@@ -45,6 +45,7 @@ import {
   fleetSeatModelArgs,
   fleetSeatChromeArgs,
   fleetSeatEffortArgs,
+  type FleetSeatDelivery,
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
@@ -614,7 +615,7 @@ export function herdrAgentName(title: string, suffix: string = randomUUID().slic
 }
 
 /**
- * Every launched hire names its lane, including why it selected terminal input.
+ * Every hire names its available control, including why structured delivery is unavailable.
  */
 type SeatControlMode = NonNullable<OperatorSeatSpawnResult["control"]>;
 
@@ -710,7 +711,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       /**
        * Programmatic control by harness (ADR 0203, VUH-1458). A briefed local
        * hire of a listed harness is started, messaged and watched through its
-       * adapter, with herdr as its view; any other hire types into the pane.
+       * adapter, with herdr as its view; unsupported briefs fail without terminal input.
        */
       readonly seatAdapters?: readonly HarnessSeatAdapter[];
       /** Include every configured Herdr server on the same exact SSH destination. */
@@ -852,8 +853,27 @@ export class HerdrWatchStore implements HerdrWatchPort {
     text: string,
     uncontrolled?: () => Promise<boolean>,
   ): Promise<boolean> {
-    if (this.closed) return uncontrolled?.() ?? false;
-    return this.seatControl.sendToSeat(seatId, text, uncontrolled);
+    const delivery = await this.deliverToSeat(
+      seatId,
+      text,
+      uncontrolled === undefined
+        ? undefined
+        : async () =>
+            (await uncontrolled())
+              ? { outcome: "delivered" }
+              : { outcome: "undelivered", detail: "The seat mailbox did not confirm delivery." },
+    );
+    return delivery.outcome === "delivered";
+  }
+
+  public async deliverToSeat(
+    seatId: string,
+    text: string,
+    uncontrolled?: () => Promise<FleetSeatDelivery>,
+  ): Promise<FleetSeatDelivery> {
+    if (this.closed)
+      return uncontrolled?.() ?? { outcome: "offline", detail: "Native hire service is closed." };
+    return this.seatControl.deliverToSeat(seatId, text, uncontrolled);
   }
 
   /** The herdr status an adapter-held seat's own status reads as; undefined when no adapter holds it. */
@@ -1068,6 +1088,27 @@ export class HerdrWatchStore implements HerdrWatchPort {
         detail: `${input.workingDirectory} is not a granted workspace on fleet ${remote}; grant it with clankie runtime workspaces ${remote} --dir PATH`,
       };
     }
+    const adapter =
+      remote === undefined &&
+      (brief !== undefined || resume !== undefined) &&
+      this.runner.runInPane !== undefined
+        ? this.seatAdapters.get(input.harness)
+        : undefined;
+    const unavailableReason =
+      remote !== undefined
+        ? "remote_fleet"
+        : this.runner.runInPane === undefined
+          ? "pane_run_unavailable"
+          : "adapter_unavailable";
+    if (brief !== undefined && adapter === undefined) {
+      const detail = `No structured harness adapter is available (${unavailableReason}); no seat was started and no terminal input was sent.`;
+      return {
+        outcome: "failed",
+        reason: "harness_unavailable",
+        detail,
+        control: { mode: "unavailable", reason: unavailableReason, detail },
+      };
+    }
     const canApplySkills =
       remote === undefined &&
       this.skillBundle !== undefined &&
@@ -1141,6 +1182,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return { outcome: "failed", reason: "herdr_unreachable", detail: reasonDetail(caught) };
     }
     let control: SeatControlMode | undefined;
+    let startAttempted = false;
     try {
       // A pi seat's durable identity is the session its herdr extension
       // reports; make sure the extension is there before starting one.
@@ -1157,12 +1199,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const chromeArgs = input.chrome === true ? fleetSeatChromeArgs(input.harness) : [];
       if (chromeArgs === undefined)
         throw new Error(`unsupported: ${input.harness} has no Chrome integration`);
-      const adapter =
-        remote === undefined &&
-        (brief !== undefined || resume !== undefined) &&
-        this.runner.runInPane !== undefined
-          ? this.seatAdapters.get(input.harness)
-          : undefined;
       const terminalReason =
         remote !== undefined
           ? "remote_fleet"
@@ -1181,6 +1217,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           : { mode: input.harness === "claude" ? "channel" : "adapter" };
       if (adapter !== undefined && (brief !== undefined || resume !== undefined)) {
         const runInPane = this.runner.runInPane!;
+        startAttempted = true;
         const started = await adapter.start(
           {
             harness: adapter.harness,
@@ -1207,15 +1244,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
         );
         if (started.outcome === "failed") {
           const failure = await this.startupFailure(paneId, input.harness, started.detail, started.reason);
-          if (resume === undefined) await this.runner.closePane?.(paneId).catch(() => undefined);
-          else
-            return {
-              ...failure,
-              reason: "start_unconfirmed",
-              control,
-              detail: `${failure.detail ?? started.detail}; inspect pane ${paneId} before retrying`,
-            };
-          return { ...failure, control };
+          if (started.reason === "harness_unavailable") {
+            await this.runner.closePane?.(paneId).catch(() => undefined);
+            return { ...failure, control };
+          }
+          return {
+            ...failure,
+            reason:
+              failure.reason === "trust_required"
+                ? "trust_required"
+                : started.detail.includes("brief_delivery_unverified")
+                  ? "delivery_unconfirmed"
+                  : "start_unconfirmed",
+            control,
+            detail: `${failure.detail ?? started.detail}; inspect pane ${paneId} before retrying; no fallback was started`,
+          };
         }
         if (started.outcome === "started") {
           const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
@@ -1228,9 +1271,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
             control,
           };
         }
-        // Blocked on the owner: nothing launched, so the terminal lane below
-        // starts it in this same pane and says why.
-        control = { mode: "terminal", reason: started.reason, detail: started.detail, fix: started.fix };
+        // Consent is the owner's decision. Nothing launched, so close only
+        // this empty pane and report the fix without a native fallback.
+        await this.runner.closePane?.(paneId).catch(() => undefined);
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: started.detail,
+          control: { mode: "unavailable", reason: started.reason, detail: started.detail, fix: started.fix },
+        };
       }
       const args = [
         ...skillLaunch.args,
@@ -1240,6 +1289,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...chromeArgs,
         ...(resume === undefined ? [] : nativeResumeArgs(resume)),
       ];
+      startAttempted = true;
       await startAgent({
         name: subject,
         kind: input.harness,
@@ -1250,26 +1300,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
         if (nativeSessionId(agent) !== resume.sessionId)
           throw new Error("The native seat has not confirmed the saved session identity; no brief was sent");
-      }
-      let previousReceiptIds: ReadonlySet<string> | undefined;
-      if (brief !== undefined && resume !== undefined) {
-        const transcript = await this.runner.transcript?.(await this.runner.get(paneId));
-        if (transcript === undefined)
-          throw new Error("The resumed transcript cannot be read; no brief was sent");
-        previousReceiptIds = new Set(transcript.entries.map((entry) => entry.id));
-      }
-      if (brief !== undefined) {
-        if (this.runner.promptAgent === undefined) throw new Error("Herdr cannot submit a first prompt");
-        // Herdr 0.9.1 can report Codex ready while its folder-trust screen is
-        // visible. Sending a brief there consumes Enter as trust, losing the
-        // assignment. Leave that decision to the operator, never the prompt.
-        if (input.harness === "codex") {
-          const visible = await this.runner.read?.(paneId, input.harness, "visible");
-          if (visible?.includes("Trust this folder?") && visible.includes("Trust and continue")) {
-            throw new Error("agent_not_ready: Codex is waiting for folder trust");
-          }
-        }
-        await this.runner.promptAgent(paneId, brief);
       }
       const agent = await this.agentWithSession(
         paneId,
@@ -1282,57 +1312,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
             : "Herdr started an agent without a durable session identity",
         );
       }
-      if (brief !== undefined) await this.verifyBrief(agent, brief, previousReceiptIds);
       return {
         ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
         control,
       };
     } catch (caught) {
       const failure = await this.startupFailure(paneId, input.harness, reasonDetail(caught));
-      if (resume !== undefined)
+      if (startAttempted && failure.reason !== "harness_unavailable")
         return {
           ...failure,
-          reason: "start_unconfirmed",
+          reason: failure.reason === "trust_required" ? "trust_required" : "start_unconfirmed",
           detail: `${failure.detail ?? reasonDetail(caught)}; inspect pane ${paneId} before retrying`,
           ...(control === undefined ? {} : { control }),
         };
       await this.runner.closePane?.(paneId).catch(() => undefined);
       return { ...failure, ...(control === undefined ? {} : { control }) };
     }
-  }
-
-  /** A successful PTY write or working status is not a receipt (VUH-1450). */
-  private async verifyBrief(
-    agent: HerdrAgentSnapshot,
-    brief: string,
-    previousReceiptIds?: ReadonlySet<string>,
-  ): Promise<void> {
-    // Compare the entire message, never a prefix or the tail that survived a
-    // dropped chunk. Transcript projection normalizes CRLF and outer whitespace.
-    const expected = brief.replace(/\r\n?/gu, "\n").trim();
-    const deadline = Date.now() + SPAWN_SESSION_WAIT_MS;
-    while (!this.closed) {
-      const transcript = await this.runner.transcript?.(agent);
-      if (
-        transcript?.entries.some((entry) => {
-          if (entry.type !== "message" || entry.role !== "operator") return false;
-          if (previousReceiptIds?.has(entry.id)) return false;
-          if (entry.text === expected) return true;
-          // Claude stores a long bracketed paste inside its own envelope.
-          // Match the whole payload, including its end, not a substring.
-          return (
-            agent.agent === "claude" &&
-            /^<pasted_content id="([^"]+)">\n([\s\S]*)\n<\/pasted_content id="\1">$/u.exec(
-              entry.text,
-            )?.[2] === expected
-          );
-        })
-      )
-        return;
-      if (Date.now() >= deadline) break;
-      await delay(SPAWN_SESSION_POLL_MS);
-    }
-    throw new Error("brief_delivery_unverified: the complete brief was not observed in the seat transcript");
   }
 
   /** Inspect before closing the failed pane; trust and channel consent belong to the owner. */
@@ -1351,7 +1346,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       failure = {
         outcome: "failed",
         reason: "trust_required",
-        detail: `${harness} is waiting for folder trust. Open it in this working directory and review the trust prompt yourself, then retry the hire. The new pane was closed; no trust was accepted.`,
+        detail: `${harness} is waiting for folder trust. Review the trust prompt in pane ${paneId}; no trust was accepted.`,
       };
     else if (harness === "claude" && visible?.includes(CHANNEL_DIALOG_MARKER))
       failure = { outcome: "failed", reason: "not_ready", detail: CLAUDE_CHANNEL_CONSENT_REQUIRED };

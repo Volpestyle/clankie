@@ -53,6 +53,8 @@ keeps its own fleet: steer through that lead. Another machine's Herdr and shell
 stay its owner's. A lost connection or an uncertain dispatch is reconciled with
 its owner, never retried another way. Close only workers you created, after
 keeping their results, and never type over someone's unsent draft.
+Agent briefs and messages use harness channels or session APIs; a missing
+connection never authorizes falling back to terminal input.
 
 # Remembering
 
@@ -76,10 +78,11 @@ Durable facts about people come only from your person's `/person-memory`.
   included; `clankie herdr <command>` reaches your fleet socket. Pane states are
   observations, not task results. Name a pane by its role or tab label; its id
   is a clickable extra in the console.
-- Leading: `lead` (Swarm first; `clankie swarm connections`, with an explicit
-  Herdr fallback). Hire seats with `hire_agent`, never a bare
-  `herdr agent start`. If the owner turned the skills off
-  (`clankie skills`), lead with `swarm-mcp`, `herdr` and your own judgment.
+- Leading: `lead` when enabled. Hire seats with `hire_agent`, watch them with
+  `herdr_watch`, and use `message_seat` for harness delivery. Herdr holds their
+  native terminals. Swarm is optional for independent enrolled peers; inspect
+  `clankie swarm connections` and load `swarm-mcp` when using it. If the owner
+  turned guidance off (`clankie skills`), use those tools and your own judgment.
 - Work is tracked where each repo already tracks it: `work_items` or
   `clankie work`. Linear notifications wake you; `this-machine` has the inbox
   read and ack protocol.

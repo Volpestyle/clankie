@@ -508,8 +508,9 @@ const runtimes = new ExecutionConnections({
   settings: settingsStore,
   primary: herdr,
   sshControlDirectory: join(stateRoot, "ssh"),
-  interactiveWorkers: interactiveWorkersSupported,
-  managedWorkers: managedWorkersSupported,
+  interactiveWorkers: (harness) =>
+    startupSettings.swarm.enabled ? interactiveWorkersSupported(harness) : Promise.resolve(false),
+  managedWorkers: () => (startupSettings.swarm.enabled ? managedWorkersSupported() : Promise.resolve(false)),
 });
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
@@ -517,23 +518,29 @@ const externalRelays = new ExternalCoordinatorRelays({
   fleets: () => runtimes.fleets(),
   log: (message) => logger.info({ event: "swarm.relay" }, message),
 });
-const swarm = new SwarmHost({
-  stateDirectory: join(stateRoot, "swarm"),
-  connections: { settings: settingsStore, credentials: operatorCredentialStore, transport: externalRelays },
-  socketPath: herdr.binding()?.socketPath,
-  runtimeConnections: () => runtimes.list(),
-  dispatchBudget: () => runtimes.dispatchBudget(),
-  workerMcp: {
-    command: process.execPath,
-    args: [
-      existsSync(compiledWorkerCli) ? compiledWorkerCli : compiledWorkerCli.replace(/\.js$/u, ".ts"),
-      "mcp",
-      "--swarm",
-    ],
-    env: { CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${String(port)}` },
-  },
-  warn: (message) => logger.warn({ event: "swarm.unavailable" }, message),
-});
+const swarm = startupSettings.swarm.enabled
+  ? new SwarmHost({
+      stateDirectory: join(stateRoot, "swarm"),
+      connections: {
+        settings: settingsStore,
+        credentials: operatorCredentialStore,
+        transport: externalRelays,
+      },
+      socketPath: herdr.binding()?.socketPath,
+      runtimeConnections: () => runtimes.list(),
+      dispatchBudget: () => runtimes.dispatchBudget(),
+      workerMcp: {
+        command: process.execPath,
+        args: [
+          existsSync(compiledWorkerCli) ? compiledWorkerCli : compiledWorkerCli.replace(/\.js$/u, ".ts"),
+          "mcp",
+          "--swarm",
+        ],
+        env: { CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${String(port)}` },
+      },
+      warn: (message) => logger.warn({ event: "swarm.unavailable" }, message),
+    })
+  : undefined;
 const agentSessions = createAgentSessions(settingsStore);
 // Work items in each repo's own convention (ADR 0191): Linear rides his
 // connected account, GitHub the owner's GitHub connection or gh login (a
@@ -739,7 +746,7 @@ const captain = createCaptain(
       ? {}
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
-    swarm,
+    ...(swarm === undefined ? {} : { swarm }),
     settings: settingsStore,
     personaImages,
     linearFollowing,
@@ -764,6 +771,7 @@ const hostedDiscord =
 // One coordinator reachable from every fleet (VUH-1381): each ssh fleet pinned
 // to a conversation gets a supervised relay into that conversation's owner.
 const fleetOwnerEndpoint = async (conversationId: string) => {
+  if (swarm === undefined) throw new Error("Swarm is disabled; enable it and restart the captain first");
   const binding = captain.seatContext(conversationId);
   if (!binding) throw new Error("Unknown Clankie conversation");
   return swarm.ownerEndpoint(conversationId, binding.cwd);
@@ -775,9 +783,10 @@ const fleetRelays = new FleetRelays({
   log: (message) => logger.info({ event: "fleet.relay" }, message),
 });
 runtimes.relayStatus = (fleet) => fleetRelays.status(fleet);
-void fleetRelays.restore();
+if (swarm !== undefined) void fleetRelays.restore();
 const fleetPeers = {
   async enroll(input: { conversationId: string; fleet: string; name: string }) {
+    if (swarm === undefined) throw new Error("Swarm is disabled; enable it and restart the captain first");
     const fleet = (await runtimes.fleets()).find((entry) => entry.id === input.fleet);
     if (fleet === undefined) throw new Error(`No enabled ssh fleet ${input.fleet}`);
     const binding = captain.seatContext(input.conversationId);
@@ -850,11 +859,10 @@ const clankie = await createClankieApp({
     directory: join(stateRoot, "worker-grants"),
     credentials: operatorCredentialStore,
     host: mcpHost,
-    swarm,
+    ...(swarm === undefined ? {} : { swarm }),
   }),
   captain,
-  swarm,
-  fleetPeers,
+  ...(swarm === undefined ? {} : { swarm, fleetPeers }),
   deliveredFiles,
   herdrRuntime: herdr.status,
   herdrBinding: herdr.binding,

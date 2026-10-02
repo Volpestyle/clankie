@@ -353,7 +353,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       description: "Inspect or connect authorized Swarm coordinators",
       takesArgument: true,
       argumentHint:
-        "[status|contacts|thread PERSONA|message PERSONA TEXT|connections|connect PRIVATE.json|disconnect ID]",
+        "[status|on|off|contacts|thread PERSONA|message PERSONA TEXT|connections|connect PRIVATE.json|disconnect ID]",
       async run(argument, shell): Promise<void> {
         if (argument.trim() === "") {
           await runConnectionsSection("swarm", shell, connectionServices(shell));

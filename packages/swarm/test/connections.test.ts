@@ -1,4 +1,6 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SettingsStore } from "@clankie/settings";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { afterEach, expect, it, vi } from "vitest";
@@ -13,7 +15,7 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 async function fixture() {
-  const path = await mkdtemp("/tmp/swarm-connect-test-");
+  const path = await mkdtemp(join(tmpdir(), "swarm-connect-test-"));
   directories.push(path);
   bootstrap.mockResolvedValue({ actor: "clankie", scope: "project" });
   const stores = {
@@ -33,7 +35,9 @@ async function fixture() {
 
 it("passes no capability to the transport and pins the SSH target before another import", async () => {
   const { stores, input } = await fixture();
+  await stores.settings.update((settings) => ({ ...settings, swarm: { ...settings.swarm, enabled: false } }));
   await connectExternal(stores, input);
+  expect((await stores.settings.load()).swarm.enabled).toBe(false);
   expect(stores.transport.endpoint).toHaveBeenCalledExactlyOnceWith({
     id: "rivals",
     ssh: "pc",

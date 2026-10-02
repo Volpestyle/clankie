@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { foldOperatorConversationReactions, type UpsertOperatorChannel } from "@clankie/protocol";
 import { ConversationStore } from "../src/captain/conversations.ts";
+import type { FleetSeatDelivery } from "../src/captain/fleet-seat.ts";
 
 const roots: string[] = [];
 
@@ -19,6 +20,60 @@ async function makeRoot(prefix: string): Promise<string> {
 }
 
 describe("channel conversations", () => {
+  it.each(["unconfirmed", "undelivered"] as const)(
+    "reports structured %s delivery without an offline claim or a replay invitation",
+    async (outcome) => {
+      const root = await makeRoot("clankie-channel-safe-delivery-");
+      const sender = vi.fn(
+        async (): Promise<FleetSeatDelivery> => ({ outcome, detail: "Inspect the worker channel." }),
+      );
+      const posted: { content: string }[] = [];
+      const store = new ConversationStore(root, vi.fn(), undefined, sender, undefined, undefined, {
+        post: async (post) => {
+          posted.push(post);
+        },
+        resolve: async () => ({ guildId: "guild-1", channelId: "channel-1" }),
+        swarmGuildId: () => "guild-1",
+      });
+      try {
+        const created = await store.serve({
+          schemaVersion: 1,
+          op: "channel",
+          channel: {
+            schemaVersion: 1,
+            title: "Worker room",
+            members: ["atlas"],
+            discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/synthetic-token" },
+          },
+        });
+        if (created.op !== "channel") throw new Error("channel expected");
+        const sent = await store.serve({
+          schemaVersion: 1,
+          op: "send",
+          turn: {
+            schemaVersion: 1,
+            kind: "message",
+            conversationId: created.conversation.conversationId,
+            surfaceClientId: "tui",
+            expectedRevision: 0,
+            message: "Do this once.",
+          },
+        });
+        if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("accepted expected");
+        await store.awaitRun(sent.result.runId);
+        expect(sender).toHaveBeenCalledOnce();
+        const notice = posted.at(-1)?.content;
+        expect(notice).toContain(
+          outcome === "unconfirmed" ? "delivery unconfirmed; it may still arrive" : "message not delivered",
+        );
+        expect(notice).toContain("Inspect the native sessions before resending");
+        expect(notice).not.toContain("No one here has a live seat");
+        expect(notice).not.toContain("say it again");
+      } finally {
+        await store.close();
+      }
+    },
+  );
   it("answers an operator message with a sequenced round instead of a captain turn", async () => {
     const root = await makeRoot("clankie-channel-round-");
     // What each member says when its turn comes. `undefined` leaves the seat

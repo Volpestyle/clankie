@@ -16,7 +16,10 @@ answer a question that no longer matters; a well-executed task can serve the
 wrong priority. Research leadership considers the whole effort, connects its
 activities to the person's goal and changes direction when the evidence warrants it.
 
-For authorized dispatch, load `lead` and use its Swarm-first or Herdr fallback section. Use `work-items` when a tracker is in play and `shared-checkout`
+For authorized dispatch, load `lead`. Local hires use `hire_agent` and
+`message_seat`; Swarm is optional for independent enrolled peers. Missing
+harness control never permits automated terminal typing. Use `work-items` when
+a tracker is in play and `shared-checkout`
 before commits. An advisory check-in does not itself authorize more workers,
 compute, data access or external actions.
 

@@ -23,7 +23,7 @@ want to customize him, connect a team, or understand where your work goes.
   <div class="diagram-col">
     <h4>His connections</h4>
     <div class="dnode"><strong>Models and tools</strong><span>chosen for the task</span></div>
-    <div class="dnode"><strong>Helper agents</strong><span>Swarm coordination · runtime connections</span></div>
+    <div class="dnode"><strong>Helper agents</strong><span>native harnesses · optional peer coordination</span></div>
     <div class="dnode"><strong>Optional services</strong><span>accounts · browser · media · play</span></div>
   </div>
 </div>
@@ -73,10 +73,21 @@ for the practical setup and [clankie.bot](https://clankie.bot) for hosted availa
 
 ## A team around him
 
-**Swarm coordinates:** identities, messages, assignments, and task ownership.
-**An execution runtime runs agents:** Herdr supplies the built-in terminal
-routes. A tracker such as Linear or GitHub records project work when connected.
-These are separate connections; a tracker account is not a worker login.
+**Work stays where you track it:** Linear, GitHub, or task files in the repo.
+**Herdr contains the agents:** their native interactive terminals remain yours
+to watch and use. Clankie sends assignments through each supported harness's
+message connection, without typing into your draft. If delivery is unavailable
+or uncertain, he reports that outcome.
+
+**Swarm is optional:** connect it when independent agents need shared messaging
+and task ownership. Local hires and work tracking can run without it. These are
+separate connections; a tracker account is not a worker login.
+
+Native local message adapters currently cover Claude Code and Codex. Pi,
+OpenCode, and Prime Agent have been researched but are not integrated into this
+hire path. Swarm defaults on; `clankie swarm off` disables it after the captain
+restarts. See the [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
+for the message flow and current limits.
 
 The app presents those agents in Messages and, where execution seats exist,
 Commons and Terminal. A worker's contact can outlive its terminal session.

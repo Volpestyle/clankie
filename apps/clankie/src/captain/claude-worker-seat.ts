@@ -53,7 +53,10 @@ export interface ClaudeWorkerSeatDeps {
   /** The seat's mailbox: bound while its channel polls, and a message handed to it. */
   readonly mailbox: {
     bound(seatId: string): boolean;
-    deliver(seatId: string, text: string): Promise<boolean>;
+    deliver(
+      seatId: string,
+      text: string,
+    ): Promise<boolean | Extract<SeatDelivery, { readonly outcome: "unconfirmed" }>>;
   };
   readonly timing?: { readonly readyMs?: number; readonly receiptMs?: number; readonly pollMs?: number };
 }
@@ -371,7 +374,7 @@ function sessionIdOf(agent: WorkerSeatAgent): string | undefined {
   return session.kind === "id"
     ? session.value
     : session.value
-        .split("/")
+        .split(/[\\/]/u)
         .at(-1)
         ?.replace(/\.jsonl$/u, "");
 }
@@ -403,7 +406,9 @@ class ClaudeWorkerSeatControl implements SeatControl {
     if (!this.deps.mailbox.bound(agent.terminalId)) return { outcome: "released" };
     const before = await transcriptIds(this.deps, agent);
     const busy = agent.status === "working";
-    if (!(await this.deps.mailbox.deliver(agent.terminalId, message))) return { outcome: "released" };
+    const delivery = await this.deps.mailbox.deliver(agent.terminalId, message);
+    if (typeof delivery !== "boolean") return delivery;
+    if (!delivery) return { outcome: "released" };
     const id = await receipt(
       this.deps,
       agent,
@@ -519,6 +524,12 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
       if (launch.brief.length > 0) {
         const before = await transcriptIds(deps, agent);
         const taken = await deps.mailbox.deliver(agent.terminalId, launch.brief);
+        if (typeof taken !== "boolean")
+          return {
+            outcome: "failed",
+            reason: "not_ready",
+            detail: `brief_delivery_unverified: ${JSON.stringify(taken)}`,
+          };
         if (!taken) logReceiptRejection(agent, "mailbox_not_delivered");
         const received = taken
           ? await receipt(deps, agent, launch.brief, before, receiptMs, pollMs)

@@ -2,7 +2,8 @@
 
 Clankie is a persistent agent with a personality: he chats in Discord (text
 and voice), plays Pokemon on stream, makes images and videos,
-browses the web, codes, and leads coding agents through swarm-mcp. This repo is
+browses the web, codes, and leads native coding agents through their harness
+connections, with optional Swarm coordination for independent peers. This repo is
 his body: one persistent service (`apps/clankie`) plus the portals that reach it.
 Execution runtimes and work trackers are connections, independent of his identity
 ([ADR 0181](docs/adr/0181-clankie-is-independent-of-his-connections.md)); current
@@ -102,11 +103,12 @@ This repository is public. Both neighbors are private and consume
   decide; don't gate behavior per trigger, script his words, or add a rule
   where volition would do. The only limits are the trust and safety
   boundaries above, never timidity.
-- Agents prefer swarm-mcp for cross-session assignments, messages and handoffs.
-  Load `lead` for leadership and `swarm-mcp` for participation. `lead` includes
-  the explicit Herdr fallback for unenrolled agents. Use the selected runtime
-  for terminals and process control. Never
-  duplicate uncertain dispatch.
+- Local hires use their harness channels or session APIs; Herdr contains the
+  native interactive agents. Work stays in the repo's tracker or files. Use
+  Swarm when independent peers need its coordination, and load `swarm-mcp` for
+  participation. Load `lead` for leadership. Never fall back to terminal typing
+  for automated briefs or messages, or duplicate uncertain dispatch
+  ([ADR 0207](docs/adr/0207-work-records-and-native-agent-delivery.md)).
 - No headless agents ([ADR 0203](docs/adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
   Every worker, hired or Swarm-dispatched, runs its harness's native TUI in a
   Herdr pane the owner can watch and type into. Swarm stream mode violates

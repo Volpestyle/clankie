@@ -472,6 +472,8 @@ export const SwarmConnectionSchema = z
 export type SwarmConnection = z.infer<typeof SwarmConnectionSchema>;
 export const SwarmSettingsSchema = z
   .object({
+    /** Applies on captain startup; disabling retains coordinator records and connections. */
+    enabled: z.boolean().default(true),
     connections: z.array(SwarmConnectionSchema).max(32).default([]),
   })
   .strict()

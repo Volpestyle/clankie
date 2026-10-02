@@ -11,8 +11,8 @@
  * An adapter owns control; herdr owns the pane. `start` receives the pane at
  * its shell prompt and decides what runs there.
  *
- * Every failure is a typed outcome, never a throw, so the hire path can fall
- * back to terminal delivery (VUH-1450) and report why.
+ * Every failure is a typed outcome, never a throw. The caller reports the
+ * blocked or uncertain delivery without typing into the owner's terminal.
  */
 
 export type SeatHarness = "claude" | "codex";
@@ -53,7 +53,8 @@ export interface SeatView {
 }
 
 /**
- * A seat's durable identity: enough to reattach after a service restart. The
+ * A seat's durable native identity. Adapters that support reattachment can use
+ * it after a service restart; identity alone does not restore live control. The
  * session id is the harness's own (Claude session UUID, Codex thread id), so
  * the native transcript stays traceable through `@clankie/agent-transcript`.
  */
@@ -68,7 +69,7 @@ export type SeatStartResult =
   /**
    * Programmatic control needs a decision only the owner can make, such as
    * approving the worker plugin's channel. Nothing was launched and the pane
-   * is still at its prompt, so the hire may continue on the terminal lane.
+   * is still at its prompt. Report the owner's fix without launching a fallback.
    */
   | {
       readonly outcome: "blocked";
@@ -90,14 +91,18 @@ export type SeatStartResult =
 
 /**
  * A message's delivery. `accepted` means the harness itself acknowledged it
- * (queued behind a running turn, or started a turn). `released` means the seat
+ * (queued, steered an active turn, or started a turn). `released` means the seat
  * is not under programmatic control right now (its channel is gone), so the
- * caller falls back to the pane lane. `unconfirmed` means no acknowledgment
+ * caller reports that no structured channel is available. `unconfirmed` means no acknowledgment
  * arrived before the deadline; the message may still land, so the caller must
  * not resend it blindly.
  */
 export type SeatDelivery =
-  | { readonly outcome: "accepted"; readonly messageId: string; readonly state: "queued" | "started" }
+  | {
+      readonly outcome: "accepted";
+      readonly messageId: string;
+      readonly state: "queued" | "started" | "steered";
+    }
   | { readonly outcome: "released" }
   | { readonly outcome: "offline"; readonly detail: string }
   | { readonly outcome: "unconfirmed"; readonly messageId: string; readonly detail: string };
@@ -117,7 +122,7 @@ export type SeatEvent =
     }
   /** Waiting on the owner in the view, such as a permission prompt. */
   | { readonly type: "blocked"; readonly at: string; readonly reason: string }
-  /** Programmatic control ended (its channel is gone); the pane lane still reaches the seat. */
+  /** Programmatic control ended (its channel is gone); the owner can still use the pane. */
   | { readonly type: "released"; readonly at: string }
   | { readonly type: "exited"; readonly at: string; readonly code: number | null };
 

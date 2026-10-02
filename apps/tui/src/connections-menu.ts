@@ -116,6 +116,9 @@ export function runtimesHint(runtimes: readonly Runtime[]): string {
 }
 
 export function swarmHint(swarm: Json): string {
+  if (swarm.restartRequired === true)
+    return `${swarm.enabled === false ? "off" : "on"} after captain restart`;
+  if (swarm.mode === "disabled") return "disabled";
   if (swarm.mode === "unavailable") return "unavailable";
   const conversations = array(swarm.conversations).length;
   const external = array(swarm.connections).length;
@@ -505,6 +508,11 @@ async function swarmSection(shell: ClankieFaceShell, services: ConnectionsMenuSe
     const choice = await flow.readSelect({
       message: `Swarm — ${swarmHint(status)}`,
       options: [
+        {
+          value: "enabled",
+          label: `${status.enabled === false ? "Enable" : "Disable"} Swarm`,
+          hint: "applies after captain restart; keeps saved connections and work",
+        },
         { value: "contacts", label: "Contacts", hint: "message an agent" },
         ...external.map((connection) => ({
           value: `connection:${String(connection.id)}`,
@@ -515,6 +523,14 @@ async function swarmSection(shell: ClankieFaceShell, services: ConnectionsMenuSe
       allowBack: true,
     });
     if (choice === undefined) return;
+    if (choice === "enabled") {
+      await attempt(
+        flow,
+        () => services.swarm([status.enabled === false ? "on" : "off"]),
+        "Swarm configuration saved. Restart the captain to apply it.",
+      );
+      continue;
+    }
     if (choice === "contacts") {
       await contactsSection(flow, services);
       continue;

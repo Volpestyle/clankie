@@ -620,11 +620,12 @@ function hireAgentTool(
       "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, at_capacity (this body already runs as many hired agents " +
       "as its plan allows; close or reuse one). A hired seat is not a Swarm peer: pass brief to hand it " +
       "its first prompt (codex needs one, since its session starts with its first turn). A briefed local seat is " +
-      "driven through its harness when possible (claude: the clankie-worker plugin's channel and Stop hooks) and " +
-      "stays interactive in its pane. control.mode says how: channel for Claude, adapter for Codex, terminal for " +
-      "a pasted brief with control.reason explaining why; control.fix, when present, is the owner's one-time step. A brief is delivered only after its complete native transcript " +
-      "receipt; not_ready with brief_delivery_unverified means receipt could not be confirmed and the new pane was closed. " +
-      "Use a brief file and a short pointer when transcript limits or redaction prevent verification. Follow up " +
+      "driven through its harness (claude: the clankie-worker plugin's channel and Stop hooks) and " +
+      "stays interactive in its pane. control.mode says how: channel for Claude, adapter for Codex, terminal only " +
+      "for an unbriefed native launch, or unavailable when structured control cannot be used. control.reason " +
+      "explains the result; control.fix, when present, is the owner's step. Briefs and messages never fall back " +
+      "to terminal typing. A brief requires a harness receipt. An uncertain start or delivery retains its pane " +
+      "for inspection; reconcile it before retrying. Missing channel consent is an owner decision. Follow up " +
       "with message_seat, and watch it with herdr_watch on the returned seatId.",
     parameters: Type.Object({
       harness: StringEnum(OPERATOR_SEAT_HARNESSES),
@@ -709,7 +710,10 @@ function messageSeatTool(message: MessageSeat): ToolDefinition {
       "Send a Herdr seat you hired a message down its conversation lane, the way the operator's DM reaches " +
       "it: a follow-up, a correction, an answer to its question. seat is the seatId, personaId or " +
       "conversationId hire_agent returned. Outcomes: delivered (with the seat's status once it picked the " +
-      "message up), seat_offline, unknown_seat. Swarm peers are messaged with swarm_send instead.",
+      "message up), unconfirmed, undelivered, seat_offline, unknown_seat. Delivery uses the harness " +
+      "channel or session API and never types into the owner's terminal draft. A steered receipt means " +
+      "guidance reached the active turn, not an after-turn queue. Inspect uncertain delivery before resending. " +
+      "Independent enrolled Swarm peers use swarm_send.",
     parameters: Type.Object({
       seat: Type.String({ minLength: 1, maxLength: 200 }),
       message: Type.String({ minLength: 1, maxLength: SEAT_MESSAGE_MAX }),

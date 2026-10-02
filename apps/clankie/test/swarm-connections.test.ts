@@ -1,6 +1,104 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { emptySettings } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
+
+it("changes startup selection only, retaining active Swarm and external connections", async () => {
+  let settings = emptySettings();
+  settings.swarm.connections = [
+    {
+      id: "team",
+      conversationId: "global-default",
+      endpoint: "/tmp/team.sock",
+      actor: "lead",
+      scope: "scope",
+      credential: "swarm:reference",
+      enabled: true,
+    },
+  ];
+  const disconnect = vi.fn();
+  const clankie = await createClankieApp({
+    captain: createStubCaptain(),
+    settings: {
+      load: async () => settings,
+      update: async (mutate) => {
+        settings = mutate(settings);
+        return settings;
+      },
+    },
+    swarm: {
+      status: async () => ({ mode: "swarm", conversations: [{ conversationId: "global-default" }] }),
+      disconnect,
+    },
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer operator" ? { operatorId: "owner" } : undefined,
+  });
+  const put = (body: unknown, token = "operator") =>
+    clankie.app.request("/v1/swarm/config", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  try {
+    expect((await put({ enabled: false }, "social")).status).toBe(401);
+    expect((await put({ enabled: "false" })).status).toBe(400);
+    expect((await put({ enabled: false, connections: [] })).status).toBe(400);
+    expect(await (await put({ enabled: false })).json()).toEqual({
+      enabled: false,
+      active: true,
+      restartRequired: true,
+      restart: "Restart the captain to apply Swarm configuration.",
+    });
+    expect(settings.swarm.connections).toHaveLength(1);
+    expect(settings.swarm.connections[0]?.enabled).toBe(true);
+    expect(disconnect).not.toHaveBeenCalled();
+    expect(
+      await (
+        await clankie.app.request("/v1/swarm", { headers: { authorization: "Bearer operator" } })
+      ).json(),
+    ).toMatchObject({
+      mode: "swarm",
+      enabled: false,
+      active: true,
+      restartRequired: true,
+      connections: settings.swarm.connections,
+    });
+    expect(await (await put({ enabled: true })).json()).toEqual({
+      enabled: true,
+      active: true,
+      restartRequired: false,
+    });
+  } finally {
+    clankie.close();
+  }
+});
+
+it("reports disabled startup and keeps local APIs available without a Swarm host", async () => {
+  const settings = emptySettings();
+  settings.swarm.enabled = false;
+  const clankie = await createClankieApp({
+    captain: createStubCaptain(),
+    settings: { load: async () => settings },
+    authenticateOperator: async () => ({ operatorId: "owner" }),
+  });
+  try {
+    expect((await clankie.app.request("/health")).status).toBe(200);
+    expect(await (await clankie.app.request("/v1/swarm")).json()).toEqual({
+      mode: "disabled",
+      enabled: false,
+      active: false,
+      restartRequired: false,
+      conversations: [],
+      connections: [],
+    });
+    expect(await (await clankie.app.request("/v1/connections")).json()).toMatchObject({
+      swarms: { mode: "disabled", enabled: false, active: false, restartRequired: false },
+    });
+    expect((await clankie.app.request("/v1/swarm/connections", { method: "POST" })).status).toBe(503);
+  } finally {
+    clankie.close();
+  }
+});
 
 it("imports coordinator capabilities only for an operator and an existing conversation", async () => {
   const imported: unknown[] = [],

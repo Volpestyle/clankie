@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationStore } from "../src/captain/conversations.ts";
+import type { FleetSeatDelivery } from "../src/captain/fleet-seat.ts";
+import { SubmitOperatorConversationTurnResultSchema } from "@clankie/protocol";
 
 const roots: string[] = [];
 
@@ -11,6 +13,65 @@ afterEach(async () => {
 });
 
 describe("seat conversations", () => {
+  it.each([
+    { outcome: "undelivered", detail: "No safe channel is available." },
+    {
+      outcome: "unconfirmed",
+      messageId: "seat-message-1",
+      detail: "The bridge took it without acknowledging it.",
+    },
+  ] satisfies FleetSeatDelivery[])(
+    "preserves $outcome without accepting, resending or declaring the live seat offline",
+    async (delivery) => {
+      const root = await mkdtemp(join(tmpdir(), "clankie-seat-delivery-"));
+      roots.push(root);
+      const sender = vi.fn(async () => delivery);
+      const store = new ConversationStore(root, vi.fn(), undefined, sender);
+      try {
+        const created = await store.serve({
+          schemaVersion: 1,
+          op: "create",
+          scope: { kind: "seat", seatId: "term-one" },
+          title: "Worker",
+        });
+        if (created.op !== "create") throw new Error("create expected");
+        const sent = await store.serve({
+          schemaVersion: 1,
+          op: "send",
+          turn: {
+            schemaVersion: 1,
+            kind: "message",
+            conversationId: created.conversation.conversationId,
+            surfaceClientId: "tui",
+            expectedRevision: 0,
+            message: "Inspect before retrying.",
+          },
+        });
+        if (sent.op !== "send") throw new Error("send expected");
+        expect(SubmitOperatorConversationTurnResultSchema.parse(sent.result)).toMatchObject({
+          status: delivery.outcome === "unconfirmed" ? "seat_delivery_unconfirmed" : "seat_undelivered",
+          detail: delivery.detail,
+          currentRevision: 0,
+        });
+        if (delivery.outcome === "unconfirmed")
+          expect(sent.result).toHaveProperty("messageId", delivery.messageId);
+        expect(sender).toHaveBeenCalledOnce();
+        const replay = await store.serve({
+          schemaVersion: 1,
+          op: "replay",
+          replay: {
+            schemaVersion: 1,
+            conversationId: created.conversation.conversationId,
+            surfaceClientId: "tui",
+          },
+        });
+        if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
+        expect(replay.result.events.filter((event) => event.type === "turn")).toEqual([]);
+      } finally {
+        await store.close();
+      }
+    },
+  );
   it("keeps an offline persona distinct from the Herdr seat it does not have", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-persona-conversation-"));
     roots.push(root);

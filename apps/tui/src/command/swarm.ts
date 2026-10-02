@@ -65,7 +65,11 @@ export async function runSwarmCommand(
     method = "GET",
     body: string | undefined,
     fleetPeerOut: string | undefined;
-  if (args.length === 2 && args[0] === "connect") {
+  if (args.length === 1 && (args[0] === "on" || args[0] === "off")) {
+    path += "/config";
+    method = "PUT";
+    body = JSON.stringify({ enabled: args[0] === "on" });
+  } else if (args.length === 2 && args[0] === "connect") {
     const file = await stat(args[1]!);
     if (
       !file.isFile() ||
@@ -102,7 +106,7 @@ export async function runSwarmCommand(
     method = "POST";
   } else if (args.length > 1 || (args[0] !== undefined && !["status", "connections"].includes(args[0])))
     throw new Error(
-      "Usage: clankie swarm [status|connections] | connect PRIVATE.json | disconnect ID | fleet-peer FLEET NAME --conversation ID --out PRIVATE.json",
+      "Usage: clankie swarm [status|connections|on|off] | connect PRIVATE.json | disconnect ID | fleet-peer FLEET NAME --conversation ID --out PRIVATE.json",
     );
   const credential = await resolveOperatorCredential({
     env: options.env ?? process.env,

@@ -148,18 +148,20 @@ claude plugin disable clankie-worker@clankie
 ```
 
 Until both steps are done, a Claude hire reports `consent_required` with the
-missing step and takes the terminal lane (typed brief, verified in the
-transcript) instead.
+missing step and unavailable control. It does not type the brief into the
+terminal or launch a replacement worker.
 
 With consent approved, a briefed local Claude hire reports `control.mode: "channel"`,
 including when other execution fleets are registered. Every hire logs its lane;
-terminal results include `control.reason`. A folder-trust prompt fails with
-`trust_required` and closes the new pane. Review trust yourself in that directory
-before retrying.
+unavailable control includes `control.reason`. A folder-trust prompt reports
+`trust_required` and remains visible in its pane for the owner. Uncertain startup
+or delivery must be inspected before retrying. See
+[native delivery](../../docs/adr/0207-work-records-and-native-agent-delivery.md).
 
-Select the Swarm mode per runtime with `clankie runtime mode ID interactive|stream`;
-stream stays the default. An interactive startup that blocks stays visibly
-blocked in its pane and never falls back to stream.
+Swarm workers use native interactive mode. `clankie runtime mode ID interactive`
+selects it explicitly; new stream selections are refused. An interactive startup
+that blocks stays visibly blocked in its pane. Swarm is a separate optional
+connection; local Claude hires use the worker channel without enrolling a Swarm peer.
 
 ## Codex
 

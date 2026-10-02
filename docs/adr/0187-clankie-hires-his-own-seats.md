@@ -5,6 +5,8 @@ hiring"): hiring is no longer only the operator's act. Builds on
 [ADR 0185](0185-a-hire-may-name-its-model-and-effort.md) — a hire Clankie
 makes may name its model and effort the same way — and shares the authority
 gate of [ADR 0186](0186-a-discord-room-harvests-its-own-workers.md).
+Amended by [ADR 0207](0207-work-records-and-native-agent-delivery.md), which removes
+automatic terminal-input fallback. The fallback descriptions below are historical.
 
 ## Context
 

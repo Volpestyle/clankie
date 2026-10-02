@@ -53,10 +53,12 @@ burst starts headless. `clankie browser record on` saves browsing bursts as WebM
 videos. See the [browser contract](docs/adr/0082-clankie-holds-the-browser.md).
 
 **A coding partner and team lead.** He can work directly or bring in agents
-using supported harnesses such as Claude Code, Codex, and pi. Swarm carries
-messages and task ownership; Herdr supplies visible worker terminals. You can
-connect other runtimes and coordinators, inspect the work, and give him durable
-goals. See [current support](packages/swarm/README.md#support-at-a-glance).
+using supported harnesses such as Claude Code and Codex. Herdr supplies their
+native interactive terminals; harness channels and session APIs carry automated
+messages without typing into your draft. Work stays in your repo's tracker or
+files. Swarm is optional for independent peer coordination. See
+[agent control](packages/agent-hosts/README.md#seat-adapters) and
+[Swarm support](packages/swarm/README.md#support-at-a-glance).
 
 **A familiar face on your phone.** Messages is home. Commons shows the team as
 a small world of agent figures, each leading back to a real conversation.

@@ -33,8 +33,11 @@ assembly dereferences product links and copies Swarm's dependency graph; an
 installed release needs no sibling checkout or globally installed npm package.
 
 The candidate artifact is built from Swarm `a72a2d3`, based on pushed upstream
-`0981253`. `swarm-mcp.patch` reproduces the complete committed source delta;
-`provenance.json` pins both revisions and checksums. This candidate adds managed
+`0981253`, plus the local reconnect changes listed in `provenance.json`.
+`swarm-mcp.patch` reproduces the complete source delta, including those changes;
+`provenance.json` pins both revisions and checksums. Inbox observers now survive
+extended transient outages, and embeddings can detect closed coordinator sockets
+before sending a new request. This candidate adds managed
 Codex (`gpt-6-astra`) and pi worker adapters, per-launch MCP configuration, and
 persisted harness selection. The first installed candidate (`b62a68f`) failed both
 live canaries. This repair corrects Codex override keys, explicitly preapproves only

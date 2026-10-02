@@ -48,6 +48,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
     );
   }
   const routes: Record<string, readonly string[]> = {
+    PUT: ["/v1/swarm/config"],
     GET: [
       "/health",
       "/v1/operator/persona",

@@ -135,7 +135,7 @@ export class OperatorConversationSendError extends OperatorConversationClientErr
   public constructor(delivery: "not_sent" | "unconfirmed", cause: unknown) {
     super(
       delivery === "unconfirmed"
-        ? "Delivery unconfirmed. Check the conversation before retrying; Clankie may have received this message."
+        ? `Delivery unconfirmed. Check the conversation before retrying; the message may have been received.${cause instanceof Error ? ` ${cause.message}` : ""}`
         : `Message not sent. ${cause instanceof TypeError ? "Clankie is unreachable. Retry when it reconnects." : cause instanceof Error ? cause.message : "Retry when the connection is ready."}`,
       cause,
     );
@@ -604,6 +604,12 @@ export class OperatorConversationPromptSession {
     }
     if (accepted.status === "seat_offline") {
       throw new OperatorConversationClientError("That agent is offline; retry when its pane is live");
+    }
+    if (accepted.status === "seat_delivery_unconfirmed") {
+      throw new OperatorConversationSendError("unconfirmed", new Error(accepted.detail));
+    }
+    if (accepted.status === "seat_undelivered") {
+      throw new OperatorConversationSendError("not_sent", new Error(accepted.detail));
     }
     return accepted.runId;
   }

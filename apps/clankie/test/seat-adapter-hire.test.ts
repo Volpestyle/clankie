@@ -1,7 +1,6 @@
 /**
  * VUH-1458: the hire path drives a seat through its harness adapter, with herdr
- * as the view, and falls back to the terminal lane only when the adapter is
- * blocked on an owner decision.
+ * as the view, and reports blocked or uncertain delivery without terminal input.
  */
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -120,7 +119,7 @@ it("a hire without a brief never reaches the adapter", async () => {
   expect(adapter.start).not.toHaveBeenCalled();
 });
 
-it("an adapter blocked on the owner falls back to the terminal lane in the same pane and says why", async () => {
+it("an adapter blocked on the owner reports the fix and never launches a fallback", async () => {
   const { runner, hire } = await fixture(async () => ({
     outcome: "blocked",
     reason: "consent_required",
@@ -129,32 +128,33 @@ it("an adapter blocked on the owner falls back to the terminal lane in the same 
   }));
   const result = await hire("the brief");
   expect(result).toMatchObject({
-    outcome: "spawned",
+    outcome: "failed",
+    reason: "not_ready",
     control: {
-      mode: "terminal",
+      mode: "unavailable",
       reason: "consent_required",
       fix: "Approve clankie-worker@clankie in managed settings.",
     },
   });
   expect(runner.createTab).toHaveBeenCalledOnce();
-  expect(runner.startAgent).toHaveBeenCalledOnce();
-  expect(runner.promptAgent).toHaveBeenCalledWith("w1:p1", "the brief");
-  expect(runner.closePane).not.toHaveBeenCalled();
+  expect(runner.startAgent).not.toHaveBeenCalled();
+  expect(runner.promptAgent).not.toHaveBeenCalled();
+  expect(runner.closePane).toHaveBeenCalledWith("w1:p1");
 });
 
-it("an adapter that fails closes the pane and returns its typed outcome, with no terminal retry", async () => {
+it("an unconfirmed brief keeps its pane for inspection and never retries", async () => {
   const { runner, hire } = await fixture(async () => ({
     outcome: "failed",
     reason: "not_ready",
     detail: "brief_delivery_unverified: no transcript receipt",
   }));
-  expect(await hire("the brief")).toEqual({
+  expect(await hire("the brief")).toMatchObject({
     outcome: "failed",
-    reason: "not_ready",
-    detail: "brief_delivery_unverified: no transcript receipt",
+    reason: "delivery_unconfirmed",
+    detail: expect.stringContaining("inspect pane w1:p1"),
     control: { mode: "channel" },
   });
-  expect(runner.closePane).toHaveBeenCalledWith("w1:p1");
+  expect(runner.closePane).not.toHaveBeenCalled();
   expect(runner.promptAgent).not.toHaveBeenCalled();
 });
 
@@ -221,8 +221,7 @@ it.each([false, true])(
       if (blocked) {
         expect(result).toMatchObject({ outcome: "failed", reason: "trust_required" });
         expect(deliver).not.toHaveBeenCalled();
-        expect(runner.closePane).toHaveBeenCalledWith(agent.paneId);
-        expect(read.mock.invocationCallOrder[0]).toBeLessThan(runner.closePane.mock.invocationCallOrder[0]!);
+        expect(runner.closePane).not.toHaveBeenCalled();
         expect(OperatorSeatSpawnResultSchema.parse(result).control).toEqual({ mode: "channel" });
       } else {
         expect(result.outcome).toBe("spawned");
@@ -241,7 +240,7 @@ it.each([false, true])(
   },
 );
 
-it("missing runner capability and missing adapters report distinct terminal reasons", async () => {
+it("missing runner capability and missing adapters refuse briefs before creating a pane", async () => {
   const { root, runner } = await fixture(async () => ({ outcome: "started", control: {} as SeatControl }));
   const { runInPane: _run, ...withoutRun } = runner;
   for (const [runtime, reason] of [
@@ -255,12 +254,19 @@ it("missing runner capability and missing adapters report distinct terminal reas
         undefined,
         "the brief",
       ),
-    ).toMatchObject({ outcome: "spawned", control: { mode: "terminal", reason } });
+    ).toMatchObject({
+      outcome: "failed",
+      reason: "harness_unavailable",
+      control: { mode: "unavailable", reason },
+    });
+    expect(runner.createTab).not.toHaveBeenCalled();
+    expect(runner.startAgent).not.toHaveBeenCalled();
+    expect(runner.promptAgent).not.toHaveBeenCalled();
     store.close();
   }
 });
 
-it("messages go through the adapter while it holds the seat, and the pane lane when it lets go", async () => {
+it("adapter uncertainty or release never becomes delivered or triggers another channel", async () => {
   const { store, runner, send, adapter, control } = await fixture(async () => ({
     outcome: "started",
     control: {} as SeatControl,
@@ -275,25 +281,28 @@ it("messages go through the adapter while it holds the seat, and the pane lane w
 
   send.mockResolvedValueOnce({ outcome: "unconfirmed", messageId: "m2", detail: "late" } as never);
   // May still land, so it is never typed a second time.
-  expect(await store.sendToSeat("term_0a1b2c", "maybe", mailbox)).toBe(true);
+  expect(await store.deliverToSeat("term_0a1b2c", "maybe")).toMatchObject({
+    outcome: "unconfirmed",
+    messageId: "m2",
+  });
   expect(runner.promptAgent).not.toHaveBeenCalled();
 
   send.mockResolvedValueOnce({ outcome: "released" } as never);
-  expect(await store.sendToSeat("term_0a1b2c", "via pane", mailbox)).toBe(true);
-  expect(runner.promptAgent).toHaveBeenCalledWith("w1:p1", "via pane");
+  expect(await store.sendToSeat("term_0a1b2c", "via pane", mailbox)).toBe(false);
+  expect(runner.promptAgent).not.toHaveBeenCalled();
 
   send.mockResolvedValueOnce({ outcome: "offline", detail: "gone" } as never);
   expect(await store.sendToSeat("term_0a1b2c", "offline", mailbox)).toBe(false);
   send.mockRejectedValueOnce(new Error("lost control"));
   expect(await store.sendToSeat("term_0a1b2c", "uncertain", mailbox)).toBe(false);
   expect(mailbox).not.toHaveBeenCalled();
-  expect(runner.promptAgent).toHaveBeenCalledTimes(1);
+  expect(runner.promptAgent).not.toHaveBeenCalled();
 
   vi.mocked(adapter.attach).mockResolvedValue(undefined);
   expect(await store.sendToSeat("term_0a1b2c", "via mailbox", mailbox)).toBe(true);
   expect(mailbox).toHaveBeenCalledOnce();
-  expect(await store.sendToSeat("term_0a1b2c", "no adapter")).toBe(true);
-  expect(runner.promptAgent).toHaveBeenCalledWith("w1:p1", "no adapter");
+  expect(await store.sendToSeat("term_0a1b2c", "no adapter")).toBe(false);
+  expect(runner.promptAgent).not.toHaveBeenCalled();
   expect(control.ref.paneId).toBe("w1:p1");
 });
 

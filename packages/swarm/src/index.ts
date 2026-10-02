@@ -21,6 +21,7 @@ import { isDeepStrictEqual, promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { LazyMcpClient } from "./mcp-client.ts";
 import type { InlineExtension, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 import {
@@ -137,8 +138,8 @@ interface Session {
   actor: string;
   scope: string;
   endpoint: string;
-  client: Client;
-  connection: CoordinationClient;
+  client: LazyMcpClient;
+  connection: Pick<CoordinationClient, "request" | "close">;
   observe(runtime: "available" | "busy" | "unavailable"): Promise<void>;
   kick(): void;
   close(): Promise<void>;
@@ -337,6 +338,7 @@ export class SwarmHost {
       return {
         ...current,
         swarm: {
+          ...current.swarm,
           connections: current.swarm.connections.map((entry) =>
             entry.id === id ? { ...entry, enabled: false } : entry,
           ),
@@ -392,28 +394,62 @@ export class SwarmHost {
       });
     }
     const environment = enrolled.environment;
-    const connection = await CoordinationClient.connect(
+    let currentConnection = await CoordinationClient.connect(
       environment.SWARM_COORDINATOR_ENDPOINT,
       environment.SWARM_SESSION_CAPABILITY,
     );
-    const client = new Client({ name: "clankie-swarm", version: "1" }, { capabilities: {} });
-    try {
-      await client.connect(
-        new StdioClientTransport({
-          command: process.execPath,
-          args: [executable("mcp-cli.js")],
-          env: Object.fromEntries(
-            Object.entries(environment).filter(
-              (entry): entry is [string, string] => typeof entry[1] === "string",
+    let closed = false;
+    let reconnecting: Promise<CoordinationClient> | undefined;
+    const connection: Session["connection"] = {
+      async request(operation) {
+        if (closed) throw new Error("Swarm session closed");
+        if (!currentConnection.connected) {
+          reconnecting ??= CoordinationClient.connect(
+            environment.SWARM_COORDINATOR_ENDPOINT,
+            environment.SWARM_SESSION_CAPABILITY,
+          )
+            .then((next) => {
+              currentConnection = next;
+              return next;
+            })
+            .finally(() => {
+              reconnecting = undefined;
+            });
+          await reconnecting;
+          if (closed) {
+            currentConnection.close();
+            throw new Error("Swarm session closed");
+          }
+        }
+        // Reconnect only before sending; a failed request is never replayed.
+        return currentConnection.request(operation);
+      },
+      close() {
+        closed = true;
+        currentConnection.close();
+      },
+    };
+    const client = new LazyMcpClient(async () => {
+      const opened = new Client({ name: "clankie-swarm", version: "1" }, { capabilities: {} });
+      try {
+        await opened.connect(
+          new StdioClientTransport({
+            command: process.execPath,
+            args: [executable("mcp-cli.js")],
+            env: Object.fromEntries(
+              Object.entries(environment).filter(
+                (entry): entry is [string, string] => typeof entry[1] === "string",
+              ),
             ),
-          ),
-          stderr: "ignore",
-        }) as unknown as Transport,
-      );
-    } catch (error) {
-      connection.close();
-      throw error;
-    }
+            stderr: "ignore",
+          }) as unknown as Transport,
+        );
+        return opened;
+      } catch (error) {
+        await opened.close().catch(() => undefined);
+        throw error;
+      }
+    });
     const observe = async (runtime: "available" | "busy" | "unavailable") => {
       await connection.request({
         op: "command",
@@ -542,9 +578,7 @@ export class SwarmHost {
     const current = this.sessions.get(key);
     if (current) {
       const session = await current;
-      // A closed MCP transport must not poison every future bank for this lane.
-      // Reopen on the next request; never replay a possibly mutating tool call.
-      if (session.signature === external?.signature && session.client.transport !== undefined) return session;
+      if (session.signature === external?.signature) return session;
       if (this.sessions.get(key) === current) this.sessions.delete(key);
       await session.close();
       return this.get(binding);
@@ -574,7 +608,7 @@ export class SwarmHost {
   /** One tool surface for Pi and native seats, bound to the same conversation. */
   async tools(binding: Binding): Promise<ToolDefinition[]> {
     const session = await this.get(binding);
-    const { tools } = await session.client.listTools();
+    const { tools } = await session.client.use((client) => client.listTools());
     return tools.map((tool) => ({
       name: tool.name,
       label: tool.name,
@@ -711,16 +745,19 @@ export class SwarmHost {
           throw new Error(
             "Worker provisioning unavailable; Swarm communication remains available. Reconcile existing assignments under their original intent.",
           );
-        const result = await active.client.callTool(
-          {
-            name: tool.name,
-            arguments:
-              tool.name === "swarm_assign" && this.instructions
-                ? await this.assignmentInstructions(selected, active, forwarded)
-                : forwarded,
-          },
-          undefined,
-          tool.name === "swarm_assign" && forwarded.routing !== undefined ? { timeout: 75000 } : undefined,
+        const arguments_ =
+          tool.name === "swarm_assign" && this.instructions
+            ? await this.assignmentInstructions(selected, active, forwarded)
+            : forwarded;
+        const result = await active.client.use((client) =>
+          client.callTool(
+            {
+              name: tool.name,
+              arguments: arguments_,
+            },
+            undefined,
+            tool.name === "swarm_assign" && forwarded.routing !== undefined ? { timeout: 75000 } : undefined,
+          ),
         );
         if (result.isError) throw new Error(JSON.stringify(result.content));
         return {

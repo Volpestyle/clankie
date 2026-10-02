@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
-import type { CodexSeatEvent } from "../src/captain/codex-app-server.ts";
+import type { CodexAppServerSeat, CodexSeatEvent } from "../src/captain/codex-app-server.ts";
 
 function fixture() {
   let event: (event: CodexSeatEvent) => void = () => undefined;
   const emit = (method: string, params: Record<string, unknown> = {}) =>
     event({ method, params: { threadId: "thread-1", ...params } });
-  const send = vi.fn(async () => {
+  const send = vi.fn<CodexAppServerSeat["send"]>(async () => {
     emit("turn/started", { turn: { id: "turn-1" } });
     return { turnId: "turn-1", state: "started" as const };
   });
@@ -81,9 +81,11 @@ describe("Codex harness seat adapter", () => {
         expect.arrayContaining(["report-agent", "--agent-session-id", "thread-1"]),
       );
       expect(await started.control.status()).toBe("working");
+      f.send.mockResolvedValueOnce({ turnId: "turn-1", state: "steered" });
       expect(await started.control.send("follow-up")).toMatchObject({
         outcome: "accepted",
         messageId: "turn-1",
+        state: "steered",
       });
       expect(f.send).toHaveBeenLastCalledWith("follow-up");
       expect(await f.adapter.attach(started.control.ref)).toBe(started.control);

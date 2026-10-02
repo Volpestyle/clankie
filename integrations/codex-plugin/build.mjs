@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { cpSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bundledSkills } from "../../packages/settings/src/bundled-skills.ts";
 
@@ -39,7 +39,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     rmSync(skillsRoot, { recursive: true, force: true });
     mkdirSync(skillsRoot);
     for (const skill of bundledSkills(join(root, "../.."))) {
-      cpSync(skill.path, join(skillsRoot, skill.name), { recursive: true, dereference: true });
+      // Git can create a file symlink for a directory on Windows. Resolve the
+      // authored root link before copying; never replace it with a snapshot.
+      const source = lstatSync(skill.path).isSymbolicLink()
+        ? resolve(dirname(skill.path), readlinkSync(skill.path))
+        : skill.path;
+      cpSync(source, join(skillsRoot, skill.name), { recursive: true, dereference: true });
     }
   }
 }

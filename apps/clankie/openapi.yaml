@@ -782,12 +782,51 @@ paths:
     get:
       tags: [Operator]
       operationId: inspectSwarmConnections
-      summary: Inspect configured connections and active conversation actors
+      summary: Inspect Swarm selection, configured connections and active conversation actors
       security: [{ operatorBearer: [] }]
       responses:
-        "200": { description: Non-secret connection configuration and coordinator observations }
+        "200":
+          description: Non-secret connection configuration and coordinator observations, including configured enabled, running active, and restartRequired
         "401": { description: Operator authentication required }
         "503": { description: Operator authentication unavailable }
+  /v1/swarm/config:
+    put:
+      tags: [Operator]
+      operationId: configureSwarmStartup
+      summary: Select whether Swarm starts with the captain
+      description: Saves the selection for the next captain restart. Does not stop running workers or delete coordinator state, saved connections, or credentials. Local hires and repo work tracking do not require Swarm.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Saved startup selection and current service state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, active, restartRequired]
+                properties:
+                  enabled: { type: boolean, description: Configured selection for the next captain start }
+                  active: { type: boolean, description: This captain has a Swarm host }
+                  restartRequired: { type: boolean }
+                  restart:
+                    {
+                      type: string,
+                      description: Restart instruction when the selection differs from the running service,
+                    }
+        "400": { description: Invalid configuration request }
+        "401": { description: Operator authentication required }
+        "413": { description: Request exceeds 1 KiB }
+        "503": { description: Operator authentication or settings persistence unavailable }
   /v1/swarm/connections:
     post:
       tags: [Operator]

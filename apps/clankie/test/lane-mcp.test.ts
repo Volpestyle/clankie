@@ -9,6 +9,7 @@ import type { TSchema } from "typebox";
 import { createCaptain } from "../src/captain/captain.ts";
 import { describe, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
+import { createWorkItemsService } from "../src/work-items.ts";
 import { buildLaneToolBank } from "../src/captain/lane-tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { AutonomyStore } from "../src/captain/autonomy.ts";
@@ -504,37 +505,86 @@ it("binds native tools, project doctrine and channel delivery to selected servic
   }
 });
 
-it("initializes an operator MCP session with local tools while Swarm is disconnected", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clankie-seat-offline-"));
-  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const captain = createCaptain(bankDeps(), {
-    repoRoot: root,
-    stateDir: root,
-    workingDirectory: root,
-    swarm: {
-      start: async () => {},
-      tools: async () => {
-        throw new Error("Not connected");
+it.each(["disabled", "disconnected"] as const)(
+  "initializes an operator MCP session with local tools while Swarm is %s",
+  async (mode) => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-seat-offline-"));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const workItems = createWorkItemsService({
+      stateDirectory: root,
+      workspace: () => root,
+      run: async () => {
+        throw new Error("fixture has no git repository");
       },
-      close: async () => {},
-    } as unknown as SwarmHost,
-  });
-  const app = await createClankieApp({
-    captain,
-    authenticateOperator: async () => ({ operatorId: "operator-james" }),
-  });
-  try {
-    const sessionId = await connect(app, "operator");
-    expect(await toolNames(app, "operator", sessionId)).toContain("hire_agent");
-    expect(warning).toHaveBeenCalledWith(
-      "Swarm tools unavailable; continuing with the local lane tool bank",
-      expect.objectContaining({ message: "Not connected" }),
+    });
+    const captain = createCaptain(
+      {
+        ...bankDeps(),
+        workItems,
+        agentSessions: {
+          list: async () => ({ sessions: [], errors: [] }),
+          read: async () => {
+            throw new Error("no transcript in fixture");
+          },
+        },
+      },
+      {
+        repoRoot: root,
+        stateDir: root,
+        workingDirectory: root,
+        ...(mode === "disabled"
+          ? {}
+          : {
+              swarm: {
+                start: async () => {},
+                tools: async () => {
+                  throw new Error("Not connected");
+                },
+                close: async () => {},
+              } as unknown as SwarmHost,
+            }),
+      },
     );
-  } finally {
-    app.close();
-    await captain.close();
-    warning.mockRestore();
-    // The session store can still be flushing after close; retry ENOTEMPTY.
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-  }
-});
+    const app = await createClankieApp({
+      captain,
+      authenticateOperator: async () => ({ operatorId: "operator-james" }),
+    });
+    try {
+      const sessionId = await connect(app, "operator");
+      const names = await toolNames(app, "operator", sessionId);
+      for (const name of ["hire_agent", "message_seat", "agent_sessions", "agent_session_read", "work_items"])
+        expect(names).toContain(name);
+      for (const [index, name, args] of [
+        [3, "work_items", { action: "repos" }],
+        [4, "agent_sessions", {}],
+      ] as const) {
+        const response = await call(
+          app,
+          "operator",
+          {
+            jsonrpc: "2.0",
+            id: index,
+            method: "tools/call",
+            params: { name, arguments: args },
+          },
+          sessionId,
+        );
+        expect(response.status).toBe(200);
+        const reply = (await response.json()) as Rpc;
+        expect(reply).toMatchObject({ result: { content: expect.any(Array) } });
+        expect(reply.result?.isError).not.toBe(true);
+      }
+      if (mode === "disconnected")
+        expect(warning).toHaveBeenCalledWith(
+          "Swarm tools unavailable; continuing with the local lane tool bank",
+          expect.objectContaining({ message: "Not connected" }),
+        );
+    } finally {
+      app.close();
+      await captain.close();
+      warning.mockRestore();
+      // The session store can still be flushing after close; retry ENOTEMPTY.
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  },
+);

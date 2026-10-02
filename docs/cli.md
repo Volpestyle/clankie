@@ -1656,8 +1656,9 @@ owner-global selection. See [the full bundle and A/B limits](bundled-skills.md).
 Local briefed Codex hires use a dedicated app-server with a native Codex TUI in
 Herdr. Briefs and `message_seat` use protocol receipts; completion comes from turn
 events. The owner can type into the same session, whose identity and transcript
-stay visible. Existing unmanaged seats retain queue/terminal fallback. An
-uncertain protocol send is never replayed through terminal typing.
+stay visible. Existing unmanaged seats can use a supported native queue or
+channel. Automated messages never fall back to terminal typing. A `steered`
+receipt means guidance reached the active Codex turn, not an after-turn queue.
 
 A supplied `hire_agent` brief goes through the harness's own interface when a
 seat adapter drives that harness locally ([ADR 0187](adr/0187-clankie-hires-his-own-seats.md),
@@ -1670,20 +1671,17 @@ The worker is never swapped for a headless process; the owner can type into its
 pane at any time. This needs the owner's one-time consent: the plugin installed
 and disabled, and its channel approved in managed settings (see the
 [plugin README](../integrations/claude-plugin/README.md#worker-channel-plugin-clankie-worker)).
-Until then the hire result carries
-`control: { mode: "terminal", reason: "consent_required", fix }` and the brief
-takes the terminal fallback below; nothing accepts the development-channel
-warning on the owner's behalf.
+Until then the hire reports unavailable control with `consent_required` and the
+owner's fix. It does not launch a second worker or type the brief into the pane.
+Nothing accepts the development-channel warning on the owner's behalf.
 
 Every hire logs its selected lane and reason. The result carries `control.mode`:
-`channel` for the Claude worker channel, `adapter` for Codex, or `terminal` with
-`control.reason` explaining the fallback (including a remote fleet, absent brief,
-unavailable adapter or pane capability). Registered remote fleets do not change
-the control lane of a local hire. A visible folder-trust prompt returns
-`trust_required` and closes the new pane without accepting trust; review the
-prompt yourself in that directory before retrying.
+`channel` for the Claude worker channel, `adapter` for Codex, `terminal` for an
+unbriefed native launch, or `unavailable` with `control.reason` explaining missing
+structured control. Registered remote fleets do not change the control lane of a
+local hire. Questions and folder-trust prompts remain visible owner decisions.
 
-Failed startups log `hire_agent.startup_failed` before closing the pane, with its
+Failed startups log `hire_agent.startup_failed`, with its
 session ID, resolved transcript path (null when no file is found), and rejecting
 rule. Claude receipt failures also log `hire_agent.receipt_rejected`, distinguishing
 `transcript_unavailable`, `no_new_operator_message`, `complete_body_mismatch`, and
@@ -1691,13 +1689,16 @@ rule. Claude receipt failures also log `hire_agent.receipt_rejected`, distinguis
 not proof that Claude recorded it. Only the selected bridge polls: a globally
 registered `clankie-seat` stays inactive when the worker plugin is selected.
 
-On the terminal fallback, the brief uses Herdr's paste-aware `agent prompt` after
-startup readiness. Delivery is reported only when
-the complete brief appears in the native transcript. An unverifiable receipt
-returns `not_ready` with `brief_delivery_unverified` and closes the new pane;
-the turn may already have started, so inspect its work before retrying. For a
-brief that exceeds the transcript display limit (16,384 characters), is redacted,
-or has no readable native transcript, use a brief file with a short pointer.
+An uncertain start or brief delivery retains its pane for inspection and reports
+uncertainty. The turn may already have started; reconcile its native session before
+retrying. `message_seat` distinguishes confirmed delivery, unconfirmed delivery,
+and unavailable control. An unavailable connection does not promise an automatic
+retry. The current Codex adapter's control map is in memory, so a saved session
+reference alone does not reattach after a service restart. Sends target the bound
+Codex thread even if the owner switches the TUI to another thread; they do not
+follow terminal focus. Explicit owner terminal
+control remains available; normal agent messages do not use it. See
+[ADR 0207](adr/0207-work-records-and-native-agent-delivery.md).
 
 <a id="seat-commands"></a>
 
@@ -2010,6 +2011,16 @@ is the replay bound. Image files use `clankie file publish` separately.
 
 ### Swarm coordination
 
+Swarm is optional for independent peers. Local hires use the harness's channel or
+session API, and work stays in the repo's existing tracker or files. `clankie swarm
+off` (or `/swarm off`) saves `swarm.enabled: false`; `swarm on` enables it again.
+The setting takes effect on the next deliberate captain restart. It does not stop
+running workers, erase coordinator state or connections, or switch the tracker.
+The default is **on**, including fresh installs; disabling it is explicit.
+`PUT /v1/swarm/config` accepts `{ "enabled": true | false }`; its response and
+`swarm status` distinguish configured `enabled`, running `active`, and
+`restartRequired`. The Connections menu exposes the same setting.
+
 `clankie swarm status` (or `/swarm status` in the TUI) reads the authenticated
 `GET /v1/swarm` diagnostic view: configured connections, active conversation actors
 and coordinator state. `swarm connections` is the same inventory.
@@ -2034,10 +2045,9 @@ that channel; processing still requires `swarm_inbox` acknowledgment. The projec
 plugin uses its `clankie@inline` channel identity. See the [seat plugin](../integrations/claude-plugin/README.md)
 for context, resume and native-workspace requirements.
 
-When included, use `lead` for shared judgment, Swarm-first leadership,
-and the explicit Herdr fallback. `swarm-mcp` always
-remains available for peer participation; turning opinionated skills off retains
-the captain's own leadership instructions.
+When included, use `lead` for leadership and `swarm-mcp` when participating in
+this optional peer connection. Turning opinionated skills off retains the
+captain's own leadership instructions and native hire/message tools.
 Through `clankie mcp`, Pi or the Claude seat, `swarm_assign` accepts optional
 `skills: ["installed-name"]`. Selected skills and supporting files travel with the
 assignment's pinned project context. The existing conversation composer catalog

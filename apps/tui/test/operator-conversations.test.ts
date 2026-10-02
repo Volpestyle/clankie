@@ -940,6 +940,37 @@ describe("TUI selected-conversation prompt path", () => {
     },
   );
 
+  it.each(["seat_undelivered", "seat_delivery_unconfirmed"] as const)(
+    "keeps a %s admission uncertain or unsent without retrying the worker",
+    async (status) => {
+      const { store } = await tempTailStore();
+      const selection = new OperatorConversationSelection(client());
+      await selection.selectDefault();
+      const send = vi.fn(async () => ({
+        schemaVersion: 1 as const,
+        status,
+        conversationId: "global-default",
+        seatId: "term-one",
+        currentRevision: 0,
+        safeCursor: "global-default:0",
+        detail: "Inspect the worker before retrying.",
+        ...(status === "seat_delivery_unconfirmed" ? { messageId: "seat-message-1" } : {}),
+      }));
+      const session = new OperatorConversationPromptSession({
+        client: { ...client(), send },
+        selection,
+        tails: store,
+      });
+      await session.initialize();
+      await expect(session.prompt("keep these words", recordingSink().sink)).rejects.toMatchObject({
+        name: "OperatorConversationSendError",
+        delivery: status === "seat_delivery_unconfirmed" ? "unconfirmed" : "not_sent",
+        message: expect.stringContaining("Inspect the worker before retrying."),
+      });
+      expect(send).toHaveBeenCalledOnce();
+    },
+  );
+
   it("resumes a recoverable retained boundary before sending", async () => {
     const { store } = await tempTailStore();
     const selection = new OperatorConversationSelection(client());

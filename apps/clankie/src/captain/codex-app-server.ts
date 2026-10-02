@@ -100,7 +100,7 @@ export interface CodexAppServerSeat {
   transcriptPath?: string;
   /** Native TUI observes and can operate this exact server and thread. */
   viewArgs: readonly string[];
-  send(message: string): Promise<{ turnId: string; state: "started" | "queued" }>;
+  send(message: string): Promise<{ turnId: string; state: "started" | "steered" }>;
   interrupt(): Promise<boolean>;
   close(): Promise<void>;
 }
@@ -291,7 +291,7 @@ export async function startCodexAppServerSeat(options: {
           if (typeof turnId !== "string")
             throw new Error("Codex did not confirm the turn identity; delivery is uncertain");
           await subscribe();
-          return { turnId, state: steering ? ("queued" as const) : ("started" as const) };
+          return { turnId, state: steering ? ("steered" as const) : ("started" as const) };
         };
         const next = sending.then(send);
         sending = next.catch(() => undefined);

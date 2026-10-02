@@ -1,6 +1,19 @@
 # Swarm host
 
-Each operator conversation owns a stable Swarm actor and an independently fenced
+Swarm is optional for independent peer coordination and **defaults on**, including
+fresh installs. `clankie swarm off` saves a disabled selection for the next captain
+start; `clankie swarm on` restores it. The API is `PUT /v1/swarm/config`, and the
+Connections menu exposes the same setting. Status distinguishes configured
+`enabled`, running `active`, and `restartRequired`. Saving the setting does not
+stop the running fleet or delete coordinator records, credentials, or connections.
+The package remains bundled when the runtime connection is disabled.
+
+Local hires use [native harness adapters](../agent-hosts/README.md#seat-adapters)
+without Swarm. Project work stays in its [tracker or repo files](../work-items/README.md).
+Skills guide tool use; the adapter code enforces that automated messages never
+fall back to terminal typing. See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md).
+
+When enabled, each operator conversation owns a stable Swarm actor and an independently fenced
 session. The host mounts the actual Swarm MCP tools into Pi and admits leased
 messages through the existing conversation queue. The model explicitly acknowledges
 processing. Social conversations have no Swarm connection.
@@ -9,7 +22,12 @@ processing. Social conversations have no Swarm connection.
 the inbox after a turn; `close` closes clients. The coordinator retains durable
 state under `CLANKIE_STATE/swarm` and outlives individual host clients.
 
-A disconnected Swarm MCP transport is reopened on the next tool-bank request.
+A tool MCP subprocess starts only when tools are listed or called, and closes
+after one minute without active calls. Restoring saved conversations keeps inbox
+observers and actor identity alive without starting tool subprocesses. A disconnected
+tool transport reopens on the next request. Inbox observers retry transient outages
+with a delay capped at 30 seconds; authorization and fencing failures remain terminal.
+The direct coordinator connection reconnects before the next request when closed.
 If Swarm cannot supply its tools, the operator lane logs the failure and still
 serves its local tools. Mutating Swarm calls are never automatically replayed.
 
@@ -43,8 +61,8 @@ can terminate owned work even when MCP is unavailable. Legacy launches retain
 uncertain capacity until stop proof exists. [The original incident](../../docs/testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
 records the failure that led to these safeguards.
 
-The opinionated leadership skill is `lead`, with Swarm-first and Herdr fallback sections;
-`swarm-mcp` is the always-on tool/protocol reference. `clankie skills opinionated
+The opinionated leadership skill is `lead`; `swarm-mcp` supplies the protocol
+reference when using this connection. `clankie skills opinionated
 off` disables leadership guidance while retaining the captain's own leadership
 instructions and tool references.
 Clankie also ships a [process-skill bundle](../../docs/bundled-skills.md) for local

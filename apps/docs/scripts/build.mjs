@@ -561,7 +561,7 @@ async function consoleMarkdown() {
     ),
   ].join("\n");
 
-  const readme = await readFile(resolve(repoRoot, "apps/tui/README.md"), "utf8");
+  const readme = (await readFile(resolve(repoRoot, "apps/tui/README.md"), "utf8")).replace(/\r\n?/gu, "\n");
   const section = (title) => {
     const start = readme.indexOf(`\n## ${title}\n`);
     if (start < 0) throw new Error(`apps/tui/README.md no longer has a "${title}" section`);

@@ -35,7 +35,9 @@ it.each([false, true])("reads native history on demand without importing it (rem
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
   const read = vi.spyOn(HerdrWatchStore.prototype, "readNativeChat").mockResolvedValue(native);
-  const send = vi.spyOn(HerdrWatchStore.prototype, "sendToSeat").mockResolvedValue(true);
+  const send = vi
+    .spyOn(HerdrWatchStore.prototype, "deliverToSeat")
+    .mockResolvedValue({ outcome: "delivered" });
   vi.spyOn(census, "readFleet").mockResolvedValue({
     seats: [
       {

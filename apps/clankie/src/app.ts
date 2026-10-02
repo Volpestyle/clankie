@@ -489,6 +489,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Read per briefing rather than cached: the owner edits persona and a
   // refreshed voice session must pick it up without a restart.
   const settingsSource = dependencies.settings ?? new SettingsStore();
+  const swarmConfiguration = async () => {
+    const enabled = (await settingsSource.load()).swarm.enabled;
+    const active = dependencies.swarm !== undefined;
+    return { enabled, active, restartRequired: enabled !== active };
+  };
+  const swarmStatus = async () => {
+    const configuration = await swarmConfiguration();
+    const status = dependencies.swarm
+      ? ((await dependencies.swarm.status()) as Record<string, unknown>)
+      : { mode: configuration.enabled ? "unavailable" : "disabled", conversations: [] };
+    return {
+      ...status,
+      connections:
+        "connections" in status ? status.connections : (await settingsSource.load()).swarm.connections,
+      ...configuration,
+    };
+  };
   const voiceTranscriptStore = dependencies.voiceTranscriptStore ?? new DiscordVoiceTranscriptStore();
   const instanceId = randomUUID();
   const hostDisplayName = dependencies.hostDisplayName ?? hostname();
@@ -871,7 +888,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     const [runtimes, swarms, linear] = await Promise.all([
       dependencies.runtimes?.list() ?? [],
-      dependencies.swarm?.status() ?? { mode: "unavailable" },
+      swarmStatus(),
       dependencies.workerMcp?.linearAccount() ?? { status: "unavailable" },
     ]);
     return context.json({ runtimes, swarms, accounts: { linear } });
@@ -951,7 +968,32 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    return context.json(dependencies.swarm ? await dependencies.swarm.status() : { mode: "unavailable" });
+    return context.json(await swarmStatus());
+  });
+
+  app.put("/v1/swarm/config", bodyLimit({ maxSize: 1024 }), async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
+    const parsed = z
+      .object({ enabled: z.boolean() })
+      .strict()
+      .safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_swarm_configuration" }, 400);
+    const updated = await settingsSource.update((current) => ({
+      ...current,
+      swarm: { ...current.swarm, enabled: parsed.data.enabled },
+    }));
+    const active = dependencies.swarm !== undefined;
+    const restartRequired = updated.swarm.enabled !== active;
+    return context.json({
+      enabled: updated.swarm.enabled,
+      active,
+      restartRequired,
+      ...(restartRequired ? { restart: "Restart the captain to apply Swarm configuration." } : {}),
+    });
   });
 
   app.post("/v1/swarm/connections", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {

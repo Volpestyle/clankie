@@ -21,10 +21,12 @@ flowchart LR
   Discord["Configured Discord body"] --> Service
   Service --> State["Host-owned state<br/>memory · files · credential broker"]
   Service --> Models["Configured models and services"]
-  Service <--> Swarm["Swarm coordinators<br/>messages · tasks · ownership"]
+  Service -.-> Swarm["Optional Swarm coordinators<br/>independent peer coordination"]
   Service --> Runtime["Execution connections<br/>built-in route: Herdr"]
-  Runtime --> Workers["Worker agents"]
-  Workers <--> Swarm
+  Runtime --> Workers["Native interactive worker agents"]
+  Service <-->|"harness channels / session APIs"| Workers
+  Workers -.-> Swarm
+  Service <--> Work["Repo tracker or task files"]
   Service --> World["Clankie's own PokeAgents seat"]
   World --> Viewer["Optional game watch surface"]
   Discord --> Vox["One native Vox child<br/>when media is enabled"]
@@ -172,9 +174,11 @@ creates the session, `turn/start` and `turn/steer` deliver messages, and
 `turn/completed` supplies completion. A native Codex TUI in Herdr connects to
 that same server and thread for viewing and owner takeover. The adapter reports
 the thread ID explicitly, so the fleet census does not depend on shared-daemon
-hooks. Existing unmanaged Codex seats retain `codex queue` and terminal fallback,
-so programmatic messages leave the owner's draft alone
-([ADR 0161](adr/0161-a-fleet-seat-reads-its-mail-instead-of-its-keyboard.md)).
+hooks. Existing unmanaged Codex seats can use their native `codex queue` when
+available. Automated messages never fall back to typing in the terminal. Missing
+control, waiting consent, and uncertain delivery remain explicit outcomes. A
+`turn/steer` receipt reports guidance to the active turn, not an after-turn queue
+([ADR 0207](adr/0207-work-records-and-native-agent-delivery.md)).
 
 ### Conversation selection and retention
 
@@ -337,11 +341,13 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   harness where one is ready; the service detects them and the reach card
   lists them on machine-access lanes
   ([ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
-- **Leading agents.** Swarm MCP owns cross-session messages and task ownership,
-  guided by `lead`. The per-conversation host and supported
-  worker delivery paths live in [the Swarm package](../packages/swarm/README.md).
-  Herdr supplies terminals and process control for the built-in worker route;
-  The Herdr section of `lead` is the explicit fallback for unenrolled agents. The service's
+- **Leading agents.** Native local hires use `hire_agent`, `message_seat`, and
+  `herdr_watch` through [harness adapters](../packages/agent-hosts/README.md#tool-flow-and-current-support).
+  Claude and Codex are implemented; the researched Pi, OpenCode, and Prime paths
+  are not local adapters yet. Skills explain tool use while delivery code enforces
+  the no-terminal-fallback boundary. Swarm is optional for independent peer
+  messages and task ownership; its connection [defaults on](../packages/swarm/README.md).
+  Herdr supplies the native terminals and process control. The service's
   selected runtime supplies every console's fleet view. Current binding and
   fallback behavior live in [the CLI reference](cli.md#herdr-statusopencreate--herdr-use-name).
   Native Herdr events wake fleet readers across workspaces
@@ -455,9 +461,11 @@ Clankie uses pi's `ModelRuntime` and `createAgentSession` for Clankie's
 models, sessions, tools, skills, and compaction. The agent runtime, HTTP surface, and
 play host share one service
 ([ADR 0101](adr/0101-pi-owns-the-captain-model-runtime.md)).
-Swarm owns cross-session task coordination and messages. Herdr exposes the
-current built-in workers as visible panes through its CLI; `lead` supplies
-the fallback for unenrolled agents. Untrusted input stays fenced, secrets stay in the credential
+The repo's tracker or task files hold work and results. Herdr contains the native
+interactive workers; Clankie uses their supported channels or session APIs for
+delivery. Swarm is optional for independent peers requiring its durable inboxes
+and task ownership. Turning it off applies at the next service start and retains
+its saved state; local hires and work tracking do not require it. Untrusted input stays fenced, secrets stay in the credential
 broker, and every report describes observed outcomes rather than intentions.
 
 [`adr/`](adr/) records the active decisions for play mechanics, voice, presence,

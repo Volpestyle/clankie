@@ -114,6 +114,7 @@ export async function connectExternal(stores: ConnectionStores, raw: unknown) {
       return {
         ...current,
         swarm: {
+          ...current.swarm,
           connections: [...current.swarm.connections.filter((entry) => entry.id !== input.id), connection],
         },
       };

@@ -195,7 +195,7 @@ describe("native saved-session hires", () => {
       reason: "not_ready",
       detail: "brief_delivery_unverified",
     });
-    expect(await f.hire("continue")).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+    expect(await f.hire("continue")).toMatchObject({ outcome: "failed", reason: "delivery_unconfirmed" });
     const recreated = new HerdrWatchStore(join(f.root, "new-service.json"), {
       runner: f.runner,
       seatAdapters: [f.adapter],
@@ -244,13 +244,10 @@ describe("native saved-session hires", () => {
           f.session,
         );
         await vi.advanceTimersByTimeAsync(10_500);
-        expect(await result).toMatchObject(
-          fresh ? { outcome: "spawned" } : { outcome: "failed", reason: "start_unconfirmed" },
-        );
-        expect(f.runner.startAgent).toHaveBeenCalledWith(
-          expect.objectContaining({ args: ["--resume", UUID] }),
-        );
-        expect(f.runner.promptAgent).toHaveBeenCalledOnce();
+        expect(await result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+        expect(f.runner.createTab).not.toHaveBeenCalled();
+        expect(f.runner.startAgent).not.toHaveBeenCalled();
+        expect(f.runner.promptAgent).not.toHaveBeenCalled();
         expect(f.runner.closePane).not.toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
@@ -271,7 +268,7 @@ describe("native saved-session hires", () => {
         "do not send",
         f.session,
       ),
-    ).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+    ).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
     expect(f.runner.promptAgent).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 /**
  * A fleet seat's mailbox (ADR 0161): a DM or room turn rides a `SeatOutbox` as
- * a channel event while a `clankie mcp --seat` bridge is polling, and falls
- * back to typing into the pane only when it is not.
+ * a channel event while a `clankie mcp --seat` bridge is polling. An unavailable
+ * or uncertain channel is reported without typing into the owner's pane.
  */
 import { SeatOutbox } from "./seat-outbox.ts";
 
@@ -9,6 +9,16 @@ export interface FleetSeatMessageContext {
   readonly conversationId: string;
   readonly source: string;
 }
+
+export type FleetSeatDelivery =
+  | {
+      readonly outcome: "delivered";
+      readonly messageId?: string;
+      readonly state?: "queued" | "started" | "steered";
+    }
+  | { readonly outcome: "unconfirmed"; readonly detail: string; readonly messageId?: string }
+  | { readonly outcome: "undelivered"; readonly detail: string }
+  | { readonly outcome: "offline"; readonly detail: string };
 
 /**
  * The extra argv a hired Codex pane gets. A Codex that joins the shared
@@ -91,16 +101,15 @@ export function fleetSeatMailbox(mailboxes: Map<string, SeatOutbox>, seatId: str
 }
 
 /**
- * Hand a DM or room turn to a bound mailbox; type it into the pane when the
- * seat is not polling (or the delivery did not land as `delivered`).
+ * Hand a DM or room turn to a bound mailbox and retain its receipt outcome.
+ * A missing poller never permits terminal input.
  */
 export async function deliverFleetSeatMessage(
   mailboxes: ReadonlyMap<string, SeatOutbox>,
-  sendToPty: (seatId: string, text: string) => Promise<boolean>,
   seatId: string,
   message: string,
   context: FleetSeatMessageContext,
-): Promise<boolean> {
+): Promise<FleetSeatDelivery> {
   const mailbox = mailboxes.get(seatId);
   if (mailbox?.bound() === true) {
     const delivery = await mailbox.deliver({
@@ -110,7 +119,9 @@ export async function deliverFleetSeatMessage(
       content: message,
       wantsReply: false,
     });
-    if (delivery.outcome === "delivered") return true;
+    if (delivery.outcome === "delivered" || delivery.outcome === "replied") return { outcome: "delivered" };
+    if (delivery.outcome === "unconfirmed") return delivery;
+    return { outcome: "undelivered", detail: `Seat mailbox delivery was ${delivery.outcome}.` };
   }
-  return sendToPty(seatId, message);
+  return { outcome: "undelivered", detail: "No seat mailbox is polling; no terminal input was sent." };
 }

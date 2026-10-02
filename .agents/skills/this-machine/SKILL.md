@@ -46,8 +46,9 @@ These settings apply to new sessions and local hires. Start a fresh Claude seat
 or reset the service conversation to remove already-loaded guidance; no service
 restart is needed for the setting itself. Never edit settings JSON directly.
 
-Turning guidance off leaves Clankie able to lead using his own instructions,
-`swarm-mcp` and `herdr`. Local `hire_agent` can use `skills: "plain"` or
+Turning guidance off leaves Clankie able to lead using his own instructions and
+native hire/message tools. Swarm is optional for independent enrolled peers.
+Local `hire_agent` can use `skills: "plain"` or
 `"bundled"` for a single hire; its result records the condition. Global/project
 skills discovered independently by a harness are outside Clankie's bundle switch.
 
@@ -62,18 +63,20 @@ report the chosen account. Registration changes apply to new hires only.
 
 Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion
-comes from turn events, and the owner can type into the same session. Other
-routes use their harness adapter or Herdr's paste-aware prompt fallback, which
-requires the complete brief in the native transcript. An unverified delivery
-closes the new pane; a turn may have started, so inspect its work before retrying.
-Never replay an uncertain protocol send through terminal typing.
+comes from turn events, and the owner can type into the same bound session.
+Codex messages can steer an active turn; a `steered` receipt is not an after-turn
+queue. Other routes need a supported native channel or session API. Automated
+briefs and messages never fall back to terminal typing. An uncertain start or
+delivery retains its pane for inspection; reconcile it before retrying. A saved
+Codex session reference alone cannot recover its in-memory control after a
+service restart. Never replay uncertainty through another delivery path.
 
 Briefed local Claude hires use the approved `clankie-worker` channel and report
-`control.mode: "channel"`; Codex reports `adapter`. Every terminal fallback names
-`control.reason` (and `control.fix` when owner action is needed). Each hire logs
-its lane. `trust_required` means a visible folder-trust prompt blocked startup;
-the new pane is closed without accepting it. The owner reviews trust in that
-directory before a retry.
+`control.mode: "channel"`; Codex reports `adapter`. Missing structured control
+reports `unavailable` with `control.reason` (and `control.fix` when owner action
+is needed). `terminal` is only an unbriefed native launch. Each hire logs its
+lane. Folder trust and channel consent remain owner decisions; a visible prompt
+does not authorize sending it keystrokes or launching a replacement.
 
 For `brief_delivery_unverified`, inspect `hire_agent.receipt_rejected` in the
 service log: it names the session, transcript path (null if no file exists), and
@@ -128,7 +131,8 @@ These controls use the operator API; no Swarm tool or captain bearer can change 
 ## External agent history
 
 Herdr discovery is identity and status, not transcript enrollment. Inspect panes
-through Herdr and coordinate through Swarm. The app's native agent chats read the
+through Herdr and message supported seats through their native control. Swarm
+can coordinate independent enrolled peers. The app's native agent chats read the
 harness history on demand through replay/tail; viewing one does not call Clankie
 or copy its transcript into his event log. Explicit sends and Swarm messages are
 host-owned communications.
@@ -532,7 +536,15 @@ session. Every `swarm_*` call accepts
 `connection: "name"`; omit for embedded. Incoming wakes name their connection.
 Keep it on replies, evidence reads and retries. External grants use
 `swarm.connectionId`; enrolled worker bridges set `CLANKIE_SWARM_CONNECTION`.
-Load `lead` for Swarm-first leadership and the explicit Herdr fallback.
+Load `lead` for leadership and `swarm-mcp` for this optional peer connection.
+Local hires use `hire_agent` and `message_seat` without Swarm. `clankie swarm off`
+disables the connection on the next captain start; `swarm on` restores it. Status
+reports configured `enabled`, running `active`, and `restartRequired`. The setting
+does not change the running fleet, erase Swarm state, or change the repo's tracker.
+Swarm defaults on, including fresh installs. The native delivery mechanisms are
+runtime adapters: Claude and Codex are implemented; Pi, OpenCode, and Prime Agent
+have researched mechanisms but no local hire adapter. Skills explain these tools;
+they do not implement the transports. See the agent-hosts README under `repoRoot`.
 Assignments pin owner preferences and agent instructions from the selected
 conversation as `contract.instructions` artifacts. Select the project conversation
 before assigning; a task worktree alone does not change the instruction source.

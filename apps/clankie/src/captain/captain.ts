@@ -72,7 +72,12 @@ import {
   type HerdrSessionCensus,
   type ObservedHeadSeat,
 } from "./herdr-census.ts";
-import { deliverFleetSeatMessage, fleetSeatMailbox, type FleetSeatMessageContext } from "./fleet-seat.ts";
+import {
+  deliverFleetSeatMessage,
+  fleetSeatMailbox,
+  type FleetSeatMessageContext,
+  type FleetSeatDelivery,
+} from "./fleet-seat.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { createStanceStore } from "./stances.ts";
@@ -830,16 +835,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     transcript: async (agent) => herdrRunner.transcript?.(agent as HerdrAgentSnapshot),
     mailbox: {
       bound: (seatId) => fleetMailboxes.get(seatId)?.bound() === true,
-      deliver: async (seatId, text) =>
-        (
-          await fleetSeatMailbox(fleetMailboxes, seatId).deliver({
-            kind: "message",
-            conversationId: conversations.conversationIdForSeat(seatId) ?? seatId,
-            source: "captain",
-            content: text,
-            wantsReply: false,
-          })
-        ).outcome === "delivered",
+      deliver: async (seatId, text) => {
+        const delivery = await fleetSeatMailbox(fleetMailboxes, seatId).deliver({
+          kind: "message",
+          conversationId: conversations.conversationIdForSeat(seatId) ?? seatId,
+          source: "captain",
+          content: text,
+          wantsReply: false,
+        });
+        return delivery.outcome === "unconfirmed" ? delivery : delivery.outcome === "delivered";
+      },
     },
   });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
@@ -975,7 +980,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
   // Fleet seats (ADR 0161): one mailbox per herdr terminal id, created when
   // that pane's bridge first polls. A bound mailbox takes a DM or room turn
-  // as a channel event; an unbound one still types into the pty.
+  // as a channel event; an unbound one reports unavailable delivery.
   const fleetMailboxes = new Map<string, SeatOutbox>();
   let headSeat: ObservedHeadSeat | undefined;
 
@@ -1513,7 +1518,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       sessions.delete(key);
       void pending?.then((lane) => lane.session.dispose()).catch(() => undefined);
     },
-    (seatId, message, context) => sendToSeat(seatId, message, context),
+    (seatId, message, context) => deliverToSeat(seatId, message, context),
     undefined,
     async ({ parentConversationId, conversationId, workspace }) => {
       const cwd = workspace ?? workingDirectory;
@@ -1633,37 +1638,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   /**
    * The one lane into a seat — an operator DM, a room turn, and the captain's
-   * own brief all take it: the seat's mailbox when a bridge is polling, else
-   * the pane.
+   * own messages all take it: harness control, native queue or the seat's bound
+   * mailbox. A missing or uncertain channel never permits terminal typing.
    */
-  async function sendToSeat(
+  async function deliverToSeat(
     seatId: string,
     message: string,
     context: FleetSeatMessageContext,
-  ): Promise<boolean> {
+  ): Promise<FleetSeatDelivery> {
     // An adapter-driven seat takes its message through the adapter, which
-    // waits for the harness's own receipt; any other seat, its mailbox or pane.
+    // waits for the harness's own receipt; any other seat needs a structured lane.
     const deliver = () =>
-      herdrWatches.sendToSeat(seatId, message, () =>
-        deliverFleetSeatMessage(
-          fleetMailboxes,
-          (id, text) => herdrWatches.sendToSeat(id, text),
-          seatId,
-          message,
-          context,
-        ),
+      herdrWatches.deliverToSeat(seatId, message, () =>
+        deliverFleetSeatMessage(fleetMailboxes, seatId, message, context),
       );
-    const sent =
-      context.source === "room"
-        ? await herdrWatches.sendAndWatchReply(seatId, message, deliver)
-        : await deliver();
+    let delivery: FleetSeatDelivery | undefined;
+    if (context.source === "room") {
+      await herdrWatches.sendAndWatchReply(seatId, message, async () => {
+        delivery = await deliver();
+        return delivery.outcome === "delivered";
+      });
+    } else delivery = await deliver();
     // What a seat has been asked to do today is a fact about the seat, so the
     // roster's cursor moves for it the way it moves for a stance (ADR 0150).
-    if (sent) {
+    if (delivery?.outcome === "delivered") {
       seatLedger.promptSent(seatId);
       fleetChanges.touch();
     }
-    return sent;
+    return delivery!;
   }
 
   // A hired seat is not a Swarm actor, so the captain briefs it the way the
@@ -1675,12 +1677,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
     const seatId = seat?.seatId ?? seatByPersona.get(target);
     if (seatId === undefined) return { outcome: "unknown_seat", seat: target };
-    const sent = await sendToSeat(seatId, message, {
+    const delivery = await deliverToSeat(seatId, message, {
       conversationId: seat?.conversationId ?? seatId,
       source: "captain",
     });
-    if (!sent) return { outcome: "seat_offline", seatId };
-    return { outcome: "delivered", seatId, status: await herdrWatches.awaitPickup(seatId) };
+    if (delivery.outcome === "offline") return { outcome: "seat_offline", seatId };
+    if (delivery.outcome !== "delivered") return { ...delivery, seatId };
+    return { ...delivery, seatId, status: await herdrWatches.awaitPickup(seatId) };
   };
 
   const roomConversations = new RoomConversations(conversations);

@@ -102,7 +102,7 @@ describe("seat outbox", () => {
     const delivery = wake(live, controller.signal);
     await parked;
     controller.abort();
-    await expect(delivery).resolves.toEqual({ outcome: "aborted" });
+    await expect(delivery).resolves.toMatchObject({ outcome: "unconfirmed" });
     expect(await live.poll(0)).toEqual([]);
   });
 
@@ -112,7 +112,7 @@ describe("seat outbox", () => {
     const delivery = wake(outbox);
     await taken;
     outbox.close();
-    await expect(delivery).resolves.toEqual({ outcome: "aborted" });
+    await expect(delivery).resolves.toMatchObject({ outcome: "unconfirmed" });
 
     const parkedOutbox = new SeatOutbox({ boundGraceMs: 1_000 });
     const parked = parkedOutbox.poll(5_000);
@@ -129,7 +129,7 @@ describe("seat outbox", () => {
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
-  it("marks a taken event delivered only after the next poll, and unbound if none arrives", async () => {
+  it("marks a taken event delivered only after the next poll, and unconfirmed if none arrives", async () => {
     const acked = new SeatOutbox({ boundGraceMs: 1_000 });
     const parked = acked.poll(5_000);
     const delivery = wake(acked);
@@ -147,7 +147,7 @@ describe("seat outbox", () => {
     const first = dropped.poll(5_000);
     const lost = wake(dropped, undefined, "do not duplicate");
     expect((await first).map((event) => event.content)).toEqual(["do not duplicate"]);
-    await expect(lost).resolves.toEqual({ outcome: "unbound" });
+    await expect(lost).resolves.toMatchObject({ outcome: "unconfirmed", messageId: expect.any(String) });
     expect(await dropped.poll(0)).toEqual([]);
   });
 

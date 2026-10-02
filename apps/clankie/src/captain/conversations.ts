@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
+import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { z } from "zod";
 import {
   LinearWorkOwnerSchema,
@@ -262,7 +263,7 @@ type SeatSender = (
   seatId: string,
   message: string,
   context: { readonly conversationId: string; readonly source: string },
-) => Promise<boolean>;
+) => Promise<boolean | FleetSeatDelivery>;
 type PersonaSeatResolver = (personaId: string) => string | undefined;
 /**
  * What one seat said to another, as it happens (ADR 0163). The store reports;
@@ -2049,6 +2050,7 @@ export class ConversationStore {
       // the same as one that passed — and telling them apart is the whole
       // difference between a quiet room and a broken one.
       const unreachable: string[] = [];
+      const deliveryFailures: string[] = [];
       let spoke = 0;
       for (;;) {
         if (context.signal.aborted) return;
@@ -2074,9 +2076,11 @@ export class ConversationStore {
           seatId === undefined
             ? undefined
             : this.awaitSeatReply(seatId, AbortSignal.any([context.signal, replyController.signal]));
-        const asked =
-          seatId !== undefined &&
-          (await this.sendToSeat?.(seatId, prompt, { conversationId, source: "room" })) === true;
+        const delivery =
+          seatId === undefined
+            ? undefined
+            : await this.sendToSeat?.(seatId, prompt, { conversationId, source: "room" });
+        const asked = delivery === true || (typeof delivery === "object" && delivery.outcome === "delivered");
         if (asked && seatId !== undefined && answering !== undefined) {
           const fromSeatId =
             this.seatForPersona === undefined
@@ -2097,7 +2101,15 @@ export class ConversationStore {
         replyController.abort();
         const spokenText = channelTurnReply(reply);
         if (spokenText === undefined) {
-          if (!asked || reply === undefined) unreachable.push(names.get(personaId) ?? personaId);
+          const name = names.get(personaId) ?? personaId;
+          if (
+            typeof delivery === "object" &&
+            (delivery.outcome === "unconfirmed" || delivery.outcome === "undelivered")
+          ) {
+            deliveryFailures.push(
+              `${name}: ${delivery.outcome === "unconfirmed" ? "delivery unconfirmed; it may still arrive" : "message not delivered"}. ${delivery.detail}`,
+            );
+          } else if (!asked || reply === undefined) unreachable.push(name);
           taken.push({ personaId, outcome: "passed" });
           continue;
         }
@@ -2117,7 +2129,13 @@ export class ConversationStore {
         await this.projectChannelMessage(meta, personaId, spokenText);
       }
       const notice = channelRoundNotice({ spoke, unreachable, members: members.length });
-      if (notice !== undefined) await this.projectChannelNotice(meta, notice);
+      if (notice !== undefined && deliveryFailures.length === 0)
+        await this.projectChannelNotice(meta, notice);
+      if (deliveryFailures.length > 0)
+        await this.projectChannelNotice(
+          meta,
+          `${deliveryFailures.join("\n")}\nInspect the native sessions before resending; no terminal input was sent.`,
+        );
     };
   }
 
@@ -2270,13 +2288,28 @@ export class ConversationStore {
         safeCursor,
       };
     }
-    if (
-      seatId === undefined ||
-      !(await this.sendToSeat?.(seatId, turn.message, {
+    const delivery =
+      seatId === undefined
+        ? undefined
+        : await this.sendToSeat?.(seatId, turn.message, {
+            conversationId: meta.conversationId,
+            source: "operator",
+          });
+    if (typeof delivery === "object" && delivery.outcome !== "delivered" && delivery.outcome !== "offline") {
+      return {
+        schemaVersion: 1,
+        status: delivery.outcome === "unconfirmed" ? "seat_delivery_unconfirmed" : "seat_undelivered",
         conversationId: meta.conversationId,
-        source: "operator",
-      }))
-    ) {
+        ...offlineIdentity,
+        detail: delivery.detail.slice(0, OPERATOR_CONVERSATION_SUMMARY_MAX),
+        ...(delivery.outcome === "unconfirmed" && delivery.messageId !== undefined
+          ? { messageId: delivery.messageId }
+          : {}),
+        currentRevision: meta.revision,
+        safeCursor,
+      };
+    }
+    if (delivery !== true && !(typeof delivery === "object" && delivery.outcome === "delivered")) {
       return {
         schemaVersion: 1,
         status: "seat_offline",

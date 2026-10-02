@@ -1,6 +1,8 @@
 # 0203 — Clankie keeps what better models cannot absorb
 
-Status: accepted (James, 2026-09-30)
+Status: accepted (James, 2026-09-30). Amended by
+[ADR 0207](0207-work-records-and-native-agent-delivery.md): Swarm is optional and
+automated agent delivery no longer falls back to terminal typing.
 
 Date: 2026-09-30
 

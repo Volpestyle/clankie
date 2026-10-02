@@ -1,4 +1,5 @@
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
+import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import type {
   EvaluatorCommand,
   EvaluatorStatus,
@@ -54,13 +55,17 @@ export type HireSeat = (seat: SpawnOperatorSeat, brief?: string) => Promise<Oper
 
 /**
  * The captain's own message into a hired seat, down the same lane an operator
- * DM takes (mailbox, else the pane). A herdr seat is not a Swarm actor, so this
+ * DM takes (harness control, native queue, or bound mailbox). A herdr seat is not a Swarm actor, so this
  * is how he follows up with one (VUH-1373). `seat` is the seatId,
  * personaId, or conversationId `hire_agent` returned.
  */
 export type MessageSeat = (seat: string, message: string) => Promise<SeatMessageResult>;
 type SeatMessageResult =
-  | { readonly outcome: "delivered"; readonly seatId: string; readonly status: string }
+  | (Extract<FleetSeatDelivery, { outcome: "delivered" }> & {
+      readonly seatId: string;
+      readonly status: string;
+    })
+  | (Extract<FleetSeatDelivery, { outcome: "unconfirmed" | "undelivered" }> & { readonly seatId: string })
   | { readonly outcome: "seat_offline"; readonly seatId: string }
   | { readonly outcome: "unknown_seat"; readonly seat: string };
 

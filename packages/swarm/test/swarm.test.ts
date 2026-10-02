@@ -265,7 +265,10 @@ test("real MCP delivers isolated inboxes, explicit acknowledgment and stable ide
   await host.close();
   hosts.splice(hosts.indexOf(host), 1);
   ready = false;
+  const connect = vi.spyOn(Client.prototype, "connect");
   const resumed = await open();
+  expect(connect).not.toHaveBeenCalled();
+  connect.mockRestore();
   const resumedAlice = await tools(resumed, "alice");
   expect((await resumedAlice("swarm_assign", assignment)).value.task.id).toBe(taskId);
   expect(snapshots).toBe(1);

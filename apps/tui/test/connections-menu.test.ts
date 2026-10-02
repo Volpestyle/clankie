@@ -31,6 +31,10 @@ it("formats hints a person can scan", () => {
     "3 conversations · 0 external coordinators",
   );
   expect(swarmHint({ mode: "unavailable" })).toBe("unavailable");
+  expect(swarmHint({ mode: "disabled" })).toBe("disabled");
+  expect(swarmHint({ mode: "swarm", enabled: false, restartRequired: true })).toBe(
+    "off after captain restart",
+  );
   expect(accountsHint({ linear: { status: "connected", account: { name: "James" } } })).toBe(
     "Linear: connected as James",
   );
@@ -78,6 +82,19 @@ function fakeShell(selections: (string | undefined)[], texts: (string | undefine
 }
 
 const values = (call: unknown[]) => (call[0] as { options: { value: string }[] }).options.map((o) => o.value);
+
+it("changes the Swarm startup setting from the connections menu", async () => {
+  const { shell, readSelect, lines } = fakeShell(["enabled", undefined]);
+  const swarm = vi.fn(async (args: readonly string[]) =>
+    args[0] === "status"
+      ? { mode: "disabled", enabled: false, active: false, restartRequired: false, connections: [] }
+      : { enabled: true, active: false, restartRequired: true },
+  );
+  await runConnectionsSection("swarm", shell, services({ swarm }).services);
+  expect(values(readSelect.mock.calls[0]!)).toEqual(["enabled", "contacts"]);
+  expect(swarm).toHaveBeenCalledWith(["on"]);
+  expect(lines).toContain("Swarm configuration saved. Restart the captain to apply it.");
+});
 
 function services(overrides: Partial<ConnectionsMenuServices> = {}) {
   const agentsCalls: string[][] = [];

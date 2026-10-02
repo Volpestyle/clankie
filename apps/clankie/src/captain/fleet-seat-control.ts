@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { splitFleetQualified } from "../herdr-fleet.ts";
 import { codexProcess, resolveCodexHome, resolveCodexSessionId } from "./codex-seat.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
+import type { FleetSeatDelivery } from "./fleet-seat.ts";
 
 /** Native control is shared by messages and watches; the adapters own its lifetime. */
 export function createFleetSeatControl(
@@ -23,60 +24,81 @@ export function createFleetSeatControl(
   };
 
   /** Existing unowned Codex sessions may take their native queue instead of PTY input. */
-  const deliverCodexQueue = async (agent: HerdrAgentSnapshot, text: string): Promise<boolean> => {
+  const deliverCodexQueue = async (
+    agent: HerdrAgentSnapshot,
+    text: string,
+  ): Promise<FleetSeatDelivery | undefined> => {
     const { paneProcesses, openFiles, codexQueue } = runner;
-    if (paneProcesses === undefined || openFiles === undefined || codexQueue === undefined) return false;
-    // `codex queue` and lsof run here; a remote seat takes the pty lane (ADR 0184).
-    if (splitFleetQualified(agent.paneId) !== undefined) return false;
+    if (paneProcesses === undefined || openFiles === undefined || codexQueue === undefined) return undefined;
+    // `codex queue` and lsof run here; remote seats need their own structured channel.
+    if (splitFleetQualified(agent.paneId) !== undefined) return undefined;
+    let sessionId: string;
+    let home: string | undefined;
     try {
       const processes = await paneProcesses(agent.paneId);
       const process = codexProcess(processes);
-      if (process === undefined) return false;
+      if (process === undefined) return undefined;
       const files = await openFiles(process.pid);
-      const sessionId = resolveCodexSessionId(processes, files);
-      if (sessionId === undefined) return false;
-      return await codexQueue(sessionId, text, resolveCodexHome(files, sessionId));
+      const resolved = resolveCodexSessionId(processes, files);
+      if (resolved === undefined) return undefined;
+      sessionId = resolved;
+      home = resolveCodexHome(files, sessionId);
     } catch {
-      return false;
+      return undefined;
+    }
+    try {
+      if (await codexQueue(sessionId, text, home)) return { outcome: "delivered" };
+      return {
+        outcome: "unconfirmed",
+        detail: "Codex queue did not confirm delivery; inspect the seat before resending.",
+      };
+    } catch (error) {
+      return { outcome: "unconfirmed", detail: String(error) };
     }
   };
 
   return {
     attach,
-    async sendToSeat(
+    async deliverToSeat(
       seatId: string,
       text: string,
       /** A bound mailbox can work even while terminal discovery is unavailable. */
-      uncontrolled?: () => Promise<boolean>,
-    ): Promise<boolean> {
+      uncontrolled?: () => Promise<FleetSeatDelivery>,
+    ): Promise<FleetSeatDelivery> {
       let current: HerdrAgentSnapshot | undefined;
       try {
         current = await runner.resolveTerminal(seatId);
       } catch {
-        return uncontrolled?.() ?? false;
+        return uncontrolled?.() ?? { outcome: "offline", detail: "Native seat discovery is unavailable." };
       }
       const control = current === undefined ? undefined : await attach(current);
-      // Choose the adapter once. Mailbox delivery retains its own errors and
-      // revalidates terminal identity through the caller's existing fallback.
-      if (control === undefined && uncontrolled !== undefined) return uncontrolled();
-      if (!isMessageableSeat(current)) return false;
-      try {
-        if (control !== undefined) {
+      // A chosen channel is the sole delivery attempt. Uncertain delivery must
+      // never be replayed through a queue, mailbox or terminal.
+      if (control !== undefined) {
+        try {
           const delivery = await control.send(text);
-          // An unconfirmed message may still land, so it is never typed again.
-          if (delivery.outcome === "accepted" || delivery.outcome === "unconfirmed") return true;
-          if (delivery.outcome === "offline") return false;
-          // Released: the owner took over, and the pane lane reaches the interactive harness.
+          if (delivery.outcome === "accepted")
+            return { outcome: "delivered", messageId: delivery.messageId, state: delivery.state };
+          if (delivery.outcome === "unconfirmed" || delivery.outcome === "offline") return delivery;
+          return {
+            outcome: "undelivered",
+            detail: "The harness released its channel; no terminal input was sent.",
+          };
+        } catch (error) {
+          return { outcome: "unconfirmed", detail: String(error) };
         }
-        if (current.agent === "codex" && (await deliverCodexQueue(current, text))) return true;
-        if (runner.promptAgent === undefined) return false;
-        // Raw pane send-text has no bracketed-paste framing. Claude can lose
-        // earlier PTY chunks even after startup is ready (VUH-1450).
-        await runner.promptAgent(current.paneId, text);
-        return true;
-      } catch {
-        return false;
       }
+      if (isMessageableSeat(current) && current.agent === "codex") {
+        const delivery = await deliverCodexQueue(current, text);
+        if (delivery !== undefined) return delivery;
+      }
+      if (uncontrolled !== undefined) return uncontrolled();
+      return isMessageableSeat(current)
+        ? {
+            outcome: "undelivered",
+            detail: "No structured seat channel is available; no terminal input was sent.",
+          }
+        : { outcome: "offline", detail: "The native seat is unavailable." };
     },
   };
 }

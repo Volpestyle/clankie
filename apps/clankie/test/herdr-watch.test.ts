@@ -227,7 +227,7 @@ describe("HerdrWatchStore", () => {
     store.close();
   });
 
-  it("sends through the current pane and projects status and changed summaries", async () => {
+  it("refuses uncontrolled input and projects status and changed summaries", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-seat-watch-"));
     roots.push(root);
     const summariesPath = join(root, "summaries.json");
@@ -273,8 +273,8 @@ describe("HerdrWatchStore", () => {
     await vi.waitFor(() =>
       expect(project).toHaveBeenCalledWith("term-potato", { kind: "summary", text: "Initial" }),
     );
-    await expect(store.sendToSeat("term-potato", "hello")).resolves.toBe(true);
-    expect(promptAgent).toHaveBeenCalledWith("w18:p1", "hello");
+    await expect(store.sendToSeat("term-potato", "hello")).resolves.toBe(false);
+    expect(promptAgent).not.toHaveBeenCalled();
     expect(pressEnter).not.toHaveBeenCalled();
     await expect(store.closeSeat("term-potato")).resolves.toBe(true);
     expect(closePane).toHaveBeenCalledWith("w18:p1");
@@ -346,7 +346,7 @@ describe("HerdrWatchStore", () => {
     store.close();
   });
 
-  it("a Codex seat with no rollout falls back to the pty", async () => {
+  it("a Codex seat with no rollout refuses input without typing", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-codex-no-rollout-"));
     roots.push(root);
     const codex: HerdrAgentSnapshot = {
@@ -374,14 +374,14 @@ describe("HerdrWatchStore", () => {
       },
     });
 
-    await expect(store.sendToSeat("term-codex", "hello")).resolves.toBe(true);
+    await expect(store.sendToSeat("term-codex", "hello")).resolves.toBe(false);
     expect(codexQueue).not.toHaveBeenCalled();
-    expect(promptAgent).toHaveBeenCalledWith("w18:p2", "hello");
+    expect(promptAgent).not.toHaveBeenCalled();
     expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
 
-  it("a Codex queue failure falls back to the pty", async () => {
+  it("a Codex queue failure remains unconfirmed without typing or another delivery", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-codex-queue-fail-"));
     roots.push(root);
     const codex: HerdrAgentSnapshot = {
@@ -409,8 +409,10 @@ describe("HerdrWatchStore", () => {
       },
     });
 
-    await expect(store.sendToSeat("term-codex", "hello")).resolves.toBe(true);
-    expect(promptAgent).toHaveBeenCalledWith("w18:p2", "hello");
+    await expect(store.deliverToSeat("term-codex", "hello")).resolves.toMatchObject({
+      outcome: "unconfirmed",
+    });
+    expect(promptAgent).not.toHaveBeenCalled();
     expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
@@ -436,11 +438,11 @@ describe("HerdrWatchStore", () => {
       },
     });
 
-    await expect(store.sendToSeat("term-potato", "hello")).resolves.toBe(true);
+    await expect(store.sendToSeat("term-potato", "hello")).resolves.toBe(false);
     expect(paneProcesses).not.toHaveBeenCalled();
     expect(openFiles).not.toHaveBeenCalled();
     expect(codexQueue).not.toHaveBeenCalled();
-    expect(promptAgent).toHaveBeenCalledWith("w18:p1", "hello");
+    expect(promptAgent).not.toHaveBeenCalled();
     expect(pressEnter).not.toHaveBeenCalled();
     store.close();
   });
@@ -1804,7 +1806,7 @@ describe("hiring a seat", () => {
     });
   });
 
-  it("never answers the development-channel warning: the hire fails consent_required and closes the pane", async () => {
+  it("refuses an unsupported brief before any development-channel warning can consume it", async () => {
     const blockedClaude: HerdrAgentSnapshot = {
       ...hired,
       agent: "claude",
@@ -1843,18 +1845,17 @@ describe("hiring a seat", () => {
       "the brief",
     );
 
-    expect(result).toMatchObject({ outcome: "failed", reason: "not_ready" });
-    expect(result.outcome === "failed" && result.detail).toMatch(
-      /^consent_required: .*managed-settings\.json/u,
-    );
+    expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
     // Nothing reaches the pane: no key, no Enter, no text, no brief.
     for (const input of [sendKeys, pressEnter, sendText, promptAgent, waitUntilIdle])
       expect(input).not.toHaveBeenCalled();
-    expect(closePane).toHaveBeenCalledWith("w1C:p9");
+    expect(runner.createTab).not.toHaveBeenCalled();
+    expect(startAgent).not.toHaveBeenCalled();
+    expect(closePane).not.toHaveBeenCalled();
     store.close();
   });
 
-  it("reports a folder trust blocker as a typed failure and closes the pane", async () => {
+  it("reports a folder trust blocker and keeps its native prompt available to the owner", async () => {
     const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
     const read = vi.fn(() => Promise.resolve("Do you trust the files in this folder?"));
     const sendKeys = vi.fn(() => Promise.resolve());
@@ -1880,7 +1881,7 @@ describe("hiring a seat", () => {
 
     expect(result).toMatchObject({ outcome: "failed", reason: "trust_required" });
     expect(sendKeys).not.toHaveBeenCalled();
-    expect(closePane).toHaveBeenCalledWith("w1C:p9");
+    expect(closePane).not.toHaveBeenCalled();
     store.close();
   });
 

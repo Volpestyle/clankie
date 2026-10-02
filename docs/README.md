@@ -38,7 +38,8 @@ source setup and checks.
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Service HTTP contract             | [OpenAPI](../apps/clankie/openapi.yaml), rendered as the [API docs](https://docs.clankie.bot/api/)                                                                   |
 | Public wire contracts             | [`packages/protocol`](../packages/protocol/README.md)                                                                                                                |
-| Coordination and worker routes    | [Swarm host](../packages/swarm/README.md)                                                                                                                            |
+| Native hire and message delivery  | [Harness adapters and current support](../packages/agent-hosts/README.md#tool-flow-and-current-support)                                                              |
+| Optional peer coordination        | [Swarm host](../packages/swarm/README.md)                                                                                                                            |
 | Harness discovery and transcripts | [Agent hosts](../packages/agent-hosts/README.md), [transcripts](../packages/agent-transcript/README.md)                                                              |
 | Project work tracking             | [Work items](../packages/work-items/README.md)                                                                                                                       |
 | Models                            | [Provider resolution](../packages/model-provider/README.md), [catalog](../packages/model-registry/README.md)                                                         |

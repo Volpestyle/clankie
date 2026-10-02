@@ -20,6 +20,7 @@ const REPLY_TIMEOUT_MS = 10 * 60_000;
 export type SeatDelivery =
   | { readonly outcome: "delivered" }
   | { readonly outcome: "replied"; readonly text: string }
+  | { readonly outcome: "unconfirmed"; readonly messageId: string; readonly detail: string }
   | { readonly outcome: "unbound" }
   | { readonly outcome: "aborted" };
 
@@ -95,7 +96,16 @@ export class SeatOutbox {
         content: input.content,
         createdAt: new Date(this.now()).toISOString(),
       };
-      const onAbort = (): void => pending.settle({ outcome: "aborted" });
+      const onAbort = (): void =>
+        pending.settle(
+          pending.taken
+            ? {
+                outcome: "unconfirmed",
+                messageId: event.id,
+                detail: "The bridge took the event before cancellation; delivery may still land.",
+              }
+            : { outcome: "aborted" },
+        );
       const pending: Pending = {
         event,
         wantsReply: input.wantsReply,
@@ -164,7 +174,15 @@ export class SeatOutbox {
 
   public close(): void {
     for (const pending of [...this.queued, ...this.inFlight, ...this.awaitingReply.values()]) {
-      pending.settle({ outcome: "aborted" });
+      pending.settle(
+        pending.taken
+          ? {
+              outcome: "unconfirmed",
+              messageId: pending.event.id,
+              detail: "The bridge took the event before the mailbox closed; delivery may still land.",
+            }
+          : { outcome: "aborted" },
+      );
     }
     // Each poller removes itself as it settles; a set never revisits a yielded entry.
     for (const poller of this.pollers) poller.finish([], "close");
@@ -197,7 +215,16 @@ export class SeatOutbox {
       pending.taken = true;
       if (pending.timer !== undefined) clearTimeout(pending.timer);
       this.inFlight.push(pending);
-      pending.timer = setTimeout(() => pending.settle({ outcome: "unbound" }), this.boundGraceMs);
+      pending.timer = setTimeout(
+        () =>
+          pending.settle({
+            outcome: "unconfirmed",
+            messageId: pending.event.id,
+            detail:
+              "The bridge took the event but did not acknowledge it; inspect the seat before resending.",
+          }),
+        this.boundGraceMs,
+      );
       pending.timer.unref?.();
     }
     if (taken.length > 0) this.lastPollAt = this.now();

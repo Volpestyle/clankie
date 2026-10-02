@@ -1058,7 +1058,7 @@ const SeatControlModeSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.enum(["channel", "adapter"]) }).strict(),
   z
     .object({
-      mode: z.literal("terminal"),
+      mode: z.enum(["terminal", "unavailable"]),
       reason: z.string(),
       detail: z.string(),
       fix: z.string().optional(),
@@ -1761,10 +1761,19 @@ export const OperatorConversationSeatOfflineSchema = z
   .strict();
 export type OperatorConversationSeatOffline = z.infer<typeof OperatorConversationSeatOfflineSchema>;
 
+/** A live seat can lack a safe channel, or take a message without confirming it. */
+const OperatorConversationSeatDeliveryFailureSchema = OperatorConversationSeatOfflineSchema.extend({
+  status: z.enum(["seat_undelivered", "seat_delivery_unconfirmed"]),
+  detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX),
+  messageId: z.string().min(1).max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+}).strict();
+
 export const SubmitOperatorConversationTurnResultSchema = z.discriminatedUnion("status", [
   OperatorConversationTurnAcceptedSchema,
   OperatorConversationRevisionConflictSchema,
   OperatorConversationSeatOfflineSchema,
+  OperatorConversationSeatDeliveryFailureSchema.extend({ status: z.literal("seat_undelivered") }),
+  OperatorConversationSeatDeliveryFailureSchema.extend({ status: z.literal("seat_delivery_unconfirmed") }),
 ]);
 export type SubmitOperatorConversationTurnResult = z.infer<typeof SubmitOperatorConversationTurnResultSchema>;
 

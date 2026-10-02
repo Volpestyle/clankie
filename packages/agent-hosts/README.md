@@ -43,14 +43,60 @@ job: a hired seat stays the real interactive harness in its Herdr pane (ADR 0203
 `HarnessSeatAdapter` starts a hired seat in its herdr pane (`SeatView`) as the
 real interactive harness, and controls it through the harness's own extension
 points: a `SeatControl` with `send` acknowledged by the harness, `settled`
-completion, `interrupt`, and `close`. `attach` reattaches by the harness's own
-session id after a service restart. Failures are typed outcomes; `blocked`
-names an owner decision (such as approving a channel), and the hire path then
-falls back to terminal delivery and says why. The Claude adapter lives in the
+completion, `interrupt`, and `close`. `attach` looks up control using the harness's
+session ID; recovery after a service restart depends on the adapter. Failures are typed outcomes; `blocked`
+names an owner decision (such as approving a channel). Automated delivery never
+falls back to typing into the owner's terminal. Missing control and uncertain
+delivery remain explicit outcomes; neither authorizes a second launch or resend.
+The Claude adapter lives in the
 service (`apps/clankie/src/captain/claude-worker-seat.ts`), as does Codex's.
+
+### Tool flow and current support
+
+Clankie calls `hire_agent`, `message_seat`, and `herdr_watch`. The service selects
+the registered adapter, which owns the harness-specific delivery and receipts.
+The adapter is runtime code. The shipped `this-machine` skill and captain
+instructions explain how to use those tools and interpret their outcomes; the
+no-terminal-fallback behavior is enforced in the delivery code itself.
+
+```mermaid
+flowchart TD
+  Tools["hire_agent / message_seat / herdr_watch"] --> Adapter["Registered harness adapter"]
+  Adapter --> Claude["Claude worker channel"]
+  Adapter --> Codex["Codex app-server"]
+  Claude --> Session["Bound native session in Herdr"]
+  Codex --> Session
+  Session -->|"receipts and turn events"| Tools
+```
+
+| Harness     | Mechanism                                            | Local hire adapter                                        |
+| ----------- | ---------------------------------------------------- | --------------------------------------------------------- |
+| Claude Code | Native worker-plugin channel and turn hooks          | Implemented; requires the owner's channel consent         |
+| Codex       | App-server shared with the native TUI's bound thread | Implemented; starts or steers a turn                      |
+| Pi          | Native extension follow-up or steering messages      | Researched; not implemented in this local hire path       |
+| OpenCode    | Session endpoint on the existing TUI's server        | Researched; not implemented in this local hire path       |
+| Prime Agent | Daemon-backed messages to the active session         | Researched for PrimeIntellect's CLI; not implemented here |
+
+Transcript discovery, an available native CLI, and Swarm managed-worker support
+do not imply a local hire adapter exists. Unsupported automated briefs fail
+without creating a worker or typing into a terminal. Upstream source links and
+the distinction between automated checks and live evidence are recorded in the
+[delivery verification notes](../../docs/testing/2026-10-01-native-agent-delivery/README.md).
+
+Work records stay in the repo's [tracker or files](../work-items/README.md).
+These tools do not require Swarm; [Swarm](../swarm/README.md) is an optional
+connection for independent peer coordination.
 
 `SeatLaunch.resumeSessionId` continues an exact session in the native view.
 The normal hire path resolves its transcript, reuses a live seat on that host,
 and confirms native identity before delivering a brief. Transcript hosts remain
 read-only. See [native continuation](../../docs/adr/0189-agent-sessions-read-from-their-transcripts.md#native-continuation)
 for host matching, original Codex account selection, and uncertain-start behavior.
+
+An adapter contract is not proof of restart recovery: the current Codex adapter's
+control map is in memory, so a saved session reference alone cannot reattach it
+after a service restart. Codex sends stay bound to the original thread: if the
+owner switches the TUI to another thread, this connection does not follow UI
+focus. Report unavailable control without falling back to terminal input.
+See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md)
+for the boundary between task records, native terminals, and optional Swarm.

@@ -14,6 +14,7 @@ import {
   claudeWorkerLaunchArgs,
   createClaudeWorkerSeatAdapter,
   managedPolicyApprovesWorker,
+  type ClaudeWorkerSeatDeps,
   type WorkerSeatAgent,
 } from "../src/captain/claude-worker-seat.ts";
 import { parseHerdrSeatTranscript, type HerdrSeatTranscript } from "../src/captain/herdr-transcript.ts";
@@ -177,7 +178,7 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
   };
   const entries: HerdrSeatTranscript["entries"][number][] = [];
   let bound = false;
-  const deliver = vi.fn(async (_seatId: string, text: string) => {
+  const deliver = vi.fn<ClaudeWorkerSeatDeps["mailbox"]["deliver"]>(async (_seatId, text) => {
     if (options.echoes !== false)
       entries.push({
         type: "message",
@@ -221,6 +222,38 @@ it("a hire starts the interactive TUI, briefs it over the channel, and waits for
   expect(
     await adapter.attach({ ...started.control.ref, sessionId: "20000000-0000-4000-8000-000000000002" }),
   ).toBeUndefined();
+});
+
+it("preserves a taken but unacknowledged channel event as uncertain without replaying it", async () => {
+  const f = await fixture();
+  const started = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "" }, f.view);
+  if (started.outcome !== "started") throw new Error(JSON.stringify(started));
+  const receipt = {
+    outcome: "unconfirmed" as const,
+    messageId: "seat-taken",
+    detail: "The bridge took the event but did not acknowledge it",
+  };
+  f.deliver.mockResolvedValueOnce(receipt);
+  expect(await started.control.send("follow-up")).toEqual(receipt);
+  expect(f.deliver).toHaveBeenCalledTimes(1);
+  expect(f.view.run).not.toHaveBeenCalled();
+  expect(f.entries).toEqual([]);
+});
+
+it("keeps an uncertain brief distinct from a released channel", async () => {
+  const f = await fixture();
+  f.deliver.mockResolvedValueOnce({
+    outcome: "unconfirmed",
+    messageId: "seat-brief",
+    detail: "The bridge took the brief but did not acknowledge it",
+  });
+  expect(await f.adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, f.view)).toMatchObject({
+    outcome: "failed",
+    reason: "not_ready",
+    detail: expect.stringMatching(/brief_delivery_unverified: .*unconfirmed.*seat-brief/u),
+  });
+  expect(f.deliver).toHaveBeenCalledTimes(1);
+  expect(f.view.run).not.toHaveBeenCalled();
 });
 
 it.each(["string", "blocks"])(

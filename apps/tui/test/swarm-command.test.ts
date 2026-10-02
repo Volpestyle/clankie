@@ -1,10 +1,38 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { expect, it } from "vitest";
 import { runSwarmCommand } from "../src/command/swarm.ts";
 
+it("persists an explicit Swarm selection without restarting the service", async () => {
+  const calls: unknown[] = [];
+  const options = {
+    env: { CLANKIE_OPERATOR_TOKEN: "operator" },
+    fetchImpl: (async (url, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer operator");
+      const body = JSON.parse(init?.body as string) as { enabled: boolean };
+      calls.push([new URL(String(url)).pathname, init?.method, body]);
+      return Response.json({ enabled: body.enabled, active: true, restartRequired: !body.enabled });
+    }) as typeof fetch,
+  };
+  expect(await runSwarmCommand(["off"], options)).toEqual({
+    enabled: false,
+    active: true,
+    restartRequired: true,
+  });
+  expect(await runSwarmCommand(["on"], options)).toEqual({
+    enabled: true,
+    active: true,
+    restartRequired: false,
+  });
+  expect(calls).toEqual([
+    ["/v1/swarm/config", "PUT", { enabled: false }],
+    ["/v1/swarm/config", "PUT", { enabled: true }],
+  ]);
+});
+
 it("imports a private connection file without printing its capability", async () => {
-  const root = await mkdtemp("/tmp/clankie-swarm-cli-");
+  const root = await mkdtemp(join(tmpdir(), "clankie-swarm-cli-"));
   const file = join(root, "connection.json");
   const capability = "synthetic-session-capability";
   const calls: Array<{ path: string; method: string }> = [];
@@ -28,7 +56,10 @@ it("imports a private connection file without printing its capability", async ()
       ["/v1/swarm", "GET"],
     ]);
     await writeFile(join(root, "public.json"), "{}", { mode: 0o644 });
-    await expect(runSwarmCommand(["connect", join(root, "public.json")], options)).rejects.toThrow("private");
+    if (process.platform !== "win32")
+      await expect(runSwarmCommand(["connect", join(root, "public.json")], options)).rejects.toThrow(
+        "private",
+      );
     await expect(runSwarmCommand(["connect", root], options)).rejects.toThrow("regular");
   } finally {
     await rm(root, { recursive: true, force: true });
