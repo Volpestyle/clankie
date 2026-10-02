@@ -4,7 +4,7 @@ import { hostedOperatorAllows } from "../src/hosted-operator.ts";
 it("limits hosted device authority to explicit routes and validated conversation operations", () => {
   for (const path of ["/v1/operator/persona", "/v1/model-keys/set", "/v1/accounts/github/start"])
     expect(hostedOperatorAllows("POST", path, "{}")).toBe(true);
-  for (const op of ["list", "fleet", "terminal_catalog"])
+  for (const op of ["list", "fleet", "terminal_catalog", "roles"])
     expect(
       hostedOperatorAllows("POST", "/operator/v1/dispatch", JSON.stringify({ op, schemaVersion: 1 })),
     ).toBe(true);
@@ -19,7 +19,7 @@ it("limits hosted device authority to explicit routes and validated conversation
     hostedOperatorAllows(
       "POST",
       "/operator/v1/dispatch",
-      JSON.stringify({ op: "set_persona_role", schemaVersion: 1, personaId: "agent-1", role: "wizard" }),
+      JSON.stringify({ op: "set_persona_role", schemaVersion: 1, personaId: "agent-1", role: "wiz/ard" }),
     ),
   ).toBe(false);
   expect(

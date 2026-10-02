@@ -49,9 +49,16 @@ it("a hire names the persona's role, and set_persona_role reassigns or clears it
         schemaVersion: 1,
         op: "set_persona_role",
         personaId,
-        role: "reviewer",
+        role: "  Sound   Designer ",
       }),
-    ).toMatchObject({ op: "set_persona_role", persona: { personaId, role: "reviewer" } });
+    ).toMatchObject({ op: "set_persona_role", persona: { personaId, role: "Sound Designer" } });
+    expect(await captain.serveOperatorConversation({ schemaVersion: 1, op: "roles" })).toMatchObject({
+      op: "roles",
+      roles: expect.arrayContaining([
+        { role: "designer", builtIn: true, count: 0 },
+        { role: "Sound Designer", builtIn: false, count: 1 },
+      ]),
+    });
     const cleared = await captain.serveOperatorConversation({
       schemaVersion: 1,
       op: "set_persona_role",

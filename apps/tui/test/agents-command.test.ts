@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { runAgentsCommand } from "../src/command/agents.ts";
+import { runAgentsCommand, splitQuotedArguments } from "../src/command/agents.ts";
 
 it("maps agents verbs onto the operator session and host routes", async () => {
   const calls: Array<{ path: string; method: string; body?: unknown }> = [];
@@ -122,6 +122,12 @@ it("assigns and clears a persona's role by name or id through set_persona_role",
     fetchImpl: (async (_url, init) => {
       const request = JSON.parse(init!.body as string);
       calls.push(request);
+      if (request.op === "roles")
+        return Response.json({
+          op: "roles",
+          schemaVersion: 1,
+          roles: [{ role: "Sound Designer", builtIn: false, count: 1 }],
+        });
       if (request.op === "fleet")
         return Response.json({
           op: "fleet",
@@ -152,8 +158,22 @@ it("assigns and clears a persona's role by name or id through set_persona_role",
   });
   await runAgentsCommand(["role", "agent-1", "none"], options);
   expect(calls.at(-1)).toMatchObject({ personaId: "agent-1", role: null });
-  await expect(runAgentsCommand(["role", "agent-1", "wizard"], options)).rejects.toThrow("Unknown role");
+  await runAgentsCommand(["role", "Pixel Smith", "  Sound   Designer"], options);
+  expect(calls.at(-1)).toMatchObject({ personaId: "agent-1", role: "Sound Designer" });
+  await expect(runAgentsCommand(["role", "agent-1", "wiz/ard"], options)).rejects.toThrow("Invalid role");
   await expect(runAgentsCommand(["role", "twin", "builder"], options)).rejects.toThrow("persona id");
   await expect(runAgentsCommand(["role", "nobody", "builder"], options)).rejects.toThrow("No agent named");
   await expect(runAgentsCommand(["role", "builder"], options)).rejects.toThrow("Usage");
+  expect(await runAgentsCommand(["roles"], options)).toEqual([
+    { role: "Sound Designer", builtIn: false, count: 1 },
+  ]);
+});
+
+it("lists roles in use and splits quoted TUI arguments", async () => {
+  expect(splitQuotedArguments(`role "Pixel Smith" 'sound designer'  none`)).toEqual([
+    "role",
+    "Pixel Smith",
+    "sound designer",
+    "none",
+  ]);
 });

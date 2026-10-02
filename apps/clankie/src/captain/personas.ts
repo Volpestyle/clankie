@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   defaultOperatorAgentAppearance,
   isInternalSwarmContact,
+  OPERATOR_AGENT_ROLES,
+  operatorAgentRoleKey,
   OperatorAgentNameSchema,
   OperatorCodexAccountSchema,
   OperatorAgentPersonaIdSchema,
@@ -14,6 +16,7 @@ import {
   UpdateOperatorAgentPersonaSchema,
   type OperatorAgentPersona,
   type OperatorAgentRole,
+  type OperatorAgentRoleSummary,
   type SetOperatorAgentPersonaRole,
   type OperatorConversation,
   type OperatorFleetSeat,
@@ -247,6 +250,38 @@ export class PersonaStore {
       throw error;
     }
     return updated;
+  }
+
+  /**
+   * Built-in roles, then the custom roles characters hold, most held first
+   * (ADR 0208). Roles compare case-insensitively; a custom role shows the
+   * casing its most recently updated holder was given.
+   */
+  public roles(): readonly OperatorAgentRoleSummary[] {
+    const held = new Map<string, { role: string; count: number; updatedAt: string }>();
+    for (const persona of this.records.values()) {
+      if (persona.role === undefined || isInternalSwarmContact(persona)) continue;
+      const key = operatorAgentRoleKey(persona.role);
+      const current = held.get(key);
+      held.set(key, {
+        role: current === undefined || persona.updatedAt >= current.updatedAt ? persona.role : current.role,
+        count: (current?.count ?? 0) + 1,
+        updatedAt:
+          current === undefined || persona.updatedAt >= current.updatedAt
+            ? persona.updatedAt
+            : current.updatedAt,
+      });
+    }
+    const builtIns = OPERATOR_AGENT_ROLES.map((role) => ({
+      role,
+      builtIn: true,
+      count: held.get(role)?.count ?? 0,
+    }));
+    const custom = [...held.entries()]
+      .filter(([key]) => !(OPERATOR_AGENT_ROLES as readonly string[]).includes(key))
+      .map(([, entry]) => ({ role: entry.role, builtIn: false, count: entry.count }))
+      .sort((left, right) => right.count - left.count || left.role.localeCompare(right.role));
+    return [...builtIns, ...custom];
   }
 
   /** Assign or clear a character's team role (ADR 0208). */

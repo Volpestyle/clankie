@@ -2,7 +2,7 @@ import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runLinearCommand } from "./command/linear.ts";
 import { runSwarmCommand } from "./command/swarm.ts";
-import { runAgentsCommand } from "./command/agents.ts";
+import { runAgentsCommand, splitQuotedArguments } from "./command/agents.ts";
 import {
   runConnectionsMenu,
   runConnectionsSection,
@@ -257,10 +257,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       aliases: [],
       description: "Live agents, and past ones that kept a thread",
       takesArgument: true,
-      argumentHint: "[contacts | role NAME ROLE|none | legacy session commands; see /sessions]",
+      argumentHint: '[contacts | roles | role NAME "ROLE"|none | legacy session commands; see /sessions]',
       async run(argument, shell): Promise<void> {
         if (argument.trim()) {
-          const result = await runAgentsCommand(argument.trim().split(/\s+/u).filter(Boolean));
+          const result = await runAgentsCommand(splitQuotedArguments(argument));
           shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
           return;
         }

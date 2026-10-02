@@ -6,6 +6,7 @@ import {
   DrawSequenceDiagramRequestSchema,
   OPERATOR_SEAT_DIRECTORY_MAX,
   OPERATOR_SEAT_EFFORT_MAX,
+  OPERATOR_AGENT_ROLE_MAX,
   OPERATOR_AGENT_ROLES,
   OPERATOR_SEAT_HARNESSES,
   OPERATOR_SEAT_MODEL_MAX,
@@ -646,9 +647,10 @@ function hireAgentTool(
       ),
       title: Type.String({ minLength: 1, maxLength: 80, description: "What the roster calls it." }),
       role: Type.Optional(
-        StringEnum(OPERATOR_AGENT_ROLES, {
-          description:
-            "Its team role, where the owner's world places it and whose backlog its station reads. Omit to leave it unassigned.",
+        Type.String({
+          minLength: 1,
+          maxLength: OPERATOR_AGENT_ROLE_MAX,
+          description: `Its team role, where the owner's world places it and whose backlog (work items labelled with it) its station reads: one of ${OPERATOR_AGENT_ROLES.join(", ")}, or a custom role of letters, digits, spaces and hyphens. Omit to leave it unassigned.`,
         }),
       ),
       workingDirectory: Type.String({

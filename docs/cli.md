@@ -1259,16 +1259,26 @@ now opens the agents that are live, with offline agents that kept a thread behin
 one "Past agents" entry. `clankie agents contacts` returns every known identity,
 live or not, through the existing fleet API.
 
-`clankie agents role NAME|PERSONA_ID ROLE|none` assigns an agent's team role:
-`planner`, `designer`, `builder`, `tester`, `reviewer` or `researcher`; `none`
-clears it ([ADR 0208](adr/0208-agents-carry-a-role-the-world-reads-it.md)). A
-name must match exactly one agent, case-insensitively; otherwise pass the
-persona id from `agents contacts`. It prints the updated persona. The role is
-semantic, unlike the cosmetic `appearance.accessory`, and persists with the
-persona across seats. The same setting is the `set_persona_role` operator op
-(`{ personaId, role: ROLE | null }`, steer grant) and `hire_agent`'s optional
-`role`; `/agents role NAME ROLE` works in the TUI, and the `/agents` picker
-shows each live agent's role.
+`clankie agents role NAME|PERSONA_ID ROLE|none` assigns an agent's team role
+([ADR 0208](adr/0208-agents-carry-a-role-the-world-reads-it.md)). The built-ins
+`planner`, `designer`, `builder`, `tester`, `reviewer` and `researcher` are
+suggestions; a custom role is 1–24 letters, digits, spaces and hyphens. Quote a
+role with spaces: `clankie agents role Smith "sound designer"`. The role is the
+last argument and everything before it names the agent. A name must match
+exactly one agent, case-insensitively; otherwise pass the persona id from
+`agents contacts`. Roles are trimmed, inner whitespace collapses, and a built-in
+in any casing is stored lowercase. A custom role keeps the casing you typed
+and compares case-insensitively, so `Sound Designer` and `sound designer` are
+one role. `none` clears it. It prints the updated persona.
+
+`clankie agents roles` lists the built-ins (always, with counts), then custom
+roles personas hold, most held first, each as `{ role, builtIn, count }`. Counts
+include offline personas. The role is semantic, unlike the cosmetic
+`appearance.accessory`, and persists with the persona across seats. The same
+settings are the `set_persona_role` operator op (`{ personaId, role: ROLE |
+null }`, steer grant), the `roles` op (read), and `hire_agent`'s and
+`spawn_seat`'s optional `role`. In the TUI, `/agents role NAME "ROLE"` and
+`/agents roles` honour quotes. The `/agents` picker shows each live agent's role.
 
 The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`
 (known identities), `/rooms` (group channels and Discord inspection), and

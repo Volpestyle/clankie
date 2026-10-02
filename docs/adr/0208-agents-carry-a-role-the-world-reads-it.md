@@ -27,6 +27,7 @@ independent of `appearance.accessory`. The owner sets it with the
 `set_persona_role` operator op (steer grant), `clankie agents role`, or `/agents
 role` in the TUI; Clankie or the owner can set it at hire time with the
 optional `role` on `hire_agent` and `spawn_seat`. Nothing infers a role.
+Custom roles are allowed (amendment below).
 
 **A fleet seat may carry `subagents`:** a running count and up to eight recent
 labels. It is derived from the harness's own transcript through
@@ -82,3 +83,25 @@ flowchart LR
 - An unaddressed, remote or Codex seat shows no subagents. The world treats
   that as unknown.
 - A subagent started before the 2 MiB cold-read window is not counted.
+
+## Amendment: custom roles (James, 2026-10-02)
+
+James asked for custom roles. The role is now an open, validated string. The six
+built-ins stay as suggestions (`OPERATOR_AGENT_ROLES`). Any role is 1–24
+letters, digits, spaces and hyphens, and starts with a letter or digit.
+
+Parsing trims the role and collapses inner whitespace. A built-in in any casing
+folds to its lowercase name. A custom role keeps the owner's casing for display
+and compares case-insensitively (`operatorAgentRoleKey`), so `Sound Designer`
+and `sound designer` are one role and one station. Personas stored with an
+enum role remain valid, because every built-in is a valid string.
+
+A read-only `roles` operator op lists roles as `{ role, builtIn, count }`. It
+returns the six built-ins first, always and with counts, then the custom roles
+personas hold, most held first. A custom role is labelled with the casing of
+its most recently updated holder. `clankie agents roles` prints it. It is an op
+rather than a fleet field so the long-polled snapshot does not grow. The app's
+picker reads it on open.
+
+A custom role's station reads work items labelled with that role, using the
+same case-insensitive label match.

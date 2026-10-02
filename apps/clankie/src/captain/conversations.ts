@@ -69,6 +69,7 @@ type ConversationServiceRequest = Exclude<
   | { op: "composer_catalog" }
   | { op: "state_stance" }
   | { op: "personas" }
+  | { op: "roles" }
   | { op: "update_persona" }
   | { op: "set_persona_role" }
   | { op: "terminal_catalog" }
@@ -90,6 +91,7 @@ type ConversationServiceResult = Exclude<
   | { op: "composer_catalog" }
   | { op: "state_stance" }
   | { op: "personas" }
+  | { op: "roles" }
   | { op: "update_persona" }
   | { op: "set_persona_role" }
   | { op: "terminal_catalog" }

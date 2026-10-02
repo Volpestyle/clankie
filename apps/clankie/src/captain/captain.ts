@@ -2647,6 +2647,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
         };
       }
+      if (request.op === "roles") {
+        return { op: "roles", schemaVersion: 1, roles: [...personas.roles()] };
+      }
       if (request.op === "set_persona_role") {
         const updated = personas.setRole({
           schemaVersion: 1,

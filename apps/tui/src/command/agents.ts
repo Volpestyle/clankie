@@ -1,5 +1,6 @@
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
+  OPERATOR_AGENT_ROLE_MAX,
   OPERATOR_AGENT_ROLES,
   OperatorAgentRoleSchema,
   type OperatorAgentPersona,
@@ -14,7 +15,8 @@ import { commandHost } from "./io.ts";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
-  `       clankie agents role NAME|PERSONA_ID ${OPERATOR_AGENT_ROLES.join("|")}|none\n` +
+  `       clankie agents role NAME|PERSONA_ID ROLE|none   (${OPERATOR_AGENT_ROLES.join(", ")}, or "a custom role")\n` +
+  "       clankie agents roles\n" +
   "       clankie agents [list] [--host ID] [--limit N]\n" +
   "       clankie agents read HOST:SESSION [--tail N | --after CURSOR]\n" +
   "       clankie agents resume HOST:SESSION [--fleet ID] [--brief TEXT]\n" +
@@ -32,10 +34,18 @@ function flags(args: readonly string[], allowed: readonly string[]): Map<string,
   return values;
 }
 
+/** Whitespace-separated words, where "double" or 'single' quotes keep a phrase (a custom role) together. */
+export function splitQuotedArguments(input: string): string[] {
+  return [...input.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/gu)].map((match) => match[1] ?? match[2] ?? match[3]!);
+}
+
 function parseRole(value: string): OperatorAgentRole | null {
-  if (value.toLowerCase() === "none") return null;
-  const role = OperatorAgentRoleSchema.safeParse(value.toLowerCase());
-  if (!role.success) throw new Error(`Unknown role ${value}; use ${OPERATOR_AGENT_ROLES.join(", ")} or none`);
+  if (value.trim().toLowerCase() === "none") return null;
+  const role = OperatorAgentRoleSchema.safeParse(value);
+  if (!role.success)
+    throw new Error(
+      `Invalid role ${JSON.stringify(value)}: 1-${String(OPERATOR_AGENT_ROLE_MAX)} letters, digits, spaces and hyphens (built-ins: ${OPERATOR_AGENT_ROLES.join(", ")}), or none`,
+    );
   return role.data;
 }
 
@@ -61,7 +71,11 @@ export async function runAgentsCommand(
     operatorCredentialStore?: CredentialStore;
   } = {},
 ): Promise<unknown> {
-  if ((args[0] === "contacts" && args.length === 1) || (args[0] === "role" && args.length >= 3)) {
+  if (
+    (args[0] === "contacts" && args.length === 1) ||
+    (args[0] === "roles" && args.length === 1) ||
+    (args[0] === "role" && args.length >= 3)
+  ) {
     const token = await resolveCaptainRouteToken({ env: options.env ?? process.env });
     const client = createCaptainOperatorConversationClient(
       createCaptainRouteClient({
@@ -70,6 +84,7 @@ export async function runAgentsCommand(
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       }),
     );
+    if (args[0] === "roles") return client.roles!();
     const personas = (await client.fleet!()).personas;
     if (args[0] === "contacts") return personas;
     return client.setPersonaRole!(

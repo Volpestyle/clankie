@@ -1554,9 +1554,13 @@ paths:
         contacts nor channel participants. Seats, channels, tallies and edges
         are unchanged. Omitting the selector preserves the full directory;
         `personas` and conversation IDs still address retained history.
-        `set_persona_role` (`personaId`, `role` one of planner, designer,
-        builder, tester, reviewer, researcher, or null to clear) returns the
-        updated persona and rides the steer grant (ADR 0208). Fleet seats may
+        `set_persona_role` (`personaId`, `role`: a built-in such as planner,
+        designer, builder, tester, reviewer or researcher, or a custom role of
+        1-24 letters, digits, spaces and hyphens; null clears) returns the
+        updated persona and rides the steer grant (ADR 0208). Roles are trimmed
+        and whitespace-collapsed, built-ins fold to lowercase, and custom roles
+        keep their casing and compare case-insensitively. `roles` returns the
+        built-ins, then custom roles in use, as `{ role, builtIn, count }`. Fleet seats may
         carry `subagents` (running count and up to eight recent labels) for
         local Claude seats that were hired or whose chat is open; absent means
         unknown. `work_items` takes an optional case-insensitive `label`.

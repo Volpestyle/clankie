@@ -24,6 +24,7 @@ import {
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   defaultOperatorAgentAppearance,
   OPERATOR_AGENT_ROLES,
+  operatorAgentRoleKey,
   OperatorAgentAppearanceSchema,
   OperatorAgentNameSchema,
   OperatorAgentPersonaSchema,
@@ -63,7 +64,15 @@ describe("protocol", () => {
     };
     expect(OperatorAgentPersonaSchema.parse({ ...persona, role: "designer" }).role).toBe("designer");
     expect(OperatorAgentPersonaSchema.parse(persona)).not.toHaveProperty("role");
-    expect(() => OperatorAgentPersonaSchema.parse({ ...persona, role: "planner-ish" })).toThrow();
+    // Custom roles: trimmed, inner whitespace collapsed, owner's casing kept; built-ins fold to lowercase.
+    expect(OperatorAgentPersonaSchema.parse({ ...persona, role: "  Sound   Designer " }).role).toBe(
+      "Sound Designer",
+    );
+    expect(OperatorAgentPersonaSchema.parse({ ...persona, role: " BUILDER" }).role).toBe("builder");
+    expect(OperatorAgentPersonaSchema.parse({ ...persona, role: "QA-2" }).role).toBe("QA-2");
+    for (const bad of ["", "   ", "x".repeat(25), "art/design", "-lead", "a_b"])
+      expect(() => OperatorAgentPersonaSchema.parse({ ...persona, role: bad }), bad).toThrow();
+    expect(operatorAgentRoleKey("Sound  Designer")).toBe(operatorAgentRoleKey("sound designer"));
     expect(
       OperatorConversationServiceRequestSchema.parse({
         op: "set_persona_role",
@@ -92,7 +101,23 @@ describe("protocol", () => {
         subagents: { running: 0, recent: Array(9).fill({ label: "x", status: "done" }) },
       }),
     ).toThrow();
-    expect(SpawnOperatorSeatSchema.shape.role.unwrap().options).toEqual([...OPERATOR_AGENT_ROLES]);
+    expect(OPERATOR_AGENT_ROLES).toEqual([
+      "planner",
+      "designer",
+      "builder",
+      "tester",
+      "reviewer",
+      "researcher",
+    ]);
+    expect(
+      SpawnOperatorSeatSchema.parse({
+        schemaVersion: 1,
+        harness: "claude",
+        title: "Smith",
+        workingDirectory: "/tmp",
+        role: " Level  Designer",
+      }).role,
+    ).toBe("Level Designer");
     const item = {
       id: "W-1",
       title: "T",

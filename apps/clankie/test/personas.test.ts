@@ -80,9 +80,32 @@ describe("PersonaStore", () => {
     expect(() => store.setRole({ schemaVersion: 1, personaId: "agent-missing", role: "tester" })).toThrow(
       "Unknown agent",
     );
-    expect(() =>
-      store.setRole({ schemaVersion: 1, personaId: seat.personaId, role: "wizard" as "tester" }),
-    ).toThrow();
+    expect(() => store.setRole({ schemaVersion: 1, personaId: seat.personaId, role: "wiz/ard" })).toThrow();
+  });
+
+  it("holds custom roles in the owner's casing and lists roles in use case-insensitively", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-roles-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const one = store.adoptSpawn(observed("term-1", OCCUPANT_ONE, "one-ab12"), "One");
+    const two = store.adoptSpawn(observed("term-2", OCCUPANT_TWO, "two-ab12"), "Two");
+    expect(
+      store.setRole({ schemaVersion: 1, personaId: one.personaId, role: "  sound   designer" }).role,
+    ).toBe("sound designer");
+    expect(store.setRole({ schemaVersion: 1, personaId: two.personaId, role: "Sound Designer" }).role).toBe(
+      "Sound Designer",
+    );
+    const listed = store.roles();
+    expect(listed.slice(0, 6).map((entry) => [entry.role, entry.builtIn, entry.count])).toEqual(
+      ["planner", "designer", "builder", "tester", "reviewer", "researcher"].map((role) => [role, true, 0]),
+    );
+    expect(listed.slice(6)).toEqual([{ role: "Sound Designer", builtIn: false, count: 2 }]);
+    store.setRole({ schemaVersion: 1, personaId: one.personaId, role: "Designer" });
+    expect(store.roles().find((entry) => entry.role === "designer")?.count).toBe(1);
+    // Restart keeps the casing.
+    expect(new PersonaStore(root).roles().slice(6)).toEqual([
+      { role: "Sound Designer", builtIn: false, count: 1 },
+    ]);
   });
 
   it("never puts the internal harness session on a wire seat", () => {
