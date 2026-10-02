@@ -86,6 +86,9 @@ the worker is launched from a sibling file and cannot be flattened into the
 service bundle. Chrome and FFmpeg remain external executables. Set
 `CLANKIE_RELEASE_SMOKE_BROWSER=1` to exercise the packaged SDK against local
 Chrome during release smoke.
+The hosted build preserves relative dependency symlinks when moving the assembled
+release and imports Browser Use Pi from its final image location as the runtime
+user. This catches broken package links before an image can pass its build.
 
 Optional integrations such as cloudflared remain external executables.
 Clankie's own herdr plugin declaration ships under

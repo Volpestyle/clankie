@@ -44,6 +44,9 @@ ENV HOME=/state/home \
 ENV PATH=/opt/clankie/libexec:$PATH
 USER node
 WORKDIR /workspace
+# Import from the relocated release as the runtime user. The browser's package
+# graph must load even when browsing is disabled, since the service imports it.
+RUN cd /opt/clankie && node --input-type=module -e 'await import("@browser_use/pi")'
 # Verify as the actual runtime user, without an owner's global skill installation.
 RUN test "$(herdr --version)" = "herdr $(node -p 'require("/opt/clankie/release.json").herdr.release.version')" \
  && herdr --skill > /tmp/herdr-skill \

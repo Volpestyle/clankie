@@ -154,7 +154,9 @@ try {
   if (hosted) {
     const destination = join(outputDir, "hosted");
     await rm(destination, { recursive: true, force: true });
-    await cp(releaseRoot, destination, { recursive: true });
+    // Runtime dependency links are relative to this tree. Preserve them when
+    // relocating it; cp otherwise points them into the deleted temporary root.
+    await cp(releaseRoot, destination, { recursive: true, verbatimSymlinks: true });
     process.stdout.write(`${destination}\n`);
   } else {
     await rm(archivePath, { force: true });
