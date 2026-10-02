@@ -5162,7 +5162,7 @@ export type DiscordPersonMemoryEdit = z.infer<typeof DiscordPersonMemoryEditSche
 // ---------------------------------------------------------------------------
 // Clankie's browser (ADR 0082).
 //
-// The captain drives an in-process `agent-browser` MCP server. The host stamps
+// The captain drives a service-owned Browser Use Pi session. The host stamps
 // risk and whether an operator must approve the call onto each descriptor, so
 // `requiresApproval` is a decided fact on the wire rather than something the
 // captain or the model re-derives.
@@ -5177,8 +5177,10 @@ export const BrowserToolNameSchema = z
 export const BrowserToolDescriptorSchema = z.object({
   name: BrowserToolNameSchema,
   description: z.string().max(4_000),
-  /** JSON Schema for the tool's arguments, verbatim from the MCP server. */
+  /** JSON Schema for the tool's arguments. */
   inputSchema: z.record(z.string(), z.unknown()),
+  /** Native Node execution is offered only to machine-authorized turns. */
+  requiresShell: z.boolean().optional(),
   riskClass: z.enum(["read", "reversible-write", "irreversible-write", "publish-external", "destructive"]),
   /** The host marked this call as needing an operator approval. */
   requiresApproval: z.boolean(),

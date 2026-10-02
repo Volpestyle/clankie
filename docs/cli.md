@@ -952,11 +952,32 @@ Read or set whether the PokeAgent MMO body is available. JSON contains the
 `"restart": "clankie restart captain"`. The TUI `/games` command calls this
 same writer.
 
+### `browser tools` / `browser call TOOL JSON`
+
+Inspect or call Clankie's Browser Use Pi tools with the operator credential:
+
+```sh
+clankie browser tools
+clankie browser call browser_use_open '{"url":"https://example.com"}'
+clankie browser call browser_use_javascript '{"code":"console.log(await page.info())"}'
+clankie browser call browser_use_close '{}'
+```
+
+The same catalog and call contract are available at `GET /v1/browser/tools`
+and `POST /v1/browser/call`. Native JavaScript requires machine authority;
+captain bearers expose only browser-realm tools. JavaScript variables persist
+within a browsing burst; mode changes, idle close and worker timeouts reset
+them. The SDK uses Clankie's private profile and workspace under
+`~/.clankie/runner/browser/`. It discovers installed Chrome; set
+`CLANKIE_BROWSER_EXECUTABLE` to use a particular Chrome/Chromium executable.
+`CLANKIE_AGENT_BROWSER_EXECUTABLE` no longer applies. No browser model key is
+needed: Clankie's existing model writes the code and the SDK executes it.
+
 ### `browser [status]` / `browser record on|off`
 
 Read or set `browser.recordSessions`. When on, each burst of Clankie's browsing
 is saved as a WebM under `~/.clankie/runner/browser/recordings/`: recording
-starts before the burst's first browser call and stops after 60 seconds without
+samples the current tab every 750 ms and stops after 60 seconds without
 one; the newest 50 are kept. The browser then closes its tabs/windows while
 keeping its private profile and persistent logins, even with recording off.
 Browsing defaults to headless; explicit `headed: true` takeover lasts for that

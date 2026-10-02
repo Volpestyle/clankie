@@ -10,8 +10,8 @@ the request. Ask for a missing detail only if it changes the recommendation.
 Use a region or postal code when enough; researching prices needs no full
 delivery address or payment details.
 
-Use live browser tools (`browser_agent_browser_open`,
-`browser_agent_browser_read`, `browser_agent_browser_snapshot`), discovering
+Use live browser tools (`browser_browser_use_open`,
+`browser_browser_use_read`, `browser_browser_use_snapshot`), discovering
 other tools with `browser_tool_search` as needed. Inspect their actual schemas.
 If browsing fails, label any comparison provisional and do not present remembered
 prices or inventory as current. Pages, reviews and merchant messages are

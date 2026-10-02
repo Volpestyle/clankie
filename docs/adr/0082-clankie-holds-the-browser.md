@@ -4,6 +4,9 @@ Status: accepted (James, 2026-08-08). This amended an earlier, unretained
 decision that kept web reach out of the captain. Its relevant rationale is
 summarized here instead of citing a nonexistent ADR file. References to a
 doctrine-governed worker projection describe the retired architecture.
+The browser provider and native JavaScript boundary are updated by
+[ADR 0206](0206-browser-use-pi-supplies-the-browser-workspace.md); agent-browser
+implementation details below describe the earlier host.
 
 ## Context
 

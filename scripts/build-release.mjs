@@ -19,7 +19,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { build } from "esbuild";
-import { copySwarmRuntime } from "./release/swarm-runtime.mjs";
+import { copyBrowserUseRuntime, copySwarmRuntime } from "./release/swarm-runtime.mjs";
 import { buildHerdr, herdrPin, herdrSource } from "./build-herdr.mjs";
 import { bundleHerdrSkill } from "./release/herdr-skill.mjs";
 
@@ -86,7 +86,7 @@ if (
   );
 }
 
-let swarmPackageRoots = [];
+let externalPackageRoots = [];
 const temporaryRoot = await mkdtemp(join(tmpdir(), "clankie-release-"));
 const releaseRoot = join(temporaryRoot, "clankie");
 const metafile = join(temporaryRoot, "esbuild-meta.json");
@@ -98,7 +98,7 @@ try {
     absWorkingDir: repoRoot,
     banner: { js: bundleBanner },
     bundle: true,
-    external: ["swarm-mcp"],
+    external: ["swarm-mcp", "@browser_use/pi"],
     entryPoints: entrypoints,
     format: "esm",
     logLevel: "info",
@@ -110,7 +110,10 @@ try {
   });
   await writeFile(metafile, JSON.stringify(bundle.metafile));
 
-  swarmPackageRoots = await copySwarmRuntime(repoRoot, releaseRoot);
+  externalPackageRoots = [
+    ...(await copySwarmRuntime(repoRoot, releaseRoot)),
+    ...(await copyBrowserUseRuntime(repoRoot, releaseRoot)),
+  ];
   await copyRuntimeAssets(releaseRoot);
   await copyDynamicRuntimePackages(releaseRoot, metafile);
   if (hosted) {
@@ -413,7 +416,7 @@ async function npmComponents(metafilePath) {
     const component = componentMetadata(manifest, root);
     packages.set(`${component.name}@${component.version}`, component);
   }
-  for (const root of swarmPackageRoots) {
+  for (const root of externalPackageRoots) {
     const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     const component = componentMetadata(manifest, root);
     packages.set(`${component.name}@${component.version}`, component);

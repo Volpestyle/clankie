@@ -162,7 +162,10 @@ ask for a GitHub or Linear token in chat; send the owner to the app or
 ## His browser
 
 Browser tools use Clankie's service-private profile, never the owner's Chrome.
-Browsing starts headless. `agent_browser_open` with `headed: true` opens a
+Browser Use Pi supplies his persistent JavaScript workspace; load `browser-use`
+for its primitives. `clankie browser tools` lists the catalog, and
+`clankie browser call TOOL JSON` calls it with operator authority.
+Browsing starts headless. `browser_use_open` with `headed: true` opens a
 visible takeover window for sign-in; that mode lasts through the current burst.
 `headed: false` returns early. After 60 seconds without a browser tool call,
 the host saves any recording and closes the tabs/windows. Human input alone
@@ -172,11 +175,11 @@ in. The next burst starts headless; the profile and persistent logins survive.
 `clankie browser record on|off` controls burst recordings (default off), including
 headless browsing. WebM files live under `~/.clankie/runner/browser/recordings/`;
 the newest 50 are kept. Recording finishes before idle cleanup or a mode change.
-Startup retires the private browser daemon to clear stale headed launch settings.
-Do not share its socket/session with another harness. For diagnosis, inspect
+The SDK launches and closes its own Chrome; no agent-browser daemon is involved.
+Do not share its profile/session with another harness. For diagnosis, inspect
 `browser.burst.closed`, `browser.burst.close_failed`, and `browser.recording.*`
 service events; browser calls remain in the conversation's pi tree. Source
-contract: `{repoRoot}/docs/adr/0082-clankie-holds-the-browser.md`.
+contract: `{repoRoot}/docs/adr/0206-browser-use-pi-supplies-the-browser-workspace.md`.
 
 ## Launcher control
 

@@ -312,7 +312,11 @@ interface ActivityObservationReadPort {
 
 interface BrowserToolPort {
   catalog(signal?: AbortSignal): Promise<BrowserToolCatalog>;
-  call(request: CallBrowserToolRequest, signal?: AbortSignal): Promise<CallBrowserToolResult>;
+  call(
+    request: CallBrowserToolRequest,
+    signal?: AbortSignal,
+    authority?: { shell?: boolean },
+  ): Promise<CallBrowserToolResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -2377,7 +2381,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "browser_unavailable" }, 503);
     }
     try {
-      return context.json({ catalog: await dependencies.browserTools.catalog(context.req.raw.signal) }, 200, {
+      const catalog = await dependencies.browserTools.catalog(context.req.raw.signal);
+      const visible = {
+        ...catalog,
+        tools: catalog.tools.filter(
+          (tool) => !tool.requiresShell || authorization.principal.kind === "operator",
+        ),
+      };
+      return context.json({ catalog: visible }, 200, {
         "cache-control": "no-store",
       });
     } catch {
@@ -2408,6 +2419,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         200,
       );
     }
+    if (descriptor.requiresShell && authorization.principal.kind !== "operator") {
+      return context.json(
+        {
+          result: {
+            outcome: "refused",
+            tool: parsed.data.tool,
+            reason: "approval_required",
+            detail: "Browser JavaScript needs operator authentication.",
+          },
+        },
+        200,
+      );
+    }
     if (descriptor.requiresApproval) {
       const operator = await authenticateOperator(context.req.raw, dependencies);
       if (operator === "unavailable") {
@@ -2429,7 +2453,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     try {
       return context.json(
-        { result: await dependencies.browserTools.call(parsed.data, context.req.raw.signal) },
+        {
+          result: await dependencies.browserTools.call(parsed.data, context.req.raw.signal, {
+            shell: authorization.principal.kind === "operator",
+          }),
+        },
         200,
       );
     } catch {

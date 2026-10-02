@@ -2,9 +2,18 @@ import { createRequire } from "node:module";
 import { cp, mkdir, readFile, realpath, symlink } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 
-// Swarm launches sibling Node entrypoints, so preserve its package graph instead
-// of folding it into Clankie's bundle. Each real package is copied exactly once.
-export async function copySwarmRuntime(repoRoot, targetRoot) {
+// These runtimes launch sibling Node entrypoints, so preserve their package
+// graphs instead of folding them into Clankie's bundle.
+export function copySwarmRuntime(repoRoot, targetRoot) {
+  // Skills are assembled from the current catalog, not the legacy npm archive.
+  return copyRuntime("swarm-mcp", join(repoRoot, "packages/swarm"), targetRoot);
+}
+
+export function copyBrowserUseRuntime(repoRoot, targetRoot) {
+  return copyRuntime("@browser_use/pi", join(repoRoot, "apps/clankie"), targetRoot);
+}
+
+async function copyRuntime(name, from, targetRoot) {
   const copied = new Map();
   async function copy(name, from, destination) {
     const require = createRequire(join(from, "package.json"));
@@ -35,7 +44,6 @@ export async function copySwarmRuntime(repoRoot, targetRoot) {
       await copy(dependency, root, join(destination, "node_modules", dependency));
     }
   }
-  // Skills are assembled from the current catalog, not the legacy npm archive.
-  await copy("swarm-mcp", join(repoRoot, "packages/swarm"), join(targetRoot, "node_modules/swarm-mcp"));
+  await copy(name, from, join(targetRoot, "node_modules", name));
   return [...copied.keys()];
 }

@@ -425,8 +425,7 @@ const mediaGenerator = new ConfiguredMediaGenerator({
   configCwd: repoRoot,
 });
 
-// Clankie's own browser (ADR 0082). On by default; a missing binary degrades
-// to a logged unavailability rather than a boot failure.
+// Clankie's private Browser Use Pi session. Chrome launches on the first call.
 let browserHost: BrowserHost | undefined;
 if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
   try {
