@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   VoxFrameDecoder,
   VoxClientError,
@@ -104,6 +104,33 @@ ${
 }
 
 describe("Vox client framing", () => {
+  it("copies a fragmented large payload once and preserves adjacent empty frames", () => {
+    const payload = Buffer.alloc(1024 * 1024, 37);
+    const input = Buffer.concat([
+      framed(1, payload),
+      framed(0, Buffer.alloc(0)),
+      framed(1, Buffer.from([7])),
+    ]);
+    const decoder = new VoxFrameDecoder();
+    const concatenate = vi.spyOn(Buffer, "concat");
+    const frames: { format: number; payload: Buffer }[] = [];
+    try {
+      for (let offset = 0; offset < input.length; offset += 4093) {
+        const chunk = input.subarray(offset, offset + 4093);
+        frames.push(...decoder.push(chunk).frames);
+        expect(chunk.every((byte) => byte === 0)).toBe(true);
+      }
+      expect(frames).toEqual([
+        { format: 1, payload },
+        { format: 0, payload: Buffer.alloc(0) },
+        { format: 1, payload: Buffer.from([7]) },
+      ]);
+      expect(concatenate).not.toHaveBeenCalled();
+    } finally {
+      concatenate.mockRestore();
+    }
+  });
+
   it("reassembles split control frames", () => {
     const payload = Buffer.from(
       JSON.stringify({ type: "process_ready", protocolVersion: VOX_IPC_PROTOCOL_VERSION }),

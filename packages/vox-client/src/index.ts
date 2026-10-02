@@ -885,7 +885,10 @@ export class VoxStderrDecoder {
 }
 
 export class VoxFrameDecoder {
-  private buffer: Buffer = Buffer.alloc(0);
+  private readonly header = Buffer.alloc(FRAME_HEADER_BYTES);
+  private headerBytes = 0;
+  private payload: Buffer | undefined;
+  private payloadBytes = 0;
   private faulted = false;
 
   public push(chunk: Uint8Array): { frames: { format: number; payload: Buffer }[]; fault?: string } {
@@ -894,32 +897,49 @@ export class VoxFrameDecoder {
       return { frames: [] };
     }
     const incoming = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-    this.buffer = this.buffer.length === 0 ? Buffer.from(chunk) : Buffer.concat([this.buffer, chunk]);
-    incoming.fill(0);
     const frames: { format: number; payload: Buffer }[] = [];
-    while (this.buffer.length >= FRAME_HEADER_BYTES) {
-      const format = this.buffer.readUInt8(0);
-      const length = this.buffer.readUInt32LE(1);
-      if (format !== 0 && format !== 1) {
-        this.faulted = true;
-        const fault = `unknown Vox frame format ${format}`;
-        this.buffer.fill(0);
-        this.buffer = Buffer.alloc(0);
-        return { frames: [], fault };
+    try {
+      let offset = 0;
+      while (offset < incoming.length) {
+        if (this.headerBytes < FRAME_HEADER_BYTES) {
+          const bytes = Math.min(FRAME_HEADER_BYTES - this.headerBytes, incoming.length - offset);
+          incoming.copy(this.header, this.headerBytes, offset, offset + bytes);
+          this.headerBytes += bytes;
+          offset += bytes;
+          if (this.headerBytes < FRAME_HEADER_BYTES) break;
+          const format = this.header.readUInt8(0);
+          const length = this.header.readUInt32LE(1);
+          if ((format !== 0 && format !== 1) || length > MAX_FRAME_BYTES) {
+            this.faulted = true;
+            this.header.fill(0);
+            for (const frame of frames) frame.payload.fill(0);
+            return {
+              frames: [],
+              fault:
+                format !== 0 && format !== 1
+                  ? `unknown Vox frame format ${format}`
+                  : `Vox frame length ${length} exceeds cap`,
+            };
+          }
+          // Validate the header before allocating. Each payload byte is copied
+          // once, regardless of how the pipe fragments the frame.
+          this.payload = Buffer.allocUnsafe(length);
+        }
+        const payload = this.payload!;
+        const bytes = Math.min(payload.length - this.payloadBytes, incoming.length - offset);
+        incoming.copy(payload, this.payloadBytes, offset, offset + bytes);
+        offset += bytes;
+        this.payloadBytes += bytes;
+        if (this.payloadBytes === payload.length) {
+          frames.push({ format: this.header.readUInt8(0), payload });
+          this.header.fill(0);
+          this.headerBytes = 0;
+          this.payload = undefined;
+          this.payloadBytes = 0;
+        }
       }
-      if (length > MAX_FRAME_BYTES) {
-        this.faulted = true;
-        const fault = `Vox frame length ${length} exceeds cap`;
-        this.buffer.fill(0);
-        this.buffer = Buffer.alloc(0);
-        return { frames: [], fault };
-      }
-      if (this.buffer.length < FRAME_HEADER_BYTES + length) break;
-      frames.push({
-        format,
-        payload: this.buffer.subarray(FRAME_HEADER_BYTES, FRAME_HEADER_BYTES + length),
-      });
-      this.buffer = this.buffer.subarray(FRAME_HEADER_BYTES + length);
+    } finally {
+      incoming.fill(0);
     }
     return { frames };
   }

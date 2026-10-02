@@ -501,6 +501,23 @@ pub(crate) fn resample_mono_i16(input: &[i16], in_rate: u32, out_rate: u32) -> V
     // transition band.
     let cutoff = 0.45 / ratio.max(1.0);
 
+    // Integer downsampling and power-of-two upsampling have exactly repeating
+    // phases, including the floating-point positions used below. Compute their
+    // coefficients once per chunk instead of evaluating trig for every sample.
+    // Other rates keep the existing fractional-position calculation.
+    let phases = if in_rate.is_multiple_of(out_rate) {
+        1
+    } else if out_rate.is_multiple_of(in_rate) && (out_rate / in_rate).is_power_of_two() {
+        (out_rate / in_rate) as usize
+    } else {
+        0
+    };
+    let kernels: Vec<[f64; 33]> = (0..phases)
+        .map(|phase| {
+            std::array::from_fn(|tap| sinc_weight(tap as f64 - 16.0 - phase as f64 * ratio, cutoff))
+        })
+        .collect();
+
     let mut output = Vec::with_capacity(out_len);
     for i in 0..out_len {
         let center = i as f64 * ratio;
@@ -513,21 +530,11 @@ pub(crate) fn resample_mono_i16(input: &[i16], in_rate: u32, out_rate: u32) -> V
         let end = (i_center + SINC_HALF_LEN as isize + 1).min(input.len() as isize);
 
         for j in start..end {
-            let x = (j as f64 - center) * cutoff * 2.0;
-            // sinc(x) = sin(πx)/(πx), with sinc(0) = 1
-            let sinc = if x.abs() < 1e-10 {
-                1.0
+            let kernel = if phases == 0 {
+                sinc_weight(j as f64 - center, cutoff)
             } else {
-                let px = std::f64::consts::PI * x;
-                px.sin() / px
+                kernels[i % phases][(j - i_center + SINC_HALF_LEN as isize) as usize]
             };
-            // Blackman window
-            let n = j as f64 - center;
-            let win_pos = (n / SINC_HALF_LEN as f64 + 1.0) * 0.5; // 0..1
-            let w = 0.42 - 0.5 * (2.0 * std::f64::consts::PI * win_pos).cos()
-                + 0.08 * (4.0 * std::f64::consts::PI * win_pos).cos();
-
-            let kernel = sinc * w;
             sum += input[j as usize] as f64 * kernel;
             weight_sum += kernel;
         }
@@ -540,6 +547,20 @@ pub(crate) fn resample_mono_i16(input: &[i16], in_rate: u32, out_rate: u32) -> V
         output.push(sample.round().clamp(-32768.0, 32767.0) as i16);
     }
     output
+}
+
+fn sinc_weight(n: f64, cutoff: f64) -> f64 {
+    let x = n * cutoff * 2.0;
+    let sinc = if x.abs() < 1e-10 {
+        1.0
+    } else {
+        let px = std::f64::consts::PI * x;
+        px.sin() / px
+    };
+    let win_pos = (n / 16.0 + 1.0) * 0.5;
+    let window = 0.42 - 0.5 * (2.0 * std::f64::consts::PI * win_pos).cos()
+        + 0.08 * (4.0 * std::f64::consts::PI * win_pos).cos();
+    sinc * window
 }
 
 /// Convert LLM output (mono i16 LE at `in_rate`) to 48kHz mono i16 for Opus encoding.
@@ -661,6 +682,62 @@ mod tests {
         AudioSendState, MAX_PCM_BUFFER_SAMPLES, convert_llm_to_48k_mono,
         is_supported_llm_sample_rate, zero_pcm_queue,
     };
+
+    #[test]
+    fn cached_resampling_matches_fractional_filter_at_chunk_edges() {
+        // Slow sample-by-sample reference retains the pre-optimization filter.
+        fn reference(input: &[i16], from: u32, to: u32) -> Vec<i16> {
+            if from == to || input.len() <= 1 {
+                return input.to_vec();
+            }
+            let ratio = f64::from(from) / f64::from(to);
+            let cutoff = 0.45 / ratio.max(1.0);
+            (0..(input.len() as f64 / ratio).floor() as usize)
+                .map(|i| {
+                    let center = i as f64 * ratio;
+                    let at = center.floor() as isize;
+                    let mut sum = 0.0;
+                    let mut weights = 0.0;
+                    for j in (at - 16).max(0)..(at + 17).min(input.len() as isize) {
+                        let weight = super::sinc_weight(j as f64 - center, cutoff);
+                        sum += f64::from(input[j as usize]) * weight;
+                        weights += weight;
+                    }
+                    (if weights.abs() > 1e-10 {
+                        sum / weights
+                    } else {
+                        0.0
+                    })
+                    .round()
+                    .clamp(-32768.0, 32767.0) as i16
+                })
+                .collect()
+        }
+        for size in [0, 1, 2, 17, 32, 960, 1920] {
+            let noise: Vec<i16> = (0..size).map(|i| ((i * 7919) % 65536) as i16).collect();
+            let mut impulse = vec![0; size];
+            if size > 0 {
+                impulse[size / 2] = i16::MAX;
+            }
+            for (from, to) in [
+                (48000, 24000),
+                (24000, 48000),
+                (48000, 16000),
+                (12000, 48000),
+                (44100, 48000),
+                (16000, 48000),
+                (24000, 24000),
+            ] {
+                for input in [&noise, &impulse] {
+                    assert_eq!(
+                        super::resample_mono_i16(input, from, to),
+                        reference(input, from, to),
+                        "{from}->{to}, {size}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn tts_drain_waits_for_pcm_and_all_trailing_frames() {
