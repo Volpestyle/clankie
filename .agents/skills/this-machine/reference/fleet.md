@@ -26,6 +26,13 @@ the windows returned by Codex’s read-only quota API, including weekly-only pla
 Recent rollout usage is the fallback if that query fails. Missing or stale usage is unknown,
 not an empty plan. `hire_agent` can pin `account: "LABEL"`; the hire and roster
 report the chosen account. Registration changes apply to new hires only.
+Account list/API reads expose native `hookTrust` (`ready`, `review_required`,
+`unknown`) for home hooks; repository trust still belongs to the owner.
+A hired Codex startup waiting on trust retains its pane and server and continues
+the original brief automatically after owner review. A visible hook/folder prompt
+reports `trust_required`; other pending startup reports `start_unconfirmed`.
+Inspect that pane; do not retry the hire or approve trust yourself. Closing the
+pane cancels pending startup.
 
 `hire_agent` can also set `role`. The built-ins are planner, designer, builder,
 tester, reviewer and researcher; you can also use a custom role such as "sound

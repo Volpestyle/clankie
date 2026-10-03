@@ -630,6 +630,19 @@ canonical home path and label; `authPresent` checks file existence, not whether
 the login is valid. `default` is implicit (`CODEX_HOME`, otherwise `~/.codex`).
 Removing a registration never deletes its home or credentials.
 
+Account reads also report `hookTrust`: `ready`, `review_required`, or `unknown`,
+from Codex’s read-only `hooks/list` query for that home. Unsupported or failed
+queries stay unknown. This checks home hooks, not trust for a future repository.
+Selection still follows headroom; review stale hooks in the selected account’s
+native Codex UI. No hook hashes or trust approvals are written by this check.
+
+If a hired Codex TUI is waiting on hook or folder trust, the hire reports
+`trust_required` when the prompt is visible. Its pane and app-server stay alive,
+and its original brief continues once the owner completes review. A slow startup
+without a recognized prompt reports `start_unconfirmed` with the same pending
+explanation. Do not repeat the hire; inspect the existing pane. Closing that pane
+cancels its pending startup.
+
 Local Codex hires choose the greatest minimum remaining fraction across the
 windows Codex reports (some plans report only a weekly window). The read-only
 `account/rateLimits/read` query uses each home without starting a model turn.
