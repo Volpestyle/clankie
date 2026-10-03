@@ -5,7 +5,8 @@ import type { CaptainPort } from "./captain/port.ts";
 /** Explicit requests notify their captured conversation; they never perform a body effect. */
 export async function pumpBodyRequests(
   router: BodyLeaseRouter,
-  captain: Pick<CaptainPort, "validateConversationOwner" | "wakeConversation">,
+  captain: Pick<CaptainPort, "validateConversationOwner" | "wakeConversation"> &
+    Partial<Pick<CaptainPort, "designatedConversationHead">>,
   current: () => boolean = () => true,
 ) {
   const valid = (id: string, route?: BodyOwnerRoute) =>
@@ -20,7 +21,7 @@ export async function pumpBodyRequests(
             current,
             authorize: async () => captain.validateConversationOwner(route!.owner, route!.mode),
           },
-    designatedHead: () => undefined,
+    designatedHead: (owner) => captain.designatedConversationHead?.(owner)?.conversationId,
     authorizeDelivery: async (source, destination, sourceRoute, destinationRoute) =>
       valid(source, sourceRoute) &&
       valid(destination, destinationRoute) &&
@@ -32,7 +33,7 @@ export async function pumpBodyRequests(
         request.kind === "queue"
           ? `The ${request.resource} resource you explicitly queued for is available. This is a notification; reacquire and recheck before any effect.`
           : `Conversation ${request.requester} explicitly asks the conversation holding ${request.resource}:\n${request.text}`;
-      return (await captain.wakeConversation(request.route!.owner, notice, guard, request.route!.mode))
+      return (await captain.wakeConversation(request.route!.owner, notice, guard, request.route!.mode, false))
         ? "accepted"
         : "unavailable";
     },

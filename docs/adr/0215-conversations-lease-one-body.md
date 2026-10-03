@@ -139,7 +139,25 @@ process maps cannot. Every automatic OP4 rejoin and OP18 publish retry refreshes
 the original lease guard so an old generation cannot recreate cleared effects.
 
 Pending queue/ask requests persist host-stamped requester and holder routes.
-The service pump only wakes these routes, with no configured head fallback.
+The service pump tries the exact owner first. Only a definite pre-acceptance
+refusal may route the explicit request to that owner’s designated head.
 Social wakes use a separate non-shell session even after a later machine grant.
 A changed holder incarnation, missing route, expired request or revoked grant
 cannot redirect delivery. Uncertain wake acceptance is not replayed.
+
+## Explicit head designation
+
+An operator may persist an optional head with `POST /v1/conversation-heads`.
+The owner must be an existing runnable conversation or canonical host-created
+room. The head must be an existing writable global/workspace captain thread;
+self references and cycles are rejected. The default is no designation.
+This metadata grants no room send, reset, fork, or captain access.
+
+Worker results, escalations, and explicit resource asks try their owning
+conversation first. Only a definite refusal before acceptance may use the
+explicit head. Accepted or uncertain dispatch is never replayed. Original
+source grants, registered account/presence and opt-in remain valid, and the
+mapping and head writability are checked again after asynchronous authorization
+at dispatch. Only the explicit notification crosses this route, never room
+history or inherited source authority. Removing a designation fences pending
+fallback. Queue availability still wakes its original requester only.

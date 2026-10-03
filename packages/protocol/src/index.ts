@@ -1416,9 +1416,16 @@ export const OperatorConversationSchema = z
     assignment: OperatorWorkAssignmentSchema.optional(),
     /** Present only for an ephemeral side conversation forked from this parent. */
     parentConversationId: OperatorConversationIdSchema.optional(),
+    designatedHeadConversationId: OperatorConversationIdSchema.optional(),
   })
   .strict();
 export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;
+export const CONVERSATION_HEAD_PATH = "/v1/conversation-heads";
+export const ConversationHeadRequestSchema = z.strictObject({
+  conversationId: OperatorConversationIdSchema,
+  headConversationId: OperatorConversationIdSchema.nullable(),
+});
+export type ConversationHeadRequest = z.infer<typeof ConversationHeadRequestSchema>;
 
 export const OperatorWakeSchema = z
   .object({

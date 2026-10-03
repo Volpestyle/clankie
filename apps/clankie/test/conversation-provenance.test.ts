@@ -280,12 +280,16 @@ it("validates a persisted exact room against current grants and never falls back
   const start = vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   const censusRead = vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
   const submit = vi.spyOn(ConversationStore.prototype, "submitInternal");
-  const captain = createCaptain({} as CaptainDeps, {
-    repoRoot: stateDir,
-    stateDir,
-    settings,
-    discordEnvironment: {},
-  });
+  let routePresent = true;
+  const captain = createCaptain(
+    { conversationRouteAuthorized: () => routePresent } as unknown as CaptainDeps,
+    {
+      repoRoot: stateDir,
+      stateDir,
+      settings,
+      discordEnvironment: {},
+    },
+  );
   const owner = {
     conversationId,
     discord: {
@@ -310,6 +314,30 @@ it("validates a persisted exact room against current grants and never falls back
       await captain.validateConversationOwner({ ...owner, discord: { ...owner.discord, channelId: "999" } }),
     ).toBe(false);
     expect(await captain.validateConversationOwner({ conversationId })).toBe(false);
+    expect(await captain.wakeConversation(owner, "explicit result")).toBe(false);
+    await captain.setDesignatedConversationHead(conversationId, "global-default");
+    submit.mockReturnValue({
+      schemaVersion: 1,
+      status: "accepted",
+      conversationId: "global-default",
+      runId: "fake-run",
+      revision: 1,
+      safeCursor: "fake-cursor",
+      deliveryStage: "stored",
+    });
+    expect(await captain.wakeConversation(owner, "explicit result")).toBe(true);
+    expect(submit).toHaveBeenCalledWith("global-default", "explicit result", "watch");
+    submit.mockClear();
+    routePresent = false;
+    expect(await captain.wakeConversation(owner, "unavailable source")).toBe(false);
+    routePresent = true;
+    await expect(
+      captain.wakeConversation(owner, "mapping race", async () => {
+        await captain.setDesignatedConversationHead(conversationId, null);
+      }),
+    ).rejects.toThrow("Designated head authority changed");
+    expect(submit).not.toHaveBeenCalled();
+    await captain.setDesignatedConversationHead(conversationId, "global-default");
     await settings.update((current) => ({
       ...current,
       discord: { ...current.discord, systemActorUserIds: [] },

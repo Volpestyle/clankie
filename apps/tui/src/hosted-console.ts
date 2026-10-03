@@ -1,6 +1,10 @@
 import { runAccountsCommand } from "./command/accounts.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { OperatorConversationIdSchema } from "@clankie/protocol";
+import {
+  CONVERSATION_HEAD_PATH,
+  ConversationHeadRequestSchema,
+  OperatorConversationIdSchema,
+} from "@clankie/protocol";
 import { join } from "node:path";
 import {
   createDefaultCredentialStore,
@@ -246,6 +250,28 @@ export async function runHostedConsole() {
       description: "List or select a hosted conversation",
       takesArgument: true,
       async run(argument) {
+        if (argument.trim().startsWith("head ")) {
+          const target = argument.trim().slice(5).trim();
+          const input = ConversationHeadRequestSchema.parse({
+            conversationId: selection.conversationId,
+            headConversationId: target === "none" ? null : target,
+          });
+          const response = await transport.fetchImpl(new URL(CONVERSATION_HEAD_PATH, transport.host), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(input),
+          });
+          if (!response.ok)
+            throw new Error(
+              "Conversation head requires current hosted operator authority and writable routes",
+            );
+          shell.insertCommandResult(
+            "/conversation head",
+            target === "none" ? "Designated head cleared." : `Designated head: ${target}`,
+            "success",
+          );
+          return;
+        }
         if (!argument.trim()) {
           shell.insertCommandResult(
             "/conversation",

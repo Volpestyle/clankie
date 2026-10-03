@@ -2525,3 +2525,24 @@ reconciled, including explicit retries and retries after service or launcher
 restart. An exact late bridge acknowledgment or original-session native
 transcript receipt can reconcile it without dispatching a replacement. Missing
 or corrupt evidence remains blocked; changing channels is not a repair.
+
+### `conversations head OWNER HEAD|none`
+
+Set or remove an explicit escalation head using operator authentication:
+
+```sh
+clankie conversations head ROOM_OR_CONVERSATION_ID HEAD_CONVERSATION_ID
+clankie conversations head ROOM_OR_CONVERSATION_ID none
+```
+
+Use the existing conversation listing to select exact IDs. The owner can be a
+host-created room; the head must be a writable global/workspace conversation.
+The TUI command `/conversation head HEAD|none` applies to the selected thread.
+`POST /v1/conversation-heads` accepts only `{conversationId,headConversationId}`,
+where `null` removes the designation. Observe and captain credentials cannot
+change it. Self references and cycles are refused; there is no default head.
+
+Explicit asks and asynchronous results try the owner first and may use its head
+only after a definite refusal before acceptance. Revoked source authority or
+presence, a changed designation, and uncertain dispatch cannot trigger fallback.
+This forwards the explicit request/result only and grants no room privileges.

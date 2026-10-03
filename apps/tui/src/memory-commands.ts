@@ -62,7 +62,7 @@ export function formatMemoryCatalog(catalog: OperatorMemoryCatalog): string {
   ];
   for (const episode of newestEpisodes(catalog.captainEpisodes)) {
     lines.push(
-      `- ${episode.occurredAt} · ${episode.lane}/${episode.targetId} · ${episode.visibility}${
+      `- ${episode.occurredAt} · ${episode.lane}/${episode.targetId} · ${episode.visibility} · source ${episode.sourceConversationId ?? "unknown"}${
         episode.retained ? " · kept" : ""
       }${episode.correctedAt === undefined ? "" : ` · corrected ${episode.correctedAt}`} · ${episode.episodeId}`,
       `  ${episode.summary}`,
@@ -133,7 +133,7 @@ async function browseEpisodes(
       value: String(index),
       label: truncate(episode.summary),
       hint: `${episode.lane} · ${episode.occurredAt.slice(0, 10)}${episode.retained ? " · kept" : ""}`,
-      description: `${episode.targetId} · ${episode.visibility} · ${episode.episodeId}`,
+      description: `${episode.targetId} · ${episode.visibility} · source ${episode.sourceConversationId ?? "unknown"} · ${episode.episodeId}`,
     })),
   });
   const episode = picked === undefined ? undefined : ordered[Number(picked)];

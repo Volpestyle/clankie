@@ -66,6 +66,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/agent-sessions",
     ],
     POST: [
+      "/v1/conversation-heads",
       "/v1/operator/persona",
       "/v1/model-keys/set",
       "/v1/model-keys/validate",

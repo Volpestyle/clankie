@@ -1,3 +1,5 @@
+import { DiscordTurnReceipts } from "../src/captain/discord-turn-receipts.ts";
+import type { CaptainPort } from "../src/captain/port.ts";
 import { BodyVoiceStays } from "../src/body-voice-stays.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -15,13 +17,16 @@ afterEach(async () => {
   for (const close of cleanups.splice(0)) await close();
 });
 
-async function fixture() {
+async function fixture(overrides: Partial<CaptainPort> = {}) {
   const root = mkdtempSync(join(tmpdir(), "clankie-mouth-routes-"));
   const store = new BodyLeaseStore(root);
   let beforeEffect = async () => {};
   const effect = vi.fn();
+  const receipts = new DiscordTurnReceipts(join(root, "receipts.json"));
+  const router = new BodyLeaseRouter(store);
   const app = await createClankieApp({
     captain: createStubCaptain({
+      ...overrides,
       submitDiscordTurn: async () => ({
         state: "settled",
         captainSessionId: "fixture",
@@ -29,13 +34,13 @@ async function fixture() {
         response: "hello",
       }),
     }),
-    discordTurnReceiptPath: join(root, "receipts.json"),
+    discordTurnReceipts: receipts,
     authenticateCaptain: async (request) =>
       request.headers.get("authorization") === "Bearer fixture"
         ? { captainId: "body", steerSourceLane: "discord_text" }
         : undefined,
     bodyVoiceStays: new BodyVoiceStays(store, join(root, "voice.json")),
-    bodyLeases: { store, router: new BodyLeaseRouter(store), confirmStopped: async () => false },
+    bodyLeases: { store, router, confirmStopped: async () => false },
     discordPresenceRuntime: {
       execute: async (write, _session, guard) => {
         await beforeEffect();
@@ -117,6 +122,9 @@ async function fixture() {
       "x-clankie-discord-presence-revision": String(session.record.revision),
     });
   return {
+    app,
+    receipts,
+    router,
     post,
     store,
     effect,
@@ -209,4 +217,56 @@ it("voice RPC binds the registered physical session and exact stay generation", 
     (await post("/v1/discord/voice-lease", { action: "finish", stay, incarnation: claim.incarnation }))
       .status,
   ).toBe(200);
+});
+
+it("rechecks actual presence after suspended captain grant validation before queue wake", async () => {
+  vi.useFakeTimers();
+  let release!: (allowed: boolean) => void;
+  const validated = new Promise<void>((resolve) => {
+    release = () => resolve();
+  });
+  let resume!: (allowed: boolean) => void;
+  const wake = vi.fn(async () => true);
+  const f = await fixture({
+    validateConversationOwner: async () => {
+      release(true);
+      return new Promise<boolean>((resolve) => {
+        resume = resolve;
+      });
+    },
+    wakeConversation: wake,
+  });
+  try {
+    const origin = f.receipts.get("discord:source")!.origin!;
+    const route = {
+      owner: {
+        conversationId: "owner",
+        discord: {
+          baseSessionKey: origin.baseSessionKey!,
+          targetId: "dm:room",
+          actorId: origin.actorId,
+          channelId: origin.channelId,
+          messageId: "source",
+          transportKind: origin.transportKind,
+        },
+      },
+      mode: "social" as const,
+    };
+    const claim = f.store.acquire("browser", "owner", 10000, route);
+    if (claim.outcome !== "acquired") throw new Error("claim");
+    await f.router.request(
+      { conversationId: "owner", route, current: () => true, authorize: async () => true },
+      { resource: "browser", kind: "queue", text: "next", ttlMs: 10000 },
+    );
+    f.store.release(claim.lease);
+    await vi.advanceTimersByTimeAsync(1000);
+    await validated;
+    await f.session.gatewayDisconnected();
+    resume(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(wake).not.toHaveBeenCalled();
+  } finally {
+    f.app.stopBodyRequests();
+    vi.useRealTimers();
+  }
 });

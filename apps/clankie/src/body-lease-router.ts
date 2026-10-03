@@ -76,20 +76,16 @@ export class BodyLeaseRouter {
       )
         continue;
       let destination = request.kind === "queue" ? request.requester : request.holder;
-      const targetRoute = request.kind === "queue" ? request.requesterRoute : request.holderRoute;
+      let targetRoute = request.kind === "queue" ? request.requesterRoute : request.holderRoute;
       let target = await ports.identity(destination, targetRoute);
-      if (target === undefined && request.kind === "ask") {
-        const head = ports.designatedHead(request.holder);
-        if (head === undefined) continue;
-        destination = head;
-        target = await ports.identity(head);
-      }
       if (
         target === undefined ||
         !target.current() ||
         !(await ports.authorizeDelivery(request.requester, destination, request.requesterRoute, targetRoute))
       )
         continue;
+      const originalTarget = target;
+      const originalTargetRoute = targetRoute;
       // Recheck after awaited route discovery. Nothing from another room's context is copied.
       if (!source.current() || !target.current()) continue;
       const current = this.store.recoveryReference(request.resource);
@@ -97,6 +93,19 @@ export class BodyLeaseRouter {
       const attempted = this.store.attemptRequest(request.requestId);
       if (attempted === undefined) continue;
       const guard = async () => {
+        if (destination !== request.requester && destination !== request.holder) {
+          if (
+            (await this.authorize(originalTarget, request.holder, request.resource, "effect")) !==
+              undefined ||
+            !(await ports.authorizeDelivery(
+              request.requester,
+              request.holder,
+              request.requesterRoute,
+              originalTargetRoute,
+            ))
+          )
+            throw new Error("Designated head or original conversation authority changed");
+        }
         if (
           (await this.authorize(source, request.requester, request.resource, "effect")) !== undefined ||
           !(await ports.authorizeDelivery(
@@ -106,11 +115,18 @@ export class BodyLeaseRouter {
             targetRoute,
           )) ||
           !source.current() ||
+          target === undefined ||
           !target.current() ||
           (await this.authorize(target, destination, request.resource, "effect")) !== undefined ||
           !this.store.requestCurrent(request.requestId)
         )
           throw new Error("Lease request authority or deadline changed");
+        if (
+          destination !== request.requester &&
+          destination !== request.holder &&
+          ports.designatedHead(request.holder) !== destination
+        )
+          throw new Error("Designated head changed");
         const latest = this.store.recoveryReference(request.resource);
         if (request.kind === "queue" ? latest !== undefined : latest?.token !== request.incarnation)
           throw new Error("Lease request holder changed");
@@ -129,6 +145,30 @@ export class BodyLeaseRouter {
           },
           guard,
         );
+        // Only a definite pre-acceptance refusal can fall back. Accepted/uncertain wakes never replay.
+        if (deliveryStage === "unavailable" && request.kind === "ask") {
+          const head = await ports.designatedHead(request.holder);
+          if (head !== undefined) {
+            destination = head;
+            targetRoute = { owner: { conversationId: head }, mode: "machine" };
+            const headIdentity = await ports.identity(head, targetRoute);
+            if (headIdentity !== undefined) {
+              target = headIdentity;
+              await guard();
+              deliveryStage = await ports.deliver(
+                head,
+                {
+                  requester: request.requester,
+                  resource: request.resource,
+                  text: request.text,
+                  kind: request.kind,
+                  route: targetRoute,
+                },
+                guard,
+              );
+            }
+          }
+        }
       } catch {
         deliveryStage = "uncertain";
       }

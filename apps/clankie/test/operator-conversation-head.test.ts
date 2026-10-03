@@ -223,3 +223,35 @@ it("settles native display records without ending a service run, and deduplicate
     await conversations.close();
   }
 });
+
+it("persists an explicit room head without giving the room captain privileges; rejects self/cycles/unwritable heads", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-designated-head-"));
+  roots.push(root);
+  let conversations = new ConversationStore(root, async () => {});
+  const room = conversations.roomConversation("discord_presence", "guild:channel");
+  expect(conversations.designatedHead(room)).toBeUndefined();
+  conversations.setDesignatedHead(room, "global-default");
+  expect(conversations.designatedHead(room)).toBe("global-default");
+  expect(conversations.runsCaptainTurns(room)).toBe(false);
+  expect(() => conversations.submitInternal(room, "not authorized", "watch")).toThrow();
+  expect(() => conversations.setDesignatedHead("missing", "global-default")).toThrow();
+  expect(() => conversations.setDesignatedHead("global-default", room)).toThrow();
+  expect(() => conversations.setDesignatedHead("global-default", "global-default")).toThrow();
+  const created = await conversations.serve({
+    op: "create",
+    schemaVersion: 1,
+    scope: { kind: "workspace", workspaceId: root },
+    title: "Explicit head",
+  });
+  if (created.op !== "create") throw new Error("create failed");
+  const head = created.conversation.conversationId;
+  conversations.setDesignatedHead("global-default", head);
+  expect(() => conversations.setDesignatedHead(head, "global-default")).toThrow(/cycle/);
+  await conversations.close();
+  conversations = new ConversationStore(root, async () => {});
+  expect(conversations.designatedHead(room)).toBe("global-default");
+  expect(conversations.conversation(room)?.designatedHeadConversationId).toBe("global-default");
+  conversations.setDesignatedHead(room, null);
+  expect(conversations.designatedHead(room)).toBeUndefined();
+  await conversations.close();
+});

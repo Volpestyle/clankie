@@ -17,6 +17,7 @@ import type {
   FleetSeatMessageDelivery,
   FleetSeatMessageReceipt,
   ObservableCaptainLane,
+  OperatorConversation,
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
   OperatorSeatEvent,
@@ -100,12 +101,18 @@ export interface LaneToolBank {
  */
 export interface CaptainPort {
   /** Host-only persisted ownership. Inspection and caller-supplied IDs grant no route authority. */
+  designatedConversationHead(conversationId: string): ConversationOwner | undefined;
+  setDesignatedConversationHead(
+    conversationId: string,
+    headConversationId: string | null,
+  ): Promise<OperatorConversation>;
   validateConversationOwner(owner: ConversationOwner, mode?: "machine" | "social"): Promise<boolean>;
   wakeConversation(
     owner: ConversationOwner,
     text: string,
     guard?: () => Promise<void>,
     mode?: "machine" | "social",
+    allowHeadFallback?: boolean,
   ): Promise<boolean>;
   bodyRoomConversation(lane: "discord_presence" | "discord_voice", targetId: string): string;
   evaluatorStatus(): EvaluatorStatus;
@@ -268,6 +275,10 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     syncSeatTranscript: () => true,
     seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
+    designatedConversationHead: () => undefined,
+    setDesignatedConversationHead: async () => {
+      throw new Error("Conversation head configuration unavailable");
+    },
     validateConversationOwner: async () => false,
     wakeConversation: async () => false,
     laneMemoryCard: async () => "",

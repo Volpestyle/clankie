@@ -226,6 +226,12 @@ try {
 }
 
 const conversationsContext = {
+  designateHead: async (headConversationId: string | null) => {
+    const conversationId = conversationSelection.conversationId;
+    if (operatorClient === undefined || conversationId === undefined)
+      throw new Error("Select a writable conversation with operator authority first");
+    await operatorClient.setConversationHead({ conversationId, headConversationId });
+  },
   get conversationId(): string | undefined {
     return conversationSelection.conversationId;
   },

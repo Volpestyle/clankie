@@ -16,6 +16,7 @@ const catalog: OperatorMemoryCatalog = {
       episodeId: "episode-1",
       lane: "operator",
       targetId: "self",
+      sourceConversationId: "source-thread",
       summary: "Remembered the old thing",
       visibility: "operator_private",
       retained: true,
@@ -96,6 +97,16 @@ describe("/memory", () => {
     expect(view.results[0]).toContain("Remembered the old thing");
     expect(view.results[0]).toContain("Likes Bulbasaur");
     expect(formatMemoryCatalog(catalog)).toContain("guild-1/user-1");
+    expect(formatMemoryCatalog(catalog)).toContain("source source-thread");
+    expect(
+      formatMemoryCatalog({
+        ...catalog,
+        captainEpisodes: catalog.captainEpisodes.map((episode) => ({
+          ...episode,
+          sourceConversationId: undefined,
+        })),
+      }),
+    ).toContain("source unknown");
   });
 
   it("edits an episode and confirms before forgetting a person fact", async () => {

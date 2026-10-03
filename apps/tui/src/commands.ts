@@ -115,6 +115,7 @@ export interface ConsoleCommandContext {
         readonly scope: OperatorConversationScope;
       }[]
     >;
+    designateHead?(headConversationId: string | null): Promise<void>;
     select(conversationId: string): Promise<{ readonly conversationId: string; readonly title: string }>;
     /** Forks and selects an ephemeral Pi branch from the current conversation. */
     fork?(): Promise<{ readonly conversationId: string; readonly title: string }>;
@@ -526,6 +527,18 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         async run(argument, shell): Promise<void> {
           if (conversations === undefined) {
             shell.insertCommandResult(`/${name}`, "Conversations are unavailable.", "error");
+            return;
+          }
+          if (name === "chats" && argument.trim().startsWith("head ")) {
+            const target = argument.trim().slice(5).trim();
+            if (conversations.designateHead === undefined || !target || /\s/u.test(target))
+              throw new Error("Use /conversation head HEAD_ID|none with operator authority");
+            await conversations.designateHead(target === "none" ? null : target);
+            shell.insertCommandResult(
+              "/conversation head",
+              target === "none" ? "Designated head cleared." : `Designated head: ${target}`,
+              "success",
+            );
             return;
           }
           const selector = argument.trim();

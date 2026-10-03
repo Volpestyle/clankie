@@ -44,6 +44,10 @@ import type { WorkItemsService } from "../work-items.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  /** Host-proven original body account, presence, source receipt and opt-in. */
+  readonly conversationRouteAuthorized?: (
+    owner: import("./conversation-owner.ts").ConversationOwner,
+  ) => boolean;
   readonly bodyLeases?: BodyLeaseRouter;
   /** Actual work lifetime, separate from presence and model telemetry. */
   readonly onWorkStarted?: HostedWorkStarted;

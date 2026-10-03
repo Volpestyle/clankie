@@ -2398,6 +2398,31 @@ paths:
         "404":
           description: Unknown
 
+  /v1/conversation-heads:
+    post:
+      tags: [Captain]
+      operationId: setConversationHead
+      summary: Designate or clear an explicit escalation head
+      description: Operator only. Owner must be an existing runnable or canonical room conversation; head must be a writable global/workspace conversation. Rejects self/cycles. Grants no room authority.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [conversationId, headConversationId]
+              properties:
+                conversationId: { type: string }
+                headConversationId:
+                  type: [string, "null"]
+      responses:
+        "200": { description: Updated conversation projection }
+        "400": { description: Invalid strict request }
+        "401": { description: Operator authentication required }
+        "409": { description: Owner/head unavailable or cycle }
+
   /v1/body-leases:
     get:
       tags: [Captain]

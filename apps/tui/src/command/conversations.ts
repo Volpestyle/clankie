@@ -1,5 +1,10 @@
+import { ClankieApiClient } from "@clankie/api-client";
 import { parseArgs } from "node:util";
-import { resolveCaptainCredential, type CredentialStore } from "@clankie/credential-broker";
+import {
+  resolveOperatorCredential,
+  resolveCaptainCredential,
+  type CredentialStore,
+} from "@clankie/credential-broker";
 import {
   createCaptainOperatorConversationClient,
   createCaptainRouteClient,
@@ -14,6 +19,7 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 const USAGE = [
   "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
   "       clankie conversations channels | rooms",
+  "       clankie conversations head OWNER HEAD|none",
   "       clankie conversations channel [CHANNEL_ID] [--title TITLE] [--member PERSONA_ID]...",
   "                                     [--discord provision [--room ROOM_ID] | --discord off | --webhook-stdin]",
   "       clankie conversations channel --json-stdin",
@@ -29,11 +35,33 @@ export async function runConversationsCommand(
     readonly host?: string;
     readonly fetchImpl?: typeof fetch;
     readonly captainCredentialStore?: CredentialStore;
+    readonly operatorCredentialStore?: CredentialStore;
     readonly stdout?: Writable;
     readonly signal?: AbortSignal;
     readonly stdin?: AsyncIterable<unknown> & { readonly isTTY?: boolean };
   },
 ): Promise<number> {
+  if (args[0] === "head") {
+    if (args.length !== 3 || !args[1] || !args[2]) throw new Error(USAGE);
+    const env = options.env ?? process.env;
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    if (credential === undefined)
+      throw new Error("Operator credential required to designate a conversation head");
+    const client = new ClankieApiClient({
+      baseUrl: commandHost({ ...options, env }),
+      operatorToken: credential.token,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    });
+    const result = await client.setConversationHead({
+      conversationId: args[1],
+      headConversationId: args[2] === "none" ? null : args[2],
+    });
+    outputJson(options.stdout ?? process.stdout, result);
+    return 0;
+  }
   if (CHANNEL_ACTIONS.has(args[0] ?? "")) return runChannelAction(args, options);
   const { values, positionals } = parseArgs({
     args: [...args],

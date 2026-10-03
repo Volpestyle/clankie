@@ -116,3 +116,70 @@ it("does not redirect an ask to a replacement incarnation or unknown holder rout
   });
   expect(effects).toBe(0);
 });
+
+it("tries the exact owner first and uses only its explicit head after definite unavailability", async () => {
+  const f = setup();
+  await f.router.request(f.requester, {
+    resource: "browser",
+    kind: "ask",
+    text: "Please finish",
+    ttlMs: 10000,
+  });
+  const wakes: string[] = [];
+  const result = await pumpBodyRequests(f.router, {
+    designatedConversationHead: () => ({ conversationId: "head" }),
+    validateConversationOwner: async () => true,
+    wakeConversation: async (owner, text, guard) => {
+      await guard?.();
+      wakes.push(owner.conversationId);
+      expect(text).toContain("Please finish");
+      return owner.conversationId === "head";
+    },
+  });
+  expect(wakes).toEqual(["owner", "head"]);
+  expect(result[0]).toMatchObject({ deliveryStage: "accepted" });
+  expect(f.store.status("browser")?.conversationId).toBe("owner");
+});
+
+it("checks the head mapping after a suspended final grant check", async () => {
+  const f = setup();
+  await f.router.request(f.requester, { resource: "browser", kind: "ask", text: "question", ttlMs: 10000 });
+  let head = "head";
+  let inHeadDispatch = false;
+  let effects = 0;
+  const result = await pumpBodyRequests(f.router, {
+    designatedConversationHead: () => ({ conversationId: head }),
+    validateConversationOwner: async (owner) => {
+      if (inHeadDispatch && owner.conversationId === "head") {
+        await Promise.resolve();
+        head = "replacement";
+      }
+      return true;
+    },
+    wakeConversation: async (owner, _text, guard) => {
+      if (owner.conversationId === "owner") return false;
+      inHeadDispatch = true;
+      await guard?.();
+      effects++;
+      return true;
+    },
+  });
+  expect(effects).toBe(0);
+  expect(result[0]).toMatchObject({ deliveryStage: "uncertain" });
+});
+
+it.each(["accepted", "uncertain"])("never falls back after %s owner dispatch", async (stage) => {
+  const f = setup();
+  await f.router.request(f.requester, { resource: "browser", kind: "ask", text: "question", ttlMs: 10000 });
+  const wakes: string[] = [];
+  await pumpBodyRequests(f.router, {
+    designatedConversationHead: () => ({ conversationId: "head" }),
+    validateConversationOwner: async () => true,
+    wakeConversation: async (owner) => {
+      wakes.push(owner.conversationId);
+      if (stage === "uncertain") throw new Error("lost acceptance");
+      return true;
+    },
+  });
+  expect(wakes).toEqual(["owner"]);
+});

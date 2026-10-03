@@ -564,6 +564,7 @@ const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body"
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
 const captain = createCaptain(
   {
+    conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,
     ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses: computerUseHarnesses.current }),
     // Hosted pi workers follow the captain's model path (VUH-1373).

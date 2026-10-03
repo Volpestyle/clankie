@@ -153,3 +153,27 @@ it.each(["acquire", "renew"])("reauthorizes %s after seat lookup", async (action
   if (action === "acquire") expect(store.status("voice")).toBeUndefined();
   else expect(store.status("voice")?.expiresAt).toBe(expiresAt);
 });
+
+it("requires separate operator authority for explicit head designation and rejects extra fields", async () => {
+  const f = await fixture();
+  const designation = vi.fn(async () => ({ conversationId: "a" }) as never);
+  f.captain.setDesignatedConversationHead = designation;
+  expect(
+    (await f.post("/v1/conversation-heads", { conversationId: "a", headConversationId: "b" })).status,
+  ).toBe(200);
+  expect(designation).toHaveBeenCalledWith("a", "b");
+  expect(
+    (
+      await f.post("/v1/conversation-heads", {
+        conversationId: "a",
+        headConversationId: "b",
+        grant: "operator",
+      })
+    ).status,
+  ).toBe(400);
+  f.revoke();
+  expect(
+    (await f.post("/v1/conversation-heads", { conversationId: "a", headConversationId: null })).status,
+  ).toBe(401);
+  expect(designation).toHaveBeenCalledTimes(1);
+});

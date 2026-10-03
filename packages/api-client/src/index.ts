@@ -1,4 +1,11 @@
 import {
+  CONVERSATION_HEAD_PATH,
+  ConversationHeadRequestSchema,
+  OperatorConversationSchema,
+  type ConversationHeadRequest,
+  type OperatorConversation,
+} from "@clankie/protocol";
+import {
   BodyVoiceReconcileGuardSchema,
   type BodyVoiceReconcileGuard,
   BodyVoiceLeaseRequestSchema,
@@ -233,6 +240,16 @@ export class ClankieApiClient {
    * Requests a policy-evaluated action gated by the bridge-owned Discord presence session.
    * Bot credentials stay behind the credential broker used by the trusted presence runtime module.
    */
+  public async setConversationHead(input: ConversationHeadRequest): Promise<OperatorConversation> {
+    return OperatorConversationSchema.parse(
+      await this.request(CONVERSATION_HEAD_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        body: JSON.stringify(ConversationHeadRequestSchema.parse(input)),
+      }),
+    );
+  }
+
   public async voiceReconcileGuard(input: BodyVoiceReconcileGuard): Promise<boolean> {
     const result = await this.request<{ authorized?: unknown }>("/v1/discord/voice-reconcile-guard", {
       method: "POST",

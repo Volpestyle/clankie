@@ -2331,6 +2331,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (await settings()).discord,
       options.discordEnvironment,
     );
+    if (deps.conversationRouteAuthorized?.(owner) === false) return false;
     return (
       mode === "social" ||
       planDiscordTurnSession({
@@ -2346,6 +2347,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   async function wakeConversation(
+    input: ConversationOwner,
+    notification: string,
+    guard?: () => Promise<void>,
+    mode: "machine" | "social" = "machine",
+    allowHeadFallback = true,
+  ): Promise<boolean> {
+    if (await wakeExactConversation(input, notification, guard, mode)) return true;
+    if (!allowHeadFallback || !(await validateConversationOwner(input, mode))) return false;
+    const head = conversations.designatedHead(input.conversationId);
+    if (head === undefined) return false;
+    const finalGuard = async () => {
+      await guard?.();
+      if (!(await validateConversationOwner(input, mode)))
+        throw new Error("Original conversation authority changed");
+      if (
+        conversations.designatedHead(input.conversationId) !== head ||
+        !conversations.runsCaptainTurns(head)
+      )
+        throw new Error("Designated head authority changed");
+    };
+    return wakeExactConversation({ conversationId: head }, notification, finalGuard, "machine");
+  }
+
+  async function wakeExactConversation(
     input: ConversationOwner,
     notification: string,
     guard?: () => Promise<void>,
@@ -2370,6 +2395,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     mode: "machine" | "social" = "machine",
   ): Promise<boolean> {
     const origin = owner.discord!;
+    // No body reply port means this route cannot accept an asynchronous turn.
+    if (deps.discordActions === undefined) return false;
     const scope = conversations.conversation(owner.conversationId)?.scope;
     if (scope?.kind !== "room") return false;
     const { settings: discord } = resolveDiscordSettings(
@@ -3299,6 +3326,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     bodyRoomConversation: (lane, targetId) => conversations.roomConversation(lane, targetId),
 
+    designatedConversationHead: (id) => {
+      const head = conversations.designatedHead(id);
+      return head === undefined ? undefined : { conversationId: head };
+    },
+    setDesignatedConversationHead: async (id, head) => conversations.setDesignatedHead(id, head),
     validateConversationOwner,
     wakeConversation,
 

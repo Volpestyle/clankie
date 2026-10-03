@@ -10,7 +10,18 @@ import {
   type LinearActivityEvent,
   type LinearWorkOwner,
 } from "../linear-webhook.ts";
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  openSync,
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import {
   operatorConversationWindow,
@@ -179,6 +190,7 @@ const InboundAcceptanceSchema = z
 type InboundAcceptance = z.infer<typeof InboundAcceptanceSchema>;
 
 interface ConversationMeta {
+  designatedHeadConversationId?: string;
   /** Retained accepted inbound payloads; independent of event-log trimming. */
   inboundAcceptances?: Record<string, InboundAcceptance>;
   nativeSource?: HerdrAgentSnapshot;
@@ -933,6 +945,63 @@ export class ConversationStore {
    * that agent, nor in a channel, where the members answer (ADR 0146). Every
    * caller that would hand him a turn asks this first.
    */
+  public designatedHead(conversationId: string): string | undefined {
+    const head = this.metas.get(conversationId)?.designatedHeadConversationId;
+    return this.canDesignateHead(conversationId) &&
+      head !== undefined &&
+      head !== conversationId &&
+      this.runsCaptainTurns(head)
+      ? head
+      : undefined;
+  }
+
+  private canDesignateHead(id: string): boolean {
+    const scope = this.metas.get(id)?.scope;
+    return (
+      this.runsCaptainTurns(id) ||
+      (scope?.kind === "room" &&
+        id ===
+          `room-${createHash("sha256").update(`${scope.lane}:${scope.targetId}`).digest("hex").slice(0, 24)}`)
+    );
+  }
+
+  /** Administrative routing metadata; it grants neither the source nor the head new authority. */
+  public setDesignatedHead(conversationId: string, headConversationId: string | null): OperatorConversation {
+    const previous = this.metas.get(conversationId);
+    if (previous === undefined || !this.canDesignateHead(conversationId))
+      throw new Error("Owner conversation is not writable");
+    if (headConversationId !== null) {
+      if (!this.runsCaptainTurns(headConversationId)) throw new Error("Head conversation is not writable");
+      const visited = new Set([conversationId]);
+      for (
+        let next: string | undefined = headConversationId;
+        next !== undefined;
+        next = this.metas.get(next)?.designatedHeadConversationId
+      ) {
+        if (visited.has(next)) throw new Error("Conversation head cycle");
+        visited.add(next);
+      }
+    }
+    const meta = { ...previous, updatedAt: new Date().toISOString(), revision: previous.revision + 1 };
+    if (headConversationId === null) delete meta.designatedHeadConversationId;
+    else meta.designatedHeadConversationId = headConversationId;
+    this.saveMeta(meta);
+    const file = openSync(join(this.root, conversationId, "meta.json"), "r");
+    try {
+      fsyncSync(file);
+    } finally {
+      closeSync(file);
+    }
+    const directory = openSync(join(this.root, conversationId), "r");
+    try {
+      fsyncSync(directory);
+    } finally {
+      closeSync(directory);
+    }
+    this.metas.set(conversationId, meta);
+    return publicConversation(meta);
+  }
+
   public runsCaptainTurns(conversationId: string): boolean {
     const kind = this.metas.get(conversationId)?.scope.kind;
     return kind === "global" || kind === "workspace";
@@ -3182,6 +3251,9 @@ function publicConversation(meta: ConversationMeta): OperatorConversation {
     updatedAt: meta.updatedAt,
     sessionState: meta.sessionState,
     revision: meta.revision,
+    ...(meta.designatedHeadConversationId === undefined
+      ? {}
+      : { designatedHeadConversationId: meta.designatedHeadConversationId }),
     ...(meta.contextUsage === undefined ? {} : { contextUsage: meta.contextUsage }),
     ...(meta.parentConversationId === undefined ? {} : { parentConversationId: meta.parentConversationId }),
   };
