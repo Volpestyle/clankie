@@ -1,6 +1,21 @@
-# Herdr runtime
+# Machines and Herdr workspaces
 
 Which Herdr session Clankie uses and how to change it.
+
+## Machines and devices
+
+Machines run agents; devices are paired portals. Use `clankie machines --json`
+for configured machines and discovered candidates. `machines discover --json`
+refreshes bounded, non-prompting SSH discovery. An unreachable candidate remains
+listed; no probe starts Herdr or installs software.
+
+`machines add NAME --ssh HOST [--shell posix|powershell]` immediately registers
+transcript reading and offers existing Herdr sessions. `machines sessions NAME`
+lists them; add `--connect SESSION --id CONNECTION` to connect one. Named
+connections apply live. `machines remove NAME` detaches its connections without
+stopping workers. Historical connection IDs, transcript references and grants
+keep their meaning. `herdr add/remove/fleets`, `runtime connect` and `agents hosts`
+remain aliases. Only a changed default workspace needs `clankie restart captain`.
 
 ## Herdr runtime
 
@@ -22,13 +37,13 @@ runtime; restart to apply it. Conversations and native communication still work.
 official stable releases at startup and every six hours. Verified updates stage
 without replacing a live fleet's executable; the next Clankie start without a
 live owned server applies them. `pnpm herdr:build` prepares the official offline
-fallback in a checkout. `clankie herdr status` distinguishes the
+fallback in a checkout. `clankie herdr status --json` distinguishes the
 configured choice from the running `active` binding. Change it with
 `use NAME`, `create`, or the compatibility command `set --runtime auto`
-(the bundled default), then `clankie restart`.
+(the bundled default), then `clankie restart captain`.
 `set --runtime external` keeps whichever session name is already saved.
 
-`clankie-herdr`, `clankie herdr open`, and TUI `/herdr open` attach to the
+`clankie herdr`, `clankie-herdr`, `clankie herdr open`, and TUI `/herdr open` attach to the
 running local fleet; Ctrl+B then Q detaches without stopping workers. Every
 TUI's roster, jumps, and optional board follow the service's binding. Source
 socket identity qualifies pane-scoped messages and worker stances.

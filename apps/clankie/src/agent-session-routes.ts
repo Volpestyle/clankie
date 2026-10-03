@@ -1,3 +1,4 @@
+import type { Machines } from "./machines.ts";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AgentHostConnectionSchema } from "@clankie/settings";
@@ -30,6 +31,7 @@ export function createAgentSessionRoutes(
   sessions: AgentSessions | undefined,
   authenticate: (request: Request) => Promise<boolean | "unavailable">,
   hire?: HireSeat,
+  machines?: Machines,
 ): Hono {
   const app = new Hono();
   const authorize = async (context: Context) => {
@@ -79,6 +81,10 @@ export function createAgentSessionRoutes(
     if (refused) return refused;
     const input = AgentHostConnectionSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!input.success) return context.json({ error: "invalid_agent_host" }, 400);
+    if (machines) {
+      await machines.add(input.data);
+      return context.json({ hosts: await sessions!.hosts() });
+    }
     return context.json({ hosts: await sessions!.addHost(input.data) });
   });
 
@@ -86,6 +92,10 @@ export function createAgentSessionRoutes(
     const refused = await authorize(context);
     if (refused) return refused;
     try {
+      if (machines) {
+        await machines.remove(context.req.param("id"));
+        return context.json({ hosts: await sessions!.hosts() });
+      }
       return context.json({ hosts: await sessions!.removeHost(context.req.param("id")) });
     } catch (error) {
       return context.json(

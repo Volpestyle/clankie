@@ -58,13 +58,15 @@ export interface CaptainDeps {
   readonly computerUseHarnesses?: () => Promise<readonly ComputerUseHarness[]>;
   /** A hosted body's hire limit (VUH-1388); absent, hires are not counted. */
   readonly hireCapacity?: () => Promise<{ readonly live: number; readonly limit: number } | undefined>;
-  readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;
+  readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange"> &
+    Partial<Pick<ExecutionConnections, "namedLocal" | "runNamed">>;
   /**
    * Registered remote Herdr fleets (ADR 0184), as they stood when the captain
    * started; changes take effect on `clankie restart captain`.
    */
   readonly fleets?: {
     readonly list: readonly HerdrFleet[];
+    current?(): Promise<readonly HerdrFleet[]>;
     run(fleet: HerdrFleet): HerdrFleetRun;
     /** Non-Herdr commands on the fleet's machine, for its native seat channels (VUH-1527). */
     shell?(fleet: HerdrFleet): FleetShellRun;

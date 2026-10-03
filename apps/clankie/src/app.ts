@@ -884,6 +884,41 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({ runtimes, accounts: { linear } });
   });
 
+  app.get("/v1/machines", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.runtimes) return context.json({ error: "machines_unavailable" }, 503);
+    return context.json(await dependencies.runtimes.machines.list(context.req.query("discover") === "true"));
+  });
+  app.post("/v1/machines", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.runtimes) return context.json({ error: "machines_unavailable" }, 503);
+    try {
+      await dependencies.runtimes.machines.add(await context.req.json());
+      return context.json(await dependencies.runtimes.machines.list(true));
+    } catch (error) {
+      return context.json({ error: "invalid_machine", detail: String(error) }, 400);
+    }
+  });
+  app.delete("/v1/machines/:id", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.runtimes) return context.json({ error: "machines_unavailable" }, 503);
+    try {
+      await dependencies.runtimes.machines.remove(context.req.param("id"));
+      return context.json({ ok: true });
+    } catch (error) {
+      return context.json({ error: "invalid_machine", detail: String(error) }, 400);
+    }
+  });
+
   app.get("/v1/runtime-connections", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
@@ -966,6 +1001,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         if (result.op !== "spawn_seat") throw new Error("The captain did not return a hire result");
         return result.result;
       },
+      dependencies.runtimes?.machines,
     ),
   );
 

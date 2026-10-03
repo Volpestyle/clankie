@@ -731,6 +731,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
        * any other remote brief still fails without terminal input.
        */
       readonly remoteSeatAdapters?: (fleet: string) => readonly HarnessSeatAdapter[];
+      readonly fleetAvailable?: (fleet: string) => boolean;
       /** `codex queue` on a remote fleet's machine, for its Codex sessions he did not start. */
       readonly remoteCodexControl?: (fleet: string, paneId: string) => ExternalCodexControl | undefined;
       readonly remoteCodexQueue?: (fleet: string, sessionId: string, text: string) => Promise<boolean>;
@@ -755,6 +756,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
       remoteSeatAdapters === undefined
         ? undefined
         : (fleet) => {
+            if (options.fleetAvailable?.(fleet) === false) {
+              remote.delete(fleet);
+              return undefined;
+            }
             let adapters = remote.get(fleet);
             if (adapters === undefined) {
               adapters = new Map(remoteSeatAdapters(fleet).map((adapter) => [adapter.harness, adapter]));

@@ -582,6 +582,7 @@ const captain = createCaptain(
     runtimes,
     fleets: {
       list: herdrFleets,
+      current: () => runtimes.fleets(),
       run: (fleet) => runtimes.fleetRun(fleet),
       shell: (fleet) => runtimes.fleetShell(fleet),
       remoteWorkspace: (fleet, directory) => runtimes.remoteWorkspace(fleet, directory),
@@ -829,7 +830,7 @@ const clankie = await createClankieApp({
   captain,
   fleetLinks,
   prepareFleet: async (id: string) => {
-    const fleet = herdrFleets.find((entry) => entry.id === id);
+    const fleet = (await runtimes.fleets()).find((entry) => entry.id === id);
     if (fleet === undefined)
       throw new Error(`No ssh fleet ${id} is connected; add it with clankie herdr add first`);
     return prepareFleet(fleet, {
@@ -970,10 +971,11 @@ localFleetServer?.once("listening", () => {
   if (address && typeof address === "object")
     void localFleet.publish(address.port).catch(() => logger.warn("Local fleet discovery unavailable"));
 });
-const fleetLinkServer =
-  herdrFleets.length === 0
-    ? undefined
-    : serve({ fetch: fleetLinkFetch(clankie.app.fetch), port: 0, hostname: "127.0.0.1" });
+const fleetLinkServer = serve({ fetch: fleetLinkFetch(clankie.app.fetch), port: 0, hostname: "127.0.0.1" });
+runtimes.onChange(async () => {
+  const address = fleetLinkServer.address();
+  if (address && typeof address === "object") fleetLinks.start(await runtimes.fleets(), address.port);
+});
 fleetLinkServer?.once("listening", () => {
   const address = fleetLinkServer.address();
   if (typeof address === "object" && address !== null) fleetLinks.start(herdrFleets, address.port);

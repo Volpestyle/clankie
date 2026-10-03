@@ -55,7 +55,7 @@ async function herdrStatus(options: HerdrCommandOptions = {}): Promise<HerdrComm
     ok: true,
     herdr: (await settings.load()).herdr,
     settingsFile: settings.path,
-    restart: "clankie restart",
+    restart: "clankie restart captain",
   };
 }
 
@@ -79,7 +79,7 @@ async function herdrSet(
     ok: true,
     herdr: updated.herdr,
     settingsFile: settings.path,
-    restart: "clankie restart",
+    restart: "clankie restart captain",
   };
 }
 
@@ -91,6 +91,8 @@ export function forwardsToFleetHerdr(args: readonly string[]): boolean {
   const verb = args[0];
   return (
     verb !== undefined &&
+    verb !== "help" &&
+    verb !== "--help" &&
     verb !== "status" &&
     verb !== "set" &&
     verb !== "open" &&

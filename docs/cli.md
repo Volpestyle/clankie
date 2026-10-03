@@ -47,45 +47,45 @@ the real command: stop the service with `clankie down`, not `stop`.
 | Host                            | `CLANKIE_CONTROL_PLANE_URL` (default `http://127.0.0.1:4310`). `CLANKIE_CAPTAIN_URL` is a compatibility alias.                         |
 
 `--json` is required only where the default is human-readable (pairing QR,
-device table, credential-rotate sentence). Everything else is already JSON.
+device and machine tables, credential-rotate sentence). Everything else is already JSON.
 `rivals connect --token-stdin` reads its bridge token from a pipe into the broker;
 the token is never an argument, settings value, or printed result.
 
-| Command                                                                                                      | stdout                                                                                       |
-| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`, `awake`                                      | JSON                                                                                         |
-| `model …`, `effort …`, `image-model …`, `video-model …`                                                      | JSON                                                                                         |
-| `linear …`, `persona …`, `games …`, `browser …`, `fleet …`, `herdr …`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
-| `play status`                                                                                                | JSON                                                                                         |
-| `send --conversation ID …`                                                                                   | JSON accepted-run receipt or refusal                                                         |
-| `file publish --conversation ID PATH …`                                                                      | JSON delivered-file metadata                                                                 |
-| `memory …`, `metrics …`                                                                                      | JSON                                                                                         |
-| `telemetry ship …`                                                                                           | One JSON line per shipping pass                                                              |
-| `play stop`                                                                                                  | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
-| `prompt …`, `memory-card …`                                                                                  | Plain text: the prompt or card itself, verbatim                                              |
-| `seat`                                                                                                       | Interactive (TTY); `seat --dry-run` is JSON                                                  |
-| `mcp`                                                                                                        | JSON-RPC for a harness, never for people                                                     |
-| `pair`, `devices`, `operator-credential rotate`                                                              | Human text; pass `--json`                                                                    |
-| `help`                                                                                                       | This index (plain text)                                                                      |
-| `--version`                                                                                                  | `clankie <version>`                                                                          |
+| Command                                                                                                                       | stdout                                                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`, `awake`                                                       | JSON                                                                                         |
+| `model …`, `effort …`, `image-model …`, `video-model …`                                                                       | JSON                                                                                         |
+| `linear …`, `persona …`, `games …`, `browser …`, `fleet …`, `herdr use/create/disable`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
+| `play status`                                                                                                                 | JSON                                                                                         |
+| `send --conversation ID …`                                                                                                    | JSON accepted-run receipt or refusal                                                         |
+| `file publish --conversation ID PATH …`                                                                                       | JSON delivered-file metadata                                                                 |
+| `memory …`, `metrics …`                                                                                                       | JSON                                                                                         |
+| `telemetry ship …`                                                                                                            | One JSON line per shipping pass                                                              |
+| `play stop`                                                                                                                   | JSON when a session is stopping; the sentence `Nothing is playing.` when idle (still exit 0) |
+| `prompt …`, `memory-card …`                                                                                                   | Plain text: the prompt or card itself, verbatim                                              |
+| `seat`                                                                                                                        | Interactive (TTY); `seat --dry-run` is JSON                                                  |
+| `mcp`                                                                                                                         | JSON-RPC for a harness, never for people                                                     |
+| `pair`, `devices`, `machines`, `herdr status`, `operator-credential rotate`                                                   | Human text; pass `--json`                                                                    |
+| `help`                                                                                                                        | This index (plain text)                                                                      |
+| `--version`                                                                                                                   | `clankie <version>`                                                                          |
 
 Do not edit `~/.config/clankie/clankie.json`,
 `~/.config/clankie/settings.json`, or Keychain entries by hand.
 
 ## Command index
 
-| Task                                                   | Commands                                        |
-| ------------------------------------------------------ | ----------------------------------------------- |
-| [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                    |
-| [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`, `awake`         |
-| [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                    |
-| [Connect accounts and track work](#account-setup)      | `accounts`, `work`                              |
-| [Choose working skills](#skill-setup)                  | `skills`                                        |
-| [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model` |
-| [Select runtime connections](#runtime-setup)           | `connections`, `runtime`, `agents`, `herdr`     |
-| [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`       |
-| [Use native seats and delegated tools](#seat-commands) | `seat`, `mcp`, `access`                         |
-| [Evaluate agent work](#evaluation-commands)            | `evaluator`                                     |
+| Task                                                   | Commands                                                |
+| ------------------------------------------------------ | ------------------------------------------------------- |
+| [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                            |
+| [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`, `awake`                 |
+| [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                            |
+| [Connect accounts and track work](#account-setup)      | `accounts`, `work`                                      |
+| [Choose working skills](#skill-setup)                  | `skills`                                                |
+| [Choose models](#model-setup)                          | `model`, `effort`, `image-model`, `video-model`         |
+| [Connect machines](#runtime-setup)                     | `machines`, `connections`, `runtime`, `agents`, `herdr` |
+| [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`               |
+| [Use native seats and delegated tools](#seat-commands) | `seat`, `mcp`, `access`                                 |
+| [Evaluate agent work](#evaluation-commands)            | `evaluator`                                             |
 
 ## Commands
 
@@ -1159,6 +1159,42 @@ clankie fleet set --size small --models efficient
 
 <a id="runtime-setup"></a>
 
+### `machines [list|discover] [--json]`
+
+A machine is where agents run; a device is a paired phone or desktop portal.
+`machines` prints one row per machine: Herdr sessions, state and worker count
+(`?` when unavailable). `--json` returns `{ observedAt, machines }` from
+`GET /v1/machines`. Discovery reads local Herdr sessions and literal aliases in
+the owner's SSH config. Probes use BatchMode and strict known-host checking,
+never prompt, start a server or install remote software. Four probes run at
+most concurrently, with a three-second probe deadline and a 6.5-second listing
+budget. Unreachable and still-discovering candidates remain visible. Results
+are cached for fifteen seconds; `discover` refreshes them.
+
+```bash
+clankie machines add pc --ssh my-pc --shell powershell
+clankie machines sessions pc
+clankie machines sessions pc --connect work --id pc-work
+clankie machines remove pc
+```
+
+Adding registers transcript access immediately and lists available sessions.
+Connecting names an existing Herdr session; it does not start one. Removal
+unregisters that machine's connections without stopping workers. Named and SSH
+connections apply live to census, hires and watches. Default workspace changes
+still require `clankie restart captain` (ADR 0172).
+
+Existing `herdr add/remove/fleets`, `runtime connect` and `agents hosts` remain
+aliases. Machine records own transport; old connection IDs, transcript host
+aliases, exact-directory grants and saved seat IDs survive migration. Devices
+continue to use `pair` and `devices`.
+
+The paired operator `connections` operation uses the existing `steer` grant for
+`discover`, `add_machine` (`id`, `ssh`, optional `shell`), `remove_machine` and
+`connect_runtime` (`id`, `session`, optional `machine`, default `local`). Its
+inventory includes `machines` and a `machine` ID on every runtime row. Paired
+metadata omits local socket paths.
+
 ### `connections` and `runtime`
 
 `clankie connections` combines execution runtime health and the recorded
@@ -1334,7 +1370,11 @@ resumes a harness. Workers retain their native identity and
 ownership; a native resume does not enroll or replace them. Headless continuation
 remains retired (ADR 0203).
 
-### `herdr [status|open|create]` / `herdr use NAME`
+### `herdr` / `herdr status [--json]` / `herdr use NAME`
+
+Bare `clankie herdr` attaches the full workspace, as `clankie-herdr` does.
+`herdr status` prints machine rows; `--json` includes those rows plus the configured and active
+default-binding details. `herdr help` prints Clankie's commands.
 
 The TUI `/status` shows the active fleet binding and `/herdr` shows both the
 configured and active sessions. The binding is re-read at start, after `/herdr`,
@@ -1386,7 +1426,7 @@ session on restart; `set --runtime external` keeps whichever session name is
 already saved. External mode never starts or stops the owner's server.
 `set --runtime auto` clears the named session and selects the bundled default. Apply changes with `clankie restart captain`.
 
-`clankie herdr status` reports configured `herdr`, `settingsFile`, `restart`,
+`clankie herdr status --json` reports configured `herdr`, `settingsFile`, `restart`,
 and the running service's `active` binding (or `unavailable`). Settings hold
 the owner's intent and `active` holds what is live; the two differ whenever a
 named session is down. The authenticated operator endpoint `GET /v1/herdr`
@@ -1418,14 +1458,13 @@ change a worker with the same ID in another session.
 
 ### `herdr fleets` / `herdr add NAME --ssh HOST` / `herdr remove NAME` / `herdr prepare NAME`
 
-A Herdr session on another machine is a **fleet** ([ADR 0184](adr/0184-clankie-leads-more-than-one-fleet.md)):
+A **machine** can expose one or more Herdr sessions, called fleets internally ([ADR 0184](adr/0184-clankie-leads-more-than-one-fleet.md)):
 a named runtime connection whose transport is the owner's own ssh.
 
 ```sh
 clankie herdr add pc --ssh volpe@supedupsilly --session default --shell powershell
 clankie runtime workspaces pc --dir 'C:\src\rivals'
 clankie herdr fleets
-clankie restart captain
 clankie herdr remove pc
 ```
 
@@ -1435,8 +1474,9 @@ trust stay there (`BatchMode`, so an unknown host key or a locked key fails
 instead of prompting). `--shell powershell` is for a Windows host whose sshd
 default shell is PowerShell. The session must already be running there: adding
 checks `herdr --session SESSION api snapshot` over ssh and refuses otherwise.
-`remove` disables the connection and keeps its identity, like `runtime disconnect`.
-Changes reach the captain on `clankie restart captain`.
+`remove` unregisters the machine and its connections without stopping workers.
+Use `runtime disconnect ID` to disable only one connection while keeping its identity.
+Named machine connections reach the captain immediately; only default workspace changes require `clankie restart captain`.
 
 `prepare NAME` readies that machine for Claude workers (VUH-1527), once per
 machine; running it is the owner's approval. It ships this Clankie's own

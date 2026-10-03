@@ -1,3 +1,4 @@
+import { Machines } from "./machines.ts";
 import { z } from "zod";
 import { realpath, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -267,9 +268,9 @@ async function resolveExecutionWorkspaces(entries: z.infer<typeof ExecutionWorks
 
 /** Named external runtimes are never started, stopped or replaced by connection management. */
 export class ExecutionConnections {
-  private readonly changes = new Set<(id: string) => void>();
+  private readonly changes = new Set<(id: string) => void | Promise<void>>();
 
-  onChange(listener: (id: string) => void): () => void {
+  onChange(listener: (id: string) => void | Promise<void>): () => void {
     this.changes.add(listener);
     return () => {
       this.changes.delete(listener);
@@ -290,8 +291,19 @@ export class ExecutionConnections {
   linkStatus: ((fleet: string) => unknown) | undefined;
   /** When each ssh fleet last answered; an unreachable fleet reports it (ADR 0184). */
   private readonly lastSeen = new Map<string, string>();
+  readonly machines: Machines;
   constructor(options: ExecutionConnections["options"]) {
     this.options = options;
+    this.machines = new Machines({
+      settings: options.settings,
+      primary: options.primary.binding,
+      changed: async (id) => {
+        await Promise.all([...this.changes].map((listener) => listener(id)));
+      },
+      ...(options.run ? { run: options.run, sshConfig: async () => "" } : {}),
+      ...(options.env ? { env: options.env } : {}),
+    });
+    this.onChange(() => this.machines.invalidate());
   }
 
   /** The one transport per fleet; a changed host or session replaces it. */
@@ -335,12 +347,50 @@ export class ExecutionConnections {
     );
   }
 
+  async namedLocal() {
+    return (await this.options.settings.load()).execution.connections.filter(
+      (entry) => entry.enabled && entry.socketPath !== undefined,
+    );
+  }
+
+  async runNamed(
+    id: string,
+    args: readonly string[],
+    signal?: AbortSignal,
+    timeoutMs = 15_000,
+  ): Promise<string> {
+    const binding = await this.configuredBinding(id);
+    if (!binding) throw new Error(`Machine connection ${id} is disconnected`);
+    const env = pinHerdrEnvironment({ ...(this.options.env ?? process.env) }, binding.socketPath);
+    const result = this.options.run
+      ? await this.options.run("herdr", args, env)
+      : await exec("herdr", [...args], {
+          env,
+          ...(signal === undefined ? { timeout: timeoutMs } : { signal }),
+          maxBuffer: 8 * 1024 * 1024,
+        });
+    return result.stdout;
+  }
+
   /** The owner's exact-directory grant for a remote fleet (ADR 0193). */
   async remoteWorkspace(fleetId: string, directory: string): Promise<boolean> {
     const connection = (await this.options.settings.load()).execution.connections.find(
       (entry) => entry.id === fleetId,
     );
-    if (connection?.ssh === undefined || !connection.enabled) return false;
+    if (!connection?.enabled) return false;
+    if (!connection.ssh) {
+      const resolved = await resolveExecutionWorkspaces([{ kind: "directory", path: directory }]);
+      for (const grant of connection.workspaces ?? []) {
+        if (grant.kind === "directory" && grant.path === resolved[0]?.path) return true;
+        if (grant.kind === "repository") {
+          const repository = await resolveExecutionWorkspaces([
+            { kind: "repository", path: directory },
+          ]).catch(() => []);
+          if (repository[0]?.path === grant.path) return true;
+        }
+      }
+      return false;
+    }
     const shell = connection.ssh.shell;
     return (connection.workspaces ?? []).some(
       (entry) => entry.kind === "directory" && sameRemoteDirectory(entry.path, directory, shell),
@@ -355,6 +405,13 @@ export class ExecutionConnections {
   async connect(raw: unknown) {
     const parsed = ExecutionConnectSchema.parse(raw);
     const input = parsed;
+    if (!("action" in input) && input.machine && input.machine !== "local" && !input.ssh) {
+      const machine = (await this.options.settings.load()).machines.find(
+        (entry) => entry.id === input.machine,
+      );
+      if (!machine) throw new Error("Unknown machine");
+      input.ssh = { host: machine.ssh, shell: machine.shell };
+    }
     if ("action" in input && input.action !== "workspaces") {
       await this.options.settings.update((current) => {
         if (input.id !== "default" && !current.execution.connections.some((entry) => entry.id === input.id))
@@ -373,7 +430,7 @@ export class ExecutionConnections {
           },
         };
       });
-      for (const listener of this.changes) listener(input.id);
+      await Promise.all([...this.changes].map((listener) => listener(input.id)));
       return input;
     }
     if ("action" in input) {
@@ -401,7 +458,7 @@ export class ExecutionConnections {
           },
         };
       });
-      for (const listener of this.changes) listener(input.id);
+      await Promise.all([...this.changes].map((listener) => listener(input.id)));
       return { id: input.id, workspaces };
     }
     if (input.ssh !== undefined) return this.connectFleet({ ...input, ssh: input.ssh });
@@ -440,7 +497,7 @@ export class ExecutionConnections {
         },
       };
     });
-    for (const listener of this.changes) listener(connection.id);
+    await Promise.all([...this.changes].map((listener) => listener(connection.id)));
     return connection;
   }
 
@@ -496,7 +553,7 @@ export class ExecutionConnections {
         },
       };
     });
-    for (const listener of this.changes) listener(connection.id);
+    await Promise.all([...this.changes].map((listener) => listener(connection.id)));
     return connection;
   }
 
@@ -514,7 +571,7 @@ export class ExecutionConnections {
       };
     });
     this.fleetRuns.delete(id);
-    for (const listener of this.changes) listener(id);
+    await Promise.all([...this.changes].map((listener) => listener(id)));
   }
 
   async disconnect(id: string) {
@@ -531,7 +588,7 @@ export class ExecutionConnections {
         },
       };
     });
-    for (const listener of this.changes) listener(id);
+    await Promise.all([...this.changes].map((listener) => listener(id)));
   }
 
   async list() {
@@ -575,6 +632,7 @@ export class ExecutionConnections {
     return [
       {
         id: "default",
+        machine: "local",
         kind: "herdr" as const,
         session: primary?.session ?? settings.herdr.session,
         configured: settings.herdr,

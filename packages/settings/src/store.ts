@@ -57,14 +57,14 @@ export class SettingsStore {
     // defaults, which would quietly widen an allowlist the operator narrowed.
     // Sections this version retired are the one exception: they are dropped, so
     // an older file still opens. The next write persists it without them.
-    return ClankieSettingsSchema.parse(dropRetiredSettings(parsed));
+    return machineSettings(dropRetiredSettings(parsed));
   }
 
   /** Apply a transform atomically under a serialized queue. */
   public update(mutate: (current: ClankieSettings) => ClankieSettings): Promise<ClankieSettings> {
     const run = async (): Promise<ClankieSettings> => {
       const current = await this.load();
-      const next = ClankieSettingsSchema.parse(mutate(current));
+      const next = machineSettings(mutate(current), current);
       assertNoSecretShapedValue(next);
       await this.persist(next);
       return next;
@@ -79,11 +79,73 @@ export class SettingsStore {
     await mkdir(parentDirectory, { recursive: true, mode: 0o700 });
     await chmod(parentDirectory, 0o700);
     const temporaryPath = `${this.filePath}.${String(process.pid)}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, {
+    await writeFile(temporaryPath, `${JSON.stringify(storedMachineSettings(settings), null, 2)}\n`, {
       encoding: "utf8",
       mode: 0o600,
     });
     await rename(temporaryPath, this.filePath);
     await chmod(this.filePath, 0o600);
   }
+}
+
+/** Materialize compatibility views; only machines own SSH transport on disk. */
+function machineSettings(raw: unknown, previous?: ClankieSettings): ClankieSettings {
+  const data = structuredClone(raw) as ClankieSettings;
+  data.machines ??= [];
+  data.agentHosts ??= { connections: [] };
+  data.execution ??= { connections: [] };
+  if (new Set(data.agentHosts.connections.map((host) => host.id)).size !== data.agentHosts.connections.length)
+    throw new Error("Agent host IDs must be unique");
+  if (new Set(data.machines.map((machine) => machine.id)).size !== data.machines.length)
+    throw new Error("Machine IDs must be unique");
+  // Old host writers remain aliases, including deletion. Never redirect an existing ID.
+  if (previous && JSON.stringify(data.agentHosts) !== JSON.stringify(previous.agentHosts)) {
+    const removed = previous.agentHosts.connections.filter(
+      (old) => !data.agentHosts.connections.some((host) => host.id === old.id),
+    );
+    data.machines = data.machines.filter(
+      (machine) => !removed.some((host) => machine.id === host.id || machine.aliases.includes(host.id)),
+    );
+    data.execution.connections = data.execution.connections.filter(
+      (connection) =>
+        !removed.some(
+          (host) =>
+            previous.machines
+              .find((machine) => machine.id === connection.machine)
+              ?.aliases.includes(host.id) || connection.machine === host.id,
+        ),
+    );
+  }
+  function register(id: string, ssh: string, shell: "posix" | "powershell", transcript: boolean) {
+    let machine = data.machines.find((entry) => entry.ssh === ssh && entry.shell === shell);
+    if (!machine) {
+      let name = id;
+      let suffix = 2;
+      while (data.machines.some((entry) => entry.id === name)) name = `${id.slice(0, 58)}-${suffix++}`;
+      machine = { id: name, ssh, shell, aliases: [] };
+      data.machines.push(machine);
+    }
+    if (transcript && id !== machine.id && !machine.aliases.includes(id)) machine.aliases.push(id);
+    return machine;
+  }
+  for (const host of data.agentHosts.connections) register(host.id, host.ssh, host.shell, true);
+  for (const connection of data.execution.connections) {
+    if (connection.ssh)
+      connection.machine = register(connection.id, connection.ssh.host, connection.ssh.shell, false).id;
+    else if (connection.machine && connection.machine !== "local") {
+      const machine = data.machines.find((entry) => entry.id === connection.machine);
+      if (!machine) throw new Error(`Unknown machine ${connection.machine}`);
+      connection.ssh = { host: machine.ssh, shell: machine.shell };
+    } else connection.machine = "local";
+  }
+  data.agentHosts.connections = data.machines.flatMap(({ id, ssh, shell, aliases }) =>
+    [id, ...aliases].map((name) => ({ id: name, ssh, shell })),
+  );
+  return ClankieSettingsSchema.parse(data);
+}
+
+function storedMachineSettings(settings: ClankieSettings) {
+  const { agentHosts: _hosts, ...stored } = structuredClone(settings);
+  for (const connection of stored.execution.connections) delete connection.ssh;
+  return stored;
 }

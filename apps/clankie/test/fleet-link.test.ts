@@ -180,6 +180,8 @@ describe("a fleet link (VUH-1527)", () => {
       shell: () => shell,
       spawn: vi.fn(() => child) as unknown as typeof spawn,
     });
+    links.start([], 4567);
+    expect(links.status("pc")).toBeUndefined();
     links.start([pc], 4567);
     expect(links.status("pc")).toMatchObject({ state: "starting" });
     stderr.write("Allocated port 50123 for remote forward to 127.0.0.1:4567\n");
@@ -194,7 +196,11 @@ describe("a fleet link (VUH-1527)", () => {
     expect(decoded(shell.mock.calls[1]![0])).toContain("'pc.json'");
     expect(links.authenticate(written.token)).toBe("pc");
     expect(links.authenticate(`${written.token}x`)).toBeUndefined();
+    links.start([], 4567);
+    expect(links.status("pc")).toBeUndefined();
+    expect(links.authenticate(written.token)).toBeUndefined();
+    expect(child.kill).toHaveBeenCalledTimes(1); // only our SSH tunnel, never a Herdr worker
+    expect(shell).toHaveBeenCalledTimes(2); // session read and link metadata write, no stop
     links.close();
-    expect(child.kill).toHaveBeenCalled();
   });
 });

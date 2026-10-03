@@ -131,13 +131,13 @@ export function createRemoteHerdrRunner(
  */
 export function routeHerdrFleets(
   local: HerdrWatchRunner,
-  fleets: ReadonlyMap<string, HerdrWatchRunner>,
+  fleets: ReadonlyMap<string, HerdrWatchRunner> | (() => Promise<ReadonlyMap<string, HerdrWatchRunner>>),
 ): HerdrWatchRunner {
-  if (fleets.size === 0) return local;
-  const route = (target: string): { runner: HerdrWatchRunner; id: string; fleet?: string } => {
+  const current = async () => (typeof fleets === "function" ? fleets() : fleets);
+  const route = async (target: string): Promise<{ runner: HerdrWatchRunner; id: string; fleet?: string }> => {
     const qualified = splitFleetQualified(target);
     if (qualified === undefined) return { runner: local, id: target };
-    const runner = fleets.get(qualified.fleet);
+    const runner = (await current()).get(qualified.fleet);
     if (runner === undefined) throw new Error(`Unknown Herdr fleet ${qualified.fleet}`);
     return { runner, id: qualified.id, fleet: qualified.fleet };
   };
@@ -162,19 +162,19 @@ export function routeHerdrFleets(
     target: string,
     call: (runner: HerdrWatchRunner, id: string) => Promise<HerdrAgentSnapshot>,
   ): Promise<HerdrAgentSnapshot> => {
-    const { runner, id, fleet } = route(target);
+    const { runner, id, fleet } = await route(target);
     return qualify(fleet, await call(runner, id));
   };
   return {
     list: async (fleet) => {
-      const runner = fleet === undefined ? local : fleets.get(fleet);
+      const runner = fleet === undefined ? local : (await current()).get(fleet);
       if (runner?.list === undefined)
         throw new Error(`Complete Herdr inventory unavailable for ${fleet ?? "local"}`);
       return (await runner.list()).map((snapshot) => qualify(fleet, snapshot));
     },
     get: (target) => onTarget(target, (runner, id) => runner.get(id)),
     resolveTerminal: async (terminalId) => {
-      const { runner, id, fleet } = route(terminalId);
+      const { runner, id, fleet } = await route(terminalId);
       const found = await runner.resolveTerminal(id);
       return found === undefined ? undefined : qualify(fleet, found);
     },
@@ -190,31 +190,31 @@ export function routeHerdrFleets(
         runner.waitUntilIdle === undefined ? runner.wait(id, signal) : runner.waitUntilIdle(id, signal),
       ),
     transcript: async (agent) => {
-      const { runner } = route(agent.paneId);
+      const { runner } = await route(agent.paneId);
       return runner.transcript?.(unqualify(agent));
     },
     read: async (target, harness, source) => {
-      const { runner, id } = route(target);
+      const { runner, id } = await route(target);
       if (runner.read === undefined) throw new Error("Herdr read is unavailable");
       return runner.read(id, harness, source);
     },
     sendText: async (target, text) => {
-      const { runner, id } = route(target);
+      const { runner, id } = await route(target);
       if (runner.sendText === undefined) throw new Error("Herdr send is unavailable");
       await runner.sendText(id, text);
     },
     pressEnter: async (target) => {
-      const { runner, id } = route(target);
+      const { runner, id } = await route(target);
       if (runner.pressEnter === undefined) throw new Error("Herdr send is unavailable");
       await runner.pressEnter(id);
     },
     sendKeys: async (target, key) => {
-      const { runner, id } = route(target);
+      const { runner, id } = await route(target);
       if (runner.sendKeys === undefined) throw new Error("Herdr send-keys is unavailable");
       await runner.sendKeys(id, key);
     },
     paneProcesses: async (paneId) => {
-      const { runner, id } = route(paneId);
+      const { runner, id } = await route(paneId);
       if (runner.paneProcesses === undefined) throw new Error("Herdr process info is unavailable");
       return runner.paneProcesses(id);
     },
@@ -224,23 +224,23 @@ export function routeHerdrFleets(
     ...(local.codexControl === undefined ? {} : { codexControl: local.codexControl }),
     ...(local.codexQueue === undefined ? {} : { codexQueue: local.codexQueue }),
     closePane: async (target) => {
-      const { runner, id } = route(target);
+      const { runner, id } = await route(target);
       if (runner.closePane === undefined) throw new Error("Herdr close is unavailable");
       await runner.closePane(id);
     },
     createTab: async (options) => {
-      const runner = options.fleet === undefined ? local : fleets.get(options.fleet);
+      const runner = options.fleet === undefined ? local : (await current()).get(options.fleet);
       if (runner?.createTab === undefined) throw new Error(`Unknown Herdr fleet ${String(options.fleet)}`);
       const paneId = await runner.createTab(options);
       return options.fleet === undefined ? paneId : fleetQualified(options.fleet, paneId);
     },
     promptAgent: async (target, text) => {
-      const { runner, id } = route(target);
+      const { runner, id } = await route(target);
       if (runner.promptAgent === undefined) throw new Error("Herdr agent prompt is unavailable");
       await runner.promptAgent(id, text);
     },
     startAgent: async (options) => {
-      const { runner, id } = route(options.paneId);
+      const { runner, id } = await route(options.paneId);
       if (runner.startAgent === undefined) throw new Error("Herdr agent start is unavailable");
       await runner.startAgent({ ...options, paneId: id });
     },
@@ -248,7 +248,7 @@ export function routeHerdrFleets(
       ? {}
       : {
           runInPane: async (target: string, argv: readonly string[]) => {
-            const { runner, id } = route(target);
+            const { runner, id } = await route(target);
             if (runner.runInPane === undefined) throw new Error("Herdr pane run is unavailable");
             await runner.runInPane(id, argv);
           },

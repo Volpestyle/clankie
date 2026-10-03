@@ -139,6 +139,15 @@ it("serves bounded connection metadata through the operator client and refuses s
       },
     });
     expect(JSON.stringify(result)).not.toMatch(/secret|must-not-leak|pinned.sock/u);
+    for (const command of [
+      { action: "discover" },
+      { action: "add_machine", id: "pc", ssh: "pc", shell: "posix" },
+      { action: "remove_machine", id: "pc" },
+    ]) {
+      expect((await call({ op: "connections", schemaVersion: 1, command }, "social")).status).toBe(403);
+    }
+    expect((await settings.load()).machines).toEqual([]);
+    expect((await app.app.request("/v1/machines")).status).toBe(503);
     expect(
       (await call({ op: "connections", schemaVersion: 1, command: { action: "list" } }, "social")).status,
     ).toBe(403);

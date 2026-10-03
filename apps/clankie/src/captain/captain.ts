@@ -824,17 +824,56 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.herdrAvailable ? { defaultAvailable: deps.herdrAvailable } : {}),
   });
   // One runner over the local fleet and every registered remote one (ADR 0184).
-  const remoteFleets = deps.fleets?.list ?? [];
-  const censusFleets: readonly HerdrCensusFleet[] = remoteFleets.map((fleet) => ({
-    id: fleet.id,
-    session: fleet.session,
-    host: fleet.ssh.host,
-    run: (args) => deps.fleets!.run(fleet)(args),
-  }));
+  let remoteFleets = deps.fleets?.list ?? [];
+  let namedLocal: Array<{ id: string; session: string; socketPath?: string | undefined }> = [];
+  const censusFleets = async (): Promise<readonly HerdrCensusFleet[]> => [
+    ...(await refreshFleets()).map((fleet) => ({
+      id: fleet.id,
+      session: fleet.session,
+      host: fleet.ssh.host,
+      run: (args: readonly string[]) => deps.fleets!.run(fleet)(args),
+    })),
+    ...namedLocal.map((entry) => ({
+      id: entry.id,
+      session: entry.session,
+      host: "local",
+      run: (args: readonly string[]) => deps.runtimes!.runNamed!(entry.id, args),
+    })),
+  ];
   const herdrRunner = routeHerdrFleets(
     createHerdrWatchRunner(deps.herdrAvailable),
-    new Map(remoteFleets.map((fleet) => [fleet.id, createRemoteHerdrRunner(fleet, deps.fleets!.run(fleet))])),
+    async () =>
+      new Map([
+        ...(await refreshFleets()).map(
+          (fleet) =>
+            [
+              fleet.id,
+              createRemoteHerdrRunner(fleet, async (args, signal, timeout) => {
+                const active = (await refreshFleets()).find((entry) => entry.id === fleet.id);
+                if (!active) throw new Error(`Machine connection ${fleet.id} is disconnected`);
+                return deps.fleets!.run(active)(args, signal, timeout);
+              }),
+            ] as const,
+        ),
+        ...namedLocal.map(
+          (entry) =>
+            [
+              entry.id,
+              createHerdrWatchRunner(undefined, (args, signal, timeout) =>
+                deps.runtimes!.runNamed!(entry.id, args, signal, timeout),
+              ),
+            ] as const,
+        ),
+      ]),
   );
+  async function refreshFleets() {
+    namedLocal = await (deps.runtimes?.namedLocal?.() ?? Promise.resolve([]));
+    remoteFleets = await (deps.fleets?.current?.() ?? Promise.resolve(deps.fleets?.list ?? []));
+    return remoteFleets;
+  }
+  const unsubscribeFleets = deps.runtimes?.onChange(async () => {
+    await refreshFleets();
+  });
   // Claude seats stay interactive in their pane and are driven through the
   // clankie-worker plugin: its channel carries the mailbox, its hooks report
   // each settled turn (VUH-1458).
@@ -881,9 +920,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       settings: async () => (await settings()).skills,
     },
     runner: herdrRunner,
+    fleetAvailable: (id) =>
+      remoteFleets.some((entry) => entry.id === id) || namedLocal.some((entry) => entry.id === id),
     resumeInventory: async (fleetId) => {
       if (herdrRunner.list === undefined) throw new Error("Complete Herdr inventory is unavailable");
       if (fleetId === undefined) return herdrRunner.list();
+      await refreshFleets();
       const selected = remoteFleets.find((fleet) => fleet.id === fleetId);
       if (selected === undefined) throw new Error(`Unknown Herdr fleet ${fleetId}`);
       const sameHost = remoteFleets.filter(
@@ -927,6 +969,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           remoteCodexQueue: (() => {
             const queues = new Map<string, ReturnType<typeof remoteCodexQueue>>();
             return async (fleetId: string, sessionId: string, text: string) => {
+              await refreshFleets();
               const fleet = remoteFleets.find((entry) => entry.id === fleetId);
               if (fleet === undefined) return false;
               let queue = queues.get(fleetId);
@@ -938,6 +981,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             };
           })(),
           remoteSeatAdapters: (fleetId: string) => {
+            if (namedLocal.some((entry) => entry.id === fleetId))
+              return [
+                createCodexSeatAdapter({
+                  herdr: (args) =>
+                    deps.runtimes!.runNamed!(
+                      fleetId,
+                      args.map((arg) =>
+                        arg.startsWith(`${fleetId}/`) ? arg.slice(fleetId.length + 1) : arg,
+                      ),
+                    ),
+                  viewEnv: async (view) => ({
+                    HERDR_PANE_ID: view.paneId.replace(`${fleetId}/`, ""),
+                    HERDR_SOCKET_PATH: (await deps.runtimes!.configuredBinding(fleetId))?.socketPath ?? "",
+                  }),
+                }),
+                claudeWorkerSeats,
+              ];
             const fleet = remoteFleets.find((entry) => entry.id === fleetId);
             if (fleet === undefined) return [];
             const shell = deps.fleets!.shell!(fleet);
@@ -1537,7 +1597,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           deps.herdrAvailable?.() === false ||
           conversationId === LINEAR_INBOX_CONVERSATION_ID
             ? undefined
-            : await readHerdrSessionCensus(paneId, { fleets: censusFleets });
+            : await readHerdrSessionCensus(paneId, { fleets: await censusFleets() });
         // Owner attachments reach his model as images; the note numbers them
         // and names where each original is stored (ADR 0209).
         const attached =
@@ -1734,6 +1794,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // persona thread created through `create` is — otherwise its first reply
   // lands in a thread nothing is listening to.
   const hireSeat: HireSeat = async (request, brief) => {
+    await refreshFleets();
     if (brief?.trim()) {
       brief += `\n\n${WORKER_RESULT_BRIEF}`;
     }
@@ -1754,7 +1815,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         resume = await deps.agentSessions.resolve(request.resume);
         if (request.harness !== resume.file.harness || request.workingDirectory !== resume.workingDirectory)
           throw new Error("Harness and workingDirectory must match the saved transcript");
-        const fleet = savedSessionFleet(resume, request.fleet, remoteFleets);
+        const fleet = savedSessionFleet(resume, request.fleet, await refreshFleets());
         request = { ...request, ...(fleet === undefined ? {} : { fleet }) };
       } catch (error) {
         return {
@@ -1875,7 +1936,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const fleet =
       deps.herdrAvailable?.() === false
         ? { seats: [], head: undefined }
-        : await readFleet({ fleets: censusFleets, ...(binding ? { herdrSession: binding.session } : {}) });
+        : await readFleet({
+            fleets: await censusFleets(),
+            ...(binding ? { herdrSession: binding.session } : {}),
+          });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const goalList = await conversations.serve({ op: "list", schemaVersion: 1 });
@@ -3172,6 +3236,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     receiveLinearActivity: (activity, following) => conversations.receiveLinearActivity(activity, following),
 
     async close(): Promise<void> {
+      unsubscribeFleets?.();
       evaluator.close();
       for (const mailbox of fleetMailboxes.values()) mailbox.close();
       fleetMailboxes.clear();

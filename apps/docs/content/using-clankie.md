@@ -117,3 +117,21 @@ instead of images. `clankie persona images clear` clears the selection without
 deleting the originals. Images are sent to your configured models when used.
 Hosted paths refer to folders already on the hosted machine; this does not
 upload files from your phone or Mac. See the [CLI reference](/cli/).
+
+## Machines and devices
+
+A **machine** is where agents run. A **device** is a paired phone or desktop
+portal. `clankie machines` shows each machine's Herdr sessions, availability and
+worker count; add `--json` for scripts. `clankie machines discover` refreshes
+local sessions and SSH candidates without prompting or starting remote software.
+
+Add a machine with `clankie machines add pc --ssh my-pc`, then inspect
+`clankie machines sessions pc`. Connect an existing session with
+`clankie machines sessions pc --connect work --id pc-work`. Transcript access
+is available immediately after adding. Named connections apply without a
+restart; removing a machine detaches Clankie without stopping its workers.
+Changing the default workspace still requires `clankie restart captain`.
+
+`clankie herdr` opens the full workspace. `clankie herdr status` prints the
+machine summary; `herdr status --json` includes machine rows and default-binding details.
+Phones and desktop portals remain under `clankie pair` and `clankie devices`.

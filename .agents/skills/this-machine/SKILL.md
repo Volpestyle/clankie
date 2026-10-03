@@ -14,7 +14,7 @@ and do not treat the conversation workspace as your body.
 
 Doctor reports the service root as `repoRoot`. Read files there when you need
 your own README or plugin path. `README.md` in the current workspace is whoever
-you are helping. Portals, runtime connections and work trackers are
+you are helping. Devices, machines and work trackers are
 independent choices. Read `packages/agent-hosts/README.md` under `repoRoot` for current
 connection support; do not infer support from the architecture alone.
 
@@ -66,40 +66,41 @@ layer. Do not write Keychain entries, `~/.config/clankie/clankie.json`, or
 contract is `{repoRoot}/docs/cli.md` (every install) and `clankie help` (same
 index). Configure through the headless CLI:
 
-| Job                                   | Command                                                                                        |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                              |
-| Can he take a turn                    | `clankie doctor` → `captain` (`ready`, or `no_model` / `no_credential`)                        |
-| Start at login                        | `clankie autostart status`, `clankie autostart enable`                                         |
-| Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                          |
-| Bundled skill classes and selection   | `clankie skills`; also `clankie doctor` → `skills`                                             |
-| Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                                        |
-| Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                                 |
-| Captain + local providers             | `clankie model status`                                                                         |
-| Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`                      |
-| Switch captain                        | `clankie model set provider/model`                                                             |
-| Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                     |
-| Cheaper model for everyday turns      | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`           |
-| When long sessions compact            | `clankie model compaction`, `clankie model compaction set 250000`, `… default`                 |
-| ElevenLabs voice model                | `clankie voice status`, `clankie voice model set eleven_v4_turbo`, `clankie voice model clear` |
-| Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`             |
-| Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`                       |
-| Persona images                        | `clankie persona images set <folder>`, `status`, `clear` (restart applies)                     |
-| Linear wake rules                     | `clankie linear wake show`, `clankie linear wake set --owner-user-ids ID --actors owner`       |
-| Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`               |
-| Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                        |
-| Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                            |
-| Herdr session                         | `clankie herdr status`, `clankie herdr use NAME`, `clankie herdr create`                       |
-| His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                  |
-| State your assignment (for agents)    | `clankie work-on "Objective" [--repo REPO_ID --issue ISSUE_ID]`, `clankie work-on clear`       |
-| Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)                |
-| Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                         |
-| Pick up model/provider config         | `clankie restart`                                                                              |
-| Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`          |
-| Rotate operator credential            | `clankie operator-credential rotate --json`                                                    |
-| Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                          |
-| Play session                          | `clankie play status` / `clankie play stop`                                                    |
-| Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it           |
+| Job                                   | Command                                                                                                |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                                      |
+| Can he take a turn                    | `clankie doctor` → `captain` (`ready`, or `no_model` / `no_credential`)                                |
+| Start at login                        | `clankie autostart status`, `clankie autostart enable`                                                 |
+| Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                                  |
+| Bundled skill classes and selection   | `clankie skills`; also `clankie doctor` → `skills`                                                     |
+| Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                                                |
+| Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                                         |
+| Captain + local providers             | `clankie model status`                                                                                 |
+| Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`                              |
+| Switch captain                        | `clankie model set provider/model`                                                                     |
+| Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                             |
+| Cheaper model for everyday turns      | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`                   |
+| When long sessions compact            | `clankie model compaction`, `clankie model compaction set 250000`, `… default`                         |
+| ElevenLabs voice model                | `clankie voice status`, `clankie voice model set eleven_v4_turbo`, `clankie voice model clear`         |
+| Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`                     |
+| Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`                               |
+| Persona images                        | `clankie persona images set <folder>`, `status`, `clear` (restart applies)                             |
+| Linear wake rules                     | `clankie linear wake show`, `clankie linear wake set --owner-user-ids ID --actors owner`               |
+| Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`                       |
+| Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                                |
+| Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                                    |
+| Herdr session                         | `clankie herdr status --json`, `clankie herdr use NAME`, `clankie herdr create`                        |
+| His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                          |
+| State your assignment (for agents)    | `clankie work-on "Objective" [--repo REPO_ID --issue ISSUE_ID]`, `clankie work-on clear`               |
+| Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)                        |
+| Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                                 |
+| Pick up model/provider config         | `clankie restart`                                                                                      |
+| Machines / discovery / sessions       | `clankie machines --json`, `clankie machines discover --json`, `clankie machines sessions NAME --json` |
+| Pair a device / list / revoke         | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`                  |
+| Rotate operator credential            | `clankie operator-credential rotate --json`                                                            |
+| Restart / stop a service              | `clankie restart [service]`, `clankie down [service]`                                                  |
+| Play session                          | `clankie play status` / `clankie play stop`                                                            |
+| Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                   |
 
 Everything else about the launcher (Linear inbox, devices, memory, sleep,
 steering a turn, model refresh, setup and conflicts) is in

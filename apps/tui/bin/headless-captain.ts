@@ -1,3 +1,5 @@
+import { MachineInventorySchema } from "@clankie/protocol";
+import { runMachinesCommand, formatMachines, MACHINE_RESTART_HINT } from "../src/command/machines.ts";
 import { runWorkOnCommand } from "../src/command/work-on.ts";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import {
@@ -247,6 +249,13 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await runRuntimeCommand(["inventory"], options));
       return 0;
     }
+    if (command === "machines") {
+      const result = await runMachinesCommand(rest, options);
+      const inventory = MachineInventorySchema.safeParse(result);
+      if (!rest.includes("--json") && inventory.success) stdout.write(`${formatMachines(inventory.data)}\n`);
+      else outputJson(stdout, result);
+      return 0;
+    }
     if (command === "runtime") {
       outputJson(stdout, await runRuntimeCommand(rest, options));
       return 0;
@@ -265,6 +274,30 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "herdr") {
+      if (!rest.length) return await openHerdr(options);
+      if (rest[0] === "help" || rest[0] === "--help") {
+        stdout.write(
+          "clankie herdr: open | status [--json] | use NAME | create | disable | fleets | add | remove | prepare\n",
+        );
+        return 0;
+      }
+      if (rest[0] === "status") {
+        const inventory = MachineInventorySchema.parse(await runMachinesCommand([], options));
+        if (rest.includes("--json"))
+          outputJson(stdout, { ...(await runHerdrCommand(["status"], options)), ...inventory });
+        else stdout.write(`${formatMachines(inventory)}\n`);
+        return 0;
+      }
+      if (rest[0] === "fleets") {
+        const result = await runMachinesCommand(rest.includes("--json") ? ["--json"] : [], options);
+        if (rest.includes("--json")) outputJson(stdout, result);
+        else stdout.write(`${formatMachines(MachineInventorySchema.parse(result))}\n`);
+        return 0;
+      }
+      if (rest[0] === "remove" || (rest[0] === "add" && !rest.includes("--session"))) {
+        outputJson(stdout, await runMachinesCommand(rest, options));
+        return 0;
+      }
       if (rest[0] === "--connection") {
         const connectionId = rest[1];
         if (!connectionId || !/^[a-z][a-z0-9-]{0,63}$/u.test(connectionId))
@@ -280,7 +313,7 @@ export async function runHeadlessCaptainCommand(
       if (fleetArgs !== undefined) {
         outputJson(stdout, {
           ...(await runRuntimeCommand(fleetArgs, options)),
-          restart: "clankie restart captain",
+          hint: MACHINE_RESTART_HINT,
         });
         return 0;
       }

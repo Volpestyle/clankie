@@ -220,6 +220,13 @@ export class FleetLinks {
 
   /** Link each fleet to the restricted listener on `localPort`. */
   start(fleets: readonly HerdrFleet[], localPort: number): void {
+    for (const [id, link] of this.links) {
+      const fleet = fleets.find((entry) => entry.id === id);
+      if (!fleet || JSON.stringify(fleet) !== JSON.stringify(link.fleet)) {
+        link.close();
+        this.links.delete(id);
+      }
+    }
     for (const fleet of fleets) {
       if (this.links.has(fleet.id)) continue;
       const link = new FleetLink(fleet, {

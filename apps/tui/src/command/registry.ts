@@ -240,10 +240,17 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["machines"],
+    lines: [
+      "  machines [list|discover] [--json] | add NAME --ssh HOST | remove NAME | sessions NAME",
+      "                           Machines where agents run; connections apply live",
+    ],
+  },
+  {
     nouns: ["herdr"],
     lines: [
-      "  herdr [status|open|disable] | set --runtime auto|bundled|external|disabled | set --session NAME",
-      "                           Bundled runtime or an external Herdr session",
+      "  herdr [status|open|create|disable] | use NAME",
+      "                           Open his workspace or choose your Herdr session",
       "  herdr [--connection ID] <herdr command>    Run against a selected runtime",
     ],
   },

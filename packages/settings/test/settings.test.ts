@@ -60,6 +60,7 @@ describe("settings store", () => {
       connections: [
         {
           id: "pc",
+          machine: "pc",
           kind: "herdr",
           session: "work",
           ssh: { host: "pc", shell: "powershell" },

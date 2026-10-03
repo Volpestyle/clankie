@@ -388,6 +388,10 @@ export const ExecutionConnectionSchema = z
       .string()
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)
       .refine((id) => id !== "default"),
+    machine: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
     kind: z.literal("herdr").default("herdr"),
     session: z.string().regex(/^[\w][\w.-]{0,63}$/u),
     /** A local runtime's socket. An ssh fleet names only its session (ADR 0184). */
@@ -772,8 +776,24 @@ export const ClankieSettingsSchema = z
         "Codex accounts need unique labels and homes",
       )
       .default([]),
+    machines: z
+      .array(
+        AgentHostConnectionSchema.extend({
+          aliases: z
+            .array(
+              z
+                .string()
+                .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+                .refine((id) => id !== "local"),
+            )
+            .max(30)
+            .default([]),
+        }),
+      )
+      .max(30)
+      .default([]),
     agentHosts: z
-      .object({ connections: z.array(AgentHostConnectionSchema).max(15).default([]) })
+      .object({ connections: z.array(AgentHostConnectionSchema).max(60).default([]) })
       .strict()
       .refine(
         (value) => new Set(value.connections.map((entry) => entry.id)).size === value.connections.length,
@@ -793,7 +813,11 @@ export const ClankieSettingsSchema = z
       )
       .refine(
         (value) =>
-          value.connections.every((entry) => (entry.ssh === undefined) !== (entry.socketPath === undefined)),
+          value.connections.every(
+            (entry) =>
+              (entry.machine !== undefined && entry.machine !== "local" && entry.socketPath === undefined) ||
+              (entry.ssh === undefined) !== (entry.socketPath === undefined),
+          ),
         "An execution connection is either a local socket or an ssh fleet",
       )
       .default(() => ({ connections: [] })),
@@ -808,7 +832,40 @@ export const ClankieSettingsSchema = z
     linearWebhook: LinearWebhookSettingsSchema.default(() => LinearWebhookSettingsSchema.parse({})),
     oauthApps: OauthAppsSettingsSchema.default(() => OauthAppsSettingsSchema.parse({})),
   })
-  .strict();
+  .strict()
+  .superRefine((settings, context) => {
+    const identities = settings.machines.flatMap((machine) => [machine.id, ...machine.aliases]);
+    if (new Set(identities).size !== identities.length)
+      context.addIssue({
+        code: "custom",
+        path: ["machines"],
+        message: "Machine IDs and aliases must be unique",
+      });
+    const routes = settings.machines.map((machine) => `${machine.shell}:${machine.ssh}`);
+    if (new Set(routes).size !== routes.length)
+      context.addIssue({
+        code: "custom",
+        path: ["machines"],
+        message: "Each SSH transport belongs to one machine",
+      });
+    for (const connection of settings.execution.connections) {
+      if (connection.machine === undefined) continue; // legacy input, migrated by SettingsStore
+      const machine = settings.machines.find((entry) => entry.id === connection.machine);
+      if (
+        connection.machine === "local"
+          ? connection.ssh !== undefined
+          : !machine ||
+            connection.socketPath !== undefined ||
+            (connection.ssh !== undefined &&
+              (connection.ssh.host !== machine.ssh || connection.ssh.shell !== machine.shell))
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["execution", "connections"],
+          message: "Connection transport must match its machine",
+        });
+    }
+  });
 export type ClankieSettings = z.infer<typeof ClankieSettingsSchema>;
 
 export function emptySettings(): ClankieSettings {

@@ -14,7 +14,10 @@ export async function runRuntimeCommand(
   let path = "/v1/runtime-connections",
     method = "GET",
     body: string | undefined;
-  if (args[0] === "inventory" && args.length === 1) {
+  if (args[0] === "connect-machine" && args.length === 4) {
+    method = "POST";
+    body = JSON.stringify({ id: args[1], machine: args[2], session: args[3] });
+  } else if (args[0] === "inventory" && args.length === 1) {
     path = "/v1/connections";
   } else if (args[0] === "connect" && args.length === 2) {
     method = "POST";
