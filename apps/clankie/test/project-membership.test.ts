@@ -241,9 +241,18 @@ it.each(["valid", "missing-other", "junction", "wrong-machine", "case", "boundar
     f.state.settings.projects[1]!.workspaces = [
       { id: "remote", machineId: "pc", platform: "windows", path: "C:\\gone" },
     ];
-    if (kind === "wrong-machine") f.state.proof.workspace!.machineId = "another";
-    if (kind === "case") f.state.proof.workspace!.canonicalPath = "c:\\code\\kh2\\src";
-    if (kind === "boundary") f.state.proof.workspace!.canonicalPath = "C:\\code\\kh2-other";
+    if (kind === "wrong-machine")
+      f.state.proof = { ...f.state.proof, workspace: { ...f.state.proof.workspace!, machineId: "another" } };
+    if (kind === "case")
+      f.state.proof = {
+        ...f.state.proof,
+        workspace: { ...f.state.proof.workspace!, canonicalPath: "c:\\code\\kh2\\src" },
+      };
+    if (kind === "boundary")
+      f.state.proof = {
+        ...f.state.proof,
+        workspace: { ...f.state.proof.workspace!, canonicalPath: "C:\\code\\kh2-other" },
+      };
     const resolve = createProjectMembershipResolver({
       settings: async () => f.state.settings,
       hire: async () => f.state.hire,
@@ -257,7 +266,11 @@ it.each(["valid", "missing-other", "junction", "wrong-machine", "case", "boundar
         expect(machineId).toBe("pc");
         if (kind === "missing-other" && path === "C:\\gone") return undefined;
         if (kind === "junction" && path === "C:\\code\\kh2") return "D:\\actual";
-        if (kind === "cwd-change") f.state.proof = { ...f.state.proof, workspace: { ...f.state.proof.workspace!, canonicalPath: "C:\\outside" } };
+        if (kind === "cwd-change")
+          f.state.proof = {
+            ...f.state.proof,
+            workspace: { ...f.state.proof.workspace!, canonicalPath: "C:\\outside" },
+          };
         return path;
       },
     });
