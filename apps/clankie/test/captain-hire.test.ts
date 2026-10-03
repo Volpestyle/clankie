@@ -96,9 +96,10 @@ describe("captain hire_agent", () => {
         vi.fn(),
       ),
     );
-    expect(tool.parameters.required).toContain("title");
-    expect(tool.parameters.required).toContain("role");
-    expect(tool.parameters.properties.title.description).toContain("human name");
+    expect(tool.parameters).toMatchObject({
+      required: expect.arrayContaining(["title", "role"]),
+      properties: { title: { description: expect.stringContaining("human name") } },
+    });
   });
 
   it("hires through the wired path with model and effort spelled for the harness", async () => {
