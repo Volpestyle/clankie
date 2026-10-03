@@ -182,11 +182,16 @@ function freshDirectory(path) {
 /** Exact historical inputs; callers never read an ambient checkout or fetch missing objects. */
 export function historicalDependencyInputs(task) {
   verifyTask(task);
-  const paths = gitText("ls-tree", "-r", "--name-only", task.baseCommit).split("\n").filter((path) =>
-    path === "package.json" || path.endsWith("/package.json") ||
-    ["pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc", ".pnpmfile.cjs"].includes(path) ||
-    path.startsWith("patches/") || path.startsWith("vendor/"),
-  );
+  const paths = gitText("ls-tree", "-r", "--name-only", task.baseCommit)
+    .split("\n")
+    .filter(
+      (path) =>
+        path === "package.json" ||
+        path.endsWith("/package.json") ||
+        ["pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc", ".pnpmfile.cjs"].includes(path) ||
+        path.startsWith("patches/") ||
+        path.startsWith("vendor/"),
+    );
   return paths.map((path) => ({ path, bytes: git("show", `${task.baseCommit}:${path}`) }));
 }
 
@@ -201,10 +206,37 @@ export function prepareHistoricalWorkspace(task, output) {
   for (const grader of task.graders) rmSync(join(workspace, grader.path), { force: true });
   rmSync(join(workspace, "scripts/evals"), { recursive: true, force: true });
   rmSync(join(workspace, "docs/testing"), { recursive: true, force: true });
-  writeFileSync(join(workspace, "TASK.md"), `${task.prompt}\n\nTime budget: ${task.timeBudgetSeconds} seconds. Do not seek original fixes or held-out tests.\n`);
+  // Native allocations must not carry legacy personal skill links or shared ancestry.
+  const scrubLinks = (directory) => {
+    for (const name of readdirSync(directory)) {
+      const path = join(directory, name),
+        stat = lstatSync(path);
+      if (stat.isSymbolicLink()) rmSync(path);
+      else if (stat.isDirectory()) scrubLinks(path);
+    }
+  };
+  scrubLinks(workspace);
+  writeFileSync(
+    join(workspace, "TASK.md"),
+    `${task.prompt}\n\nTime budget: ${task.timeBudgetSeconds} seconds. Do not seek original fixes or held-out tests.\n`,
+  );
   command("/usr/bin/git", ["init", "-q"], workspace);
   command("/usr/bin/git", ["add", "."], workspace);
-  command("/usr/bin/git", ["-c", "user.name=Lead eval fixture", "-c", "user.email=eval@invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "Pinned pre-fix replay"], workspace);
+  command(
+    "/usr/bin/git",
+    [
+      "-c",
+      "user.name=Lead eval fixture",
+      "-c",
+      "user.email=eval@invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "Pinned pre-fix replay",
+    ],
+    workspace,
+  );
   return { task: task.id, baseCommit: task.baseCommit, workspace, status: "prepared-no-agents-launched" };
 }
 
@@ -400,7 +432,9 @@ export function dependencySnapshot(directory) {
       const path = join(root, category);
       if (!existsSync(path)) return [];
       ownedPath(root, path);
-      return readdirSync(path).map((name) => `${category}/${name}/node_modules`);
+      return readdirSync(path)
+        .sort()
+        .map((name) => `${category}/${name}/node_modules`);
     }),
   ]) {
     const path = join(root, relative);
