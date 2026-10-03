@@ -111,6 +111,7 @@ describe("trusted native seat policy", () => {
   async function fixture(
     policy: import("../src/captain/codex-app-server.ts").CodexNativePolicy,
     callerEnv?: Record<string, string>,
+    catalog?: { result: unknown; read(): void },
   ) {
     const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
     await once(server, "listening");
@@ -127,18 +128,21 @@ describe("trusted native seat policy", () => {
         const request = JSON.parse(String(bytes)) as { id?: number; method: string };
         methods.push(request.method);
         if (request.id === undefined) return;
+        if (request.method === "mcpServerStatus/list") catalog?.read();
         const result =
-          request.method === "thread/loaded/list"
-            ? { data: ["root"] }
-            : request.method === "thread/read"
-              ? { thread: { id: "root" } }
-              : request.method === "thread/resume"
-                ? { thread: { turns: [] } }
-                : request.method === "turn/start"
-                  ? { turn: { id: "turn" } }
-                  : request.method === "turn/steer"
-                    ? { turnId: "turn" }
-                    : {};
+          request.method === "mcpServerStatus/list"
+            ? catalog?.result
+            : request.method === "thread/loaded/list"
+              ? { data: ["root"] }
+              : request.method === "thread/read"
+                ? { thread: { id: "root" } }
+                : request.method === "thread/resume"
+                  ? { thread: { turns: [] } }
+                  : request.method === "turn/start"
+                    ? { turn: { id: "turn" } }
+                    : request.method === "turn/steer"
+                      ? { turnId: "turn" }
+                      : {};
         socket.send(JSON.stringify({ id: request.id, result }));
       });
     });
@@ -158,6 +162,7 @@ describe("trusted native seat policy", () => {
         launches.push(input);
         return {
           endpoint: "fixture",
+          ...(catalog ? { waitForClankieCatalog: true as const } : {}),
           failure: () => undefined,
           output: () => "",
           close: async () => {
@@ -180,6 +185,54 @@ describe("trusted native seat policy", () => {
       launches,
     };
   }
+
+  it.each([
+    {},
+    { data: [] },
+    { data: [{ name: "clankie", runtimeStatus: "starting", tools: { message_clankie: {} } }] },
+    {
+      data: [
+        { name: "clankie", runtimeStatus: "connected", tools: { message_clankie: {} }, toolsError: "failed" },
+      ],
+    },
+    {
+      data: [{ name: "clankie", runtimeStatus: "connected", tools: { message_clankie: {} } }],
+      nextCursor: "more",
+    },
+    {
+      data: [
+        { name: "clankie", runtimeStatus: "connected", tools: { message_clankie: {} } },
+        { name: "clankie", runtimeStatus: "connected", tools: { message_clankie: {} } },
+      ],
+    },
+  ])("never sends the first brief on an incomplete or ambiguous native catalog %j", async (result) => {
+    let now = Date.now();
+    const f = await fixture(
+      {
+        connected: async () => {},
+        beforeTurn: async () => {},
+        audit: async () => {},
+        failed: async () => {},
+      },
+      undefined,
+      {
+        result,
+        read: () => {
+          now += 21_000;
+        },
+      },
+    );
+    const seat = await f.pending;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      await expect(seat.send("first")).rejects.toThrow("no first turn was sent");
+      expect(f.methods).toContain("mcpServerStatus/list");
+      expect(f.methods).not.toContain("turn/start");
+    } finally {
+      clock.mockRestore();
+      await seat.close();
+    }
+  });
 
   it("gates every send and steer and audits descendants before root filtering", async () => {
     const seen: CodexSeatEvent[] = [];

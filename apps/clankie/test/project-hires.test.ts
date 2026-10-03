@@ -1,3 +1,4 @@
+import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import type { SavedAgentSession } from "../src/agent-sessions.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -85,6 +86,72 @@ async function fixture() {
 }
 
 describe("project hiring", () => {
+  it.each([
+    "bound",
+    "wrong-pane",
+    "wrong-harness",
+    "wrong-session",
+    "replacement",
+    "retarget",
+    "missing-proof",
+  ])(
+    "records project assignment before the first brief only for a current bound native seat: %s",
+    async (mode) => {
+      const f = await fixture();
+      f.store.close();
+      f.runner.runInPane = async () => {};
+      const brief = vi.fn();
+      let store: HerdrWatchStore;
+      const ref = { harness: "claude" as const, paneId: "p1", sessionId: "s1" };
+      const adapter: HarnessSeatAdapter = {
+        harness: "claude",
+        attach: async () => undefined,
+        start: async (_launch, view) => {
+          await view.start?.("claude", []);
+          const claimed = {
+            ...ref,
+            ...(mode === "wrong-pane" ? { paneId: "victim" } : {}),
+            ...(mode === "wrong-harness" ? { harness: "codex" as const } : {}),
+            ...(mode === "wrong-session" ? { sessionId: "victim" } : {}),
+          };
+          try {
+            await view.bound?.(claimed);
+            expect(store.projectHireAssignment("default", "p1", proof)).toMatchObject({
+              state: "assigned",
+              projectId: "game",
+            });
+            brief();
+            return { outcome: "started", control: { ref } as SeatControl };
+          } catch (error) {
+            return { outcome: "failed", reason: "not_ready", detail: String(error) };
+          }
+        },
+      };
+      if (mode === "missing-proof") f.options.projectHirePolicy.proof.mockResolvedValue(undefined);
+      if (mode === "replacement")
+        f.options.projectHirePolicy.proof.mockImplementation(async () => {
+          vi.mocked(f.runner.get).mockResolvedValue({
+            ...f.agent,
+            session: { source: "claude", kind: "id", value: "replacement" },
+          });
+          return proof;
+        });
+      if (mode === "retarget")
+        f.options.projectHirePolicy.proof.mockImplementation(async () => {
+          f.options.projectHirePolicy.project = async () => "foreign";
+          return proof;
+        });
+      store = new HerdrWatchStore(f.path, { ...f.options, seatAdapters: [adapter] });
+      try {
+        const result = await store.spawnSeat(request(f.root), undefined, "first brief");
+        expect(result.outcome).toBe(mode === "bound" ? "spawned" : "failed");
+        expect(brief).toHaveBeenCalledTimes(mode === "bound" ? 1 : 0);
+      } finally {
+        store.close();
+      }
+    },
+  );
+
   it("passes role harness, model and effort to the actual native launch, overriding requests", async () => {
     const f = await fixture();
     expect((await f.store.spawnSeat(request(f.root))).outcome).toBe("spawned");

@@ -37,6 +37,10 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
     denied = resolve;
   });
   let bound = false;
+  let assigned = false;
+  let catalogReceived = false;
+  let statusReads = 0;
+  let turns = 0;
   let attempts = 0;
   let sessionStarts = 0;
   const http = createServer((request, response) => {
@@ -45,7 +49,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
     request.on("end", () => {
       const rpc = JSON.parse(bytes) as { id?: number; method: string };
       response.setHeader("content-type", "application/json");
-      if (!bound) {
+      if (!bound || !assigned) {
         attempts++;
         denied();
         response.writeHead(403);
@@ -107,12 +111,30 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
     socket.on("message", (bytes) => {
       const rpc = JSON.parse(String(bytes)) as { id?: number; method: string };
       if (rpc.id === undefined) return;
+      if (rpc.method === "mcpServerStatus/list") statusReads++;
+      if (rpc.method === "turn/start") {
+        expect(assigned && catalogReceived).toBe(true);
+        turns++;
+      }
       const result =
-        rpc.method === "thread/loaded/list"
-          ? { data: ["thread"], nextCursor: null }
-          : rpc.method === "thread/read"
-            ? { thread: { id: "thread" } }
-            : {};
+        rpc.method === "mcpServerStatus/list"
+          ? {
+              data: [
+                {
+                  name: "clankie",
+                  runtimeStatus: catalogReceived ? "connected" : "starting",
+                  tools: catalogReceived ? { message_clankie: {}, linear_get_issue: {} } : {},
+                },
+              ],
+              nextCursor: null,
+            }
+          : rpc.method === "turn/start"
+            ? { turn: { id: "first-turn" } }
+            : rpc.method === "thread/loaded/list"
+              ? { data: ["thread"], nextCursor: null }
+              : rpc.method === "thread/read"
+                ? { thread: { id: "thread" } }
+                : {};
       socket.send(JSON.stringify({ id: rpc.id, result }));
     });
   });
@@ -126,7 +148,10 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
       if (end < 0) break;
       const row = JSON.parse(buffer.slice(0, end));
       buffer = buffer.slice(end + 1);
-      if (row.id === 2) catalogResolve(row);
+      if (row.id === 2) {
+        catalogReceived = true;
+        catalogResolve(row);
+      }
     }
   });
   bridge.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
@@ -141,6 +166,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
       },
       server: async () => ({
         endpoint: "fixture",
+        waitForClankieCatalog: true,
         failure: () => undefined,
         output: () => "",
         close: async () => {
@@ -160,7 +186,15 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
         },
       }),
     });
+    expect(catalogReceived).toBe(false);
+    const firstTurn = seat.send("first brief");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(statusReads).toBeGreaterThan(0);
+    expect(turns).toBe(0);
+    assigned = true; // Trusted SeatView.bound callback completes before adapter sends.
     const reply = await catalog;
+    expect(await firstTurn).toMatchObject({ turnId: "first-turn" });
+    expect(turns).toBe(1);
     expect(reply).toMatchObject({
       result: { tools: [{ name: "message_clankie" }, { name: "linear_get_issue" }] },
     });

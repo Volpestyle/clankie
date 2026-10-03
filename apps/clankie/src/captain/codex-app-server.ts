@@ -148,6 +148,7 @@ interface CodexServerConnection {
   /** Local child identity; remote launchers must not expose a remote PID here. */
   readonly pid?: number;
   readonly remoteRegistration?: RemoteCodexRegistration;
+  readonly waitForClankieCatalog?: true;
   readonly endpoint: string;
   connect(): Promise<WebSocket | undefined>;
   /** Why the server is gone, once it is. */
@@ -526,6 +527,43 @@ export async function startCodexAppServerSeat(options: {
         });
     };
     if (options.resumeThreadId) await subscribe();
+    let catalogReady = !server.waitForClankieCatalog;
+    const waitForCatalog = async () => {
+      if (catalogReady) return;
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        options.signal?.throwIfAborted();
+        if (closed || stopped || server.failure())
+          throw new Error("Private Codex server disconnected before catalog readiness");
+        try {
+          const status = record(
+            await client!.request(
+              "mcpServerStatus/list",
+              { threadId, detail: "toolsAndAuthOnly" },
+              Math.min(2_000, deadline - Date.now()),
+            ),
+          );
+          const rows = Array.isArray(status.data) ? status.data.map(record) : [];
+          const matches = rows.filter((row) => row.name === "clankie");
+          if (
+            status.nextCursor == null &&
+            matches.length === 1 &&
+            matches[0]!.runtimeStatus === "connected" &&
+            matches[0]!.toolsError == null &&
+            Object.hasOwn(record(matches[0]!.tools), "message_clankie")
+          ) {
+            catalogReady = true;
+            return;
+          }
+        } catch {
+          /* Read-only readiness checks can be retried within this deadline. */
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(250, Math.max(0, deadline - Date.now()))),
+        );
+      }
+      throw new Error("Private Codex Clankie catalog was not ready; no first turn was sent");
+    };
     let sending: Promise<unknown> = Promise.resolve();
     return {
       threadId,
@@ -533,6 +571,7 @@ export async function startCodexAppServerSeat(options: {
       viewArgs,
       send(message, guard) {
         const send = async () => {
+          await waitForCatalog();
           // The owner may have started a native turn before the first delivery.
           // Subscribe first when its rollout exists so we steer that turn.
           await subscribe(false);

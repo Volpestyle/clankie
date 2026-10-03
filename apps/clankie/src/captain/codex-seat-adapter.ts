@@ -166,6 +166,9 @@ export function createCodexSeatAdapter(
             launch.cwd,
             launch.env,
           );
+          // Only this dedicated remote launch must bootstrap before Clankie's
+          // project assignment exists. Other servers retain their required flags.
+          if (options.serverForView) trackerOverrides.push("mcp_servers.clankie.required=false");
           // A private local app-server needs the same worker bridge even when its
           // selected account has no user-scoped MCP registration. This grants no tools.
           if (options.localProcess)
@@ -228,6 +231,8 @@ export function createCodexSeatAdapter(
           ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
           report();
           await reporting;
+          await view.guard?.();
+          await view.bound?.(ref);
           let initialDispatch = Boolean(launch.brief);
           const control: SeatControl = {
             ref,

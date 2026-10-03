@@ -106,6 +106,26 @@ the original PID and checks its full creation timestamp on the held handle befor
 termination, so a reused PID is not killed. An unavailable SSH cleanup cannot
 restore authority. A service restart does not adopt detached survivors.
 
+Only the service-owned dedicated remote launch overrides
+`mcp_servers.clankie.required=false` in both server and view arguments. Other
+servers retain their required flags; owner configuration is unchanged. An
+optional asynchronous connection lets the native thread bind while its bridge
+still receives denied responses. There is no pre-thread private authority.
+
+After the thread binds and Herdr reports it, the trusted controller's `bound`
+callback checks the exact pane, harness, session, fresh process proof, project
+admission and allocation before recording project membership. It repeats host
+identity and admission checks after that observation. The first brief then waits
+at most 20 seconds for thread-specific `mcpServerStatus/list` to report Clankie
+connected with its catalog. A missing or failed catalog prevents the first turn;
+this readiness state never substitutes for fresh per-tool authorization.
+
+The atomic launch inherits the remote machine's environment, including its
+provider/account context, and resolves the two Herdr discovery variables from
+the live allocated pane. As before, arbitrary Mac environment overrides are
+unsupported. The detached launch has no inherited SSH stdio or diagnostic log;
+actual native app-server startup remains part of owner acceptance.
+
 The atomic launch mechanism has an OS-only bounded sleeper check; native hired
 Codex end-to-end acceptance still requires an owner-authorized native run. The
 deterministic protocol fixture holds the bridge's first catalog through denied

@@ -35,6 +35,47 @@ function fixture(nativePolicy?: NonNullable<Parameters<typeof createCodexSeatAda
 }
 
 describe("Codex harness seat adapter", () => {
+  it("binds the reported native session before its first brief, and closes on binding failure", async () => {
+    const f = fixture();
+    const bound = vi.fn(async (ref) => {
+      expect(ref).toEqual({ harness: "codex", paneId: "w1:p1", sessionId: "thread-1" });
+      expect(f.herdr).toHaveBeenCalled();
+      expect(f.send).not.toHaveBeenCalled();
+      throw new Error("process replaced");
+    });
+    expect(
+      await f.adapter.start({ harness: "codex", cwd: "/scratch", brief: "first" }, { ...f.view, bound }),
+    ).toMatchObject({ outcome: "failed", detail: expect.stringContaining("process replaced") });
+    expect(bound).toHaveBeenCalledOnce();
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.close).toHaveBeenCalledOnce();
+  });
+
+  it("overrides only Clankie's required flag for a dedicated remote server and its view", async () => {
+    const f = fixture();
+    const inherited = ["mcp_servers.clankie.required=true", "mcp_servers.other.required=true"];
+    const adapter = createCodexSeatAdapter({
+      start: f.start,
+      herdr: f.herdr,
+      trackerOverrides: async () => [...inherited],
+      serverForView: () => async () => {
+        throw new Error("fixture");
+      },
+    });
+    const started = await adapter.start({ harness: "codex", cwd: "/scratch", brief: "" }, f.view);
+    expect(started.outcome).toBe("started");
+    expect(f.start.mock.calls[0]![0].config).toEqual([...inherited, "mcp_servers.clankie.required=false"]);
+    if (started.outcome === "started") await started.control.close();
+    const ordinary = createCodexSeatAdapter({
+      start: f.start,
+      herdr: f.herdr,
+      trackerOverrides: async () => [...inherited],
+    });
+    const local = await ordinary.start({ harness: "codex", cwd: "/scratch", brief: "" }, f.view);
+    expect(f.start.mock.calls.at(-1)![0].config).toEqual(inherited);
+    if (local.outcome === "started") await local.control.close();
+  });
+
   it("resumes the exact existing thread without creating or prompting a fresh session", async () => {
     const f = fixture();
     const started = await f.adapter.start(

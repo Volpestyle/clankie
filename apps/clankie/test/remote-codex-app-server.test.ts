@@ -360,3 +360,32 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
   );
   expect(decoded(commands.at(-1)!)).not.toContain("taskkill");
 });
+
+it("releases an atomic registration and its exact process when the local forward cannot allocate", async () => {
+  const registration = { release: vi.fn(), bindThread: vi.fn(), observeThread: vi.fn() };
+  const shell = vi.fn(async (command: string) =>
+    decoded(command).includes("$created=[ClankieCodexLaunch]::Start")
+      ? JSON.stringify({
+          pid: 42,
+          log: "",
+          binding: { session: "default", socketPath: "C:\\herdr.sock" },
+          shell: { pid: 10, startTime: "shell" },
+          server: { pid: 42, startTime: "2026-10-03T00:00:00.1234567Z", executable: "C:\\codex.exe" },
+        })
+      : "",
+  );
+  await expect(
+    remoteCodexServer({
+      fleet: windows,
+      shell,
+      privateSeat: { pane: "w1:p1", register: () => registration },
+      freeLocalPort: async () => {
+        throw new Error("no local port");
+      },
+    })({ cwd: "C:\\repo", configArgs: [], onExit: () => {} }),
+  ).rejects.toThrow("no local port");
+  expect(registration.release).toHaveBeenCalledOnce();
+  expect(decoded(shell.mock.calls.at(-1)![0])).toContain(
+    "[ClankieCodexLaunch]::Stop(42,'2026-10-03T00:00:00.1234567Z')",
+  );
+});

@@ -227,10 +227,11 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
     let closed = false;
     let output = `remote log ${started.log} on ${fleet.id}`;
     let tailedAt = Date.now();
-    const localPort = await (options.freeLocalPort ?? freeLocalPort)();
+    let localPort: number;
     let forward: ChildProcess;
     let forwardErrors = "";
     try {
+      localPort = await (options.freeLocalPort ?? freeLocalPort)();
       forward = (options.spawn ?? spawn)("ssh", forwardSshArgs(fleet, localPort, remotePort), {
         stdio: ["ignore", "ignore", "pipe"],
       });
@@ -269,7 +270,7 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
       return raw.trim() === "true";
     };
     return {
-      ...(registration ? { remoteRegistration: registration } : {}),
+      ...(registration ? { remoteRegistration: registration, waitForClankieCatalog: true as const } : {}),
       endpoint: `ws://127.0.0.1:${String(remotePort)}`,
       async connect() {
         if (!(await ownsListener())) return undefined;

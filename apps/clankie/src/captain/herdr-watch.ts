@@ -1478,6 +1478,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     agent: HerdrAgentSnapshot,
     input: SpawnOperatorSeat,
     authority?: HireAuthority,
+    requireProof = false,
   ): Promise<void> {
     if (agent.session === undefined) throw new Error("Native hire identity has not been observed");
     const occupantId = occupantIdForHerdrSession(agent.session);
@@ -1488,6 +1489,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const proof = await this.projectPolicy
         ?.proof?.(input.fleet ?? "default", agent.paneId)
         .catch(() => undefined);
+      if (
+        requireProof &&
+        (!proof ||
+          proof.nativeOccupantId !== occupantId ||
+          proof.pane !== agent.paneId ||
+          proof.fleet !== (input.fleet ?? "default"))
+      )
+        throw new Error("Native hire binding has no matching current process proof; no brief was sent");
       this.projectHires.observe(allocation, agent.terminalId, occupantId, proof);
     }
     // Recording the exact result is historical proof, not a new effect. Preserve
@@ -1733,6 +1742,26 @@ export class HerdrWatchStore implements HerdrWatchPort {
             paneId,
             name: subject,
             ...(authority === undefined ? {} : { guard: () => assertConversationAuthority(authority) }),
+            bound: async (ref) => {
+              if (ref.paneId !== paneId || ref.harness !== input.harness || !ref.sessionId)
+                throw new Error("Native hire binding does not match the allocated pane and harness");
+              if (authority !== undefined) await assertConversationAuthority(authority);
+              await this.admitProjectLaunch(input);
+              const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
+              const matches = (current: HerdrAgentSnapshot) =>
+                current.paneId === paneId &&
+                current.agent === ref.harness &&
+                current.status !== "offline" &&
+                current.status !== "unknown" &&
+                nativeSessionId(current) === ref.sessionId;
+              if (!matches(agent)) throw new Error("Native hire binding does not match the live session");
+              await this.observeHireIdentity(receiptKey, agent, input, authority, true);
+              const final = await this.runner.get(paneId);
+              if (!matches(final) || final.terminalId !== agent.terminalId)
+                throw new Error("Native hire changed while binding; no brief was sent");
+              if (authority !== undefined) await assertConversationAuthority(authority);
+              await this.admitProjectLaunch(input);
+            },
             run: async (argv) => {
               if (authority !== undefined) await assertConversationAuthority(authority);
               await this.admitProjectLaunch(input);
