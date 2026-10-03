@@ -3,8 +3,10 @@ import { powershellScriptCommand } from "./herdr-fleet.ts";
 /** Trusted service-authored relay. SSH stdout carries frames; client TCP carries only bytes.
  * The peer tuple is taken from AcceptTcpClient's socket, never an HTTP field. EOF closes all peers.
  */
-export function windowsFleetRelayCommand(): string {
-  return powershellScriptCommand(String.raw`
+export function windowsFleetRelayCommand(returnPort: number): string {
+  if (!Number.isInteger(returnPort) || returnPort < 1 || returnPort > 65535)
+    throw new Error("Invalid relay return port");
+  const encoded = powershellScriptCommand(String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
 using System;
@@ -13,12 +15,25 @@ using System.Net;
 using System.Net.Sockets;
 using System.Collections.Generic;
 using System.Threading;
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 public static class ClankieRelay {
   static readonly object outputLock = new object();
   static readonly object clientsLock = new object();
   static readonly Dictionary<uint, TcpClient> clients = new Dictionary<uint, TcpClient>();
   static readonly Stream output = Console.OpenStandardOutput();
-  static readonly Stream input = Console.OpenStandardInput();
+  static Stream input;
+  static TcpClient control;
+  public class Command { public uint Id; public string Script; }
+  static readonly BlockingCollection<Command> commands = new BlockingCollection<Command>(16);
+  public static bool Running { get { return !stopped; } }
+  public static Command NextCommand() { Command command; return commands.TryTake(out command, 250) ? command : null; }
+  public static void Result(uint id, string result) {
+    byte[] bytes = Encoding.UTF8.GetBytes(result);
+    if (bytes.Length > MAX_FRAME) { Stop(); return; }
+    Send(4, id, bytes, bytes.Length);
+  }
   static TcpListener listener;
   static volatile bool stopped;
   const int MAX_FRAME = 65536;
@@ -46,14 +61,20 @@ public static class ClankieRelay {
   static void Stop() {
     stopped = true;
     if (listener != null) listener.Stop();
+    if (control != null) control.Close();
     lock (clientsLock) { foreach (var client in clients.Values) client.Close(); clients.Clear(); }
   }
   static void Receive() {
     try {
       while (!stopped) {
         byte[] header = Read(9); byte kind = header[0]; uint id = BitConverter.ToUInt32(header, 1); int length = BitConverter.ToInt32(header, 5);
-        if (id == 0 || length < 0 || length > MAX_FRAME || (kind != 2 && kind != 3) || (kind == 3 && length != 0)) throw new Exception("Invalid relay frame");
-        byte[] bytes = Read(length); TcpClient client;
+        if (id == 0 || length < 0 || length > MAX_FRAME || (kind != 2 && kind != 3 && kind != 4) || (kind == 3 && length != 0)) throw new Exception("Invalid relay frame");
+        byte[] bytes = Read(length);
+        if (kind == 4) {
+          if (!commands.TryAdd(new Command { Id=id, Script=Encoding.UTF8.GetString(bytes) })) throw new Exception("Relay proof queue full");
+          continue;
+        }
+        TcpClient client;
         lock (clientsLock) {clients.TryGetValue(id, out client);}
         if (client == null) continue;
         if (kind == 3) { Close(id); continue; }
@@ -68,10 +89,17 @@ public static class ClankieRelay {
     } catch { }
     finally { Close(id); try {Send(3, id, new byte[0], 0);} catch {Stop();} }
   }
-  public static void Run() {
+  public static void Start(int returnPort) {
+    byte[] nonce = new byte[32]; using (var random = RandomNumberGenerator.Create()) { random.GetBytes(nonce); }
+    Send(5, 0, nonce, nonce.Length);
+    control = new TcpClient("127.0.0.1", returnPort);
+    input = control.GetStream(); input.Write(nonce, 0, nonce.Length); input.Flush();
     listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(64);
     Send(0, 0, BitConverter.GetBytes(((IPEndPoint)listener.LocalEndpoint).Port), 4);
     var reader = new Thread(Receive); reader.IsBackground = true; reader.Start();
+    var acceptor = new Thread(Accept); acceptor.IsBackground = true; acceptor.Start();
+  }
+  static void Accept() {
     uint next = 0;
     try {
       while (!stopped) {
@@ -92,6 +120,17 @@ public static class ClankieRelay {
   }
 }
 '@
-[ClankieRelay]::Run()
-`);
+[ClankieRelay]::Start(${returnPort})
+while ([ClankieRelay]::Running) {
+  $command = [ClankieRelay]::NextCommand()
+  if ($null -eq $command) { continue }
+  try {
+    $result = (& ([scriptblock]::Create($command.Script)) | Out-String).Trim()
+    [ClankieRelay]::Result($command.Id, $result)
+  } catch { [ClankieRelay]::Result($command.Id, 'null') }
+}
+`)
+    .split(" ")
+    .at(-1)!;
+  return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}`;
 }

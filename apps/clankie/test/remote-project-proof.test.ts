@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createRemoteProjectObserver, createRemoteWorkspaceCanonical } from "../src/remote-project-proof.ts";
+import {
+  createRemoteProjectObserver,
+  createRemoteWorkspaceCanonical,
+  createRemoteGitWorktreeObserver,
+  createRemoteWorktreeRootObserver,
+} from "../src/remote-project-proof.ts";
 import { windowsProcessCommand } from "../src/windows-process-probe.ts";
 
 const fleet = { id: "pc", session: "kh2-desktop", ssh: { host: "pc", shell: "powershell" as const } };
@@ -28,10 +33,7 @@ function fixture() {
 }
 const stream = { clientPort: 1234, serverPort: 2345, alive: () => true };
 function setup(first = fixture(), last = structuredClone(first)) {
-  const shell = vi
-    .fn()
-    .mockResolvedValueOnce(JSON.stringify(first))
-    .mockResolvedValueOnce(JSON.stringify(last));
+  const shell = vi.fn().mockResolvedValue(JSON.stringify({ first, last }));
   const registered = vi.fn().mockResolvedValue(fleet);
   return {
     shell,
@@ -49,8 +51,17 @@ describe("remote project process proof", () => {
       processes: [{ pid: 30 }],
       workspace: { machineId: "pc", platform: "windows", canonicalPath: "C:\\repos\\rivals-agent" },
     });
-    expect(shell).toHaveBeenCalledTimes(2);
+    expect(shell).toHaveBeenCalledTimes(1);
   });
+  it("proves a native startup with no reported session using a disjoint process identity", async () => {
+    const observation = fixture();
+    delete (observation.agent as { agent_session?: unknown }).agent_session;
+    const proof = await setup(observation).observe("pc", "w3:p8", stream);
+    expect(proof?.nativeSessionPending).toBe(true);
+    expect(proof?.nativeOccupantId).toMatch(/^process-/u);
+    expect(proof?.workspace?.canonicalPath).toBe("C:\\repos\\rivals-agent");
+  });
+
   it("allows host doctor observation without pretending it authenticates a socket", async () => {
     expect(await setup().observe("pc", "w3:p8")).toBeDefined();
   });
@@ -182,10 +193,44 @@ describe("remote project process proof", () => {
     });
     const script = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
     expect(script).toContain("ReadProcessMemory");
+    expect(script).toContain("DuplicateHandle(handle, directoryHandle");
+    expect(script).toContain("parameters + 0x48");
     expect(script).toContain("GetFinalPathNameByHandle");
-    expect(script).toContain("-LocalPort 1234 -RemoteAddress 127.0.0.1 -RemotePort 2345");
+    expect(script).toContain("[ClankieProcess]::Owners(1234, 2345)");
+    expect(script).toContain("GetExtendedTcpTable");
     expect(script).not.toContain("Get-Location");
   });
+  it("observes remote Git facts only on the registered Windows machine", async () => {
+    const facts = {
+      cwd: "C:\\work\\topic",
+      worktreePath: "C:\\work\\topic",
+      gitDirectory: "C:\\repo\\.git\\worktrees\\topic",
+      commonDirectory: "C:\\repo\\.git",
+      repoPath: "C:\\repo",
+      repoCommonDirectory: "C:\\repo\\.git",
+      registeredWorktrees: ["C:\\work\\topic"],
+      gitFilePath: "C:\\work\\topic\\.git",
+      gitDirectoryBacklink: "C:\\work\\topic\\.git",
+    };
+    const shell = vi.fn(async (_command: string) => JSON.stringify(facts));
+    const options = { fleet: async () => fleet, shell: () => shell };
+    const observe = createRemoteGitWorktreeObserver(options);
+    expect(await observe({ machineId: "pc", repoPath: "C:\\repo" }, "C:\\work\\topic")).toEqual(facts);
+    expect(await observe({ machineId: "other", repoPath: "C:\\repo" }, "C:\\work\\topic")).toBeUndefined();
+    const script = Buffer.from(shell.mock.calls[0]![0].split(" ").at(-1)!, "base64").toString("utf16le");
+    expect(script).toContain("'worktree','list','--porcelain','-z'");
+    expect(script).toContain("Join-Path $gitDir 'gitdir'");
+    shell.mockRejectedValue(new Error("SSH failed"));
+    expect(await observe({ machineId: "pc", repoPath: "C:\\repo" }, "C:\\work\\topic")).toBeUndefined();
+    const root = createRemoteWorktreeRootObserver(options);
+    expect(
+      await root({ machineId: "pc", platform: "posix", path: "/work", repoPath: "/repo" }),
+    ).toBeUndefined();
+    expect(
+      await root({ machineId: "pc", platform: "windows", path: "C:\\work", repoPath: "C:\\repo" }),
+    ).toBeUndefined();
+  });
+
   it("canonicalizes only on the registered Windows fleet and fails on SSH loss", async () => {
     const shell = vi.fn().mockResolvedValue(JSON.stringify("C:\\repos"));
     const canonical = createRemoteWorkspaceCanonical({ fleet: async () => fleet, shell: () => shell });

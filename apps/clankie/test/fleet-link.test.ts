@@ -1,3 +1,4 @@
+import { createConnection } from "node:net";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, spawn } from "node:child_process";
@@ -232,5 +233,56 @@ describe("a fleet link (VUH-1527)", () => {
     expect(child.kill).toHaveBeenCalledTimes(1); // only our SSH tunnel, never a Herdr worker
     expect(shell).toHaveBeenCalledTimes(2); // session read and link metadata write, no stop
     links.close();
+  });
+  it("publishes credential-free PC discovery only after the SSH-bound response channel is ready", async () => {
+    const forward = Object.assign(new EventEmitter(), { stderr: new PassThrough(), kill: vi.fn() });
+    const remote = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+    });
+    const launch = vi.fn(() => forward) as unknown as typeof spawn;
+    const stream = vi.fn(() => remote as unknown as ChildProcess);
+    const shell = vi.fn(async (_command: string) =>
+      shell.mock.calls.length === 1
+        ? JSON.stringify({ sessions: [{ name: "default", socket_path: "C:\\herdr.sock" }] })
+        : "",
+    );
+    const links = new FleetLinks({ shell: () => shell, stream: () => stream, spawn: launch });
+    links.start([pc], 4567);
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce());
+    const argv = vi.mocked(launch).mock.calls[0]![1] as string[];
+    const reverse = argv[argv.indexOf("-R") + 1]!;
+    const returnPort = Number(reverse.split(":").at(-1));
+    forward.stderr.write("Allocated port 55000 for remote forward\n");
+    const frame = (kind: number, payload: Buffer) => {
+      const value = Buffer.alloc(9 + payload.length);
+      value[0] = kind;
+      value.writeUInt32LE(payload.length, 5);
+      payload.copy(value, 9);
+      return value;
+    };
+    const nonce = Buffer.alloc(32, 1);
+    remote.stdout.write(frame(5, nonce));
+    const port = Buffer.alloc(4);
+    port.writeUInt32LE(55001);
+    remote.stdout.write(frame(0, port));
+    expect(shell).not.toHaveBeenCalled();
+    const response = createConnection({ host: "127.0.0.1", port: returnPort });
+    response.on("error", () => {});
+    response.write(nonce);
+    try {
+      await vi.waitFor(() => expect(links.status("pc")).toMatchObject({ state: "ready", port: 55001 }));
+      const written = decoded(shell.mock.calls[1]![0]);
+      expect(written).toContain('"schemaVersion":2');
+      expect(written).toContain('"authentication":"local-process"');
+      expect(written).not.toContain('"token"');
+      remote.emit("exit", 1);
+      expect(links.status("pc")).toMatchObject({ state: "unreachable" });
+    } finally {
+      response.destroy();
+      links.close();
+    }
   });
 });

@@ -237,9 +237,11 @@ proof. This removes nested duplicate scans without caching authority between
 requests. A slow or unavailable observation still denies access; a completed
 proof never grants access beyond the live account and revocation checks.
 
-SSH/PC fleet links still carry native messages, but they do not yet provide the
-OS process proof needed for project tools (VUH-1563). Remote project calls deny
-access. Shared daemons, unregistered detached processes, foreground shell
+Windows SSH fleets prove native Claude and Codex agents through a service-owned
+relay on their configured SSH connection. [Remote process proof](remote-process-proof.md)
+explains the socket binding, native observations and fail-closed behavior. The
+project workspace uses the registered fleet's machine ID; another machine's same
+path confers nothing. Shared daemons, unregistered detached processes, foreground shell
 or Node wrappers without the exact installed script in their retained argv,
 unsupported harnesses and non-macOS local listeners also lack
 this project's foreground-agent proof. Pi's installed launcher rewrites its process title and removes the script argv.

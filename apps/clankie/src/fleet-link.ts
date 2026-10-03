@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import type { Socket } from "node:net";
+import { createServer, type Server, type Socket } from "node:net";
 import type { HttpBindings, Http2Bindings } from "@hono/node-server";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
@@ -20,15 +20,12 @@ import {
 } from "./herdr-fleet.ts";
 
 /**
- * How a machine on an ssh fleet reaches Clankie (VUH-1527, ADR 0213 phase 2):
- * the Claude worker channel and hooks of a seat he hired there, and any agent
- * there writing to him. The link is the reverse of the Codex app-server
- * forward: one ssh connection per fleet carries a `-R` forward from that
- * machine's loopback to a listener here that answers the fleet seat routes and
- * nothing else, and a token that authorizes only those routes, only for panes
- * on that fleet. The token travels to the machine inside
- * `~/.clankie/links/<fleet>.json`, beside the fleet's Herdr socket there,
- * readable by its owner only; the operator credential never leaves this Mac.
+ * Windows fleets use a service-authored loopback relay over the configured SSH
+ * connection. Authenticated stdout identifies each accepted TCP stream; the
+ * existing reverse forward carries replies and fresh observation commands.
+ * A one-use relay nonce binds that return channel and never leaves relay memory.
+ * Discovery contains only the fleet, Herdr socket and loopback URL, not a bearer.
+ * Legacy POSIX link tokens identify a machine but confer no project/mailbox authority.
  */
 
 /** The only paths the link listener answers (seat routes and the fleet's granted tools); everything else is 404. */
@@ -115,6 +112,8 @@ export function writeLinkFileCommand(fleet: HerdrFleet, file: FleetLinkFile | Pr
 class FleetLink {
   private child: ChildProcess | undefined;
   private relay: RemoteFleetRelay | undefined;
+  private responseServer: Server | undefined;
+  private relayChild: ChildProcess | undefined;
   private current: FleetLinkState = { state: "starting", since: new Date().toISOString() };
   private closed = false;
   private backoff = RESTART_MIN_MS;
@@ -139,52 +138,94 @@ class FleetLink {
   }
 
   start(): void {
-    if (this.closed || this.child !== undefined) return;
+    if (this.closed || this.child !== undefined || this.responseServer !== undefined) return;
     this.current = { state: "starting", since: new Date().toISOString() };
     const trustedRelay = this.fleet.ssh.shell === "powershell" && this.options.stream !== undefined;
-    const child = trustedRelay
-      ? this.options.stream!(windowsFleetRelayCommand())
-      : (this.options.spawn ?? spawn)("ssh", linkSshArgs(this.fleet, this.options.localPort), {
-          stdio: ["ignore", "ignore", "pipe"],
+    const launch = (forwardPort: number, responseServer?: Server) => {
+      if (this.closed) {
+        responseServer?.close();
+        return;
+      }
+      const child = (this.options.spawn ?? spawn)("ssh", linkSshArgs(this.fleet, forwardPort), {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      this.child = child;
+      let stderr = "";
+      let port: number | undefined;
+      const publish = (allocatedPort: number) => {
+        if (port !== undefined) return;
+        port = allocatedPort;
+        void this.socket()
+          .then((socket) => {
+            const discovery = { fleet: this.fleet.id, socket, url: `http://127.0.0.1:${String(port)}` };
+            const file: FleetLinkFile | ProcessLinkFile = trustedRelay
+              ? { ...discovery, schemaVersion: 2, authentication: "local-process" }
+              : { ...discovery, schemaVersion: 1, token: this.token };
+            return this.options.shell(writeLinkFileCommand(this.fleet, file));
+          })
+          .then(() => {
+            if (this.child !== child) return;
+            this.backoff = RESTART_MIN_MS;
+            this.current = { state: "ready", since: new Date().toISOString(), port: port! };
+            this.options.log?.(`fleet ${this.fleet.id}: link ready on its port ${String(port)}`);
+          })
+          .catch((error: unknown) => {
+            stderr = `could not write the link file: ${error instanceof Error ? error.message : String(error)}`;
+            child.kill();
+          });
+      };
+      child.stderr?.setEncoding("utf8");
+      child.stderr?.on("data", (chunk: string) => {
+        stderr = `${stderr}${chunk}`.slice(-4096);
+        const allocated = /Allocated port (\d+) for remote forward/u.exec(stderr);
+        if (!allocated) return;
+        if (!trustedRelay) {
+          publish(Number(allocated[1]));
+          return;
+        }
+        if (this.relayChild) return;
+        const relayChild = this.options.stream!(windowsFleetRelayCommand(Number(allocated[1])));
+        this.relayChild = relayChild;
+        relayChild.stderr?.on("data", () => {});
+        this.relay = new RemoteFleetRelay({
+          child: relayChild,
+          localPort: this.options.localPort,
+          ready: publish,
+          responseServer: responseServer!,
         });
-    this.child = child;
-    let stderr = "";
-    let port: number | undefined;
-    const publish = (allocatedPort: number) => {
-      if (port !== undefined) return;
-      port = allocatedPort;
-      void this.socket()
-        .then((socket) => {
-          const discovery = { fleet: this.fleet.id, socket, url: `http://127.0.0.1:${String(port)}` };
-          const file: FleetLinkFile | ProcessLinkFile = trustedRelay
-            ? { ...discovery, schemaVersion: 2, authentication: "local-process" }
-            : { ...discovery, schemaVersion: 1, token: this.token };
-          return this.options.shell(writeLinkFileCommand(this.fleet, file));
-        })
-        .then(() => {
-          if (this.child !== child) return;
-          this.backoff = RESTART_MIN_MS;
-          this.current = { state: "ready", since: new Date().toISOString(), port: port! };
-          this.options.log?.(`fleet ${this.fleet.id}: link ready on its port ${String(port)}`);
-        })
-        .catch((error: unknown) => {
-          stderr = `could not write the link file: ${error instanceof Error ? error.message : String(error)}`;
-          child.kill();
+        relayChild.once("exit", () => {
+          if (this.child === child) {
+            child.kill();
+            this.lost(child, "Remote proof relay disconnected");
+          }
         });
+        relayChild.once("error", () => {
+          if (this.child === child) {
+            child.kill();
+            this.lost(child, "Remote proof relay unavailable");
+          }
+        });
+      });
+      child.on("error", (error) => this.lost(child, error.message));
+      child.on("exit", (code, signal) =>
+        this.lost(child, stderr.trim().split("\n").at(-1) || `ssh exited (${String(code ?? signal)})`),
+      );
     };
-    if (trustedRelay)
-      this.relay = new RemoteFleetRelay({ child, localPort: this.options.localPort, ready: publish });
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderr = `${stderr}${chunk}`.slice(-4096);
-      if (trustedRelay) return;
-      const allocated = /Allocated port (\d+) for remote forward/u.exec(stderr);
-      if (allocated) publish(Number(allocated[1]));
+    if (!trustedRelay) {
+      launch(this.options.localPort);
+      return;
+    }
+    const server = createServer((socket) => {
+      if (!this.relay) socket.destroy();
     });
-    child.on("error", (error) => this.lost(child, error.message));
-    child.on("exit", (code, signal) =>
-      this.lost(child, stderr.trim().split("\n").at(-1) || `ssh exited (${String(code ?? signal)})`),
-    );
+    this.responseServer = server;
+    server.once("error", () => {
+      this.close();
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address && typeof address !== "string") launch(address.port, server);
+    });
   }
 
   /** The fleet's Herdr socket on that machine: how its panes say which session they are in. */
@@ -204,10 +245,20 @@ class FleetLink {
     return this.current.state === "ready" ? this.relay?.stream(socket) : undefined;
   }
 
+  observe(command: string, timeoutMs?: number): Promise<string> {
+    return this.current.state === "ready" && this.relay
+      ? this.relay.execute(command, timeoutMs)
+      : Promise.reject(new Error("Remote proof relay unavailable"));
+  }
+
   close(): void {
     this.closed = true;
     this.relay?.close();
     this.relay = undefined;
+    this.relayChild?.kill();
+    this.relayChild = undefined;
+    this.responseServer?.close();
+    this.responseServer = undefined;
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.child?.kill();
     this.child = undefined;
@@ -218,6 +269,10 @@ class FleetLink {
     this.child = undefined;
     this.relay?.close();
     this.relay = undefined;
+    this.relayChild?.kill();
+    this.relayChild = undefined;
+    this.responseServer?.close();
+    this.responseServer = undefined;
     this.current = { state: "unreachable", since: new Date().toISOString(), error: error.slice(0, 500) };
     this.options.log?.(`fleet ${this.fleet.id}: link down: ${error}`);
     if (this.closed) return;
@@ -322,6 +377,14 @@ export class FleetLinks {
       if (expected.length === presented.length && timingSafeEqual(expected, presented)) return link.fleet.id;
     }
     return undefined;
+  }
+
+  /** Fresh commands reuse the resident trusted relay; no process authority is cached. */
+  observer(fleet: HerdrFleet): FleetShellRun | undefined {
+    const link = this.links.get(fleet.id);
+    return link && JSON.stringify(link.fleet) === JSON.stringify(fleet) && link.status().state === "ready"
+      ? (command, timeoutMs) => link.observe(command, timeoutMs)
+      : undefined;
   }
 
   status(fleet: string): FleetLinkState | undefined {

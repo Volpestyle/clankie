@@ -120,8 +120,60 @@ describe("trusted remote SSH relay", () => {
     child.emit("exit", 1);
     expect(proof.alive()).toBe(false);
   });
+  it("binds the return channel to a one-use nonce learned only from SSH stdout", async () => {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("no server");
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      kill: vi.fn(),
+    });
+    const ready = vi.fn();
+    const relay = new RemoteFleetRelay({
+      child: child as unknown as ChildProcess,
+      localPort: 1,
+      responseServer: server,
+      ready,
+    });
+    cleanup.push(() => {
+      relay.close();
+      server.close();
+    });
+    const nonce = Buffer.alloc(32, 7);
+    child.stdout.write(frame(5, 0, nonce));
+    child.stdout.write(frame(0, 0, ports(1234)));
+    const forged = createConnection({ host: "127.0.0.1", port: address.port });
+    forged.on("error", () => {});
+    cleanup.push(() => forged.destroy());
+    forged.write(Buffer.alloc(32, 9));
+    await settle(() => forged.destroyed);
+    expect(ready).not.toHaveBeenCalled();
+    const genuine = createConnection({ host: "127.0.0.1", port: address.port });
+    genuine.on("error", () => {});
+    cleanup.push(() => genuine.destroy());
+    genuine.write(nonce);
+    await settle(() => ready.mock.calls.length === 1);
+    const replay = createConnection({ host: "127.0.0.1", port: address.port });
+    replay.on("error", () => {});
+    cleanup.push(() => replay.destroy());
+    replay.write(nonce);
+    await settle(() => replay.destroyed);
+    expect(ready).toHaveBeenCalledTimes(1);
+    const request = relay.execute(
+      "powershell.exe -NoProfile -NonInteractive -EncodedCommand " +
+        Buffer.from("'result'", "utf16le").toString("base64"),
+    );
+    child.stdout.write(frame(4, 1, Buffer.from("fresh-result")));
+    await expect(request).resolves.toBe("fresh-result");
+    genuine.destroy();
+    await settle(() => child.kill.mock.calls.length > 0);
+    await expect(relay.execute("arbitrary request")).rejects.toThrow("unavailable");
+  });
+
   it("ships a relay that derives endpoints exclusively from accepted kernel sockets", () => {
-    const command = windowsFleetRelayCommand();
+    const command = windowsFleetRelayCommand(1234);
     const script = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
     expect(script).toContain("AcceptTcpClient");
     expect(script).toContain("client.Client.RemoteEndPoint");

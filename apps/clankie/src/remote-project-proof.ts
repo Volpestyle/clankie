@@ -1,10 +1,16 @@
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { win32 } from "node:path";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import type { FleetShellRun, HerdrFleet } from "./herdr-fleet.ts";
 import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
-import { windowsCanonicalCommand, windowsProcessCommand } from "./windows-process-probe.ts";
+import {
+  windowsCanonicalCommand,
+  windowsProcessCommand,
+  windowsGitWorktreeCommand,
+  windowsWorktreeRootCommand,
+} from "./windows-process-probe.ts";
 
 interface Process {
   pid: number;
@@ -67,14 +73,14 @@ function select(observation: Observation, fleet: HerdrFleet, pane: string, strea
   )
     return undefined;
   const agent = parseHerdrAgentResult(JSON.stringify({ result: { agent: observation.agent } }));
-  if (agent.paneId !== pane || !agent.session || !["claude", "codex"].includes(agent.agent ?? ""))
-    return undefined;
+  if (agent.paneId !== pane || !["claude", "codex"].includes(agent.agent ?? "")) return undefined;
   const shell = observation.processes.find((process) => process.pid === observation.info.shell_pid);
   const foreground = observation.info.foreground_process_group_id;
   if (!shell || shell.pid === foreground) return undefined;
   const candidates = observation.nativeProcesses.flatMap((native) => {
     if (
       !observation.installed.includes(native.executable) ||
+      typeof native.cwd !== "string" ||
       !win32.isAbsolute(native.cwd) ||
       win32.normalize(native.cwd) !== native.cwd
     )
@@ -106,7 +112,21 @@ function select(observation: Observation, fleet: HerdrFleet, pane: string, strea
     fleet: fleet.id,
     pane,
     binding: observation.binding,
-    nativeOccupantId: occupantIdForHerdrSession(agent.session),
+    nativeOccupantId: agent.session
+      ? occupantIdForHerdrSession(agent.session)
+      : `process-${createHash("sha256")
+          .update(
+            JSON.stringify([
+              fleet.id,
+              observation.binding,
+              pane,
+              agent.agent,
+              agent.terminalId,
+              candidate.chain,
+            ]),
+          )
+          .digest("hex")}`,
+    ...(agent.session ? {} : { nativeSessionPending: true as const }),
     shell: { pid: shell.pid, startTime: shell.startTime },
     processes: [{ pid: candidate.native.pid, startTime: candidate.chain[0]!.startTime }],
     workspace: { machineId: fleet.id, platform: "windows", canonicalPath: candidate.native.cwd },
@@ -139,9 +159,10 @@ export function createRemoteProjectObserver(options: Options) {
         ...(stream ? { clientPort: stream.clientPort, serverPort: stream.serverPort } : {}),
       });
       const shell = options.shell(fleet);
-      const first = select(JSON.parse(await shell(command, 8_000)), fleet, pane, stream);
+      const snapshots = JSON.parse(await shell(command, 10_000)) as { first: Observation; last: Observation };
+      const first = select(snapshots.first, fleet, pane, stream);
       if (!first || (stream && !stream.alive())) return undefined;
-      const last = select(JSON.parse(await shell(command, 8_000)), fleet, pane, stream);
+      const last = select(snapshots.last, fleet, pane, stream);
       if (
         !isDeepStrictEqual(first, last) ||
         !isDeepStrictEqual(await options.fleet(fleetId), fleet) ||
@@ -171,6 +192,78 @@ export function createRemoteWorkspaceCanonical(options: Options) {
       return typeof result === "string" && isDeepStrictEqual(await options.fleet(machineId), fleet)
         ? result
         : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+interface GitWorktreeFacts {
+  cwd: string;
+  worktreePath: string;
+  gitDirectory: string;
+  commonDirectory: string;
+  repoPath: string;
+  repoCommonDirectory: string;
+  registeredWorktrees: readonly string[];
+  gitFilePath: string;
+  gitDirectoryBacklink: string;
+}
+interface WorktreeRootFacts {
+  path: string;
+  repoPath: string;
+  commonDirectory: string;
+  homePath: string;
+}
+
+/** These Git facts are evidence, not authority: project policy still compares the enrolled root. */
+export function createRemoteGitWorktreeObserver(options: Options) {
+  return async (
+    root: { machineId: string; repoPath: string },
+    cwd: string,
+  ): Promise<GitWorktreeFacts | undefined> => {
+    try {
+      const fleet = await options.fleet(root.machineId);
+      if (
+        !fleet ||
+        fleet.id !== root.machineId ||
+        fleet.ssh.shell !== "powershell" ||
+        !win32.isAbsolute(cwd) ||
+        !win32.isAbsolute(root.repoPath)
+      )
+        return undefined;
+      const result = JSON.parse(
+        await options.shell(fleet)(windowsGitWorktreeCommand(root.repoPath, cwd), 5_000),
+      );
+      return result && isDeepStrictEqual(await options.fleet(root.machineId), fleet) ? result : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+export function createRemoteWorktreeRootObserver(options: Options) {
+  return async (input: {
+    machineId: string;
+    platform: string;
+    path: string;
+    repoPath: string;
+  }): Promise<WorktreeRootFacts | undefined> => {
+    try {
+      const fleet = await options.fleet(input.machineId);
+      if (
+        !fleet ||
+        fleet.id !== input.machineId ||
+        input.platform !== "windows" ||
+        fleet.ssh.shell !== "powershell" ||
+        !win32.isAbsolute(input.path) ||
+        !win32.isAbsolute(input.repoPath)
+      )
+        return undefined;
+      const result = JSON.parse(
+        await options.shell(fleet)(windowsWorktreeRootCommand(input.path, input.repoPath), 5_000),
+      );
+      return result && isDeepStrictEqual(await options.fleet(input.machineId), fleet) ? result : undefined;
     } catch {
       return undefined;
     }

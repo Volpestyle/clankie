@@ -2123,9 +2123,12 @@ against the live pane in Clankie's connected local Herdr session. The pane ID is
 a hint, not a credential. Private hired Codex app-servers use the service's live
 process-to-pane registry. Shared Codex daemon MCP processes cannot prove which
 pane owns them: exit and restart the pane's Codex under the existing
-`daemon_auto_start=false` configuration. Local process proof on other platforms
-is not implemented; SSH fleet links keep their native-message authentication
-but cannot confer project tools until remote process proof is implemented.
+`daemon_auto_start=false` configuration. Windows SSH fleets use a trusted relay
+on the configured fleet connection. Its accepted socket, native executable,
+process ancestry and kernel current-directory handle prove each remote pane;
+register Windows workspaces with the fleet's machine ID. The discovery file
+contains no bearer. Lost SSH, ambiguous identity and a claimed other pane deny
+access. Other remote platforms and non-macOS local process proof remain unsupported.
 
 The owner grants a saved project through `clankie access project PROJECT linear
 --tool get_issue` (repeat `--tool` for the needed tools). `clankie access list`

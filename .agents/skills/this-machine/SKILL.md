@@ -223,3 +223,16 @@ not tool grants. Do not run it as a workaround for an unapproved workspace.
 Remove only the enrollment with `clankie project remove-worktree-root NAME
 --worktree-root ROOT` and the same machine/platform flags. Remove root enrollments
 before their repo workspace. Neither command deletes filesystem content.
+
+### Windows fleet project tools
+
+A configured Windows fleet uses a service-owned SSH relay to prove each native
+Claude/Codex bridge's accepted socket, process lifetime, ancestry to its live
+Herdr pane, installed executable and actual kernel cwd. The link discovery file
+contains no agent bearer. Register workspaces with that fleet's machine ID;
+`pc` and `kh2` registrations do not substitute for one another. A lost SSH link,
+shared daemon, unknown process or claimed other pane denies project tools and
+mailbox reads. The same project grants and revocation checks apply remotely.
+See [the trust contract](../../../docs/remote-process-proof.md). Missing native
+catalog access still needs a real owner-run pane acceptance check after deployment;
+a host observer or isolated relay smoke test does not establish that acceptance.

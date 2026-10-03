@@ -1,0 +1,94 @@
+# Windows fleet process proof
+
+A Windows agent reaches project-granted tools through Clankie's configured fleet
+SSH connection. Hand-started agents and hires use the same proof. A project grant
+still binds the connected account, and every request and tool call checks current
+membership, settings and revocation.
+
+## Binding a request to a process
+
+OpenSSH's ordinary reverse TCP forward does not tell an HTTP listener which
+remote process opened a particular channel. A caller-supplied PID, port, pane,
+header or fleet bearer cannot fill that gap.
+
+The service launches a fixed relay through the existing fleet SSH multiplexer.
+The relay accepts only Windows loopback connections. For each accepted socket it
+sends a new stream ID and the socket's own client/server endpoints over authenticated
+SSH stdout. Client traffic is wrapped as data frames; it cannot introduce control
+frames or choose another stream's identity. The local side opens a distinct TCP
+pair to the restricted HTTP listener and matches both endpoints while that pair
+and the SSH stream remain alive.
+
+Windows PowerShell buffers stdin, so replies and observation commands use the
+fleet's existing reverse forward. The relay generates a 32-byte random nonce in
+memory, announces it only on authenticated SSH stdout, and presents it once on
+its return connection. The service admits exactly one matching return connection.
+The nonce never appears in discovery, arguments, environment, files or HTTP
+headers. It binds the relay transport and does not authorize an agent.
+
+```mermaid
+sequenceDiagram
+  participant Agent as Native Windows agent
+  participant Relay as Service-owned Windows relay
+  participant SSH as Authenticated SSH channel
+  participant Service as Clankie
+  Agent->>Relay: Open loopback TCP socket
+  Relay->>SSH: Accepted stream ID and kernel endpoints
+  SSH->>Service: Trusted stream metadata and framed HTTP bytes
+  Service->>Relay: Fresh process observation through bound return channel
+  Relay->>Service: Initial and final OS / Herdr observations
+  Service->>Service: Check project, account and revocation
+  Service->>Relay: Framed response on the same stream
+  Relay->>Agent: Response bytes
+```
+
+A second PC process cannot borrow a victim's live proof: its connection has a
+different kernel TCP tuple, and it cannot create a second live connection with
+the victim's same four endpoints. Naming the victim's pane only causes Clankie
+to compare that claim with the attacker's own observed socket ancestry. Direct
+connections to the service listener have no trusted stream association.
+
+## Fresh Windows evidence
+
+The resident relay executes service-authored, bounded observations without
+starting a new PowerShell process for each read. It caches the compiled native
+reader, never a successful authorization result.
+
+- `GetExtendedTcpTable` identifies the unique owner of the exact accepted tuple.
+- Toolhelp process enumeration and kernel process handles supply parent PIDs,
+  executable paths and full creation timestamps. Ancestry is bounded, cycle-safe,
+  complete through the live pane shell, and checked for parent PID reuse.
+- Herdr's configured session and live foreground process identify the pane.
+  Native Claude/Codex executables are resolved from the SSH account's installed
+  launchers; supported command wrappers may sit between shell and native agent.
+- The x64 process parameters locate the current-directory **handle**. The reader
+  duplicates that handle, resolves it with `GetFinalPathNameByHandle`, and compares
+  the result with the separately canonicalized DOS path. Neither the SSH shell's
+  cwd nor Herdr's startup directory supplies workspace authority.
+- Initial and final native session, shell, foreground, process lifetimes, cwd,
+  socket ownership and ancestry must match. The registered fleet and live stream
+  are checked again before returning the proof.
+
+The machine ID comes from service configuration. Windows workspace paths are
+canonicalized on that machine; local Mac filesystem calls never validate them.
+The same reader supplies fresh Git facts for enrolled repository worktree roots.
+
+Before Herdr reports a native session ID, an independently started process may
+receive workspace access under a disjoint process-lifetime identity. A pending
+native session cannot establish a hired/private seat assignment.
+
+## Failure and operational limits
+
+SSH or return-channel loss invalidates every held stream and pending observation.
+Malformed frames, replayed stream IDs, unavailable process memory, changed native
+state, unsupported architecture, missing executables and ambiguous ownership
+fail closed. Relay traffic is bounded to 64 streams, 64 KiB frames and bounded
+pending buffers/observation queues. Unsupported POSIX remote fleets and local
+platforms without a process observer receive no project or mailbox authority
+from a legacy machine token.
+
+A deployment is not a native acceptance result. The owner must prepare the
+machine's bridge, register the intended machine workspaces or repository roots,
+apply the intended project grant, and verify fresh hand-started Claude and Codex
+catalogs and a granted read call after service/pane cutover. Isolated relay and
+host-observer evidence does not claim those steps happened.

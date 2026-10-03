@@ -1,4 +1,5 @@
-import { createConnection, type Socket } from "node:net";
+import { createConnection, type Socket, type Server } from "node:net";
+import { timingSafeEqual } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import type { RemoteStream } from "./remote-project-proof.ts";
 
@@ -16,17 +17,101 @@ export class RemoteFleetRelay {
   private open = true;
   private lastId = 0;
   private remotePort: number | undefined;
+  private readyNotified = false;
+  private nonce: Buffer | undefined;
+  private response: Socket | undefined;
+  private readonly candidates = new Map<Socket, Buffer>();
+  private commandId = 0;
+  private readonly commands = new Map<
+    number,
+    { resolve(value: string): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
+  >();
   private readonly options: {
     child: ChildProcess;
     localPort: number;
     ready(port: number): void;
     connect?: typeof createConnection;
+    responseServer?: Server;
   };
   constructor(options: RemoteFleetRelay["options"]) {
     this.options = options;
+    options.responseServer?.on("connection", (socket) => {
+      if (!this.open || this.response || this.candidates.size >= 4) {
+        socket.destroy();
+        return;
+      }
+      this.candidates.set(socket, Buffer.alloc(0));
+      socket.setTimeout(5_000, () => socket.destroy());
+      socket.on("error", () => socket.destroy());
+      socket.on("close", () => {
+        this.candidates.delete(socket);
+        if (this.response === socket) this.close();
+      });
+      socket.on("data", (chunk: Buffer) => {
+        const prior = this.candidates.get(socket);
+        if (!prior || prior.length + chunk.length > 32) {
+          socket.destroy();
+          return;
+        }
+        this.candidates.set(socket, Buffer.concat([prior, chunk]));
+        this.bindResponse();
+      });
+    });
     options.child.stdout?.on("data", (chunk: Buffer) => this.receive(chunk));
     options.child.once("exit", () => this.close());
     options.child.once("error", () => this.close());
+  }
+
+  private bindResponse(): void {
+    if (!this.nonce || this.response) return;
+    for (const [socket, bytes] of this.candidates) {
+      if (bytes.length !== 32) continue;
+      if (!timingSafeEqual(this.nonce, bytes)) {
+        socket.destroy();
+        this.candidates.delete(socket);
+        continue;
+      }
+      this.response = socket;
+      socket.setTimeout(0);
+      this.candidates.delete(socket);
+      for (const other of this.candidates.keys()) other.destroy();
+      this.candidates.clear();
+      this.notifyReady();
+      return;
+    }
+  }
+
+  private notifyReady(): void {
+    if (
+      this.readyNotified ||
+      this.remotePort === undefined ||
+      (this.options.responseServer && !this.response)
+    )
+      return;
+    this.readyNotified = true;
+    this.options.ready(this.remotePort);
+  }
+
+  /** A bounded fresh observation executed inside the service-owned relay PowerShell process. */
+  execute(command: string, timeoutMs = 10_000): Promise<string> {
+    const encoded = /^powershell\.exe -NoProfile -NonInteractive -EncodedCommand ([A-Za-z0-9+/=]+)$/u.exec(
+      command,
+    )?.[1];
+    if (!this.open || !this.readyNotified || !encoded || this.commands.size >= 16)
+      return Promise.reject(new Error("Remote observer unavailable"));
+    const script = Buffer.from(Buffer.from(encoded, "base64").toString("utf16le"), "utf8");
+    if (script.length > MAX_FRAME || this.commandId >= 0xffffffff)
+      return Promise.reject(new Error("Remote observation too large"));
+    const id = ++this.commandId;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.commands.delete(id);
+        reject(new Error("Remote observation timed out"));
+        this.close();
+      }, timeoutMs);
+      this.commands.set(id, { resolve, reject, timer });
+      this.send(4, id, script);
+    });
   }
 
   /** Match both ends of the locally created TCP pair while its exact stream is still alive. */
@@ -55,7 +140,7 @@ export class RemoteFleetRelay {
   }
 
   private send(kind: number, id: number, bytes: Buffer = Buffer.alloc(0)): void {
-    const input = this.options.child.stdin;
+    const input = this.options.responseServer ? this.response : this.options.child.stdin;
     if (!this.open || !input || input.destroyed) return;
     if (bytes.length > MAX_FRAME || input.writableLength > MAX_PENDING) {
       this.close();
@@ -89,11 +174,30 @@ export class RemoteFleetRelay {
   }
 
   private frame(kind: number, id: number, bytes: Buffer): void {
+    if (
+      kind === 5 &&
+      id === 0 &&
+      bytes.length === 32 &&
+      this.nonce === undefined &&
+      this.options.responseServer
+    ) {
+      this.nonce = Buffer.from(bytes);
+      this.bindResponse();
+      return;
+    }
+    if (kind === 4 && id > 0) {
+      const command = this.commands.get(id);
+      if (!command) throw new Error("Unknown relay observation");
+      this.commands.delete(id);
+      clearTimeout(command.timer);
+      command.resolve(bytes.toString("utf8"));
+      return;
+    }
     if (kind === 0 && id === 0 && bytes.length === 4 && this.remotePort === undefined) {
       const port = bytes.readUInt32LE();
       if (port < 1 || port > 65535) throw new Error("Invalid relay port");
       this.remotePort = port;
-      this.options.ready(port);
+      this.notifyReady();
       return;
     }
     if (this.remotePort === undefined || id === 0) throw new Error("Relay not ready");
@@ -114,7 +218,11 @@ export class RemoteFleetRelay {
         socket,
         clientPort,
         serverPort,
-        alive: () => this.open && this.streams.get(id) === stream && !socket.destroyed,
+        alive: () =>
+          this.open &&
+          this.streams.get(id) === stream &&
+          !socket.destroyed &&
+          (!this.options.responseServer || (this.response !== undefined && !this.response.destroyed)),
       };
       this.streams.set(id, stream);
       socket.on("data", (data: Buffer) => {
@@ -148,6 +256,17 @@ export class RemoteFleetRelay {
     for (const stream of this.streams.values()) stream.socket.destroy();
     this.streams.clear();
     this.buffer = Buffer.alloc(0);
+    this.response?.destroy();
+    for (const socket of this.candidates.keys()) socket.destroy();
+    this.candidates.clear();
+    this.nonce?.fill(0);
+    this.nonce = undefined;
+    for (const command of this.commands.values()) {
+      clearTimeout(command.timer);
+      command.reject(new Error("Remote observer disconnected"));
+    }
+    this.commands.clear();
+    this.options.child.stdin?.destroy();
     this.options.child.kill();
   }
 }

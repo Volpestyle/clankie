@@ -568,7 +568,8 @@ const localProjectProcessObserver = createProjectProcessObserver({
 });
 const remoteProofOptions = {
   fleet: async (id: string) => (await runtimes.fleets()).find((fleet) => fleet.id === id),
-  shell: (fleet: Parameters<typeof runtimes.fleetShell>[0]) => runtimes.fleetShell(fleet),
+  shell: (fleet: Parameters<typeof runtimes.fleetShell>[0]) =>
+    fleetLinks.observer(fleet) ?? runtimes.fleetShell(fleet),
 };
 const remoteProjectObserver = createRemoteProjectObserver(remoteProofOptions);
 const remoteCanonical = createRemoteWorkspaceCanonical(remoteProofOptions);
