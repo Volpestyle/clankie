@@ -1,5 +1,5 @@
 {
-  "description": "A hired seat's lifecycle: each settled turn and its final text, reported to Clankie (VUH-1458). A no-op outside a Clankie hire.",
+  "description": "A fleet seat's lifecycle and next-turn replies, for hired or hand-started native Claude sessions. A no-op outside a linked Herdr pane.",
   "hooks": {
     "SessionStart": [
       {

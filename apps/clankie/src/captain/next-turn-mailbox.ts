@@ -1,6 +1,6 @@
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { randomUUID, createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 
@@ -157,7 +157,19 @@ export class NextTurnMailbox {
       if (inbox.expiresAt <= this.now()) delete this.inboxes[seat];
     mkdirSync(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${process.pid}.tmp`;
-    writeFileSync(temporary, JSON.stringify(this.inboxes), { mode: 0o600 });
+    const file = openSync(temporary, "w", 0o600);
+    try {
+      writeFileSync(file, JSON.stringify(this.inboxes));
+      fsyncSync(file);
+    } finally {
+      closeSync(file);
+    }
     renameSync(temporary, this.path);
+    const directory = openSync(dirname(this.path), "r");
+    try {
+      fsyncSync(directory);
+    } finally {
+      closeSync(directory);
+    }
   }
 }

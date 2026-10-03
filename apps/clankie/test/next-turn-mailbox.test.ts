@@ -1,9 +1,14 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { fsyncSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextTurnMailbox, nextTurnReceiverProof } from "../src/captain/next-turn-mailbox.ts";
 import { fleetDeliveryStage } from "@clankie/protocol";
+
+vi.mock("node:fs", async (original) => {
+  const actual = await original<typeof import("node:fs")>();
+  return { ...actual, fsyncSync: vi.fn(actual.fsyncSync) };
+});
 
 const roots: string[] = [];
 afterEach(() => {
@@ -127,3 +132,32 @@ it("retains the original receipt before selecting a newly available live channel
   mailbox.take("pane", "session");
   expect(mailbox.receipt("pane", "session", "hello")?.deliveryStage).toBe("uncertain");
 });
+
+it.each(["file", "directory"])(
+  "failed %s persistence emits no context and cannot retry the take",
+  (boundary) => {
+    const { mailbox, reload } = fixture();
+    mailbox.observe("pane", "session");
+    mailbox.store("pane", "session", "hello");
+    const original = vi.mocked(fsyncSync).getMockImplementation()!;
+    if (boundary === "directory") vi.mocked(fsyncSync).mockImplementationOnce(original);
+    vi.mocked(fsyncSync).mockImplementationOnce(() => {
+      throw new Error("disk sync failed");
+    });
+    let output: unknown;
+    expect(() => {
+      output = mailbox.take("pane", "session");
+    }).toThrow("disk sync failed");
+    expect(output).toBeUndefined();
+    expect(mailbox.take("pane", "session")).toBeUndefined();
+    expect(mailbox.receipt("pane", "session", "hello")?.deliveryStage).toBe("uncertain");
+    const restarted = reload();
+    if (boundary === "directory") expect(restarted.take("pane", "session")).toBeUndefined();
+    else {
+      // No output crossed the boundary before the failed file sync. The original
+      // pending message may be taken once after durable storage recovers.
+      expect(restarted.take("pane", "session")?.additionalContext).toContain("hello");
+      expect(restarted.take("pane", "session")).toBeUndefined();
+    }
+  },
+);
