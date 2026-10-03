@@ -9,13 +9,16 @@ import type { FleetSeatDelivery } from "./fleet-seat.ts";
 export function createFleetSeatControl(
   runner: HerdrWatchRunner,
   adapters: ReadonlyMap<string, HarnessSeatAdapter>,
+  /** A remote fleet's own adapters (VUH-1527); absent, its seats have none. */
+  remoteAdapters?: (fleet: string) => ReadonlyMap<string, HarnessSeatAdapter> | undefined,
 ) {
   const attach = async (agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> => {
+    const fleet = splitFleetQualified(agent.paneId)?.fleet;
+    const available = fleet === undefined ? adapters : remoteAdapters?.(fleet);
     const adapter =
-      adapters.get(agent.agent) ?? adapters.get(agent.session?.source.replace(/^herdr:/u, "") ?? "");
+      available?.get(agent.agent) ?? available?.get(agent.session?.source.replace(/^herdr:/u, "") ?? "");
     const session = agent.session;
     if (adapter === undefined || session === undefined) return undefined;
-    if (splitFleetQualified(agent.paneId) !== undefined) return undefined;
     // A transcript path names its session in the file name (Claude's `<uuid>.jsonl`).
     const sessionId = session.kind === "id" ? session.value : basename(session.value, ".jsonl");
     return adapter

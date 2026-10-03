@@ -37,7 +37,19 @@ export function splitFleetQualified(
  */
 const REMOTE_VERBS: Readonly<Record<string, ReadonlySet<string> | true>> = {
   agent: new Set(["list", "get", "read", "wait", "prompt", "send-keys", "start"]),
-  pane: new Set(["list", "get", "read", "send-text", "send-keys", "close", "process-info", "layout"]),
+  // `report-agent` labels a pane whose seat Clankie drives over its native
+  // channel; it updates Herdr's view and controls nothing.
+  pane: new Set([
+    "list",
+    "get",
+    "read",
+    "send-text",
+    "send-keys",
+    "close",
+    "process-info",
+    "layout",
+    "report-agent",
+  ]),
   tab: new Set(["create", "list"]),
   workspace: new Set(["create", "list"]),
   api: new Set(["snapshot"]),
@@ -90,10 +102,14 @@ export function remoteProgramCommand(
   shell: HerdrSshTransport["shell"],
   program: string,
   argv: readonly string[],
+  /** Run it in this directory on the remote machine; the remote user's home when absent. */
+  cwd?: string,
 ): string {
   if (!/^[a-z][a-z0-9-]*$/u.test(program)) throw new Error("Remote program must be a bare command name");
-  if (argv.some((arg) => arg.includes("\0"))) throw new Error("Remote arguments cannot contain NUL");
-  if (shell === "posix") return `exec ${program} ${argv.map(posixQuote).join(" ")}`;
+  if (argv.some((arg) => arg.includes("\0")) || cwd?.includes("\0") === true)
+    throw new Error("Remote arguments cannot contain NUL");
+  if (shell === "posix")
+    return `${cwd === undefined ? "" : `cd ${posixQuote(cwd)} && `}exec ${program} ${argv.map(posixQuote).join(" ")}`;
   const commandLine = Buffer.from(argv.map(windowsArgument).join(" "), "utf8").toString("base64");
   const script = [
     "$ErrorActionPreference = 'Stop'",
@@ -101,6 +117,7 @@ export function remoteProgramCommand(
     "$start = New-Object System.Diagnostics.ProcessStartInfo",
     "$start.FileName = $program",
     `$start.Arguments = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${commandLine}'))`,
+    ...(cwd === undefined ? [] : [`$start.WorkingDirectory = ${powershellLiteral(cwd)}`]),
     "$start.UseShellExecute = $false",
     "$start.RedirectStandardOutput = $true",
     "$start.RedirectStandardError = $true",
@@ -115,6 +132,23 @@ export function remoteProgramCommand(
   ].join("; ");
   return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
 }
+
+/** A PowerShell single-quoted literal: nothing inside it is interpolated. */
+export function powershellLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/** A whole PowerShell script as one remote command, never re-parsed by an outer shell. */
+export function powershellScriptCommand(script: string): string {
+  return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
+}
+
+/** A POSIX shell script as one remote command, whatever the login shell is. */
+export function posixScriptCommand(script: string): string {
+  return `exec sh -c ${posixQuote(script)}`;
+}
+
+export { posixQuote };
 
 /**
  * One multiplexed ssh connection per fleet carries every call (ADR 0184). The
@@ -174,6 +208,48 @@ function herdrError(stdout: string): HerdrFleetError | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * One remote command (already built for the fleet's shell) over the fleet's
+ * multiplexed connection; resolves its stdout. Used for the few non-Herdr
+ * steps a native channel needs on that machine, such as starting a dedicated
+ * Codex app-server (VUH-1527).
+ */
+export type FleetShellRun = (remoteCommand: string, timeoutMs?: number) => Promise<string>;
+
+export function createFleetShellRun(
+  fleet: HerdrFleet,
+  options: {
+    readonly controlDirectory: string;
+    readonly execFile?: typeof execFile;
+  },
+): FleetShellRun {
+  const run = options.execFile ?? execFile;
+  return (remoteCommand, timeoutMs = REMOTE_HERDR_TIMEOUT_MS) => {
+    try {
+      mkdirSync(options.controlDirectory, { recursive: true, mode: 0o700 });
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    return new Promise((resolve, reject) => {
+      run(
+        "ssh",
+        sshArgs(fleet, options.controlDirectory, remoteCommand),
+        { maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs },
+        (error, stdout, stderr) => {
+          if (error === null) return resolve(String(stdout));
+          const detail = String(stderr).trim().slice(-2_000);
+          reject(
+            new HerdrFleetError(
+              error.killed ? "timeout" : "fleet_command_failed",
+              `fleet ${fleet.id}: ${detail || error.message}`,
+            ),
+          );
+        },
+      );
+    });
+  };
 }
 
 export type HerdrFleetRun = (

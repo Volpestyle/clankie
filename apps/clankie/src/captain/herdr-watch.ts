@@ -657,6 +657,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly path: string;
   private readonly runner: HerdrWatchRunner;
   private readonly seatAdapters: ReadonlyMap<string, HarnessSeatAdapter>;
+  private readonly remoteSeatAdapters:
+    | ((fleet: string) => ReadonlyMap<string, HarnessSeatAdapter>)
+    | undefined;
   private readonly seatControl: ReturnType<typeof createFleetSeatControl>;
   private readonly skillBundle:
     | { repoRoot: string; stateDir: string; settings?: () => Promise<SkillsSettings> }
@@ -714,6 +717,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
        * adapter, with herdr as its view; unsupported briefs fail without terminal input.
        */
       readonly seatAdapters?: readonly HarnessSeatAdapter[];
+      /**
+       * A remote fleet's own adapters (VUH-1527). A briefed hire on that fleet
+       * of a listed harness gets the same native channel a local one does;
+       * any other remote brief still fails without terminal input.
+       */
+      readonly remoteSeatAdapters?: (fleet: string) => readonly HarnessSeatAdapter[];
       /** Include every configured Herdr server on the same exact SSH destination. */
       readonly resumeInventory?: (fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>;
     } = {},
@@ -727,7 +736,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.runner = options.runner ?? createHerdrWatchRunner(options.available);
     this.resumeInventory = options.resumeInventory;
     this.seatAdapters = new Map((options.seatAdapters ?? []).map((adapter) => [adapter.harness, adapter]));
-    this.seatControl = createFleetSeatControl(this.runner, this.seatAdapters);
+    const remoteSeatAdapters = options.remoteSeatAdapters;
+    // One adapter set per fleet, made once: an adapter holds its seats' live control.
+    const remote = new Map<string, ReadonlyMap<string, HarnessSeatAdapter>>();
+    this.remoteSeatAdapters =
+      remoteSeatAdapters === undefined
+        ? undefined
+        : (fleet) => {
+            let adapters = remote.get(fleet);
+            if (adapters === undefined) {
+              adapters = new Map(remoteSeatAdapters(fleet).map((adapter) => [adapter.harness, adapter]));
+              remote.set(fleet, adapters);
+            }
+            return adapters;
+          };
+    this.seatControl = createFleetSeatControl(this.runner, this.seatAdapters, this.remoteSeatAdapters);
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
     this.seatTranscriptTailMs = options.seatTranscriptTailMs ?? SEAT_TRANSCRIPT_TAIL_MS;
@@ -1088,14 +1111,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
         detail: `${input.workingDirectory} is not a granted workspace on fleet ${remote}; grant it with clankie runtime workspaces ${remote} --dir PATH`,
       };
     }
+    const adapters = remote === undefined ? this.seatAdapters : this.remoteSeatAdapters?.(remote);
     const adapter =
-      remote === undefined &&
-      (brief !== undefined || resume !== undefined) &&
-      this.runner.runInPane !== undefined
-        ? this.seatAdapters.get(input.harness)
+      (brief !== undefined || resume !== undefined) && this.runner.runInPane !== undefined
+        ? adapters?.get(input.harness)
         : undefined;
     const unavailableReason =
-      remote !== undefined
+      remote !== undefined && adapters?.get(input.harness) === undefined
         ? "remote_fleet"
         : this.runner.runInPane === undefined
           ? "pane_run_unavailable"
@@ -1200,7 +1222,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (chromeArgs === undefined)
         throw new Error(`unsupported: ${input.harness} has no Chrome integration`);
       const terminalReason =
-        remote !== undefined
+        remote !== undefined && adapter === undefined
           ? "remote_fleet"
           : brief === undefined
             ? "no_brief"

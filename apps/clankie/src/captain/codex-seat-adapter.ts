@@ -2,19 +2,30 @@ import type { HarnessSeatAdapter, SeatControl, SeatEvent, SeatRef, SeatStatus } 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { startCodexAppServerSeat, type CodexAppServerSeat, type CodexSeatEvent } from "./codex-app-server.ts";
+import {
+  startCodexAppServerSeat,
+  type CodexAppServerSeat,
+  type CodexSeatEvent,
+  type CodexServerLauncher,
+} from "./codex-app-server.ts";
 import { codexTrackerOverrides } from "./tracker-isolation.ts";
 
 const exec = promisify(execFile);
 const object = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 
-/** Local hires use a dedicated app-server; the native TUI is its second client. */
+/**
+ * Each hire gets a dedicated app-server; the native TUI is its second client.
+ * A remote fleet (VUH-1527) supplies where that server runs, its own Herdr
+ * calls and its own configuration read; the protocol is the same.
+ */
 export function createCodexSeatAdapter(
   options: {
     start?: typeof startCodexAppServerSeat;
     herdr?: (args: readonly string[]) => Promise<unknown>;
-    trackerOverrides?: typeof codexTrackerOverrides;
+    trackerOverrides?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<string[]>;
+    server?: CodexServerLauncher;
+    listenTimeoutMs?: number;
   } = {},
 ): HarnessSeatAdapter {
   const controls = new Map<string, SeatControl>();
@@ -132,6 +143,8 @@ export function createCodexSeatAdapter(
           ...(launch.model ? { model: launch.model } : {}),
           ...(launch.effort ? { effort: launch.effort } : {}),
           ...(launch.env ? { env: launch.env } : {}),
+          ...(options.server === undefined ? {} : { server: options.server }),
+          ...(options.listenTimeoutMs === undefined ? {} : { listenTimeoutMs: options.listenTimeoutMs }),
           startView: (args) => (view.start ? view.start("codex", args) : view.run(["codex", ...args])),
           onEvent: observe,
         });

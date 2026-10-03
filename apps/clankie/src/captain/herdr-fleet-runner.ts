@@ -40,9 +40,9 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  * Machine-local powers (lsof, codex queue, the seat MCP
  * registration, pi's integration and provider files) are absent: they read or
  * write this machine, not that one. Native history reads on demand through
- * the SSH host's confined transcript reader. Other replies use `herdr agent read`
- * and delivery to the pty lane, as ADR 0184 allows until the reverse-forward
- * mailbox lands.
+ * the SSH host's confined transcript reader. Other replies use `herdr agent read`.
+ * A Codex seat Clankie hired here is driven through its own app-server over
+ * ssh (VUH-1527); every other remote message stays refused rather than typed.
  */
 export function createRemoteHerdrRunner(
   fleet: HerdrFleet,
@@ -53,9 +53,9 @@ export function createRemoteHerdrRunner(
   const pollMs = options.pollMs ?? REMOTE_POLL_MS;
   let cached: { readonly at: number; readonly panes: Promise<readonly HerdrAgentSnapshot[]> } | undefined;
 
-  const panes = (): Promise<readonly HerdrAgentSnapshot[]> => {
+  const panes = (fresh = false): Promise<readonly HerdrAgentSnapshot[]> => {
     const now = Date.now();
-    if (cached === undefined || now - cached.at >= pollMs / 2) {
+    if (fresh || cached === undefined || now - cached.at >= pollMs / 2) {
       const pending = run(["pane", "list"]).then(parseHerdrPaneList);
       cached = { at: now, panes: pending };
       pending.catch(() => {
@@ -68,6 +68,14 @@ export function createRemoteHerdrRunner(
   const current = async (target: string): Promise<HerdrAgentSnapshot> =>
     (await panes()).find((pane) => pane.paneId === target || pane.terminalId === target) ??
     (await base.get(target));
+
+  /**
+   * A pane can be newer than the shared poll (a hire just made it), so a miss
+   * reads the list once more before reporting the terminal gone.
+   */
+  const terminal = async (terminalId: string): Promise<HerdrAgentSnapshot | undefined> =>
+    (await panes()).find((pane) => pane.terminalId === terminalId) ??
+    (await panes(true)).find((pane) => pane.terminalId === terminalId);
 
   const until = async (
     target: string,
@@ -87,7 +95,7 @@ export function createRemoteHerdrRunner(
   return {
     ...base,
     get: current,
-    resolveTerminal: async (terminalId) => (await panes()).find((pane) => pane.terminalId === terminalId),
+    resolveTerminal: terminal,
     wait: (target, signal) => until(target, signal, (snapshot) => SETTLED.has(snapshot.status)),
     waitForChange: (target, status, signal) =>
       until(target, signal, (snapshot) => snapshot.status !== status),
@@ -211,7 +219,7 @@ export function routeHerdrFleets(
       return runner.paneProcesses(id);
     },
     // A pid is only meaningful on the machine that reported it; the local
-    // runner answers for local panes and remote codex seats take the pty lane.
+    // runner answers for local panes; remote codex seats use their own app-server.
     ...(local.openFiles === undefined ? {} : { openFiles: local.openFiles }),
     ...(local.codexQueue === undefined ? {} : { codexQueue: local.codexQueue }),
     closePane: async (target) => {

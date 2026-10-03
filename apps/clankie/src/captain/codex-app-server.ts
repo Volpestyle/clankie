@@ -107,10 +107,108 @@ export interface CodexAppServerSeat {
 }
 
 /**
- * Protocol reference: https://developers.openai.com/codex/app-server
+ * One dedicated app-server, wherever it runs. `endpoint` is what the native
+ * TUI dials from its own machine; `connect` opens a protocol socket from this
+ * one, and resolves undefined while the server is not listening yet.
+ */
+interface CodexServerConnection {
+  readonly endpoint: string;
+  connect(): Promise<WebSocket | undefined>;
+  /** Why the server is gone, once it is. */
+  failure(): Error | undefined;
+  /** Recent server output, for a startup error. */
+  output(): string;
+  close(): Promise<void>;
+}
+
+export type CodexServerLauncher = (input: {
+  readonly cwd: string;
+  /** `-c key=value` pairs, already flattened. */
+  readonly configArgs: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  /** The server exited or its link dropped; `code` is the exit status when known. */
+  readonly onExit: (code: number | null) => void;
+}) => Promise<CodexServerConnection>;
+
+/**
  * Unix transport is WebSocket over HTTP Upgrade (not JSONL). The private socket
  * avoids a shared daemon losing the pane identity (VUH-1398), and TCP exposure.
  */
+const localCodexServer: CodexServerLauncher = async (input) => {
+  const directory = await mkdtemp(join(tmpdir(), "clankie-codex-"));
+  const socketPath = join(directory, "rpc.sock");
+  // The supervisor must not lend its own pane identity or Swarm enrollment to
+  // the child. Explicit worker launch settings (including CODEX_HOME) survive.
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key)),
+  );
+  // `clankie restart` signals the service's whole process group. The native
+  // TUI stays in Herdr, so its app-server must also outlive a service restart.
+  // Redirect stderr to a file: a pipe back to the service would break on exit.
+  const stderrPath = join(directory, "app-server.log");
+  const stderrFd = openSync(stderrPath, "a", 0o600);
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn("codex", [...input.configArgs, "app-server", "--listen", `unix://${socketPath}`], {
+      cwd: input.cwd,
+      env: { ...env, ...input.env },
+      detached: true,
+      stdio: ["ignore", "ignore", stderrFd],
+    });
+    child.unref();
+  } finally {
+    closeSync(stderrFd);
+  }
+  let failure: Error | undefined;
+  const output = () => {
+    try {
+      return readFileSync(stderrPath, "utf8").slice(-8_192);
+    } catch {
+      return "";
+    }
+  };
+  child.on("error", (error) => {
+    failure = error;
+    input.onExit(null);
+  });
+  child.on("exit", (code) => {
+    failure = new Error(`Codex app-server exited (${String(code)}): ${output()}`);
+    input.onExit(code);
+  });
+  return {
+    endpoint: `unix://${socketPath}`,
+    connect: () => openCodexSocket(`ws+unix://${socketPath}:/`),
+    failure: () => failure,
+    output,
+    async close() {
+      if (child.exitCode === null && child.signalCode === null && child.pid !== undefined) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => child.kill("SIGKILL"), 2_000);
+          child.once("exit", () => {
+            clearTimeout(timer);
+            resolve();
+          });
+          child.kill("SIGTERM");
+        });
+      }
+      await rm(directory, { recursive: true, force: true });
+    },
+  };
+};
+
+/** One attempt to open a protocol socket; undefined while nothing listens. */
+export function openCodexSocket(address: string): Promise<WebSocket | undefined> {
+  return new Promise<WebSocket | undefined>((resolve) => {
+    const attempt = new WebSocket(address, { handshakeTimeout: 1_000 });
+    attempt.once("open", () => resolve(attempt));
+    attempt.once("error", () => {
+      attempt.terminate();
+      resolve(undefined);
+    });
+  });
+}
+
+/** Protocol reference: https://developers.openai.com/codex/app-server */
 export async function startCodexAppServerSeat(options: {
   cwd: string;
   model?: string;
@@ -122,87 +220,44 @@ export async function startCodexAppServerSeat(options: {
   threadStartTimeoutMs?: number;
   signal?: AbortSignal;
   env?: Readonly<Record<string, string>>;
+  /** Where the dedicated server runs; this machine unless a fleet supplies its own. */
+  server?: CodexServerLauncher;
+  /** How long the server may take to listen; a remote one starts over ssh. */
+  listenTimeoutMs?: number;
   /** Start the native TUI on this server before sending any model input. */
   startView: (args: readonly string[]) => Promise<void>;
   onEvent?: (event: CodexSeatEvent) => void;
 }): Promise<CodexAppServerSeat> {
   options.signal?.throwIfAborted();
-  const directory = await mkdtemp(join(tmpdir(), "clankie-codex-"));
-  const socketPath = join(directory, "rpc.sock");
-  const endpoint = `unix://${socketPath}`;
-  // The supervisor must not lend its own pane identity or Swarm enrollment to
-  // the child. Explicit worker launch settings (including CODEX_HOME) survive.
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key)),
-  );
   const configArgs = (options.config ?? []).flatMap((value) => ["-c", value]);
-  // `clankie restart` signals the service's whole process group. The native
-  // TUI stays in Herdr, so its app-server must also outlive a service restart.
-  // Redirect stderr to a file: a pipe back to the service would break on exit.
-  const stderrPath = join(directory, "app-server.log");
-  const stderrFd = openSync(stderrPath, "a", 0o600);
-  let child: ReturnType<typeof spawn>;
-  try {
-    child = spawn("codex", [...configArgs, "app-server", "--listen", endpoint], {
-      cwd: options.cwd,
-      env: { ...env, ...options.env },
-      detached: true,
-      stdio: ["ignore", "ignore", stderrFd],
-    });
-    child.unref();
-  } finally {
-    closeSync(stderrFd);
-  }
-  let failure: Error | undefined;
-  const stderr = () => {
-    try {
-      return readFileSync(stderrPath, "utf8").slice(-8_192);
-    } catch {
-      return "";
-    }
-  };
   let client: CodexAppServerClient | undefined;
   let closed = false;
-  child.on("error", (error) => {
-    failure = error;
-    client?.close();
+  const server = await (options.server ?? localCodexServer)({
+    cwd: options.cwd,
+    configArgs,
+    ...(options.env === undefined ? {} : { env: options.env }),
+    onExit: (code) => {
+      client?.close();
+      options.onEvent?.({ method: "connection/closed", params: { code } });
+    },
   });
-  child.on("exit", (code) => {
-    failure = new Error(`Codex app-server exited (${String(code)}): ${stderr()}`);
-    client?.close();
-    options.onEvent?.({ method: "connection/closed", params: { code } });
-  });
+  const endpoint = server.endpoint;
   const close = async () => {
     if (closed) return;
     closed = true;
     client?.close();
-    if (child.exitCode === null && child.signalCode === null && child.pid !== undefined) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => child.kill("SIGKILL"), 2_000);
-        child.once("exit", () => {
-          clearTimeout(timer);
-          resolve();
-        });
-        child.kill("SIGTERM");
-      });
-    }
-    await rm(directory, { recursive: true, force: true });
+    await server.close();
   };
   try {
-    const deadline = Date.now() + 15_000;
+    const deadline = Date.now() + (options.listenTimeoutMs ?? 15_000);
     let socket: WebSocket | undefined;
     while (!socket) {
       options.signal?.throwIfAborted();
+      const failure = server.failure();
       if (failure) throw failure;
-      if (Date.now() >= deadline) throw new Error(`Codex app-server did not open its socket: ${stderr()}`);
-      socket = await new Promise<WebSocket | undefined>((resolve) => {
-        const attempt = new WebSocket(`ws+unix://${socketPath}:/`, { handshakeTimeout: 1_000 });
-        attempt.once("open", () => resolve(attempt));
-        attempt.once("error", () => {
-          attempt.terminate();
-          resolve(undefined);
-        });
-      });
+      if (Date.now() >= deadline)
+        throw new Error(`Codex app-server did not open its socket: ${server.output()}`);
+      socket = await server.connect();
       if (!socket) await new Promise((resolve) => setTimeout(resolve, 50));
     }
     let activeTurn: string | undefined;

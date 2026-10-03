@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
+import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 
 const roots: string[] = [];
@@ -64,6 +65,95 @@ test.each(["claude", "codex", "pi"] as const)(
     }
   },
 );
+
+test("a remote Codex hire is briefed and messaged through its fleet's own adapter (VUH-1527)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "remote-codex-hire-"));
+  roots.push(root);
+  const agent: HerdrAgentSnapshot = {
+    paneId: "pc/w1:p1",
+    terminalId: "pc/term-1",
+    agent: "codex",
+    status: "idle",
+    title: "Remote",
+    session: { source: "herdr:codex", kind: "id", value: "thread-1" },
+  };
+  const sent: string[] = [];
+  const control: SeatControl = {
+    ref: { harness: "codex", sessionId: "thread-1", paneId: "pc/w1:p1" },
+    send: vi.fn(async (message: string) => {
+      sent.push(message);
+      return { outcome: "accepted" as const, messageId: "turn-2", state: "started" as const };
+    }),
+    status: async () => "idle",
+    settled: async () => ({ type: "turn_completed", at: "now", ok: true }),
+    interrupt: async () => false,
+    close: async () => undefined,
+  };
+  const adapter: HarnessSeatAdapter = {
+    harness: "codex",
+    start: vi.fn(async () => ({ outcome: "started" as const, control })),
+    attach: vi.fn(async (ref) =>
+      ref.paneId === "pc/w1:p1" && ref.sessionId === "thread-1" ? control : undefined,
+    ),
+  };
+  const remoteSeatAdapters = vi.fn(() => [adapter]);
+  const runner = {
+    createTab: vi.fn(async () => "pc/w1:p1"),
+    startAgent: vi.fn(async () => undefined),
+    runInPane: vi.fn(async () => undefined),
+    promptAgent: vi.fn(async () => undefined),
+    sendText: vi.fn(async () => undefined),
+    get: vi.fn(async () => agent),
+    resolveTerminal: vi.fn(async () => agent),
+    wait: vi.fn(async () => agent),
+  };
+  const store = new HerdrWatchStore(join(root, "watches.json"), {
+    remoteWorkspace: async () => true,
+    remoteSeatAdapters,
+    runner,
+  });
+  try {
+    expect(
+      await store.spawnSeat(
+        {
+          schemaVersion: 1,
+          harness: "codex",
+          title: "Remote",
+          workingDirectory: "C:\\src\\app",
+          fleet: "pc",
+        },
+        undefined,
+        "Do the work",
+      ),
+    ).toMatchObject({ outcome: "spawned", control: { mode: "adapter" } });
+    expect(remoteSeatAdapters).toHaveBeenCalledWith("pc");
+    expect(adapter.start).toHaveBeenCalledWith(
+      expect.objectContaining({ harness: "codex", cwd: "C:\\src\\app", brief: "Do the work" }),
+      expect.objectContaining({ paneId: "pc/w1:p1" }),
+    );
+    expect(await store.deliverToSeat("pc/term-1", "Next step")).toMatchObject({ outcome: "delivered" });
+    expect(sent).toEqual(["Next step"]);
+    // Nothing reached the remote terminal as typed input.
+    expect(runner.promptAgent).not.toHaveBeenCalled();
+    expect(runner.sendText).not.toHaveBeenCalled();
+    // A harness the fleet has no adapter for still refuses its brief.
+    expect(
+      await store.spawnSeat(
+        {
+          schemaVersion: 1,
+          harness: "claude",
+          title: "Remote",
+          workingDirectory: "C:\\src\\app",
+          fleet: "pc",
+        },
+        undefined,
+        "Do the work",
+      ),
+    ).toMatchObject({ outcome: "failed", control: { mode: "unavailable", reason: "remote_fleet" } });
+  } finally {
+    store.close();
+  }
+});
 
 test("a granted remote workspace does not authorize terminal brief injection", async () => {
   const createTab = vi.fn(async () => "pc/w1:p1");

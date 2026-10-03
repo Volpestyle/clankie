@@ -2,6 +2,7 @@ import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
+import { createRemoteCodexSeatAdapter } from "./remote-codex-app-server.ts";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import {
   createPersonaImageSource,
@@ -883,6 +884,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
     ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
     seatAdapters: options.seatAdapters ?? [createCodexSeatAdapter(), claudeWorkerSeats],
+    // Remote Codex seats get their native app-server over the fleet's ssh (VUH-1527).
+    ...(deps.fleets?.shell === undefined
+      ? {}
+      : {
+          remoteSeatAdapters: (fleetId: string) => {
+            const fleet = remoteFleets.find((entry) => entry.id === fleetId);
+            return fleet === undefined
+              ? []
+              : [createRemoteCodexSeatAdapter(fleet, deps.fleets!.shell!(fleet), deps.fleets!.run(fleet))];
+          },
+        }),
   });
   const evaluator = new Evaluator(
     join(options.stateDir, "evaluator"),

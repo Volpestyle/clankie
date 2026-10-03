@@ -1,4 +1,4 @@
-import type { HerdrFleet, HerdrFleetRun } from "../herdr-fleet.ts";
+import type { FleetShellRun, HerdrFleet, HerdrFleetRun } from "../herdr-fleet.ts";
 import type { HostedWorkStarted } from "../hosted-work.ts";
 import type { PiSeatModel } from "./herdr-watch.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
@@ -66,6 +66,8 @@ export interface CaptainDeps {
   readonly fleets?: {
     readonly list: readonly HerdrFleet[];
     run(fleet: HerdrFleet): HerdrFleetRun;
+    /** Non-Herdr commands on the fleet's machine, for its native seat channels (VUH-1527). */
+    shell?(fleet: HerdrFleet): FleetShellRun;
     remoteWorkspace(fleet: string, directory: string): Promise<boolean>;
   };
   readonly rivals?: RivalsClient;

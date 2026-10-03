@@ -238,6 +238,17 @@ describe("fleet routing", () => {
     expect(await runner.transcript!({ paneId: "pc/w2:p1J" } as HerdrAgentSnapshot)).toBeUndefined();
   });
 
+  it("finds a pane made since the shared poll, such as a seat just hired (VUH-1527)", async () => {
+    let panes = [pane("w2:p1J", "term_abc", "idle")];
+    const run = vi.fn<HerdrFleetRun>(async () => JSON.stringify({ result: { panes } }));
+    // A long poll window: only a miss may read the list again.
+    const runner = createRemoteHerdrRunner(pc, run, { pollMs: 60_000 });
+    expect(await runner.resolveTerminal("term_abc")).toMatchObject({ paneId: "w2:p1J" });
+    panes = [...panes, pane("w2:p2", "term_new", "working")];
+    expect(await runner.resolveTerminal("term_new")).toMatchObject({ paneId: "w2:p2" });
+    expect(await runner.resolveTerminal("term_gone")).toBeUndefined();
+  });
+
   it.each([
     { missing: "terminal_id", malformed: { pane_id: "w2:pBad" } },
     { missing: "pane_id", malformed: { terminal_id: "term_bad" } },

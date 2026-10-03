@@ -16,7 +16,13 @@ import {
 } from "@clankie/settings";
 import type { HerdrBinding } from "@clankie/protocol";
 import { startHerdrRuntime, watchHerdrSocket } from "./herdr-runtime.ts";
-import { createHerdrFleetRun, type HerdrFleet, type HerdrFleetRun } from "./herdr-fleet.ts";
+import {
+  createFleetShellRun,
+  createHerdrFleetRun,
+  type FleetShellRun,
+  type HerdrFleet,
+  type HerdrFleetRun,
+} from "./herdr-fleet.ts";
 
 const exec = promisify(execFile);
 type HerdrSessionRunner = (
@@ -334,6 +340,13 @@ export class ExecutionConnections {
       });
     this.fleetRuns.set(fleet.id, { key, run });
     return run;
+  }
+
+  /** Non-Herdr commands on a fleet's machine, over the same multiplexed connection (VUH-1527). */
+  fleetShell(fleet: HerdrFleet): FleetShellRun {
+    return createFleetShellRun(fleet, {
+      controlDirectory: this.options.sshControlDirectory ?? join(homedir(), ".clankie", "ssh"),
+    });
   }
 
   private async fleetAnswers(fleet: HerdrFleet): Promise<boolean> {

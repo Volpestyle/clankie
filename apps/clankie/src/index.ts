@@ -599,6 +599,7 @@ const captain = createCaptain(
     fleets: {
       list: herdrFleets,
       run: (fleet) => runtimes.fleetRun(fleet),
+      shell: (fleet) => runtimes.fleetShell(fleet),
       remoteWorkspace: (fleet, directory) => runtimes.remoteWorkspace(fleet, directory),
     },
     mcp: mcpHost,

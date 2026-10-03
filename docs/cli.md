@@ -1442,10 +1442,17 @@ What crosses the link, and what cannot:
   persisted under its qualified id, so it resumes after a service restart.
   Remote panes are observed by polling one shared `pane list` every three
   seconds rather than holding a wait open per pane.
-- A remote seat takes the pty lane: its transcript is read with `herdr agent
-read`, a Codex seat is not reached through `codex queue`, and a Claude hire
-  there starts without the seat channel. Terminal observe/control and the
-  reverse-forward mailbox are not wired for ssh fleets yet.
+- A remote Codex hire gets the same native channel a local one does (VUH-1527).
+  Clankie starts a dedicated `codex app-server` on that machine, detached and
+  listening on its loopback only, reaches it through his own `ssh -L` forward,
+  and the Codex TUI in the remote pane attaches to it with `--remote`. The
+  brief, later messages and completion go through that server; nothing is
+  typed into the pane. Its inherited Linear connectors are switched off from
+  that machine's own Codex configuration. On Windows, launch arguments that
+  `cmd.exe` would reinterpret are refused rather than altered.
+- A briefed remote Claude hire still fails typed (`remote_fleet`) until its
+  channel is wired. Other remote seats' replies are read with `herdr agent
+read`. Terminal observe/control is not wired for ssh fleets yet.
 - An unreachable fleet is a state. `herdr fleets` (and `runtime list`) report
   `state: "unreachable"` with `lastSeenAt`; other fleets answer normally.
 

@@ -133,6 +133,14 @@ export async function codexTrackerOverrides(
       `Could not read Codex's MCP servers to switch off inherited Linear connectors: ${error instanceof Error ? error.message : String(error)}`,
     );
   });
+  return codexTrackerOverridesFromList(stdout);
+}
+
+/**
+ * The same overrides from `codex mcp list --json` output, wherever it ran: a
+ * remote hire reads the configuration on the machine its Codex runs on.
+ */
+export function codexTrackerOverridesFromList(stdout: string): string[] {
   const listed: unknown = JSON.parse(stdout);
   if (!Array.isArray(listed)) throw new Error("Codex listed its MCP servers in an unexpected shape");
   return (listed as CodexListedServer[])
