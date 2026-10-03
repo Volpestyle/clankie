@@ -1,3 +1,5 @@
+import { BodyLeaseStore } from "./body-leases.ts";
+import { BodyLeaseRouter } from "./body-lease-router.ts";
 import { createPersonaImageSource } from "./persona-images.ts";
 import { createHostPowerMonitor } from "./host-power.ts";
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
@@ -548,6 +550,8 @@ const localFleetBinding = async () => {
     : undefined;
 };
 const localCodexSeats = new LocalCodexSeats(herdr.binding);
+const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
+const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
 const captain = createCaptain(
   {
     workItems,
@@ -590,6 +594,7 @@ const captain = createCaptain(
     mcp: mcpHost,
     email,
     rivals,
+    bodyLeases,
     browser: {
       catalog: () =>
         browserHost?.catalog() ??
@@ -599,8 +604,8 @@ const captain = createCaptain(
           reason: "the browser host is not running",
           tools: [],
         }),
-      call: (request) =>
-        browserHost?.call(request) ??
+      call: (request, signal, authority) =>
+        browserHost?.call(request, signal, authority) ??
         Promise.resolve({
           outcome: "refused" as const,
           tool: request.tool,
@@ -797,6 +802,28 @@ const localFleet = new LocalFleetLink({
   }),
 });
 const clankie = await createClankieApp({
+  bodyLeases: {
+    router: bodyLeases,
+    store: bodyLeaseStore,
+    async confirmStopped(resource, guard) {
+      await guard();
+      if (resource === "browser") {
+        if (browserHost === undefined) return true;
+        const result = await browserHost.call(
+          { schemaVersion: 1, tool: "browser_use_close", arguments: {} },
+          undefined,
+          { guard },
+        );
+        return result.outcome === "ok" && !result.isError;
+      }
+      if (resource === "voice") return (await createDiscordVoicePresenceClient().leave({})).action === "left";
+      if (resource === "play") {
+        const result = await playHost.stopAndWait({ deadlineMs: 12_000, reason: "operator_body_recovery" });
+        return result.status === "settled";
+      }
+      return false; // An uncertain Discord send requires an exact delivery receipt, not a reset.
+    },
+  },
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   localFleet,
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
@@ -1019,6 +1046,11 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     await captain.close().catch(() => undefined);
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
+    try {
+      bodyLeaseStore.close();
+    } catch (error) {
+      logger.warn({ error }, "Body lease operations remain unresolved at shutdown");
+    }
     await mcpHost.close().catch(() => undefined);
     clankie.close();
     if (result.status === "deadline_expired") {

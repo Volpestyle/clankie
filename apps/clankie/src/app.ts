@@ -1,3 +1,6 @@
+import { BodyLeaseRequestSchema, BodyResourceSchema } from "@clankie/protocol";
+import type { BodyLeaseRouter, BodyConversationIdentity } from "./body-lease-router.ts";
+import type { BodyLeaseStore } from "./body-leases.ts";
 import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import { discordDeliveryStage } from "@clankie/protocol";
 import { createAgentSessionRoutes } from "./agent-session-routes.ts";
@@ -324,7 +327,7 @@ interface BrowserToolPort {
   call(
     request: CallBrowserToolRequest,
     signal?: AbortSignal,
-    authority?: { shell?: boolean },
+    authority?: { shell?: boolean; guard?: () => Promise<void> },
   ): Promise<CallBrowserToolResult>;
 }
 
@@ -421,6 +424,14 @@ export interface ClankieAppDependencies {
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
+  bodyLeases?: {
+    router: BodyLeaseRouter;
+    store: BodyLeaseStore;
+    confirmStopped(
+      resource: import("@clankie/protocol").BodyResource,
+      guard: () => Promise<void>,
+    ): Promise<boolean>;
+  };
   /**
    * Computer-use harnesses on this machine (ADR 0199). Absent on a hosted body,
    * which has no owner desktop; the route then answers an empty list.
@@ -1765,6 +1776,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const fingerprint = createHash("sha256").update(JSON.stringify(write)).digest("hex");
     return withSerializedLock(discordPresenceLocks, write.idempotencyKey, async () => {
       pruneExpired(discordPresenceResults, clock().getTime());
+      const persistedWrite =
+        dependencies.bodyLeases === undefined
+          ? undefined
+          : discordTurnReceipts.get(`write:${write.idempotencyKey}`);
+      if (persistedWrite !== undefined) {
+        if (persistedWrite.fingerprint !== fingerprint)
+          return context.json({ error: "discord_presence_idempotency_conflict" }, 409);
+        if (persistedWrite.writeResult !== undefined) return context.json(persistedWrite.writeResult);
+        return context.json({ error: "discord_presence_write_uncertain", deliveryStage: "uncertain" }, 409);
+      }
       const previous = discordPresenceResults.get(write.idempotencyKey);
       if (previous !== undefined) {
         if (previous.fingerprint !== fingerprint) {
@@ -1813,7 +1834,78 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         );
       }
       try {
-        const result = await discordPresenceRuntime.execute(write, session);
+        let result: DiscordPresenceWriteResult;
+        if (dependencies.bodyLeases === undefined || write.payload.kind === "typing_start") {
+          result = await discordPresenceRuntime.execute(write, session);
+        } else {
+          const sourceId =
+            write.sourceDeliveryId ??
+            ("replyToMessageId" in write.payload
+              ? write.payload.replyToMessageId
+              : "messageId" in write.payload
+                ? write.payload.messageId
+                : undefined);
+          const origin =
+            sourceId === undefined ? undefined : discordTurnReceipts.get(`discord:${sourceId}`)?.origin;
+          if (
+            origin === undefined ||
+            origin.messageId !== sourceId ||
+            ("channelId" in write.payload && origin.channelId !== write.payload.channelId) ||
+            origin.presenceSessionId !== write.identity.presenceSessionId ||
+            origin.transportKind !== captainTransportKind(captain) ||
+            origin.characterId !== write.identity.characterId ||
+            origin.credentialRef !== write.identity.credentialRef
+          )
+            return context.json({ outcome: "rejected", reason: "identity_required" }, 409);
+          const conversationId = dependencies.captain.bodyRoomConversation(
+            "discord_presence",
+            `${origin.guildId ?? "dm"}:${origin.channelId}`,
+          );
+          const identity: BodyConversationIdentity = {
+            conversationId,
+            current: () => {
+              const current = discordPresenceLiveSessions.get(discordPresenceBindingKey(write.identity));
+              return (
+                !context.req.raw.signal.aborted &&
+                current?.revision === liveClaim.data.revision &&
+                current.sessionId === liveClaim.data.sessionId &&
+                current.phase === liveClaim.data.phase
+              );
+            },
+            authorize: async () => {
+              const currentCaptain = await authenticateCaptain(context.req.raw, dependencies);
+              const currentSession = discordPresenceSessions.resolve(write.identity);
+              return (
+                currentCaptain !== undefined &&
+                currentCaptain !== "unavailable" &&
+                captainTransportKind(currentCaptain) === origin.transportKind &&
+                currentSession !== undefined &&
+                isDiscordPresenceActionAvailable({ action: write.action, session: currentSession }) &&
+                (origin.transportKind !== "user_session" ||
+                  discordUserSessionOptIns.resolveActive(PROFILE_HASH) !== undefined)
+              );
+            },
+          };
+          const leased = await dependencies.bodyLeases.router.run(
+            identity,
+            "discord_mouth",
+            async (guard) => {
+              await guard();
+              discordTurnReceipts.begin(`write:${write.idempotencyKey}`, {
+                fingerprint,
+                lane: "discord_text",
+                origin,
+                bodyConversationId: conversationId,
+              });
+              const result = await discordPresenceRuntime.execute(write, session, guard);
+              discordTurnReceipts.settleWrite(`write:${write.idempotencyKey}`, fingerprint, result);
+              return result;
+            },
+            { lifetime: "operation" },
+          );
+          if (leased.outcome !== "completed") return context.json(leased, 409);
+          result = leased.value;
+        }
         discordPresenceResults.set(write.idempotencyKey, {
           fingerprint,
           result,
@@ -1882,7 +1974,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     if (record === undefined) {
       try {
-        discordTurnReceipts.begin(deliveryKey, { fingerprint, lane: expectedLane });
+        discordTurnReceipts.begin(deliveryKey, {
+          fingerprint,
+          lane: expectedLane,
+          origin: {
+            presenceSessionId:
+              request.identity.presenceSessionId ??
+              `discord:${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`,
+            characterId: request.identity.characterId,
+            credentialRef: request.identity.credentialRef,
+            transportKind: request.identity.transportKind,
+            ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
+            channelId: request.trigger.channelId,
+            messageId: request.deliveryId,
+            actorId: request.trigger.actorId,
+          },
+        });
       } catch {
         return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
       }
@@ -2541,6 +2648,117 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Which harnesses here can drive the owner's apps and Chrome (ADR 0199). It
   // describes the owner's machine and sessions, so only the operator reads it;
   // an explicit read re-probes rather than trusting the prompt's cache.
+  app.get("/v1/body-leases", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (!operator || operator === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    if (dependencies.bodyLeases === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
+    try {
+      return context.json({
+        leases: BodyResourceSchema.options.flatMap((resource) => {
+          const lease = dependencies.bodyLeases!.store.status(resource);
+          return lease === undefined ? [] : [lease];
+        }),
+      });
+    } catch {
+      return context.json({ error: "body_leases_unavailable" }, 503);
+    }
+  });
+
+  app.post("/v1/body-leases", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (!operator || operator === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = BodyLeaseRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_body_lease_request" }, 400);
+    const body = dependencies.bodyLeases;
+    if (body === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
+    const input = parsed.data;
+    // An operator bearer can select its own existing writable thread. Room inspection is insufficient.
+    const identity = operatorBodyIdentity(input.conversationId, context.req.raw);
+    if (identity === undefined)
+      return context.json({ outcome: "rejected", reason: "identity_required" }, 409);
+    try {
+      if (input.action === "queue" || input.action === "ask")
+        return context.json(
+          await body.router.request(identity, {
+            kind: input.action,
+            resource: input.resource,
+            text: input.request,
+            ttlMs: input.ttlMs,
+          }),
+        );
+      if (input.action === "recover")
+        return context.json(
+          await body.router.recover(identity, input.resource, (guard) =>
+            confirmBodyStopped(input.resource, guard),
+          ),
+        );
+      if (input.action === "acquire") {
+        const result = body.store.acquire(input.resource, input.conversationId, input.ttlMs);
+        if (result.outcome === "busy") return context.json({ ...result, actions: ["queue", "ask"] }, 409);
+        if (result.outcome !== "acquired") return context.json(result, 409);
+        return context.json({
+          outcome: "acquired",
+          lease: body.store.status(input.resource),
+          incarnation: result.lease.token,
+        });
+      }
+      const held = body.store.recoveryReference(input.resource);
+      if (held?.conversationId !== input.conversationId || held.token !== input.incarnation)
+        return context.json({ outcome: "rejected", reason: "stale_lease" }, 409);
+      if (input.action === "renew") {
+        const result = body.store.renew(held, input.ttlMs);
+        return context.json(
+          result.outcome === "renewed"
+            ? { outcome: "renewed", lease: body.store.status(input.resource) }
+            : result,
+        );
+      }
+      // Ordinary release still proves actual stop. A token cannot assert a running body ended.
+      return context.json(
+        await body.router.recover(identity, input.resource, (guard) =>
+          confirmBodyStopped(input.resource, guard),
+        ),
+      );
+    } catch {
+      return context.json({ outcome: "rejected", reason: "store_unavailable" }, 503);
+    }
+  });
+
+  async function confirmBodyStopped(
+    resource: import("@clankie/protocol").BodyResource,
+    guard: () => Promise<void>,
+  ): Promise<boolean> {
+    const body = dependencies.bodyLeases;
+    if (body === undefined) return false;
+    if (resource !== "discord_mouth") return body.confirmStopped(resource, guard);
+    await guard();
+    const held = body.store.recoveryReference(resource);
+    return held !== undefined && discordTurnReceipts.writesSettled(held.conversationId);
+  }
+
+  function operatorBodyIdentity(
+    conversationId: string | undefined,
+    request: Request,
+  ): BodyConversationIdentity | undefined {
+    if (
+      conversationId === undefined ||
+      dependencies.captain.seatContext(conversationId)?.conversationId !== conversationId
+    )
+      return undefined;
+    return {
+      conversationId,
+      current: () =>
+        !request.signal.aborted &&
+        dependencies.captain.seatContext(conversationId)?.conversationId === conversationId,
+      authorize: async () => {
+        const operator = await authenticateOperator(request, dependencies);
+        return operator !== undefined && operator !== "unavailable";
+      },
+    };
+  }
+
   app.get("/v1/browser/harnesses", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
@@ -2632,14 +2850,32 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }
     }
     try {
-      return context.json(
-        {
-          result: await dependencies.browserTools.call(parsed.data, context.req.raw.signal, {
-            shell: authorization.principal.kind === "operator",
-          }),
-        },
-        200,
-      );
+      if (dependencies.bodyLeases !== undefined) {
+        if (authorization.principal.kind !== "operator")
+          return context.json({ outcome: "rejected", reason: "identity_required" }, 409);
+        const identity = operatorBodyIdentity(
+          context.req.header("x-clankie-conversation-id"),
+          context.req.raw,
+        );
+        if (identity === undefined)
+          return context.json({ outcome: "rejected", reason: "identity_required" }, 409);
+        const result = await dependencies.bodyLeases.router.run(
+          identity,
+          "browser",
+          (guard) =>
+            dependencies.browserTools!.call(parsed.data, context.req.raw.signal, { shell: true, guard }),
+          {
+            lifetime: parsed.data.tool === "browser_use_close" ? "operation" : "session",
+            uncertain: (value) => value.outcome === "ok" && value.isError === true,
+          },
+        );
+        return context.json({ result: result.outcome === "completed" ? result.value : result });
+      }
+      return context.json({
+        result: await dependencies.browserTools.call(parsed.data, context.req.raw.signal, {
+          shell: authorization.principal.kind === "operator",
+        }),
+      });
     } catch {
       return context.json({ error: "browser_upstream_failure" }, 502);
     }

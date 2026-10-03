@@ -419,3 +419,34 @@ const presentSession = DiscordPresenceSessionRecordSchema.parse({
   revision: 1,
   updatedAt: "2026-07-14T18:00:00.000Z",
 });
+
+it("fences an attachment send when the body lease changes during materialization", async () => {
+  let allowed = true;
+  const post = vi.fn(async () => ({ id: "must-not-send" }));
+  const runtime = new DiscordBotPresenceRuntime({
+    botToken: "fixture",
+    rest: { post } as never,
+    resolveAttachment: async () => {
+      allowed = false;
+      return { data: Buffer.from("png"), contentType: "image/png" };
+    },
+  });
+  await expect(
+    runtime.execute(
+      write({
+        action: "discord.presence.send_attachment",
+        payload: {
+          kind: "send_attachment",
+          channelId: "ch-1",
+          artifactRef: "artifact:1",
+          filename: "image.png",
+        },
+      }),
+      presentSession,
+      async () => {
+        if (!allowed) throw new Error("stale body lease");
+      },
+    ),
+  ).rejects.toThrow("stale body lease");
+  expect(post).not.toHaveBeenCalled();
+});

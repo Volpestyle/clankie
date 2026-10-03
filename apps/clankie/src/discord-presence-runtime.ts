@@ -14,6 +14,7 @@ export interface DiscordPresenceRuntimePort {
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
+    guard?: () => Promise<void>,
   ): Promise<DiscordPresenceWriteResult>;
   /**
    * Make the webhook for a Clankie channel, plus either its guild channel when

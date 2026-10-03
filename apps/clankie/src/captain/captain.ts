@@ -1535,6 +1535,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         lane.capture.media = undefined;
         lane.capture.autonomous = context.internal === true;
       }
+      const bodyIdentity = {
+        conversationId,
+        current: () =>
+          lane.capture.bodyIdentity === bodyIdentity &&
+          !context.signal.aborted &&
+          conversations.runsCaptainTurns(conversationId),
+        authorize: async () => conversations.runsCaptainTurns(conversationId),
+      };
+      lane.capture.bodyIdentity = bodyIdentity;
       lane.capture.room = roomKey("operator", conversationId);
       lane.capture.targetId = conversationId;
       lane.capture.publishFile = (input) => conversations.publishFile({ conversationId, ...input });
@@ -2352,6 +2361,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const syncTranscript = (): void => roomConversations.sync(conversationId, lane.session.sessionFile);
     syncTranscript();
     lane.turnCounter += 1;
+    const bodyIdentity = {
+      conversationId,
+      current: () => lane.capture.bodyIdentity === bodyIdentity,
+      authorize: async () => {
+        const { settings: discord } = resolveDiscordSettings(
+          (await settings()).discord,
+          options.discordEnvironment,
+        );
+        const currentPlan = planDiscordTurnSession({
+          baseSessionKey: origin.baseSessionKey,
+          durable: true,
+          actorId: origin.actorId,
+          ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
+          channelId: origin.channelId,
+          transportKind: origin.transportKind,
+          settings: discord,
+        });
+        return lane.capture.shell !== true || currentPlan.systemTools;
+      },
+    };
+    lane.capture.bodyIdentity = bodyIdentity;
     lane.capture.room = roomKey(normalized.lane, normalized.targetId);
     lane.capture.targetId = normalized.targetId;
     lane.capture.actorId = normalized.actorId;
@@ -3160,6 +3190,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ].join("\n\n");
     },
 
+    bodyRoomConversation: (lane, targetId) => conversations.roomConversation(lane, targetId),
+
     async laneMemoryCard(lane) {
       return renderEpisodeCard(await deps.memory.recallEpisodeCard(lane));
     },
@@ -3176,6 +3208,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const binding = seatContext(conversationId);
         if (binding === undefined) throw new Error("Unknown captain conversation");
         const targetId = binding.conversationId;
+        capture.bodyIdentity = {
+          conversationId: targetId,
+          current: () => conversations.runsCaptainTurns(targetId),
+          authorize: async () => conversations.runsCaptainTurns(targetId),
+        };
+        capture.shell = true;
         capture.room = roomKey("operator", targetId);
         capture.targetId = targetId;
       }

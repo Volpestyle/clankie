@@ -176,3 +176,39 @@ describe("captain Discord action control", () => {
     expect(invalid.status).toBe(400);
   });
 });
+
+it("preserves a structured body conflict instead of claiming transport failure", async () => {
+  const call = {
+    action: "send_text_update" as const,
+    callId: "call",
+    actorId: "actor",
+    guildId: "guild",
+    channelId: "channel",
+    messageId: "source",
+    text: "update",
+  };
+  const plan = planNonWatchCaptainDiscordAction(call)!;
+  const bodyLease = {
+    outcome: "busy",
+    lease: { resource: "discord_mouth", conversationId: "other-thread", state: "active", expiresAt: 1000 },
+    actions: ["queue", "ask"],
+  };
+  const result = await executePlannedCaptainDiscordAction({
+    call,
+    plan,
+    guildId: "guild",
+    channelId: "channel",
+    characterId: "clankie",
+    credentialRef: "discord_bot",
+    transportKind: "bot",
+    progressMessageIds: new Set(),
+    presencePort: {
+      getHealth: async () => ({ profileHash: "profile" }),
+      executeDiscordPresenceAction: async (write) => {
+        expect(write.sourceDeliveryId).toBe("source");
+        throw Object.assign(new Error("Clankie API 409"), { bodyLease });
+      },
+    },
+  });
+  expect(result).toMatchObject({ ok: false, bodyLease });
+});

@@ -19,7 +19,7 @@ import type { CaptainDeps } from "./deps.ts";
 import type { HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat, LaneTool, LaneToolBank, LaneToolResult, MessageSeat } from "./port.ts";
-import { captainTools, toolJson, type TurnContext } from "./tools.ts";
+import { captainTools, callConversationBrowser, toolJson, type TurnContext } from "./tools.ts";
 
 type McpToolDescriptor = Awaited<ReturnType<CaptainDeps["mcp"]["catalog"]>>[number];
 type BrowserToolDescriptor = Awaited<ReturnType<CaptainDeps["browser"]["catalog"]>>["tools"][number];
@@ -129,10 +129,10 @@ function browserLaneTool(
     description: tool.description,
     inputSchema: tool.inputSchema,
     async call(args) {
-      const result = await deps.browser.call(
+      const result = await callConversationBrowser(
+        deps,
+        { ...turn, shell },
         { schemaVersion: 1, tool: tool.name, arguments: args },
-        undefined,
-        { shell },
       );
       if (result.outcome === "ok" && result.isError) {
         return { content: [{ type: "text", text: result.content }], isError: true };

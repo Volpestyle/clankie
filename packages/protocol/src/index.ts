@@ -1,3 +1,4 @@
+import { BodyLeaseResultSchema } from "./body-leases.ts";
 import { DeliveryStageSchema } from "./delivery.ts";
 export * from "./delivery.ts";
 import {
@@ -4227,6 +4228,7 @@ export type DiscordCaptainActionInput = z.infer<typeof DiscordCaptainActionInput
 
 export const DiscordCaptainActionResultSchema = z
   .object({
+    bodyLease: BodyLeaseResultSchema.optional(),
     ok: z.boolean(),
     message: z.string().min(1).max(1_000),
     messageId: z.string().min(1).max(128).optional(),
@@ -4652,6 +4654,8 @@ export const DISCORD_PRESENCE_ACTION_PAYLOAD_KIND: Readonly<
 export const DiscordPresenceWriteSchema = z
   .object({
     schemaVersion: z.literal(1),
+    /** Host-stamped original Discord delivery, resolved against durable service admission. */
+    sourceDeliveryId: z.string().min(1).max(128).optional(),
     idempotencyKey: z.string().min(1),
     action: DiscordPresenceActionSchema,
     identity: DiscordPresenceChannelIdentitySchema,

@@ -248,3 +248,58 @@ describe("browser host", () => {
     expect(BrowserUse.create).not.toHaveBeenCalled();
   });
 });
+
+it("rechecks the body lease inside the browser queue before any queued effect", async () => {
+  const current = await build();
+  await current.call(open());
+  let release!: () => void;
+  let started!: () => void;
+  const begun = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  execute.mockImplementationOnce(async () => {
+    started();
+    await waiting;
+    return { text: "done", images: [], targetId: "tab-1" };
+  });
+  const first = current.call(code(), undefined, { shell: true });
+  await begun;
+  let permitted = true;
+  const second = current.call(
+    { schemaVersion: 1, tool: "browser_use_click", arguments: { x: 10, y: 10 } },
+    undefined,
+    {
+      guard: async () => {
+        if (!permitted) throw new Error("stale body lease");
+      },
+    },
+  );
+  permitted = false;
+  release();
+  await first;
+  await expect(second).rejects.toThrow("stale body lease");
+  expect(page.clickAt).not.toHaveBeenCalled();
+});
+
+it("rechecks a body lease after asynchronous browser setup before page actions", async () => {
+  const current = await build();
+  let allowed = true;
+  vi.mocked(Page.attach).mockImplementationOnce(async () => {
+    allowed = false;
+    return page as unknown as Page;
+  });
+  const result = await current.call(
+    { schemaVersion: 1, tool: "browser_use_click", arguments: { x: 10, y: 10 } },
+    undefined,
+    {
+      guard: async () => {
+        if (!allowed) throw new Error("lease changed during browser setup");
+      },
+    },
+  );
+  expect(result).toMatchObject({ outcome: "refused", reason: "browser_unavailable" });
+  expect(page.clickAt).not.toHaveBeenCalled();
+});

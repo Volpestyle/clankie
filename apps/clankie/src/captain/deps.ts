@@ -1,3 +1,4 @@
+import type { BodyLeaseRouter } from "../body-lease-router.ts";
 import type { FleetShellRun, HerdrFleet, HerdrFleetRun } from "../herdr-fleet.ts";
 import type { HostedWorkStarted } from "../hosted-work.ts";
 import type { PiSeatModel } from "./herdr-watch.ts";
@@ -43,6 +44,7 @@ import type { WorkItemsService } from "../work-items.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  readonly bodyLeases?: BodyLeaseRouter;
   /** Actual work lifetime, separate from presence and model telemetry. */
   readonly onWorkStarted?: HostedWorkStarted;
   /** Called once per settled turn with its bounded metrics (hosted body telemetry). */

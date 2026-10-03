@@ -612,6 +612,7 @@ export class DiscordTextIngress {
     const write = DiscordPresenceWriteSchema.parse({
       schemaVersion: 1,
       idempotencyKey: `${message.id}:reply`,
+      sourceDeliveryId: message.id,
       action: media === undefined ? "discord.presence.reply" : "discord.presence.reply_with_media",
       identity,
       content,

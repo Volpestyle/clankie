@@ -2,6 +2,8 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { SettingsStore, defaultSettingsPath, type BrowserSettings } from "@clankie/settings";
 import { commandHost } from "./io.ts";
 import {
+  BodyLeaseResultSchema,
+  type BodyLeaseResult,
   BrowserToolCatalogSchema,
   CallBrowserToolRequestSchema,
   CallBrowserToolResultSchema,
@@ -15,11 +17,12 @@ const BROWSER_USAGE = [
   "       clankie browser delegate on|off",
   "       clankie browser harnesses",
   "       clankie browser tools",
-  "       clankie browser call TOOL JSON",
+  "       clankie browser call TOOL JSON --conversation ID",
 ].join("\n");
 
 export interface BrowserCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
+  readonly conversationId?: string;
   readonly settings?: SettingsStore;
   readonly host?: string;
   readonly fetchImpl?: typeof fetch;
@@ -142,7 +145,9 @@ export async function browserHarnesses(options: BrowserCommandOptions = {}): Pro
 export async function runBrowserCommand(
   args: readonly string[],
   options: BrowserCommandOptions = {},
-): Promise<BrowserCommandResult | BrowserHarnessesResult | BrowserToolCatalog | CallBrowserToolResult> {
+): Promise<
+  BrowserCommandResult | BrowserHarnessesResult | BrowserToolCatalog | CallBrowserToolResult | BodyLeaseResult
+> {
   const verb = args[0];
   if (verb === undefined || verb === "status") return await browserStatus(options);
   if (verb === "harnesses" && args.length === 1) return await browserHarnesses(options);
@@ -150,14 +155,21 @@ export async function runBrowserCommand(
     const body = await browserRequest("/v1/browser/tools", options);
     return BrowserToolCatalogSchema.parse(body.catalog);
   }
-  if (verb === "call" && args.length === 3) {
+  if (verb === "call" && (args.length === 3 || (args.length === 5 && args[3] === "--conversation"))) {
     const request = CallBrowserToolRequestSchema.parse({
       schemaVersion: 1,
       tool: args[1],
       arguments: JSON.parse(args[2] ?? "{}"),
     });
-    const body = await browserRequest("/v1/browser/call", options, request);
-    return CallBrowserToolResultSchema.parse(body.result);
+    const selected =
+      args[4] ?? options.conversationId ?? (options.env ?? process.env).CLANKIE_CONVERSATION_ID;
+    const body = await browserRequest(
+      "/v1/browser/call",
+      { ...options, ...(selected === undefined ? {} : { conversationId: selected }) },
+      request,
+    );
+    const lease = BodyLeaseResultSchema.safeParse(body.result);
+    return lease.success ? lease.data : CallBrowserToolResultSchema.parse(body.result);
   }
   if (
     (verb === "record" || verb === "delegate") &&
@@ -185,7 +197,13 @@ async function browserRequest(
     throw new Error("No operator credential is available; `clankie status` reports this install's.");
   const response = await (options.fetchImpl ?? fetch)(new URL(path, commandHost({ ...options, env })), {
     method: request === undefined ? "GET" : "POST",
-    headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${credential.token}`,
+      "content-type": "application/json",
+      ...(options.conversationId === undefined
+        ? {}
+        : { "x-clankie-conversation-id": options.conversationId }),
+    },
     ...(request === undefined ? {} : { body: JSON.stringify(request) }),
     signal: AbortSignal.timeout(150_000),
   });

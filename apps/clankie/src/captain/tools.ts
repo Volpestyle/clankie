@@ -1,3 +1,4 @@
+import type { BodyConversationIdentity } from "../body-lease-router.ts";
 import { VOICE_JOIN_REQUEST_MAX_CHARS } from "@clankie/discord-presence-core";
 import {
   CAPTAIN_EPISODE_SUMMARY_MAX,
@@ -14,6 +15,9 @@ import {
   hireDeliveryStage,
   fleetDeliveryStage,
   type CaptainSessionLaneV2,
+  type CallBrowserToolRequest,
+  type CallBrowserToolResult,
+  type BodyLeaseResult,
   type CaptainTurnMedia,
   type DrawDiagramResult,
   type OperatorDeliveredFile,
@@ -46,6 +50,8 @@ import { WorkRequestSchema } from "../work-items.ts";
  * (which scopes every room-keyed read and write a tool makes).
  */
 export interface TurnContext {
+  /** Immutable host binding for this turn; never populated from tool arguments. */
+  bodyIdentity?: BodyConversationIdentity | undefined;
   media?: CaptainTurnMedia | undefined;
   /**
    * Stable key for the room this turn is in. Sessions are per-room in every
@@ -1633,15 +1639,11 @@ export function browserExtension(deps: CaptainDeps, turn: TurnContext): InlineEx
           parameters: (tool.inputSchema ?? Type.Object({})) as TSchema,
           executionMode: "sequential",
           execute: async (_id, params) => {
-            const result = await deps.browser.call(
-              {
-                schemaVersion: 1,
-                tool: tool.name,
-                arguments: (params ?? {}) as Record<string, unknown>,
-              },
-              undefined,
-              { shell: turn.shell === true },
-            );
+            const result = await callConversationBrowser(deps, turn, {
+              schemaVersion: 1,
+              tool: tool.name,
+              arguments: (params ?? {}) as Record<string, unknown>,
+            });
             if (result.outcome === "ok" && result.isError) {
               throw new Error(result.content || `${tool.name} failed`);
             }
@@ -1696,4 +1698,26 @@ export function browserExtension(deps: CaptainDeps, turn: TurnContext): InlineEx
       });
     },
   };
+}
+
+/** Both Pi and native seats enter the same body boundary with a captured host identity. */
+export async function callConversationBrowser(
+  deps: CaptainDeps,
+  turn: TurnContext,
+  request: CallBrowserToolRequest,
+): Promise<CallBrowserToolResult | BodyLeaseResult> {
+  const shell = turn.shell === true;
+  if (deps.bodyLeases === undefined) return deps.browser.call(request, undefined, { shell });
+  const identity = turn.bodyIdentity;
+  if (identity === undefined) return { outcome: "rejected", reason: "identity_required" };
+  const result = await deps.bodyLeases.run(
+    identity,
+    "browser",
+    (guard) => deps.browser.call(request, undefined, { shell, guard }),
+    {
+      lifetime: request.tool === "browser_use_close" ? "operation" : "session",
+      uncertain: (value) => value.outcome === "ok" && value.isError === true,
+    },
+  );
+  return result.outcome === "completed" ? result.value : result;
 }

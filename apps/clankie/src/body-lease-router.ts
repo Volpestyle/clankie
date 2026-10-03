@@ -19,6 +19,7 @@ interface RequestDeliveryPorts {
   deliver(
     destination: string,
     request: { requester: string; resource: BodyResource; text: string; kind: "queue" | "ask" },
+    guard: () => Promise<void>,
   ): Promise<Extract<BodyLeaseResult, { outcome: "asked" }>["deliveryStage"]>;
 }
 
@@ -78,14 +79,32 @@ export class BodyLeaseRouter {
       if (request.kind === "queue" ? current !== undefined : current?.token !== request.incarnation) continue;
       const attempted = this.store.attemptRequest(request.requestId);
       if (attempted === undefined) continue;
+      const guard = async () => {
+        if (
+          (await this.authorize(source, request.requester, request.resource, "effect")) !== undefined ||
+          !(await ports.authorizeDelivery(request.requester, destination)) ||
+          !source.current() ||
+          !target.current() ||
+          !this.store.requestCurrent(request.requestId)
+        )
+          throw new Error("Lease request authority or deadline changed");
+        const latest = this.store.recoveryReference(request.resource);
+        if (request.kind === "queue" ? latest !== undefined : latest?.token !== request.incarnation)
+          throw new Error("Lease request holder changed");
+      };
       let deliveryStage: Extract<BodyLeaseResult, { outcome: "asked" }>["deliveryStage"];
       try {
-        deliveryStage = await ports.deliver(destination, {
-          requester: request.requester,
-          resource: request.resource,
-          text: request.text,
-          kind: request.kind,
-        });
+        await guard();
+        deliveryStage = await ports.deliver(
+          destination,
+          {
+            requester: request.requester,
+            resource: request.resource,
+            text: request.text,
+            kind: request.kind,
+          },
+          guard,
+        );
       } catch {
         deliveryStage = "uncertain";
       }
@@ -99,7 +118,7 @@ export class BodyLeaseRouter {
     resource: BodyResource,
     effect: (guard: () => Promise<void>) => Promise<T>,
     options: { lifetime: "operation" | "session"; uncertain?: (result: T) => boolean },
-  ): Promise<{ outcome: "completed"; value: T } | Refusal> {
+  ): Promise<{ outcome: "completed"; value: T; leaseIssue?: string } | Refusal> {
     const conversationId = identity.conversationId;
     const authorized = await this.authorize(identity, conversationId, resource, "effect");
     if (authorized !== undefined) return authorized;
@@ -110,6 +129,8 @@ export class BodyLeaseRouter {
         const reference = this.store.recoveryReference(resource);
         if (reference === undefined) return { outcome: "rejected", reason: "stale_lease" };
         lease = reference;
+        const renewed = this.store.renew(lease, 300_000);
+        if (renewed.outcome !== "renewed") return renewed;
       } else {
         const result = this.store.acquire(resource, conversationId, 300_000);
         if (result.outcome === "busy") return { ...result, actions: ["queue", "ask"] };
@@ -134,10 +155,12 @@ export class BodyLeaseRouter {
       const value = await effect(guard);
       const uncertain = options.uncertain?.(value) === true;
       const finished = this.store.finish(lease, begun.operationId, uncertain ? "uncertain" : "settled");
-      if (finished.outcome !== "finished") return finished;
+      if (finished.outcome !== "finished")
+        return { outcome: "completed", value, leaseIssue: finished.reason };
       if (!uncertain && options.lifetime === "operation") {
         const released = this.store.release(lease);
-        if (released.outcome !== "released") return released;
+        if (released.outcome !== "released")
+          return { outcome: "completed", value, leaseIssue: released.reason };
       }
       return { outcome: "completed", value };
     } catch (error) {

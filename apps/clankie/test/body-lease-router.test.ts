@@ -125,12 +125,16 @@ it("queues only an explicit scoped wake, persists attempted delivery, and never 
   expect(await router.deliverRequests(ports)).toMatchObject([
     { outcome: "asked", deliveryStage: "uncertain" },
   ]);
-  expect(deliver).toHaveBeenCalledExactlyOnceWith("b", {
-    requester: "b",
-    resource: "browser",
-    text: "My browsing task is waiting",
-    kind: "queue",
-  });
+  expect(deliver).toHaveBeenCalledExactlyOnceWith(
+    "b",
+    {
+      requester: "b",
+      resource: "browser",
+      text: "My browsing task is waiting",
+      kind: "queue",
+    },
+    expect.any(Function),
+  );
   expect(await router.deliverRequests(ports)).toEqual([]);
   expect(store.status("browser")).toBeUndefined();
   store.close();
@@ -163,7 +167,11 @@ it("ask never falls back to default head and rechecks route permission", async (
       authorizeDelivery: async () => true,
     }),
   ).toMatchObject([{ deliveryStage: "consumed" }]);
-  expect(deliver).toHaveBeenCalledWith("explicit-head", expect.objectContaining({ requester: "b" }));
+  expect(deliver).toHaveBeenCalledWith(
+    "explicit-head",
+    expect.objectContaining({ requester: "b" }),
+    expect.any(Function),
+  );
   store.close();
 });
 
@@ -175,5 +183,54 @@ it("a queued request cannot survive an intervening replacement holder", async ()
   await router.run(identity("c"), "play", async () => "running", { lifetime: "session" });
   await router.recover(identity("c"), "play", async () => true);
   expect(store.pendingRequests()).toEqual([]);
+  store.close();
+});
+
+it("preserves each successful send receipt when same-conversation operations overlap", async () => {
+  const { store, router } = fixture();
+  let finishFirst!: () => void;
+  let finishSecond!: () => void;
+  let startedFirst!: () => void;
+  let startedSecond!: () => void;
+  const firstStarted = new Promise<void>((resolve) => {
+    startedFirst = resolve;
+  });
+  const secondStarted = new Promise<void>((resolve) => {
+    startedSecond = resolve;
+  });
+  const firstWait = new Promise<void>((resolve) => {
+    finishFirst = resolve;
+  });
+  const secondWait = new Promise<void>((resolve) => {
+    finishSecond = resolve;
+  });
+  const first = router.run(
+    identity("a"),
+    "discord_mouth",
+    async () => {
+      startedFirst();
+      await firstWait;
+      return { messageId: "one" };
+    },
+    { lifetime: "operation" },
+  );
+  await firstStarted;
+  const second = router.run(
+    identity("a"),
+    "discord_mouth",
+    async () => {
+      startedSecond();
+      await secondWait;
+      return { messageId: "two" };
+    },
+    { lifetime: "operation" },
+  );
+  await secondStarted;
+  finishFirst();
+  expect(await first).toMatchObject({ outcome: "completed", value: { messageId: "one" } });
+  expect(store.status("discord_mouth")).toBeDefined();
+  finishSecond();
+  expect(await second).toMatchObject({ outcome: "completed", value: { messageId: "two" } });
+  expect(store.status("discord_mouth")).toBeUndefined();
   store.close();
 });

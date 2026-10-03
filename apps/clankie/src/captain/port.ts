@@ -94,6 +94,7 @@ export interface LaneToolBank {
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  bodyRoomConversation(lane: "discord_presence" | "discord_voice", targetId: string): string;
   evaluatorStatus(): EvaluatorStatus;
   evaluatorCommand(command: EvaluatorCommand): Promise<EvaluatorStatus>;
   /** One Discord text/voice message becomes one captain turn. */
@@ -271,6 +272,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     }),
     receiveFleetSeatMessage: async () => false,
     replySeatEvent: async () => false,
+    bodyRoomConversation: (lane, targetId) => `room:${lane}:${targetId}`,
     laneToolBank: async (lane) => ({ lane, tools: [] }),
     // A stub writes no transcripts, so it has nothing to announce. A test that
     // wants the trigger passes its own store's observer through `overrides`.

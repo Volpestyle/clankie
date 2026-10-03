@@ -74,6 +74,8 @@ const tools = {
 type ToolName = keyof typeof tools;
 
 interface BrowserCallAuthority {
+  /** Revalidated after the browser queue and before native effects. */
+  guard?: () => Promise<void>;
   /** Supplied by the host's authority plan, never by tool arguments. */
   shell?: boolean;
 }
@@ -262,6 +264,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     const parsed = tools[name].schema.safeParse(request.arguments);
     if (!parsed.success)
       return { outcome: "ok", tool: name, content: parsed.error.message, isError: true, artifacts: [] };
+    await authority?.guard?.();
     clearTimeout(idle);
     if (name === "browser_use_close") {
       await finishBurst();
@@ -283,6 +286,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     try {
       signal?.throwIfAborted();
       await ensureSession();
+      await authority?.guard?.();
     } catch (error) {
       if (session) armIdle();
       return { outcome: "refused", tool: name, reason: "browser_unavailable", detail: errorText(error) };
@@ -292,6 +296,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     try {
       if (!page || !session || !connection) throw new Error("Browser session unavailable");
       let value: unknown;
+      await authority?.guard?.();
       switch (name) {
         case "browser_use_javascript": {
           const args = tools.browser_use_javascript.schema.parse(parsed.data);

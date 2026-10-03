@@ -29,6 +29,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
+    guard?: () => Promise<void>,
   ): ReturnType<DiscordBotPresenceRuntime["execute"]>;
   provisionChannel(input: {
     readonly name: string;
@@ -169,7 +170,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
         webhookToken: webhook.token,
       };
     },
-    async execute(write, session) {
+    async execute(write, session, guard) {
       const request = presenceActGrantRequest(write);
       const grant = await provider.issueGrant(request);
       const botToken = await provider.resolveBotToken({ grant, ...request });
@@ -178,7 +179,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
         ...(options.rest === undefined ? {} : { rest: options.rest }),
         resolveAttachment: createFilesystemAttachmentResolver(discordAttachmentRoot(process.env)),
         activityApplicationIds: activitySurfaces(),
-      }).execute(write, session);
+      }).execute(write, session, guard);
     },
   };
 }

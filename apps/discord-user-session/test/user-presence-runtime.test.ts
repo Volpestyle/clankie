@@ -230,3 +230,34 @@ function write(partial: Pick<DiscordPresenceWrite, "action" | "payload">): Disco
     ...partial,
   };
 }
+
+it("rechecks the body lease after resolving a user-session attachment", async () => {
+  let allowed = true;
+  const fetchImpl = jsonFetch({ id: "must-not-send" });
+  const body = new DiscordUserPresenceRuntime({
+    token: "fixture",
+    fetch: fetchImpl,
+    resolveAttachment: async () => {
+      allowed = false;
+      return { data: Buffer.from("png"), contentType: "image/png" };
+    },
+  });
+  await expect(
+    body.execute(
+      write({
+        action: "discord.presence.send_attachment",
+        payload: {
+          kind: "send_attachment",
+          channelId: "channel-1",
+          artifactRef: "artifact:1",
+          filename: "image.png",
+        },
+      }),
+      present,
+      async () => {
+        if (!allowed) throw new Error("stale body lease");
+      },
+    ),
+  ).rejects.toThrow("stale body lease");
+  expect(fetchImpl).not.toHaveBeenCalled();
+});

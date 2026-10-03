@@ -7,6 +7,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -65,8 +66,7 @@ export class BodyLeaseStore {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     this.path = join(directory, "body-leases.json");
     this.lock = join(directory, "body-leases.lock");
-    // mkdir is exclusive across processes; failing never removes someone else's lock.
-    mkdirSync(this.lock, { mode: 0o700 });
+    this.acquireProcessLock();
     try {
       if (existsSync(this.path)) {
         const state = StateSchema.parse(JSON.parse(readFileSync(this.path, "utf8")));
@@ -84,6 +84,55 @@ export class BodyLeaseStore {
     } catch {
       this.unavailable = true;
     }
+  }
+
+  private acquireProcessLock(): void {
+    const recovery = `${this.lock}.recovery`;
+    if (existsSync(recovery))
+      throw new Error("Body lease lock recovery already in progress; inspect its owner before retrying");
+    try {
+      mkdirSync(this.lock, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const ownerPath = join(this.lock, "owner.json");
+      const ownerSchema = z.strictObject({ pid: z.number().int().positive(), nonce: z.uuid() });
+      const original = ownerSchema.parse(JSON.parse(readFileSync(ownerPath, "utf8")));
+      const originalInode = statSync(this.lock).ino;
+      const definitelyDead = (pid: number): boolean => {
+        try {
+          process.kill(pid, 0);
+          return false;
+        } catch (cause) {
+          return (cause as NodeJS.ErrnoException).code === "ESRCH";
+        }
+      };
+      // A reused PID is alive and is deliberately NOT treated as proof of death.
+      if (!definitelyDead(original.pid))
+        throw new Error("Body lease store is held by a live or unverifiable process");
+      mkdirSync(recovery, { mode: 0o700 });
+      try {
+        writeFileSync(
+          join(recovery, "owner.json"),
+          JSON.stringify({ pid: process.pid, nonce: randomUUID() }),
+          { mode: 0o600 },
+        );
+        const current = ownerSchema.parse(JSON.parse(readFileSync(ownerPath, "utf8")));
+        if (
+          statSync(this.lock).ino !== originalInode ||
+          current.nonce !== original.nonce ||
+          !definitelyDead(current.pid)
+        )
+          throw new Error("Body lease process owner changed during recovery");
+        rmSync(this.lock, { recursive: true });
+        // A competing startup that wins this mkdir owns the new lock; never remove it.
+        mkdirSync(this.lock, { mode: 0o700 });
+      } finally {
+        rmSync(recovery, { recursive: true });
+      }
+    }
+    writeFileSync(join(this.lock, "owner.json"), JSON.stringify({ pid: process.pid, nonce: randomUUID() }), {
+      mode: 0o600,
+    });
   }
 
   public request(input: {
@@ -131,6 +180,19 @@ export class BodyLeaseStore {
       this.unavailable = true;
       return this.refused("store_unavailable");
     }
+  }
+
+  public requestCurrent(requestId: string): boolean {
+    return (
+      !this.unavailable &&
+      !this.closed &&
+      this.requests.some(
+        (request) =>
+          request.requestId === requestId &&
+          request.phase === "attempted" &&
+          request.expiresAt > this.clock(),
+      )
+    );
   }
 
   public pendingRequests(): readonly BodyRequest[] {

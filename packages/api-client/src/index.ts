@@ -1,3 +1,4 @@
+import { BodyLeaseResultSchema } from "@clankie/protocol";
 import { HERDR_BINDING_PATH, HerdrBindingSchema, type HerdrBinding } from "@clankie/protocol";
 import {
   CaptainChannelTurnResultSchema,
@@ -126,7 +127,17 @@ export class ClankieApiClient {
       },
     });
     if (!response.ok) {
-      throw new Error(`Clankie API ${response.status}: ${await response.text()}`);
+      const text = await response.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        /* Preserve the original HTTP error. */
+      }
+      const lease = BodyLeaseResultSchema.safeParse(parsed);
+      const error = new Error(`Clankie API ${response.status}: ${text}`);
+      if (lease.success) Object.assign(error, { bodyLease: lease.data });
+      throw error;
     }
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;

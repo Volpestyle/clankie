@@ -69,6 +69,7 @@ export class DiscordBotPresenceRuntime {
   public async execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
+    guard?: () => Promise<void>,
   ): Promise<DiscordPresenceWriteResult> {
     if (write.identity.transportKind !== "bot") {
       throw new Error("discord_presence_transport_unsupported");
@@ -77,6 +78,7 @@ export class DiscordBotPresenceRuntime {
       throw new Error("discord_presence_action_unavailable_for_bot");
     }
 
+    await guard?.();
     const payload = write.payload;
     if (payload.kind === "tool_progress") {
       const route =
@@ -84,14 +86,17 @@ export class DiscordBotPresenceRuntime {
           ? Routes.channelMessages(payload.channelId)
           : Routes.channelMessage(payload.channelId, payload.messageId);
       if (payload.phase === "dismissed") {
+        await guard?.();
         await this.rest.delete(route);
         return result(write, payload.channelId);
       }
       const components = discordToolProgressComponents(payload);
       if (payload.messageId !== undefined) {
+        await guard?.();
         await this.rest.patch(route, { body: { components } });
         return result(write, payload.channelId, payload.messageId);
       }
+      await guard?.();
       const message = (await this.rest.post(route, {
         body: {
           flags: MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications,
@@ -104,6 +109,7 @@ export class DiscordBotPresenceRuntime {
     }
     const restPlan = planDiscordRestAction(payload);
     if (restPlan !== undefined) {
+      await guard?.();
       const response = await this.rest[restPlan.method](
         restPlan.path as `/${string}`,
         restPlan.body === undefined
@@ -132,6 +138,7 @@ export class DiscordBotPresenceRuntime {
         // did not make it, which is the same honesty ADR 0072 asks of him when
         // he cannot see an attachment someone else posted.
         const file = await this.replyMedia(payload.artifactRef);
+        await guard?.();
         const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
           body: {
             ...replyNonce(write),
@@ -158,6 +165,7 @@ export class DiscordBotPresenceRuntime {
           throw new Error("discord_presence_attachment_resolver_unavailable");
         }
         const file = await this.resolveAttachment(payload.artifactRef);
+        await guard?.();
         const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
           body: {
             content: payload.content ?? "",
@@ -184,6 +192,7 @@ export class DiscordBotPresenceRuntime {
         if (applicationId === undefined) {
           throw new Error("discord_presence_activity_surface_not_configured");
         }
+        await guard?.();
         const invite = (await this.rest.post(Routes.channelInvites(payload.channelId), {
           body: {
             max_age: ACTIVITY_INVITE_MAX_AGE_SECONDS,
@@ -198,7 +207,8 @@ export class DiscordBotPresenceRuntime {
           throw new Error("discord_presence_activity_invite_missing_code");
         }
         // Replace rather than accumulate: prior launch links stop working.
-        await this.revokeActivityInvites(payload.channelId, invite.code);
+        await this.revokeActivityInvites(payload.channelId, invite.code, guard);
+        await guard?.();
         const message = (await this.rest.post(Routes.channelMessages(payload.channelId), {
           body: {
             content: `Launch: https://discord.gg/${invite.code}`,
@@ -208,7 +218,7 @@ export class DiscordBotPresenceRuntime {
         return result(write, payload.channelId, message.id);
       }
       case "activity_stop": {
-        await this.revokeActivityInvites(payload.channelId);
+        await this.revokeActivityInvites(payload.channelId, undefined, guard);
         return result(write, payload.channelId);
       }
       default: {
@@ -250,7 +260,11 @@ export class DiscordBotPresenceRuntime {
     }
   }
 
-  private async revokeActivityInvites(channelId: string, keepCode?: string): Promise<void> {
+  private async revokeActivityInvites(
+    channelId: string,
+    keepCode?: string,
+    guard?: () => Promise<void>,
+  ): Promise<void> {
     const configured = new Set(Object.values(this.activityApplicationIds));
     if (configured.size === 0) return;
     let invites: ChannelInvite[];
@@ -266,6 +280,7 @@ export class DiscordBotPresenceRuntime {
       if (invite.target_application?.id === undefined) continue;
       if (!configured.has(invite.target_application.id)) continue;
       if (invite.code === undefined || invite.code === keepCode) continue;
+      await guard?.();
       try {
         await this.rest.delete(Routes.invite(invite.code));
       } catch {

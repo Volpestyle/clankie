@@ -30,6 +30,7 @@ export function createDiscordUserPresenceRuntime(
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
+    guard?: () => Promise<void>,
   ): Promise<DiscordPresenceWriteResult>;
 } {
   if (process.env.DISCORD_USER_TOKEN) {
@@ -53,14 +54,14 @@ export function createDiscordUserPresenceRuntime(
     },
   });
   return {
-    async execute(write, session) {
+    async execute(write, session, guard) {
       const request = presenceActGrantRequest(write);
       const grant = await provider.issueGrant(request);
       const userToken = await provider.resolveUserToken({ grant, ...request });
       return new DiscordUserPresenceRuntime({
         token: userToken,
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-      }).execute(write, session);
+      }).execute(write, session, guard);
     },
   };
 }

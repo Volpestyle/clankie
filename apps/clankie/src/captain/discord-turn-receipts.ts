@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { CaptainChannelTurnResultSchema, type CaptainChannelTurnResult } from "@clankie/protocol";
+import {
+  CaptainChannelTurnResultSchema,
+  DiscordPresenceWriteResultSchema,
+  type DiscordPresenceWriteResult,
+  type CaptainChannelTurnResult,
+} from "@clankie/protocol";
 import { z } from "zod";
 
 const ReceiptSchema = z
@@ -9,6 +14,20 @@ const ReceiptSchema = z
     fingerprint: z.string().min(1),
     lane: z.enum(["discord_text", "discord_voice"]),
     settled: CaptainChannelTurnResultSchema.optional(),
+    bodyConversationId: z.string().optional(),
+    writeResult: DiscordPresenceWriteResultSchema.optional(),
+    origin: z
+      .strictObject({
+        presenceSessionId: z.string(),
+        characterId: z.string(),
+        credentialRef: z.string(),
+        transportKind: z.enum(["bot", "user_session"]),
+        guildId: z.string().optional(),
+        channelId: z.string(),
+        messageId: z.string(),
+        actorId: z.string(),
+      })
+      .optional(),
   })
   .strict();
 type Receipt = z.infer<typeof ReceiptSchema>;
@@ -47,6 +66,25 @@ export class DiscordTurnReceipts {
       throw new Error("Discord receipt mismatch");
     this.records.set(id, { ...receipt, settled: CaptainChannelTurnResultSchema.parse(result) });
     this.save();
+  }
+
+  public settleWrite(id: string, fingerprint: string, result: DiscordPresenceWriteResult): void {
+    const receipt = this.get(id);
+    if (
+      receipt === undefined ||
+      receipt.fingerprint !== fingerprint ||
+      receipt.bodyConversationId === undefined
+    )
+      throw new Error("Discord write receipt mismatch");
+    this.records.set(id, { ...receipt, writeResult: DiscordPresenceWriteResultSchema.parse(result) });
+    this.save();
+  }
+
+  public writesSettled(conversationId: string): boolean {
+    if (this.unreadable) return false;
+    return [...this.records.values()].every(
+      (receipt) => receipt.bodyConversationId !== conversationId || receipt.writeResult !== undefined,
+    );
   }
 
   private save(): void {

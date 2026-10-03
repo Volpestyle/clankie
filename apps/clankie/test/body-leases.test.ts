@@ -123,3 +123,24 @@ describe("exclusive conversation body leases", () => {
     });
   });
 });
+
+it("recovers a proven-dead process lock after abrupt death without freeing its body claim", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const root = mkdtempSync(join(tmpdir(), "clankie-body-death-"));
+  roots.push(root);
+  const module = new URL("../src/body-leases.ts", import.meta.url).href;
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import { BodyLeaseStore } from ${JSON.stringify(module)}; const store = new BodyLeaseStore(${JSON.stringify(root)}); store.acquire("voice", "room-a", 1000); process.kill(process.pid, "SIGKILL");`,
+    ],
+    { encoding: "utf8" },
+  );
+  expect(child.signal, child.stderr).toBe("SIGKILL");
+  const recovered = new BodyLeaseStore(root);
+  expect(recovered.status("voice")).toMatchObject({ conversationId: "room-a", state: "recovery_required" });
+  expect(recovered.acquire("voice", "room-b", 1000).outcome).toBe("busy");
+  recovered.close();
+});

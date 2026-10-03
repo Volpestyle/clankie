@@ -1,6 +1,10 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["body"],
+    lines: ["  body status | request JSON  Inspect or explicitly request conversation body leases (JSON)"],
+  },
+  {
     nouns: ["login", "logout", "whoami", "connect", "disconnect", "fleet", "terminal", "keys", "deprovision"],
     lines: [
       "  login [--email EMAIL] [--url ORIGIN] [--code-stdin] [--machine ID]",

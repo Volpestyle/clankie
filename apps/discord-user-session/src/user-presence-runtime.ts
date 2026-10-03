@@ -52,6 +52,7 @@ export class DiscordUserPresenceRuntime {
   public async execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
+    guard?: () => Promise<void>,
   ): Promise<DiscordPresenceWriteResult> {
     if (write.identity.transportKind !== "user_session") {
       throw new Error("discord_presence_transport_unsupported");
@@ -60,20 +61,24 @@ export class DiscordUserPresenceRuntime {
       throw new Error("discord_presence_action_unavailable_for_user_session");
     }
 
+    await guard?.();
     const payload = write.payload;
     if (payload.kind === "tool_progress") {
       const path = `/channels/${payload.channelId}/messages${
         payload.messageId === undefined ? "" : `/${payload.messageId}`
       }`;
       if (payload.phase === "dismissed") {
+        await guard?.();
         await this.request("DELETE", path);
         return this.result(write, payload.channelId);
       }
       const content = discordToolProgressText(payload);
       if (payload.messageId !== undefined) {
+        await guard?.();
         await this.request("PATCH", path, { content, allowed_mentions: { parse: [] } });
         return this.result(write, payload.channelId, payload.messageId);
       }
+      await guard?.();
       const message = await this.request("POST", path, {
         content,
         message_reference: { message_id: payload.replyToMessageId },
@@ -83,6 +88,7 @@ export class DiscordUserPresenceRuntime {
     }
     const restPlan = planDiscordRestAction(payload);
     if (restPlan !== undefined) {
+      await guard?.();
       const response = await this.request(restPlan.method.toUpperCase(), restPlan.path, restPlan.body);
       const ids = resolveDiscordRestActionResult(restPlan, response);
       return this.result(write, ids.channelId, ids.messageId);
@@ -108,6 +114,7 @@ export class DiscordUserPresenceRuntime {
             ? new Blob([new Uint8Array(file.data)])
             : new Blob([new Uint8Array(file.data)], { type: file.contentType });
         form.append("files[0]", blob, payload.filename);
+        await guard?.();
         const message = await this.multipart(`/channels/${payload.channelId}/messages`, form);
         return this.result(write, payload.channelId, messageId(message));
       }
@@ -126,6 +133,7 @@ export class DiscordUserPresenceRuntime {
             ? new Blob([new Uint8Array(file.data)])
             : new Blob([new Uint8Array(file.data)], { type: file.contentType });
         form.append("files[0]", blob, payload.filename);
+        await guard?.();
         const message = await this.multipart(`/channels/${payload.channelId}/messages`, form);
         return this.result(write, payload.channelId, messageId(message));
       }
@@ -135,6 +143,7 @@ export class DiscordUserPresenceRuntime {
         // op 4 directly; routing it through REST would desynchronise the two.
         throw new Error("discord_presence_voice_via_media_session_only");
       case "go_live_start": {
+        await guard?.();
         await postUserSessionControl(
           "/go-live/start",
           {
@@ -149,6 +158,7 @@ export class DiscordUserPresenceRuntime {
         return this.result(write, payload.channelId);
       }
       case "go_live_stop": {
+        await guard?.();
         await postUserSessionControl("/go-live/stop", { guildId: payload.guildId }, this.controlFetch);
         return this.result(write);
       }

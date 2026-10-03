@@ -1,3 +1,4 @@
+import { runBodyCommand } from "../src/command/body.ts";
 import { MachineInventorySchema } from "@clankie/protocol";
 import { runMachinesCommand, formatMachines, MACHINE_RESTART_HINT } from "../src/command/machines.ts";
 import { runWorkOnCommand } from "../src/command/work-on.ts";
@@ -216,6 +217,10 @@ export async function runHeadlessCaptainCommand(
     if (command === "persona") {
       const result = await runPersonaCommand(rest, options);
       outputJson(stdout, result);
+      return 0;
+    }
+    if (command === "body") {
+      outputJson(stdout, await runBodyCommand(rest, options));
       return 0;
     }
     if (command === "browser") {

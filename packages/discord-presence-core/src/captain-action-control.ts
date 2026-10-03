@@ -1,3 +1,4 @@
+import { BodyLeaseResultSchema } from "@clankie/protocol";
 import { discordPresenceLaneAddress } from "@clankie/interactive-environment";
 import {
   DiscordCaptainActionInputSchema,
@@ -91,22 +92,40 @@ export async function executePlannedCaptainDiscordAction(input: {
   progressMessageIds: Set<string>;
 }): Promise<DiscordCaptainActionResult> {
   const health = await input.presencePort.getHealth();
-  const action = await input.presencePort.executeDiscordPresenceAction(
-    DiscordPresenceWriteSchema.parse({
-      schemaVersion: 1,
-      idempotencyKey: `captain:${input.call.callId}:${input.call.action}`,
-      action: input.plan.action,
-      identity: {
-        presenceSessionId: discordPresenceLaneAddress({ guildId: input.guildId, channelId: input.channelId }),
-        correlationId: `discord-captain-action:${input.call.callId}`,
-        profileHash: health.profileHash,
-        characterId: input.characterId,
-        credentialRef: input.credentialRef,
-        transportKind: input.transportKind,
-      },
-      payload: input.plan.payload,
-    }),
-  );
+  let action: { messageId?: string | undefined };
+  try {
+    action = await input.presencePort.executeDiscordPresenceAction(
+      DiscordPresenceWriteSchema.parse({
+        schemaVersion: 1,
+        idempotencyKey: `captain:${input.call.callId}:${input.call.action}`,
+        sourceDeliveryId: input.call.messageId,
+        action: input.plan.action,
+        identity: {
+          presenceSessionId: discordPresenceLaneAddress({
+            guildId: input.guildId,
+            channelId: input.channelId,
+          }),
+          correlationId: `discord-captain-action:${input.call.callId}`,
+          profileHash: health.profileHash,
+          characterId: input.characterId,
+          credentialRef: input.credentialRef,
+          transportKind: input.transportKind,
+        },
+        payload: input.plan.payload,
+      }),
+    );
+  } catch (error) {
+    const lease = BodyLeaseResultSchema.safeParse(
+      error !== null && typeof error === "object" && "bodyLease" in error ? error.bodyLease : undefined,
+    );
+    if (lease.success)
+      return {
+        ok: false,
+        message: "That body resource is held by another conversation or needs recovery.",
+        bodyLease: lease.data,
+      };
+    throw error;
+  }
   if (input.call.action === "tool_progress") {
     if (action.messageId !== undefined) input.progressMessageIds.add(action.messageId);
     if (input.call.phase !== "running" && input.call.progressMessageId !== undefined) {
