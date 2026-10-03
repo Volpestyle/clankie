@@ -144,7 +144,7 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
             });
             shell.insertCommandResult(
               "/discord call",
-              `${result.state} · speech output ${result.outputMuted ? "muted" : "audible"}`,
+              `${result.state} · speech output ${result.state === "unknown" ? "unconfirmed" : result.outputMuted ? "muted" : "audible"}`,
               "success",
             );
           } finally {
