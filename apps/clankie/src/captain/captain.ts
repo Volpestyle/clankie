@@ -994,6 +994,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       settings: async () => (await settings()).skills,
     },
     runner: herdrRunner,
+    // A pane Clankie did not hire reports nothing on settling; its own transcript holds its last word.
+    lastReply: async (agent) => {
+      if (deps.agentSessions === undefined || agent.session?.kind !== "id" || agent.paneId.includes("/"))
+        return undefined;
+      const page = await deps.agentSessions.read(`local:${agent.session.value}`, { tail: 60 });
+      for (let index = page.entries.length - 1; index >= 0; index -= 1) {
+        const entry = page.entries[index]!;
+        if (entry.type === "message" && entry.role === "agent" && entry.internal !== true) return entry.text;
+      }
+      return undefined;
+    },
     fleetRevision: (id) => fleetRevisions.get(id) ?? 0,
     fleetAvailable: (id) =>
       remoteFleets.some((entry) => entry.id === id) || namedLocal.some((entry) => entry.id === id),

@@ -75,6 +75,31 @@ describe("HerdrWatchStore", () => {
     store.close();
   });
 
+  it("quotes an unhired pane's last message from its own transcript when it settles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-watch-"));
+    roots.push(root);
+    const runner: HerdrWatchRunner = {
+      get: vi.fn(() => Promise.resolve(working)),
+      resolveTerminal: vi.fn(() => Promise.resolve(working)),
+      wait: vi.fn(() => Promise.resolve(done)),
+    };
+    const lastReply = vi.fn((agent: HerdrAgentSnapshot) =>
+      Promise.resolve(
+        agent.session?.value === "session-potato" ? "DONE VUH-1 | branch x | checks PASS" : undefined,
+      ),
+    );
+    const wake = vi.fn((_conversationId: string, _prompt: string) => Promise.resolve());
+    const store = new HerdrWatchStore(join(root, "herdr-watches.json"), { runner, lastReply });
+    store.start(wake);
+    await store.watch("global-default", "w18:p1", "Harvest");
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce());
+    const prompt = wake.mock.calls[0]![1];
+    expect(prompt).toContain("read from its own transcript");
+    expect(prompt).toContain("DONE VUH-1 | branch x | checks PASS");
+    expect(prompt).not.toContain("No final report was supplied");
+    store.close();
+  });
+
   it("carries a Discord origin through a restart to the wake", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-watch-discord-"));
     roots.push(root);

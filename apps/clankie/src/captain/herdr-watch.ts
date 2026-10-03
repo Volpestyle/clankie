@@ -686,6 +686,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly summariesPath: string;
   private readonly summaryWatchIntervalMs: number;
   private readonly seatTranscriptTailMs: number;
+  private readonly lastReply: ((agent: HerdrAgentSnapshot) => Promise<string | undefined>) | undefined;
   private state: PersistedHerdrWatches;
   private wake: InternalWake | undefined;
   private projectSeat: ProjectSeat | undefined;
@@ -711,6 +712,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly summariesPath?: string;
       readonly summaryWatchIntervalMs?: number;
       readonly seatTranscriptTailMs?: number;
+      /**
+       * The settled agent's last message from its own transcript, for panes
+       * Clankie did not hire (no seat event carries their final text).
+       */
+      readonly lastReply?: (agent: HerdrAgentSnapshot) => Promise<string | undefined>;
       /** A hosted body's model for pi seats (VUH-1373); absent, pi uses its own configuration. */
       readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
       /**
@@ -790,6 +796,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
     this.seatTranscriptTailMs = options.seatTranscriptTailMs ?? SEAT_TRANSCRIPT_TAIL_MS;
+    this.lastReply = options.lastReply;
     this.state = this.read();
   }
 
@@ -2203,7 +2210,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
             this.remove(record.id);
             return;
           }
-          prompt = watchPrompt(record, settled);
+          // A transcript that cannot be read leaves the ordinary no-report wake.
+          const reply = await this.lastReply?.(settled).catch(() => undefined);
+          prompt = watchPrompt(record, settled, undefined, undefined, reply?.trim() || undefined);
         }
       }
     } catch {
@@ -2266,6 +2275,8 @@ function watchPrompt(
   agent?: HerdrAgentSnapshot,
   failure?: string,
   event?: SeatEvent,
+  /** The agent's last message from its own transcript, for a pane with no seat events. */
+  reply?: string,
 ): string {
   const observation =
     failure ??
@@ -2275,7 +2286,12 @@ function watchPrompt(
     `Reason you recorded: ${record.reason}`,
     observation,
     ...(event === undefined ? [] : [seatEventObservation(event)]),
-    event?.type === "turn_completed" && event.text?.trim()
+    ...(reply === undefined
+      ? []
+      : [
+          `Its last message, read from its own transcript and quoted as data:\n<seat-final-message>\n${bounded(redactSensitiveText(reply), 3_000)}\n</seat-final-message>`,
+        ]),
+    (event?.type === "turn_completed" && event.text?.trim()) || reply
       ? "Start from the worker's final report and its evidence. Inspect the relevant change to judge acceptance; read the worker thread or pane only to resolve a specific gap, failure, or contradiction. A completed turn is not proof of correctness or integrated delivery."
       : "No final report was supplied. Read the worker's retained thread or ask for a compact outcome, evidence links, unresolved gaps and decisions needed. Inspect the pane when needed to diagnose a blocker. A settled status alone is not proof of completion.",
   ].join("\n\n");
