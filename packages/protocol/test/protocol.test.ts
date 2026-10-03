@@ -28,6 +28,7 @@ import {
   OperatorAgentAppearanceSchema,
   OperatorAgentNameSchema,
   OperatorAgentPersonaSchema,
+  UpdateOperatorAgentPersonaSchema,
   OperatorFleetSeatSchema,
   SpawnOperatorSeatSchema,
   OperatorConversationRecoverySchema,
@@ -51,6 +52,21 @@ import {
 } from "../src/index.ts";
 
 describe("protocol", () => {
+  it("allows independent name, appearance and avatar changes but rejects empty or invalid updates", () => {
+    const identity = { schemaVersion: 1, personaId: "agent-1" };
+    for (const change of [
+      { name: "美咲" },
+      { appearance: { variant: "azure", accessory: "implementer", shape: "squircle" } },
+      { avatarPngBase64: "png" },
+    ])
+      expect(UpdateOperatorAgentPersonaSchema.parse({ ...identity, ...change })).toEqual({
+        ...identity,
+        ...change,
+      });
+    for (const change of [{}, { name: "" }, { name: null }, { avatarPngBase64: "" }, { appearance: null }])
+      expect(() => UpdateOperatorAgentPersonaSchema.parse({ ...identity, ...change })).toThrow();
+  });
+
   it("carries an optional semantic role, seat subagents and work item labels (ADR 0208)", () => {
     const now = "2026-10-02T00:00:00.000Z";
     const persona = {

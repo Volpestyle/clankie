@@ -409,7 +409,7 @@ export class PersonaStore {
     }
     const updated: OperatorAgentPersona = {
       ...current,
-      name: parsed.name,
+      name: parsed.name ?? current.name,
       appearance: parsed.appearance ?? current.appearance,
       ...(avatarRevision === undefined ? {} : { avatarRevision }),
       updatedAt: new Date().toISOString(),

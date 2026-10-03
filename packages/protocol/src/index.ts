@@ -531,13 +531,19 @@ export const UpdateOperatorAgentPersonaSchema = z
   .object({
     schemaVersion: z.literal(1),
     personaId: OperatorAgentPersonaIdSchema,
-    name: OperatorAgentNameSchema,
+    /** Omit for an appearance/avatar-only change; preserve the current name atomically. */
+    name: OperatorAgentNameSchema.optional(),
     /** Omit for a name-only change; preserve the current appearance atomically. */
     appearance: OperatorAgentAppearanceSchema.optional(),
     /** Optional exact app-rendered PNG. The host validates and serves it to Discord. */
     avatarPngBase64: z.string().min(1).max(700_000).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (input) =>
+      input.name !== undefined || input.appearance !== undefined || input.avatarPngBase64 !== undefined,
+    { message: "Provide a name, appearance or avatar" },
+  );
 export type UpdateOperatorAgentPersona = z.infer<typeof UpdateOperatorAgentPersonaSchema>;
 
 /** Assign or clear one persona's role (ADR 0208); `null` clears it. */

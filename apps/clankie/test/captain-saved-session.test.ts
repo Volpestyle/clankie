@@ -159,11 +159,38 @@ it("passes a human fallback into native hire and preserves the owner rename on a
     expect(spawn.mock.calls[0]![0].title).toMatch(/^(Ari|Mei|Noor|Ravi|Sora|Zuri)$/u);
     expect(first.result.seat.title).toBe(spawn.mock.calls[0]![0].title);
     const personaId = first.result.seat.personaId!;
+    let finishImage!: (png: string) => void;
+    const image = new Promise<string>((resolve) => {
+      finishImage = resolve;
+    });
+    const avatarSave = image.then((avatarPngBase64) =>
+      captain.serveOperatorConversation({
+        schemaVersion: 1,
+        op: "update_persona",
+        persona: { schemaVersion: 1, personaId, avatarPngBase64 },
+      }),
+    );
     await captain.serveOperatorConversation({
       schemaVersion: 1,
       op: "update_persona",
       persona: { schemaVersion: 1, personaId, name: "美咲" },
     });
+    finishImage(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    );
+    const baked = await avatarSave;
+    expect(baked).toMatchObject({
+      persona: { personaId, name: "美咲", avatarRevision: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+    });
+    if (baked.op !== "update_persona" || baked.persona.conversationId === undefined)
+      throw new Error("Expected persona thread");
+    expect(
+      await captain.serveOperatorConversation({
+        schemaVersion: 1,
+        op: "get",
+        conversationId: baked.persona.conversationId,
+      }),
+    ).toMatchObject({ conversation: { title: "美咲" } });
     const again = await captain.serveOperatorConversation(request);
     expect(again).toMatchObject({ result: { seat: { personaId, seatId: "term_worker", title: "美咲" } } });
     const personas = await captain.serveOperatorConversation({ schemaVersion: 1, op: "personas" });

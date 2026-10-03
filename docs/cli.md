@@ -1420,6 +1420,8 @@ name; omitted appearance stays unchanged. Names support any language and the
 existing 1–80 character/Discord webhook rules. Rename keeps the persona,
 conversation, native seat and project assignment, including after a refresh or
 resume. The app offers the same action in an agent's tray card.
+Appearance and avatar updates may omit `name`; the service keeps the current
+saved name, so an avatar finishing later cannot undo a completed rename.
 
 `clankie agents roles` lists the built-ins (always, with counts), then custom
 roles personas hold, most held first, each as `{ role, builtIn, count }`. Counts

@@ -74,6 +74,32 @@ describe("PersonaStore", () => {
     });
   });
 
+  it("preserves the current name on appearance-only and avatar-only saves across restart and census", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-persona-avatar-name-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const original = observed("term-1");
+    const seat = store.adoptSpawn(original, "Noor", "builder");
+    store.update({ schemaVersion: 1, personaId: seat.personaId, name: "美咲" });
+    const appearance = { variant: "azure", accessory: "implementer", shape: "squircle" } as const;
+    expect(store.update({ schemaVersion: 1, personaId: seat.personaId, appearance })).toMatchObject({
+      name: "美咲",
+      appearance,
+    });
+    const avatar = store.update({ schemaVersion: 1, personaId: seat.personaId, avatarPngBase64: PNG_BASE64 });
+    expect(avatar).toMatchObject({ name: "美咲", appearance, role: "builder" });
+    expect(avatar.avatarRevision).toBe(
+      createHash("sha256").update(Buffer.from(PNG_BASE64, "base64")).digest("hex"),
+    );
+    const restarted = new PersonaStore(root);
+    expect(restarted.reconcile([original])[0]).toMatchObject({ personaId: seat.personaId, title: "美咲" });
+    expect(restarted.all([], () => undefined)[0]).toMatchObject({
+      name: "美咲",
+      appearance,
+      avatarRevision: avatar.avatarRevision,
+    });
+  });
+
   it("retains the hired account across roster refresh and restart, but not a replacement occupant", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-personas-account-"));
     roots.push(root);

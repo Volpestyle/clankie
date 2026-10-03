@@ -39,6 +39,9 @@ Give every hire a short human name in `title`, in any language, and an assignmen
 callers can still omit the role; the model-facing tool requires it. Rename later
 with `clankie agents rename NAME|PERSONA_ID "NEW NAME"`; this preserves native
 identity, appearance and project assignment.
+`update_persona` preserves omitted fields from the current saved persona:
+send only `name` for a rename, and omit `name` when saving appearance or an
+avatar. Background image work must not resend a cached display name.
 
 `hire_agent` sets `role`. The built-ins are planner, designer, builder,
 tester, reviewer and researcher; you can also use a custom role such as "sound
