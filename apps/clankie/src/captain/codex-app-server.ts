@@ -101,7 +101,10 @@ export interface CodexAppServerSeat {
   transcriptPath?: string;
   /** Native TUI observes and can operate this exact server and thread. */
   viewArgs: readonly string[];
-  send(message: string): Promise<{ turnId: string; state: "started" | "steered" }>;
+  send(
+    message: string,
+    guard?: () => Promise<void>,
+  ): Promise<{ turnId: string; state: "started" | "steered" }>;
   interrupt(): Promise<boolean>;
   close(): Promise<void>;
 }
@@ -374,7 +377,7 @@ export async function startCodexAppServerSeat(options: {
       threadId,
       ...(typeof thread.path === "string" ? { transcriptPath: thread.path } : {}),
       viewArgs,
-      send(message) {
+      send(message, guard) {
         const send = async () => {
           // The owner may have started a native turn before the first delivery.
           // Subscribe first when its rollout exists so we steer that turn.
@@ -382,6 +385,7 @@ export async function startCodexAppServerSeat(options: {
           const input = [{ type: "text", text: message, text_elements: [] }];
           // Serialize dispatch so simultaneous messages cannot start two turns.
           // A failed steer is not retried: only the server knows if it applied.
+          await guard?.();
           const steering = activeTurn;
           const response = record(
             await client!.request(steering ? "turn/steer" : "turn/start", {

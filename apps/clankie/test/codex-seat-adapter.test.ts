@@ -70,6 +70,71 @@ describe("Codex harness seat adapter", () => {
     expect(f.start).not.toHaveBeenCalled();
   });
 
+  it("refuses native startup when the source changes during connector lookup", async () => {
+    const f = fixture();
+    let authorized = true;
+    f.trackerOverrides.mockImplementationOnce(async () => {
+      authorized = false;
+      return [];
+    });
+    const result = await f.adapter.start(
+      { harness: "codex", cwd: "/scratch", brief: "never dispatch" },
+      {
+        ...f.view,
+        guard: async () => {
+          if (!authorized) throw new Error("source grant revoked");
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      outcome: "failed",
+      detail: expect.stringContaining("source grant revoked"),
+    });
+    expect(f.start).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses the initial brief when source authority changes during native reporting", async () => {
+    const f = fixture();
+    let authorized = true;
+    f.herdr.mockImplementation(async () => {
+      authorized = false;
+    });
+    const result = await f.adapter.start(
+      { harness: "codex", cwd: "/scratch", brief: "never dispatch" },
+      {
+        ...f.view,
+        guard: async () => {
+          if (!authorized) throw new Error("source grant revoked");
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      outcome: "failed",
+      detail: expect.stringContaining("source grant revoked"),
+    });
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.close).toHaveBeenCalledOnce();
+  });
+
+  it("forwards the original source guard only for the initial brief", async () => {
+    const f = fixture();
+    const guard = vi.fn(async () => undefined);
+    const started = await f.adapter.start(
+      { harness: "codex", cwd: "/scratch", brief: "original brief" },
+      { ...f.view, guard },
+    );
+    if (started.outcome !== "started") throw new Error(started.detail);
+    try {
+      expect(f.send).toHaveBeenCalledExactlyOnceWith("original brief", guard);
+      guard.mockRejectedValue(new Error("original turn ended"));
+      expect(await started.control.send("fresh owner message")).toMatchObject({ outcome: "accepted" });
+      expect(f.send).toHaveBeenLastCalledWith("fresh owner message");
+    } finally {
+      await started.control.close();
+    }
+  });
+
   it("refuses a different native thread before sending the brief", async () => {
     const f = fixture();
     const started = await f.adapter.start(

@@ -13,7 +13,7 @@ afterEach(async () => {
   spawn.mockReset();
 });
 
-function fixture(persisted = false, missingRollout = "no rollout found") {
+function fixture(persisted = false, missingRollout = "no rollout found", beforeResume?: () => Promise<void>) {
   const requests: { method: string; params: Record<string, unknown> }[] = [];
   let nativeLoaded = false;
   const id = "native-thread";
@@ -26,7 +26,7 @@ function fixture(persisted = false, missingRollout = "no rollout found") {
     });
     http.listen(endpoint.slice("unix://".length));
     server.on("connection", (socket) =>
-      socket.on("message", (bytes) => {
+      socket.on("message", async (bytes) => {
         const message = JSON.parse(bytes.toString());
         requests.push(message);
         if (message.id === undefined) return;
@@ -35,6 +35,7 @@ function fixture(persisted = false, missingRollout = "no rollout found") {
         if (message.method === "thread/loaded/list") result = { data: nativeLoaded ? [id] : [] };
         if (message.method === "thread/read") result = { thread: { id } };
         if (message.method === "thread/resume") {
+          await beforeResume?.();
           if (!persisted) {
             socket.send(JSON.stringify({ id: message.id, error: { message: missingRollout } }));
             return;
@@ -105,6 +106,36 @@ it("treats Codex 0.159's empty-rollout resume error as not yet persisted", async
   await expect(seat.send("first brief")).resolves.toEqual({ state: "started", turnId: "turn-one" });
   expect(f.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
 });
+
+it.each([false, true])(
+  "rechecks source after subscription before a native dispatch (persisted=%s)",
+  async (persisted) => {
+    let markWaiting!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      markWaiting = resolve;
+    });
+    let releaseResume!: () => void;
+    const release = new Promise<void>((resolve) => {
+      releaseResume = resolve;
+    });
+    let authorized = true;
+    const f = fixture(persisted, "no rollout found", async () => {
+      markWaiting();
+      await release;
+    });
+    const seat = await startCodexAppServerSeat({ cwd: "/tmp", startView: f.startView });
+    cleanup.push(seat.close);
+    const delivery = seat.send("source-owned brief", async () => {
+      if (!authorized) throw new Error("source grant revoked");
+    });
+    const assertion = expect(delivery).rejects.toThrow("source grant revoked");
+    await waiting;
+    authorized = false;
+    releaseResume();
+    await assertion;
+    expect(f.requests.filter((r) => r.method === "turn/start" || r.method === "turn/steer")).toEqual([]);
+  },
+);
 
 it("resumes the selected native thread and applies config to both clients without replay", async () => {
   const f = fixture(true);

@@ -169,6 +169,7 @@ export function createCodexSeatAdapter(
               'mcp_servers.clankie.args=["mcp","--fleet"]',
               'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH"]',
             );
+          await view.guard?.();
           seat = await (options.start ?? startCodexAppServerSeat)({
             cwd: launch.cwd,
             onServerStarted: (pid) => {
@@ -201,6 +202,7 @@ export function createCodexSeatAdapter(
                 });
               }, 3_000);
               monitor.unref();
+              await view.guard?.();
               await (view.start ? view.start("codex", args) : view.run(["codex", ...args]));
             },
             onEvent: observe,
@@ -214,6 +216,7 @@ export function createCodexSeatAdapter(
           ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
           report();
           await reporting;
+          let initialDispatch = Boolean(launch.brief);
           const control: SeatControl = {
             ref,
             async send(message) {
@@ -228,7 +231,9 @@ export function createCodexSeatAdapter(
                 // A request reply may precede turn/started. Do not expose the
                 // preceding idle settlement as the result of this new message.
                 if (state === "idle") state = "working";
-                const accepted = await seat!.send(message);
+                const guard = initialDispatch ? view.guard : undefined;
+                initialDispatch = false;
+                const accepted = guard ? await seat!.send(message, guard) : await seat!.send(message);
                 return {
                   outcome: "accepted",
                   deliveryStage: "consumed",
@@ -269,6 +274,7 @@ export function createCodexSeatAdapter(
           };
           startupSignal.throwIfAborted();
           if (launch.brief) {
+            await view.guard?.();
             const delivered = await control.send(launch.brief);
             if (delivered.outcome !== "accepted")
               throw new Error("brief_delivery_unverified: " + JSON.stringify(delivered));
