@@ -60,12 +60,25 @@ async function fakeService() {
   return { seen, url: `http://127.0.0.1:${String(address.port)}` };
 }
 
+const SOCKET = "/tmp/herdr-pc-default.sock";
+
+/** A linked machine's home: this fleet's link, and another session's beside it. */
 async function linkedHome(url: string): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "clankie-link-home-"));
-  await mkdir(join(home, ".clankie"));
+  await mkdir(join(home, ".clankie", "links"), { recursive: true });
   await writeFile(
-    join(home, ".clankie", "link.json"),
-    JSON.stringify({ schemaVersion: 1, fleet: "pc", url, token: TOKEN }),
+    join(home, ".clankie", "links", "pc.json"),
+    JSON.stringify({ schemaVersion: 1, fleet: "pc", socket: SOCKET, url, token: TOKEN }),
+  );
+  await writeFile(
+    join(home, ".clankie", "links", "kh2.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      fleet: "kh2",
+      socket: "/tmp/herdr-kh2.sock",
+      url: "http://127.0.0.1:1",
+      token: "k".repeat(43),
+    }),
   );
   return home;
 }
@@ -85,7 +98,7 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
         "--channels",
         "plugin:clankie-worker@clankie",
       ],
-      { env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w8:p3" } },
+      { env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w8:p3", HERDR_SOCKET_PATH: SOCKET } },
     );
     cleanups.push(() => parent.kill());
     const lines: Record<string, unknown>[] = [];
@@ -145,7 +158,7 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     const service = await fakeService();
     const home = await linkedHome(service.url);
     const child = spawn(process.execPath, [join(bin, "swarm-mcp.mjs")], {
-      env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w8:p3" },
+      env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w8:p3", HERDR_SOCKET_PATH: SOCKET },
     });
     cleanups.push(() => child.kill());
     let stderr = "";
@@ -157,11 +170,25 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     expect(service.seen.some((request) => request.path.endsWith("/events"))).toBe(false);
   });
 
+  it("refuses a pane in a Herdr session none of his links name", async () => {
+    const service = await fakeService();
+    const home = await linkedHome(service.url);
+    const child = spawn(process.execPath, [join(bin, "swarm-mcp.mjs")], {
+      env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "/tmp/other.sock" },
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => (stderr += String(chunk)));
+    const [code] = (await once(child, "exit")) as [number];
+    expect(code).toBe(1);
+    expect(stderr).toContain("no link to Clankie for this Herdr session");
+    expect(service.seen).toEqual([]);
+  });
+
   it("reports a settled turn over the link", async () => {
     const service = await fakeService();
     const home = await linkedHome(service.url);
     const child = spawn(process.execPath, [join(bin, "seat-hook.mjs")], {
-      env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w8:p3" },
+      env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w8:p3", HERDR_SOCKET_PATH: SOCKET },
     });
     child.stdin.end(
       JSON.stringify({ hook_event_name: "Stop", session_id: "session-1", last_assistant_message: "Done." }),

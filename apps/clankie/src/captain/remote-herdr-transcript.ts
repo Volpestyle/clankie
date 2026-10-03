@@ -29,7 +29,8 @@ export function remoteHerdrTranscriptReader(host: AgentTranscriptHost) {
       resolved.set(key, file);
     }
     try {
-      const page = await readAgentSession(host, file, { tail: 500 });
+      // A seat's reader keeps its channel deliveries, as the local one does, for receipts.
+      const page = await readAgentSession(host, file, { tail: 500, channelPrompts: true });
       return {
         sessionKey: JSON.stringify([host.id, file.harness, sessionIdFromPath(file)]),
         // Remote image paths must never reach this machine's file publisher.

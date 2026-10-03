@@ -167,7 +167,16 @@ export async function findAgentSession(
 export async function readAgentSession(
   host: AgentTranscriptHost,
   file: AgentSessionFile,
-  options: { readonly tail?: number; readonly after?: string } = {},
+  options: {
+    readonly tail?: number;
+    readonly after?: string;
+    /**
+     * Keep channel deliveries as internal operator entries, as a seat's own
+     * reader does, so a delivery receipt can find them (VUH-1527). Off for
+     * browsing, where they are not conversation.
+     */
+    readonly channelPrompts?: boolean;
+  } = {},
 ): Promise<AgentSessionPage> {
   const session = `${host.id}:${sessionIdFromPath(file)}`;
   if (
@@ -179,10 +188,10 @@ export async function readAgentSession(
   if (cursor !== undefined && cursor.s !== session)
     throw new AgentSessionRequestError("Transcript cursor belongs to another session");
   if (cursor !== undefined) {
-    const page = await readAfter(host, file, cursor);
+    const page = await readAfter(host, file, cursor, options.channelPrompts === true);
     if (page !== undefined) return page;
   }
-  const page = await readTail(host, file, options.tail ?? AGENT_SESSION_TAIL_DEFAULT);
+  const page = await readTail(host, file, options.tail ?? AGENT_SESSION_TAIL_DEFAULT, options.channelPrompts === true);
   return cursor === undefined ? page : { ...page, reset: true };
 }
 
@@ -238,6 +247,7 @@ async function readTail(
   host: AgentTranscriptHost,
   file: AgentSessionFile,
   tail: number,
+  channelPrompts = false,
 ): Promise<AgentSessionPage> {
   const session = `${host.id}:${sessionIdFromPath(file)}`;
   let window = WINDOW_BYTES;
@@ -259,7 +269,7 @@ async function readTail(
     // Past the start of the file, the first line is almost always cut mid-record.
     const start = from === 0 ? 0 : bytes.indexOf(0x0a) + 1;
     const end = bytes.lastIndexOf(0x0a) + 1;
-    const entries = (from === 0 || start > 0) && end > start ? parse(file, bytes.subarray(start, end)) : [];
+    const entries = (from === 0 || start > 0) && end > start ? parse(file, bytes.subarray(start, end), channelPrompts) : [];
     const exhausted = from === 0 || window >= MAX_WINDOW_BYTES;
     if (entries.length >= tail || exhausted) {
       return {
@@ -277,6 +287,7 @@ async function readAfter(
   host: AgentTranscriptHost,
   file: AgentSessionFile,
   cursor: Cursor,
+  channelPrompts = false,
 ): Promise<AgentSessionPage | undefined> {
   const offset = cursor.o;
   const from = Math.max(0, offset - OVERLAP_BYTES);
@@ -300,8 +311,8 @@ async function readAfter(
   const fresh = end > offset - from ? bytes.subarray(offset - from, end) : Buffer.alloc(0);
   // Compare whole entries, not ids: a record can resolve after the cursor, such
   // as a tool whose result lands later, and that change is news.
-  const seen = new Set(parse(file, context).map((entry) => JSON.stringify(entry)));
-  const entries = parse(file, Buffer.concat([context, fresh])).filter(
+  const seen = new Set(parse(file, context, channelPrompts).map((entry) => JSON.stringify(entry)));
+  const entries = parse(file, Buffer.concat([context, fresh]), channelPrompts).filter(
     (entry) => !seen.has(JSON.stringify(entry)),
   );
   return {
@@ -315,9 +326,9 @@ async function readAfter(
   };
 }
 
-function parse(file: AgentSessionFile, bytes: Buffer): AgentSessionEntry[] {
+function parse(file: AgentSessionFile, bytes: Buffer, channelPrompts = false): AgentSessionEntry[] {
   if (bytes.length === 0) return [];
-  return parseHerdrSeatTranscript(file.harness, bytes.toString("utf8")).map((entry) =>
+  return parseHerdrSeatTranscript(file.harness, bytes.toString("utf8"), channelPrompts).map((entry) =>
     entry.type === "viewed_image"
       ? {
           type: "viewed_image",

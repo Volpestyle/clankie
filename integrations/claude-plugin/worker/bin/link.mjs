@@ -1,10 +1,10 @@
 // A linked machine's way back to Clankie (VUH-1527). On a machine in one of
-// his ssh fleets, he writes ~/.clankie/link.json: his service through a reverse
-// ssh forward on this machine's loopback, and a token good only for the seat
-// routes of panes on this fleet. Nothing else is installed here: these scripts
+// his ssh fleets, he writes ~/.clankie/links/<fleet>.json per Herdr session:
+// his service through a reverse ssh forward on this machine's loopback, and a
+// token good only for the seat routes of panes on that fleet. Nothing else is installed here: these scripts
 // need only Node, which Claude Code already brings.
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -12,19 +12,54 @@ export const TEXT_MAX = 16_384;
 export const SUMMARY_MAX = 512;
 const WORKER_CHANNEL = "plugin:clankie-worker@clankie";
 
-/** The link, when this machine has one; a Mac running Clankie itself never does. */
-export function readLink() {
+/** A socket path as this machine compares it: Windows paths are case-insensitive. */
+function normalSocket(path) {
+  const value = String(path ?? "").trim();
+  return process.platform === "win32" ? value.replaceAll("/", "\\").toLowerCase() : value;
+}
+
+/**
+ * The link for the Herdr session this pane is in, when this machine has one;
+ * a Mac running Clankie itself never does. One machine can host several of
+ * his fleets, one per Herdr session, so the pane's own HERDR_SOCKET_PATH
+ * chooses among ~/.clankie/links/*.json.
+ */
+export function readLink(socket = process.env.HERDR_SOCKET_PATH) {
+  const dir = join(homedir(), ".clankie", "links");
+  let links = [];
   try {
-    const link = JSON.parse(readFileSync(join(homedir(), ".clankie", "link.json"), "utf8"));
-    const valid =
-      link?.schemaVersion === 1 &&
-      typeof link.fleet === "string" &&
-      /^http:\/\/127\.0\.0\.1:\d{1,5}$/u.test(String(link.url)) &&
-      typeof link.token === "string" &&
-      link.token.length >= 32;
-    return valid ? link : undefined;
+    links = readdirSync(dir)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => {
+        try {
+          return JSON.parse(readFileSync(join(dir, name), "utf8"));
+        } catch {
+          return undefined;
+        }
+      })
+      .filter(
+        (link) =>
+          link?.schemaVersion === 1 &&
+          typeof link.fleet === "string" &&
+          typeof link.socket === "string" &&
+          /^http:\/\/127\.0\.0\.1:\d{1,5}$/u.test(String(link.url)) &&
+          typeof link.token === "string" &&
+          link.token.length >= 32,
+      );
   } catch {
     return undefined;
+  }
+  if (links.length === 0) return undefined;
+  const mine = links.filter((link) => normalSocket(link.socket) === normalSocket(socket));
+  return mine.length === 1 ? mine[0] : undefined;
+}
+
+/** Whether this machine has any link at all: it is in one of his fleets. */
+export function hasLinks() {
+  try {
+    return readdirSync(join(homedir(), ".clankie", "links")).some((name) => name.endsWith(".json"));
+  } catch {
+    return false;
   }
 }
 

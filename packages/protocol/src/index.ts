@@ -2506,13 +2506,18 @@ export function fleetSeatMessagesPath(paneId: string): string {
  * The link a machine on an ssh fleet uses to reach Clankie (VUH-1527): his
  * service through a reverse ssh forward on that machine's loopback, and a
  * token that authorizes only the seat routes above, only for panes on that
- * fleet. Clankie writes it to the machine as `~/.clankie/link.json`, readable
- * by its owner only, and replaces it whenever the link reconnects.
+ * fleet. One machine can host several fleets (one per Herdr session), so
+ * Clankie writes each as `~/.clankie/links/<fleet>.json`, readable by its owner
+ * only, naming that session's socket; a pane's bridge takes the link whose
+ * socket is its own `HERDR_SOCKET_PATH`. It is replaced whenever the link
+ * reconnects.
  */
 export const FleetLinkFileSchema = z
   .object({
     schemaVersion: z.literal(1),
     fleet: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+    /** The fleet's Herdr socket on that machine, as its panes see it. */
+    socket: z.string().min(1).max(1024),
     url: z.string().regex(/^http:\/\/127\.0\.0\.1:\d{1,5}$/u),
     token: z.string().min(32).max(200),
   })

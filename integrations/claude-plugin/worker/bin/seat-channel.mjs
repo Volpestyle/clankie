@@ -37,7 +37,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export function runSeatChannel({ paneId, parentArgv }) {
   const link = readLink();
   if (!link) {
-    log("no link to Clankie on this machine");
+    log("no link to Clankie for this Herdr session (HERDR_SOCKET_PATH); is it one of his fleets?");
     process.exit(1);
   }
   const polling = paneId && approvesWorkerChannel(parentArgv);

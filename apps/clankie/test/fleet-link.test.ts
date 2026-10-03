@@ -123,6 +123,7 @@ describe("a fleet link (VUH-1527)", () => {
     const file = {
       schemaVersion: 1 as const,
       fleet: "pc",
+      socket: "C:\\Users\\volpe\\AppData\\Roaming\\herdr\\herdr.sock",
       url: "http://127.0.0.1:50123",
       token: "x".repeat(43),
     };
@@ -130,8 +131,10 @@ describe("a fleet link (VUH-1527)", () => {
     expect(windows).toContain("New-Object Text.UTF8Encoding $false");
     expect(windows).toContain("icacls.exe $temp /inheritance:r");
     expect(windows).toContain(JSON.stringify(file));
+    expect(windows).toContain("'pc.json'");
     const posix = writeLinkFileCommand(box, file);
     expect(posix).toMatch(/^exec sh -c '/u);
+    expect(posix).toContain(".clankie/links/pc.json");
     expect(posix).toContain("umask 077");
   });
 
@@ -139,7 +142,12 @@ describe("a fleet link (VUH-1527)", () => {
     const child = new EventEmitter() as ChildProcess & EventEmitter;
     const stderr = new PassThrough();
     Object.assign(child, { stderr, kill: vi.fn(() => true) });
-    const shell = vi.fn(async (_command: string) => "");
+    // The first call lists the machine's Herdr sessions; the second writes the link.
+    const shell = vi.fn(async (_command: string) =>
+      shell.mock.calls.length === 1
+        ? JSON.stringify({ sessions: [{ name: "default", socket_path: "C:\\herdr\\herdr.sock" }] })
+        : "",
+    );
     const links = new FleetLinks({
       shell: () => shell,
       spawn: vi.fn(() => child) as unknown as typeof spawn,
@@ -148,11 +156,14 @@ describe("a fleet link (VUH-1527)", () => {
     expect(links.status("pc")).toMatchObject({ state: "starting" });
     stderr.write("Allocated port 50123 for remote forward to 127.0.0.1:4567\n");
     await vi.waitFor(() => expect(links.status("pc")).toMatchObject({ state: "ready", port: 50123 }));
-    const written = JSON.parse(/\{"schemaVersion".*?\}/u.exec(decoded(shell.mock.calls[0]![0]))![0]) as {
+    const written = JSON.parse(/\{"schemaVersion".*?\}/u.exec(decoded(shell.mock.calls[1]![0]))![0]) as {
       url: string;
       token: string;
+      socket: string;
     };
     expect(written.url).toBe("http://127.0.0.1:50123");
+    expect(written.socket).toBe("C:\\herdr\\herdr.sock");
+    expect(decoded(shell.mock.calls[1]![0])).toContain("'pc.json'");
     expect(links.authenticate(written.token)).toBe("pc");
     expect(links.authenticate(`${written.token}x`)).toBeUndefined();
     links.close();

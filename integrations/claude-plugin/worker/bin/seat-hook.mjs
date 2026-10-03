@@ -4,13 +4,16 @@
 // a machine linked to his fleet (VUH-1527) it reports over that link instead.
 // A Swarm worker, or any session outside a pane, has nothing to report here.
 import { spawn } from "node:child_process";
-import { authorization, readLink, seatRoute, SUMMARY_MAX, TEXT_MAX } from "./link.mjs";
+import { authorization, hasLinks, readLink, seatRoute, SUMMARY_MAX, TEXT_MAX } from "./link.mjs";
 
 const paneId = process.env.HERDR_PANE_ID?.trim();
 if (process.env.SWARM_WORKER_LAUNCH || !paneId) process.exit(0);
-const link = readLink();
-if (link) await reportOverLink(link, paneId);
-else {
+if (hasLinks()) {
+  // On a linked machine; a pane outside his fleets has nothing to report.
+  const link = readLink();
+  if (link) await reportOverLink(link, paneId);
+  process.exit(0);
+} else {
   const child = spawn("clankie", ["seat-hook"], { stdio: ["pipe", "inherit", "inherit"], env: process.env });
   process.stdin.pipe(child.stdin);
   child.on("error", (error) => {

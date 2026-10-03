@@ -13,7 +13,7 @@
 // message_clankie tool, run here over that machine's link.
 import { execFileSync, spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
-import { parentCommandLine, readLink } from "./link.mjs";
+import { hasLinks, parentCommandLine } from "./link.mjs";
 import { runSeatChannel } from "./seat-channel.mjs";
 
 const fail = (message) => {
@@ -43,7 +43,7 @@ if (process.env.SWARM_WORKER_LAUNCH) {
   )
     fail("SWARM_WORKER_MCP must name the absolute Node and Swarm MCP paths");
   run(argv[0], [argv[1]], process.env);
-} else if (readLink()) {
+} else if (hasLinks()) {
   // A machine in one of his ssh fleets (VUH-1527) reaches him through its link,
   // with no `clankie` CLI or operator credential here.
   runSeatChannel({ paneId: process.env.HERDR_PANE_ID?.trim(), parentArgv: parentCommandLine() });

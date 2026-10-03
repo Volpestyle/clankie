@@ -7,6 +7,7 @@ import {
   posixScriptCommand,
   powershellLiteral,
   powershellScriptCommand,
+  remoteProgramCommand,
   type FleetShellRun,
   type HerdrFleet,
 } from "./herdr-fleet.ts";
@@ -18,7 +19,8 @@ import {
  * forward: one ssh connection per fleet carries a `-R` forward from that
  * machine's loopback to a listener here that answers the fleet seat routes and
  * nothing else, and a token that authorizes only those routes, only for panes
- * on that fleet. The token travels to the machine inside `~/.clankie/link.json`,
+ * on that fleet. The token travels to the machine inside
+ * `~/.clankie/links/<fleet>.json`, beside the fleet's Herdr socket there,
  * readable by its owner only; the operator credential never leaves this Mac.
  */
 
@@ -70,9 +72,9 @@ export function writeLinkFileCommand(fleet: HerdrFleet, file: FleetLinkFile): st
     return powershellScriptCommand(
       [
         "$ErrorActionPreference = 'Stop'",
-        "$dir = Join-Path $env:USERPROFILE '.clankie'",
+        "$dir = Join-Path $env:USERPROFILE '.clankie\\links'",
         "New-Item -ItemType Directory -Force $dir | Out-Null",
-        "$path = Join-Path $dir 'link.json'",
+        `$path = Join-Path $dir ${powershellLiteral(`${file.fleet}.json`)}`,
         "$temp = $path + '.tmp'",
         // No BOM: the bridge reads it with JSON.parse.
         `[IO.File]::WriteAllText($temp, ${powershellLiteral(json)}, (New-Object Text.UTF8Encoding $false))`,
@@ -84,9 +86,9 @@ export function writeLinkFileCommand(fleet: HerdrFleet, file: FleetLinkFile): st
     [
       "set -e",
       "umask 077",
-      'mkdir -p "$HOME/.clankie"',
-      `printf '%s' ${posixQuote(json)} > "$HOME/.clankie/link.json.tmp"`,
-      'mv -f "$HOME/.clankie/link.json.tmp" "$HOME/.clankie/link.json"',
+      'mkdir -p "$HOME/.clankie/links"',
+      `printf '%s' ${posixQuote(json)} > "$HOME/.clankie/links/${file.fleet}.json.tmp"`,
+      `mv -f "$HOME/.clankie/links/${file.fleet}.json.tmp" "$HOME/.clankie/links/${file.fleet}.json"`,
     ].join("\n"),
   );
 }
@@ -131,14 +133,17 @@ class FleetLink {
       const allocated = /Allocated port (\d+) for remote forward/u.exec(stderr);
       if (port !== undefined || allocated === null) return;
       port = Number(allocated[1]);
-      const file: FleetLinkFile = {
-        schemaVersion: 1,
-        fleet: this.fleet.id,
-        url: `http://127.0.0.1:${String(port)}`,
-        token: this.token,
-      };
-      void this.options
-        .shell(writeLinkFileCommand(this.fleet, file))
+      void this.socket()
+        .then((socket) => {
+          const file: FleetLinkFile = {
+            schemaVersion: 1,
+            fleet: this.fleet.id,
+            socket,
+            url: `http://127.0.0.1:${String(port)}`,
+            token: this.token,
+          };
+          return this.options.shell(writeLinkFileCommand(this.fleet, file));
+        })
         .then(() => {
           if (this.child !== child) return;
           this.backoff = RESTART_MIN_MS;
@@ -155,6 +160,17 @@ class FleetLink {
     child.on("exit", (code, signal) =>
       this.lost(child, stderr.trim().split("\n").at(-1) || `ssh exited (${String(code ?? signal)})`),
     );
+  }
+
+  /** The fleet's Herdr socket on that machine: how its panes say which session they are in. */
+  private async socket(): Promise<string> {
+    const listed = JSON.parse(
+      await this.options.shell(remoteProgramCommand(this.fleet.ssh.shell, "herdr", ["session", "list", "--json"])),
+    ) as { sessions?: { name?: unknown; socket_path?: unknown }[] };
+    const socket = listed.sessions?.find((session) => session.name === this.fleet.session)?.socket_path;
+    if (typeof socket !== "string" || socket === "")
+      throw new Error(`Herdr session ${this.fleet.session} is not running on ${this.fleet.id}`);
+    return socket;
   }
 
   close(): void {
