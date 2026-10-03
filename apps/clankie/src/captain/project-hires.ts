@@ -332,7 +332,7 @@ export class ProjectHires {
   }
 }
 
-export function projectHireRequest(
+function projectHireRequest(
   settings: ProjectsSettings,
   projectId: string,
   request: SpawnOperatorSeat,
