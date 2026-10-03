@@ -196,3 +196,33 @@ it("ignores a missing sibling workspace in the same project without admitting it
   f.state.cwd = "/code/retired/src";
   expect(await f.resolve()).toBeUndefined();
 });
+
+it("keeps owner-started workspace principals stable when the native session arrives, but not across process lifetimes", async () => {
+  const f = fixture();
+  f.state.proof = { ...f.state.proof, nativeOccupantId: "process-pending", nativeSessionPending: true };
+  const pending = await f.resolve();
+  expect(pending?.projectId).toBe("kh2");
+  const { nativeSessionPending: _pending, ...settled } = f.state.proof;
+  f.state.proof = { ...settled, nativeOccupantId: "native-session-now-known" };
+  expect(await f.resolve()).toEqual(pending);
+  f.state.proof = { ...f.state.proof, processes: [{ pid: 40, startTime: "new-process" }] };
+  expect((await f.resolve())?.occupantId).not.toEqual(pending?.occupantId);
+});
+it.each(["assigned", "invalid", "private"])("refuses session-pending %s hires", async (kind) => {
+  const f = fixture();
+  f.state.proof = {
+    ...f.state.proof,
+    nativeSessionPending: true,
+    ...(kind === "private" ? { privateSeat: true } : {}),
+  };
+  f.state.hire =
+    kind === "invalid" ? { state: "invalid" } : { state: "assigned", projectId: "kh2", occupantId: "hire" };
+  expect(await f.resolve()).toBeUndefined();
+});
+it("retains native session identity in assigned hire principals", async () => {
+  const f = fixture();
+  f.state.hire = { state: "assigned", projectId: "kh2", occupantId: "hire" };
+  const first = await f.resolve();
+  f.state.proof = { ...f.state.proof, nativeOccupantId: "replacement-session" };
+  expect((await f.resolve())?.occupantId).not.toEqual(first?.occupantId);
+});
