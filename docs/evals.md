@@ -458,7 +458,7 @@ not agent trials.
 
 `candidate` applies a retained binary diff to the verified pre-fix grading tree,
 retains its SHA-256, indexed candidate tree and changed paths, and rejects changes
-to held-out tests, package manifests, TypeScript/Vitest configuration, and grader
+to test/support files, package manifests, TypeScript/Vitest configuration, and grader
 state. Changes requiring different grading dependencies need separately reviewed
 support. The submitted patch must include the integrated candidate's added files
 and committed changes as well as its uncommitted edits; the runner does not infer
@@ -471,7 +471,14 @@ existing macOS `sandbox-exec` helper with networking disabled and a fixed narrow
 Vitest invocation. Source and fixture state remain disposable; owner credentials
 and the active fleet are not imported. It retains stdout/stderr, timeout/overflow,
 source/patch/test/dependency hashes and the result in `grading-result.json`.
-Changed graders/dependencies cannot yield a passing result. A nonzero exit is
+Changed graders/dependencies cannot yield a passing result. Exit zero alone is
+insufficient: a structured Vitest JSON report must show every pinned file and its
+full expected assertion count, all passed with no skips/todos/pending/failures.
+Counts come from pinned test declarations reconciled with the retained successful
+reference records (74, 11 and 35 tests); report and reference hashes are retained.
+Missing, malformed or empty coverage cannot produce green evidence. The pinned
+Vitest configs import only Node built-ins and `vitest/config`, with no setup imports;
+candidate changes to test/support files or test configuration are rejected. A nonzero exit is
 `failed-or-infrastructure`, requiring log review, not automatically a task failure.
 Deterministic tests fake the verifier process; no live candidate or model trial
 has been graded during this continuation.

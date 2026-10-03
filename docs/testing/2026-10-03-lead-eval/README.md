@@ -77,6 +77,11 @@ tree, test and dependency hashes, rejects validation-tooling changes, and invoke
 only the fixed held-out Vitest command through the existing network-off macOS
 sandbox. Dependency directories must be independent copies inside the disposable
 workspace; external dependency links fail closed. No dependency install occurs.
+A structured verifier report must prove complete execution of every pinned file
+and expected assertion count; exit zero without that evidence is not a pass.
+Counts reconcile pinned test declarations with the retained 74/11/35 reference
+totals. Missing reports, empty coverage, skips, partial files and duplicate suites
+fail closed, and the report/reference content hashes are retained.
 Deterministic tests use fake verifier process results and disposable repositories;
 they are not benchmark results or proof of a live native run.
 

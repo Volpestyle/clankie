@@ -324,6 +324,8 @@ export function prepareCandidate(task, patchPath, output) {
     changed.some(
       (path) =>
         protectedPaths.has(path) ||
+        /(^|\/)(test|tests|__tests__)(\/|$)/.test(path) ||
+        /(^|\/)(vitest|vite)\.[^/]+$/.test(path) ||
         /(^|\/)(package\.json|tsconfig[^/]*\.json)$/.test(path) ||
         /^(fixture-(home|tmp|state)|scripts\/evals)(\/|$)/.test(path),
     )
@@ -386,6 +388,84 @@ export function dependencySnapshot(directory) {
   return { sha256: sha(JSON.stringify(entries)), files: entries.length };
 }
 
+const referencePath = join(repo, "docs/testing/2026-10-03-lead-eval/reference-checks.json");
+// Per-file declarations from the pinned test blobs, reconciled with retained after-pass totals.
+// text-inbox has 10 ordinary tests plus it.each tables of 2, 3 and 3 cases.
+const referenceFileCounts = {
+  "roles-subagents-labels": [13, 1, 10, 4, 5, 5, 1, 22, 13],
+  "owner-attachments": [9, 2],
+  "async-discord-text": [9, 18, 8],
+};
+const referenceSha256 = "e33d17ee80de218202f66b46c73a851f4fc869e3463cab7eb159d7327084ecfd";
+
+/** A process exit alone is never a green result: require every pinned file and test. */
+export function validateGraderReport(task, workspace, report) {
+  const bytes = readFileSync(referencePath);
+  if (sha(bytes) !== referenceSha256) throw Error("Reference coverage pin changed");
+  const reference = JSON.parse(bytes).results.find((r) => r.task === task.id);
+  const after = reference?.checks.find((r) => r.reference === "after" && r.outcome === "pass");
+  const expectedTests = Number(after?.summary.join("\n").match(/Tests\s+(\d+) passed/)?.[1]);
+  if (
+    !expectedTests ||
+    reference.sourceCommit !== task.sourceCommit ||
+    reference.baseCommit !== task.baseCommit ||
+    JSON.stringify(reference.graders) !== JSON.stringify(task.graders)
+  )
+    throw Error("Reference coverage does not match task");
+  const failure = (detail) => ({ complete: false, detail, expectedTests, referenceSha256 });
+  if (
+    !report ||
+    report.success !== true ||
+    report.numTotalTests !== expectedTests ||
+    report.numPassedTests !== expectedTests ||
+    !Array.isArray(report.testResults) ||
+    report.testResults.length !== task.graders.length ||
+    ["numFailedTests", "numPendingTests", "numTodoTests", "numFailedTestSuites", "numPendingTestSuites"].some(
+      (key) => report[key] !== 0,
+    )
+  )
+    return failure("Missing, skipped, failed or incomplete held-out test coverage");
+  const expectedFiles = new Map(
+    task.graders.map((g, i) => [join(workspace, g.path), referenceFileCounts[task.id][i]]),
+  );
+  let count = 0;
+  for (const file of report.testResults) {
+    const expectedCount = expectedFiles.get(file.name);
+    if (
+      !expectedFiles.delete(file.name) ||
+      file.status !== "passed" ||
+      !Array.isArray(file.assertionResults) ||
+      file.assertionResults.length !== expectedCount
+    )
+      return failure("Missing, duplicate or unexpected grader file");
+    const names = new Set();
+    for (const assertion of file.assertionResults) {
+      if (
+        assertion.status !== "passed" ||
+        typeof assertion.fullName !== "string" ||
+        !assertion.fullName ||
+        names.has(assertion.fullName) ||
+        !Array.isArray(assertion.failureMessages) ||
+        assertion.failureMessages.length ||
+        !Number.isFinite(assertion.duration) ||
+        assertion.duration < 0
+      )
+        return failure("Unexecuted, duplicate or failed grader assertion");
+      names.add(assertion.fullName);
+      count++;
+    }
+  }
+  return count === expectedTests && expectedFiles.size === 0
+    ? {
+        complete: true,
+        expectedTests,
+        executedTests: count,
+        files: report.testResults.length,
+        referenceSha256,
+      }
+    : failure("Assertion count does not match pinned reference");
+}
+
 /** Grade only an explicitly prepared candidate with separately staged dependencies.
  * This command never starts agents. It uses the existing network-off OS sandbox.
  */
@@ -400,7 +480,10 @@ export async function gradeCandidate(directory) {
     throw Error("Not a prepared candidate");
   verifyTask(task);
   const local = (...args) => command("/usr/bin/git", args, workspace);
-  const untracked = local("ls-files", "--others", "--directory", "--no-empty-directory", "-z").toString().split("\0").filter(Boolean);
+  const untracked = local("ls-files", "--others", "--directory", "--no-empty-directory", "-z")
+    .toString()
+    .split("\0")
+    .filter(Boolean);
   if (untracked.some((path) => path !== "candidate.patch" && !/(^|\/)node_modules\/$/.test(path)))
     throw Error("Untracked source changed after preparation");
   if (
@@ -419,11 +502,21 @@ export async function gradeCandidate(directory) {
   if (!existsSync(vitest) || !realpathSync(vitest).startsWith(`${root}/`))
     throw Error("Stage independent owned dependencies inside the grading sandbox before grading");
   const dependencies = dependencySnapshot(workspace);
+  const reportPath = join(root, "tmp/heldout-results.json");
+  rmSync(reportPath, { force: true });
   const started = Date.now();
   const result = await executeSandbox({
     root,
     binary: process.execPath,
-    args: [vitest, "run", "--config", "vitest.config.ts", ...task.graders.map((g) => g.path)],
+    args: [
+      vitest,
+      "run",
+      "--config",
+      "vitest.config.ts",
+      "--reporter=json",
+      `--outputFile=${reportPath}`,
+      ...task.graders.map((g) => g.path),
+    ],
     network: false,
     timeoutMs: 120_000,
     env: {
@@ -444,7 +537,18 @@ export async function gradeCandidate(directory) {
   } catch {
     // Retain a failed result if the candidate removed files or replaced links.
   }
+  let coverage = { complete: false, detail: "Missing or malformed structured verifier report" };
+  let verifierReportSha256 = null;
+  try {
+    const bytes = readFileSync(reportPath);
+    verifierReportSha256 = sha(bytes);
+    coverage = validateGraderReport(task, workspace, JSON.parse(bytes));
+  } catch {
+    // An exit(0), import crash or malformed output cannot substitute for test execution.
+  }
   const report = {
+    coverage,
+    verifierReportSha256,
     task: task.id,
     candidatePatchSha256: receipt.candidatePatchSha256,
     candidateTree: receipt.candidateTree,
@@ -457,7 +561,7 @@ export async function gradeCandidate(directory) {
     ...result,
     status: !unchanged
       ? "grader-tampered"
-      : result.exitCode === 0 && !result.timedOut && !result.overflow
+      : coverage.complete && result.exitCode === 0 && !result.timedOut && !result.overflow
         ? "passed"
         : "failed-or-infrastructure",
     agentsLaunched: false,
