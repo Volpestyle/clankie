@@ -301,10 +301,9 @@ so they must stay inside those terms:
 - **Throttle.** Both CLIs report live window usage: Claude Code's stream-json emits
   `rate_limit_event` with five-hour and seven-day utilization, and Codex writes
   `rate_limits` into its session rollout. After every call, both runners compare
-  it with `--stop-at` (default `five_hour=0.8,seven_day=0.5`). A five-hour window
-  past its threshold waits for that window's reset. The weekly window or an actual
-  rate limit stops the run, leaving the rest of the week to the owner's other
-  agents. On 2026-09-30 Codex's weekly window was already at 86%, so the baseline
+  it with `--stop-at` (default `five_hour=0.8,seven_day=0.5`). The Clankie-suite runner stops on any guard and requires explicit resume;
+  the benchmark runner can wait for a known five-hour reset. The weekly window
+  stops both runners, leaving the rest of the week to the owner's other agents. On 2026-09-30 Codex's weekly window was already at 86%, so the baseline
   ran on Claude. The benchmark runs at most three containers at once.
 
 ## Isolation and authentication
@@ -371,3 +370,42 @@ before credentials are loaded; start again after the reset. All regular
 `run.mjs` arguments apply, except the harness is fixed to Codex.
 Big sweeps belong on an API key with an explicit
 spend budget, not rotated subscription accounts.
+
+### Concurrent calls and campaign resume
+
+`scripts/evals/run.mjs --concurrency N` runs up to N isolated attempts, each
+with its own fixture, worktree and home. The default remains one worker. Call
+reservations and reported tokens count across the entire campaign, including
+rework. A call reservation is saved before launch, so an interrupted call still
+consumes budget. Already running calls may finish after a usage or token guard
+trips; reported-token budgets can overshoot by those in-flight calls.
+
+Use `--resume CAMPAIGN_DIR` with the same matrix, harness, model, CLI, timeout, rework,
+budgets, usage thresholds and account selection. Finished cells (passing or
+exhausting rework) are skipped; unfinished rework keeps its recorded feedback.
+The campaign identity and finished artifacts are retained. Retried interrupted
+attempts use new directories. Resume rejects changed suite hashes and incompatible
+arguments. Selected configuration definitions, exact instruction text, all included
+skill files (including supporting content), case images, and the harness binary
+hash/version must also match before credentials or account probes are accessed.
+Inputs are checked again around fixture preparation before new model dispatch.
+Legacy reports without this complete input fingerprint cannot safely resume;
+their finished evidence remains usable, and any new campaign needs its own
+authorization. Concurrency and pause may change. Resume is an explicit owner action:
+a subscription guard stops all new dispatch, including on a five-hour reset wait;
+there is no automatic post-reset launch. Completed in-flight calls are saved.
+
+For explicit Codex account spread, add `--harness codex --concurrency 2
+--accounts default,second` to `run.mjs`, or use the same concurrency and accounts
+flags with `codex.mjs`. Labels come from the VUH-1476 registry, must be distinct,
+and map one-to-one to worker slots. Each account is checked at startup and its
+isolated rollout supplies the guard after each attempt. A guard on any account
+stops the campaign; workers never switch accounts to bypass it. Credentials are
+copied directly from the slot's account into its isolated home without changing
+the process-wide `CODEX_HOME`. `--account` and `--accounts` are mutually exclusive.
+`--dry-run` only prints the plan, without credentials or account usage probes.
+
+Large campaigns remain on hold. These flags do not enlarge the call budget.
+The three-repetition broad gate preset is deferred; start a newly authorized
+uncertainty with a few relevant cases and one repetition. No campaign or model
+trial was run to validate this implementation; tests use deterministic callbacks.

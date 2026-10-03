@@ -461,3 +461,139 @@ describe.skipIf(process.platform !== "darwin")("OS isolation", () => {
     );
   });
 });
+
+it("schedules isolated slots concurrently with shared call and usage guards", async () => {
+  // @ts-expect-error -- checkout eval tooling is plain ESM.
+  const { schedule } = await import("../../../scripts/evals/run.mjs");
+  const options = plan(["--cases", "memory-card", "--reps", "4", "--concurrency", "2", "--max-runs", "4"]);
+  const report = { results: [], stopped: null } as any;
+  let active = 0,
+    peak = 0;
+  const accounts: string[] = [];
+  await schedule(
+    options,
+    report,
+    async (cell: any, attempt: number, _feedback: string, slot: any) => {
+      peak = Math.max(peak, ++active);
+      accounts.push(slot.label);
+      await new Promise((done) => setTimeout(done, 5));
+      active--;
+      return { ...cell, attempt, passed: true, tokens: { total: 10 }, rateLimit: { seven_day: 0.9 } };
+    },
+    () => {},
+    [{ label: "first" }, { label: "second" }],
+  );
+  expect(peak).toBe(2);
+  expect(accounts).toEqual(["first", "second"]);
+  expect(report.calls).toBe(2);
+  expect(report.totalTokens).toBe(20);
+  expect(report.stopped).toContain("seven_day");
+});
+
+it("resumes completed cells and accounts for interrupted call reservations", async () => {
+  // @ts-expect-error -- checkout eval tooling is plain ESM.
+  const { schedule, validateResume, heldoutSha256 } = await import("../../../scripts/evals/run.mjs");
+  const options = plan(["--cases", "memory-card", "--reps", "3", "--concurrency", "2", "--max-runs", "3"]);
+  const report = {
+    options,
+    suiteSha256: "fixture",
+    heldoutSha256,
+    calls: 2,
+    results: [{ ...options.matrix[0], attempt: 0, passed: false, tokens: { total: 12 } }],
+    stopped: null,
+  } as any;
+  expect(() => validateResume(report, options, "fixture")).not.toThrow();
+  expect(() => validateResume(report, { ...options, model: "different" }, "fixture")).toThrow("same model");
+  const started: number[] = [];
+  await schedule(options, report, async (cell: any, attempt: number) => {
+    started.push(cell.rep);
+    return { ...cell, attempt, passed: true, tokens: { total: 3 } };
+  });
+  expect(started).toEqual([1]);
+  expect(report.calls).toBe(3);
+  expect(report.totalTokens).toBe(15);
+});
+
+it("validates account spread without loading accounts during planning", () => {
+  expect(
+    plan(["--harness", "codex", "--accounts", "default,second", "--concurrency", "2", "--dry-run"]).accounts,
+  ).toBe("default,second");
+  expect(() => plan(["--accounts", "default"])).toThrow("Codex");
+  expect(() => plan(["--harness", "codex", "--accounts", "default,default", "--concurrency", "2"])).toThrow(
+    "distinct",
+  );
+  expect(() => plan(["--concurrency", "0"])).toThrow("positive integer");
+});
+
+it("resumes remaining rework with feedback and stops all slots at the reported-token budget", async () => {
+  // @ts-expect-error -- checkout eval tooling is plain ESM.
+  const { schedule } = await import("../../../scripts/evals/run.mjs");
+  const options = plan(["--cases", "memory-card", "--reps", "1", "--rework", "2", "--token-budget", "10"]);
+  const report = {
+    results: [
+      { ...options.matrix[0], attempt: 0, passed: false, feedback: "retry fixture", tokens: { total: 3 } },
+    ],
+    stopped: null,
+  } as any;
+  const attempts: number[] = [];
+  await schedule(options, report, async (cell: any, attempt: number, feedback: string) => {
+    expect(feedback).toBe("retry fixture");
+    attempts.push(attempt);
+    return { ...cell, attempt, passed: false, tokens: { total: 7 } };
+  });
+  expect(attempts).toEqual([1]);
+  expect(report.calls).toBe(2);
+  expect(report.totalTokens).toBe(10);
+  expect(report.stopped).toContain("budget");
+});
+
+it("pins selected instructions, configuration, full skills, images and harness across resume", async () => {
+  // @ts-expect-error -- checkout eval tooling is plain ESM.
+  const { campaignInputs, validateCampaignIdentity } = await import("../../../scripts/evals/run.mjs");
+  const root = fixture();
+  mkdirSync(join(root, "scripts/evals"), { recursive: true });
+  mkdirSync(join(root, ".agents/skills/example/support"), { recursive: true });
+  const configPath = join(root, "scripts/evals/configurations.json");
+  const definitions = {
+    current: { skills: "bundled", instructions: "instructions.md" },
+    unused: { skills: "none", instructions: null },
+  };
+  writeFileSync(configPath, JSON.stringify(definitions));
+  writeFileSync(join(root, "instructions.md"), "original instructions");
+  writeFileSync(join(root, ".agents/skills/example/SKILL.md"), "skill");
+  writeFileSync(join(root, ".agents/skills/example/support/helper.txt"), "original helper");
+  writeFileSync(join(root, "scripts/evals/image.png"), "original image");
+  const options = { matrix: [{ config: "current", caseId: "image-case" }] };
+  const source = { repoRoot: root, selectedCases: [{ id: "image-case", image: true }] };
+  const inputs = campaignInputs(options, source);
+  const report = { inputs, cliSha256: "binary-v1", version: "1.0" };
+  const validate = () =>
+    validateCampaignIdentity(report, campaignInputs(options, source), "binary-v1", "1.0");
+  expect(validate).not.toThrow();
+  writeFileSync(
+    configPath,
+    JSON.stringify({ ...definitions, unused: { skills: "plain", instructions: null } }),
+  );
+  expect(validate).not.toThrow();
+  for (const [path, original] of [
+    ["instructions.md", "original instructions"],
+    [".agents/skills/example/SKILL.md", "skill"],
+    [".agents/skills/example/support/helper.txt", "original helper"],
+    ["scripts/evals/image.png", "original image"],
+  ]) {
+    writeFileSync(join(root, path!), "changed");
+    expect(validate).toThrow("inputs changed");
+    writeFileSync(join(root, path!), original!);
+    expect(validate).not.toThrow();
+  }
+  writeFileSync(
+    configPath,
+    JSON.stringify({ ...definitions, current: { ...definitions.current, skills: "none" } }),
+  );
+  expect(validate).toThrow("inputs changed");
+  expect(() => validateCampaignIdentity(report, inputs, "binary-v2", "1.0")).toThrow("same harness");
+  expect(() => validateCampaignIdentity(report, inputs, "binary-v1", "2.0")).toThrow("same harness");
+  expect(() =>
+    validateCampaignIdentity({ ...report, inputs: undefined }, inputs, "binary-v1", "1.0"),
+  ).toThrow("legacy report");
+});

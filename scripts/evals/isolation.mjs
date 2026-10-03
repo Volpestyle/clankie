@@ -39,11 +39,11 @@ export function executable(name) {
   return realpathSync(result.stdout.trim());
 }
 
-export function subscriptionAuth(harness) {
+export function subscriptionAuth(harness, codexHome) {
   const home = homedir();
   if (harness === "codex") {
     const auth = JSON.parse(
-      readFileSync(join(process.env.CODEX_HOME ?? join(home, ".codex"), "auth.json"), "utf8"),
+      readFileSync(join(codexHome ?? process.env.CODEX_HOME ?? join(home, ".codex"), "auth.json"), "utf8"),
     );
     if (auth.auth_mode !== "chatgpt" || !auth.tokens?.access_token || auth.OPENAI_API_KEY) {
       throw Error("Codex must be logged in with ChatGPT, not an API key");

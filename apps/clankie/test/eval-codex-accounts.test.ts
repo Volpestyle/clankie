@@ -105,3 +105,26 @@ vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
   readCodexHookTrust: vi.fn(async () => "unknown"),
   readCodexRateLimits: vi.fn(async () => null),
 }));
+
+test("explicit account slots bypass single-account selection and dry-run stays inert", async () => {
+  const runner = vi.fn(async (options) => options);
+  const spread = [...args, "--accounts", "default,second", "--concurrency", "2"];
+  expect(await codexCampaign([...spread, "--dry-run"], runner)).toMatchObject({
+    accounts: "default,second",
+    concurrency: 2,
+  });
+  expect(runner).not.toHaveBeenCalled();
+  expect(await codexCampaign(spread, runner)).toMatchObject({ accounts: "default,second" });
+  await expect(codexCampaign([...spread, "--account", "default"], runner)).rejects.toThrow("not both");
+});
+
+test("resume rejects legacy input identity before probing a Codex account", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eval-resume-identity-"));
+  roots.push(root);
+  await writeFile(join(root, "report.json"), JSON.stringify({ results: [] }));
+  vi.mocked(readCodexRateLimits).mockClear();
+  const runner = vi.fn();
+  await expect(codexCampaign([...args, "--resume", root], runner)).rejects.toThrow("legacy report");
+  expect(readCodexRateLimits).not.toHaveBeenCalled();
+  expect(runner).not.toHaveBeenCalled();
+});
