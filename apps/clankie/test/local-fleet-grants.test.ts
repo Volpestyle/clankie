@@ -153,3 +153,70 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
   expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
   await worker.close();
 });
+it("admits exact linked receipt and ACK routes only with the same proven local pane and live membership", async () => {
+  let live = true;
+  let checks = 0;
+  let failAfter = Infinity;
+  const local = new LocalFleetLink({
+    directory: "/unused",
+    binding: async () => undefined,
+    prove: async (_socket, pane) => live && ++checks <= failAfter && pane === "w1:p1",
+  });
+  const deliveryId = randomUUID();
+  const binding = "a".repeat(64);
+  const fingerprint = "b".repeat(64);
+  const reconciled: string[] = [];
+  const acknowledged: string[] = [];
+  const app = await createClankieApp({
+    localFleet: local,
+    authenticateOperator: async () => undefined,
+    captain: createStubCaptain({
+      fleetSeatMessageBinding: async () => binding,
+      reconcileFleetSeatMessage: async (pane, delivery) => {
+        reconciled.push(`${pane}/${delivery.id}`);
+        return {
+          schemaVersion: 1,
+          received: true,
+          deliveryStage: "stored",
+          deliveryId: delivery.id,
+          binding,
+          fingerprint,
+        };
+      },
+      acknowledgeFleetSeatEvent: async (pane, id) => {
+        acknowledged.push(`${pane}/${id}`);
+        return true;
+      },
+    }),
+  });
+  const forward = local.fetch(app.app.fetch);
+  const messagePath = `/v1/fleet/seats/w1%3Ap1/messages/${deliveryId}?binding=${binding}&fingerprint=${fingerprint}`;
+  const ackPath = "/v1/fleet/seats/w1%3Ap1/events/seat-original/ack";
+  const request = (path: string, method = "GET", pane = "w1:p1") =>
+    new Request(`http://127.0.0.1${path}`, { method, headers: { "x-clankie-pane": pane } });
+  const linked = (path: string, method = "GET", pane = "w1:p1") =>
+    forward(request(path, method, pane), { incoming: { socket: {} } } as HttpBindings);
+  try {
+    expect((await app.app.fetch(request(messagePath))).status).toBe(401);
+    expect((await linked(messagePath)).status).toBe(200);
+    expect((await linked(ackPath, "POST")).status).toBe(200);
+    expect(reconciled).toEqual([`w1:p1/${deliveryId}`]);
+    expect(acknowledged).toEqual(["w1:p1/seat-original"]);
+    expect((await linked(messagePath, "GET", "w1:p2")).status).toBe(403);
+    expect((await linked(messagePath, "POST")).status).toBe(404);
+    expect((await linked(ackPath)).status).toBe(404);
+    expect((await linked("/v1/fleet/seats/w1%3Ap1/messages/not-a-uuid")).status).toBe(404);
+    expect((await linked("/v1/captain/seat-events/original/ack", "POST")).status).toBe(404);
+    checks = 0;
+    failAfter = 1;
+    expect((await linked(messagePath)).status).toBe(403);
+    expect(reconciled).toHaveLength(1);
+    failAfter = Infinity;
+    live = false;
+    expect((await linked(ackPath, "POST")).status).toBe(403);
+    expect(acknowledged).toHaveLength(1);
+  } finally {
+    app.close();
+    await local.close();
+  }
+});

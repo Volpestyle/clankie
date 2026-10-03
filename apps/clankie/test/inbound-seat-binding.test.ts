@@ -20,7 +20,10 @@ it("compares POST and receipt assertions to freshly inspected native identity wi
     title: "test",
     session: { source: "herdr:codex", kind: "id", value: "native-1" },
   };
-  const get = vi.fn(async (pane: string) => (pane === agent.paneId || pane === "alias" ? agent : undefined));
+  const get = vi.fn(async (pane: string) => {
+    if (pane === agent.paneId || pane === "alias") return agent;
+    throw new Error("unknown native pane");
+  });
   vi.spyOn(fleetRunner, "routeHerdrFleets").mockReturnValue({ get, wait: get, resolveTerminal: get });
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   const submit = vi.spyOn(ConversationStore.prototype, "submitInbound").mockImplementation(() => {

@@ -144,6 +144,7 @@ export function runSeatChannel({ paneId, parentArgv }) {
   async function poll() {
     let quiet404 = false;
     while (!closed) {
+      let receiptUnresolved = false;
       try {
         const response = await fetch(`${seatRoute(link, paneId, "events")}?wait=${String(WAIT_MS)}`, {
           headers: authorization(link),
@@ -158,8 +159,9 @@ export function runSeatChannel({ paneId, parentArgv }) {
         }
         if (!response.ok) throw new Error(`mailbox answered ${String(response.status)}`);
         const page = await response.json();
-        for (const event of Array.isArray(page?.events) ? page.events : [])
-          send({
+        for (const event of Array.isArray(page?.events) ? page.events : []) {
+          receiptUnresolved = true;
+          const notification = {
             method: "notifications/claude/channel",
             params: {
               content: String(event.content ?? ""),
@@ -171,9 +173,30 @@ export function runSeatChannel({ paneId, parentArgv }) {
                 created_at: event.createdAt,
               },
             },
+          };
+          await new Promise((resolve, reject) => {
+            process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...notification })}\n`, (error) =>
+              error ? reject(error) : resolve(),
+            );
           });
+          const ack = await fetch(
+            `${seatRoute(link, paneId, "events")}/${encodeURIComponent(event.id)}/ack`,
+            {
+              method: "POST",
+              headers: authorization(link),
+              signal: AbortSignal.timeout(10_000),
+            },
+          );
+          const receipt = ack.ok ? await ack.json() : undefined;
+          if (receipt?.acknowledged !== true) throw new Error("Exact channel acknowledgment is unresolved");
+          receiptUnresolved = false;
+        }
       } catch (error) {
         if (closed) return;
+        if (receiptUnresolved) {
+          log("channel receipt unresolved; stopped polling without replay");
+          return;
+        }
         if (refused(error) && refresh()) continue;
         log(`mailbox poll failed (${error instanceof Error ? error.message : String(error)}); retrying`);
         await delay(RETRY_MS);

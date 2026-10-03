@@ -1,3 +1,4 @@
+import { fleetLinkFetch } from "../../clankie/src/fleet-link.ts";
 import { createHash } from "node:crypto";
 import { ConversationStore } from "../../clankie/src/captain/conversations.ts";
 import { InboundSeatReceipts } from "../../clankie/src/captain/inbound-seat-receipts.ts";
@@ -26,13 +27,20 @@ afterEach(() => {
 });
 
 /** A stand-in for Clankie's link listener: one event in the mailbox, then nothing. */
-async function fakeService() {
+async function fakeService(dropAck = false) {
   const seen: Seen[] = [];
   let delivered = false;
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     let body = "";
     request.on("data", (chunk: Buffer) => (body += String(chunk)));
     request.on("end", () => {
+      const wire = new Request(new URL(request.url ?? "/", "http://x"), { method: request.method ?? "GET" });
+      const admitted = fleetLinkFetch(() => new Response(null, { status: 204 }))(wire) as Response;
+      if (admitted.status !== 204) {
+        response.statusCode = admitted.status;
+        response.end("{}");
+        return;
+      }
       const path = new URL(request.url ?? "/", "http://x").pathname;
       seen.push({
         method: request.method ?? "",
@@ -62,6 +70,12 @@ async function fakeService() {
               ? { tools: [{ name: "linear_get_issue", inputSchema: { type: "object" } }] }
               : { content: [{ type: "text", text: `ran ${String(message.params?.name)}` }], isError: false };
         response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+        return;
+      }
+      if (path.endsWith("/ack")) {
+        if (dropAck) response.destroy();
+        else
+          response.end(JSON.stringify({ schemaVersion: 1, acknowledged: true, deliveryStage: "delivered" }));
         return;
       }
       if (path.endsWith("/events")) {
@@ -369,6 +383,14 @@ async function receiptService() {
     });
     request.on("end", () => {
       const url = new URL(request.url ?? "/", "http://x");
+      const admitted = fleetLinkFetch(() => new Response(null, { status: 204 }))(
+        new Request(url, { method: request.method ?? "GET" }),
+      ) as Response;
+      if (admitted.status !== 204) {
+        response.statusCode = admitted.status;
+        response.end("{}");
+        return;
+      }
       seen.push({ method: request.method ?? "", path: url.pathname, body: raw });
       response.setHeader("content-type", "application/json");
       if (request.method === "GET" && url.pathname.endsWith("/messages")) {
@@ -436,7 +458,7 @@ async function receiptService() {
     },
   };
 }
-function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string) {
+function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string, channel = false) {
   const code = `import { runMcpCommand } from ${JSON.stringify(new URL("../src/command/mcp.ts", import.meta.url).href)}; await runMcpCommand(["--seat"], { readParentArgv: async () => "test" });`;
   const child = spawn(
     process.execPath,
@@ -449,10 +471,12 @@ function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string) {
         HERDR_SOCKET_PATH: SOCKET,
         CLANKIE_OPERATOR_TOKEN: "test-only",
         CLANKIE_CONTROL_PLANE_URL: url,
+        ...(channel ? { CLANKIE_SEAT_PARENT_ARGV: "claude --channels plugin:clankie-worker@clankie" } : {}),
       },
     },
   );
   cleanups.push(() => child.kill());
+  const notifications: unknown[] = [];
   const replies = new Map<number, unknown>();
   let buffer = "";
   let stderr = "";
@@ -466,6 +490,7 @@ function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string) {
       const line = JSON.parse(buffer.slice(0, at));
       buffer = buffer.slice(at + 1);
       if (line.id !== undefined) replies.set(line.id, line);
+      else if (line.method === "notifications/claude/channel") notifications.push(line);
     }
   });
   let sequence = 0;
@@ -481,6 +506,10 @@ function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string) {
   };
   return {
     child,
+    notifications,
+    initialized: () =>
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`),
+    stderr: () => stderr,
     init: () =>
       call("initialize", {
         protocolVersion: "2025-06-18",
@@ -561,3 +590,31 @@ it("two raw bridges sharing a pane claim at most one original POST", async () =>
   expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(1);
   expect(service.runner).not.toHaveBeenCalled();
 });
+it.each([false, true])(
+  "installed linked channel acknowledges its exact written event and stops on lost ack=%s",
+  async (dropAck) => {
+    const service = await fakeService(dropAck);
+    const home = await linkedHome(service.url, true);
+    const bridge = rawReceiptBridge("fleet", home, service.url, true);
+    await bridge.init();
+    bridge.initialized();
+    await expect.poll(() => service.seen.filter((r) => r.path.endsWith("/ack")).length).toBe(1);
+    expect(bridge.notifications).toMatchObject([
+      { params: { meta: { event_id: "event-1" }, content: "Hello from Clankie" } },
+    ]);
+    expect(service.seen.find((r) => r.path.endsWith("/ack"))).toMatchObject({
+      method: "POST",
+      path: "/v1/fleet/seats/w8%3Ap3/events/event-1/ack",
+      pane: "w8:p3",
+      authorization: undefined,
+    });
+    if (dropAck) {
+      await expect.poll(() => bridge.stderr()).toContain("stopped polling without replay");
+      expect(service.seen.filter((r) => r.path.endsWith("/events"))).toHaveLength(1);
+      expect(bridge.notifications).toHaveLength(1);
+    } else
+      await expect
+        .poll(() => service.seen.filter((r) => r.path.endsWith("/events")).length)
+        .toBeGreaterThan(1);
+  },
+);

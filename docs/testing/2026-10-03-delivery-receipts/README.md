@@ -63,3 +63,10 @@ visibly render the accepted/failure/spawn and turn-event `deliveryStage` fields,
 retain queue detail, and distinguish local completion from receipt progress.
 VUH-1521 remains in progress until that display and the parent trust/durability
 review are complete; this public harvest is partial issue scope.
+
+The continuation also covers both restricted listener boundaries:
+`fleetLinkFetch` admits only exact receipt reads and event acknowledgments, and
+`LocalFleetLink.fetch` preserves bearerless pane proof, revalidation and
+revocation for those routes. Raw installed-channel tests assert exact ACK after
+notification output and no further poll after a lost acknowledgment. Raw
+inbound subprocess fixtures pass through the real fleet route filter.

@@ -184,3 +184,11 @@ the fence. A legacy success response without the original exact receipt cannot
 resolve a new bridge's pending claim. The linked bridge still refreshes its
 link after a refused connection; safe reads may follow the refreshed port, but
 an uncertain POST is never blindly repeated. No local bearer was introduced.
+
+The restricted fleet listener admits only the exact UUID receipt GET and
+exact event-ID ACK POST alongside its existing routes. The bearerless local
+listener applies the same shape and method restrictions, retains its verified
+request identity, and rechecks live pane membership inside the API handler.
+The installed channel writes each notification with the stdout completion
+callback before posting that event's ACK. A failed write or lost ACK stops the
+pump without replay; writing to the bridge remains `delivered`, not model-seen.

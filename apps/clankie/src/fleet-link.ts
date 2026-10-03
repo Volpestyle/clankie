@@ -26,14 +26,21 @@ import {
 
 /** The only paths the link listener answers (seat routes and the fleet's granted tools); everything else is 404. */
 const LINK_ROUTE = /^\/v1\/fleet\/(?:seats\/[^/]+\/(?:events|hook|messages)|mcp)$/u;
+const LINK_RECEIPT =
+  /^\/v1\/fleet\/seats\/[^/]+\/messages\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
+const LINK_EVENT_ACK = /^\/v1\/fleet\/seats\/[^/]+\/events\/[^/]+\/ack$/u;
 
 export function fleetLinkFetch<Rest extends unknown[]>(
   fetch: (request: Request, ...rest: Rest) => Response | Promise<Response>,
 ): (request: Request, ...rest: Rest) => Response | Promise<Response> {
-  return (request, ...rest) =>
-    LINK_ROUTE.test(new URL(request.url).pathname)
+  return (request, ...rest) => {
+    const path = new URL(request.url).pathname;
+    return LINK_ROUTE.test(path) ||
+      (request.method === "GET" && LINK_RECEIPT.test(path)) ||
+      (request.method === "POST" && LINK_EVENT_ACK.test(path))
       ? fetch(request, ...rest)
       : Response.json({ error: "not_found" }, { status: 404 });
+  };
 }
 
 export type FleetLinkState =

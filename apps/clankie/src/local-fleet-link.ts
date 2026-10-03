@@ -31,7 +31,13 @@ export class LocalFleetLink {
   fetch(forward: (request: Request) => Response | Promise<Response>) {
     return async (request: Request, env: HttpBindings | Http2Bindings): Promise<Response> => {
       const path = new URL(request.url).pathname;
-      const seat = /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages)$/u.exec(path);
+      const seat =
+        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages)$/u.exec(path) ||
+        (request.method === "GET" &&
+          /^\/v1\/fleet\/seats\/([^/]+)\/messages\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
+            path,
+          )) ||
+        (request.method === "POST" && /^\/v1\/fleet\/seats\/([^/]+)\/events\/[^/]+\/ack$/u.exec(path));
       if (path !== "/v1/fleet/mcp" && !seat) return Response.json({ error: "not_found" }, { status: 404 });
       const pane = request.headers.get("x-clankie-pane") ?? "";
       if (seat && decodeURIComponent(seat[1]!) !== pane)
