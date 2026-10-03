@@ -44,3 +44,6 @@ whose system spans repos may additionally keep an editable tldraw source listed
 here with its export. Retained JPG exports preserve the architecture at their
 publication date; do not treat them as current or hand-edit/fabricate a binary
 render without its source.
+
+[ADR 0215](0215-conversations-lease-one-body.md) proposes exclusive body-resource
+leases for parallel conversations belonging to one Clankie.
