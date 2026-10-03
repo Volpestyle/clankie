@@ -220,6 +220,36 @@ it("admits only a live registered private server matching the foreground native 
   expect(await prove(socket(), "w1:p1")).toBeUndefined();
 });
 
+it("allows a sessionless owner process only through its own socket ancestry, never a private seat", async () => {
+  const { localProjectProof } = await import("../src/local-fleet-proof.ts");
+  let tree = "55 44\n44 33\n33 1\n";
+  const prove = localProjectProof({
+    platform: "darwin",
+    binding: async () => binding,
+    herdrBinary: "herdr",
+    launcher: async () => ({ executable: "/trusted/codex" }),
+    canonical: async (path) => path,
+    privateSeat: async () => true,
+    privateProjectSeat: async () => true,
+    run: async (command, args) => {
+      if (command === "/usr/sbin/lsof") return args.includes("txt") ? "p44\nftxt\nn/trusted/codex\n" : owner;
+      if (command === "/bin/ps" && args[0] === "-axo") return tree;
+      if (command === "/bin/ps") return "Sat Oct  3 10:00:00 2026 /trusted/codex\n";
+      if (args[0] === "agent")
+        return JSON.stringify({
+          result: { agent: { pane_id: "w1:p1", terminal_id: "terminal", agent: "codex" } },
+        });
+      return JSON.stringify({
+        result: { process_info: { pane_id: "w1:p1", shell_pid: 33, foreground_process_group_id: 44 } },
+      });
+    },
+  });
+  expect(await prove(socket(), "w1:p1")).toMatchObject({ nativeSessionPending: true });
+  expect(await prove(socket(), "w1:p2")).toBeUndefined();
+  tree = "55 99\n99 1\n44 33\n33 1\n";
+  expect(await prove(socket(), "w1:p1")).toBeUndefined();
+});
+
 it.each([
   "owner",
   "duplicate",

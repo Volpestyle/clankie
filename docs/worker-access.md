@@ -106,7 +106,8 @@ symlink aliases, case mismatches and missing directories deny access.
 The implemented proof is local macOS: the separate listener checks the socket's
 OS-observed owner and ancestry against the connected Herdr pane, then binds the
 native foreground harness PID and start time, pane shell PID and start
-time, and current Herdr socket/session plus native agent session identity.
+time, and current Herdr socket/session. When a native agent session identity is
+reported, it must stay unchanged throughout each observation.
 The service reads both `agent get` and `pane process-info` from that pinned Herdr
 socket, requires the same pane and terminal/session before and after observation,
 and checks the OS executable mapping against its installed launcher. A matching
@@ -122,6 +123,17 @@ must match that live registration, the fresh native TUI proof and an actual hire
 assignment. They never inherit a project solely from the pane's cwd. Disposal,
 PID reuse or a replacement thread denies the old server. MCP sessions expire after 15 minutes idle and are
 bound to the exact project and process identity.
+
+An owner-started native process can receive workspace-granted tools before Herdr
+reports its session: Codex reports `SessionStart` only when its first turn begins,
+after loading MCP. The socket must still descend from the exact installed native
+foreground process, and its actual cwd must match an approved workspace. This
+startup path is available only when the host ledger has no hire allocation for
+the pane. Pending, stale or assigned hires and private seats cannot use it.
+Session reporting arriving later preserves an owner-started process's MCP
+principal; a new PID lifetime or changed shell/binding does not. Hired/private
+principals remain bound to their actual native session. A process proof without
+a native session cannot register or drain next-turn reply mail.
 
 Workspace exit, assignment invalidation, account change and revocation are
 checked on every list and call, without a one-minute authorization cache. The
