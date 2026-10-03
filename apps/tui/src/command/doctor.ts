@@ -55,5 +55,9 @@ export async function machineDoctorCommand(
           status: "unavailable",
           detail: result.reason instanceof Error ? result.reason.message : String(result.reason),
         };
-  return { machine, harnesses: value(results[0]!), membership: value(results[1]!) };
+  return {
+    machine,
+    harnesses: results[0]!.status === "fulfilled" ? results[0]!.value.harnesses : value(results[0]!),
+    membership: value(results[1]!),
+  };
 }

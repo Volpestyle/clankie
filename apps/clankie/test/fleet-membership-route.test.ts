@@ -49,7 +49,7 @@ it("exposes only owner-authorized host observations and combines the selected ma
     const result = await machineDoctorCommand("kh2", cli);
     expect(result).toMatchObject({
       machine: "kh2",
-      harnesses: { harnesses: { claude: [{ versionMatches: true }] } },
+      harnesses: { claude: [{ versionMatches: true }] },
       membership: report,
     });
     expect(seen).toEqual(["kh2"]);
@@ -95,7 +95,7 @@ it("retains a usable harness card when host membership inspection is unavailable
       fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
     });
     expect(result).toMatchObject({
-      harnesses: { harnesses: { claude: [{ enabled: true }] } },
+      harnesses: { claude: [{ enabled: true }] },
       membership: { status: "unavailable" },
     });
   } finally {
