@@ -46,6 +46,7 @@ describe("the head seat in the census", () => {
       harness: "claude",
       status: "working",
       workingDirectory: "/Users/me/dev/project",
+      session: { source: "herdr:claude", kind: "id", value: "abc" },
     });
     expect(fleet.seats.map((seat) => seat.seatId)).toEqual(["term-atlas"]);
   });

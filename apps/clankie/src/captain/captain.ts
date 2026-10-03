@@ -1,3 +1,5 @@
+import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
+import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
@@ -943,6 +945,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const seatByPersona = new Map<string, string>();
   const seatSubjects = new Map<string, string>();
   const stances = createStanceStore();
+  const agentWork = createAgentWorkStore(options.stateDir);
   /**
    * What each fleet seat's pane status was last seen as. The watcher publishes
    * only changes, so this is the other half of a transition — and holding it
@@ -1771,14 +1774,36 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * keeps live agent names unique, so the census carries at most one.
    */
   function bindHeadSeat(head: ObservedHeadSeat | undefined): void {
-    if (head?.seatId === headSeat?.seatId) return;
+    if (head?.seatId === headSeat?.seatId) {
+      headSeat = head;
+      return;
+    }
     if (headSeat !== undefined) herdrWatches.untrackSeat(headSeat.seatId);
     headSeat = head;
     if (head !== undefined) herdrWatches.trackSeat(head.seatId, "head");
   }
 
+  function conversationGoal(conversationId: string) {
+    if (conversationId === conversations.defaultGlobalConversationId() && headSeat?.harness === "codex") {
+      try {
+        return headSeat.session === undefined ? undefined : readCodexGoal(headSeat.session);
+      } catch {
+        return undefined;
+      }
+    }
+    return autonomy.getGoal(conversationId);
+  }
+
+  function conversationAssignment(conversationId: string) {
+    return conversationId === conversations.defaultGlobalConversationId() && headSeat !== undefined
+      ? agentWork.read(headSeat.occupantId)
+      : undefined;
+  }
+
   let swarmRoster = "";
   let seatSubagents = "";
+  let seatWork = "";
+  let captainGoals = "";
   let swarmTasks: readonly SwarmTaskView[] = [];
   let swarmTaskBoard = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
@@ -1789,13 +1814,37 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         : await readFleet({ fleets: censusFleets, ...(binding ? { herdrSession: binding.session } : {}) });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
-    const seats = withSeatSubagents(
-      personas.reconcile(fleet.seats),
+    const goalList = await conversations.serve({ op: "list", schemaVersion: 1 });
+    const nextGoals =
+      goalList.op === "list"
+        ? JSON.stringify(
+            goalList.conversations.map((conversation) => [
+              conversation.conversationId,
+              conversationGoal(conversation.conversationId),
+              conversationAssignment(conversation.conversationId),
+            ]),
+          )
+        : "";
+    if (nextGoals !== captainGoals) {
+      captainGoals = nextGoals;
+      fleetChanges.touch();
+    }
+    const seats = withSeatWork(
+      withSeatSubagents(
+        personas.reconcile(fleet.seats),
+        fleet.seats,
+        (seat) =>
+          conversations.conversationIdForPersona(seat.personaId) !== undefined ||
+          conversations.conversationIdForSeat(seat.seatId) !== undefined,
+      ),
       fleet.seats,
-      (seat) =>
-        conversations.conversationIdForPersona(seat.personaId) !== undefined ||
-        conversations.conversationIdForSeat(seat.seatId) !== undefined,
+      agentWork,
     );
+    const nextWork = JSON.stringify(seats.map((seat) => [seat.goal, seat.assignment]));
+    if (seatWork !== nextWork) {
+      seatWork = nextWork;
+      fleetChanges.touch();
+    }
     // A subagent starting or finishing is a roster change the long poll reports.
     const nextSubagents = JSON.stringify(seats.map((seat) => seat.subagents ?? null));
     if (seatSubagents !== nextSubagents) {
@@ -1865,6 +1914,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const cursor = fleetChanges.current();
       const seats = await refreshFleet();
       const channelsResult = await conversations.serve({ op: "channels", schemaVersion: 1 });
+      const goalConversations = await conversations.serve({ op: "list", schemaVersion: 1 });
+      const goals =
+        goalConversations.op === "list"
+          ? goalConversations.conversations.flatMap((conversation) => {
+              const goal = conversationGoal(conversation.conversationId);
+              return goal === undefined ? [] : [{ conversationId: conversation.conversationId, goal }];
+            })
+          : [];
+      const assignments =
+        goalConversations.op === "list"
+          ? goalConversations.conversations.flatMap((conversation) => {
+              const assignment = conversationAssignment(conversation.conversationId);
+              return assignment === undefined
+                ? []
+                : [{ conversationId: conversation.conversationId, assignment }];
+            })
+          : [];
       if (channelsResult.op !== "channels") throw new Error("Fleet channel read returned the wrong result");
       if (cursor !== fleetChanges.current()) continue;
       const fleetPersonas = [
@@ -1876,6 +1942,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         snapshot: {
           schemaVersion: 1,
           cursor,
+          goals,
+          assignments,
           seats: [...seats],
           personas: fleetPersonas,
           channels: [...channelsResult.channels],
@@ -2488,7 +2556,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ): Promise<OperatorConversationServiceResult> {
       if (
         deps.herdrAvailable?.() === false &&
-        ["spawn_seat", "move_seat", "close_seat", "state_stance"].includes(request.op)
+        ["spawn_seat", "move_seat", "close_seat", "state_stance", "state_work"].includes(request.op)
       )
         throw new HerdrUnavailableError();
       if (deps.herdrAvailable?.() === false && request.op === "create" && request.scope.kind === "seat")
@@ -2565,16 +2633,56 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
       if (request.op === "roster") {
+        const seats = await refreshFleet();
         return {
           op: "roster",
           schemaVersion: 1,
-          seats: [...(await refreshFleet())],
+          seats:
+            request.includeWork === true
+              ? [...seats]
+              : seats.map(({ goal: _goal, assignment: _assignment, ...seat }) => seat),
         };
       }
       if (request.op === "fleet") {
         await fleetChanges.wait(request.cursor, request.waitMs ?? 0);
-        const result = await fleetSnapshot();
+        const full = await fleetSnapshot();
+        const { goals: _goals, assignments: _assignments, ...legacy } = full.snapshot;
+        const result =
+          request.includeWork === true
+            ? full
+            : {
+                ...full,
+                snapshot: {
+                  ...legacy,
+                  seats: legacy.seats.map(({ goal: _goal, assignment: _assignment, ...seat }) => seat),
+                },
+              };
         return request.view === "home" ? { ...result, snapshot: operatorFleetHome(result.snapshot) } : result;
+      }
+      if (request.op === "state_work") {
+        const seatId = await readSeatIdForHerdrPane(request.work.herdrPaneId);
+        const seat =
+          seatId === undefined
+            ? undefined
+            : (await refreshFleet()).find((candidate) => candidate.seatId === seatId);
+        const occupantId =
+          seat?.occupantId ?? (seatId === headSeat?.seatId ? headSeat?.occupantId : undefined);
+        if (occupantId === undefined || seatId === undefined)
+          return {
+            op: "state_work",
+            schemaVersion: 1,
+            result: { outcome: "unseated", herdrPaneId: request.work.herdrPaneId },
+          };
+        const assignment = agentWork.state(occupantId, request.work.assignment);
+        fleetChanges.touch();
+        return {
+          op: "state_work",
+          schemaVersion: 1,
+          result:
+            assignment === undefined
+              ? { outcome: "cleared", seatId }
+              : { outcome: "stated", seatId, assignment },
+        };
       }
       if (request.op === "state_stance") {
         // The pane is the whole claim of identity, and it is checked against the
@@ -2853,6 +2961,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       } else if (request.op === "create" && request.scope.kind === "persona") {
         fleetChanges.touch();
       }
+      if (result.op === "list" && request.op === "list" && request.includeWork === true)
+        return {
+          ...result,
+          conversations: result.conversations.map((conversation) => ({
+            ...conversation,
+            goal: conversationGoal(conversation.conversationId),
+            assignment: conversationAssignment(conversation.conversationId),
+          })),
+        };
+      if (
+        result.op === "get" &&
+        request.op === "get" &&
+        request.includeWork === true &&
+        result.conversation !== undefined
+      )
+        return {
+          ...result,
+          conversation: {
+            ...result.conversation,
+            goal: conversationGoal(result.conversation.conversationId),
+            assignment: conversationAssignment(result.conversation.conversationId),
+          },
+        };
       return result;
     },
 

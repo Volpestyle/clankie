@@ -1,3 +1,12 @@
+import {
+  OperatorGoalSchema,
+  OperatorWorkAssignmentSchema,
+  StateOperatorAgentWorkSchema,
+  StateOperatorAgentWorkResultSchema,
+  type StateOperatorAgentWork,
+  type StateOperatorAgentWorkResult,
+} from "./agent-work.ts";
+export * from "./agent-work.ts";
 import { z } from "zod";
 import {
   OperatorConnectionCommandSchema,
@@ -964,6 +973,9 @@ export const OperatorFleetSeatSchema = z
     harness: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     status: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     title: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
+    /** Native goal and explicitly stated assignment for this exact session. */
+    goal: OperatorGoalSchema.optional(),
+    assignment: OperatorWorkAssignmentSchema.optional(),
     /** Herd-lead distilled summary, when one has been written for the seat's pane. */
     summary: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
     next: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
@@ -1130,6 +1142,18 @@ export const OperatorFleetSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
     cursor: OperatorConversationCursorSchema,
+    goals: z
+      .array(z.object({ conversationId: OperatorConversationIdSchema, goal: OperatorGoalSchema }).strict())
+      .max(OPERATOR_CONVERSATION_LIST_MAX)
+      .optional(),
+    assignments: z
+      .array(
+        z
+          .object({ conversationId: OperatorConversationIdSchema, assignment: OperatorWorkAssignmentSchema })
+          .strict(),
+      )
+      .max(OPERATOR_CONVERSATION_LIST_MAX)
+      .optional(),
     seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
     personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_AGENT_PERSONA_LIST_MAX),
     channels: z.array(OperatorChannelSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
@@ -1468,26 +1492,13 @@ export const OperatorConversationSchema = z
     sessionState: OperatorConversationSessionStateSchema,
     revision: z.number().int().nonnegative(),
     contextUsage: OperatorConversationContextUsageSchema.optional(),
+    goal: OperatorGoalSchema.optional(),
+    assignment: OperatorWorkAssignmentSchema.optional(),
     /** Present only for an ephemeral side conversation forked from this parent. */
     parentConversationId: OperatorConversationIdSchema.optional(),
   })
   .strict();
 export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;
-
-export const OperatorGoalStatusSchema = z.enum(["active", "paused", "blocked", "budget_limited", "complete"]);
-export type OperatorGoalStatus = z.infer<typeof OperatorGoalStatusSchema>;
-
-export const OperatorGoalSchema = z
-  .object({
-    objective: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
-    status: OperatorGoalStatusSchema,
-    tokenBudget: z.number().int().positive().optional(),
-    tokensUsed: z.number().int().nonnegative(),
-    createdAt: z.string().datetime(),
-    updatedAt: z.string().datetime(),
-  })
-  .strict();
-export type OperatorGoal = z.infer<typeof OperatorGoalSchema>;
 
 export const OperatorWakeSchema = z
   .object({
@@ -2497,6 +2508,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("list"),
       schemaVersion: z.literal(1),
       scope: OperatorConversationScopeSchema.optional(),
+      includeWork: z.boolean().optional(),
     })
     .strict(),
   z
@@ -2504,6 +2516,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("get"),
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
+      includeWork: z.boolean().optional(),
     })
     .strict(),
   z
@@ -2672,6 +2685,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("roster"),
       schemaVersion: z.literal(1),
+      includeWork: z.boolean().optional(),
     })
     .strict(),
   /**
@@ -2682,6 +2696,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("fleet"),
       schemaVersion: z.literal(1),
+      /** Opt-in keeps older strict response schemas usable. */
+      includeWork: z.boolean().optional(),
       /** Omitted preserves the full durable directory for existing clients. */
       view: z.literal("home").optional(),
       cursor: OperatorConversationCursorSchema.optional(),
@@ -2701,6 +2717,9 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
    * side, and it is safe there for the reason those are not: it names no seat,
    * so the only figure a caller can move is the one it is sitting in.
    */
+  z
+    .object({ op: z.literal("state_work"), schemaVersion: z.literal(1), work: StateOperatorAgentWorkSchema })
+    .strict(),
   z
     .object({
       op: z.literal("state_stance"),
@@ -3013,6 +3032,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("state_work"),
+      schemaVersion: z.literal(1),
+      result: StateOperatorAgentWorkResultSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("state_stance"),
       schemaVersion: z.literal(1),
       result: StateOperatorAgentStanceResultSchema,
@@ -3148,6 +3174,7 @@ export interface OperatorConversationServiceClient {
    * An agent saying what it is doing with its own figure (ADR 0148). The seat
    * comes from the pane the caller sits in, never from the caller's word for it.
    */
+  stateWork?(input: StateOperatorAgentWork): Promise<StateOperatorAgentWorkResult>;
   stateStance?(input: StateOperatorAgentStance): Promise<StateOperatorAgentStanceResult>;
   /** Durable fleet characters, including those with no live Herdr seat. */
   personas?(): Promise<readonly OperatorAgentPersona[]>;
@@ -3268,6 +3295,7 @@ export function createOperatorConversationServiceClient(
     readonly tailIdleMs?: number;
     readonly tailWaitMs?: number;
     readonly fleetWaitMs?: number;
+    readonly includeWork?: boolean;
   } = {},
 ): OperatorConversationServiceClient {
   const tailIdleMs = options.tailIdleMs ?? 250;
@@ -3276,6 +3304,7 @@ export function createOperatorConversationServiceClient(
   // spend waiting — an older service that ignores it keeps today's cadence.
   const tailWaitMs = Math.min(options.tailWaitMs ?? 10_000, OPERATOR_CONVERSATION_TAIL_WAIT_MS_MAX);
   const fleetWaitMs = Math.min(options.fleetWaitMs ?? 20_000, OPERATOR_FLEET_WAIT_MS_MAX);
+  const workProjection = options.includeWork === true ? { includeWork: true } : {};
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   return {
     async connections(command = { action: "list" }) {
@@ -3287,13 +3316,14 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({
         op: "list",
         schemaVersion: 1,
+        ...workProjection,
         ...(scope === undefined ? {} : { scope }),
       });
       if (result.op !== "list") throw new Error(`Unexpected ${result.op} result for list`);
       return result.conversations;
     },
     async roster() {
-      const result = await dispatch({ op: "roster", schemaVersion: 1 });
+      const result = await dispatch({ op: "roster", schemaVersion: 1, ...workProjection });
       if (result.op !== "roster") throw new Error(`Unexpected ${result.op} result for roster`);
       return result.seats;
     },
@@ -3302,6 +3332,7 @@ export function createOperatorConversationServiceClient(
         {
           op: "fleet",
           schemaVersion: 1,
+          ...workProjection,
           ...(cursor === undefined ? {} : { cursor }),
           waitMs: fleetWaitMs,
         },
@@ -3316,6 +3347,11 @@ export function createOperatorConversationServiceClient(
         throw new Error(`Unexpected ${result.op} result for composer_catalog`);
       }
       return result.catalog;
+    },
+    async stateWork(input) {
+      const result = await dispatch({ op: "state_work", schemaVersion: 1, work: input });
+      if (result.op !== "state_work") throw new Error(`Unexpected ${result.op} result for state_work`);
+      return result.result;
     },
     async stateStance(input) {
       const result = await dispatch({ op: "state_stance", schemaVersion: 1, stance: input });
@@ -3422,7 +3458,7 @@ export function createOperatorConversationServiceClient(
       return result.reacted;
     },
     async get(conversationId) {
-      const result = await dispatch({ op: "get", schemaVersion: 1, conversationId });
+      const result = await dispatch({ op: "get", schemaVersion: 1, conversationId, ...workProjection });
       if (result.op !== "get") throw new Error(`Unexpected ${result.op} result for get`);
       return result.conversation;
     },

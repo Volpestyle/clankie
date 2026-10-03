@@ -900,3 +900,5 @@ export const SeatTranscriptUploadSchema = z
 export type SeatTranscriptUpload = z.infer<typeof SeatTranscriptUploadSchema>;
 export * from "./sessions.ts";
 export * from "./subagents.ts";
+
+export * from "./goals.ts";

@@ -68,6 +68,7 @@ type ConversationServiceRequest = Exclude<
   | { op: "fleet" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }
+  | { op: "state_work" }
   | { op: "personas" }
   | { op: "roles" }
   | { op: "update_persona" }
@@ -90,6 +91,7 @@ type ConversationServiceResult = Exclude<
   | { op: "fleet" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }
+  | { op: "state_work" }
   | { op: "personas" }
   | { op: "roles" }
   | { op: "update_persona" }

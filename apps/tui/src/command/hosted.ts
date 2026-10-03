@@ -198,6 +198,7 @@ export const HOSTED_LOCAL_ONLY = new Set([
   "telemetry",
   "workdir",
   "stance",
+  "work-on",
   "file",
   "doctor",
   "pair",

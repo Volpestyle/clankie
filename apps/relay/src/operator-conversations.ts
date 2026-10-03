@@ -142,7 +142,11 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // against the census (ADR 0148). A remote device cannot make that claim — it
     // would be typing some other pane's id — so the op stays on the local door
     // rather than riding a device grant.
-    if (serviceRequest.op === "state_stance" || serviceRequest.op === "publish_file") {
+    if (
+      serviceRequest.op === "state_stance" ||
+      serviceRequest.op === "state_work" ||
+      serviceRequest.op === "publish_file"
+    ) {
       writeJson(response, 403, { error: "op_is_local_to_the_machine" });
       return true;
     }

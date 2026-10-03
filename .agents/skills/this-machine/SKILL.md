@@ -78,6 +78,7 @@ index). Configure through the headless CLI:
 | Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                            |
 | Herdr session                         | `clankie herdr status`, `clankie herdr use NAME`, `clankie herdr create`                       |
 | His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                  |
+| State your assignment (for agents)    | `clankie work-on "Objective" [--repo REPO_ID --issue ISSUE_ID]`, `clankie work-on clear`       |
 | Say what you are doing (for agents)   | `clankie stance working --note "…"` (`thinking`, `stuck`, `hauling`, `resting`)                |
 | Public doorway                        | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                         |
 | Pick up model/provider config         | `clankie restart`                                                                              |
@@ -118,3 +119,16 @@ harness's context. Full contract: `{repoRoot}/docs/cli.md`.
 - [Hosted Clankie](reference/hosted.md): hosted deployment, managed bodies and
   Discord, a Mac connected to a hosted body.
 - [Browser and persona images](reference/browser-and-persona.md).
+
+## Showing current work in the app
+
+A local agent can state its current assignment with `clankie work-on "Objective"`
+from its own Herdr pane. Add `--repo REPO_ID --issue ISSUE_ID` to link the exact
+registered repo and its existing tracker item; use `clankie work repos` to find
+repo IDs. Clear the pointer with `clankie work-on clear` when it no longer
+applies. This changes display metadata, not the issue's status or ownership.
+The pointer follows the native session through a pane move and service restart;
+a new session does not inherit it. Keep transient actions in `clankie stance`
+notes. Local Codex `/goal` state appears automatically, including paused,
+blocked, budget/usage limits and completion. Remote or unsupported native goal
+stores remain unknown. Goal state and busy/idle turn status are independent.

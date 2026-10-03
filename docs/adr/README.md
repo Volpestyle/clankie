@@ -27,6 +27,9 @@ later ADRs link back to the decision they amend or replace.
 
 ## Diagram sources
 
+[ADR 0210](0210-objectives-outlive-agent-turns.md) records the separation of
+native goals, explicit session assignments and current activity.
+
 | Editable source                                                                          | Export                                                                                                      |
 | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | [`clankie-current-architecture.tldraw`](../diagrams/clankie-current-architecture.tldraw) | Historical [`clankie-current-architecture.jpg`](../diagrams/clankie-current-architecture.jpg)               |

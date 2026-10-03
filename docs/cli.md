@@ -1096,8 +1096,8 @@ clankie fleet set --size small --models efficient
 
 `clankie connections` combines execution runtime health, Swarm
 connections/diagnostics and the recorded Linear account identity as JSON. Its
-operator API is `GET /v1/connections`; the companion app does not display this
-inventory yet.
+operator API is `GET /v1/connections`; the companion app shows it under
+Settings, where it can also connect a local Herdr session by name.
 
 In the TUI, `/connections` opens a menu over the same data: execution runtimes
 (details, connect, disconnect, Herdr settings), Swarm (contacts, one row per
@@ -1482,6 +1482,10 @@ requires `expectedRevision`; stale requests refuse without changing history.
 <a id="conversation-commands"></a>
 
 ### `conversations list | show ID | tail ID`
+
+Recent-history reads include native agent seats. Backward replay returns a
+bounded window and an exclusive `previousCursor`; native cursors are opaque
+identities, so pass them back unchanged when loading older messages.
 
 Inspect the same conversations as the TUI picker, including Discord text/voice
 rooms, operator chats, fleet agents, and channels. `conversation` is an alias.
@@ -2432,3 +2436,15 @@ Claude, Codex and Pi workers receive it through their launch configuration; a
 plain harness keeps the owner's independent global selection. See
 [bundled working skills](bundled-skills.md) for the inventory, source revisions,
 per-harness mechanisms, deployment gate and remote/Swarm limitations.
+
+### Current agent assignment
+
+From a local Herdr agent pane, `clankie work-on "Objective"` states what that
+native session is working on. Add `--repo REPO_ID --issue ISSUE_ID` to link an
+existing Work item, or run `clankie work-on clear` to remove the assignment.
+Repo IDs come from `clankie work repos`. The authenticated `state_work` dispatch
+resolves the caller's pane in its source Herdr session; devices cannot submit it.
+Assignments persist across service restarts and follow the same native session
+between panes. They do not change tracker status or ownership. The fleet also
+projects local Codex goals from its native goal store and Clankie's conversation
+goals. Native goal state remains separate from turn activity.

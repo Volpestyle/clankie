@@ -1230,27 +1230,32 @@ function parseNdjson(text: string): TailFrame[] {
     });
 }
 
-describe("state_stance stays on the local door (ADR 0148)", () => {
-  it("refuses the op for an authorized device and never asks the captain", async () => {
-    // The op's identity claim is "the pane I am sitting in", which only a local
-    // caller can make. The refusal must come before the grant map, so even a
-    // fully granted device cannot move another agent's figure by typing a pane id.
-    const seen: OperatorConversationServiceRequest[] = [];
-    const relay = await startRelay({
-      dispatch: (request) => {
-        seen.push(request);
-        return Promise.reject(new Error("state_stance must not reach the captain through the relay"));
-      },
-    });
-    const response = await post(relay.url, "/operator/v1/dispatch", {
-      op: "state_stance",
-      schemaVersion: 1,
-      stance: { herdrPaneId: "w1:p2", pose: "stuck", note: "typed from a phone" },
-    });
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({ error: "op_is_local_to_the_machine" });
-    expect(seen).toEqual([]);
-  });
+describe("seat self-reporting stays on the local door (ADR 0148)", () => {
+  it.each(["state_stance", "state_work"] as const)(
+    "refuses %s for an authorized device and never asks the captain",
+    async (op) => {
+      // The op's identity claim is "the pane I am sitting in", which only a local
+      // caller can make. The refusal must come before the grant map, so even a
+      // fully granted device cannot move another agent's figure by typing a pane id.
+      const seen: OperatorConversationServiceRequest[] = [];
+      const relay = await startRelay({
+        dispatch: (request) => {
+          seen.push(request);
+          return Promise.reject(new Error("state_stance must not reach the captain through the relay"));
+        },
+      });
+      const response = await post(relay.url, "/operator/v1/dispatch", {
+        op,
+        schemaVersion: 1,
+        ...(op === "state_stance"
+          ? { stance: { herdrPaneId: "w1:p2", pose: "stuck", note: "typed from a phone" } }
+          : { work: { herdrPaneId: "w1:p2", assignment: { objective: "typed from a phone" } } }),
+      });
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({ error: "op_is_local_to_the_machine" });
+      expect(seen).toEqual([]);
+    },
+  );
 });
 
 function parseTerminalNdjson(text: string) {

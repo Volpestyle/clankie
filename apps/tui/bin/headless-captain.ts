@@ -1,3 +1,4 @@
+import { runWorkOnCommand } from "../src/command/work-on.ts";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import {
   connectHostedCli,
@@ -300,6 +301,9 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "stance") {
       return await runStanceCommand(rest, { ...options, stdout });
+    }
+    if (command === "work-on") {
+      return await runWorkOnCommand(rest, { ...options, stdout });
     }
     // Prompt and memory card print the words themselves, not a JSON envelope:
     // the consumer is another harness's system prompt or a per-turn hook.

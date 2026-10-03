@@ -425,6 +425,7 @@ export interface ObservedHeadSeat {
   readonly harness: string;
   readonly status: string;
   readonly workingDirectory?: string;
+  readonly session?: NonNullable<HerdrCensusAgent["session"]>;
 }
 
 export interface ObservedFleet {
@@ -540,6 +541,7 @@ async function readLocalFleet(
             occupantId: occupantIdForHerdrSession(headEntry.session),
             harness: headEntry.agent,
             status: headEntry.status,
+            session: headEntry.session,
             ...(headEntry.cwd === undefined
               ? {}
               : { workingDirectory: bounded(headEntry.cwd, SEAT_DIRECTORY_MAX) }),
