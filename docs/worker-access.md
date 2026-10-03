@@ -265,3 +265,33 @@ Provider permissions still apply. Launch isolation is not an OS sandbox: workers
 with direct access to the owner's broker or operator bearer can reach other
 authority. Use the [tracker identity contract](worker-tracker-identity.md) and
 [Linear worker publishing](linear-worker-posts.md) for the remaining boundaries.
+
+### Retiring and approving machine-specific workspaces
+
+A missing, inaccessible or noncanonical registered local workspace matches no
+agents. It does not prevent valid unrelated workspaces or projects from resolving.
+Remove an exact registration explicitly, even after deleting its folder:
+
+```sh
+clankie project remove-workspace kh2 --workspace /absolute/canonical/retired-worktree
+```
+
+The project, roles, caps, grants, assignments and unrelated settings remain.
+A workspace referenced by the project tracker cannot be removed until that binding
+is moved or removed. No directory is deleted by this command.
+
+Remote approvals name the registered fleet machine and target path platform:
+
+```sh
+clankie project add kh2 --workspace 'C:\code\kh2' --machine pc --platform windows
+clankie project remove-workspace kh2 --workspace 'C:\code\kh2' --machine pc --platform windows
+```
+
+The owner approves the exact normalized absolute spelling; the Mac does not
+canonicalize a Windows path. Approval alone proves no remote membership: matching
+still requires fresh native process and filesystem proof on that registered machine.
+
+Owner API clients read `GET /v1/operator/projects` for the current settings and
+revision, then call `POST /v1/operator/projects/remove-workspace` with
+`projectId`, `workspaceId` and `expectedRevision`. A stale revision, tracker
+reference, changed owner authority or concurrent settings edit refuses removal.

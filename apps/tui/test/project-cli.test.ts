@@ -167,3 +167,74 @@ it.each(["settings", "credential"])("refuses an append when %s changes before co
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("removes an absent workspace explicitly while preserving policy and other settings", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-project-remove-")));
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  const token = mintOperatorToken();
+  await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+  const options = { settings, operatorCredentialStore: credentials, env: { CLANKIE_OPERATOR_TOKEN: token } };
+  const repo = join(root, "repo");
+  await mkdir(repo);
+  try {
+    await runProjectCommand(["add", "clankie", "--workspace", repo], options);
+    await rm(repo, { recursive: true });
+    const before = await settings.load();
+    await expect(
+      runProjectCommand(["remove-workspace", "clankie", "--workspace", repo], {
+        ...options,
+        env: { CLANKIE_OPERATOR_TOKEN: "wrong" },
+      }),
+    ).rejects.toThrow("operator credential");
+    const result = await runProjectCommand(["remove-workspace", "clankie", "--workspace", repo], options);
+    expect(result.project.workspaces).toEqual([]);
+    before.projects.projects[0]!.workspaces = [];
+    expect(await settings.load()).toEqual(before);
+    await expect(
+      runProjectCommand(["remove-workspace", "clankie", "--workspace", repo], options),
+    ).rejects.toThrow("Unknown");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("approves and removes exact remote machine/platform paths without consulting the local filesystem", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-project-remote-")));
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  const token = mintOperatorToken();
+  await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+  const options = { settings, operatorCredentialStore: credentials, env: { CLANKIE_OPERATOR_TOKEN: token } };
+  const path = "C:\\code\\kh2";
+  const args = ["kh2", "--workspace", path, "--machine", "pc", "--platform", "windows"];
+  try {
+    const added = await runProjectCommand(["add", ...args], options);
+    expect(added.project.workspaces[0]).toMatchObject({ machineId: "pc", platform: "windows", path });
+    await expect(runProjectCommand(["add", ...args], options)).rejects.toThrow("overlaps");
+    await expect(
+      runProjectCommand(
+        [
+          "add",
+          "other",
+          "--workspace",
+          "C:\\code\\kh2\\..\\elsewhere",
+          "--machine",
+          "pc",
+          "--platform",
+          "windows",
+        ],
+        options,
+      ),
+    ).rejects.toThrow("canonical");
+    await expect(
+      runProjectCommand(
+        ["remove-workspace", "kh2", "--workspace", path, "--machine", "other-pc", "--platform", "windows"],
+        options,
+      ),
+    ).rejects.toThrow("Unknown");
+    expect((await runProjectCommand(["remove-workspace", ...args], options)).project.workspaces).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

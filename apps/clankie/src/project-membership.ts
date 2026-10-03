@@ -39,15 +39,20 @@ async function workspaceProject(
   const cwd = options.cwd ?? processCwd;
   const current = await cwd(proof.processes[0]!.pid);
   if (!current || (await canonical(current)) !== current) return undefined;
-  for (const project of settings.projects)
-    for (const workspace of project.workspaces)
-      if (
-        workspace.machineId === "local" &&
-        workspace.platform === "posix" &&
-        (await canonical(workspace.path)) !== workspace.path
-      )
-        return undefined;
-  const membership = resolveProjectMembership(settings, {
+  const eligible: ProjectsSettings = { ...settings, projects: [] };
+  for (const project of settings.projects) {
+    const workspaces = [];
+    for (const workspace of project.workspaces) {
+      if (workspace.machineId !== "local" || workspace.platform !== "posix") continue;
+      try {
+        if ((await canonical(workspace.path)) === workspace.path) workspaces.push(workspace);
+      } catch {
+        // Missing or inaccessible registrations match nobody; unrelated projects remain usable.
+      }
+    }
+    eligible.projects.push({ ...project, workspaces });
+  }
+  const membership = resolveProjectMembership(eligible, {
     occupantId: JSON.stringify(proof),
     workspace: { machineId: "local", platform: "posix", canonicalPath: current },
   });

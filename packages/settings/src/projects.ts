@@ -146,3 +146,25 @@ export function resolveProjectMembership(
     ? { outcome: "member", projectId: project.id, source: "workspace" }
     : { outcome: "unassigned" };
 }
+
+/** Explicit owner removal: preserves project policy and refuses to orphan its tracker binding. */
+export function removeProjectWorkspace(
+  settings: ProjectsSettings,
+  input: { projectId: string; workspaceId: string; expectedRevision: string },
+): ProjectsSettings {
+  if (projectsRevision(settings) !== input.expectedRevision) throw new Error("Project settings changed");
+  const project = settings.projects.find((entry) => entry.id === input.projectId);
+  if (!project) throw new Error("Unknown project");
+  if (!project.workspaces.some((workspace) => workspace.id === input.workspaceId))
+    throw new Error("Unknown workspace");
+  if (project.trackerRef?.workspaceId === input.workspaceId)
+    throw new Error("Workspace is referenced by the project tracker; move or remove that binding first");
+  return ProjectsSettingsSchema.parse({
+    ...settings,
+    projects: settings.projects.map((entry) =>
+      entry.id === input.projectId
+        ? { ...entry, workspaces: entry.workspaces.filter((workspace) => workspace.id !== input.workspaceId) }
+        : entry,
+    ),
+  });
+}

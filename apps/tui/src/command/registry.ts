@@ -2,7 +2,9 @@
 const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["project"],
-    lines: ["  project add NAME --workspace /absolute/path  Approve one local project workspace (JSON)"],
+    lines: [
+      "  project add|remove-workspace NAME --workspace PATH [--machine ID --platform windows|posix]  Manage approved project workspaces (JSON)",
+    ],
   },
   {
     nouns: ["update"],

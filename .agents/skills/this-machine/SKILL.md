@@ -194,3 +194,11 @@ manage workspace grants and capacity; choose native harnesses per hire. The
 `/herdr` default workspace choice still requires a restart. `/setup` offers that
 choice only after doctor finds installed Herdr with running sessions, explaining
 that leading the owner's session means seeing and messaging every pane.
+
+Retire a workspace explicitly with `clankie project remove-workspace NAME
+--workspace PATH`, even if its directory is gone. This preserves roles, caps,
+grants and assignments; a tracker-bound workspace must first have its tracker
+binding moved or removed. Missing/noncanonical local registrations match nobody
+without denying unrelated valid workspaces. For remote approval/removal append
+`--machine FLEET_ID --platform windows|posix` and use that machine's exact absolute
+path. An approval is never remote process proof or a tool grant.

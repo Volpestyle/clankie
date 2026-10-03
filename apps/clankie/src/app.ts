@@ -1,3 +1,4 @@
+import { createProjectRoutes } from "./project-routes.ts";
 import { createRuntimeUpdateRoutes } from "./runtime-update-routes.ts";
 import { resolveDiscordSettings } from "@clankie/settings";
 import {
@@ -1096,6 +1097,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   };
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
+  app.route("/", createProjectRoutes(authorizeOwnerSecrets, settingsSource));
   /**
    * Owner operator or any active paired device: account data that is not a
    * secret and needs no terminal grant, such as the hosted credit balance.

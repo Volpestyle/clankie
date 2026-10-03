@@ -2632,3 +2632,16 @@ presence, a changed designation, and uncertain dispatch cannot trigger fallback.
 This forwards the explicit request/result only and grants no room privileges.
 
 Discord room inspection, private next-turn guidance, delivery health and exact-stay voice controls are documented in [Discord rooms](discord-rooms.md). Use `clankie discord rooms`, `clankie discord guide CONVERSATION_ID TEXT`, and `clankie discord call`.
+
+### Project workspace removal
+
+`clankie project remove-workspace NAME --workspace PATH` removes the exact owner
+registration, including a folder that no longer exists. It preserves project
+policy, grants and assignments and refuses to orphan a tracker binding.
+Both `project add` and `project remove-workspace` accept
+`--machine ID --platform windows|posix` for an explicit remote registration.
+Remote paths are normalized absolute paths on that machine; registration does not
+replace live native process/canonical filesystem proof or grant any tools.
+The owner API exposes `GET /v1/operator/projects` and revision-guarded
+`POST /v1/operator/projects/remove-workspace` (`projectId`, `workspaceId`,
+`expectedRevision`).

@@ -161,3 +161,38 @@ it("rechecks settings and hire state after a slow final process proof, never bef
     expect(await result).toBeUndefined();
   }
 });
+
+it.each(["missing", "alias", "malformed"])(
+  "isolates an unrelated %s workspace from valid projects",
+  async (kind) => {
+    const f = fixture();
+    f.state.canonical = async (path) => {
+      if (path === "/code/rivals") {
+        if (kind === "missing") throw new Error("ENOENT");
+        if (kind === "alias") return "/actual/rivals";
+      }
+      return path;
+    };
+    if (kind === "malformed") f.state.settings.projects[1]!.workspaces[0]!.path = "relative/rivals";
+    expect(await f.resolve()).toMatchObject({ projectId: "kh2" });
+    f.state.cwd = "/code/rivals";
+    expect(await f.resolve()).toBeUndefined();
+  },
+);
+
+it("ignores a missing sibling workspace in the same project without admitting it", async () => {
+  const f = fixture();
+  f.state.settings.projects[0]!.workspaces.push({
+    id: "retired",
+    machineId: "local",
+    platform: "posix",
+    path: "/code/retired",
+  });
+  f.state.canonical = async (path) => {
+    if (path === "/code/retired") throw new Error("ENOENT");
+    return path;
+  };
+  expect(await f.resolve()).toMatchObject({ projectId: "kh2" });
+  f.state.cwd = "/code/retired/src";
+  expect(await f.resolve()).toBeUndefined();
+});

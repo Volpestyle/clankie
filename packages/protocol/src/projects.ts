@@ -180,3 +180,13 @@ export const ProjectMembershipSchema = z.discriminatedUnion("outcome", [
     .strict(),
 ]);
 export type ProjectMembership = z.infer<typeof ProjectMembershipSchema>;
+
+export const PROJECTS_PATH = "/v1/operator/projects";
+export const PROJECT_REMOVE_WORKSPACE_PATH = "/v1/operator/projects/remove-workspace";
+export const RemoveProjectWorkspaceSchema = z
+  .object({
+    projectId: ProjectIdSchema,
+    workspaceId: ProjectIdSchema,
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
