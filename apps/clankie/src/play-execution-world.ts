@@ -32,6 +32,7 @@ import {
 } from "./play-execution-shared.ts";
 import { joinWorld, type WorldJoinOptions, type WorldJoinResult } from "./world/body.ts";
 import type { HostedWorldSession } from "./world/session.ts";
+import type { WorldPlayerPersistedSession } from "@pokeagents/world-protocol/ipc";
 
 export interface WorldPlayExecutionOptions {
   logger: PlayExecutionLogger;
@@ -52,6 +53,11 @@ export interface WorldPlayExecutionOptions {
   createVoice?: () => Promise<PlayVoiceClient | undefined>;
   createActivitySink?: () => Promise<ActivityFrameSink | undefined>;
   joinWorld?: (options: WorldJoinOptions) => Promise<WorldJoinResult>;
+  rememberWorldSession?: (
+    sessionId: string,
+    target: string,
+    state: WorldPlayerPersistedSession | undefined,
+  ) => void;
 }
 
 export function createWorldPlayExecution(options: WorldPlayExecutionOptions): PlayExecution {
@@ -61,6 +67,7 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
 
   return async (session, control, onRunning) => {
     if (options.gameplay?.pokeagentMmoEnabled === false) {
+      control.confirmStopped?.();
       return { kind: "refused", reason: "environment_unavailable" };
     }
     let joined: WorldJoinResult;
@@ -68,6 +75,14 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       joined = await join({
         environmentId: session.environmentId,
         env,
+        ...(control.guard === undefined ? {} : { guard: control.guard }),
+        ...(control.confirmStopped === undefined ? {} : { onStopped: control.confirmStopped }),
+        ...(options.rememberWorldSession === undefined
+          ? {}
+          : {
+              rememberSession: (target, state) =>
+                options.rememberWorldSession!(session.sessionId, target, state),
+            }),
         onAudioUnavailable: (reason) =>
           options.logger.info(
             { sessionId: session.sessionId, reason },
@@ -90,6 +105,11 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       return { kind: "refused", reason: joined.reason };
     }
     const body = joined.body;
+    let closePromise: Promise<void> | undefined;
+    const close = (): Promise<void> =>
+      (closePromise ??= body.close().then(() => {
+        control.confirmStopped?.();
+      }));
     const journalDir = defaultGbaPlayJournalDir(env);
     const resumedContinuity = latestPlayJourneyContinuity(journalDir, body.journeyId);
     const { repoRoot } = resolvePlayRuntimeRoots(options.repoRoot);
@@ -104,7 +124,11 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
         ...(options.createVoiceAgent === undefined ? {} : { createVoiceAgent: options.createVoiceAgent }),
       }));
     } catch (error) {
-      await body.close().catch(() => undefined);
+      try {
+        await close();
+      } catch {
+        /* Failed departure retains the body lease. */
+      }
       options.logger.warn(
         { sessionId: session.sessionId, errorName: error instanceof Error ? error.name : "Error" },
         "world play mind refused",
@@ -118,51 +142,63 @@ export function createWorldPlayExecution(options: WorldPlayExecutionOptions): Pl
       return png === null ? null : createHash("sha256").update(png).digest("hex");
     };
 
-    return runEmbodiedPlay({
-      session,
-      control,
-      onRunning,
-      logger: options.logger,
-      env,
-      clock,
-      mind,
-      ...(voiceAgent === undefined ? {} : { voiceAgent }),
-      surface: {
-        venue: "world",
-        journeyId: body.journeyId,
-        scenarioId,
-        environmentSessionId: session.sessionId,
-        io: body.io,
-        streamPng: () => body.framePng(),
-        framePng: () => body.framePng(),
-        framebufferSha256: frameDigest,
-        observationDigest: () => frameDigest() ?? "0".repeat(64),
-        observeFrames: (observer) => body.observeFrames(observer),
-        provenance: () => body.traceProvenance(),
-        ended: () => body.ended(),
-        extraDroppedFrames: () => body.droppedFrameCount(),
-        extraDroppedAudioPackets: () => body.droppedAudioPacketCount(),
-        drainAudio: () => body.drainAudio(),
-        close: () => body.close().catch(() => undefined),
-      },
-      resumedContinuity,
-      captureSight: () => {
-        const png = body.framePng();
-        if (png === null) return undefined;
-        return { png: Buffer.from(png), width: PLAY_STREAM_WIDTH, height: PLAY_STREAM_HEIGHT };
-      },
-      attach: () => options.hostedWorld?.attach(body),
-      extraCleanup: () => options.hostedWorld?.detach(body),
-      ...(options.createVoice === undefined ? {} : { createVoice: options.createVoice }),
-      ...(options.createActivitySink === undefined ? {} : { createActivitySink: options.createActivitySink }),
-      ...(options.interjections === undefined ? {} : { interjections: options.interjections }),
-      ...(options.activityObservations === undefined
-        ? {}
-        : { activityObservations: options.activityObservations }),
-      ...(options.playSight === undefined ? {} : { playSight: options.playSight }),
-      ...(options.onTurn === undefined ? {} : { onTurn: options.onTurn }),
-      silentVoiceLog: "no play voice seam; this playthrough has no spoken narration",
-      finishedLog: "world playthrough finished",
-    });
+    try {
+      return await runEmbodiedPlay({
+        session,
+        control,
+        onRunning,
+        logger: options.logger,
+        env,
+        clock,
+        mind,
+        ...(voiceAgent === undefined ? {} : { voiceAgent }),
+        surface: {
+          venue: "world",
+          journeyId: body.journeyId,
+          scenarioId,
+          environmentSessionId: session.sessionId,
+          io: {
+            ...body.io,
+            act: async (action) => {
+              await control.guard?.();
+              return body.io.act(action);
+            },
+          },
+          streamPng: () => body.framePng(),
+          framePng: () => body.framePng(),
+          framebufferSha256: frameDigest,
+          observationDigest: () => frameDigest() ?? "0".repeat(64),
+          observeFrames: (observer) => body.observeFrames(observer),
+          provenance: () => body.traceProvenance(),
+          ended: () => body.ended(),
+          extraDroppedFrames: () => body.droppedFrameCount(),
+          extraDroppedAudioPackets: () => body.droppedAudioPacketCount(),
+          drainAudio: () => body.drainAudio(),
+          close,
+        },
+        resumedContinuity,
+        captureSight: () => {
+          const png = body.framePng();
+          if (png === null) return undefined;
+          return { png: Buffer.from(png), width: PLAY_STREAM_WIDTH, height: PLAY_STREAM_HEIGHT };
+        },
+        attach: () => options.hostedWorld?.attach(body),
+        extraCleanup: () => options.hostedWorld?.detach(body),
+        ...(options.createVoice === undefined ? {} : { createVoice: options.createVoice }),
+        ...(options.createActivitySink === undefined
+          ? {}
+          : { createActivitySink: options.createActivitySink }),
+        ...(options.interjections === undefined ? {} : { interjections: options.interjections }),
+        ...(options.activityObservations === undefined
+          ? {}
+          : { activityObservations: options.activityObservations }),
+        ...(options.playSight === undefined ? {} : { playSight: options.playSight }),
+        ...(options.onTurn === undefined ? {} : { onTurn: options.onTurn }),
+        silentVoiceLog: "no play voice seam; this playthrough has no spoken narration",
+        finishedLog: "world playthrough finished",
+      });
+    } finally {
+      await close();
+    }
   };
 }

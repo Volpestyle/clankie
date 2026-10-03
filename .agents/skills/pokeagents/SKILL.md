@@ -57,6 +57,15 @@ MCP/CLI player or a second button-pressing agent. `joined` confirms the sitting;
 handled. For `play_session_active`, inspect the existing run instead of joining
 again.
 
+Play belongs to the conversation that started it. A typed `bodyLease` busy
+result names the thread holding the controls; queue or ask that thread instead
+of taking over. A stop request, timeout, or failed lifecycle report does not
+prove departure. Recovery waits for the actual driver to settle and an exact
+world-session leave receipt. Lost authentication or a lost join receipt retains
+uncertainty; do not start a replacement sitting to work around it. Operator
+HTTP intents must select an existing writable `conversationId`; the host
+authenticates the operator separately from those request fields.
+
 Use `pokeagent_world` to discover the current session's granted operations and
 check its status, `pokeagent_observe` to see the game, and `pokeagent_recall` for
 the play history. The driver chooses its own actions while you keep talking to

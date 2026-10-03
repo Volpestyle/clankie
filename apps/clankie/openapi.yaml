@@ -2295,7 +2295,8 @@ paths:
       tags: [Embodiment]
       operationId: postEmbodimentIntent
       summary: Ask to start or stop play
-      security: [{ captainBearer: [] }]
+      description: Select an existing writable captain conversation with conversationId. The operator identity is authenticated separately; originLane and requestedBy are host-stamped. A competing body lease returns a typed refusal. In-process captain tools carry their own admitted conversation identity.
+      security: [{ operatorBearer: [] }]
       requestBody:
         required: true
         content:
@@ -2306,6 +2307,7 @@ paths:
                   kind: start
                   schemaVersion: 1
                   intentId: yaak-start-1
+                  conversationId: replace-with-selected-conversation
                   originLane: operator
                   requestedBy: local-operator
                   requestedAt: "2026-08-15T20:00:00.000Z"
@@ -2316,13 +2318,16 @@ paths:
                   kind: stop
                   schemaVersion: 1
                   intentId: yaak-stop-1
+                  conversationId: replace-with-selected-conversation
                   originLane: operator
                   requestedBy: local-operator
                   requestedAt: "2026-08-15T20:00:00.000Z"
                   sessionId: replace-me
       responses:
         "200":
-          description: Accepted, refused (`play_session_active` when another local or hosted session is live), or stop requested
+          description: Accepted, refused, or stop requested. A stop request does not prove that the executor has ended.
+        "409":
+          description: Body lease refusal with bodyLease naming the held conversation or missing authority; queue or ask rather than taking over.
 
   /v1/embodiment/sessions/live:
     get:

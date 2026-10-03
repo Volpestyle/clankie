@@ -1,5 +1,6 @@
 import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import { BodyVoiceStays } from "./body-voice-stays.ts";
+import { BodyPlaySessions } from "./body-play-sessions.ts";
 import { BodyLeaseStore } from "./body-leases.ts";
 import { BodyLeaseRouter } from "./body-lease-router.ts";
 import { createPersonaImageSource } from "./persona-images.ts";
@@ -560,6 +561,7 @@ const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-tur
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
+const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
 const captain = createCaptain(
   {
     workItems,
@@ -627,7 +629,7 @@ const captain = createCaptain(
     },
     ...(tldrawHost === undefined ? {} : { diagrams: tldrawHost }),
     embodiment: {
-      submitIntent: (intent) => boundApp().embodiment.submit(intent),
+      submitIntent: (intent, identity) => bodyPlaySessions.submit(intent, identity, boundApp().embodiment),
       getSession: (sessionId) => boundApp().embodiment.observe(sessionId),
       getLiveSession: () => boundApp().embodiment.observe(),
     },
@@ -660,7 +662,8 @@ const captain = createCaptain(
     },
     hostedWorld: {
       inspect: () => hostedWorld.inspect(),
-      invoke: (name, input) => hostedWorld.invoke(name, input),
+      invoke: (name, input, identity) =>
+        hostedWorld.invoke(name, input, () => bodyPlaySessions.guardOwner(identity)),
     },
     // Voice, music and screen shares need a live Discord body. A loadout
     // without one (a hosted body runs `clankie,relay`) leaves their tools out
@@ -818,6 +821,7 @@ const clankie = await createClankieApp({
   discordTurnReceipts,
   bodyVoiceStays,
   resolveBodyVoiceTarget: resolveDiscordVoiceTarget,
+  bodyPlaySessions,
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,
@@ -837,7 +841,10 @@ const clankie = await createClankieApp({
       }
       if (resource === "play") {
         const result = await playHost.stopAndWait({ deadlineMs: 12_000, reason: "operator_body_recovery" });
-        return result.status === "settled";
+        return (
+          result.status !== "deadline_expired" &&
+          (bodyPlaySessions.stopped() || (await bodyPlaySessions.recover(guard)))
+        );
       }
       return false; // An uncertain Discord send requires an exact delivery receipt, not a reset.
     },
@@ -975,6 +982,11 @@ const playHost = new PlayHost({
   client: embodimentClient,
   environmentIds: ["pokemon-firered", "pokemon-emerald"],
   execute: (...args) => createConfiguredPlayExecution()(...args),
+  lifecycle: {
+    guard: (sessionId) => bodyPlaySessions.guard(sessionId),
+    uncertain: (sessionId) => bodyPlaySessions.uncertain(sessionId),
+    settled: (sessionId, confirmed) => bodyPlaySessions.settle(sessionId, confirmed),
+  },
   logger,
 });
 const playAbort = new AbortController();
@@ -1096,6 +1108,8 @@ function createConfiguredPlayExecution(): PlayExecution {
     playSight,
     hostedWorld,
     gameplay: startupSettings.gameplay,
+    rememberWorldSession: (sessionId, target, state) =>
+      bodyPlaySessions.rememberWorldSession(sessionId, target, state),
   });
 }
 

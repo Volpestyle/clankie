@@ -96,7 +96,10 @@ export interface CaptainDeps {
    */
   readonly diagrams?: TldrawHost;
   readonly embodiment: {
-    submitIntent(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult>;
+    submitIntent(
+      intent: EmbodimentIntent,
+      identity?: import("../body-lease-router.ts").BodyConversationIdentity,
+    ): Promise<EmbodimentSubmitResult>;
     getSession(sessionId: string): Promise<EmbodimentSession | undefined>;
     getLiveSession(): Promise<EmbodimentSession | undefined>;
   };
@@ -124,7 +127,11 @@ export interface CaptainDeps {
               }
             | undefined;
         };
-    invoke(name: string, input?: Record<string, unknown>): Promise<unknown>;
+    invoke(
+      name: string,
+      input?: Record<string, unknown>,
+      identity?: import("../body-lease-router.ts").BodyConversationIdentity,
+    ): Promise<unknown>;
   };
   /** Screen shares a live Discord body is watching. Absent when no Discord body is in the loadout. */
   readonly streamWatch?: {

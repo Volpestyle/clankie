@@ -6,6 +6,7 @@ import {
   BodyVoiceReconcileRequestSchema,
 } from "@clankie/protocol";
 import type { BodyVoiceStays } from "./body-voice-stays.ts";
+import type { BodyPlaySessions } from "./body-play-sessions.ts";
 import { BodyLeaseRequestSchema, BodyResourceSchema } from "@clankie/protocol";
 import type { BodyLeaseRouter, BodyConversationIdentity } from "./body-lease-router.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
@@ -446,6 +447,7 @@ export interface ClankieAppDependencies {
     publishChannelId?: string;
   }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
   bodyVoiceStays?: BodyVoiceStays;
+  bodyPlaySessions?: BodyPlaySessions;
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;
@@ -2622,6 +2624,35 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
 
   app.post("/v1/embodiment/intents", async (context) => {
+    if (dependencies.bodyLeases !== undefined) {
+      const operator = await authenticateOperator(context.req.raw, dependencies);
+      if (operator === "unavailable")
+        return context.json({ error: "operator_authentication_unavailable" }, 503);
+      if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+      const parsed = EmbodimentIntentSchema.safeParse(await readJson(context.req.raw));
+      if (!parsed.success) return context.json({ error: "invalid_embodiment_intent" }, 400);
+      if (dependencies.bodyPlaySessions === undefined)
+        return context.json({ error: "body_play_unavailable" }, 503);
+      const selected = operatorBodyIdentity(parsed.data.conversationId, context.req.raw);
+      const identity =
+        selected === undefined
+          ? undefined
+          : {
+              ...selected,
+              authorize: async () => {
+                const current = await authenticateOperator(context.req.raw, dependencies);
+                return Boolean(
+                  current && current !== "unavailable" && current.operatorId === operator.operatorId,
+                );
+              },
+            };
+      const result = await dependencies.bodyPlaySessions.submit(
+        { ...parsed.data, originLane: "operator", requestedBy: operator.operatorId },
+        identity,
+        embodiment,
+      );
+      return context.json(result, result.outcome === "refused" && result.bodyLease !== undefined ? 409 : 200);
+    }
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") {
       return context.json({ error: "captain_authentication_unavailable" }, 503);
@@ -2653,15 +2684,32 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     const live = embodiment.liveSession();
     if (live === undefined) return context.json({ error: "not_playing" }, 404);
-    const result = await embodiment.submit({
-      kind: "stop",
-      schemaVersion: 1,
-      intentId: `operator-stop-${idFactory()}`,
-      originLane: "operator",
-      requestedBy: operator.operatorId,
-      requestedAt: clock().toISOString(),
-      sessionId: live.sessionId,
-    });
+    const result = await embodiment.submit(
+      {
+        kind: "stop",
+        schemaVersion: 1,
+        intentId: `operator-stop-${idFactory()}`,
+        originLane: "operator",
+        requestedBy: operator.operatorId,
+        requestedAt: clock().toISOString(),
+        sessionId: live.sessionId,
+      },
+      {
+        guard: async () => {
+          const current = await authenticateOperator(context.req.raw, dependencies);
+          if (
+            context.req.raw.signal.aborted ||
+            !current ||
+            current === "unavailable" ||
+            current.operatorId !== operator.operatorId
+          )
+            throw new Error("Operator stop authority changed");
+        },
+        beforeStart: async () => {
+          throw new Error("A stop override cannot start a play session");
+        },
+      },
+    );
     logger.info(
       { sessionId: live.sessionId, operatorId: operator.operatorId, outcome: result.outcome },
       "operator embodiment stop submitted",

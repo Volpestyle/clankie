@@ -5320,6 +5320,8 @@ const embodimentIntentBase = {
   /** Content-free principal id, as the origin lane authenticated it. */
   requestedBy: z.string().min(1).max(200),
   requestedAt: z.string().datetime(),
+  /** Selected conversation; the host separately authenticates ownership and grants. */
+  conversationId: z.string().min(1).max(256).optional(),
 } as const;
 
 /**
@@ -5443,6 +5445,7 @@ export const EmbodimentSubmitResultSchema = z.discriminatedUnion("outcome", [
       outcome: z.literal("refused"),
       reason: EmbodimentRefusalReasonSchema,
       sessionId: EnvironmentSessionIdSchema.optional(),
+      bodyLease: BodyLeaseResultSchema.optional(),
     })
     .strict(),
   z.object({ outcome: z.literal("stop_requested"), session: EmbodimentSessionSchema }).strict(),
@@ -5492,6 +5495,7 @@ export const EmbodimentPlayNoteSchema = z.discriminatedUnion("action", [
       action: z.literal("join_refused"),
       environmentId: EmbodimentEnvironmentIdSchema,
       reason: EmbodimentRefusalReasonSchema,
+      bodyLease: BodyLeaseResultSchema.optional(),
     })
     .strict(),
   z
@@ -5505,6 +5509,7 @@ export const EmbodimentPlayNoteSchema = z.discriminatedUnion("action", [
       action: z.literal("stop_refused"),
       sessionId: EnvironmentSessionIdSchema.optional(),
       reason: EmbodimentRefusalReasonSchema,
+      bodyLease: BodyLeaseResultSchema.optional(),
     })
     .strict(),
   z

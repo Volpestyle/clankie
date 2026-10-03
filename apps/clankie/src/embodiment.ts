@@ -252,11 +252,18 @@ export class EmbodimentManager {
     return sessionId === undefined ? this.liveSession() : this.getSession(sessionId);
   }
 
-  public async submit(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult> {
+  public async submit(
+    intent: EmbodimentIntent,
+    admission?: {
+      guard(): Promise<void>;
+      beforeStart(sessionId: string): Promise<void>;
+    },
+  ): Promise<EmbodimentSubmitResult> {
     // Outside the mutation queue: reconciliation reports through that same queue.
     await this.options.startHost?.();
     return this.serialized(async () => {
       await this.expireStale();
+      await admission?.guard();
       if (this.options.decide(intent) !== "allow") {
         if (intent.kind === "start") {
           return this.refuseStart(intent, "policy");
@@ -281,11 +288,13 @@ export class EmbodimentManager {
         // ADR 0062's never-rejoin. A different environment, or a session
         // already winding down, stays an honest play_session_active.
         if (live.environmentId === intent.environmentId && live.state !== "stopping") {
+          await admission?.beforeStart(live.sessionId);
           return { outcome: "accepted" as const, session: this.mustGet(live.sessionId) };
         }
         return this.refuseStart(intent, "play_session_active");
       }
       const sessionId = this.options.idFactory();
+      await admission?.beforeStart(sessionId);
       await this.record("embodiment.intent.submitted", sessionId, submittedEventData(sessionId, intent));
       return { outcome: "accepted" as const, session: this.mustGet(sessionId) };
     });

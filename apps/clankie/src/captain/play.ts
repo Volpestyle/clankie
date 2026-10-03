@@ -8,6 +8,7 @@
  * which he must voice as "starting it up", never "I'm playing".
  */
 import { randomUUID } from "node:crypto";
+import type { BodyConversationIdentity } from "../body-lease-router.ts";
 import type {
   CaptainSessionLaneV2,
   EmbodimentBudget,
@@ -19,7 +20,10 @@ import type {
 } from "@clankie/protocol";
 
 export interface PlayPorts {
-  submitEmbodimentIntent(intent: EmbodimentIntent): Promise<EmbodimentSubmitResult>;
+  submitEmbodimentIntent(
+    intent: EmbodimentIntent,
+    identity?: BodyConversationIdentity,
+  ): Promise<EmbodimentSubmitResult>;
   getEmbodimentSession(sessionId: string): Promise<EmbodimentSession | undefined>;
   getLiveEmbodimentSession(): Promise<EmbodimentSession | undefined>;
 }
@@ -29,6 +33,7 @@ interface PlayAskContext {
   originLane: CaptainSessionLaneV2;
   /** The asker as the surface authenticated them; a content-free id. */
   requestedBy: string;
+  bodyIdentity?: BodyConversationIdentity | undefined;
 }
 
 export interface StartPlayInput extends PlayAskContext {
@@ -57,21 +62,25 @@ function defaultPlayBudget(env: NodeJS.ProcessEnv = process.env): EmbodimentBudg
 /** Ask to join the hosted world — the only body he has. */
 export async function joinWorld(ports: PlayPorts, input: StartPlayInput): Promise<EmbodimentPlayNote> {
   const intentId = `world-${randomUUID()}`;
-  const submitted = await ports.submitEmbodimentIntent({
-    kind: "start",
-    schemaVersion: 1,
-    intentId,
-    originLane: input.originLane,
-    requestedBy: input.requestedBy,
-    requestedAt: new Date().toISOString(),
-    environmentId: input.environmentId,
-    budget: input.budget ?? defaultPlayBudget(),
-  });
+  const submitted = await ports.submitEmbodimentIntent(
+    {
+      kind: "start",
+      schemaVersion: 1,
+      intentId,
+      originLane: input.originLane,
+      requestedBy: input.requestedBy,
+      requestedAt: new Date().toISOString(),
+      environmentId: input.environmentId,
+      budget: input.budget ?? defaultPlayBudget(),
+    },
+    input.bodyIdentity,
+  );
   if (submitted.outcome === "refused") {
     return {
       action: "join_refused",
       environmentId: input.environmentId,
       reason: submitted.reason,
+      ...(submitted.bodyLease === undefined ? {} : { bodyLease: submitted.bodyLease }),
     };
   }
   if (submitted.outcome !== "accepted") {
@@ -118,27 +127,32 @@ export async function stopPlay(ports: PlayPorts, input: StopPlayInput): Promise<
     return { action: "stop_refused", reason: "not_playing" };
   }
   const intentId = `play-stop-${randomUUID()}`;
-  const submitted = await ports.submitEmbodimentIntent({
-    kind: "stop",
-    schemaVersion: 1,
-    intentId,
-    originLane: input.originLane,
-    requestedBy: input.requestedBy,
-    requestedAt: new Date().toISOString(),
-    sessionId: live.sessionId,
-  });
+  const submitted = await ports.submitEmbodimentIntent(
+    {
+      kind: "stop",
+      schemaVersion: 1,
+      intentId,
+      originLane: input.originLane,
+      requestedBy: input.requestedBy,
+      requestedAt: new Date().toISOString(),
+      sessionId: live.sessionId,
+    },
+    input.bodyIdentity,
+  );
   if (submitted.outcome === "refused") {
-    return { action: "stop_refused", sessionId: live.sessionId, reason: submitted.reason };
+    return {
+      action: "stop_refused",
+      sessionId: live.sessionId,
+      reason: submitted.reason,
+      ...(submitted.bodyLease === undefined ? {} : { bodyLease: submitted.bodyLease }),
+    };
   }
   const sessionId = live.sessionId;
   const outcome = await waitForSession(ports, sessionId, input.waitMs, input.pollMs, (session) => {
     if (session.state === "stopped") {
       return { action: "stopped" as const, sessionId };
     }
-    // Failed after a stop ask still means the playthrough ended.
-    if (session.state === "failed" || session.state === "refused") {
-      return { action: "stopped" as const, sessionId };
-    }
+    // A deadline can publish failed while the real executor is still draining.
     return undefined;
   });
   return outcome ?? { action: "pending", intentId };

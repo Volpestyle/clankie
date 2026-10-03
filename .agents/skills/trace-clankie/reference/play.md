@@ -2,6 +2,14 @@
 
 Traps that cost real time when reading play journals, screenshots and hosted worlds.
 
+- **A failed session report does not prove the controls are free.** Shutdown
+  can publish `failed` while the real execution promise is still draining.
+  The conversation play lease remains pinned until execution settles and the
+  world confirms departure. Restart recovery uses the exact saved world
+  session; `unauthenticated`, a missing receipt, and a timeout keep ownership
+  uncertain. The private session journal contains transport state and must
+  never be copied into issue evidence or public status.
+
 - **An empty play transcript receipt does not prove a broken wire.** Older
   `play_transcript_delivery` receipts include idle room input with
   `attachedCount: 0, deliveredCount: 0`. The play consumer connects only during

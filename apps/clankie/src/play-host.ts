@@ -37,6 +37,10 @@ export interface EmbodimentClientPort {
 interface PlayControl {
   /** True once a stop ask (or shutdown) wants the playthrough to end. */
   stopRequested(): boolean;
+  /** Host-owned authority check at the final world action boundary. */
+  guard?: () => Promise<void>;
+  /** Successful world departure or a proven pre-join refusal; never a timeout report. */
+  confirmStopped?: () => void;
 }
 
 /** What one executed playthrough reports back, content-free by construction. */
@@ -92,6 +96,11 @@ export interface PlayHostOptions {
   clock?: () => Date;
   /** Best-effort grace for the forced terminal report after a shutdown deadline. */
   forcedReportGraceMs?: number;
+  lifecycle?: {
+    guard(sessionId: string): Promise<void>;
+    uncertain(sessionId: string): void;
+    settled(sessionId: string, confirmed: boolean): void;
+  };
 }
 
 export class PlayHost {
@@ -328,13 +337,46 @@ export class PlayHost {
   }
 
   private async runSession(active: ActivePlay, session: EmbodimentSession): Promise<void> {
+    let executionStarted = false;
+    let stoppedConfirmed = false;
+    let checking = false;
+    const guard = async () => this.options.lifecycle?.guard(session.sessionId);
+    const monitor =
+      this.options.lifecycle === undefined
+        ? undefined
+        : setInterval(() => {
+            if (checking || active.stop) return;
+            checking = true;
+            void guard()
+              .catch(() => {
+                this.markStop(active, "body_authority_lost");
+                this.options.lifecycle?.uncertain(session.sessionId);
+              })
+              .finally(() => {
+                checking = false;
+              });
+          }, 5_000);
+    monitor?.unref();
     try {
-      const result = await this.options.execute(session, { stopRequested: () => active.stop }, async () => {
-        this.options.logger.info({ sessionId: session.sessionId }, "embodiment session running");
-        await this.report(session.sessionId, { state: "running" });
-        active.runningReported = true;
-        if (active.stop) await this.reportStopping(active);
-      });
+      await guard();
+      executionStarted = true;
+      const result = await this.options.execute(
+        session,
+        {
+          stopRequested: () => active.stop,
+          guard,
+          confirmStopped: () => {
+            stoppedConfirmed = true;
+          },
+        },
+        async () => {
+          await guard();
+          this.options.logger.info({ sessionId: session.sessionId }, "embodiment session running");
+          await this.report(session.sessionId, { state: "running" });
+          active.runningReported = true;
+          if (active.stop) await this.reportStopping(active);
+        },
+      );
       if (active.deadlineExpired) {
         this.options.logger.warn(
           { sessionId: session.sessionId },
@@ -382,6 +424,15 @@ export class PlayHost {
         }),
       });
     } finally {
+      if (monitor !== undefined) clearInterval(monitor);
+      try {
+        this.options.lifecycle?.settled(session.sessionId, stoppedConfirmed || !executionStarted);
+      } catch (error) {
+        this.options.logger.error(
+          { sessionId: session.sessionId, errorName: error instanceof Error ? error.name : "Error" },
+          "play termination evidence could not be persisted; ownership retained",
+        );
+      }
       if (this.active === active) this.active = undefined;
     }
   }

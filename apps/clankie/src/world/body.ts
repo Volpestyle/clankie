@@ -60,6 +60,7 @@ import {
   WorldPlayerConfigError,
   worldSocketPath,
   type WorldPlayerTransport,
+  type WorldPlayerPersistedSession,
 } from "@pokeagents/world-protocol/ipc";
 import { z } from "zod";
 
@@ -125,6 +126,10 @@ export interface WorldJoinOptions {
   onAudioUnavailable?: (reason: string) => void;
   /** Test injection; production uses the package transport. */
   transport?: WorldPlayerTransport;
+  /** Host-owned checks and no-effect receipts, never supplied by the model. */
+  guard?: () => Promise<void>;
+  onStopped?: () => void;
+  rememberSession?: (target: string, state: WorldPlayerPersistedSession | undefined) => void;
 }
 
 interface WorldAudioPacket {
@@ -167,6 +172,7 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
   try {
     credential = await resolveWorldCredential({ env });
   } catch (error) {
+    options.onStopped?.();
     return {
       outcome: "refused",
       reason: "no_credential",
@@ -176,13 +182,17 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
           : "The hosted-world credential could not be read",
     };
   }
-  if (credential === undefined) return { outcome: "refused", reason: "no_credential" };
+  if (credential === undefined) {
+    options.onStopped?.();
+    return { outcome: "refused", reason: "no_credential" };
+  }
 
   let target: string;
   try {
     target = resolveWorldTarget(env);
     parseWorldAddress(target);
   } catch (error) {
+    options.onStopped?.();
     return joinConfigRefusal(error);
   }
 
@@ -190,11 +200,20 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
     target,
     credential,
     ...(options.transport === undefined ? {} : { transport: options.transport }),
+    ...(options.rememberSession === undefined
+      ? {}
+      : { sessionPersistence: { save: (state) => options.rememberSession!(target, state) } }),
   });
   // `world.join` takes a game, not a region. Regions are reached afterwards
   // through `world.travel`, gated on badges — so there is nothing to choose here.
   const gameId = gameIdFor(options.environmentId);
   let joined;
+  try {
+    await options.guard?.();
+  } catch (error) {
+    options.onStopped?.();
+    throw error;
+  }
   try {
     joined = await client.call("world.join", {
       protocolVersion: WORLD_PROTOCOL_VERSION,
@@ -205,10 +224,13 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
   } catch (error) {
     return joinConfigRefusal(error);
   }
-  if (isRefusal(joined)) return joinRefusal(joined);
+  if (isRefusal(joined)) {
+    options.onStopped?.();
+    return joinRefusal(joined);
+  }
   const missing = REQUIRED_CAPABILITIES.filter((capability) => !client.capabilities.includes(capability));
   if (missing.length > 0) {
-    await bestEffortLeave(client);
+    if (await bestEffortLeave(client)) options.onStopped?.();
     return {
       outcome: "refused",
       reason: "world_refused",
@@ -220,11 +242,11 @@ export async function joinWorld(options: WorldJoinOptions): Promise<WorldJoinRes
   try {
     observation = await client.call("play.observe", {});
   } catch (error) {
-    await bestEffortLeave(client);
+    if (await bestEffortLeave(client)) options.onStopped?.();
     return joinConfigRefusal(error);
   }
   if (isRefusal(observation) || observation.gameId !== joined.gameId) {
-    await bestEffortLeave(client);
+    if (await bestEffortLeave(client)) options.onStopped?.();
     return {
       outcome: "refused",
       reason: "world_refused",
@@ -252,6 +274,7 @@ const AUDIO_QUEUE_MAX = 64;
 const FRAME_CONSUME_RETRIES = 8;
 const FRAME_CONSUME_BACKOFF_MS = 50;
 const ALREADY_LEFT = new Set(["session_ended", "not_your_session", "unauthenticated"]);
+const CONFIRMED_LEFT = new Set(["session_ended", "not_your_session"]);
 const GOAL_VERSION = 1;
 const CHARACTER_ID = "clankie";
 
@@ -452,6 +475,7 @@ class HostedWorldBody implements WorldBody {
   private observationPollInFlight = false;
   private paused = false;
   private closed = false;
+  private terminationConfirmed = false;
   private sessionEnded = false;
   private closePromise: Promise<void> | undefined;
   private lastAction: EnvironmentActionResult | undefined;
@@ -564,12 +588,19 @@ class HostedWorldBody implements WorldBody {
     this.frameObserver = null;
     this.stopAudioPolling();
     this.closePromise = (async () => {
-      if (!this.client.joined) return;
+      if (!this.client.joined) {
+        if (this.terminationConfirmed) return;
+        throw new Error("World session authority was lost without confirmed departure");
+      }
       const outcome = await this.client.call("world.leave", {});
-      if (isRefusal(outcome) && ALREADY_LEFT.has(outcome.code)) return;
+      if (isRefusal(outcome) && CONFIRMED_LEFT.has(outcome.code)) {
+        this.terminationConfirmed = true;
+        return;
+      }
       if (isRefusal(outcome)) {
         throw new Error(`${outcome.code}: ${outcome.message}`);
       }
+      this.terminationConfirmed = true;
     })();
     return this.closePromise;
   };
@@ -1070,6 +1101,7 @@ class HostedWorldBody implements WorldBody {
 
   private stopIfEnded(outcome: Refusal): void {
     if (!ALREADY_LEFT.has(outcome.code)) return;
+    if (CONFIRMED_LEFT.has(outcome.code)) this.terminationConfirmed = true;
     this.markEnded();
   }
 
@@ -1374,12 +1406,14 @@ function joinRefusal(refusal: Refusal): WorldJoinResult {
   return { outcome: "refused", reason: "world_refused", detail: refusal.message };
 }
 
-async function bestEffortLeave(client: WorldPlayerClient): Promise<void> {
+async function bestEffortLeave(client: WorldPlayerClient): Promise<boolean> {
   try {
-    await client.call("world.leave", {});
+    const result = await client.call("world.leave", {});
+    return !isRefusal(result) || CONFIRMED_LEFT.has(result.code);
   } catch {
     // The join is already being refused; cleanup cannot make that result less true.
   }
+  return false;
 }
 
 function boundedError(error: unknown): string {

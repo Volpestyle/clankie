@@ -319,6 +319,7 @@ export function captainTools(
             environmentId: params.environmentId,
             originLane: lane,
             requestedBy: turnActor(turn, lane),
+            bodyIdentity: turn.bodyIdentity,
           }),
         ),
     }),
@@ -384,7 +385,7 @@ export function captainTools(
           input.challengeId = params.challengeId;
           input.answer = params.answer;
         }
-        return json(await hosted.invoke(operation, input));
+        return json(await hosted.invoke(operation, input, turn.bodyIdentity));
       },
     }),
     defineTool({
@@ -395,7 +396,13 @@ export function captainTools(
         "already stopped is not an error worth apologising for.",
       parameters: Type.Object({}),
       execute: async () =>
-        json(await stopPlay(playPorts, { originLane: lane, requestedBy: turnActor(turn, lane) })),
+        json(
+          await stopPlay(playPorts, {
+            originLane: lane,
+            requestedBy: turnActor(turn, lane),
+            bodyIdentity: turn.bodyIdentity,
+          }),
+        ),
     }),
     // A screen share is watched by a live Discord body; an install without one
     // (a hosted body) has nothing this could ever return.

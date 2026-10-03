@@ -44,7 +44,11 @@ export class HostedWorldSession {
     };
   }
 
-  public async invoke(name: string, input: Record<string, unknown> = {}): Promise<HostedWorldInvokeResult> {
+  public async invoke(
+    name: string,
+    input: Record<string, unknown> = {},
+    guard?: () => Promise<void>,
+  ): Promise<HostedWorldInvokeResult> {
     if (this.body === undefined || this.body.ended()) return { outcome: "refused", reason: "not_playing" };
     if (!MIND_OPERATIONS.has(name) || findOperation(name) === undefined) {
       return { outcome: "refused", reason: "unknown_operation", detail: name };
@@ -56,8 +60,11 @@ export class HostedWorldSession {
         detail: `The world did not grant ${name}`,
       };
     }
+    const body = this.body;
     try {
-      const result = await this.body.callWorld(name, input);
+      await guard?.();
+      if (this.body !== body || body.ended()) return { outcome: "refused", reason: "not_playing" };
+      const result = await body.callWorld(name, input);
       return { outcome: "ok", result };
     } catch (error) {
       return {
