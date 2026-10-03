@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { closeSync, openSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -135,24 +136,39 @@ export async function startCodexAppServerSeat(options: {
     Object.entries(process.env).filter(([key]) => !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key)),
   );
   const configArgs = (options.config ?? []).flatMap((value) => ["-c", value]);
-  const child = spawn("codex", [...configArgs, "app-server", "--listen", endpoint], {
-    cwd: options.cwd,
-    env: { ...env, ...options.env },
-    stdio: ["ignore", "ignore", "pipe"],
-  });
+  // `clankie restart` signals the service's whole process group. The native
+  // TUI stays in Herdr, so its app-server must also outlive a service restart.
+  // Redirect stderr to a file: a pipe back to the service would break on exit.
+  const stderrPath = join(directory, "app-server.log");
+  const stderrFd = openSync(stderrPath, "a", 0o600);
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn("codex", [...configArgs, "app-server", "--listen", endpoint], {
+      cwd: options.cwd,
+      env: { ...env, ...options.env },
+      detached: true,
+      stdio: ["ignore", "ignore", stderrFd],
+    });
+    child.unref();
+  } finally {
+    closeSync(stderrFd);
+  }
   let failure: Error | undefined;
-  let stderr = "";
+  const stderr = () => {
+    try {
+      return readFileSync(stderrPath, "utf8").slice(-8_192);
+    } catch {
+      return "";
+    }
+  };
   let client: CodexAppServerClient | undefined;
   let closed = false;
-  child.stderr.on("data", (bytes: Buffer) => {
-    stderr = (stderr + bytes.toString()).slice(-8_192);
-  });
   child.on("error", (error) => {
     failure = error;
     client?.close();
   });
   child.on("exit", (code) => {
-    failure = new Error(`Codex app-server exited (${String(code)}): ${stderr}`);
+    failure = new Error(`Codex app-server exited (${String(code)}): ${stderr()}`);
     client?.close();
     options.onEvent?.({ method: "connection/closed", params: { code } });
   });
@@ -178,7 +194,7 @@ export async function startCodexAppServerSeat(options: {
     while (!socket) {
       options.signal?.throwIfAborted();
       if (failure) throw failure;
-      if (Date.now() >= deadline) throw new Error(`Codex app-server did not open its socket: ${stderr}`);
+      if (Date.now() >= deadline) throw new Error(`Codex app-server did not open its socket: ${stderr()}`);
       socket = await new Promise<WebSocket | undefined>((resolve) => {
         const attempt = new WebSocket(`ws+unix://${socketPath}:/`, { handshakeTimeout: 1_000 });
         attempt.once("open", () => resolve(attempt));

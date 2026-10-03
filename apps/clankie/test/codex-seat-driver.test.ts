@@ -54,6 +54,7 @@ function fixture(persisted = false, missingRollout = "no rollout found") {
       pid: 12345,
       exitCode: null,
       signalCode: null,
+      unref: vi.fn(),
       kill: vi.fn(() => {
         queueMicrotask(() => child.emit("exit", 0));
         return true;
@@ -79,11 +80,13 @@ it("lets the native TUI create a fresh thread before input and subscribes after 
   const f = fixture();
   const seat = await startCodexAppServerSeat({ cwd: "/tmp", startView: f.startView });
   cleanup.push(seat.close);
+  expect(spawn.mock.calls[0]?.[2]).toMatchObject({ detached: true });
+  expect(spawn.mock.results[0]?.value.unref).toHaveBeenCalledOnce();
   expect(seat.threadId).toBe(f.id);
   expect(f.requests.some((r) => r.method === "thread/start")).toBe(false);
   expect(f.requests.some((r) => r.method === "turn/start")).toBe(false);
   await expect(seat.send("first brief")).resolves.toEqual({ state: "started", turnId: "turn-one" });
-  await expect(seat.send("follow-up")).resolves.toEqual({ state: "queued", turnId: "turn-one" });
+  await expect(seat.send("follow-up")).resolves.toEqual({ state: "steered", turnId: "turn-one" });
   expect(f.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
   expect(f.requests.find((r) => r.method === "turn/steer")?.params).toMatchObject({
     expectedTurnId: "turn-one",
@@ -112,7 +115,7 @@ it("resumes the selected native thread and applies config to both clients withou
   expect(spawn.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(["-c", config[0]]));
   expect(startView.mock.calls[0]?.[0]).toEqual(expect.arrayContaining(["-c", config[0], "resume", f.id]));
   expect(f.requests.some((r) => r.method === "turn/start")).toBe(false);
-  await expect(seat.send("operator event")).resolves.toEqual({ state: "queued", turnId: "turn-one" });
+  await expect(seat.send("operator event")).resolves.toEqual({ state: "steered", turnId: "turn-one" });
 });
 
 it("refuses a native view that resumes a different thread", async () => {

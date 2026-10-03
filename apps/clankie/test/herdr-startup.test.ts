@@ -72,7 +72,7 @@ it("lets Herdr report a pi session after the short command deadline, without res
   }
 }, 15_000);
 
-it("returns a typed not_ready failure and closes its pane when Herdr's bounded startup expires", async () => {
+it("preserves the pane and reports unconfirmed startup when Herdr's bounded deadline expires", async () => {
   const fake = await fakeHerdr(
     'console.error(JSON.stringify({error:{code:"timeout",message:"agent startup timed out"}})); process.exitCode=1;',
   );
@@ -86,10 +86,10 @@ it("returns a typed not_ready failure and closes its pane when Herdr's bounded s
       }),
     ).toMatchObject({
       outcome: "failed",
-      reason: "not_ready",
+      reason: "start_unconfirmed",
       detail: expect.stringContaining("timeout"),
     });
-    expect(await fake.calls()).toContainEqual(["pane", "close", "w1:p1"]);
+    expect(await fake.calls()).not.toContainEqual(["pane", "close", "w1:p1"]);
   } finally {
     fake.store.close();
   }
@@ -118,10 +118,10 @@ it("still requires pi's durable session report within a bounded wait", async () 
     await vi.advanceTimersByTimeAsync(10_001);
     expect(await pending).toMatchObject({
       outcome: "failed",
-      reason: "not_ready",
+      reason: "start_unconfirmed",
       detail: expect.stringContaining("durable session"),
     });
-    expect(runner.closePane).toHaveBeenCalledWith("w1:p1");
+    expect(runner.closePane).not.toHaveBeenCalled();
   } finally {
     store.close();
   }

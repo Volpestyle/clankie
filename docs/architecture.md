@@ -76,7 +76,11 @@ A Discord message reaches the active bridge. A text-only message in the live
 voice channel's attached chat enters that room's existing `VoiceFloor`; the
 realtime room thread may answer aloud, ask Clankie to act, or stay silent,
 and no separate text turn races it ([ADR 0124](adr/0124-one-self-has-many-local-threads.md)).
-Every other message posts to `POST /v1/captain/channel-turns`. The service normalizes it — untrusted body
+Every other message posts to `POST /v1/captain/channel-turns`. The bridge asks for an immediate
+acknowledgment and polls `GET /v1/captain/channel-turns/{deliveryId}` until the turn settles, so a
+long model turn does not depend on one open HTTP request. A retry submits the same delivery ID;
+the service joins a surviving turn, and the bridge's inbox saves the final reply and permits only
+one progress post for that Discord message across restarts. The service normalizes it — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context
 attached — and prompts a pi session. Every room gets a continuing session (a pi
 JSONL tree that survives restarts): operator conversations, voice channels under
@@ -172,7 +176,9 @@ room turn then lands as a channel event instead of keystrokes typed into the
 pane's pty. Local briefed Codex hires use a dedicated app-server: the native TUI
 creates the session, `turn/start` and `turn/steer` deliver messages, and
 `turn/completed` supplies completion. A native Codex TUI in Herdr connects to
-that same server and thread for viewing and owner takeover. The adapter reports
+that same server and thread for viewing and owner takeover. The app-server runs
+outside Clankie's service process group so a service restart does not disconnect
+or stop the native worker. The adapter reports
 the thread ID explicitly, so the fleet census does not depend on shared-daemon
 hooks. Existing unmanaged Codex seats can use their native `codex queue` when
 available. Automated messages never fall back to typing in the terminal. Missing

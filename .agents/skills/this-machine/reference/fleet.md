@@ -38,6 +38,9 @@ Claude subagents as `subagents`; absent means unknown (ADR 0208).
 Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion
 comes from turn events, and the owner can type into the same bound session.
+The app-server survives a Clankie service restart, so the native worker keeps
+running in its pane. After a restart, Clankie loses that adapter's in-memory
+turn state; inspect the pane and transcript before relying on a new delivery.
 Codex messages can steer an active turn; a `steered` receipt is not an after-turn
 queue. Other routes need a supported native channel or session API. Automated
 briefs and messages never fall back to terminal typing. An uncertain start or
