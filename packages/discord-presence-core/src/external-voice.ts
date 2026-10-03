@@ -315,8 +315,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       this.input.onError("External voice utterance text exceeded the character limit", itemId);
       this.closeItemContext(itemId);
       this.markSpeechFailure(itemId);
-      this.dropItem(itemId);
-      this.discardMouth();
+      this.dropItem(itemId, true);
       return;
     }
     const projected = item.projection.append(delta);
@@ -421,8 +420,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       // rest of the call while the model keeps writing replies.
       this.markSpeechFailure(itemId);
       this.closeItemContext(itemId);
-      this.dropItem(itemId);
-      this.discardMouth();
+      this.dropItem(itemId, true);
     }, this.drainTimeoutMs);
     this.heldDone.set(itemId, { meta, handle });
     this.drainPendingText(itemId);
@@ -469,8 +467,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
           this.input.onError("External voice utterance audio exceeded the byte limit", itemId);
           this.closeItemContext(itemId);
           this.markSpeechFailure(itemId);
-          this.dropItem(itemId);
-          this.discardMouth();
+          this.dropItem(itemId, true);
           return;
         }
         this.input.onAudioDelta(pcm, itemId);
@@ -498,15 +495,20 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       },
       onClose: () => {
         if (this.closed || generation !== this.mouthGeneration) return;
-        // Settling a done event can synchronously admit the next response.
+        // Detach the dead mouth before settlement can synchronously admit a
+        // new response. Its callbacks and global cleanup must not reach that
+        // response, even while the replacement mouth is still opening.
         const interruptedItems = [...this.liveItemIds];
+        const interruptedDone = [...this.heldDone.keys()];
+        this.mouthGeneration += 1;
+        this.tts = undefined;
+        this.contexts.clear();
+        this.openedContexts.clear();
         for (const itemId of interruptedItems) {
           this.markSpeechFailure(itemId);
           this.dropItem(itemId);
         }
-        for (const itemId of this.heldDone.keys()) this.releaseHeldDone(itemId);
-        this.contexts.clear();
-        this.openedContexts.clear();
+        for (const itemId of interruptedDone) this.releaseHeldDone(itemId);
       },
       onError: (message) => {
         if (this.closed || generation !== this.mouthGeneration) return;
@@ -531,13 +533,16 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   }
 
   /** The item's speech is over — by barge-in, mouth loss, or step failure. */
-  private dropItem(itemId: string): void {
+  private dropItem(itemId: string, discardMouth = false): void {
     this.liveItemIds.delete(itemId);
     this.droppedItemIds.add(itemId);
     this.pendingText.delete(itemId);
     const item = this.items.get(itemId);
     if (item?.contextId !== undefined) this.contexts.delete(item.contextId);
     this.items.delete(itemId);
+    // Releasing done may synchronously create the next live item. Decide
+    // whether this failed mouth can be discarded before that happens.
+    if (discardMouth) this.discardMouth();
     this.releaseHeldDone(itemId);
   }
 
@@ -559,8 +564,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
           );
         this.closeItemContext(itemId);
         this.markSpeechFailure(itemId);
-        this.dropItem(itemId);
-        this.discardMouth();
+        this.dropItem(itemId, true);
       }
     });
   }
@@ -596,6 +600,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   private discardMouth(): void {
     if (this.liveItemIds.size > 0) return;
     const tts = this.tts;
+    this.mouthGeneration += 1;
     this.tts = undefined;
     this.contexts.clear();
     this.openedContexts.clear();

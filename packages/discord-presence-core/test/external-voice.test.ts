@@ -22,6 +22,7 @@ class FakeRealtimePort implements ExternalVoiceRealtimePort {
   public readonly appended: Buffer[] = [];
   public readonly textItems: string[] = [];
   public responseCreates = 0;
+  public onCreateResponse: (() => void) | undefined;
   public readonly functionResults: { callId: string; output: string }[] = [];
   public closed = false;
 
@@ -37,6 +38,7 @@ class FakeRealtimePort implements ExternalVoiceRealtimePort {
 
   public createResponse(): void {
     this.responseCreates += 1;
+    this.onCreateResponse?.();
   }
 
   public submitFunctionResult(callId: string, output: string): void {
@@ -137,6 +139,7 @@ interface Harness {
 async function openHarness(
   onFirstText?: (itemId: string) => void,
   options: ExternalVoiceConversationOptions = {},
+  callbacks: { onResponseDone?: () => void; beforeTtsOpen?: () => Promise<void> | undefined } = {},
 ): Promise<Harness & { port: Awaited<ReturnType<typeof openExternalVoiceConversation>> }> {
   const realtime = new FakeRealtimePort();
   const ttsPorts: FakeTtsPort[] = [];
@@ -150,7 +153,10 @@ async function openHarness(
     ...(onFirstText === undefined ? {} : { onFirstText }),
     onAudioDelta: (pcm, itemId) => events.audio.push({ pcm: Buffer.from(pcm), itemId }),
     onFunctionCall: () => undefined,
-    onResponseDone: (meta) => events.done.push(meta),
+    onResponseDone: (meta) => {
+      events.done.push(meta);
+      callbacks.onResponseDone?.();
+    },
     onClose: (reason) => events.closes.push(reason),
     onError: (message, itemId) => {
       events.errors.push(message);
@@ -162,7 +168,8 @@ async function openHarness(
       realtimeHandlers = handlers;
       return Promise.resolve(realtime);
     },
-    openTts: (handlers) => {
+    openTts: async (handlers) => {
+      await callbacks.beforeTtsOpen?.();
       if (failNextTtsOpen.value) {
         failNextTtsOpen.value = false;
         return Promise.reject(new Error("ElevenLabs session error"));
@@ -732,3 +739,91 @@ it("barge-in during asynchronous mouth reopen prevents late context creation and
   expect(heard).toEqual(["current"]);
   port.close();
 });
+
+it.each([
+  { failure: "close", admission: "queued start" },
+  { failure: "timeout", admission: "queued start" },
+  { failure: "step failure", admission: "queued start" },
+  { failure: "close", admission: "owner callback" },
+  { failure: "timeout", admission: "owner callback" },
+  { failure: "step failure", admission: "owner callback" },
+])(
+  "preserves a synchronous $admission response through mouth $failure teardown",
+  async ({ failure, admission }) => {
+    let admitFromOwner = () => {};
+    let openGate: Promise<void> | undefined;
+    const h = await openHarness(
+      undefined,
+      { dialogue: true },
+      {
+        onResponseDone: () => admitFromOwner(),
+        beforeTtsOpen: () => openGate,
+      },
+    );
+    let resolveOpen!: () => void;
+    openGate = new Promise<void>((resolve) => {
+      resolveOpen = resolve;
+    });
+    h.port.createResponse();
+    if (admission === "queued start") h.port.createResponse();
+    const oldMouth = h.ttsPorts[0]!;
+    if (failure === "step failure") oldMouth.failNextOpenContext = true;
+    h.realtimeHandlers.onTextDelta("Old answer.", "old");
+    h.realtimeHandlers.onResponseDone(doneMeta("old-response"));
+    const admitNext = () => {
+      admitFromOwner = () => {};
+      h.realtimeHandlers.onTextDelta("New answer. And its remaining sentence.", "new");
+      h.realtimeHandlers.onResponseDone(doneMeta("new-response"));
+    };
+    if (admission === "queued start") h.realtime.onCreateResponse = admitNext;
+    else admitFromOwner = admitNext;
+    if (failure === "step failure") await settle();
+    else {
+      await settle();
+      if (failure === "close") {
+        oldMouth.close();
+        h.ttsHandlers[0]!.onClose();
+      } else h.timers.fire();
+    }
+    expect(h.realtime.responseCreates).toBe(admission === "queued start" ? 2 : 1);
+    expect(h.events.done).toEqual([doneMeta("old-response")]);
+    expect(oldMouth.closed).toBe(true);
+    // Obsolete callbacks must not kill the new item, even before its queued
+    // context open runs. Also send the new id to catch generation confusion.
+    const late = Buffer.from([9, 0]);
+    h.ttsHandlers[0]!.onAudio(late, "new");
+    h.ttsHandlers[0]!.onContextDone("new");
+    h.ttsHandlers[0]!.onClose();
+    h.ttsHandlers[0]!.onError("obsolete mouth error");
+    expect([...late]).toEqual([0, 0]);
+    await settle();
+    expect(h.ttsPorts).toHaveLength(1);
+    h.ttsHandlers[0]!.onClose();
+    expect(h.events.done).toEqual([doneMeta("old-response")]);
+    resolveOpen();
+    await settle();
+    expect(h.ttsPorts).toHaveLength(2);
+    expect(h.ttsPorts[1]!.frames).toEqual([
+      { kind: "open", contextId: "new" },
+      { kind: "append", contextId: "new", text: "New answer. " },
+      { kind: "flush", contextId: "new" },
+    ]);
+    h.ttsHandlers[1]!.onAudio(Buffer.from([1, 0]), "new");
+    h.ttsHandlers[1]!.onContextDone("new");
+    await settle();
+    expect(h.events.done).toEqual([doneMeta("old-response")]);
+    const remainder = h.ttsPorts[1]!.frames.find(
+      (frame) => frame.kind === "open" && frame.contextId !== "new",
+    )!.contextId!;
+    h.ttsHandlers[1]!.onAudio(Buffer.from([2, 0]), remainder);
+    h.ttsHandlers[1]!.onContextDone(remainder);
+    expect(h.events.audio).toEqual([
+      { pcm: Buffer.from([1, 0]), itemId: "new" },
+      { pcm: Buffer.from([2, 0]), itemId: "new" },
+    ]);
+    expect(h.events.done).toEqual([doneMeta("old-response"), doneMeta("new-response")]);
+    expect(h.events.errors).not.toContain("obsolete mouth error");
+    expect(h.timers.scheduled.every((timer) => timer.cleared)).toBe(true);
+    h.port.close();
+  },
+);
