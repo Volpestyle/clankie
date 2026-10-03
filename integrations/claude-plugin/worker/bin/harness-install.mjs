@@ -11,7 +11,7 @@ const managedText = (text) =>
 async function updatableClaudeAlias(profile, profiles, source, marketplace) {
   try {
     if (!(await lstat(join(profile, "settings.json"))).isSymbolicLink()) return false;
-    if (/[\\/]\.local[\\/]/u.test(source) || !(await lstat(source)).isFile()) return false;
+    if (/[\\/]\.local[\\/]/iu.test(source) || !(await lstat(source)).isFile()) return false;
     let owner = false;
     for (const entry of profiles) {
       const config = join(entry, "settings.json");
@@ -113,6 +113,10 @@ async function installHarnessBridges(options) {
         if (!(await updatableClaudeAlias(profile, profiles, source, marketplace)))
           throw new Error("Claude profile alias or marketplace changed during consent; inspect and retry");
         const checkAlias = async () => {
+          if (!(await updatableClaudeAlias(profile, profiles, source, marketplace)))
+            throw new Error(
+              "Claude alias plugin, enabled settings, or marketplace changed; inspect and retry",
+            );
           if (
             (await realpath(config)) !== source ||
             !(await lstat(config)).isSymbolicLink() ||
