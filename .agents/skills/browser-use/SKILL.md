@@ -10,6 +10,13 @@ drives the SDK directly; there is no separate browser mind. Tool names in Pi
 have a `browser_` prefix, for example `browser_browser_use_javascript`.
 The API/CLI uses the catalog name: `browser_use_javascript`.
 
+One conversation owns the shared browser burst. A typed `busy` result names
+its stable conversation ID; use `body_lease_request` with `ask` or `queue`
+when that is what the user wants. Neither action takes over or reruns an effect.
+Close your burst when finished. A refused close or uncertain result retains
+ownership until confirmed recovery; do not blindly repeat a browser mutation.
+Direct CLI calls require `--conversation ID` for the selected runnable thread.
+
 On machine-authorized turns, use the persistent Node REPL. Print selected
 results with `console.log`; avoid dumping entire pages. Top-level variables,
 functions and `await` survive calls in the same browsing burst.

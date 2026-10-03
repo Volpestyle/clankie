@@ -1,10 +1,11 @@
 import type { BodyLeaseResult, BodyResource } from "@clankie/protocol";
-import { BodyLeaseStore } from "./body-leases.ts";
+import { BodyLeaseStore, type BodyOwnerRoute } from "./body-leases.ts";
 
 type LeaseRef = NonNullable<ReturnType<BodyLeaseStore["recoveryReference"]>>;
 /** Host creates this binding after resolving an authenticated route; tool arguments cannot create it. */
 export interface BodyConversationIdentity {
   readonly conversationId: string;
+  readonly route?: BodyOwnerRoute;
   /** Exact seat/session/turn binding remains current, including through awaited discovery. */
   readonly current: () => boolean;
   /** Existing permission checks, independent of ownership. */
@@ -12,13 +13,24 @@ export interface BodyConversationIdentity {
 }
 
 interface RequestDeliveryPorts {
-  identity(conversationId: string): Promise<BodyConversationIdentity | undefined>;
+  identity(conversationId: string, route?: BodyOwnerRoute): Promise<BodyConversationIdentity | undefined>;
   /** Verifies the source may deliver to this exact destination under existing route grants. */
-  authorizeDelivery(requester: string, destination: string): Promise<boolean>;
+  authorizeDelivery(
+    requester: string,
+    destination: string,
+    requesterRoute?: BodyOwnerRoute,
+    targetRoute?: BodyOwnerRoute,
+  ): Promise<boolean>;
   designatedHead(owner: string): string | undefined;
   deliver(
     destination: string,
-    request: { requester: string; resource: BodyResource; text: string; kind: "queue" | "ask" },
+    request: {
+      requester: string;
+      resource: BodyResource;
+      text: string;
+      kind: "queue" | "ask";
+      route?: BodyOwnerRoute;
+    },
     guard: () => Promise<void>,
   ): Promise<Extract<BodyLeaseResult, { outcome: "asked" }>["deliveryStage"]>;
 }
@@ -39,7 +51,11 @@ export class BodyLeaseRouter {
     const requester = identity.conversationId;
     const denied = await this.authorize(identity, requester, input.resource, "effect");
     if (denied !== undefined) return denied;
-    return this.store.request({ ...input, requester });
+    return this.store.request({
+      ...input,
+      requester,
+      ...(identity.route === undefined ? {} : { requesterRoute: identity.route }),
+    });
   }
 
   /** Explicit pump: fresh identities/grants, exact holder incarnation, and no automatic body action. */
@@ -53,14 +69,15 @@ export class BodyLeaseRouter {
         (held?.token !== request.incarnation || held.conversationId !== request.holder)
       )
         continue;
-      const source = await ports.identity(request.requester);
+      const source = await ports.identity(request.requester, request.requesterRoute);
       if (
         source === undefined ||
         (await this.authorize(source, request.requester, request.resource, "effect")) !== undefined
       )
         continue;
       let destination = request.kind === "queue" ? request.requester : request.holder;
-      let target = await ports.identity(destination);
+      const targetRoute = request.kind === "queue" ? request.requesterRoute : request.holderRoute;
+      let target = await ports.identity(destination, targetRoute);
       if (target === undefined && request.kind === "ask") {
         const head = ports.designatedHead(request.holder);
         if (head === undefined) continue;
@@ -70,7 +87,7 @@ export class BodyLeaseRouter {
       if (
         target === undefined ||
         !target.current() ||
-        !(await ports.authorizeDelivery(request.requester, destination))
+        !(await ports.authorizeDelivery(request.requester, destination, request.requesterRoute, targetRoute))
       )
         continue;
       // Recheck after awaited route discovery. Nothing from another room's context is copied.
@@ -82,9 +99,15 @@ export class BodyLeaseRouter {
       const guard = async () => {
         if (
           (await this.authorize(source, request.requester, request.resource, "effect")) !== undefined ||
-          !(await ports.authorizeDelivery(request.requester, destination)) ||
+          !(await ports.authorizeDelivery(
+            request.requester,
+            destination,
+            request.requesterRoute,
+            targetRoute,
+          )) ||
           !source.current() ||
           !target.current() ||
+          (await this.authorize(target, destination, request.resource, "effect")) !== undefined ||
           !this.store.requestCurrent(request.requestId)
         )
           throw new Error("Lease request authority or deadline changed");
@@ -102,6 +125,7 @@ export class BodyLeaseRouter {
             resource: request.resource,
             text: request.text,
             kind: request.kind,
+            ...(targetRoute === undefined ? {} : { route: targetRoute }),
           },
           guard,
         );
@@ -132,7 +156,7 @@ export class BodyLeaseRouter {
         const renewed = this.store.renew(lease, 300_000);
         if (renewed.outcome !== "renewed") return renewed;
       } else {
-        const result = this.store.acquire(resource, conversationId, 300_000);
+        const result = this.store.acquire(resource, conversationId, 300_000, identity.route);
         if (result.outcome === "busy") return { ...result, actions: ["queue", "ask"] };
         if (result.outcome !== "acquired") return result;
         lease = result.lease;

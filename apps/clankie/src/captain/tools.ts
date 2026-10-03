@@ -153,6 +153,39 @@ export function captainTools(
       : [],
   );
   return [
+    ...(deps.bodyLeases === undefined
+      ? []
+      : [
+          {
+            name: "body_lease_request",
+            label: "Ask or queue for a body resource",
+            description:
+              "Explicitly ask the owning conversation about a busy body resource, or queue a notification when it is free. Never transfers ownership or performs an effect. Text goes only to the holder for ask; queue wakes this conversation. Requests expire after five minutes.",
+            parameters: Type.Object({
+              resource: Type.Union([
+                Type.Literal("discord_mouth"),
+                Type.Literal("voice"),
+                Type.Literal("browser"),
+                Type.Literal("play"),
+              ]),
+              kind: Type.Union([Type.Literal("queue"), Type.Literal("ask")]),
+              text: Type.String({ minLength: 1, maxLength: 2000 }),
+            }),
+            execute: async (
+              _id: string,
+              input: {
+                resource: "discord_mouth" | "voice" | "browser" | "play";
+                kind: "queue" | "ask";
+                text: string;
+              },
+            ) => {
+              const identity = turn.bodyIdentity;
+              if (identity?.route === undefined)
+                return json({ outcome: "rejected", reason: "identity_required" });
+              return json(await deps.bodyLeases!.request(identity, { ...input, ttlMs: 300_000 }));
+            },
+          },
+        ]),
     ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     // A Discord room with a shell can start workers, so it watches and

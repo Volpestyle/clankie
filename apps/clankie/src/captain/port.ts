@@ -100,8 +100,13 @@ export interface LaneToolBank {
  */
 export interface CaptainPort {
   /** Host-only persisted ownership. Inspection and caller-supplied IDs grant no route authority. */
-  validateConversationOwner(owner: ConversationOwner): Promise<boolean>;
-  wakeConversation(owner: ConversationOwner, text: string, guard?: () => Promise<void>): Promise<boolean>;
+  validateConversationOwner(owner: ConversationOwner, mode?: "machine" | "social"): Promise<boolean>;
+  wakeConversation(
+    owner: ConversationOwner,
+    text: string,
+    guard?: () => Promise<void>,
+    mode?: "machine" | "social",
+  ): Promise<boolean>;
   bodyRoomConversation(lane: "discord_presence" | "discord_voice", targetId: string): string;
   evaluatorStatus(): EvaluatorStatus;
   evaluatorCommand(command: EvaluatorCommand): Promise<EvaluatorStatus>;

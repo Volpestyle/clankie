@@ -1,3 +1,5 @@
+import { pumpBodyRequests } from "./body-request-pump.ts";
+import { discordTurnSessionKey } from "./captain/discord-turn.ts";
 import {
   BodyVoiceLeaseRequestSchema,
   BodyVoiceReconcileGuardSchema,
@@ -512,6 +514,7 @@ export interface ClankieApp {
   streamWatch: () => DiscordStreamWatchObservation;
   voiceHistory: (limit: number) => DiscordVoiceStay[];
   recentVoiceSpeech: (limit: number) => Promise<VoiceSpeechSnapshot>;
+  stopBodyRequests(): void;
   close(): void;
 }
 
@@ -645,6 +648,55 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   >();
   const discordTurnReceipts =
     dependencies.discordTurnReceipts ?? new DiscordTurnReceipts(dependencies.discordTurnReceiptPath);
+  let bodyRequestsOpen = true;
+  let pumpingBodyRequests = false;
+  const bodyRequestCaptain = {
+    validateConversationOwner: async (
+      owner: import("./captain/conversation-owner.ts").ConversationOwner,
+      mode?: "machine" | "social",
+    ) => {
+      const origin = owner.discord;
+      if (origin !== undefined) {
+        const source = discordTurnReceipts.get(`discord:${origin.messageId}`)?.origin;
+        if (
+          source === undefined ||
+          source.baseSessionKey !== origin.baseSessionKey ||
+          source.actorId !== origin.actorId ||
+          source.guildId !== origin.guildId ||
+          source.channelId !== origin.channelId ||
+          source.transportKind !== origin.transportKind
+        )
+          return false;
+        const live = discordPresenceLiveSessions.get(discordPresenceBindingKey(source));
+        if (
+          live?.gatewayConnected !== true ||
+          !isDiscordPresenceActionAvailable({ action: "discord.presence.reply", session: live }) ||
+          (origin.transportKind === "user_session" &&
+            discordUserSessionOptIns.resolveActive(PROFILE_HASH) === undefined)
+        )
+          return false;
+      }
+      return dependencies.captain.validateConversationOwner(owner, mode);
+    },
+    wakeConversation: dependencies.captain.wakeConversation,
+  };
+  const bodyRequestTimer =
+    dependencies.bodyLeases === undefined
+      ? undefined
+      : setInterval(() => {
+          if (pumpingBodyRequests || !bodyRequestsOpen) return;
+          pumpingBodyRequests = true;
+          void pumpBodyRequests(dependencies.bodyLeases!.router, bodyRequestCaptain, () => bodyRequestsOpen)
+            .catch((error) => logger.warn({ error }, "Body request delivery failed"))
+            .finally(() => {
+              pumpingBodyRequests = false;
+            });
+        }, 1000);
+  bodyRequestTimer?.unref();
+  const stopBodyRequests = () => {
+    bodyRequestsOpen = false;
+    if (bodyRequestTimer !== undefined) clearInterval(bodyRequestTimer);
+  };
   const captainTurnResults = new Map<
     string,
     {
@@ -1890,6 +1942,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           );
           const identity: BodyConversationIdentity = {
             conversationId,
+            ...(origin.baseSessionKey === undefined
+              ? {}
+              : {
+                  route: {
+                    owner: {
+                      conversationId,
+                      discord: {
+                        baseSessionKey: origin.baseSessionKey,
+                        targetId: `${origin.guildId ?? "dm"}:${origin.channelId}`,
+                        actorId: origin.actorId,
+                        ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
+                        channelId: origin.channelId,
+                        messageId: origin.messageId,
+                        transportKind: origin.transportKind,
+                      },
+                    },
+                    mode: "social" as const,
+                  },
+                }),
             current: () => {
               const current = discordPresenceLiveSessions.get(discordPresenceBindingKey(write.identity));
               return (
@@ -2053,6 +2124,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           fingerprint,
           lane: expectedLane,
           origin: {
+            baseSessionKey: discordTurnSessionKey(request),
             presenceSessionId:
               request.identity.presenceSessionId ??
               `discord:${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`,
@@ -2886,7 +2958,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (!(await identity.authorize(input.resource, "effect")) || !identity.current())
         return context.json({ outcome: "rejected", reason: "not_authorized" }, 409);
       if (input.action === "acquire") {
-        const result = body.store.acquire(input.resource, input.conversationId, input.ttlMs);
+        const result = body.store.acquire(input.resource, input.conversationId, input.ttlMs, identity.route);
         if (result.outcome === "busy") return context.json({ ...result, actions: ["queue", "ask"] }, 409);
         if (result.outcome !== "acquired") return context.json(result, 409);
         return context.json({
@@ -2940,6 +3012,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return undefined;
     return {
       conversationId,
+      route: { owner: { conversationId }, mode: "machine" },
       current: () =>
         !request.signal.aborted &&
         dependencies.captain.seatContext(conversationId)?.conversationId === conversationId,
@@ -4019,7 +4092,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         room?.channelId === undefined ? undefined : { guildId: room.guildId, channelId: room.channelId },
       );
     },
+    stopBodyRequests,
     close: () => {
+      stopBodyRequests();
       securityClosed = true;
       if (securityRetryTimer !== undefined) clearInterval(securityRetryTimer);
       if (wakeRevocationTimer !== undefined) clearInterval(wakeRevocationTimer);

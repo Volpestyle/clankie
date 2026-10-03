@@ -3189,7 +3189,7 @@ export interface OperatorConversationServiceClient {
    * seat to open a thread on. Absent on older injected clients; failures come
    * back typed rather than thrown.
    */
-  spawnSeat?(input: SpawnOperatorSeat): Promise<OperatorSeatSpawnResult>;
+  spawnSeat?(input: SpawnOperatorSeat, conversationId?: string): Promise<OperatorSeatSpawnResult>;
   /**
    * Close a seat and hire it again in another working directory under the
    * same persona name (ADR 0166). Absent on older injected clients.
@@ -3402,8 +3402,13 @@ export function createOperatorConversationServiceClient(
       if (result.op !== "close_seat") throw new Error(`Unexpected ${result.op} result for close_seat`);
       return result.closed;
     },
-    async spawnSeat(input) {
-      const result = await dispatch({ op: "spawn_seat", schemaVersion: 1, seat: input });
+    async spawnSeat(input, conversationId) {
+      const result = await dispatch({
+        op: "spawn_seat",
+        schemaVersion: 1,
+        seat: input,
+        ...(conversationId === undefined ? {} : { conversationId }),
+      });
       if (result.op !== "spawn_seat") throw new Error(`Unexpected ${result.op} result for spawn_seat`);
       return result.result;
     },

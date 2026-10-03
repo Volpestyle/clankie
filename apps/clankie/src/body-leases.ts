@@ -13,9 +13,16 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { ConversationOwnerSchema } from "./captain/conversation-owner.ts";
+export const BodyOwnerRouteSchema = z.strictObject({
+  owner: ConversationOwnerSchema,
+  mode: z.enum(["machine", "social"]),
+});
+export type BodyOwnerRoute = z.infer<typeof BodyOwnerRouteSchema>;
 
 import { BodyResourceSchema as ResourceSchema, type BodyResource as Resource } from "@clankie/protocol";
 const ClaimSchema = z.strictObject({
+  route: BodyOwnerRouteSchema.optional(),
   resource: ResourceSchema,
   conversationId: z.string().min(1).max(512),
   token: z.uuid(),
@@ -26,6 +33,8 @@ const ClaimSchema = z.strictObject({
 });
 type Claim = z.infer<typeof ClaimSchema>;
 const RequestSchema = z.strictObject({
+  requesterRoute: BodyOwnerRouteSchema.optional(),
+  holderRoute: BodyOwnerRouteSchema.optional(),
   requestId: z.uuid(),
   kind: z.enum(["queue", "ask"]),
   resource: ResourceSchema,
@@ -139,6 +148,7 @@ export class BodyLeaseStore {
     kind: "queue" | "ask";
     resource: Resource;
     requester: string;
+    requesterRoute?: BodyOwnerRoute;
     text: string;
     ttlMs: number;
   }):
@@ -149,6 +159,12 @@ export class BodyLeaseStore {
     this.validateTtl(input.ttlMs);
     const held = this.claims.get(input.resource);
     if (held === undefined) return { outcome: "rejected", reason: "unavailable" };
+    if (
+      input.requesterRoute !== undefined &&
+      (input.requesterRoute.owner.conversationId !== input.requester ||
+        (input.kind === "ask" && held.route === undefined))
+    )
+      return { outcome: "rejected", reason: "unavailable" };
     const kept = this.requests.filter((request) => request.expiresAt > this.clock());
     if (kept.length >= 128) return { outcome: "rejected", reason: "queue_full" };
     const duplicate = kept.find(
@@ -165,6 +181,8 @@ export class BodyLeaseStore {
       kind: input.kind,
       resource: input.resource,
       requester: input.requester,
+      ...(input.requesterRoute === undefined ? {} : { requesterRoute: input.requesterRoute }),
+      ...(held.route === undefined ? {} : { holderRoute: held.route }),
       holder: held.conversationId,
       incarnation: held.token,
       text: input.text,
@@ -228,14 +246,22 @@ export class BodyLeaseStore {
     return claim === undefined ? undefined : this.view(claim);
   }
 
-  public acquire(resource: Resource, conversationId: string, ttlMs: number): Admission {
+  public acquire(
+    resource: Resource,
+    conversationId: string,
+    ttlMs: number,
+    route?: BodyOwnerRoute,
+  ): Admission {
     if (this.unavailable || this.closed) return this.refused("store_unavailable");
     this.validateTtl(ttlMs);
+    if (route !== undefined && route.owner.conversationId !== conversationId)
+      throw new Error("Body owner route mismatch");
     if (conversationId.trim().length === 0 || conversationId.length > 512)
       throw new Error("Invalid conversation identity");
     const held = this.claims.get(resource);
     if (held !== undefined) return { outcome: "busy", lease: this.view(held) };
     const claim: Claim = {
+      ...(route === undefined ? {} : { route: BodyOwnerRouteSchema.parse(route) }),
       resource,
       conversationId,
       token: randomUUID(),

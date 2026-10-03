@@ -18,6 +18,17 @@ you are helping. Devices, machines and work trackers are
 independent choices. Read `packages/agent-hosts/README.md` under `repoRoot` for current
 connection support; do not infer support from the architecture alone.
 
+## One body, several conversations
+
+`clankie body status` shows the stable conversation holding each of Discord
+mouth, voice/Go Live, browser and play. Inspecting status grants no control.
+Use the current conversation's `body_lease_request` tool to explicitly ask a
+holder or queue a notification. Requests expire and never perform an effect
+or transfer ownership. Recheck authority and reacquire when notified.
+`clankie body request JSON` exposes the same operator API; see `docs/cli.md`
+under the reported service root for its exact fields and recovery behavior.
+Do not treat expiry or a process restart as proof that a send/session stopped.
+
 ## Watching workers
 
 The local console stays in the current terminal. Its live-agent strip uses the

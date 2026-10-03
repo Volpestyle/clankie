@@ -19,6 +19,7 @@ const ReceiptSchema = z
     writeResult: DiscordPresenceWriteResultSchema.optional(),
     origin: z
       .strictObject({
+        baseSessionKey: z.string().optional(),
         presenceSessionId: z.string(),
         characterId: z.string(),
         credentialRef: z.string(),

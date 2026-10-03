@@ -1057,20 +1057,55 @@ Inspect or call Clankie's Browser Use Pi tools with the operator credential:
 
 ```sh
 clankie browser tools
-clankie browser call browser_use_open '{"url":"https://example.com"}'
-clankie browser call browser_use_javascript '{"code":"console.log(await page.info())"}'
-clankie browser call browser_use_close '{}'
+clankie browser call browser_use_open '{"url":"https://example.com"}' --conversation CONVERSATION_ID
+clankie browser call browser_use_javascript '{"code":"console.log(await page.info())"}' --conversation CONVERSATION_ID
+clankie browser call browser_use_close '{}' --conversation CONVERSATION_ID
 ```
 
 The same catalog and call contract are available at `GET /v1/browser/tools`
 and `POST /v1/browser/call`. Native JavaScript requires machine authority;
-captain bearers expose only browser-realm tools. JavaScript variables persist
+native captain calls carry their admitted conversation binding. Direct operator
+calls require `--conversation ID` (HTTP: `x-clankie-conversation-id`) naming a
+runnable conversation. A bearer and arbitrary ID cannot create authority.
+JavaScript variables persist
 within a browsing burst; mode changes, idle close and worker timeouts reset
 them. The SDK uses Clankie's private profile and workspace under
 `~/.clankie/runner/browser/`. It discovers installed Chrome; set
 `CLANKIE_BROWSER_EXECUTABLE` to use a particular Chrome/Chromium executable.
 `CLANKIE_AGENT_BROWSER_EXECUTABLE` no longer applies. No browser model key is
 needed: Clankie's existing model writes the code and the SDK executes it.
+
+### `body status` / `body request JSON`
+
+Inspect who holds Clankie's Discord mouth, voice/Go Live, browser, or play body:
+
+```sh
+clankie body status
+clankie body request '{"action":"queue","resource":"browser","conversationId":"CONVERSATION_ID","text":"Notify me when the browser is free","ttlMs":300000}'
+clankie body request '{"action":"ask","resource":"voice","conversationId":"CONVERSATION_ID","text":"Can you finish this voice stay?","ttlMs":300000}'
+```
+
+`GET /v1/body-leases` returns `{leases:[...]}` with resource, owning stable
+conversation ID, expiry and `active`/`recovery_required` state. It accepts the
+operator or an active paired device's existing observe grant. It exposes no
+incarnation tokens, actor details, room text or request messages. The relay
+forwards the same read with the original device bearer.
+
+`POST /v1/body-leases` uses the strict JSON request above and operator authority
+bound to the selected runnable conversation. Busy results name the holder and
+retain typed `queue`/`ask` options. Queue wakes the requester after release;
+ask delivers only the supplied text to the captured owner. Both expire, refresh
+source and destination authority, and perform no body effect. Unknown legacy
+owner routes cannot be redirected to a default room. A social request stays
+social even if its actor later gains machine authority.
+
+Acquire returns a private incarnation for renew/release. Ordinary release is
+owner-only and confirms actual session termination; a token is not a stop
+receipt. Explicit operator `recover` can stop a different owner's resource,
+using the current private host claim. Expiry, restart, a stop request, or a
+failed response does not imply termination. Uncertain operations remain held
+until exact delivery or termination evidence resolves them. Recovery never
+silently retries a Discord send.
 
 ### `browser [status]` / `browser record on|off`
 

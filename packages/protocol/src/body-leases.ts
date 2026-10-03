@@ -63,6 +63,7 @@ export const BodyLeaseResultSchema = z.discriminatedUnion("outcome", [
     requestId: z.uuid(),
     deliveryStage: z.enum([
       "stored",
+      "accepted",
       "delivered",
       "consumed",
       "responded",

@@ -199,7 +199,7 @@ export class BodyVoiceStays {
       existing !== undefined &&
       compatible
         ? { outcome: "acquired" as const, lease: existing }
-        : this.store.acquire("voice", owner.conversationId, 30_000);
+        : this.store.acquire("voice", owner.conversationId, 30_000, owner.route);
     if (acquired.outcome === "busy") return { ...acquired, actions: ["queue", "ask"] };
     if (acquired.outcome !== "acquired") return acquired;
     const renewed = this.store.renew(acquired.lease, 30_000);

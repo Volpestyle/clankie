@@ -123,3 +123,23 @@ saved workers without exact persisted proof fail closed. No default room,
 current worker persona or implicit head replaces a missing owner. Operator API
 hires and saved-session resumes require an explicit runnable conversation ID;
 private consumers must supply their selected thread.
+
+## Body lifecycle implementation
+
+Audio and Go Live may share a voice lease only for the same physical account,
+gateway session, guild and channel. Each keeps its own source authority,
+generation and operation pin. One termination never frees the other pin.
+Publish release requires exact gateway stream deletion and media disconnect;
+normal voice release requires the actual gateway leave. Restart recovery
+captures all unfinished stays and their registered account subject. Its
+nonce-bound internal body guard rechecks original owner/operator authority and
+the private current claim at the final remote stop boundary. Fresh exact remote
+leave/deletion receipts can reconcile an abandoned generation; empty replacement
+process maps cannot. Every automatic OP4 rejoin and OP18 publish retry refreshes
+the original lease guard so an old generation cannot recreate cleared effects.
+
+Pending queue/ask requests persist host-stamped requester and holder routes.
+The service pump only wakes these routes, with no configured head fallback.
+Social wakes use a separate non-shell session even after a later machine grant.
+A changed holder incarnation, missing route, expired request or revoked grant
+cannot redirect delivery. Uncertain wake acceptance is not replayed.

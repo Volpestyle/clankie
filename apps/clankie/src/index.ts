@@ -1056,6 +1056,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   localFleetServer?.close();
   fleetLinks.close();
   fleetLinkServer?.close();
+  clankie.stopBodyRequests();
   server.close();
   hostedDiscord?.close();
   void (async () => {
