@@ -124,3 +124,19 @@ his fleet.
   stores only semantic appearance fields and baked PNG bytes.
 - Content-hashed filenames make Discord avatar changes immediate despite its
   server-side cache.
+
+## Human hire names and owner rename (VUH-1537)
+
+The model-facing hire tool asks for a short human name and requires an assignment
+role; older spawn API callers retain their optional role contract. Known routing
+labels from older callers receive a deterministic fallback from a small set of
+human names across languages before native launch and persona adoption. This is
+compatibility display content, never an authority or allocation key. The model
+chooses ordinary hire names freely, with no Western-only validation or pool.
+
+A previously saved persona name wins on re-adoption and resume. The roster title
+projects that saved name, while native routing/session IDs remain intact. Census
+refresh and service restart preserve the owner's rename. The existing
+update_persona operation accepts omitted appearance for an atomic name-only
+change; older rename/restyle clients continue to work. CLI and TUI expose
+agents rename through that operation, without a duplicate endpoint.

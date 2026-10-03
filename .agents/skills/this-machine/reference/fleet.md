@@ -34,7 +34,13 @@ reports `trust_required`; other pending startup reports `start_unconfirmed`.
 Inspect that pane; do not retry the hire or approve trust yourself. Closing the
 pane cancels pending startup.
 
-`hire_agent` can also set `role`. The built-ins are planner, designer, builder,
+Give every hire a short human name in `title`, in any language, and an assignment
+`role`. Do not use a routing ID, task slug or issue key as the name. Older API
+callers can still omit the role; the model-facing tool requires it. Rename later
+with `clankie agents rename NAME|PERSONA_ID "NEW NAME"`; this preserves native
+identity, appearance and project assignment.
+
+`hire_agent` sets `role`. The built-ins are planner, designer, builder,
 tester, reviewer and researcher; you can also use a custom role such as "sound
 designer" (1–24 letters, digits, spaces, hyphens). The owner's world places the
 agent at that station and reads its backlog from work items labelled with the

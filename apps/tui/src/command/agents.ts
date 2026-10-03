@@ -3,6 +3,7 @@ import {
   OPERATOR_AGENT_ROLE_MAX,
   OPERATOR_AGENT_ROLES,
   OperatorAgentRoleSchema,
+  OperatorAgentNameSchema,
   type OperatorAgentPersona,
   type OperatorAgentRole,
 } from "@clankie/protocol";
@@ -17,6 +18,7 @@ const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
   `       clankie agents role NAME|PERSONA_ID ROLE|none   (${OPERATOR_AGENT_ROLES.join(", ")}, or "a custom role")\n` +
   "       clankie agents roles\n" +
+  "       clankie agents rename NAME|PERSONA_ID NEW_NAME\n" +
   "       clankie agents [list] [--host ID] [--limit N]\n" +
   "       clankie agents read HOST:SESSION [--tail N | --after CURSOR]\n" +
   "       clankie agents resume HOST:SESSION --conversation ID [--fleet ID] [--brief TEXT]\n" +
@@ -74,7 +76,8 @@ export async function runAgentsCommand(
   if (
     (args[0] === "contacts" && args.length === 1) ||
     (args[0] === "roles" && args.length === 1) ||
-    (args[0] === "role" && args.length >= 3)
+    (args[0] === "role" && args.length >= 3) ||
+    (args[0] === "rename" && args.length === 3)
   ) {
     const token = await resolveCaptainRouteToken({ env: options.env ?? process.env });
     const client = createCaptainOperatorConversationClient(
@@ -87,6 +90,12 @@ export async function runAgentsCommand(
     if (args[0] === "roles") return client.roles!();
     const personas = (await client.fleet!()).personas;
     if (args[0] === "contacts") return personas;
+    if (args[0] === "rename")
+      return client.updatePersona!({
+        schemaVersion: 1,
+        personaId: resolvePersona(personas, args[1]!),
+        name: OperatorAgentNameSchema.parse(args[2]),
+      });
     return client.setPersonaRole!(
       resolvePersona(personas, args.slice(1, -1).join(" ")),
       parseRole(args.at(-1)!),

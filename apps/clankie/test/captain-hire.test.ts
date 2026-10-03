@@ -83,6 +83,24 @@ describe("captain hire_agent", () => {
     expect(discordWithoutShell).not.toContain("hire_agent");
   });
 
+  it("asks the model for a human name and requires an assignment role", () => {
+    const tool = hireTool(
+      captainTools(
+        deps,
+        { targetId: "global-default" },
+        {} as LaneLog,
+        "operator",
+        undefined,
+        undefined,
+        undefined,
+        vi.fn(),
+      ),
+    );
+    expect(tool.parameters.required).toContain("title");
+    expect(tool.parameters.required).toContain("role");
+    expect(tool.parameters.properties.title.description).toContain("human name");
+  });
+
   it("hires through the wired path with model and effort spelled for the harness", async () => {
     const hireSeat = vi.fn(
       (_seat: SpawnOperatorSeat) =>

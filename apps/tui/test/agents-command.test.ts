@@ -180,3 +180,41 @@ it("lists roles in use and splits quoted TUI arguments", async () => {
     "none",
   ]);
 });
+
+it("renames a Unicode agent by id using a name-only persona update", async () => {
+  const now = "2026-10-03T00:00:00.000Z";
+  const persona = {
+    schemaVersion: 1,
+    personaId: "agent-1",
+    name: "Noor",
+    appearance: { variant: "teal", accessory: "none", shape: "circle" },
+    harness: "codex",
+    createdAt: now,
+    updatedAt: now,
+  };
+  const calls: unknown[] = [];
+  const result = await runAgentsCommand(["rename", "agent-1", "美咲"], {
+    env: { CLANKIE_CAPTAIN_TOKEN: "captain" },
+    fetchImpl: (async (_url, init) => {
+      const request = JSON.parse(init!.body as string);
+      calls.push(request);
+      if (request.op === "fleet")
+        return Response.json({
+          op: "fleet",
+          schemaVersion: 1,
+          snapshot: { schemaVersion: 1, cursor: "0", seats: [], personas: [persona], channels: [] },
+        });
+      return Response.json({
+        op: "update_persona",
+        schemaVersion: 1,
+        persona: { ...persona, name: request.persona.name },
+      });
+    }) as typeof fetch,
+  });
+  expect(result).toMatchObject({ personaId: "agent-1", name: "美咲" });
+  expect(calls[1]).toEqual({
+    op: "update_persona",
+    schemaVersion: 1,
+    persona: { schemaVersion: 1, personaId: "agent-1", name: "美咲" },
+  });
+});

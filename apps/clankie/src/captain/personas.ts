@@ -330,7 +330,7 @@ export class PersonaStore {
     this.records.set(seat.personaId, {
       schemaVersion: 1,
       personaId: seat.personaId,
-      name,
+      name: previousRecords.get(seat.personaId)?.name ?? name,
       appearance: current.appearance,
       // A move re-adopts the same character; it keeps the role it had.
       ...((this.projectStore ? current.role : (role ?? current.role)) === undefined
@@ -359,7 +359,7 @@ export class PersonaStore {
       for (const [subject, binding] of previousBindings) this.bindings.set(subject, binding);
       throw error;
     }
-    return seat;
+    return { ...seat, title: this.records.get(seat.personaId)!.name };
   }
 
   /**
@@ -410,7 +410,7 @@ export class PersonaStore {
     const updated: OperatorAgentPersona = {
       ...current,
       name: parsed.name,
-      appearance: parsed.appearance,
+      appearance: parsed.appearance ?? current.appearance,
       ...(avatarRevision === undefined ? {} : { avatarRevision }),
       updatedAt: new Date().toISOString(),
     };
@@ -588,6 +588,7 @@ export class PersonaStore {
         ...seat,
         ...(binding.account ? { account: binding.account } : {}),
         personaId: binding.personaId,
+        title: this.records.get(binding.personaId)!.name,
       },
       changed,
     };

@@ -704,20 +704,23 @@ function hireAgentTool(
           description: "Registered local Codex account label; omit to choose by headroom.",
         }),
       ),
-      title: Type.String({ minLength: 1, maxLength: 80, description: "What the roster calls it." }),
+      title: Type.String({
+        minLength: 1,
+        maxLength: 80,
+        description:
+          "A short human name you choose for this person, in any language; never a routing ID, issue key, task slug or job title.",
+      }),
       projectId: Type.Optional(
         Type.String({
           pattern: "^[a-z][a-z0-9_-]{0,63}$",
           description: "Project to hire for. Its role settings and limits apply.",
         }),
       ),
-      role: Type.Optional(
-        Type.String({
-          minLength: 1,
-          maxLength: OPERATOR_AGENT_ROLE_MAX,
-          description: `Its team role, where the owner's world places it and whose backlog (work items labelled with it) its station reads: one of ${OPERATOR_AGENT_ROLES.join(", ")}, or a custom role of letters, digits, spaces and hyphens. Omit to leave it unassigned.`,
-        }),
-      ),
+      role: Type.String({
+        minLength: 1,
+        maxLength: OPERATOR_AGENT_ROLE_MAX,
+        description: `Its team role, where the owner's world places it and whose backlog (work items labelled with it) its station reads: one of ${OPERATOR_AGENT_ROLES.join(", ")}, or a custom role of letters, digits, spaces and hyphens. Choose the role for this assignment.`,
+      }),
       workingDirectory: Type.String({
         minLength: 1,
         maxLength: OPERATOR_SEAT_DIRECTORY_MAX,

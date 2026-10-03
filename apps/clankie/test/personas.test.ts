@@ -46,6 +46,34 @@ describe("PersonaStore", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
+  it("keeps a Unicode owner rename through census, restart and re-adoption, without changing identity or appearance", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-persona-name-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const original = observed("term-1");
+    const seat = store.adoptSpawn(original, "Noor", "builder");
+    const before = store.all([], () => undefined)[0]!;
+    const updated = store.update({ schemaVersion: 1, personaId: seat.personaId, name: "  美咲 / نور  " });
+    expect(updated.name).toBe("美咲 / نور");
+    expect(updated.appearance).toEqual(before.appearance);
+    const restarted = new PersonaStore(root);
+    expect(restarted.reconcile([{ ...original, title: "fleet:pc/vuh1381-canary" }])[0]).toMatchObject({
+      personaId: seat.personaId,
+      seatId: seat.seatId,
+      occupantId: seat.occupantId,
+      title: updated.name,
+    });
+    expect(restarted.adoptSpawn(original, "Other name")).toMatchObject({
+      personaId: seat.personaId,
+      title: updated.name,
+    });
+    expect(restarted.all([], () => undefined)[0]).toMatchObject({
+      name: updated.name,
+      role: "builder",
+      appearance: before.appearance,
+    });
+  });
+
   it("retains the hired account across roster refresh and restart, but not a replacement occupant", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-personas-account-"));
     roots.push(root);

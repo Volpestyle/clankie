@@ -61,7 +61,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["agents", "sessions"],
     lines: [
       "  agents contacts          Known agent identities and availability (JSON)",
-      "  agents role NAME|ID ROLE|none | roles",
+      "  agents role NAME|ID ROLE|none | roles | rename NAME|ID NEW_NAME",
       '                           Built-in (planner, builder, ...) or "custom role"; roles lists in use (JSON)',
       "  sessions                 Alias for agents session commands",
       "  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]",

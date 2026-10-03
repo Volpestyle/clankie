@@ -532,7 +532,8 @@ export const UpdateOperatorAgentPersonaSchema = z
     schemaVersion: z.literal(1),
     personaId: OperatorAgentPersonaIdSchema,
     name: OperatorAgentNameSchema,
-    appearance: OperatorAgentAppearanceSchema,
+    /** Omit for a name-only change; preserve the current appearance atomically. */
+    appearance: OperatorAgentAppearanceSchema.optional(),
     /** Optional exact app-rendered PNG. The host validates and serves it to Discord. */
     avatarPngBase64: z.string().min(1).max(700_000).optional(),
   })

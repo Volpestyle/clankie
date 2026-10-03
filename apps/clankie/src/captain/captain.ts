@@ -1,4 +1,5 @@
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
+import { hireDisplayName } from "./hire-name.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { localWorkspaceProject, selectHireProject, nativeHireProject } from "./project-hire-context.ts";
 import type { ProjectHireProcessProof } from "./project-hires.ts";
@@ -2074,6 +2075,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           detail: "Claude worker channel requires an exact workspace binding",
         },
       };
+    request = { ...request, title: hireDisplayName(request.title) };
     await personas.ready(settingsStore);
     await personas.prepareRoleAdoption(request.role);
     let adopted: ReturnType<typeof personas.adoptSpawn> | undefined;
@@ -2082,11 +2084,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // Runs synchronously behind the final authority check, before the native
       // receipt is cleared. A revoked/replaced origin keeps its uncertain claim.
       if (!authority.current()) throw new Error("Hiring conversation was replaced before adoption");
-      const title = resume === undefined ? request.title : spawned.seat.title;
+      const title = resume === undefined ? request.title : hireDisplayName(spawned.seat.title);
       const seat = personas.adoptSpawn(spawned.seat, title, request.role, (status) => {
         adoptedRoleWrite = status;
       });
-      conversations.bindPersona(seat.personaId, seat.seatId, title);
+      conversations.bindPersona(seat.personaId, seat.seatId, seat.title);
       liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
       seatByPersona.set(seat.personaId, seat.seatId);
       herdrWatches.trackSeat(seat.seatId);

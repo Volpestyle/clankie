@@ -341,7 +341,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       aliases: [],
       description: "Live agents, and past ones that kept a thread",
       takesArgument: true,
-      argumentHint: '[contacts | roles | role NAME "ROLE"|none | legacy session commands; see /sessions]',
+      argumentHint:
+        '[contacts | roles | role NAME "ROLE"|none | rename NAME "NEW NAME" | legacy session commands; see /sessions]',
       async run(argument, shell): Promise<void> {
         if (argument.trim()) {
           const result = await runAgentsCommand(splitQuotedArguments(argument));

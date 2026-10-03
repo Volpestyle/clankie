@@ -1413,13 +1413,21 @@ in any casing is stored lowercase. A custom role keeps the casing you typed
 and compares case-insensitively, so `Sound Designer` and `sound designer` are
 one role. `none` clears it. It prints the updated persona.
 
+`clankie agents rename NAME|PERSONA_ID NEW_NAME` changes an agent's saved display
+name. Quote names containing spaces. `/agents rename NAME "NEW NAME"` is the
+same TUI action. It uses the existing `update_persona` operation with only the
+name; omitted appearance stays unchanged. Names support any language and the
+existing 1–80 character/Discord webhook rules. Rename keeps the persona,
+conversation, native seat and project assignment, including after a refresh or
+resume. The app offers the same action in an agent's tray card.
+
 `clankie agents roles` lists the built-ins (always, with counts), then custom
 roles personas hold, most held first, each as `{ role, builtIn, count }`. Counts
 include offline personas. The role is semantic, unlike the cosmetic
 `appearance.accessory`, and persists with the persona across seats. The same
 settings are the `set_persona_role` operator op (`{ personaId, role: ROLE |
 null }`, steer grant), the `roles` op (read), and `hire_agent`'s and
-`spawn_seat`'s optional `role`. In the TUI, `/agents role NAME "ROLE"` and
+`spawn_seat`'s `role` (required in the model-facing hire tool, optional for older API clients). In the TUI, `/agents role NAME "ROLE"` and
 `/agents roles` honour quotes. The `/agents` picker shows each live agent's role.
 
 The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`

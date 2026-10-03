@@ -111,3 +111,68 @@ it("native continuation goes through one hire/adoption path and preserves the ex
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+it("passes a human fallback into native hire and preserves the owner rename on a repeated adoption", async () => {
+  const root = mkdtempSync(join(tmpdir(), "captain-hire-name-"));
+  vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
+  vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
+  vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
+  const spawn = vi
+    .spyOn(HerdrWatchStore.prototype, "spawnSeat")
+    .mockImplementation(async (request, _subject, _brief, _resume, _authority, adopt) => {
+      const result = {
+        outcome: "spawned",
+        seat: {
+          seatId: "term_worker",
+          paneId: "w1:p1",
+          subject: "worker",
+          occupantId: `session-${"a".repeat(64)}`,
+          harness: "codex",
+          status: "idle",
+          title: request.title,
+          workingDirectory: root,
+        },
+      } as const;
+      adopt?.(result);
+      return result;
+    });
+  const captain = createCaptain({} as CaptainDeps, {
+    repoRoot: root,
+    stateDir: root,
+    settings: new SettingsStore(join(root, "settings.json")),
+  });
+  try {
+    const request = {
+      schemaVersion: 1,
+      op: "spawn_seat",
+      conversationId: "global-default",
+      seat: {
+        schemaVersion: 1,
+        harness: "codex",
+        title: "fleet:pc/vuh1381-canary",
+        workingDirectory: root,
+        role: "builder",
+      },
+    } as const;
+    const first = await captain.serveOperatorConversation(request);
+    if (first.op !== "spawn_seat" || first.result.outcome !== "spawned") throw new Error("Expected hire");
+    expect(spawn.mock.calls[0]![0].title).toMatch(/^(Ari|Mei|Noor|Ravi|Sora|Zuri)$/u);
+    expect(first.result.seat.title).toBe(spawn.mock.calls[0]![0].title);
+    const personaId = first.result.seat.personaId!;
+    await captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "update_persona",
+      persona: { schemaVersion: 1, personaId, name: "美咲" },
+    });
+    const again = await captain.serveOperatorConversation(request);
+    expect(again).toMatchObject({ result: { seat: { personaId, seatId: "term_worker", title: "美咲" } } });
+    const personas = await captain.serveOperatorConversation({ schemaVersion: 1, op: "personas" });
+    expect(personas).toMatchObject({
+      personas: [expect.objectContaining({ personaId, name: "美咲", role: "builder" })],
+    });
+  } finally {
+    await captain.close();
+    vi.restoreAllMocks();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
