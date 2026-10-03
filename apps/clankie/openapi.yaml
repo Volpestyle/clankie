@@ -1486,6 +1486,12 @@ paths:
       operationId: postCaptainChannelTurns
       summary: One Discord message becomes one captain turn
       security: [{ discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      parameters:
+        - in: header
+          name: Prefer
+          required: false
+          schema: { type: string, enum: [respond-async] }
+          description: Return 202 while the turn runs, then poll the delivery ID. Without this header, the request waits for the result.
       requestBody:
         required: true
         content:
@@ -1509,6 +1515,27 @@ paths:
       responses:
         "200":
           description: Settled turn
+        "202":
+          description: Turn accepted and still running
+
+  /v1/captain/channel-turns/{deliveryId}:
+    get:
+      tags: [Captain, Discord]
+      operationId: getCaptainChannelTurn
+      summary: Poll a Discord turn by its stable delivery ID
+      security: [{ discordTextBearer: [] }, { discordVoiceBearer: [] }]
+      parameters:
+        - in: path
+          name: deliveryId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Settled turn
+        "202":
+          description: Turn still running
+        "404":
+          description: Turn unavailable after a service restart; resubmit the original delivery
 
   /v1/captain/presence:
     post:
@@ -1544,7 +1571,7 @@ paths:
         accepted run: the captain aborts the live model turn and the durable
         log settles that run as `cancelled`. `fork` clones the current Pi leaf
         into an ephemeral child conversation. Pane-scoped `send` and
-        `state_stance` requests qualify their pane ID with the source socket.
+        `state_stance` and `state_work` requests qualify their pane ID with the source socket.
         A mismatched `send` loses its pane association; a mismatched stance
         returns 409 without changing a worker. Seat-control operations
         return 503 with herdr_unavailable when the default runtime is unavailable;

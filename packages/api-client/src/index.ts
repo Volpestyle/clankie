@@ -157,11 +157,40 @@ export class ClankieApiClient {
     input: DiscordPresenceChannelTurnRequest,
   ): Promise<CaptainChannelTurnResult> {
     const request = DiscordPresenceChannelTurnRequestSchema.parse(input);
-    const result = await this.request<unknown>("/v1/captain/channel-turns", {
-      method: "POST",
-      headers: this.captainHeaders(),
-      body: JSON.stringify(request),
-    });
+    const path = "/v1/captain/channel-turns";
+    // Voice already has its own floor and latency budget. Only text turns can
+    // spend minutes working while their bridge waits for a final response.
+    if (request.trigger.kind === "voice_event") {
+      return CaptainChannelTurnResultSchema.parse(
+        await this.request<unknown>(path, {
+          method: "POST",
+          headers: this.captainHeaders(),
+          body: JSON.stringify(request),
+        }),
+      );
+    }
+    const submit = () =>
+      this.request<unknown>(path, {
+        method: "POST",
+        headers: { ...this.captainHeaders(), prefer: "respond-async" },
+        body: JSON.stringify(request),
+      });
+    let result = await submit();
+    while (result !== null && typeof result === "object" && "state" in result && result.state === "pending") {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const response = await this.fetchImpl(
+        new URL(`${path}/${encodeURIComponent(request.deliveryId)}`, this.baseUrl),
+        { headers: this.captainHeaders() },
+      );
+      if (response.status === 404) {
+        // A service restart forgot its in-memory turn. The stable delivery ID
+        // lets a new service resume through the bridge's durable inbox.
+        result = await submit();
+      } else {
+        if (!response.ok) throw new Error(`Clankie API ${response.status}: ${await response.text()}`);
+        result = await response.json();
+      }
+    }
     return CaptainChannelTurnResultSchema.parse(result);
   }
 

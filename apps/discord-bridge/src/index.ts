@@ -1440,8 +1440,8 @@ async function executeCaptainDiscordAction(
     };
   }
 
-  try {
-    return await executePlannedCaptainDiscordAction({
+  const execute = () =>
+    executePlannedCaptainDiscordAction({
       call: input,
       plan,
       guildId: admitted.guildId,
@@ -1452,6 +1452,11 @@ async function executeCaptainDiscordAction(
       presencePort,
       progressMessageIds: toolProgressMessageIds,
     });
+  try {
+    if (input.action === "send_text_update" && textInbox !== undefined) {
+      return await textInbox.postProgressOnce(input.messageId, channelId, execute);
+    }
+    return await execute();
   } catch (error) {
     return {
       ok: false,

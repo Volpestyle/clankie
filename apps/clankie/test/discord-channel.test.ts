@@ -49,6 +49,64 @@ describe("Discord channel turn routes", () => {
     expect(submissions).toBe(1);
   });
 
+  it("accepts a long text turn immediately and polls its result without starting it twice", async () => {
+    let finish!: (result: {
+      state: "settled";
+      captainSessionId: string;
+      turnId: string;
+      response: string;
+    }) => void;
+    let submissions = 0;
+    const { app } = await createClankieApp({
+      captain: createStubCaptain({
+        submitDiscordTurn: () => {
+          submissions += 1;
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        },
+      }),
+      authenticateCaptain: (request) =>
+        Promise.resolve(
+          request.headers.get("authorization") === "Bearer discord-captain"
+            ? { captainId: "discord-bridge", steerSourceLane: "discord_text" }
+            : request.headers.get("authorization") === "Bearer voice"
+              ? { captainId: "discord-voice", steerSourceLane: "discord_voice" }
+              : undefined,
+        ),
+    });
+    const request = turnRequest();
+    const submit = () =>
+      app.request("/v1/captain/channel-turns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer discord-captain",
+          prefer: "respond-async",
+        },
+        body: JSON.stringify(request),
+      });
+    const status = (authorization = "Bearer discord-captain") =>
+      app.request("/v1/captain/channel-turns/message-1", { headers: { authorization } });
+
+    const first = await submit();
+    const repeated = await submit();
+    expect(first.status).toBe(202);
+    await expect(first.json()).resolves.toEqual({ state: "pending" });
+    expect(repeated.status).toBe(202);
+    expect((await status()).status).toBe(202);
+    expect((await status("Bearer voice")).status).toBe(403);
+    expect(submissions).toBe(1);
+
+    finish({ state: "settled", captainSessionId: "session", turnId: "turn-1", response: "Done." });
+    await Promise.resolve();
+    const complete = await status();
+    expect(complete.status).toBe(200);
+    await expect(complete.json()).resolves.toMatchObject({ state: "settled", response: "Done." });
+    expect((await submit()).status).toBe(200);
+    expect(submissions).toBe(1);
+  });
+
   it("admits voice only from a Discord voice bridge identity and preserves text authority", async () => {
     const submitted: DiscordPresenceChannelTurnRequest[] = [];
     const { app } = await createClankieApp({

@@ -30,6 +30,39 @@ it("indexes both delivery identifiers when opening an existing inbox", () => {
   }
 });
 
+it("does not repeat a progress post after the turn or bridge restarts", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "clankie-progress-"));
+  const path = join(directory, "inbox.sqlite");
+  let inbox = new DiscordTextInbox(path, "0");
+  const post = vi.fn(async () => ({ ok: true, message: "Posted.", messageId: "progress-1" }));
+  try {
+    await expect(inbox.postProgressOnce("100", "room", post)).resolves.toMatchObject({
+      messageId: "progress-1",
+    });
+    inbox.close();
+    inbox = new DiscordTextInbox(path, "0");
+    await expect(inbox.postProgressOnce("100", "room", post)).resolves.toMatchObject({
+      messageId: "progress-1",
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+  } finally {
+    inbox.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("suppresses an uncertain progress post instead of risking a duplicate", async () => {
+  const inbox = new DiscordTextInbox(":memory:", "0");
+  const post = vi.fn().mockRejectedValueOnce(new Error("connection closed"));
+  try {
+    await expect(inbox.postProgressOnce("100", "room", post)).rejects.toThrow("connection closed");
+    await expect(inbox.postProgressOnce("100", "room", post)).resolves.toMatchObject({ ok: true });
+    expect(post).toHaveBeenCalledTimes(1);
+  } finally {
+    inbox.close();
+  }
+});
+
 const config: DiscordTextIngressConfig = {
   characterId: "clankie",
   credentialRef: "discord_bot",

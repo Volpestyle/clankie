@@ -8,6 +8,7 @@ import {
   CaptainChannelTurnResultSchema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteResultSchema,
+  type DiscordCaptainActionResult,
 } from "@clankie/protocol";
 
 interface Delivery {
@@ -38,6 +39,9 @@ export class DiscordTextInbox {
       CREATE TABLE IF NOT EXISTS deliveries (
         id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, guild_id TEXT,
         request TEXT, result TEXT, reply TEXT, done INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS progress_updates (
+        delivery_id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, message_id TEXT
       );
       CREATE INDEX IF NOT EXISTS deliveries_request_id
         ON deliveries(json_extract(request, '$.deliveryId'));
@@ -151,6 +155,9 @@ export class DiscordTextInbox {
         "DELETE FROM deliveries WHERE channel_id = ? AND done = 1 AND length(id) = length(?) AND id < ? AND id < ? AND NOT EXISTS (SELECT 1 FROM deliveries AS child WHERE child.done = 0 AND json_extract(child.result, '$.replyDeliveryId') = deliveries.id)",
       )
       .run(channelId, after, after, discordSnowflakeAt(Date.now() - 7 * 24 * 60 * 60_000));
+    this.db
+      .prepare("DELETE FROM progress_updates WHERE channel_id = ? AND delivery_id < ? AND delivery_id < ?")
+      .run(channelId, after, discordSnowflakeAt(Date.now() - 7 * 24 * 60 * 60_000));
   }
 
   channels(): readonly string[] {
@@ -175,6 +182,36 @@ export class DiscordTextInbox {
     this.db
       .prepare("INSERT OR IGNORE INTO deliveries (id, channel_id, guild_id) VALUES (?, ?, ?)")
       .run(id, channelId, guildId ?? null);
+  }
+
+  /** At most one optional progress post per Discord message, even if its turn is retried. */
+  async postProgressOnce(
+    deliveryId: string,
+    channelId: string,
+    post: () => Promise<DiscordCaptainActionResult>,
+  ): Promise<DiscordCaptainActionResult> {
+    const claimed = this.db
+      .prepare("INSERT OR IGNORE INTO progress_updates (delivery_id, channel_id) VALUES (?, ?)")
+      .run(deliveryId, channelId).changes;
+    if (claimed === 0) {
+      const saved = this.db
+        .prepare("SELECT message_id FROM progress_updates WHERE delivery_id = ? AND channel_id = ?")
+        .get(deliveryId, channelId);
+      if (saved === undefined) return { ok: false, message: "Progress update belongs to another channel." };
+      return {
+        ok: true,
+        message: "A progress update was already attempted for this message; keep working.",
+        ...(saved.message_id === null ? {} : { messageId: String(saved.message_id) }),
+      };
+    }
+    // Reserve before writing to Discord. If the write outcome is uncertain, a
+    // retry may omit an optional update, but cannot post it twice.
+    const result = await post();
+    if (result.messageId !== undefined)
+      this.db
+        .prepare("UPDATE progress_updates SET message_id = ? WHERE delivery_id = ?")
+        .run(result.messageId, deliveryId);
+    return result;
   }
 
   finish(id: string): void {

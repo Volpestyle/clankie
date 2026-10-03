@@ -42,7 +42,14 @@ describe("clankie app smoke", () => {
       expect((await clankie.app.request("/v1/swarm")).status).toBe(401);
       expect(reads).toBe(0);
       const response = await clankie.app.request("/v1/swarm", { headers: { authorization: "Bearer owner" } });
-      expect(await response.json()).toEqual({ mode: "swarm", conversations: [] });
+      expect(await response.json()).toEqual({
+        mode: "swarm",
+        conversations: [],
+        active: true,
+        enabled: true,
+        restartRequired: false,
+        connections: [],
+      });
       expect(reads).toBe(1);
     } finally {
       clankie.close();
@@ -87,7 +94,7 @@ describe("clankie app smoke", () => {
       }
     }
   });
-  it("qualifies both messages and worker stances by their source session", async () => {
+  it("qualifies messages, worker stances and work assignments by their source session", async () => {
     for (const runtime of ["bundled", "external"] as const) {
       const received: unknown[] = [];
       const binding = { runtime, session: "default", socketPath: "/tmp/chosen.sock" };
@@ -126,6 +133,24 @@ describe("clankie app smoke", () => {
         }
         expect(received).toHaveLength(1);
         expect(received[0]).toMatchObject({ op: "state_stance", stance: { herdrPaneId: "w1:p1" } });
+        for (const socket of [undefined, "/tmp/other.sock", binding.socketPath]) {
+          const response = await clankie.app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(socket ? { [HERDR_SOCKET_HEADER]: socket } : {}),
+            },
+            body: JSON.stringify({
+              op: "state_work",
+              schemaVersion: 1,
+              work: { herdrPaneId: "w1:p1", assignment: { objective: "Fix loading" } },
+            }),
+          });
+          expect(response.status).toBe(socket === binding.socketPath ? 200 : 409);
+        }
+        expect(received).toHaveLength(2);
+        expect(received[1]).toMatchObject({ op: "state_work", work: { herdrPaneId: "w1:p1" } });
+        received.splice(1);
         for (const socket of ["/tmp/other.sock", binding.socketPath]) {
           await clankie.app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
             method: "POST",

@@ -630,7 +630,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   >();
   const captainTurnResults = new Map<
     string,
-    { fingerprint: string; result: Promise<CaptainChannelTurnResult>; expiresAtMs: number }
+    {
+      fingerprint: string;
+      lane: "discord_text" | "discord_voice";
+      result: Promise<CaptainChannelTurnResult>;
+      settled?: CaptainChannelTurnResult;
+      rejected?: boolean;
+      expiresAtMs: number;
+    }
   >();
   /** A gateway redelivery must not run a channel round a second time (ADR 0146). */
   const channelProjectionResults = new Map<
@@ -1781,26 +1788,44 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const fingerprint = createHash("sha256").update(JSON.stringify(request)).digest("hex");
     pruneExpired(captainTurnResults, clock().getTime());
     const deliveryKey = `discord:${request.deliveryId}`;
-    const previous = captainTurnResults.get(deliveryKey);
+    let previous = captainTurnResults.get(deliveryKey);
+    if (previous?.settled?.state === "failed" || previous?.rejected === true) {
+      captainTurnResults.delete(deliveryKey);
+      previous = undefined;
+    }
     if (previous !== undefined && previous.fingerprint !== fingerprint) {
       return context.json({ error: "captain_turn_idempotency_conflict" }, 409);
     }
-    const turn =
-      previous?.result ??
-      (async () =>
-        CaptainChannelTurnResultSchema.parse(await dependencies.captain.submitDiscordTurn(request)))();
-    if (previous === undefined) {
-      captainTurnResults.set(deliveryKey, {
+    let record = previous;
+    if (record === undefined) {
+      const turn = Promise.resolve().then(async () =>
+        CaptainChannelTurnResultSchema.parse(await dependencies.captain.submitDiscordTurn(request)),
+      );
+      record = {
         fingerprint,
+        lane: expectedLane,
         result: turn,
         expiresAtMs: clock().getTime() + DELIVERY_RETENTION_MS,
-      });
+      };
+      captainTurnResults.set(deliveryKey, record);
+      const observed = record;
+      void turn.then(
+        (result) => {
+          observed.settled = result;
+        },
+        () => {
+          observed.rejected = true;
+        },
+      );
+    }
+    if (context.req.header("prefer") === "respond-async") {
+      if (record.rejected) return context.json({ error: "captain_channel_turn_failed" }, 502);
+      return record.settled === undefined
+        ? context.json({ state: "pending" }, 202)
+        : context.json(record.settled);
     }
     try {
-      const result = await turn;
-      if (result.state === "failed" && captainTurnResults.get(deliveryKey)?.result === turn) {
-        captainTurnResults.delete(deliveryKey);
-      }
+      const result = await record.result;
       logger.info(
         {
           correlationId: request.identity.correlationId,
@@ -1811,11 +1836,24 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
       return context.json(result);
     } catch {
-      if (captainTurnResults.get(deliveryKey)?.result === turn) {
-        captainTurnResults.delete(deliveryKey);
-      }
       return context.json({ error: "captain_channel_turn_failed" }, 502);
     }
+  });
+
+  /** A Discord bridge can wait for a long turn without keeping one HTTP request open. */
+  app.get("/v1/captain/channel-turns/:deliveryId", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    const record = captainTurnResults.get(`discord:${context.req.param("deliveryId")}`);
+    if (record === undefined) return context.json({ error: "captain_channel_turn_not_found" }, 404);
+    if (captain.steerSourceLane !== record.lane) {
+      return context.json({ error: "discord_channel_authority_required" }, 403);
+    }
+    if (record.rejected) return context.json({ error: "captain_channel_turn_failed" }, 502);
+    return record.settled === undefined
+      ? context.json({ state: "pending" }, 202)
+      : context.json(record.settled);
   });
 
   /**
@@ -3304,7 +3342,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         : dependencies.herdrRuntime?.() === undefined;
     if (!sameHerdrSession) {
       if (parsed.data.op === "send") delete parsed.data.turn.herdrPaneId;
-      if (parsed.data.op === "state_stance") {
+      if (parsed.data.op === "state_stance" || parsed.data.op === "state_work") {
         return context.json({ error: "herdr_session_mismatch" }, 409);
       }
     }

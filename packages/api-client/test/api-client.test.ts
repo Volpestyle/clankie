@@ -86,6 +86,97 @@ describe("ClankieApiClient live surface", () => {
     ).resolves.toMatchObject({ state: "settled", response: "Hi there." });
   });
 
+  it("polls a long Discord turn and resubmits its delivery after a service restart", async () => {
+    vi.useFakeTimers();
+    try {
+      let posts = 0;
+      let polls = 0;
+      const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+        if (init?.method === "POST") {
+          posts += 1;
+          expect(init.headers).toMatchObject({ prefer: "respond-async" });
+          return Response.json({ state: "pending" }, { status: 202 });
+        }
+        expect(String(input)).toBe("http://127.0.0.1:4310/v1/captain/channel-turns/message-1");
+        polls += 1;
+        return polls === 1
+          ? Response.json({ error: "captain_channel_turn_not_found" }, { status: 404 })
+          : Response.json({
+              state: "settled",
+              captainSessionId: "session",
+              turnId: "turn-1",
+              response: "Done.",
+            });
+      });
+      const client = new ClankieApiClient({
+        baseUrl: "http://127.0.0.1:4310",
+        fetchImpl,
+        captainToken: "captain-secret",
+      });
+      const result = client.submitDiscordCaptainChannelTurn({
+        schemaVersion: 1,
+        deliveryId: "message-1",
+        identity: {
+          presenceSessionId: "discord:dm:dm-1",
+          correlationId: "discord-message:message-1",
+          profileHash: "profile-1",
+          characterId: "clankie",
+          credentialRef: "discord_bot",
+          transportKind: "bot",
+        },
+        trigger: { kind: "dm", id: "message-1", channelId: "dm-1", actorId: "james", body: "hello" },
+        contextMessages: [],
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(result).resolves.toMatchObject({ state: "settled", response: "Done." });
+      expect(posts).toBe(2);
+      expect(polls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps voice channel turns on the direct request path", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(init?.headers).not.toMatchObject({ prefer: "respond-async" });
+      return Response.json({
+        state: "settled",
+        captainSessionId: "voice-session",
+        turnId: "voice-turn",
+        response: "Here.",
+      });
+    });
+    const client = new ClankieApiClient({
+      baseUrl: "http://127.0.0.1:4310",
+      fetchImpl,
+      captainToken: "captain-secret",
+    });
+    await expect(
+      client.submitDiscordCaptainChannelTurn({
+        schemaVersion: 1,
+        deliveryId: "utterance-1",
+        identity: {
+          presenceSessionId: "discord:voice:guild:channel",
+          correlationId: "discord-voice:utterance-1",
+          profileHash: "profile-1",
+          characterId: "clankie",
+          credentialRef: "discord_bot",
+          transportKind: "bot",
+        },
+        trigger: {
+          kind: "voice_event",
+          id: "utterance-1",
+          guildId: "guild",
+          channelId: "channel",
+          actorId: "james",
+          body: "hello",
+        },
+        contextMessages: [],
+      }),
+    ).resolves.toMatchObject({ state: "settled", response: "Here." });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("authenticates presence actions with the bridge's live session claim", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe("http://127.0.0.1:4310/v1/discord/presence-actions");
