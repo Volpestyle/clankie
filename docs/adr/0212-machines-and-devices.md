@@ -58,7 +58,9 @@ Herdr server or installs anything remotely.
 - CLI: `clankie machines`, `machines discover`, `machines add NAME --ssh HOST`,
   `machines remove NAME`, and `machines sessions NAME` to connect a discovered
   session. `herdr add/remove/fleets`, `runtime connect` and `agents hosts`
-  remain as aliases.
+  remain as aliases. `machines` and `herdr status` print a readable summary
+  by default and take `--json` for agents, like `devices`; `--help` names
+  these commands instead of the retired runtime vocabulary.
 - TUI: `/machines` replaces the Runtimes and Agent sessions sections of
   `/connections`: machines → sessions → connect, with discovered candidates
   listed first. `/herdr` keeps the default-fleet choice.
@@ -73,6 +75,28 @@ restart: the captain reads the fleet list through `runtimes.fleets()` per use
 instead of a startup snapshot. Changing the default binding still applies on
 restart, as ADR 0172 decides. Removing a machine never stops its workers or
 redirects existing work.
+
+**The console is the conversation; `clankie herdr` is the workspace.** `clankie`
+opens the operator console in the current terminal, in every runtime mode.
+Agents are visible inside it, the way Claude Code shows its subagents: a
+compact live strip lists each agent's name, state and current step, and one
+key expands an agent to its transcript or a live terminal tail (the stream of
+[ADR 0138](0138-terminal-truth-rides-the-operator-relay.md)) and lets the owner
+message it. `clankie herdr` with no arguments attaches the full Herdr
+workspace, as `clankie-herdr` already does; its status moves to
+`clankie herdr status`. The console never runs inside a Herdr it starts, so an
+owner who already uses Herdr never gets one Herdr inside another.
+
+**Onboarding never asks about Herdr.** A new install takes Clankie's own
+workspace (the bundled runtime, ADR 0157's default), and `/setup` keeps its one
+required question ([ADR 0190](0190-setup-asks-one-question-then-clankie-takes-over.md)).
+Only when `doctor` finds Herdr installed with running sessions does the setup
+checklist offer a row: keep his own workspace (recommended) or lead the
+owner's session, saying that leading it lets him see and message every pane
+in it. The first hire is where workers are introduced: the agent appears in
+the console strip, and he can mention `clankie herdr` in his own words. User
+text says "his workspace" or "your Herdr session", never bundled, external or
+runtime.
 
 **Later: `clankie join`.** A machine with no ssh route runs `clankie join`,
 shows a code, and dials out through the gateway like the Mac does — the third
