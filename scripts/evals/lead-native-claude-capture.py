@@ -36,6 +36,16 @@ def bounded_file(path, limit):
         os.close(fd)
 
 
+def bounded_names(path, limit):
+    names = []
+    with os.scandir(path) as entries:
+        for entry in entries:
+            if len(names) >= limit:
+                raise ValueError("directory inventory exceeds bound")
+            names.append(entry.name)
+    return names
+
+
 def process_row(pid, proc="/proc"):
     prefix = f"{proc}/{pid}"
     raw = bounded_file(prefix + "/stat", 4096).decode("ascii")
@@ -47,7 +57,7 @@ def process_row(pid, proc="/proc"):
 
 def verify_process(config, expected=None, proc="/proc"):
     rows = []
-    pids = [str(expected["pid"])] if expected else [p for p in os.listdir(proc) if p.isdecimal()]
+    pids = [str(expected["pid"])] if expected else [p for p in bounded_names(proc, 512) if p.isdecimal()]
     if len(pids) > 512:
         raise ValueError("process inventory exceeds bound")
     for pid in pids:
@@ -71,11 +81,23 @@ def verify_process(config, expected=None, proc="/proc"):
                     raise ValueError("native executable lifetime changed")
                 if not expected:
                     digest = hashlib.sha256()
-                    while True:
-                        chunk = os.read(fd, 65536)
-                        if not chunk:
-                            break
+                    deadline = time.monotonic() + 5
+                    total = 0
+                    while total < info.st_size:
+                        if time.monotonic() >= deadline:
+                            raise ValueError("native executable hash deadline exceeded")
+                        chunk = os.read(fd, min(65536, info.st_size - total))
+                        if time.monotonic() >= deadline or not chunk:
+                            raise ValueError("native executable hash lifetime changed")
+                        total += len(chunk)
+                        if total > info.st_size:
+                            raise ValueError("native executable hash exceeds byte bound")
                         digest.update(chunk)
+                    if time.monotonic() >= deadline:
+                        raise ValueError("native executable hash deadline exceeded")
+                    extra = os.read(fd, 1)
+                    if extra or time.monotonic() >= deadline:
+                        raise ValueError("native executable grew or hash expired")
                     if digest.hexdigest() != config["executableSha256"]:
                         continue
                 after = os.fstat(fd)
@@ -188,7 +210,7 @@ def snapshots(config):
             except FileNotFoundError:
                 return result, []
             try:
-                names = os.listdir(children)
+                names = bounded_names(children, MAX_CHILDREN)
                 if len(names) > MAX_CHILDREN:
                     raise ValueError("subagent inventory exceeds bound")
                 for name in sorted(names):

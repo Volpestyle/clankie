@@ -16,7 +16,8 @@ does not contain a Claude binary proof, so this seam remains unavailable until
 the actual Claude image/runtime capability is engineered and verified.
 
 A controller-supplied Python helper runs through the contained pipe. It selects
-one process by exact argv, session, cwd, config directory, pane, nonzero terminal,
+one process by kernel-observed exact argv, session, cwd, config directory, pane
+environment label, nonzero terminal,
 executable hash and PID/start ticks. The executable is hashed through its actual
 `/proc/PID/exe` descriptor; later checks retain the executable device/inode/size/
 ctime identity. It rejects PID reuse, changed argv/config/cwd, replaced executables,
@@ -24,6 +25,10 @@ headless selections and missing or ambiguous roots. Every hook uses Linux Unix
 socket peer credentials and a bounded ancestor chain to that root; all ancestor
 lifetimes are rechecked. Snapshots recheck the selected root around reads and
 before transmission. These are process observations, not account attestation.
+They do not prove that the selected Herdr pane launched or foregrounded Claude.
+The pane environment label is caller-controlled and is not pane membership or
+native-child authority. Owner attachment proves the owner-to-Herdr socket binding,
+not a Claude-to-pane binding.
 
 The root's model tools must still be proven unable to access control files,
 collector sockets and parent process descriptors by the future Claude runtime
@@ -69,7 +74,12 @@ resist an unrelated privileged host process or the owner modifying local storage
 Bounds: 64 KiB per hook, 1 MiB aggregate encoded hook input, 10,000 hooks, 16 MiB per
 transcript, 32 MiB per capture batch, 32 child files, 64 MiB cumulative retained raw
 snapshots, 8 MiB/20,000 journal records, one acknowledged protocol frame at a time,
-and a socket backlog of eight. Missing root proof after ten seconds, a stalled
+and a socket backlog of eight. Directory scans stop at the first entry over their
+cap (32 children or 512 process-directory entries), without materializing the
+remaining inventory. Initial executable hashing reads at most its initial size
+(up to 512 MiB) plus one growth-detection byte, checks a five-second deadline around
+each read, and rechecks descriptor size/ctime afterward. The deadline is checked
+between synchronous reads; the controller watchdog handles a stalled helper. Missing root proof after ten seconds, a stalled
 five-second helper heartbeat, failed owner proof, malformed frames, capacity loss
 or helper exit triggers and awaits exact container-wide stop. Failed stop receipts
 remain uncertain and cannot become a successful closure. A terminal partial batch
@@ -79,7 +89,8 @@ no callback relies on a model-written claim to keep collection alive.
 ## Remaining work
 
 Implement and verify the actual Claude image/control isolation capability, connect
-this seam to the manual native TUI runtime, establish effective hook configuration
+this seam to the manual native TUI runtime, add trusted selected native launch and
+foreground binding to the Herdr pane, establish effective hook configuration
 and process/path compatibility, and exercise live collection only after owner
 approval. Provider identity/quota observation, physical-request admission and native
 child/index routing remain separate missing engineering. Retained filesystem

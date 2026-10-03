@@ -508,3 +508,77 @@ it("a stalled helper heartbeat revokes capture even while the owner stays attach
     clock.mockRestore();
   }
 });
+it("stops inventory iteration at cap plus one without materializing full directories", () => {
+  expect(
+    pythonFixture(`
+from types import SimpleNamespace
+counts=[]
+class Scan:
+ def __init__(self,limit):self.limit=limit;self.count=0;counts.append(self)
+ def __enter__(self):return self
+ def __exit__(self,*args):return False
+ def __iter__(self):return self
+ def __next__(self):
+  self.count+=1
+  if self.count>self.limit+1:raise AssertionError('iterator read beyond bound')
+  return SimpleNamespace(name=str(self.count))
+def unbounded(*args):raise AssertionError('unbounded listdir materialization used')
+with mock.patch.object(os,'listdir',unbounded),mock.patch.object(os,'scandir',lambda path:Scan(512)):
+ try:m['verify_process']({},proc=str(root))
+ except ValueError:pass
+ else:raise AssertionError('oversized proc inventory accepted')
+assert counts[-1].count==513
+project=root/'projects'/'-eval-tasks-lead';children=project/'session'/'subagents';children.mkdir(parents=True);(project/'session.jsonl').write_bytes(b'root\\n');m['CONFIG']=str(root);m['MAX_CHILDREN']=2
+with mock.patch.object(os,'listdir',unbounded),mock.patch.object(os,'scandir',lambda path:Scan(2)):
+ try:m['snapshots']({'cwd':'/eval/tasks/lead','sessionId':'session'})
+ except ValueError:pass
+ else:raise AssertionError('oversized child inventory accepted')
+assert counts[-1].count==3
+print('ok')`),
+  ).toBe("ok");
+});
+const executableFixture = `
+proc=root/'proc';p=proc/'123';p.mkdir(parents=True);exe=root/'claude';exe.write_bytes(b'fake-ELF');cwd=root/'work';cwd.mkdir();m['EXECUTABLE']=str(exe)
+args=[str(exe),'--session-id','fixture'];config={'paneId':'w1:p1','cwd':str(cwd),'argv':args,'executableSha256':hashlib.sha256(exe.read_bytes()).hexdigest()}
+(p/'exe').symlink_to(exe);(p/'cwd').symlink_to(cwd);(p/'environ').write_bytes(b'HERDR_PANE_ID=w1:p1\\0CLAUDE_CONFIG_DIR=/eval/control/claude/config\\0');(p/'cmdline').write_bytes(('\\0'.join(args)+'\\0').encode())
+fields=['0']*20;fields[1]='1';fields[4]='7';fields[19]='99';(p/'stat').write_text('123 (fixture) '+' '.join(fields))
+`;
+it("bounds hashing when an executable keeps growing after its initial stat", () => {
+  expect(
+    pythonFixture(
+      executableFixture +
+        `
+read=os.read;exe_inode=exe.stat().st_ino;reads=0
+def growing_read(fd,count):
+ global reads
+ if os.fstat(fd).st_ino==exe_inode:
+  reads+=1
+  if reads>3:raise AssertionError('unbounded executable growth read')
+  data=read(fd,count)
+  with exe.open('ab') as out:out.write(b'growgrow')
+  return data
+ return read(fd,count)
+with mock.patch.object(os,'read',growing_read):
+ try:m['verify_process'](config,proc=str(proc))
+ except ValueError:pass
+ else:raise AssertionError('growing executable accepted')
+assert reads<=2
+print('ok')`,
+    ),
+  ).toBe("ok");
+});
+it("rejects executable hashing after its bounded lifetime without sleeping", () => {
+  expect(
+    pythonFixture(
+      executableFixture +
+        `
+clock=[0]
+def expired():clock[0]+=10;return clock[0]
+with mock.patch.object(m['time'],'monotonic',expired):
+ try:m['verify_process'](config,proc=str(proc))
+ except ValueError:pass
+ else:raise AssertionError('expired executable hash accepted')
+print('ok')`,
+    ),
+  ).toBe("ok");
+});
