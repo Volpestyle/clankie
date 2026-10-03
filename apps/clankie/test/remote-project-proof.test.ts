@@ -121,6 +121,13 @@ describe("remote project process proof", () => {
       },
     ],
     [
+      "same-millisecond later parent PID reuse",
+      (x: ReturnType<typeof fixture>) => {
+        x.processes[1]!.startTime = "2026-10-03T10:00:02.0000002Z";
+        x.processes[2]!.startTime = "2026-10-03T10:00:02.0000001Z";
+      },
+    ],
+    [
       "foreground shell",
       (x: ReturnType<typeof fixture>) => {
         x.info.foreground_process_group_id = 10;

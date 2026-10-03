@@ -39,6 +39,15 @@ interface Options {
   shell(fleet: HerdrFleet): FleetShellRun;
 }
 
+/** Preserve Windows FILETIME's 100 ns precision; Date.parse alone truncates it. */
+function creationTicks(value: string): bigint | undefined {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{1,7})Z$/u.exec(value);
+  if (!match) return undefined;
+  const seconds = Date.parse(`${match[1]}.000Z`);
+  if (!Number.isFinite(seconds)) return undefined;
+  return BigInt(seconds) * 10_000n + BigInt(match[2]!.padEnd(7, "0"));
+}
+
 /** Full live ancestry, including creation order. Missing/dead parents and PID reuse deny. */
 function ancestry(processes: readonly Process[], pid: number, shell: number): Process[] | undefined {
   const byPid = new Map(processes.map((process) => [process.pid, process]));
@@ -47,16 +56,18 @@ function ancestry(processes: readonly Process[], pid: number, shell: number): Pr
   let current = pid;
   while (current !== 0 && current !== 4) {
     const process = byPid.get(current);
+    const started = process && creationTicks(process.startTime);
+    const childStarted = chain.length > 0 ? creationTicks(chain.at(-1)!.startTime) : undefined;
     if (
       !process ||
       !Number.isSafeInteger(process.pid) ||
       process.pid <= 4 ||
       !Number.isSafeInteger(process.parent) ||
       process.parent < 0 ||
-      !Number.isFinite(Date.parse(process.startTime)) ||
+      started === undefined ||
       chain.length >= 64 ||
       chain.some((entry) => entry.pid === current) ||
-      (chain.length > 0 && Date.parse(process.startTime) > Date.parse(chain.at(-1)!.startTime))
+      (childStarted !== undefined && started > childStarted)
     )
       return undefined;
     chain.push(process);

@@ -16,6 +16,7 @@ public static class ClankieProcess {
   [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr handle, int kind, byte[] info, int length, out int needed);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool ReadProcessMemory(IntPtr handle, IntPtr address, byte[] data, int size, out IntPtr read);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetFileInformationByHandleEx(IntPtr handle, int kind, byte[] info, uint size);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern uint GetFinalPathNameByHandle(IntPtr handle, StringBuilder path, uint length, uint flags);
   [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] struct Entry {
     public uint size, usage, pid; public IntPtr heap; public uint module, threads, parent; public int priority; public uint flags;
@@ -78,6 +79,15 @@ public static class ClankieProcess {
     if (handle == new IntPtr(-1)) throw new Exception("Path unavailable");
     try { return HandlePath(handle); } finally { CloseHandle(handle); }
   }
+  public static string DirectoryCanonical(string path) {
+    IntPtr handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+    if (handle == new IntPtr(-1)) throw new Exception("Directory unavailable");
+    try {
+      byte[] info = new byte[40];
+      if (!GetFileInformationByHandleEx(handle, 0, info, 40) || (BitConverter.ToUInt32(info, 32) & 0x10) == 0) throw new Exception("Path is not a directory");
+      return HandlePath(handle);
+    } finally { CloseHandle(handle); }
+  }
   static string HandlePath(IntPtr handle) {
       var buffer = new StringBuilder(32768);
       uint length = GetFinalPathNameByHandle(handle, buffer, 32768, 0);
@@ -119,7 +129,7 @@ const native = `$ErrorActionPreference = 'Stop'\nif (-not ('ClankieProcess' -as 
 
 export function windowsCanonicalCommand(path: string): string {
   return powershellScriptCommand(
-    `${native}\n[ClankieProcess]::Canonical(${powershellLiteral(path)}) | ConvertTo-Json -Compress`,
+    `${native}\n[ClankieProcess]::DirectoryCanonical(${powershellLiteral(path)}) | ConvertTo-Json -Compress`,
   );
 }
 
@@ -200,7 +210,7 @@ $last = Observe-ClankieProcess
 }
 
 const gitReader = String.raw`
-foreach ($name in @('GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR','GIT_INDEX_FILE','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES')) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+foreach ($entry in @(Get-ChildItem Env: | Where-Object { $_.Name -like 'GIT_*' })) { Remove-Item -LiteralPath ('Env:' + $entry.Name) -ErrorAction Stop }
 $git = (Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 function Read-ClankieGit([string]$at, [string[]]$arguments) {
   $output = & $git -C $at @arguments 2>$null
@@ -211,14 +221,14 @@ function Read-ClankieGit([string]$at, [string[]]$arguments) {
 
 export function windowsGitWorktreeCommand(repoPath: string, cwd: string): string {
   return powershellScriptCommand(`${native}\n${gitReader}
-$cwd = [ClankieProcess]::Canonical(${powershellLiteral(cwd)})
-$repo = [ClankieProcess]::Canonical(${powershellLiteral(repoPath)})
-$top = [ClankieProcess]::Canonical((Read-ClankieGit $cwd @('rev-parse','--show-toplevel')).Trim())
-$gitDir = [ClankieProcess]::Canonical((Read-ClankieGit $cwd @('rev-parse','--absolute-git-dir')).Trim())
-$common = [ClankieProcess]::Canonical((Read-ClankieGit $cwd @('rev-parse','--path-format=absolute','--git-common-dir')).Trim())
-$repoTop = [ClankieProcess]::Canonical((Read-ClankieGit $repo @('rev-parse','--show-toplevel')).Trim())
+$cwd = [ClankieProcess]::DirectoryCanonical(${powershellLiteral(cwd)})
+$repo = [ClankieProcess]::DirectoryCanonical(${powershellLiteral(repoPath)})
+$top = [ClankieProcess]::DirectoryCanonical((Read-ClankieGit $cwd @('rev-parse','--show-toplevel')).Trim())
+$gitDir = [ClankieProcess]::DirectoryCanonical((Read-ClankieGit $cwd @('rev-parse','--absolute-git-dir')).Trim())
+$common = [ClankieProcess]::DirectoryCanonical((Read-ClankieGit $cwd @('rev-parse','--path-format=absolute','--git-common-dir')).Trim())
+$repoTop = [ClankieProcess]::DirectoryCanonical((Read-ClankieGit $repo @('rev-parse','--show-toplevel')).Trim())
 if ($repoTop -cne $repo) { throw 'Enrolled repository root changed' }
-$repoCommon = [ClankieProcess]::Canonical((Read-ClankieGit $repo @('rev-parse','--path-format=absolute','--git-common-dir')).Trim())
+$repoCommon = [ClankieProcess]::DirectoryCanonical((Read-ClankieGit $repo @('rev-parse','--path-format=absolute','--git-common-dir')).Trim())
 $gitFile = [ClankieProcess]::Canonical((Join-Path $top '.git'))
 $backlink = [IO.File]::ReadAllText((Join-Path $gitDir 'gitdir')).Trim()
 if (![IO.Path]::IsPathRooted($backlink)) { $backlink = Join-Path $gitDir $backlink }
@@ -234,11 +244,11 @@ $registered = @(foreach ($field in $ledger.Split([char]0)) {
 
 export function windowsWorktreeRootCommand(path: string, repoPath: string): string {
   return powershellScriptCommand(`${native}\n${gitReader}
-$root = [ClankieProcess]::Canonical(${powershellLiteral(path)})
-$repo = [ClankieProcess]::Canonical(${powershellLiteral(repoPath)})
-$repoTop = [ClankieProcess]::Canonical((Read-ClankieGit $repo @('rev-parse','--show-toplevel')).Trim())
+$root = [ClankieProcess]::DirectoryCanonical(${powershellLiteral(path)})
+$repo = [ClankieProcess]::DirectoryCanonical(${powershellLiteral(repoPath)})
+$repoTop = [ClankieProcess]::DirectoryCanonical((Read-ClankieGit $repo @('rev-parse','--show-toplevel')).Trim())
 if ($repoTop -cne $repo) { throw 'Not a repository root' }
-$common = [ClankieProcess]::Canonical((Read-ClankieGit $repo @('rev-parse','--path-format=absolute','--git-common-dir')).Trim())
-[ordered]@{path=$root;repoPath=$repo;commonDirectory=$common;homePath=[ClankieProcess]::Canonical($env:USERPROFILE)} | ConvertTo-Json -Compress
+$common = [ClankieProcess]::DirectoryCanonical((Read-ClankieGit $repo @('rev-parse','--path-format=absolute','--git-common-dir')).Trim())
+[ordered]@{path=$root;repoPath=$repo;commonDirectory=$common;homePath=[ClankieProcess]::DirectoryCanonical($env:USERPROFILE)} | ConvertTo-Json -Compress
 `);
 }
