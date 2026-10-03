@@ -107,7 +107,9 @@ it("still requires pi's durable session report within a bounded wait", async () 
     },
     closePane: vi.fn(async () => undefined),
   };
-  const store = new HerdrWatchStore(join(tmpdir(), "unused-pi-start-watch.json"), { runner });
+  const root = await mkdtemp(join(tmpdir(), "clankie-pi-session-wait-"));
+  roots.push(root);
+  const store = new HerdrWatchStore(join(root, "watches.json"), { runner });
   try {
     const pending = store.spawnSeat({
       schemaVersion: 1,
