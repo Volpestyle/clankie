@@ -79,7 +79,9 @@ async function includedSession(input: { bounded: boolean; extension: boolean }) 
   });
   const advertised = runtime.getModel("clankie", "default") as Model<Api>;
   const model = input.bounded ? boundedContextModel(advertised, {}) : advertised;
-  const settingsManager = SettingsManager.inMemory();
+  // Keep the synthetic image payloads intact so this exercises the byte guard
+  // even when the owner disables Pi's image resizing.
+  const settingsManager = SettingsManager.inMemory({ images: { autoResize: false } });
   const loader = new DefaultResourceLoader({
     cwd: dir,
     agentDir: dir,

@@ -14,7 +14,7 @@
     "@clankie/credential-broker": "workspace:*",
     "@clankie/protocol": "workspace:*",
     "@clankie/settings": "workspace:*",
-    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-coding-agent": "1.0.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@volpestyle/lead-skills": "file:../../vendor/volpestyle-lead-skills-0.1.2.tgz",
     "swarm-mcp": "file:../../vendor/swarm-mcp-2.0.0-rc.1.tgz",

@@ -1,9 +1,7 @@
 diff --git a/dist/modes/interactive/components/tool-execution.js b/dist/modes/interactive/components/tool-execution.js
-index 4273855bed8013448c7665a80a86f3d7543b0242..3e187f8ea897ce26238d51ab1f85a9fc961b97ad 100644
 --- a/dist/modes/interactive/components/tool-execution.js
 +++ b/dist/modes/interactive/components/tool-execution.js
-@@ -317,8 +317,14 @@ export class ToolExecutionComponent extends Container {
-             text += `\n\n${content}`;
+@@ -329,7 +329,13 @@
          }
          const output = this.getTextOutput();
          if (output) {

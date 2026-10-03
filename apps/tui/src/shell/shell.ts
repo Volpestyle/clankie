@@ -352,7 +352,7 @@ export class ClankieFaceShell {
       overscroll: "chain",
       primary: true,
       scrollbar: "auto",
-      scrollbarStyle: selectionBg,
+      scrollbarThumbStyle: selectionBg,
     });
     this.pendingPrompts = new ClankiePendingPrompts(this.theme.ansi);
     this.editor = new Editor(this.tui, this.theme.editorTheme, { autocompleteMaxVisible: 12 });

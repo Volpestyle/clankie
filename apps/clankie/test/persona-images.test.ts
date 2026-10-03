@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   createFauxCore,
   fauxAssistantMessage,
+  getCurrentSystemPrompt,
   InMemoryCredentialStore,
   type Api,
   type Context,
@@ -75,7 +76,10 @@ it.each(["operator", "discord_presence", "discord_voice"] as const)(
       baseUrl: "http://localhost:1",
       apiKey: "test",
       streamSimple: (model, context, options) => {
-        calls.push(structuredClone(context));
+        calls.push({
+          systemPrompt: getCurrentSystemPrompt(context.messages),
+          messages: structuredClone(context.messages.filter((message) => message.role !== "system")),
+        });
         return core.streamSimple(model, context, options);
       },
       models: [true, false].map((vision) => ({

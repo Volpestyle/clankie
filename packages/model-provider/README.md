@@ -41,6 +41,10 @@ Other providers keep Pi's explicit entries: aggregators can route models over
 different wire protocols that models.dev does not identify. Pi's own entry
 always wins where both catalogs know a model.
 
+The workspace pins Pi to `1.0.0`, which includes `gpt-6.1-sol` for OpenAI
+and OpenAI Codex. The patches declared in `pnpm-workspace.yaml` preserve
+collapsed tool-output previews and the TUI editor's inline completion text.
+
 ## config.ts — layered configuration
 
 `loadConfig()` reads the global file (`${XDG_CONFIG_HOME ?? ~/.config}/clankie/clankie.json`, via `globalConfigPath`) then the nearest repo `.clankie.json` walking up from `cwd` (`findRepoConfigPath`), and deep-merges repo over global: objects merge per key, arrays and scalars replace. It never throws — a file with invalid JSON or a failing schema becomes an entry in `issues` and is skipped.
