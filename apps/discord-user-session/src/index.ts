@@ -34,7 +34,6 @@ import {
   parseVoiceRealtimeEnv,
   routeDiscordRoomText,
   selectInboundImageAttachments,
-  VoiceIdleAutoLeave,
   voiceEvidenceReceiptData,
   voiceEvidenceReceiptType,
   tryHandleCaptainDiscordActionRequest,
@@ -422,35 +421,6 @@ if (startedPlayVoice !== undefined) {
     "Discord user-session play voice seam listening on loopback",
   );
 }
-
-const voiceIdleAutoLeave =
-  voiceSession === undefined || voiceConfig === undefined
-    ? undefined
-    : new VoiceIdleAutoLeave({
-        idleLeaveMs: voiceConfig.idleLeaveMs,
-        isActive: () => voiceSession.status().active,
-        leave: () =>
-          runVoiceOperation(async () => {
-            const guildId =
-              voiceSession.status().guildId ??
-              membership.targetFor("voice")?.guildId ??
-              membership.actualTarget?.guildId;
-            if (guildId === undefined || !(await leaveVoiceConfirmed(guildId))) {
-              throw new Error("discord_user_session_voice_leave_unconfirmed");
-            }
-          }),
-        onLeave: (idleMs) => {
-          console.info(
-            `Discord user-session voice idle for ${String(idleMs)}ms; leaving the metered channel.`,
-          );
-        },
-        onLeaveError: (error) => {
-          console.error(
-            { error: error instanceof Error ? error.message : String(error) },
-            "Discord user-session voice idle auto-leave failed to close the session",
-          );
-        },
-      });
 
 gatewayUnsubscribes.push(
   gateway.on("ready", (identity) => {
@@ -900,7 +870,6 @@ async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void
   });
   for (const event of roomEvidence) void voiceApi?.recordDiscordRoomEvidence(event).catch(() => undefined);
 
-  voiceIdleAutoLeave?.observe(evidence);
   if (evidence.type === "joined" || evidence.type === "left") {
     playVoiceListener?.publishRoom({ listening: evidence.type === "joined" });
   }
@@ -966,7 +935,6 @@ const shutdown = createUserSessionShutdown({
     for (const unsubscribe of lifecycleUnsubscribes.splice(0)) unsubscribe();
   },
   stopControls: async () => {
-    voiceIdleAutoLeave?.stop();
     controlServer?.close();
     stopPlayVoiceTranscript?.();
     stopPlayVoiceTranscript = undefined;

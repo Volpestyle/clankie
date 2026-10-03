@@ -255,7 +255,6 @@ export {
   type DiscordWebhookPostPlan,
 } from "./discord-rest.ts";
 export {
-  DEFAULT_VOICE_IDLE_LEAVE_MS,
   DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT,
   DEFAULT_VOICE_REALTIME_MODEL,
   DEFAULT_VOICE_REALTIME_PROVIDER,
@@ -265,11 +264,9 @@ export {
   DEFAULT_VOICE_TTS_PROVIDER,
   DEFAULT_XAI_VOICE_REALTIME_MODEL,
   DEFAULT_XAI_VOICE_REALTIME_VOICE,
-  MAX_VOICE_IDLE_LEAVE_MS,
   VOICE_REALTIME_PROVIDERS,
   VOICE_TTS_PROVIDERS,
   XAI_VOICE_REASONING_EFFORTS,
-  VoiceIdleAutoLeave,
   createVoiceRealtimePorts,
   createVoiceBriefingProvider,
   createVoiceLookAtScreenProvider,
@@ -278,7 +275,6 @@ export {
   voiceEvidenceReceiptData,
   voiceEvidenceReceiptType,
   type VoiceBriefingApiPort,
-  type VoiceIdleAutoLeaveOptions,
   type VoiceLookAtScreenApiPort,
   type VoiceRealtimeBaseEnvConfig,
   type VoiceRealtimeEnvConfig,

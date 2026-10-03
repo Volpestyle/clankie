@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { DiscordVoiceEvidence } from "@clankie/protocol";
 import {
   parseVoiceRealtimeEnv,
-  VoiceIdleAutoLeave,
   voiceEvidenceReceiptData,
   voiceEvidenceReceiptType,
-  type RealtimeTimers,
 } from "@clankie/discord-presence-core";
 import {
   describeVoiceResponse,
@@ -13,28 +10,6 @@ import {
   renderVoiceJoinDisclosure,
   renderVoiceStatusReply,
 } from "../src/voice-composition.ts";
-
-class TestTimers implements RealtimeTimers {
-  public readonly scheduled: { handle: number; delayMs: number; handler: () => void; cleared: boolean }[] =
-    [];
-  private nextHandle = 1;
-
-  public setTimeout(handler: () => void, delayMs: number): unknown {
-    const handle = this.nextHandle;
-    this.nextHandle += 1;
-    this.scheduled.push({ handle, delayMs, handler, cleared: false });
-    return handle;
-  }
-
-  public clearTimeout(handle: unknown): void {
-    const entry = this.scheduled.find((candidate) => candidate.handle === handle);
-    if (entry !== undefined) entry.cleared = true;
-  }
-
-  public armed(): { delayMs: number; handler: () => void }[] {
-    return this.scheduled.filter((candidate) => !candidate.cleared);
-  }
-}
 
 describe("realtime voice environment", () => {
   it("applies the documented defaults, with truncation always configured", () => {
@@ -48,7 +23,6 @@ describe("realtime voice environment", () => {
       truncationRetentionRatio: 0.7,
       postInstructionsTokenLimit: 12_000,
       decayWindowMs: 60_000,
-      idleLeaveMs: 900_000,
     });
   });
 
@@ -101,7 +75,6 @@ describe("realtime voice environment", () => {
       CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT: "20000",
       CLANKIE_VOICE_SESSION_LIFETIME_MS: "600000",
       CLANKIE_VOICE_DECAY_WINDOW_MS: "45000",
-      CLANKIE_VOICE_IDLE_LEAVE_MS: "300000",
     });
     expect(config.realtimeModel).toBe("gpt-realtime-2.1-mini");
     expect(config.transcribeModel).toBe("gpt-realtime-whisper-2");
@@ -112,19 +85,14 @@ describe("realtime voice environment", () => {
     expect(config.postInstructionsTokenLimit).toBe(20_000);
     expect(config.sessionLifetimeMs).toBe(600_000);
     expect(config.decayWindowMs).toBe(45_000);
-    expect(config.idleLeaveMs).toBe(300_000);
   });
 
-  it("rejects unbounded or disabled idle auto-leave", () => {
-    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_IDLE_LEAVE_MS: "0" })).toThrow(
-      /CLANKIE_VOICE_IDLE_LEAVE_MS/u,
+  it("retires the idle leave timer: leaving is his own voice_leave decision (ADR 0057)", () => {
+    // The timer counted only speech, so a quiet music session lost him mid-song.
+    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_IDLE_LEAVE_MS: "300000" })).toThrow(
+      /CLANKIE_VOICE_IDLE_LEAVE_MS.*voice_leave/u,
     );
-    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_IDLE_LEAVE_MS: "-1" })).toThrow(
-      /CLANKIE_VOICE_IDLE_LEAVE_MS/u,
-    );
-    expect(() => parseVoiceRealtimeEnv({ CLANKIE_VOICE_IDLE_LEAVE_MS: "999999999999" })).toThrow(
-      /CLANKIE_VOICE_IDLE_LEAVE_MS/u,
-    );
+    expect(parseVoiceRealtimeEnv({})).not.toHaveProperty("idleLeaveMs");
   });
 
   it("rejects out-of-range truncation so the session is never unbounded", () => {
@@ -274,99 +242,6 @@ describe("voice evidence receipts and the response line", () => {
     ).toBe(
       "voice turn (continuing, room, fast path): 500ms from response request to first audio, then 1000ms speaking",
     );
-  });
-});
-
-describe("idle auto-leave", () => {
-  function build(overrides: { isActive?: () => boolean } = {}) {
-    const timers = new TestTimers();
-    const leaves: number[] = [];
-    let leaveLogged: number | undefined;
-    const autoLeave = new VoiceIdleAutoLeave({
-      idleLeaveMs: 900_000,
-      isActive: overrides.isActive ?? (() => true),
-      leave: () => {
-        leaves.push(1);
-        return Promise.resolve();
-      },
-      onLeave: (idleMs) => {
-        leaveLogged = idleMs;
-      },
-      timers,
-    });
-    return { timers, leaves, autoLeave, leaveLogged: () => leaveLogged };
-  }
-
-  const evidence = (type: "joined" | "utterance" | "response" | "floor" | "left" | "volition") =>
-    ({
-      joined: { type: "joined", guildId: "1", channelId: "2", daveProtocolVersion: 1 },
-      utterance: {
-        type: "utterance",
-        guildId: "1",
-        channelId: "2",
-        userId: "3",
-        deliveryId: "d",
-        durationMs: 500,
-      },
-      response: {
-        type: "response",
-        guildId: "1",
-        channelId: "2",
-        deliveryId: "d",
-        state: "settled",
-        fastPath: true,
-        wake: "continuing",
-        toFirstAudioMs: 1,
-        handoffMs: 0,
-        playbackMs: 1,
-      },
-      floor: { type: "floor", guildId: "1", channelId: "2", state: "engaged", reason: "addressed" },
-      left: { type: "left", guildId: "1", channelId: "2" },
-      volition: { type: "volition", guildId: "1", channelId: "2", offered: 1, taken: 0, suppressed: 1 },
-    })[type] as DiscordVoiceEvidence;
-
-  it("arms on join, re-arms on activity, and leaves after the idle window", () => {
-    const { timers, leaves, autoLeave, leaveLogged } = build();
-    autoLeave.observe(evidence("joined"));
-    expect(timers.armed()).toHaveLength(1);
-    // Activity resets the timer rather than stacking a second one.
-    autoLeave.observe(evidence("utterance"));
-    autoLeave.observe(evidence("floor"));
-    autoLeave.observe(evidence("response"));
-    expect(timers.armed()).toHaveLength(1);
-    timers.armed()[0]?.handler();
-    expect(leaves).toHaveLength(1);
-    expect(leaveLogged()).toBe(900_000);
-  });
-
-  it("does not leave when the session is already inactive", () => {
-    const { timers, leaves, autoLeave } = build({ isActive: () => false });
-    autoLeave.observe(evidence("joined"));
-    timers.armed()[0]?.handler();
-    expect(leaves).toHaveLength(0);
-  });
-
-  it("disarms on left evidence and on stop, and ignores non-activity evidence", () => {
-    const { timers, autoLeave } = build();
-    autoLeave.observe(evidence("volition"));
-    expect(timers.armed()).toHaveLength(0);
-    autoLeave.observe(evidence("joined"));
-    autoLeave.observe(evidence("left"));
-    expect(timers.armed()).toHaveLength(0);
-    autoLeave.observe(evidence("joined"));
-    autoLeave.stop();
-    expect(timers.armed()).toHaveLength(0);
-  });
-
-  it("rejects a non-positive idle threshold", () => {
-    expect(
-      () =>
-        new VoiceIdleAutoLeave({
-          idleLeaveMs: 0,
-          isActive: () => true,
-          leave: () => Promise.resolve(),
-        }),
-    ).toThrow(/positive/u);
   });
 });
 

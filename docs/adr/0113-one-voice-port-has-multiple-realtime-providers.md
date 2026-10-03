@@ -72,7 +72,7 @@ contracts.
 - The xAI listener buffers only until `transcript.created`, bounded to five
   seconds of PCM, and zeroes buffered audio on send or close.
 - xAI Voice does not document OpenAI's explicit truncation controls. Session
-  lifetime, engagement hold, decay, and idle leave remain bounded locally;
+  lifetime, engagement hold, and decay remain bounded locally;
   readiness labels xAI context as provider-managed instead of claiming those
   OpenAI controls apply.
 - Live readiness probes the selected provider's listener and engaged agent.

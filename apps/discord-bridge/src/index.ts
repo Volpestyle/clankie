@@ -68,7 +68,6 @@ import {
   resolveDiscordReceiptPath,
   resolveOwnerFollowTarget,
   tryHandleVoicePresenceControlRequest,
-  VoiceIdleAutoLeave,
   voiceEvidenceReceiptData,
   voiceEvidenceReceiptType,
   type DiscordBridgeReceipt,
@@ -299,8 +298,8 @@ const client = new Client({
   partials: textIngressEnabled ? [Partials.Channel] : [],
 });
 let shuttingDown = false;
-// Validated at startup like the rest of the env: truncation and idle auto-leave
-// are always configured, never defaulted to unbounded (ADR 0057, mission T6).
+// Validated at startup like the rest of the env: truncation is always
+// configured, never defaulted to unbounded (ADR 0057, mission T6).
 const voiceRealtimeConfig = voiceEnabled ? parseVoiceRealtimeEnv(process.env) : undefined;
 const realtimeCredential =
   voiceRealtimeConfig === undefined
@@ -427,23 +426,6 @@ if (voiceSession !== undefined && voiceTranscriptStore !== undefined) {
   });
   console.info({ path: discordVoiceTranscriptLogPath() }, "Full Discord voice transcript logging enabled");
 }
-const voiceIdleAutoLeave =
-  voiceSession === undefined || voiceRealtimeConfig === undefined
-    ? undefined
-    : new VoiceIdleAutoLeave({
-        idleLeaveMs: voiceRealtimeConfig.idleLeaveMs,
-        isActive: () => voiceSession.status().active,
-        leave: () => voiceGateway?.leave() ?? voiceSession.leave(),
-        onLeave: (idleMs) => {
-          console.info(`Discord voice session idle for ${String(idleMs)}ms; leaving the metered channel.`);
-        },
-        onLeaveError: (error) => {
-          console.error(
-            { error: error instanceof Error ? error.message : String(error) },
-            "Discord voice idle auto-leave failed to close the session",
-          );
-        },
-      });
 // Clankie's play voice seam (ADR 0064): local or hosted play reports what it
 // just did, and the active Discord body lets his live persona decide whether to
 // commentate. No voice session means no listener and no Discord capability.
@@ -1736,12 +1718,9 @@ async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void
   for (const event of roomEvidence) void voiceApi?.recordDiscordRoomEvidence(event).catch(() => undefined);
 
   if (evidence.type === "left") pendingLeaseLeft = evidence;
-  // The idle auto-leave watches the same stream the receipts do, so "activity"
-  // is exactly what the evidence says happened.
-  voiceIdleAutoLeave?.observe(evidence);
   // Play authors for its own surfaces until it learns it has an audience
   // (ADR 0074). These two transitions are the whole of "is anyone listening",
-  // and they are already the authority the idle watcher trusts.
+  // and they are the authority the receipts already trust.
   if (evidence.type === "joined" || evidence.type === "left") {
     playVoiceListener?.publishRoom({ listening: evidence.type === "joined" });
   }
@@ -1766,7 +1745,6 @@ const shutdown = coalesceOnce(async (signal: NodeJS.Signals) => {
   await shutdownDiscordBridge({
     stopIngress: async () => {
       shuttingDown = true;
-      voiceIdleAutoLeave?.stop();
       if (membershipSyncTimer !== undefined) clearTimeout(membershipSyncTimer);
       if (catchUpTimer !== undefined) clearInterval(catchUpTimer);
       clearInterval(inboxTimer);

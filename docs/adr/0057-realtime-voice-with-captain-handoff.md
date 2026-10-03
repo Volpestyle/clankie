@@ -220,6 +220,9 @@ There is no empty-room grace timer or hours-alone leave backstop. The briefly
 implemented timer was rejected by James: context and tools belong to the body;
 the choice to leave belongs to Clankie. Existing idle listener and conversation
 expiry already bound unused provider sessions without forcing a departure.
+An older 15-minute no-speech leave timer (`CLANKIE_VOICE_IDLE_LEAVE_MS`) still
+forced departures and ignored music, so a quiet listening session lost him
+mid-song; it was removed on 2026-10-03 and the variable now fails startup.
 
 ### Evidence retained from implementation
 
@@ -260,8 +263,9 @@ room hears.
   `ask_clankie` under the live room instructions.
 - Audio residency and AI-generated speech must be disclosed to participants;
   local PCM remains memory-only.
-- Cost is session- and context-shaped, so listener caps, truncation, decay, and
-  idle leave are load-bearing operational controls.
+- Cost is session- and context-shaped, so listener caps and idle expiry,
+  truncation, decay, and the engaged-hold window are load-bearing operational
+  controls. None of them forces a departure.
 - Current model names, configuration, rates, readiness, live-proof ceremony,
   and receipt fields belong in the
   [Discord bridge operating guide](../../apps/discord-bridge/README.md).

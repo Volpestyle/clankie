@@ -30,8 +30,6 @@ export const DEFAULT_XAI_VOICE_REALTIME_MODEL = "grok-voice-think-fast-2.0";
 export const DEFAULT_XAI_VOICE_REALTIME_VOICE = "eve";
 export const DEFAULT_VOICE_TRUNCATION_RETENTION = 0.7;
 export const DEFAULT_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT = 12_000;
-export const DEFAULT_VOICE_IDLE_LEAVE_MS = 15 * 60_000;
-export const MAX_VOICE_IDLE_LEAVE_MS = 24 * 60 * 60_000;
 
 export interface VoiceRealtimeBaseEnvConfig {
   readonly realtimeProvider: VoiceRealtimeProvider;
@@ -44,7 +42,6 @@ export interface VoiceRealtimeBaseEnvConfig {
   readonly postInstructionsTokenLimit: number;
   readonly sessionLifetimeMs?: number;
   readonly decayWindowMs: number;
-  readonly idleLeaveMs: number;
 }
 
 export const VOICE_REALTIME_PROVIDERS = ["openai", "xai"] as const;
@@ -103,9 +100,6 @@ export function parseVoiceRealtimeBaseEnv(env: NodeJS.ProcessEnv): VoiceRealtime
     decayWindowMs:
       optionalIntegerEnv(env, "CLANKIE_VOICE_DECAY_WINDOW_MS", 1, Number.MAX_SAFE_INTEGER) ??
       DEFAULT_DECAY_WINDOW_MS,
-    idleLeaveMs:
-      optionalIntegerEnv(env, "CLANKIE_VOICE_IDLE_LEAVE_MS", 1, MAX_VOICE_IDLE_LEAVE_MS) ??
-      DEFAULT_VOICE_IDLE_LEAVE_MS,
   };
 }
 
@@ -170,6 +164,8 @@ const RETIRED_VOICE_ENV: Readonly<Record<string, string>> = {
   CLANKIE_VOICE_TTS_VOICE: "use CLANKIE_VOICE_REALTIME_VOICE",
   CLANKIE_VOICE_VOLITION_MODEL:
     "there is no separate volition model — his own realtime session decides whether to speak up",
+  CLANKIE_VOICE_IDLE_LEAVE_MS:
+    "there is no idle leave timer — he leaves a call with his own voice_leave tool (ADR 0057)",
 };
 
 export interface VoiceRealtimeEnvConfig extends VoiceRealtimeBaseEnvConfig {
@@ -400,67 +396,6 @@ export function createVoiceLookAtScreenProvider(
     if (still.outcome === "pending") return { outcome: "pending" };
     return { outcome: "not_playing" };
   };
-}
-
-export interface VoiceIdleAutoLeaveOptions {
-  readonly idleLeaveMs: number;
-  readonly isActive: () => boolean;
-  readonly leave: () => Promise<void>;
-  readonly onLeave?: (idleMs: number) => void;
-  readonly onLeaveError?: (error: unknown) => void;
-  readonly timers?: RealtimeTimers;
-}
-
-const globalTimers: RealtimeTimers = {
-  setTimeout: (handler, delayMs) => setTimeout(handler, delayMs),
-  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-};
-
-export class VoiceIdleAutoLeave {
-  private readonly options: VoiceIdleAutoLeaveOptions;
-  private readonly timers: RealtimeTimers;
-  private handle: unknown;
-
-  public constructor(options: VoiceIdleAutoLeaveOptions) {
-    if (!Number.isSafeInteger(options.idleLeaveMs) || options.idleLeaveMs <= 0) {
-      throw new Error("Voice idle auto-leave threshold must be a positive number of milliseconds");
-    }
-    this.options = options;
-    this.timers = options.timers ?? globalTimers;
-  }
-
-  public observe(evidence: DiscordVoiceEvidence): void {
-    switch (evidence.type) {
-      case "joined":
-      case "utterance":
-      case "text_input":
-      case "response":
-      case "floor":
-        this.arm();
-        return;
-      case "left":
-        this.stop();
-        return;
-      default:
-        return;
-    }
-  }
-
-  public stop(): void {
-    if (this.handle === undefined) return;
-    this.timers.clearTimeout(this.handle);
-    this.handle = undefined;
-  }
-
-  private arm(): void {
-    this.stop();
-    this.handle = this.timers.setTimeout(() => {
-      this.handle = undefined;
-      if (!this.options.isActive()) return;
-      this.options.onLeave?.(this.options.idleLeaveMs);
-      void this.options.leave().catch((error: unknown) => this.options.onLeaveError?.(error));
-    }, this.options.idleLeaveMs);
-  }
 }
 
 export function voiceEvidenceReceiptType(evidence: DiscordVoiceEvidence): DiscordBridgeReceiptType {
