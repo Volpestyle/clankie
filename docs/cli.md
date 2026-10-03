@@ -1933,6 +1933,38 @@ development-channels dialog but then rejects `server:` as not on the approved
 allowlist. The service's hire path persists the server and passes the dangerous
 flag for a claude seat.
 
+### `mcp --fleet`: local owner-granted tools
+
+Register `clankie mcp --fleet` in Codex with `env_vars = ["HERDR_PANE_ID",
+"HERDR_SOCKET_PATH"]`, or install the `clankie-worker@clankie` Claude plugin.
+Generated or symlinked Codex configuration belongs to its source manager: inspect
+`doctor.harnessBridges.codex.configSource` and change that source, never append to
+or replace the runtime symlink. Hired local Codex seats receive a launch-only
+registration even when their selected account uses another `CODEX_HOME`.
+
+On macOS, a separate loopback listener verifies the actual TCP client's process
+against the live pane in Clankie's connected local Herdr session. The pane ID is
+a hint, not a credential. Private hired Codex app-servers use the service's live
+process-to-pane registry. Shared Codex daemon MCP processes cannot prove which
+pane owns them: exit and restart the pane's Codex under the existing
+`daemon_auto_start=false` configuration. Local process proof on other platforms
+is not implemented; SSH fleet links keep their existing authentication.
+
+The owner grants `default` through `clankie access fleet default linear --tool
+get_issue` (repeat `--tool` for the needed tools); `clankie access list` inspects
+those grants, and `clankie access revoke ID` revokes them immediately, including
+on existing MCP sessions. Tools and argument restrictions are checked on every
+call against the same connected account. Fleet grants are standing until revoked
+as in VUH-1527; they are not short-lived bearer grants. MCP sessions expire after
+15 minutes idle and reinitialize while membership and grants remain valid.
+No bearer or provider credential is written to the local discovery file.
+
+`doctor.harnessBridges` separates Claude installation/enabling, Codex registration
+and its config source, shared-daemon ancestry, and the invoking process's live
+local membership probe. A successful probe does not imply a grant exists. Run
+`access list` to inspect owner grants. Installer output offers the explicit
+harness registration commands; it never enables a plugin or grants tools itself.
+
 ### `access` and `mcp --grant FILE`
 
 `clankie access linear [verify]` reads or verifies the connected account.

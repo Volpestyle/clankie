@@ -395,6 +395,7 @@ export interface ClankieAppDependencies {
    * fleet seat routes for that fleet's panes and nothing else.
    */
   fleetLinks?: { authenticate(token: string): string | undefined };
+  localFleet?: { identity(request: Request): { pane: string; validate(): Promise<boolean> } | undefined };
   /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
   prepareFleet?: (id: string) => Promise<unknown>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
@@ -970,6 +971,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // A linked fleet's agents use the tools granted to that fleet (VUH-1527).
   // The link token is the identity; it names exactly one fleet.
   app.all("/v1/fleet/mcp", async (context) => {
+    const local = dependencies.localFleet?.identity(context.req.raw);
+    if (local && dependencies.workerMcp)
+      return dependencies.workerMcp.handleLocalFleet(context.req.raw, local);
     const header = context.req.header("authorization");
     const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
     const fleet = token === undefined ? undefined : dependencies.fleetLinks?.authenticate(token);
@@ -1181,6 +1185,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     context: Context,
   ): Promise<{ readonly paneId: string } | { readonly denial: Response }> => {
     const raw = context.req.param("paneId") ?? "";
+    const local = dependencies.localFleet?.identity(context.req.raw);
+    if (local)
+      return local.pane === raw && (await local.validate())
+        ? { paneId: raw }
+        : { denial: context.json({ error: "local_pane_required" }, 403) };
     const header = context.req.header("authorization");
     const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
     const fleet = token === undefined ? undefined : dependencies.fleetLinks?.authenticate(token);

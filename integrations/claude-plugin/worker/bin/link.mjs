@@ -20,7 +20,7 @@ function normalSocket(path) {
 
 /**
  * The link for the Herdr session this pane is in, when this machine has one;
- * a Mac running Clankie itself never does. One machine can host several of
+ * including Clankie’s own local fleet. One machine can host several of
  * his fleets, one per Herdr session, so the pane's own HERDR_SOCKET_PATH
  * chooses among ~/.clankie/links/*.json.
  */
@@ -39,12 +39,12 @@ export function readLink(socket = process.env.HERDR_SOCKET_PATH) {
       })
       .filter(
         (link) =>
-          link?.schemaVersion === 1 &&
+          (link?.schemaVersion === 1 ||
+            (link?.schemaVersion === 2 && link.authentication === "local-process")) &&
           typeof link.fleet === "string" &&
           typeof link.socket === "string" &&
           /^http:\/\/127\.0\.0\.1:\d{1,5}$/u.test(String(link.url)) &&
-          typeof link.token === "string" &&
-          link.token.length >= 32,
+          (link.schemaVersion === 2 || (typeof link.token === "string" && link.token.length >= 32)),
       );
   } catch {
     return undefined;
@@ -69,7 +69,9 @@ export function seatRoute(link, paneId, route) {
 }
 
 export function authorization(link) {
-  return { authorization: `Bearer ${link.token}` };
+  return link.authentication === "local-process"
+    ? { "x-clankie-pane": process.env.HERDR_PANE_ID?.trim() ?? "" }
+    : { authorization: `Bearer ${link.token}` };
 }
 
 /** The command line of a process's parent: `ps` where it exists, PowerShell on Windows. */

@@ -77,6 +77,12 @@ describe("canonical owner command layer", () => {
       credentials: [],
       commands: {},
       herdrPlugin: { bundled: false },
+      harnessBridges: {
+        codex: { registered: false, configPath: "/config", configSource: "/config" },
+        claude: { installed: false, enabled: false },
+        localFleet: { platform: "darwin", membership: "no-link", sharedDaemon: false, detail: "missing" },
+        remediation: [],
+      },
       laneTools: { url: "http://127.0.0.1:4310/v1/mcp", reachable: true },
       doorway: { state: "connected" },
       power: {

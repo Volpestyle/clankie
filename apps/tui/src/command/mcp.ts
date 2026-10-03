@@ -20,7 +20,8 @@
  *
  * stdout is the wire. Nothing here may print to it except JSON-RPC.
  */
-import { execFile as execFileCallback } from "node:child_process";
+import { join } from "node:path";
+import { execFile as execFileCallback, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -53,7 +54,8 @@ import { commandHost } from "./io.ts";
 import { runWorkerMcp } from "./worker-mcp.ts";
 
 const execFileAsync = promisify(execFileCallback);
-const MCP_USAGE = "Usage: clankie mcp [--lane operator [--conversation ID] | --seat | --grant FILE]";
+const MCP_USAGE =
+  "Usage: clankie mcp [--lane operator [--conversation ID] | --seat | --fleet | --grant FILE]";
 const FLEET_CHANNEL_SERVER = `server:${FLEET_SEAT_MCP_SERVER}`;
 /** A hired seat's worker plugin channel (VUH-1458), approved under `--channels`. */
 const WORKER_CHANNEL_PLUGIN = `plugin:${CLAUDE_WORKER_PLUGIN_ID}`;
@@ -102,6 +104,7 @@ export interface LaneToolUpstream {
 type FleetMailboxUpstream = Pick<LaneToolUpstream, "pollEvents" | "close">;
 
 export interface McpCommandOptions {
+  readonly repoRoot?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly host?: string;
   readonly operatorCredentialStore?: CredentialStore;
@@ -125,10 +128,12 @@ export interface McpCommandOptions {
 
 export type McpArgs =
   | { readonly lane: CaptainSessionLaneV2; readonly conversationId?: string }
+  | { readonly fleet: true }
   | { readonly seat: true }
   | { readonly grantFile: string };
 
 export function parseMcpArgs(args: readonly string[]): McpArgs {
+  if (args.length === 1 && args[0] === "--fleet") return { fleet: true };
   if (args.length === 2 && args[0] === "--grant" && args[1]?.trim()) return { grantFile: args[1] };
   let conversationId: string | undefined;
   let seat = false;
@@ -667,6 +672,22 @@ export async function runMcpCommand(
   options: McpCommandOptions = {},
 ): Promise<number> {
   const parsed = parseMcpArgs(args);
+  if ("fleet" in parsed) {
+    if (!options.repoRoot) throw new Error("Fleet MCP requires the installed Clankie root");
+    const parent = await (options.readParentArgv ?? defaultReadParentArgv)().catch(() => undefined);
+    return await new Promise<number>((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [join(options.repoRoot!, "integrations/claude-plugin/worker/bin/fleet-mcp.mjs")],
+        {
+          stdio: "inherit",
+          env: { ...(options.env ?? process.env), CLANKIE_SEAT_PARENT_ARGV: parent ?? "" },
+        },
+      );
+      child.once("error", reject);
+      child.once("exit", (code) => resolve(code ?? 1));
+    });
+  }
   if ("grantFile" in parsed) return runWorkerMcp(parsed.grantFile, options.transport);
   if ("seat" in parsed) return runFleetSeatMcp(options);
 

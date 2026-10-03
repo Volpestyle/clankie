@@ -97,3 +97,32 @@ channel remains. James's independent Swarm fleet and installs are unaffected.
   session APIs. Independent linked agents can initiate messages to Clankie.
 - Fenced task claims between agents go away in phase 3. Work ownership already
   lives in the tracker.
+
+## Local fleet authority (VUH-1548)
+
+The VUH-1527 fleet grant also covers `default`, Clankie's connected local Herdr
+session, including owner-started agents. It stays scoped to the selected tools
+and account and standing until owner revocation. The original short-lived-worker
+goal uses short-lived bearer grants for individual workers; this fleet path
+instead rechecks membership and grants on every request/tool call, with a
+15-minute idle MCP session lease. It does not silently turn a fleet grant into a
+renewable individual bearer.
+
+On macOS the separate local loopback listener derives the client PID from its
+actual TCP tuple using `lsof`, then checks bounded `ps` ancestry against the live
+Herdr pane shell. It checks the configured binding, open socket and tuple again
+before admitting a request. Private hired Codex app-server PIDs are associated
+with their allocated pane by the service at spawn, including pending startup;
+release, failure and exit revoke that mapping. Process/pane IDs claimed by a
+caller confer nothing. Unsupported platforms and shared-daemon Codex processes
+fail closed. This protects against forged local HTTP/env claims, not malicious
+code already controlling the same OS account, Herdr or the service files.
+
+Only that listener may place a request identity into the in-memory WeakMap read
+by the application. A temporary per-request proof stays inside the service and
+binds MCP sessions to one pane; no credential is delivered to the worker. The
+local discovery JSON holds only socket and loopback URL. The SSH fleet path
+continues to use its owner-readable session link token; neither path exports the
+operator bearer or connected provider credentials. The local listener forwards
+only worker MCP and exact-pane mailbox/hook/message routes. Tool execution
+continues through the credential broker and the existing live fleet-grant checks.

@@ -133,3 +133,17 @@ a new session does not inherit it. Keep transient actions in `clankie stance`
 notes. Local Codex `/goal` state appears automatically, including paused,
 blocked, budget/usage limits and completion. Remote or unsupported native goal
 stores remain unknown. Goal state and busy/idle turn status are independent.
+
+## Agents in the local fleet
+
+`doctor.harnessBridges` reports the worker bridge separately from the operator
+seat: Claude plugin installation/enabling, Codex registration and generated config
+source, and live local process membership. Use `clankie mcp --fleet` for the
+owner-granted tools. Missing tools do not authorize an operator-lane fallback or
+another account's Linear connector. Ask the lead/owner to inspect `access list`
+and grant only the needed tools with `access fleet default SERVER --tool NAME`.
+Fleet grants persist until revoked; `access revoke ID` removes them from running
+sessions too. Local discovery carries no bearer. Outward-facing sends still need
+the owner's instruction; the connection identity remains Clankie's connected
+account. A shared Codex app-server daemon cannot prove its pane; restart Codex in
+the pane under the existing daemon-disabled config, then check doctor again.

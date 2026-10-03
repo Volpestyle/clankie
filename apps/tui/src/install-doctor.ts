@@ -18,6 +18,7 @@ import {
   type LoadConfigResult,
 } from "@clankie/model-provider";
 import { bundledSkills, SettingsStore, defaultSettingsPath, type ClankieSettings } from "@clankie/settings";
+import { inspectHarnessBridges } from "./harness-doctor.ts";
 import { commandHost } from "./command/io.ts";
 import { probeHealth, type GatewayDoorwayReport } from "./command/gateway.ts";
 import { nextStepLine } from "./next-step.ts";
@@ -95,6 +96,7 @@ export interface InstallDoctorReport {
   readonly credentials: readonly InstallDoctorCredential[];
   readonly commands: { readonly [name: string]: CommandPresence };
   readonly herdrPlugin: HerdrPluginReport;
+  readonly harnessBridges: Awaited<ReturnType<typeof inspectHarnessBridges>>;
   /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
   readonly laneTools: { readonly url: string; readonly reachable: boolean };
   /** The live public doorway (ADR 0151): whether the phone can reach him at all. */
@@ -260,6 +262,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     credentials,
     commands,
     herdrPlugin,
+    harnessBridges: await inspectHarnessBridges(env, execute, options.fetchImpl ?? fetch),
     laneTools,
     doorway,
     power,

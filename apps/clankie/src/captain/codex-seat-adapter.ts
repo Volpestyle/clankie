@@ -30,6 +30,8 @@ const object = (value: unknown): Record<string, unknown> =>
 export function createCodexSeatAdapter(
   options: {
     start?: typeof startCodexAppServerSeat;
+    /** Service-owned process identity; returned cleanup revokes its local fleet access. */
+    localProcess?: (pid: number, pane: string) => () => void;
     herdr?: (args: readonly string[]) => Promise<unknown>;
     trackerOverrides?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<string[]>;
     server?: CodexServerLauncher;
@@ -59,6 +61,7 @@ export function createCodexSeatAdapter(
       let state: SeatStatus = "idle";
       let latest: SeatEvent = { type: "turn_completed", at: new Date().toISOString(), ok: true };
       let closed = false;
+      let releaseProcess: (() => void) | undefined;
       let reporting: Promise<unknown> = Promise.resolve();
       const waiters = new Set<(event: SeatEvent) => void>();
       const report = () => {
@@ -116,6 +119,7 @@ export function createCodexSeatAdapter(
           state = "blocked";
           settlement = { type: "blocked", at, reason: event.method };
         } else if (event.method === "connection/closed") {
+          releaseProcess?.();
           state = "offline";
           settlement = {
             type: "exited",
@@ -141,6 +145,7 @@ export function createCodexSeatAdapter(
       const close = async () => {
         if (closed) return;
         closed = true;
+        releaseProcess?.();
         startupAbort.abort(new Error("Codex native pane closed"));
         clearInterval(monitor);
         if (ref) controls.delete(ref.sessionId);
@@ -155,8 +160,21 @@ export function createCodexSeatAdapter(
             launch.cwd,
             launch.env,
           );
+          // A private local app-server needs the same worker bridge even when its
+          // selected account has no user-scoped MCP registration. This grants no tools.
+          if (options.localProcess)
+            trackerOverrides.push(
+              "mcp_servers.clankie.enabled=true",
+              'mcp_servers.clankie.command="clankie"',
+              'mcp_servers.clankie.args=["mcp","--fleet"]',
+              'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH"]',
+            );
           seat = await (options.start ?? startCodexAppServerSeat)({
             cwd: launch.cwd,
+            onServerStarted: (pid) => {
+              releaseProcess = options.localProcess?.(pid, view.paneId);
+            },
+            onServerStopped: () => releaseProcess?.(),
             signal: startupSignal,
             onThreadPending: () => {
               pendingReported = true;

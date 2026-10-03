@@ -320,6 +320,7 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  mcp [--lane operator] [--conversation ID] Serve Clankie's lane tool bank over stdio for a seated harness",
       "  mcp --seat               Serve a fleet pane's message channel over stdio (no tools)",
+      "  mcp --fleet              Serve owner-granted fleet tools through the process-authenticated local or SSH link",
       "  mcp --grant FILE         Serve only a worker's granted connected tools over stdio",
     ],
   },

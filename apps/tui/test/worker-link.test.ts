@@ -13,6 +13,7 @@ interface Seen {
   readonly method: string;
   readonly path: string;
   readonly authorization: string | undefined;
+  readonly pane: string | undefined;
   readonly body: string;
 }
 
@@ -30,7 +31,13 @@ async function fakeService() {
     request.on("data", (chunk: Buffer) => (body += String(chunk)));
     request.on("end", () => {
       const path = new URL(request.url ?? "/", "http://x").pathname;
-      seen.push({ method: request.method ?? "", path, authorization: request.headers.authorization, body });
+      seen.push({
+        method: request.method ?? "",
+        path,
+        authorization: request.headers.authorization,
+        pane: request.headers["x-clankie-pane"] as string | undefined,
+        body,
+      });
       response.setHeader("content-type", "application/json");
       if (path === "/v1/fleet/mcp") {
         // The fleet's granted tools, as Clankie's worker endpoint answers them.
@@ -85,12 +92,16 @@ async function fakeService() {
 const SOCKET = "/tmp/herdr-pc-default.sock";
 
 /** A linked machine's home: this fleet's link, and another session's beside it. */
-async function linkedHome(url: string): Promise<string> {
+async function linkedHome(url: string, local = false): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "clankie-link-home-"));
   await mkdir(join(home, ".clankie", "links"), { recursive: true });
   await writeFile(
     join(home, ".clankie", "links", "pc.json"),
-    JSON.stringify({ schemaVersion: 1, fleet: "pc", socket: SOCKET, url, token: TOKEN }),
+    JSON.stringify(
+      local
+        ? { schemaVersion: 2, fleet: "default", socket: SOCKET, url, authentication: "local-process" }
+        : { schemaVersion: 1, fleet: "pc", socket: SOCKET, url, token: TOKEN },
+    ),
   );
   await writeFile(
     join(home, ".clankie", "links", "kh2.json"),
@@ -106,16 +117,18 @@ async function linkedHome(url: string): Promise<string> {
 }
 
 describe("the worker plugin on a linked machine (VUH-1527)", () => {
-  it("serves the seat channel and message_clankie over the link, without the clankie CLI", async () => {
+  it.each(["ssh", "local"])("serves the seat channel and granted tools through the %s link", async (kind) => {
     const service = await fakeService();
-    const home = await linkedHome(service.url);
+    const home = await linkedHome(service.url, kind === "local");
+    const authorization = kind === "local" ? undefined : `Bearer ${TOKEN}`;
+    const bridge = kind === "local" ? "fleet-mcp.mjs" : "swarm-mcp.mjs";
     // The shim reads its parent's command line, as it reads Claude's in a real
     // launch; this parent carries the approved channel flag.
     const parent = spawn(
       process.execPath,
       [
         "-e",
-        `require("node:child_process").spawn(process.execPath, [${JSON.stringify(join(bin, "swarm-mcp.mjs"))}], { stdio: "inherit" }).on("exit", (c) => process.exit(c ?? 0))`,
+        `require("node:child_process").spawn(process.execPath, [${JSON.stringify(join(bin, bridge))}], { stdio: "inherit" }).on("exit", (c) => process.exit(c ?? 0))`,
         "--",
         "--channels",
         "plugin:clankie-worker@clankie",
@@ -163,7 +176,7 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     expect(
       service.seen
         .filter((request) => request.path === "/v1/fleet/mcp")
-        .every((r) => r.authorization === `Bearer ${TOKEN}`),
+        .every((r) => r.authorization === authorization && (kind !== "local" || r.pane === "w8:p3")),
     ).toBe(true);
     write({
       id: 3,
@@ -178,11 +191,11 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     expect(message).toMatchObject({
       method: "POST",
       path: "/v1/fleet/seats/w8%3Ap3/messages",
-      authorization: `Bearer ${TOKEN}`,
+      authorization,
     });
     expect(JSON.parse(message!.body)).toEqual({ schemaVersion: 1, text: "Blocked on X" });
     expect(service.seen.find((request) => request.path.endsWith("/events"))?.authorization).toBe(
-      `Bearer ${TOKEN}`,
+      authorization,
     );
   });
 

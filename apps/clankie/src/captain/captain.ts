@@ -519,6 +519,8 @@ export function resolveOperatorPrompt(
 export interface CaptainOptions {
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
+  readonly localCodexProcess?: (pid: number, pane: string) => () => void;
+  readonly localCodexSocket?: () => string | undefined;
   readonly personaImages?: PersonaImageSource;
   /** Repo root: instructions.md lives here, skills are discovered here. */
   readonly repoRoot: string;
@@ -879,7 +881,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }),
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
     ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
-    seatAdapters: options.seatAdapters ?? [createCodexSeatAdapter(), claudeWorkerSeats],
+    seatAdapters: options.seatAdapters ?? [
+      createCodexSeatAdapter(
+        options.localCodexProcess === undefined
+          ? {}
+          : {
+              localProcess: options.localCodexProcess,
+              viewEnv: async (view) => ({
+                HERDR_PANE_ID: view.paneId,
+                HERDR_SOCKET_PATH: options.localCodexSocket?.() ?? "",
+              }),
+            },
+      ),
+      claudeWorkerSeats,
+    ],
     // Remote seats get native channels too (VUH-1527): Codex its own app-server
     // over the fleet's ssh, Claude the worker plugin over the fleet's link.
     ...(deps.fleets?.shell === undefined

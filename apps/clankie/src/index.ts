@@ -68,6 +68,9 @@ import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
+import { LocalCodexSeats } from "./local-codex-seats.ts";
+import { LocalFleetLink } from "./local-fleet-link.ts";
+import { localFleetProof } from "./local-fleet-proof.ts";
 import { FleetLinks, fleetLinkFetch } from "./fleet-link.ts";
 import { prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
@@ -534,6 +537,17 @@ const workItems = createWorkItemsService({
 // detection is only wired where both hold.
 const computerUseHarnesses =
   hostedBody === undefined && process.platform === "darwin" ? cachedComputerUseHarnesses() : undefined;
+const localFleetBinding = async () => {
+  const current = (await settingsStore.load()).herdr;
+  const original = startupSettings.herdr;
+  // Changing the configured local session revokes the old link before restart.
+  return current.runtime === original.runtime &&
+    current.session === original.session &&
+    current.socketPath === original.socketPath
+    ? herdr.binding()
+    : undefined;
+};
+const localCodexSeats = new LocalCodexSeats(herdr.binding);
 const captain = createCaptain(
   {
     workItems,
@@ -719,6 +733,8 @@ const captain = createCaptain(
     resolveDiscordAttachments: createDiscordAttachmentResolver(),
   },
   {
+    localCodexSocket: () => herdr.binding()?.socketPath,
+    localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
     repoRoot,
     ...(startupSettings.captain.workingDirectory === undefined
       ? {}
@@ -770,7 +786,17 @@ const fleetLinks = new FleetLinks({
   log: (message) => logger.info({ event: "fleet.link" }, message),
 });
 runtimes.linkStatus = (fleet) => fleetLinks.status(fleet);
+const localFleet = new LocalFleetLink({
+  directory: join(homedir(), ".clankie", "links"),
+  binding: localFleetBinding,
+  prove: localFleetProof({
+    binding: localFleetBinding,
+    herdrBinary: "herdr",
+    privateSeat: async (chain, pane, binding) => localCodexSeats.allows(chain, pane, binding),
+  }),
+});
 const clankie = await createClankieApp({
+  localFleet,
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   accounts: createAccounts({
     store: operatorCredentialStore,
@@ -934,6 +960,15 @@ if (publicGatewayConnector !== undefined) {
   if (server.listening) publicGatewayConnector.start();
   else server.once("listening", () => publicGatewayConnector?.start());
 }
+const localFleetServer =
+  process.platform === "darwin" && herdr.available()
+    ? serve({ fetch: localFleet.fetch(clankie.app.fetch), port: 0, hostname: "127.0.0.1" })
+    : undefined;
+localFleetServer?.once("listening", () => {
+  const address = localFleetServer.address();
+  if (address && typeof address === "object")
+    void localFleet.publish(address.port).catch(() => logger.warn("Local fleet discovery unavailable"));
+});
 const fleetLinkServer =
   herdrFleets.length === 0
     ? undefined
@@ -969,6 +1004,8 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
   deviceDoorway?.close();
+  void localFleet.close().catch(() => undefined);
+  localFleetServer?.close();
   fleetLinks.close();
   fleetLinkServer?.close();
   server.close();

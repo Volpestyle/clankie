@@ -275,31 +275,53 @@ export class WorkerMcp {
     });
   }
 
-  /**
-   * A linked fleet's agents (VUH-1527): the fleet's live grants, through the
-   * fleet's link. `linked` re-checks the link token on every request, so a
-   * restarted or replaced link refuses at once.
-   */
+  /** Per-request proofs live only in service memory, never in HTTP responses or worker files. */
+  private readonly localRequests = new Map<string, { pane: string; validate(): Promise<boolean> }>();
+
+  async handleLocalFleet(
+    request: Request,
+    identity: { pane: string; validate(): Promise<boolean> },
+  ): Promise<Response> {
+    const proof = randomUUID();
+    this.localRequests.set(proof, identity);
+    const headers = new Headers(request.headers);
+    headers.set("authorization", `Bearer ${proof}`);
+    try {
+      return await this.handleAuthorized(new Request(request, { headers }), async (token) => {
+        const current = this.localRequests.get(token);
+        if (!current || !(await current.validate())) throw new Error("Local fleet membership unavailable");
+        return this.fleetAuthorization("default", `local:${current.pane}`);
+      });
+    } finally {
+      this.localRequests.delete(proof);
+    }
+  }
+
+  /** A link and every grant are checked afresh for each request and each tool call. */
   async handleFleet(fleet: string, request: Request, linked: (token: string) => boolean): Promise<Response> {
     return this.handleAuthorized(request, async (token) => {
       if (!linked(token)) throw new Error("Not this fleet's link");
-      const records: GrantRecord[] = [];
-      for (const record of await this.list()) {
-        if (record.fleet !== fleet || record.revokedAt !== undefined) continue;
-        try {
-          await this.checkBinding(record);
-          records.push(record);
-        } catch {
-          /* Unavailable grants confer no tools. */
-        }
-      }
-      return {
-        key: fleetPrincipalKey(fleet),
-        principalId: `fleet:${fleet}`,
-        records,
-        expiresAt: Math.floor(Date.now() / 1000) + 900,
-      };
+      return this.fleetAuthorization(fleet);
     });
+  }
+
+  private async fleetAuthorization(fleet: string, pane?: string): Promise<WorkerAuthorization> {
+    const records: GrantRecord[] = [];
+    for (const record of await this.list()) {
+      if (record.fleet !== fleet || record.revokedAt !== undefined) continue;
+      try {
+        await this.checkBinding(record);
+        records.push(record);
+      } catch {
+        /* Unavailable grants confer no tools. */
+      }
+    }
+    return {
+      key: `${fleetPrincipalKey(fleet)}${pane === undefined ? "" : `:${pane}`}`,
+      principalId: pane ?? `fleet:${fleet}`,
+      records,
+      expiresAt: Math.floor(Date.now() / 1000) + 900,
+    };
   }
 
   private async handleAuthorized(
@@ -317,7 +339,7 @@ export class WorkerMcp {
     }
     const id = request.headers.get("mcp-session-id");
     for (const [sessionId, session] of this.sessions) {
-      if (sessionId !== id && session.expiresAt <= Date.now() / 1000) {
+      if (session.expiresAt <= Date.now() / 1000) {
         this.sessions.delete(sessionId);
         await session.server.close();
       }

@@ -31,3 +31,14 @@ const onPath = (process.env.PATH ?? "").split(":").includes(binDirectory);
 if (!onPath) {
   console.log(`Note: ${binDirectory} is not on your PATH; add it in your shell profile.`);
 }
+
+// Registration remains an explicit owner step; never append to a generated harness config.
+console.log("Optional: expose owner-granted fleet tools to your own harnesses:");
+console.log(`  claude plugin marketplace add ${root}/integrations/claude-plugin`);
+console.log("  claude plugin install clankie-worker@clankie --scope user");
+console.log(
+  "  Codex: register command clankie, args [mcp, --fleet], forwarding HERDR_PANE_ID and HERDR_SOCKET_PATH through your configuration's source manager.",
+);
+console.log(
+  "Run clankie doctor to inspect harnessBridges and the actual Codex configSource before changing registration.",
+);
