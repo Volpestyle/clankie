@@ -723,6 +723,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
        * any other remote brief still fails without terminal input.
        */
       readonly remoteSeatAdapters?: (fleet: string) => readonly HarnessSeatAdapter[];
+      /** `codex queue` on a remote fleet's machine, for its Codex sessions he did not start. */
+      readonly remoteCodexQueue?: (fleet: string, sessionId: string, text: string) => Promise<boolean>;
       /** Include every configured Herdr server on the same exact SSH destination. */
       readonly resumeInventory?: (fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>;
     } = {},
@@ -750,7 +752,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
             }
             return adapters;
           };
-    this.seatControl = createFleetSeatControl(this.runner, this.seatAdapters, this.remoteSeatAdapters);
+    this.seatControl = createFleetSeatControl(
+      this.runner,
+      this.seatAdapters,
+      this.remoteSeatAdapters,
+      options.remoteCodexQueue,
+    );
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
     this.seatTranscriptTailMs = options.seatTranscriptTailMs ?? SEAT_TRANSCRIPT_TAIL_MS;

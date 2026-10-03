@@ -152,6 +152,33 @@ tools or seat channels. The endpoint must use HTTPS or loopback HTTP; remote
 workers need a reachable HTTPS endpoint at issuance. Never place grants or
 provider credentials in issue comments, Swarm messages or shared transcripts.
 
+## Fleet access
+
+A fleet is one Herdr session Clankie is connected to, here or on a linked
+machine ([ADR 0212](adr/0212-machines-and-devices.md), VUH-1527). Membership is
+the binding: every agent in that session, hired or not, holds the fleet's grants
+through the `clankie-worker` bridge over the fleet's link.
+
+```sh
+clankie access fleet kh2 linear                     # the server's worker-safe tools
+clankie access fleet kh2 linear --tool get_issue --tool save_comment
+clankie access revoke GRANT_ID
+```
+
+- With no `--tool`, the grant takes every tool Clankie's connected account
+  exposes on that server, except worker publishing, which must name the persona
+  it writes as. Calls go out as his connected account, with the fleet recorded
+  as the delegated principal.
+- No bearer is issued or printed. The fleet's link token is the identity, and it
+  reaches only that fleet; another fleet's link sees none of its grants.
+- A fleet grant does not expire. Each list and call rechecks the live grant and
+  the connected account, and revocation takes the tools away within a minute
+  (the bridge refreshes its list and tells the session it changed).
+- Claude sessions load the bridge as the worker plugin. Codex sessions on that
+  machine load it as the `clankie` MCP server that `clankie herdr prepare`
+  registers, inheriting the pane's `HERDR_PANE_ID` and `HERDR_SOCKET_PATH`;
+  a session started before that registration needs a restart.
+
 ## Boundaries and limits
 
 - Tokens expire after at most 900 seconds. With `renewable: true`, the worker

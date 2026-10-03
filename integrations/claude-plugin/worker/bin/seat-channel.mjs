@@ -5,7 +5,9 @@
 // - a Claude Code channel carrying messages for this pane, polled only when
 //   the session that started it approved this plugin's channel;
 // - one tool, message_clankie, for writing to him first. He reads it as this
-//   agent's output, never as the owner's instruction.
+//   agent's output, never as the owner's instruction;
+// - the tools the owner granted this fleet (`clankie access fleet`), such as
+//   Linear through his connected account, proxied to his service over the link.
 //
 // MCP's stdio transport is newline-delimited JSON-RPC 2.0; this speaks the few
 // methods a channel server needs, so nothing beyond Node is installed here.
@@ -34,13 +36,87 @@ const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0
 const log = (line) => process.stderr.write(`clankie-worker: ${line}\n`);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The tools the owner granted this fleet (`clankie access fleet`), from
+ * Clankie's service over the link: a minimal streamable-HTTP MCP client,
+ * because nothing beyond Node is installed here. Each call is still checked
+ * there against the live grant and his connected account.
+ */
+function fleetTools(link) {
+  const url = new URL("/v1/fleet/mcp", link.url);
+  let session;
+  let sequence = 0;
+  const headers = () => ({
+    ...authorization(link),
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    ...(session === undefined ? {} : { "mcp-session-id": session }),
+  });
+  const post = async (body) => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ jsonrpc: "2.0", ...body }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (body.method === "initialize") session = response.headers.get("mcp-session-id") ?? undefined;
+    if (response.status === 404) session = undefined;
+    if (!response.ok) throw new Error(`fleet tools answered ${String(response.status)}`);
+    if (body.id === undefined) return undefined;
+    const reply = await response.json();
+    if (reply.error) throw new Error(reply.error.message ?? "fleet tools refused");
+    return reply.result;
+  };
+  const open = async () => {
+    await post({
+      id: ++sequence,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "clankie-worker", version: "0.3.0" },
+      },
+    });
+    await post({ method: "notifications/initialized" });
+  };
+  const request = async (method, params) => {
+    if (session === undefined) await open();
+    try {
+      return await post({ id: ++sequence, method, params });
+    } catch (error) {
+      if (session !== undefined) throw error;
+      // The service forgot this session (it restarted): one fresh session, one retry.
+      await open();
+      return post({ id: ++sequence, method, params });
+    }
+  };
+  return {
+    async list() {
+      try {
+        return (await request("tools/list", {}))?.tools ?? [];
+      } catch {
+        return [];
+      }
+    },
+    call: (name, args) => request("tools/call", { name, arguments: args ?? {} }),
+  };
+}
+
 export function runSeatChannel({ paneId, parentArgv }) {
   const link = readLink();
-  if (!link) {
-    log("no link to Clankie for this Herdr session (HERDR_SOCKET_PATH); is it one of his fleets?");
-    process.exit(1);
-  }
-  const polling = paneId && approvesWorkerChannel(parentArgv);
+  // A session outside his linked fleets (a Codex config loads this server
+  // everywhere) serves no tools rather than failing every launch.
+  if (!link) log("no link to Clankie for this Herdr session (HERDR_SOCKET_PATH); serving no tools");
+  const granted = link
+    ? fleetTools(link)
+    : {
+        list: async () => [],
+        call: async () => {
+          throw new Error("no link");
+        },
+      };
+  let grantedNames = "";
+  const polling = link && paneId && approvesWorkerChannel(parentArgv);
   let started = false;
   let closed = false;
 
@@ -111,12 +187,20 @@ export function runSeatChannel({ paneId, parentArgv }) {
         id,
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
-          capabilities: { tools: {}, experimental: { "claude/channel": {} } },
+          capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
           serverInfo: { name: "clankie-worker", version: "0.3.0" },
           instructions: INSTRUCTIONS,
         },
       });
     if (method === "notifications/initialized") {
+      // A grant issued or revoked while this session runs changes its tools.
+      setInterval(async () => {
+        const names = (await granted.list()).map((tool) => tool.name).join(",");
+        if (names !== grantedNames) {
+          grantedNames = names;
+          send({ method: "notifications/tools/list_changed" });
+        }
+      }, 60_000).unref();
       if (polling && !started) {
         started = true;
         log(`serving the seat channel for pane ${paneId}`);
@@ -125,15 +209,31 @@ export function runSeatChannel({ paneId, parentArgv }) {
       return;
     }
     if (method === "ping") return send({ id, result: {} });
-    if (method === "tools/list") return send({ id, result: { tools: [MESSAGE_TOOL] } });
+    if (method === "tools/list") {
+      const tools = await granted.list();
+      grantedNames = tools.map((tool) => tool.name).join(",");
+      return send({ id, result: { tools: link ? [MESSAGE_TOOL, ...tools] : [] } });
+    }
     if (method === "tools/call") {
-      if (params?.name !== MESSAGE_TOOL.name)
-        return send({ id, error: { code: -32602, message: `Unknown tool ${String(params?.name)}` } });
-      const result = await messageClankie(params?.arguments?.text);
-      return send({
-        id,
-        result: { content: [{ type: "text", text: result.text }], isError: result.isError },
-      });
+      if (params?.name === MESSAGE_TOOL.name) {
+        const result = await messageClankie(params?.arguments?.text);
+        return send({
+          id,
+          result: { content: [{ type: "text", text: result.text }], isError: result.isError },
+        });
+      }
+      try {
+        return send({ id, result: await granted.call(params?.name, params?.arguments) });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return send({
+          id,
+          result: {
+            content: [{ type: "text", text: `Clankie's service refused ${String(params?.name)}: ${reason}` }],
+            isError: true,
+          },
+        });
+      }
     }
     if (id !== undefined)
       send({ id, error: { code: -32601, message: `Method not found: ${String(method)}` } });

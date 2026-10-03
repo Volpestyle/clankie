@@ -27,6 +27,8 @@ export interface FleetPrepareResult {
   readonly plugin: string;
   readonly marketplace: string;
   readonly policy: { readonly path: string; readonly changed: boolean };
+  /** Codex agents there reach the same bridge as an MCP server; false when Codex is absent. */
+  readonly codex: { readonly registered: boolean; readonly changed: boolean };
 }
 
 const MARKETPLACE_DIR = ".clankie/claude-plugin";
@@ -182,6 +184,43 @@ function installCommand(fleet: HerdrFleet): string {
       );
 }
 
+/**
+ * The same bridge for Codex agents on that machine, which load no Claude
+ * plugins: an MCP server named `clankie` in its Codex config, inheriting the
+ * pane's Herdr identity so it finds its session's link. Added once; Codex's
+ * own entry is left alone if the owner already has one.
+ */
+function registerCodexCommand(fleet: HerdrFleet): string {
+  const env = '["HERDR_PANE_ID", "HERDR_SOCKET_PATH"]';
+  return fleet.ssh.shell === "powershell"
+    ? powershellScriptCommand(
+        [
+          "$ErrorActionPreference = 'Stop'",
+          "if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { Write-Output 'absent'; exit 0 }",
+          "$home_ = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }",
+          "New-Item -ItemType Directory -Force $home_ | Out-Null",
+          "$config = Join-Path $home_ 'config.toml'",
+          "$current = if (Test-Path -LiteralPath $config) { [IO.File]::ReadAllText($config) } else { '' }",
+          `if ($current -match '(?m)^\\[\\s*(mcp_servers\\.clankie|"mcp_servers"\\."clankie")\\s*\\]') { Write-Output 'present'; exit 0 }`,
+          `$bridge = Join-Path $env:USERPROFILE ${powershellLiteral(`${MARKETPLACE_DIR.replaceAll("/", "\\")}\\worker\\bin\\swarm-mcp.mjs`)}`,
+          `$table = [Environment]::NewLine + '[mcp_servers.clankie]' + [Environment]::NewLine + 'command = "node"' + [Environment]::NewLine + "args = ['" + $bridge + "']" + [Environment]::NewLine + 'env_vars = ${env}' + [Environment]::NewLine`,
+          "[IO.File]::AppendAllText($config, $table, (New-Object Text.UTF8Encoding $false))",
+          "Write-Output 'added'",
+        ].join("; "),
+      )
+    : posixScriptCommand(
+        [
+          "set -e",
+          "command -v codex >/dev/null 2>&1 || { echo absent; exit 0; }",
+          'config="${CODEX_HOME:-$HOME/.codex}/config.toml"',
+          'mkdir -p "$(dirname "$config")"',
+          `if [ -f "$config" ] && grep -Eq '^\\[[[:space:]]*(mcp_servers\\.clankie|"mcp_servers"\\."clankie")[[:space:]]*\\]' "$config"; then echo present; exit 0; fi`,
+          `printf '\\n[mcp_servers.clankie]\\ncommand = "node"\\nargs = ["%s"]\\nenv_vars = ${env}\\n' "$HOME/${MARKETPLACE_DIR}/worker/bin/swarm-mcp.mjs" >> "$config"`,
+          "echo added",
+        ].join("\n"),
+      );
+}
+
 const LIST_COMMAND = (fleet: HerdrFleet) =>
   fleet.ssh.shell === "powershell"
     ? powershellScriptCommand("& claude plugin list --json 2>$null")
@@ -250,11 +289,13 @@ export async function prepareFleet(
         `Could not write ${path} on ${fleet.id}; the ssh account must be that machine's administrator (${error instanceof Error ? error.message : String(error)})`,
       );
     });
+  const codex = (await options.shell(registerCodexCommand(fleet), 60_000)).trim().split(/\r?\n/u).at(-1);
   return {
     fleet: fleet.id,
     plugin: CLAUDE_WORKER_PLUGIN_ID,
     marketplace,
     policy: { path, changed: approved.changed },
+    codex: { registered: codex === "added" || codex === "present", changed: codex === "added" },
   };
 }
 

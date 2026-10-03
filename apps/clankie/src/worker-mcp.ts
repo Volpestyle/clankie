@@ -45,18 +45,31 @@ const ToolRuleSchema = z
     forbiddenArguments: z.array(z.string().min(1).max(128)).max(64).default([]),
   })
   .strict();
+const FleetIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u);
 export const WorkerGrantRequestSchema = z
   .object({
     principalId: z.string().min(1).max(256),
     workId: z.string().min(1).max(256),
     server: z.string().min(1).max(128),
-    tools: z.array(ToolRuleSchema).min(1).max(64),
+    /** Empty only for a fleet grant, which then takes the server's whole worker-safe set. */
+    tools: z.array(ToolRuleSchema).max(64),
     ttlSeconds: z.number().int().min(1).max(900).default(900),
     swarm: SwarmAssignmentSchema.optional(),
+    /**
+     * Every agent in that fleet (one Herdr session Clankie is connected to)
+     * holds this grant over the fleet's link until it is revoked (VUH-1527).
+     * Membership is the binding: no bearer is delivered and none expires.
+     */
+    fleet: FleetIdSchema.optional(),
     renewable: z.boolean().default(false),
   })
   .strict()
-  .refine((value) => !value.renewable || value.swarm !== undefined, "Renewal requires a Swarm assignment");
+  .refine((value) => !value.renewable || value.swarm !== undefined, "Renewal requires a Swarm assignment")
+  .refine(
+    (value) => value.fleet === undefined || value.swarm === undefined,
+    "A grant binds a fleet or a Swarm task, not both",
+  )
+  .refine((value) => value.tools.length > 0 || value.fleet !== undefined, "Name at least one tool");
 const RecordSchema = z.object({
   grant: CapabilityGrantSchema,
   server: z.string(),
@@ -65,6 +78,7 @@ const RecordSchema = z.object({
   account: ProviderAccountSchema,
   revokedAt: z.string().datetime().optional(),
   swarm: SwarmBindingSchema.optional(),
+  fleet: FleetIdSchema.optional(),
   renewable: z.boolean().default(false),
 });
 type GrantRecord = z.infer<typeof RecordSchema>;
@@ -79,6 +93,7 @@ const uuid = z.string().uuid();
 const KEY_ID = "clankie_worker_mcp_signing";
 const swarmPrincipalKey = (scope: string, actor: string, connectionId?: string) =>
   JSON.stringify(["swarm", connectionId ?? "embedded", scope, actor]);
+const fleetPrincipalKey = (fleet: string) => JSON.stringify(["fleet", fleet]);
 
 /** Immutable grants plus a durable revocation marker; only the service writes them. */
 export class WorkerMcp {
@@ -166,6 +181,16 @@ export class WorkerMcp {
       request.swarm === undefined ? undefined : await this.assignment(request.swarm, request.principalId);
     const { account, binding } = await this.options.host.account(request.server, "operator");
     const catalog = await this.options.host.catalog("operator");
+    if (request.tools.length === 0)
+      // A fleet's standing access: the server's tools, minus worker publishing,
+      // which must name the persona it writes as.
+      request.tools = catalog
+        .filter(
+          (tool) =>
+            tool.server === request.server && !(request.server === "linear" && isLinearWorkerTool(tool.name)),
+        )
+        .map((tool) => ({ name: tool.name, arguments: {}, forbiddenArguments: [] }));
+    if (request.tools.length === 0) throw new Error(`No tools are available on ${request.server}`);
     if (new Set(request.tools.map((tool) => tool.name)).size !== request.tools.length)
       throw new Error("Tool names must be unique");
     for (const rule of request.tools) {
@@ -186,6 +211,7 @@ export class WorkerMcp {
       account,
       renewable: request.renewable,
       ...(swarm === undefined ? {} : { swarm }),
+      ...(request.fleet === undefined ? {} : { fleet: request.fleet }),
       grant: {
         version: 1,
         grantId: randomUUID(),
@@ -208,8 +234,13 @@ export class WorkerMcp {
   }
 
   private async notify(record: GrantRecord) {
-    if (!record.swarm) return;
-    const key = swarmPrincipalKey(record.swarm.scope, record.grant.principalId, record.swarm.connectionId);
+    const key =
+      record.fleet !== undefined
+        ? fleetPrincipalKey(record.fleet)
+        : record.swarm !== undefined
+          ? swarmPrincipalKey(record.swarm.scope, record.grant.principalId, record.swarm.connectionId)
+          : undefined;
+    if (key === undefined) return;
     await Promise.all(
       [...this.sessions.values()]
         .filter((session) => session.principalKey === key)
@@ -390,6 +421,33 @@ export class WorkerMcp {
         principalId: identity.actor,
         records,
         expiresAt: now + 900,
+      };
+    });
+  }
+
+  /**
+   * A linked fleet's agents (VUH-1527): the fleet's live grants, through the
+   * fleet's link. `linked` re-checks the link token on every request, so a
+   * restarted or replaced link refuses at once.
+   */
+  async handleFleet(fleet: string, request: Request, linked: (token: string) => boolean): Promise<Response> {
+    return this.handleAuthorized(request, async (token) => {
+      if (!linked(token)) throw new Error("Not this fleet's link");
+      const records: GrantRecord[] = [];
+      for (const record of await this.list()) {
+        if (record.fleet !== fleet || record.revokedAt !== undefined) continue;
+        try {
+          await this.checkBinding(record);
+          records.push(record);
+        } catch {
+          /* Unavailable grants confer no tools. */
+        }
+      }
+      return {
+        key: fleetPrincipalKey(fleet),
+        principalId: `fleet:${fleet}`,
+        records,
+        expiresAt: Math.floor(Date.now() / 1000) + 900,
       };
     });
   }

@@ -1091,6 +1091,20 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? dependencies.workerMcp.handle(context.req.raw)
       : context.json({ error: "worker_mcp_unavailable" }, 503),
   );
+  // A linked fleet's agents use the tools granted to that fleet (VUH-1527).
+  // The link token is the identity; it names exactly one fleet.
+  app.all("/v1/fleet/mcp", async (context) => {
+    const header = context.req.header("authorization");
+    const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
+    const fleet = token === undefined ? undefined : dependencies.fleetLinks?.authenticate(token);
+    if (fleet === undefined) return context.json({ error: "fleet_link_required" }, 401);
+    if (!dependencies.workerMcp) return context.json({ error: "worker_mcp_unavailable" }, 503);
+    return dependencies.workerMcp.handleFleet(
+      fleet,
+      context.req.raw,
+      (presented) => dependencies.fleetLinks?.authenticate(presented) === fleet,
+    );
+  });
   app.all("/v1/worker-mcp/swarm/:scope", async (context) =>
     dependencies.workerMcp
       ? dependencies.workerMcp.handleSwarm(context.req.param("scope"), context.req.raw)
@@ -1121,7 +1135,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const parsed = WorkerGrantRequestSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!parsed.success) return context.json({ error: "invalid_worker_grant" }, 400);
     try {
-      return context.json(await dependencies.workerMcp!.issue(parsed.data), 201);
+      const issued = await dependencies.workerMcp!.issue(parsed.data);
+      // A fleet grant travels by membership; it never hands out a bearer (VUH-1527).
+      if (issued.fleet !== undefined) {
+        const { token: _token, ...grant } = issued;
+        return context.json(grant, 201);
+      }
+      return context.json(issued, 201);
     } catch (error) {
       return context.json(
         {

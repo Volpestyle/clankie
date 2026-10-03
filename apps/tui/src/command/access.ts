@@ -3,7 +3,7 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { commandHost } from "./io.ts";
 
 const USAGE =
-  "Usage: clankie access list | issue REQUEST.json (--out GRANT.json | --deliver swarm) | revoke ID | linear [verify]";
+  "Usage: clankie access list | issue REQUEST.json (--out GRANT.json | --deliver swarm) | fleet NAME SERVER [--tool NAME]... | revoke ID | linear [verify]";
 export async function runAccessCommand(
   args: readonly string[],
   options: {
@@ -26,6 +26,22 @@ export async function runAccessCommand(
   } else if (args[0] === "linear" && (args.length === 1 || (args.length === 2 && args[1] === "verify"))) {
     path += "linear/account";
     method = args.length === 2 ? "POST" : "GET";
+  } else if (args[0] === "fleet" && args.length >= 3) {
+    // A fleet's standing access (VUH-1527): every agent in that Herdr session,
+    // over its link, until revoked. No tools named: the server's worker-safe set.
+    const tools: string[] = [];
+    for (let index = 3; index < args.length; index += 2) {
+      if (args[index] !== "--tool" || args[index + 1] === undefined) throw new Error(USAGE);
+      tools.push(args[index + 1]!);
+    }
+    body = JSON.stringify({
+      principalId: `fleet:${args[1]}`,
+      workId: `fleet:${args[1]}`,
+      server: args[2],
+      fleet: args[1],
+      tools: tools.map((name) => ({ name })),
+    });
+    method = "POST";
   } else if (args.length === 4 && args[0] === "issue" && args[2] === "--out") {
     body = JSON.stringify(JSON.parse(await readFile(args[1]!, "utf8")));
     output = args[3]!;

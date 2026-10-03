@@ -11,6 +11,11 @@ export function createFleetSeatControl(
   adapters: ReadonlyMap<string, HarnessSeatAdapter>,
   /** A remote fleet's own adapters (VUH-1527); absent, its seats have none. */
   remoteAdapters?: (fleet: string) => ReadonlyMap<string, HarnessSeatAdapter> | undefined,
+  /**
+   * `codex queue` on a remote fleet's machine (VUH-1527): how a Codex session
+   * Clankie did not start there receives his message as its next prompt.
+   */
+  remoteCodexQueue?: (fleet: string, sessionId: string, text: string) => Promise<boolean>,
 ) {
   const attach = async (agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> => {
     const fleet = splitFleetQualified(agent.paneId)?.fleet;
@@ -31,10 +36,22 @@ export function createFleetSeatControl(
     agent: HerdrAgentSnapshot,
     text: string,
   ): Promise<FleetSeatDelivery | undefined> => {
+    const remote = splitFleetQualified(agent.paneId)?.fleet;
+    if (remote !== undefined) {
+      // That machine's Herdr reports the session; its own Codex queues the message.
+      if (remoteCodexQueue === undefined || agent.session?.kind !== "id") return undefined;
+      try {
+        if (await remoteCodexQueue(remote, agent.session.value, text)) return { outcome: "delivered" };
+        return {
+          outcome: "unconfirmed",
+          detail: "Codex queue did not confirm delivery; inspect the seat before resending.",
+        };
+      } catch (error) {
+        return { outcome: "unconfirmed", detail: String(error) };
+      }
+    }
     const { paneProcesses, openFiles, codexQueue } = runner;
     if (paneProcesses === undefined || openFiles === undefined || codexQueue === undefined) return undefined;
-    // `codex queue` and lsof run here; remote seats need their own structured channel.
-    if (splitFleetQualified(agent.paneId) !== undefined) return undefined;
     let sessionId: string;
     let home: string | undefined;
     try {

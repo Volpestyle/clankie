@@ -87,10 +87,21 @@ const CLAUDE_MANAGED_SETTINGS = "/Library/Application Support/ClaudeCode/managed
  * its approved channel, and deny rules for inherited tracker connectors so its
  * Linear writes go through Clankie's connected account.
  */
+/**
+ * The worker plugin's own server, which a hire he launched may use without
+ * stopping at a permission prompt: it carries only message_clankie and the
+ * tools the owner granted that fleet (Claude names a plugin's MCP server
+ * `mcp__plugin_<plugin>_<server>`).
+ */
+const WORKER_SERVER_RULE = `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_swarm`;
+
 function claudeWorkerSettings(trackerDeny: readonly string[] = []): string {
   return JSON.stringify({
     enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
-    ...(trackerDeny.length === 0 ? {} : { permissions: { deny: [...trackerDeny] } }),
+    permissions: {
+      allow: [WORKER_SERVER_RULE],
+      ...(trackerDeny.length === 0 ? {} : { deny: [...trackerDeny] }),
+    },
   });
 }
 

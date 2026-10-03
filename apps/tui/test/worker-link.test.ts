@@ -32,6 +32,28 @@ async function fakeService() {
       const path = new URL(request.url ?? "/", "http://x").pathname;
       seen.push({ method: request.method ?? "", path, authorization: request.headers.authorization, body });
       response.setHeader("content-type", "application/json");
+      if (path === "/v1/fleet/mcp") {
+        // The fleet's granted tools, as Clankie's worker endpoint answers them.
+        const message = JSON.parse(body) as { id?: number; method: string; params?: { name?: string } };
+        response.setHeader("mcp-session-id", "session-1");
+        if (message.id === undefined) {
+          response.statusCode = 202;
+          response.end();
+          return;
+        }
+        const result =
+          message.method === "initialize"
+            ? {
+                protocolVersion: "2025-06-18",
+                capabilities: { tools: {} },
+                serverInfo: { name: "w", version: "1" },
+              }
+            : message.method === "tools/list"
+              ? { tools: [{ name: "linear_get_issue", inputSchema: { type: "object" } }] }
+              : { content: [{ type: "text", text: `ran ${String(message.params?.name)}` }], isError: false };
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+        return;
+      }
       if (path.endsWith("/events")) {
         const events = delivered
           ? []
@@ -131,8 +153,18 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     });
     write({ id: 2, method: "tools/list" });
     expect(await waitFor((line) => line.id === 2)).toMatchObject({
-      result: { tools: [{ name: "message_clankie" }] },
+      result: { tools: [{ name: "message_clankie" }, { name: "linear_get_issue" }] },
     });
+    // A granted tool is proxied to Clankie's service over the link.
+    write({ id: 4, method: "tools/call", params: { name: "linear_get_issue", arguments: { id: "A-1" } } });
+    expect(await waitFor((line) => line.id === 4)).toMatchObject({
+      result: { isError: false, content: [{ text: "ran linear_get_issue" }] },
+    });
+    expect(
+      service.seen
+        .filter((request) => request.path === "/v1/fleet/mcp")
+        .every((r) => r.authorization === `Bearer ${TOKEN}`),
+    ).toBe(true);
     write({
       id: 3,
       method: "tools/call",
@@ -170,17 +202,28 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     expect(service.seen.some((request) => request.path.endsWith("/events"))).toBe(false);
   });
 
-  it("refuses a pane in a Herdr session none of his links name", async () => {
+  it("serves no tools to a pane in a Herdr session none of his links name", async () => {
     const service = await fakeService();
     const home = await linkedHome(service.url);
     const child = spawn(process.execPath, [join(bin, "swarm-mcp.mjs")], {
-      env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "/tmp/other.sock" },
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        HERDR_PANE_ID: "w1:p1",
+        HERDR_SOCKET_PATH: "/tmp/other.sock",
+      },
     });
     let stderr = "";
+    let stdout = "";
     child.stderr.on("data", (chunk: Buffer) => (stderr += String(chunk)));
+    child.stdout.on("data", (chunk: Buffer) => (stdout += String(chunk)));
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    child.stdin.end();
     const [code] = (await once(child, "exit")) as [number];
-    expect(code).toBe(1);
+    expect(code).toBe(0);
     expect(stderr).toContain("no link to Clankie for this Herdr session");
+    expect(JSON.parse(stdout.trim())).toMatchObject({ id: 1, result: { tools: [] } });
     expect(service.seen).toEqual([]);
   });
 

@@ -2,7 +2,7 @@ import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
-import { createRemoteCodexSeatAdapter } from "./remote-codex-app-server.ts";
+import { createRemoteCodexSeatAdapter, remoteCodexQueue } from "./remote-codex-app-server.ts";
 import { createRemoteClaudeWorkerSeatAdapter } from "./remote-claude-worker.ts";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import {
@@ -895,6 +895,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.fleets?.shell === undefined
       ? {}
       : {
+          remoteCodexQueue: (() => {
+            const queues = new Map<string, ReturnType<typeof remoteCodexQueue>>();
+            return async (fleetId: string, sessionId: string, text: string) => {
+              const fleet = remoteFleets.find((entry) => entry.id === fleetId);
+              if (fleet === undefined) return false;
+              let queue = queues.get(fleetId);
+              if (queue === undefined) {
+                queue = remoteCodexQueue(fleet, deps.fleets!.shell!(fleet));
+                queues.set(fleetId, queue);
+              }
+              return queue(sessionId, text);
+            };
+          })(),
           remoteSeatAdapters: (fleetId: string) => {
             const fleet = remoteFleets.find((entry) => entry.id === fleetId);
             if (fleet === undefined) return [];

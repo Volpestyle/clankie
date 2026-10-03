@@ -1482,7 +1482,9 @@ machine; running it is the owner's approval. It ships this Clankie's own
 worker (`~/.clankie/claude-plugin`), installs it disabled (each hire enables it
 for its own session), and adds the worker channel to that machine's managed
 policy (`C:\Program Files\ClaudeCode\managed-settings.json` on Windows),
-keeping every entry already there. Policy is machine-wide, so the ssh account
+keeping every entry already there. It also registers the same bridge for Codex
+there, as a `clankie` MCP server in its config that inherits the pane's Herdr
+identity, once. Policy is machine-wide, so the ssh account
 must be that machine's administrator. Rerun it after an update to ship the
 matching plugin. Its API is the operator-only
 `POST /v1/runtime-connections/NAME/prepare`.
@@ -1973,7 +1975,9 @@ flag for a claude seat.
 
 `clankie access linear [verify]` shows or verifies the connected Linear API-key or OAuth
 account. `access list`, `access issue REQUEST.json --out GRANT.json`, and
-`access revoke ID` manage worker grants. `/access` in the TUI exposes status,
+`access revoke ID` manage worker grants. `access fleet NAME SERVER [--tool NAME]...`
+gives every agent in that fleet (one Herdr session) those tools over its link
+until revoked, with no bearer; see [fleet access](worker-access.md#fleet-access). `/access` in the TUI exposes status,
 verification and revocation. Issue from the terminal. For enrolled workers,
 the built-in Herdr route supplies `clankie mcp --swarm` automatically. External
 workers can configure it with `SWARM_SCOPE`, `SWARM_SESSION_CAPABILITY` and the

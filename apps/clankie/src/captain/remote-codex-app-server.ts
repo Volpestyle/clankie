@@ -59,12 +59,19 @@ interface Started {
 
 function startScript(
   fleet: HerdrFleet,
-  input: { cwd: string; configArgs: readonly string[]; port: number; id: string },
+  input: {
+    cwd: string;
+    configArgs: readonly string[];
+    port: number;
+    id: string;
+    env: Readonly<Record<string, string>>;
+  },
 ): string {
   const listen = `ws://127.0.0.1:${String(input.port)}`;
   const argv = [...input.configArgs, "app-server", "--listen", listen];
+  const env = Object.entries(input.env);
   if (fleet.ssh.shell === "powershell") {
-    const unsafe = [...argv, input.cwd].find((value) => WINDOWS_UNSAFE.test(value));
+    const unsafe = [...argv, input.cwd, ...env.flat()].find((value) => WINDOWS_UNSAFE.test(value));
     if (unsafe !== undefined)
       throw new Error(`unsupported: a remote Windows Codex server cannot take ${JSON.stringify(unsafe)}`);
     const args = argv.map((value) => (/\s/u.test(value) ? `"${value}"` : value)).join(" ");
@@ -77,7 +84,7 @@ function startScript(
       // `/s /c "…"` strips exactly the outer quotes, so the program path and
       // the log path keep theirs. Win32_Process.Create starts the server
       // outside this ssh session's job, so it survives the session.
-      `$command = 'cmd.exe /d /s /c ""' + $codex + '" ' + ${powershellLiteral(args)} + ' > "' + $log + '" 2>&1"'`,
+      `$command = 'cmd.exe /d /s /c "${env.map(([key, value]) => `set "${key}=${value}"&& `).join("")}"' + $codex + '" ' + ${powershellLiteral(args)} + ' > "' + $log + '" 2>&1"'`,
       `$created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = ${powershellLiteral(input.cwd)} }`,
       "if ($created.ReturnValue -ne 0) { throw ('Win32_Process.Create failed: ' + $created.ReturnValue) }",
       "@{ pid = [int]$created.ProcessId; log = $log } | ConvertTo-Json -Compress",
@@ -90,7 +97,7 @@ function startScript(
     `log="$dir/${input.id}.log"`,
     `cd ${posixQuote(input.cwd)}`,
     // nohup and a closed stdin detach it from this ssh session.
-    `nohup codex ${argv.map(posixQuote).join(" ")} > "$log" 2>&1 < /dev/null &`,
+    `${env.map(([key, value]) => `${key}=${posixQuote(value)} `).join("")}nohup codex ${argv.map(posixQuote).join(" ")} > "$log" 2>&1 < /dev/null &`,
     'printf \'{"pid":%s,"log":"%s"}\\n\' "$!" "$log"',
   ].join("\n");
 }
@@ -159,15 +166,22 @@ export function forwardSshArgs(fleet: HerdrFleet, localPort: number, remotePort:
 export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServerLauncher {
   const { fleet, shell } = options;
   return async (input) => {
-    if (input.env !== undefined && Object.keys(input.env).length > 0)
+    // Only the pane's Herdr identity crosses, so the server's MCP children find
+    // their session's link; everything else comes from that machine.
+    const env = Object.fromEntries(
+      Object.entries(input.env ?? {}).filter(
+        ([key]) => key === "HERDR_PANE_ID" || key === "HERDR_SOCKET_PATH",
+      ),
+    );
+    if (Object.keys(env).length !== Object.keys(input.env ?? {}).length)
       throw new Error("unsupported: a remote Codex server takes its environment from its own machine");
     const id = randomUUID();
     const remotePort = options.remotePort?.() ?? randomInt(REMOTE_PORTS.min, REMOTE_PORTS.max + 1);
     const started = parseStarted(
       await shell(
         fleet.ssh.shell === "powershell"
-          ? powershellScriptCommand(startScript(fleet, { ...input, port: remotePort, id }))
-          : posixScriptCommand(startScript(fleet, { ...input, port: remotePort, id })),
+          ? powershellScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id }))
+          : posixScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id })),
         START_TIMEOUT_MS,
       ),
     );
@@ -233,11 +247,28 @@ export function createRemoteCodexSeatAdapter(
     const qualified = splitFleetQualified(arg);
     return qualified?.fleet === fleet.id ? qualified.id : arg;
   };
+  // The pane's Herdr identity, so the server's MCP children (the clankie
+  // bridge) find this session's link and its granted tools.
+  let socket: Promise<string> | undefined;
+  const sessionSocket = () =>
+    (socket ??= shell(remoteProgramCommand(fleet.ssh.shell, "herdr", ["session", "list", "--json"]))
+      .then((stdout) => {
+        const listed = JSON.parse(stdout) as { sessions?: { name?: unknown; socket_path?: unknown }[] };
+        const path = listed.sessions?.find((entry) => entry.name === fleet.session)?.socket_path;
+        if (typeof path !== "string" || path === "")
+          throw new Error(`Herdr session ${fleet.session} is not running`);
+        return path;
+      })
+      .catch((error: unknown) => {
+        socket = undefined;
+        throw error;
+      }));
   return createCodexSeatAdapter({
     herdr: (args) => herdr(args.map(bare)),
     trackerOverrides: remoteCodexTrackerOverrides(fleet, shell),
     server: remoteCodexServer({ fleet, shell }),
     listenTimeoutMs: REMOTE_CODEX_LISTEN_TIMEOUT_MS,
+    viewEnv: async (view) => ({ HERDR_PANE_ID: bare(view.paneId), HERDR_SOCKET_PATH: await sessionSocket() }),
   });
 }
 
@@ -252,5 +283,40 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
       );
     });
     return codexTrackerOverridesFromList(stdout);
+  };
+}
+
+/**
+ * `codex queue` on a remote fleet's machine (VUH-1527): a Codex session
+ * Clankie did not start there receives his message as its next prompt. On
+ * Windows `codex` is a batch shim, and cmd.exe would reinterpret `&` or `%`
+ * in the message, so the real `codex.js` runs under node.exe with exactly
+ * escaped arguments; it is found once per fleet through `npm root -g`.
+ */
+export function remoteCodexQueue(fleet: HerdrFleet, shell: FleetShellRun) {
+  let script: Promise<string> | undefined;
+  const codexScript = () =>
+    (script ??= shell(
+      powershellScriptCommand(
+        "$root = (& npm root -g 2>$null | Select-Object -First 1); $js = Join-Path $root '@openai\\codex\\bin\\codex.js'; if (-not (Test-Path -LiteralPath $js)) { throw 'Codex is not installed through npm here' }; Write-Output $js",
+      ),
+    )
+      .then((stdout) => {
+        const path = stdout.trim().split(/\r?\n/u).at(-1)?.trim();
+        if (!path) throw new Error(`Codex was not found on ${fleet.id}`);
+        return path;
+      })
+      .catch((error: unknown) => {
+        script = undefined;
+        throw error;
+      }));
+  return async (sessionId: string, text: string): Promise<boolean> => {
+    const argv = ["queue", "--thread", sessionId, "--message", text];
+    const stdout = await shell(
+      fleet.ssh.shell === "powershell"
+        ? remoteProgramCommand("powershell", "node", [await codexScript(), ...argv])
+        : remoteProgramCommand("posix", "codex", argv),
+    );
+    return !/no active session/iu.test(stdout);
   };
 }

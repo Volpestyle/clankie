@@ -1,4 +1,11 @@
-import type { HarnessSeatAdapter, SeatControl, SeatEvent, SeatRef, SeatStatus } from "@clankie/agent-hosts";
+import type {
+  HarnessSeatAdapter,
+  SeatControl,
+  SeatEvent,
+  SeatRef,
+  SeatStatus,
+  SeatView,
+} from "@clankie/agent-hosts";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
@@ -26,6 +33,8 @@ export function createCodexSeatAdapter(
     trackerOverrides?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<string[]>;
     server?: CodexServerLauncher;
     listenTimeoutMs?: number;
+    /** Extra server environment from the pane the seat is viewed in (a remote pane's Herdr identity). */
+    viewEnv?: (view: SeatView) => Promise<Readonly<Record<string, string>>>;
   } = {},
 ): HarnessSeatAdapter {
   const controls = new Map<string, SeatControl>();
@@ -142,7 +151,9 @@ export function createCodexSeatAdapter(
           ...(launch.resumeSessionId ? { resumeThreadId: launch.resumeSessionId } : {}),
           ...(launch.model ? { model: launch.model } : {}),
           ...(launch.effort ? { effort: launch.effort } : {}),
-          ...(launch.env ? { env: launch.env } : {}),
+          ...(launch.env || options.viewEnv
+            ? { env: { ...launch.env, ...(await options.viewEnv?.(view)) } }
+            : {}),
           ...(options.server === undefined ? {} : { server: options.server }),
           ...(options.listenTimeoutMs === undefined ? {} : { listenTimeoutMs: options.listenTimeoutMs }),
           startView: (args) => (view.start ? view.start("codex", args) : view.run(["codex", ...args])),

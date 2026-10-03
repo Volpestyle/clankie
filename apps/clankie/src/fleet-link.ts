@@ -24,8 +24,8 @@ import {
  * readable by its owner only; the operator credential never leaves this Mac.
  */
 
-/** The only paths the link listener answers; everything else is 404. */
-const LINK_ROUTE = /^\/v1\/fleet\/seats\/[^/]+\/(?:events|hook|messages)$/u;
+/** The only paths the link listener answers (seat routes and the fleet's granted tools); everything else is 404. */
+const LINK_ROUTE = /^\/v1\/fleet\/(?:seats\/[^/]+\/(?:events|hook|messages)|mcp)$/u;
 
 export function fleetLinkFetch<Rest extends unknown[]>(
   fetch: (request: Request, ...rest: Rest) => Response | Promise<Response>,
@@ -165,7 +165,9 @@ class FleetLink {
   /** The fleet's Herdr socket on that machine: how its panes say which session they are in. */
   private async socket(): Promise<string> {
     const listed = JSON.parse(
-      await this.options.shell(remoteProgramCommand(this.fleet.ssh.shell, "herdr", ["session", "list", "--json"])),
+      await this.options.shell(
+        remoteProgramCommand(this.fleet.ssh.shell, "herdr", ["session", "list", "--json"]),
+      ),
     ) as { sessions?: { name?: unknown; socket_path?: unknown }[] };
     const socket = listed.sessions?.find((session) => session.name === this.fleet.session)?.socket_path;
     if (typeof socket !== "string" || socket === "")
