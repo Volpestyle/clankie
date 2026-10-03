@@ -97,9 +97,9 @@ it.each([true, false])(
       const encoded = command.match(/-EncodedCommand\s+['"]?([A-Za-z0-9+/=]+)/u)?.[1];
       const text = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
       commands.push(text);
-      if (text.includes("harness-install.mjs"))
+      if (text.includes("harness-setup.mjs"))
         return JSON.stringify([{ harness: "codex", status: "source-manager-required" }]);
-      if (text.includes("harness-status.mjs"))
+      if (text.includes("harness-inspect.mjs"))
         return JSON.stringify({
           claude: [{ executable: true, enabled: true, versionMatches: current }],
           codex: { registered: false, pluginInstalled: false, versionMatches: false },

@@ -116,13 +116,13 @@ describe("clankie-worker claude plugin", () => {
     const mcp = JSON.parse(await readFile(join(workerRoot, ".mcp.json"), "utf8")) as unknown;
     expect(mcp).toEqual({
       mcpServers: {
-        swarm: {
+        clankie: {
           command: "node",
           args: ["${CLAUDE_PLUGIN_ROOT}/bin/swarm-mcp.mjs"],
         },
       },
     });
-    expect(await readdir(workerRoot)).toEqual(expect.not.arrayContaining(["output-styles", "skills"]));
+    expect(await readdir(workerRoot)).toEqual(expect.not.arrayContaining(["output-styles"]));
     // Its hooks report a Clankie hire's settled turns (VUH-1458), through one no-op-elsewhere script.
     const hooks = JSON.parse(await readFile(join(workerRoot, "hooks", "hooks.json"), "utf8")) as {
       hooks: Record<string, { hooks: { command: string }[] }[]>;

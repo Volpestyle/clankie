@@ -30,7 +30,11 @@
         "integrations/claude-plugin/worker/bin/inbound-receipt.d.mts",
         "integrations/codex-plugin/hooks/run.mjs",
         "integrations/opencode-plugin/plugin.mjs",
-        "integrations/claude-plugin/worker/bin/seat-hook.mjs"
+        "integrations/claude-plugin/worker/bin/seat-hook.mjs",
+        "integrations/claude-plugin/worker/bin/harness-inspect.mjs",
+        "integrations/claude-plugin/worker/bin/harness-setup.mjs",
+        "integrations/claude-plugin/worker/bin/harness-install.d.mts",
+        "integrations/claude-plugin/worker/bin/harness-status.d.mts"
       ],
       "paths": {
         "/clankie/*": ["./*"]

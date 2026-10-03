@@ -5,7 +5,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { pathToFileURL } from "node:url";
 const exec = promisify(execFile);
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 const exists = async (path) => {
@@ -148,7 +147,3 @@ export async function inspectHarnessProfiles({
     })),
   };
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
-  process.stdout.write(
-    `${JSON.stringify(await inspectHarnessProfiles({ expectedVersion: process.argv[2] }))}\n`,
-  );

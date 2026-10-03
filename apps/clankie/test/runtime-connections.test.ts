@@ -263,3 +263,29 @@ it("only the operator can approve repositories and exact directories through run
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("reports remote harness diagnostics only to the owner through the registered fleet inspection port", async () => {
+  const seen: string[] = [];
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+    inspectFleetHarnesses: async (id) => {
+      seen.push(id);
+      return { claude: [{ profile: "remote", versionMatches: false }], codex: { registered: false } };
+    },
+  });
+  try {
+    expect((await app.app.request("/v1/runtime-connections/pc/harnesses")).status).toBe(401);
+    expect(seen).toEqual([]);
+    const result = await runRuntimeCommand(["harnesses", "pc"], {
+      host: "http://localhost",
+      env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+      fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
+    });
+    expect(result).toMatchObject({ machine: "pc", harnesses: { claude: [{ versionMatches: false }] } });
+    expect(seen).toEqual(["pc"]);
+  } finally {
+    await app.close();
+  }
+});

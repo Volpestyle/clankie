@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { claudeProfileDirectories } from "./harness-status.mjs";
 import { execFile } from "node:child_process";
 import { lstat, readFile, realpath } from "node:fs/promises";
@@ -32,39 +31,41 @@ async function installHarnessBridges(options) {
       });
       continue;
     }
-    const config = join(env.CODEX_HOME || join(home, ".codex"), "config.toml");
+    const config =
+      harness === "claude"
+        ? join(profile, "settings.json")
+        : join(env.CODEX_HOME || join(home, ".codex"), "config.toml");
+    const sourceSetup = harness === "codex" ? options.codexSourceSetup : undefined;
     const source = await realpath(config).catch(() => config);
     const configBefore = await readFile(config, "utf8").catch(() => undefined);
     const wasSymlink = (await lstat(config).catch(() => void 0))?.isSymbolicLink() ?? false;
     const managed =
-      harness === "codex" &&
-      (wasSymlink ||
-        /(?:generated|do not edit|managed by)/iu.test(
-          (await readFile(config, "utf8").catch(() => "")).split("\n").slice(0, 20).join("\n"),
-        ));
+      wasSymlink ||
+      /(?:generated|do not edit|managed by)/iu.test(
+        (await readFile(config, "utf8").catch(() => "")).split("\n").slice(0, 20).join("\n"),
+      );
     const detail =
-      harness === "claude"
+      harness === "claude" && !managed
         ? `Install and enable clankie-worker@clankie from ${marketplace} for profile ${profile} (bridge, native hooks and packaged skills).`
         : managed
-          ? `Codex configuration is managed at ${source}. ${options.codexSourceSetup ? `Run source setup ${options.codexSourceSetup.command} to install clankie-worker@clankie-fleet.` : "Use its source setup to install clankie-worker@clankie-fleet; no config file will be modified here."}`
+          ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install clankie-worker@clankie-fleet.` : "Use its source setup to install clankie-worker@clankie-fleet; no config file will be modified here."}`
           : `Install clankie-worker@clankie-fleet from ${marketplace} through Codex's native plugin manager (bridge and skills).`;
     if (!(await options.consent(harness, detail))) {
       results.push({ harness, profile, status: "declined", detail });
       continue;
     }
-    if (managed && !options.codexSourceSetup) {
+    if (managed && !sourceSetup) {
       results.push({ harness, profile, status: "source-manager-required", detail });
       continue;
     }
     try {
       if (
-        harness === "codex" &&
-        ((await realpath(config).catch(() => config)) !== source ||
-          (await readFile(config, "utf8").catch(() => undefined)) !== configBefore)
+        (await realpath(config).catch(() => config)) !== source ||
+        (await readFile(config, "utf8").catch(() => undefined)) !== configBefore
       )
-        throw new Error("Codex configuration changed during consent; inspect its source and retry");
-      if (harness === "codex" && managed) {
-        await execute(options.codexSourceSetup.command, options.codexSourceSetup.args);
+        throw new Error("Harness configuration changed during consent; inspect its source and retry");
+      if (managed) {
+        await execute(sourceSetup.command, sourceSetup.args);
         if ((await realpath(config)) !== source || (await lstat(config)).isSymbolicLink() !== wasSymlink)
           throw new Error(
             "Source setup changed the managed configuration link; inspect its source before continuing",
@@ -111,10 +112,3 @@ async function installHarnessBridges(options) {
   return results;
 }
 export { installHarnessBridges };
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (process.argv[2] !== "--approved" || !process.argv[3])
-    throw new Error("Owner-approved preparation requires --approved MARKETPLACE");
-  const result = await installHarnessBridges({ marketplaceRoot: process.argv[3], consent: async () => true });
-  process.stdout.write(`${JSON.stringify(result)}\n`);
-}

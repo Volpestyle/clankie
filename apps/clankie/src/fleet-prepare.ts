@@ -158,7 +158,7 @@ function installCommand(fleet: HerdrFleet): string {
           `$target = Join-Path $env:USERPROFILE ${powershellLiteral(MARKETPLACE_DIR.replaceAll("/", "\\"))}`,
           "if (Test-Path -LiteralPath $target) { Remove-Item -Recurse -Force -LiteralPath $target }",
           "Move-Item -LiteralPath $stage -Destination $target",
-          "& node (Join-Path $target 'worker\\bin\\harness-install.mjs') --approved $target",
+          "& node (Join-Path $target 'worker\\bin\\harness-setup.mjs') --approved $target",
           "if ($LASTEXITCODE -ne 0) { throw 'Native harness setup failed' }",
         ].join("; "),
       )
@@ -169,7 +169,7 @@ function installCommand(fleet: HerdrFleet): string {
           `target="$HOME/${MARKETPLACE_DIR}"`,
           'rm -rf "$target"',
           'mv "$stage" "$target"',
-          'node "$target/worker/bin/harness-install.mjs" --approved "$target"',
+          'node "$target/worker/bin/harness-setup.mjs" --approved "$target"',
         ].join("\n"),
       );
 }
@@ -184,10 +184,10 @@ export async function inspectFleetHarnesses(
   const command =
     fleet.ssh.shell === "powershell"
       ? powershellScriptCommand(
-          `& node (Join-Path $env:USERPROFILE ${powershellLiteral(`${MARKETPLACE_DIR.replaceAll("/", "\\")}\\worker\\bin\\harness-status.mjs`)}) ${powershellLiteral(expected)}; if ($LASTEXITCODE -ne 0) { throw 'Harness inspection failed; run owner preparation' }`,
+          `& node (Join-Path $env:USERPROFILE ${powershellLiteral(`${MARKETPLACE_DIR.replaceAll("/", "\\")}\\worker\\bin\\harness-inspect.mjs`)}) ${powershellLiteral(expected)}; if ($LASTEXITCODE -ne 0) { throw 'Harness inspection failed; run owner preparation' }`,
         )
       : posixScriptCommand(
-          `node "$HOME/${MARKETPLACE_DIR}/worker/bin/harness-status.mjs" ${posixQuote(expected)}`,
+          `node "$HOME/${MARKETPLACE_DIR}/worker/bin/harness-inspect.mjs" ${posixQuote(expected)}`,
         );
   return JSON.parse(await options.shell(command, 60_000));
 }
