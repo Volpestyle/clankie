@@ -1,8 +1,16 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, symlinkSync } from "node:fs";
-import { access, chmod, lstat, mkdir, rm, symlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { access } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
+import {
+  assertPinnedRuntime,
+  createPinnedWorktree,
+  installCommand,
+  installPinnedDependencies,
+  installPinnedLinks,
+  linkPinnedState,
+  pinnedCommit,
+} from "../apps/tui/bin/pinned-runtime.ts";
 
 const checkout = resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
@@ -19,55 +27,23 @@ if (args.some((arg, index) => !["--pinned", "--ref"].includes(arg) && args[index
  */
 function pinRuntime() {
   const runtime = process.env.CLANKIE_RUNTIME_DIR ?? join(homedir(), ".clankie", "pinned");
-  const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: checkout, encoding: "utf8" }).trim();
-  const commit = git("rev-parse", "--verify", `${ref}^{commit}`);
-  if (existsSync(runtime) && !existsSync(join(runtime, ".git")))
-    throw new Error(`${runtime} exists and is not a pinned worktree; set CLANKIE_RUNTIME_DIR elsewhere.`);
-  if (!existsSync(join(runtime, ".git"))) {
-    mkdirSync(dirname(runtime), { recursive: true });
-    git("worktree", "add", "--detach", runtime, commit);
-  } else {
-    const run = (...gitArgs) => execFileSync("git", gitArgs, { cwd: runtime, encoding: "utf8" }).trim();
-    if (run("status", "--porcelain", "--untracked-files=no") !== "")
-      throw new Error(
-        `${runtime} has local changes; it is a pinned runtime, not a workspace. Leaving it alone.`,
-      );
-    run("checkout", "--quiet", "--detach", commit);
+  const commit = pinnedCommit(checkout, ref);
+  if (!existsSync(runtime)) createPinnedWorktree(checkout, runtime, commit);
+  else {
+    assertPinnedRuntime(checkout, runtime);
+    installCommand("git", ["checkout", "--quiet", "--detach", commit], runtime);
   }
-  execFileSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
-    cwd: runtime,
-    stdio: "inherit",
-  });
-  // Machine-local ignored state stays in the primary checkout, shared rather than copied.
-  const primary = dirname(resolve(checkout, git("rev-parse", "--git-common-dir")));
-  for (const path of [".env.local", ".data", "apps/vox/target"]) {
-    const source = join(primary, path);
-    const target = join(runtime, path);
-    if (existsSync(source) && !existsSync(target)) symlinkSync(source, target);
-  }
+  installPinnedDependencies(runtime);
+  linkPinnedState(checkout, runtime);
   console.log(`Pinned runtime: ${runtime} at ${commit.slice(0, 8)} (${ref})`);
   return runtime;
 }
 
 const root = pinned ? pinRuntime() : checkout;
 const binDirectory = join(homedir(), ".local", "bin");
-const commands = ["clankie", "clankie-herdr"];
-await mkdir(binDirectory, { recursive: true });
-// Check both destinations before replacing either link.
-for (const command of commands) {
-  const link = join(binDirectory, command);
-  const existing = await lstat(link).catch(() => undefined);
-  if (existing && !existing.isSymbolicLink())
-    throw new Error(`${link} exists and is not a symlink; refusing to replace it.`);
-}
-for (const command of commands) {
-  const target = resolve(root, `apps/tui/bin/${command}.ts`);
-  const link = join(binDirectory, command);
-  await chmod(target, 0o755);
-  await rm(link, { force: true });
-  await symlink(target, link);
-  console.log(`Installed: ${link} -> ${target}`);
-}
+await installPinnedLinks(root, homedir());
+for (const command of ["clankie", "clankie-herdr"])
+  console.log(`Installed: ${join(binDirectory, command)} -> ${resolve(root, `apps/tui/bin/${command}.ts`)}`);
 if (pinned) console.log("Restart Clankie (`clankie restart all`) to move the running service onto it.");
 try {
   await access(resolve(root, "apps/tui/node_modules"));

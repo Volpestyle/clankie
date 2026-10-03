@@ -1,6 +1,12 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["update"],
+    lines: [
+      "  update [--ref REF] | status  Stage local main, detach safe restart, or read durable result (JSON)",
+    ],
+  },
+  {
     nouns: ["body"],
     lines: ["  body status | request JSON  Inspect or explicitly request conversation body leases (JSON)"],
   },

@@ -498,7 +498,7 @@ describe("operator bridge restart recovery", () => {
       failure = "not_found";
       await expect(upstream.callTool("missing", {})).rejects.toThrow("not_found");
       expect(effects).toBe(4);
-      expect(initializes).toBe(2);
+      expect(initializes).toBe(3); // New caller reconnects; failed mutation itself was never replayed.
     } finally {
       await upstream.close();
     }
@@ -564,3 +564,85 @@ it.each(["stored", "lost"] as const)(
     }
   },
 );
+
+it("keeps the same attached seat while reading a durable update result from a fresh MCP bank", async () => {
+  let generation = 1,
+    initializes = 0,
+    updates = 0;
+  const fetchImpl: typeof fetch = async (_url, init) => {
+    if (init?.method !== "POST") return new Response(null, { status: 405 });
+    const message = JSON.parse(String(init.body));
+    if (message.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (message.method === "initialize") {
+      initializes++;
+      return Response.json(
+        {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: message.params.protocolVersion,
+            capabilities: { tools: {} },
+            serverInfo: { name: "fixture", version: String(generation) },
+          },
+        },
+        { headers: { "mcp-session-id": String(generation) } },
+      );
+    }
+    if (new Headers(init.headers).get("mcp-session-id") !== String(generation))
+      return Response.json({ error: "unknown_session" }, { status: 404 });
+    if (message.method === "tools/list")
+      return Response.json({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          tools: [
+            {
+              name: "runtime_update_status",
+              description: `bank-${generation}`,
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+      });
+    if (message.params.name === "update_runtime") {
+      updates++;
+      throw Error("lost accepted result");
+    }
+    return Response.json({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              latest: { phase: "healthy", oldCommit: "a".repeat(40), newCommit: "b".repeat(40) },
+            }),
+          },
+        ],
+      },
+    });
+  };
+  const upstream = await connectLaneUpstream({ host: "http://localhost", bearer: "fixture", fetchImpl });
+  const server = createSeatBridge(upstream, "operator");
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "attached-native-seat", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    expect((await client.listTools()).tools[0]?.description).toBe("bank-1");
+    await expect(client.callTool({ name: "update_runtime", arguments: {} })).rejects.toThrow(
+      "lost accepted result",
+    );
+    generation++;
+    const result = await client.callTool({ name: "runtime_update_status", arguments: {} });
+    expect((result.content as { text: string }[])[0]?.text).toContain('"phase":"healthy"');
+    expect((await client.listTools()).tools[0]?.description).toBe("bank-2");
+    expect(updates).toBe(1);
+    expect(initializes).toBe(2);
+  } finally {
+    await client.close();
+    await server.close();
+    await upstream.close();
+  }
+});

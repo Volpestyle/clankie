@@ -44,6 +44,7 @@ import type { WorkItemsService } from "../work-items.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  readonly runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
   readonly roomObservations?: import("../discord-room-observations.ts").DiscordRoomObservations;
   /** Host-proven original body account, presence, source receipt and opt-in. */
   readonly conversationRouteAuthorized?: (

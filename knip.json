@@ -41,6 +41,9 @@
     },
     "packages/play": {
       "ignoreExportsUsedInFile": true
+    },
+    "apps/tui": {
+      "entry": ["bin/runtime-update-helper.mjs"]
     }
   },
   "ignoreIssues": {

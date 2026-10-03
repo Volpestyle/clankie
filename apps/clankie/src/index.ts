@@ -1,3 +1,4 @@
+import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { DiscordRoomVoice } from "./discord-room-voice.ts";
 import { DiscordRoomObservations } from "./discord-room-observations.ts";
 import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
@@ -21,7 +22,7 @@ import { createAgentSessions } from "./agent-sessions.ts";
  * surface plus its in-process capabilities (play host, browser,
  * activity observation), one process, one port (4310).
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -565,8 +566,13 @@ const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
+const runtimeUpdater =
+  hostedBody === undefined && existsSync(join(repoRoot, ".git"))
+    ? createRuntimeUpdater({ repoRoot })
+    : undefined;
 const captain = createCaptain(
   {
+    ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
     roomObservations,
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,
@@ -823,6 +829,7 @@ const localFleet = new LocalFleetLink({
   }),
 });
 const clankie = await createClankieApp({
+  ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
   roomObservations,
   roomVoice: new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore),
   discordTurnReceipts,

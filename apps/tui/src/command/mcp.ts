@@ -101,6 +101,8 @@ export interface LaneToolUpstream {
   /** Answer one escalation; false when the service no longer waits on it. */
   reply(eventId: string, text: string): Promise<boolean>;
   close(): Promise<void>;
+  /** Metadata refresh after a newly initialized upstream session; never a mutation replay. */
+  onReconnect?(listener: () => void): void;
 }
 
 /** The fleet mailbox as the seat bridge sees it: poll and close, no tools. */
@@ -271,10 +273,13 @@ export function createSeatBridge(
   const server = new Server<Request, ChannelNotification, Result>(
     { name: "clankie", version: "0.2.0" },
     {
-      capabilities: { tools: {}, experimental: { "claude/channel": {} } },
+      capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
       instructions: `${upstream.instructions ?? `Clankie's own tools, in his ${lane} lane.`}\n\n${CHANNEL_INSTRUCTIONS}`,
     },
   );
+  upstream.onReconnect?.(() => {
+    void server.sendToolListChanged().catch(() => undefined);
+  });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [...(await upstream.listTools()), REPLY_TOOL],
   }));
@@ -370,8 +375,12 @@ export async function connectLaneUpstream(input: {
   };
   class ExpiredSeatSession extends Error {}
   let closed = false;
+  const invalidated = new WeakSet<Client>();
+  const listeners = new Set<() => void>();
   const connect = async () => {
     const next = new Client(SEAT_CLIENT, { capabilities: {} });
+    next.onclose = () => invalidated.add(next);
+    next.onerror = () => invalidated.add(next);
     const transport = new StreamableHTTPClientTransport(urlFor("/v1/mcp"), {
       requestInit: { headers },
       fetch: async (url, init) => {
@@ -405,31 +414,46 @@ export async function connectLaneUpstream(input: {
   };
   let client = await connect();
   let reconnecting: Promise<void> | undefined;
+  const reconnect = async (previous: Client) => {
+    if (client !== previous) return;
+    reconnecting ??= (async () => {
+      const next = await connect();
+      if (closed) {
+        await next.close();
+        throw new Error("Seat bridge is closed");
+      }
+      client = next;
+      await previous.close().catch(() => undefined);
+      for (const listener of listeners) listener();
+    })().finally(() => {
+      reconnecting = undefined;
+    });
+    await reconnecting;
+  };
   const request = async <T>(operation: (active: Client) => Promise<T>): Promise<T> => {
     if (closed) throw new Error("Seat bridge is closed");
+    if (invalidated.has(client)) await reconnect(client);
     const previous = client;
     try {
       return await operation(previous);
     } catch (error) {
+      invalidated.add(previous);
+      // Only the service's explicit pre-admission rejection authorizes this one replay.
+      // Unknown network failures escape; the NEXT caller reconnects a fresh session.
       if (!(error instanceof ExpiredSeatSession) || closed) throw error;
-      if (client === previous) {
-        reconnecting ??= (async () => {
-          const next = await connect();
-          if (closed) {
-            await next.close();
-            throw new Error("Seat bridge is closed");
-          }
-          client = next;
-          await previous.close().catch(() => undefined);
-        })().finally(() => {
-          reconnecting = undefined;
-        });
-        await reconnecting;
+      await reconnect(previous);
+      try {
+        return await operation(client);
+      } catch (failure) {
+        invalidated.add(client);
+        throw failure;
       }
-      return await operation(client);
     }
   };
   return {
+    onReconnect(listener) {
+      listeners.add(listener);
+    },
     instructions: client.getInstructions(),
     async listTools() {
       const collected: Tool[] = [];
@@ -495,6 +519,7 @@ export async function connectLaneUpstream(input: {
     },
     close: async () => {
       closed = true;
+      listeners.clear();
       await reconnecting?.catch(() => undefined);
       await client.close();
     },

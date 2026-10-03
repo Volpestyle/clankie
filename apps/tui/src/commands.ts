@@ -78,6 +78,7 @@ export interface ConsoleCommandContext {
   /** Re-read the live binding after anything that could move it. */
   readonly refreshHerdrBinding?: () => Promise<void>;
   readonly restartCaptain?: () => Promise<void>;
+  readonly commandUpdate?: (args: readonly string[]) => Promise<unknown>;
   readonly commandStatus?: () => Promise<StatusCommandResult>;
   readonly commandDoctor?: () => Promise<InstallDoctorReport>;
   /** `clankie awake`: the launcher-supervised keep-awake, and the power state it answers to. */
@@ -145,6 +146,28 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   const focusBoard = herdLead?.focus ?? (() => focusHerdLeadCompanion());
   const closeBoard = herdLead?.close ?? (() => closeHerdLeadCompanion());
   const commands: FaceShellCommand[] = [];
+  commands.push({
+    name: "update",
+    aliases: [],
+    description: "Stage a runtime update or read its durable result",
+    argumentHint: "[--ref REF | status]",
+    takesArgument: true,
+    async run(argument, shell) {
+      if (!context.commandUpdate) {
+        shell.insertCommandResult("/update", "Runtime update is unavailable on this connection", "error");
+        return;
+      }
+      try {
+        shell.insertCommandResult(
+          "/update",
+          JSON.stringify(await context.commandUpdate(argument.trim().split(/\s+/u).filter(Boolean)), null, 2),
+          "success",
+        );
+      } catch (error) {
+        shell.insertCommandResult("/update", String(error), "error");
+      }
+    },
+  });
   const connectionServices = (): ConnectionsMenuServices => ({
     machines: (args) => runMachinesCommand(args),
     runtime: (args) => runRuntimeCommand(args),

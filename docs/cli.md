@@ -194,6 +194,45 @@ underneath it. The same object is on the service's `/health` as `power`.
 
 <a id="service-lifecycle"></a>
 
+### `update [--ref REF]` / `update status`
+
+`clankie update` stages the local landed `main` (or an explicit local Git ref),
+installs dependencies in an independent detached worktree, and schedules a fixed
+helper in a separate process group. There is no implicit fetch. The current
+service must be running the exact pinned checkout. Dirty tracked or untracked
+files in that checkout refuse the operation before any service stop.
+
+The helper installs before stopping anything, rechecks the pin, stops through
+the existing service supervisor, retains the previous worktree, activates the new
+pin and restarts the configured services. Failed new health checks trigger a
+confirmed-stop rollback. Unknown shutdown never authorizes a worktree move.
+Generated pnpm wrappers and known workspace metadata are relocated before cutover;
+committed source, lockfiles and global package-store files are not rewritten.
+
+The CLI and TUI `/update` return an accepted/pending operation, not a success
+claim. `clankie update status` and `/update status` read the durable old/new commit,
+phase, per-service receipts and exact service boot identity. Results live in
+private `~/.clankie/updates/<operation-id>/` directories and survive the old
+service exiting. A nonterminal operation or uncertain shutdown blocks another
+schedule; inspect/reconcile that operation rather than retrying or deleting its
+lock. PIDs alone are never proof that an abandoned operation is safe to repeat.
+
+The operator API is `POST /v1/runtime-update` with optional `{ "ref": "main" }`
+and `GET /v1/runtime-update` for status. It requires the actual operator credential;
+caller-supplied lane, actor and path claims confer no authority. Captain tools
+`update_runtime` and `runtime_update_status` exist only in host-admitted machine
+sessions and recheck their captured source before acceptance. Social sessions
+cannot gain the tool through a later permission change. Accepted host operations
+may finish or roll back after the original turn/service exits.
+
+Supported `clankie mcp` operator bridges reinitialize an explicitly expired
+session, advertise a refreshed tool list, and let the same attached seat read the
+result. An uncertain mutation is never replayed; its next request establishes a
+new session. Fleet bridges retain their existing exact-link refresh and durable
+receipt rules. Already-loaded older bridges missing those protocols need their
+MCP process refreshed; no server-generated delivery ID or automatic resend hides
+that incompatibility. The native seat need not be restarted for a supported bridge.
+
 ### `restart [service]`
 
 Restart launcher-owned services in dependency order

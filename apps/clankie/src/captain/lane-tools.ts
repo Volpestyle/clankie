@@ -8,6 +8,7 @@
  * from extensions — flattened into callables. There is one registry; this file
  * projects it, and never restates a schema.
  */
+import { runtimeUpdateTools } from "./update-tools.ts";
 import type { CaptainSessionLaneV2, CaptainTurnMedia } from "@clankie/protocol";
 import type { GameplaySettings } from "@clankie/settings";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -41,6 +42,7 @@ export function laneAuthoredTools(
   messageSeat?: MessageSeat,
 ): ToolDefinition[] {
   return [
+    ...runtimeUpdateTools(deps.runtimeUpdater, turn),
     ...captainTools(deps, turn, laneLog, lane, gameplay, autonomy, herdrWatches, hireSeat, messageSeat),
     ...(lane === "operator" ? connectionTools(deps, lane) : []),
   ];

@@ -1,3 +1,4 @@
+import { createRuntimeUpdateRoutes } from "./runtime-update-routes.ts";
 import { resolveDiscordSettings } from "@clankie/settings";
 import {
   DISCORD_ROOM_VOICE_PATH,
@@ -399,6 +400,7 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
+  runtimeUpdater?: import("../../tui/bin/runtime-updater.ts").RuntimeUpdater;
   discordIngress?: DiscordIngress;
   /** Durable exact Discord turn receipts; production supplies its state directory. */
   discordTurnReceiptPath?: string;
@@ -1063,6 +1065,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
 
   app.route("/", createDiscordIngressRoutes(dependencies.discordIngress));
+  app.route(
+    "/",
+    createRuntimeUpdateRoutes({
+      updater: dependencies.runtimeUpdater,
+      authorize: async (request) => {
+        const identity = await authenticateOperator(request, dependencies);
+        if (!identity || identity === "unavailable") return undefined;
+        let current = true;
+        return {
+          current: () => current,
+          guard: async () => {
+            const fresh = await authenticateOperator(request, dependencies);
+            current = Boolean(fresh && fresh !== "unavailable" && fresh.operatorId === identity.operatorId);
+            if (!current) throw new Error("operator_revoked");
+          },
+        };
+      },
+    }),
+  );
   /** Owner operator or a current Take Control device: model keys and account connections. */
   const authorizeOwnerSecrets = async (
     request: Request,

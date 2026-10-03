@@ -61,6 +61,20 @@ for a workspace conversation. Reopening the TUI does not reset model context.
 
 ## Launcher control
 
+Landed code is not live until the pinned runtime is updated. From an admitted
+machine turn, use `update_runtime` (or `clankie update [--ref REF]`) to stage the
+local landed `main`, install and detach a guarded restart. It never fetches remote
+refs implicitly. `accepted: true` means pending, not completed: finish the turn,
+then read `runtime_update_status` or `clankie update status` on your next turn and
+report the old/new commit and actual health or rollback. The TUI has `/update`
+and `/update status`. Never repeat an uncertain update; inspect its existing
+operation. A dirty pin or failed install leaves the old runtime untouched.
+
+Social turns cannot update the machine. Older already-loaded MCP bridges may
+need their MCP process refreshed to understand newer protocols; repinning files
+cannot change running bridge code. A lost tool result is not permission to resend
+it, and an HTTP 400 for a missing durable delivery ID must not be bypassed.
+
 You can restart yourself with `clankie restart` from your own bash tool when
 that restart is authorized. The launcher detaches a helper and waits for your
 current console or Discord turn to finish; `status: "scheduled"` means it is

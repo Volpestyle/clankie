@@ -1,3 +1,4 @@
+import { runUpdateCommand } from "./command/update.ts";
 import { buildHostedConnectionCommands } from "./hosted-console.ts";
 import { gatewayStatus } from "./command/gateway.ts";
 import {
@@ -448,6 +449,7 @@ const commands = [
         env: process.env,
         stderr: { write: () => undefined },
       }),
+    commandUpdate: (args) => runUpdateCommand(args),
     commandDoctor: () => doctorCommand({ repoRoot, env: process.env }),
     commandAwake: (args) =>
       runAwakeCommand(args, { repoRoot, env: process.env, stderr: { write: () => undefined } }),
