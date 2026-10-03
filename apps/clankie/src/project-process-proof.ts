@@ -49,6 +49,12 @@ async function installedLauncher(harness: string): Promise<NativeLauncher | unde
 
 export interface ProjectProcessProof {
   readonly fleet: string;
+  /** Remote OS observation; machineId comes from the registered fleet, never the caller. */
+  readonly workspace?: {
+    readonly machineId: string;
+    readonly platform: "windows" | "posix";
+    readonly canonicalPath: string;
+  };
   readonly pane: string;
   readonly nativeOccupantId: string;
   /** Only the local listener may set this after checking the private native-process registry. */
