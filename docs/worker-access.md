@@ -4,6 +4,13 @@ Workers call selected MCP tools through Clankie under explicit manual or project
 grants. Provider credentials stay in his broker. Native delivery and tool access
 are separate: a mailbox connection alone grants no provider tools.
 
+Load the shipped `clankie` skill for the worker procedure: discover the actual
+granted catalog, verify the connected actor, read the current issue and decisions,
+and perform only the authorized change. `linear-issues` retains the editing and
+writing rules and points to that shared procedure. The skill ships in the Claude
+operator and worker plugins, Codex packages and worker-skills; doctor reports its
+installed presence separately from live access.
+
 ## Verify the account
 
 `/connect linear` verifies an API key using stable user/workspace IDs, email and

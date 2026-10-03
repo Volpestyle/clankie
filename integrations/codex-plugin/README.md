@@ -72,3 +72,13 @@ native Codex plugin marketplace, not a Claude plugin.
 Native contracts: [plugin packaging](https://developers.openai.com/plugins/build/plugins),
 [hook trust and events](https://learn.chatgpt.com/docs/hooks), and
 [app-server](https://developers.openai.com/codex/app-server).
+
+## Working beside Clankie
+
+The generated skill catalog includes the product `clankie` skill from
+`.agents/skills/clankie/SKILL.md`, even when optional opinionated guidance is off.
+It explains project-granted tools, connected actors and delivery receipts.
+Fleet workers use the separate `clankie-worker@clankie-fleet` package under
+`integrations/claude-plugin/worker`; its regular skill snapshot is built before
+owner installation and checked by content hash and package version. Neither
+skill presence nor plugin installation proves live project access.

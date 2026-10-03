@@ -56,6 +56,7 @@ it("reports installed, enabled, version, bridge, hook and skill gaps independent
     });
     const environments: string[] = [];
     await installHarnessBridges({
+      prepareSkills: async () => {},
       repoRoot: "/fixture",
       env: { HOME: home, CLAUDE_CONFIG_DIR: active },
       consent: async () => true,

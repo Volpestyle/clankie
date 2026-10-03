@@ -1,4 +1,5 @@
 import { nativeCodexExecutable } from "./native-codex.mjs";
+import { prepareWorkerSkill } from "./skill-bundle.mjs";
 import { claudeProfileDirectories } from "./harness-status.mjs";
 import { execFile } from "node:child_process";
 import { lstat, readFile, readlink, realpath } from "node:fs/promises";
@@ -135,6 +136,7 @@ async function installHarnessBridges(options) {
       continue;
     }
     try {
+      await (options.prepareSkills ?? prepareWorkerSkill)(join(marketplace, "worker"));
       if (
         (await realpath(config).catch(() => config)) !== source ||
         (await readFile(config, "utf8").catch(() => undefined)) !== configBefore ||

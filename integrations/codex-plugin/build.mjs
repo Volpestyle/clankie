@@ -24,6 +24,15 @@ Use the this-machine skill for your configuration and trace-clankie for your tra
 `;
 }
 
+/** Native Codex installation skips symlinks; materialize one authored skill. */
+export function materializeSkill(sourcePath, targetPath) {
+  const source = lstatSync(sourcePath).isSymbolicLink()
+    ? resolve(dirname(sourcePath), readlinkSync(sourcePath))
+    : sourcePath;
+  rmSync(targetPath, { recursive: true, force: true });
+  cpSync(source, targetPath, { recursive: true, dereference: true });
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const rendered = renderInstructions();
   if (process.argv.includes("--check")) {
@@ -39,12 +48,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     rmSync(skillsRoot, { recursive: true, force: true });
     mkdirSync(skillsRoot);
     for (const skill of bundledSkills(join(root, "../.."))) {
-      // Git can create a file symlink for a directory on Windows. Resolve the
-      // authored root link before copying; never replace it with a snapshot.
-      const source = lstatSync(skill.path).isSymbolicLink()
-        ? resolve(dirname(skill.path), readlinkSync(skill.path))
-        : skill.path;
-      cpSync(source, join(skillsRoot, skill.name), { recursive: true, dereference: true });
+      materializeSkill(skill.path, join(skillsRoot, skill.name));
     }
   }
 }

@@ -1,3 +1,4 @@
+import { prepareWorkerSkill } from "../../../integrations/claude-plugin/worker/bin/skill-bundle.mjs";
 import { readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
@@ -224,6 +225,7 @@ export async function prepareFleet(
                 ),
         ),
       ));
+  await prepareWorkerSkill(options.workerPluginDir);
   await options.shell(stageCommand(fleet), 60_000);
   await copy(options.workerPluginDir, `${STAGING_DIR}/worker`);
   await copy(join(options.workerPluginDir, "..", ".agents"), `${STAGING_DIR}/.agents`);

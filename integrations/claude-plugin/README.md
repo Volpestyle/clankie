@@ -22,13 +22,13 @@ plugin can uniquely declare. Everything else lives in the service and the
 
 ## What the plugin carries
 
-| Piece                                                                                                                                                          | File                       | What it does                                                                                                                                                 |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Output style `Clankie`                                                                                                                                         | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`. |
-| `SessionStart` hook                                                                                                                                            | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card                                 |
-| `UserPromptSubmit` hook                                                                                                                                        | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card, once per session and again when it changes                                             |
-| MCP server `clankie`                                                                                                                                           | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                               |
-| Skills `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:work-items`, `/clankie:computer-use-delegation`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                            |
+| Piece                                                                                                                                                                              | File                       | What it does                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Output style `Clankie`                                                                                                                                                             | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`. |
+| `SessionStart` hook                                                                                                                                                                | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card                                 |
+| `UserPromptSubmit` hook                                                                                                                                                            | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card, once per session and again when it changes                                             |
+| MCP server `clankie`                                                                                                                                                               | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                               |
+| Skills `/clankie:clankie`, `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:work-items`, `/clankie:computer-use-delegation`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                            |
 
 The output style is generated: edit `apps/clankie/src/captain/instructions.md`
 and run `node integrations/claude-plugin/build.mjs`. `node
@@ -285,3 +285,21 @@ and `worker/.codex-plugin`; it reuses the fleet bridge, has no operator bearer a
 does not advertise Claude hooks as Codex receivers. Managed Codex configuration
 must go through its real source/setup. Live membership and reply delivery require
 native session proof; installation alone supplies neither.
+
+### Working beside Clankie
+
+The `clankie` skill teaches native fleet agents how to use project-granted tools,
+check their connected actor, inspect conversations and sessions, and interpret
+delivery receipts. Its authored source is `.agents/skills/clankie/SKILL.md`.
+The operator Claude plugin links it; `worker-skills` links the canonical catalog.
+Codex installation needs regular files, so its build materializes the catalog.
+The worker package contains a regular `skills/clankie/SKILL.md` snapshot, shared
+by its Claude and Codex manifests.
+
+Before a checkout worker install or fleet copy, the existing Codex materializer
+refreshes that snapshot. Release assembly does the same.
+`node integrations/claude-plugin/worker/bin/skill-bundle.mjs` builds it manually.
+`skills/clankie.bundle.json` records its content SHA-256 and worker version; a
+standalone package validates both without importing a repository or builder.
+Doctor checks the installed skill marker separately from native membership.
+Shipping or loading the skill grants no tools and is not a live delivery check.

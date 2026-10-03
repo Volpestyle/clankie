@@ -18,6 +18,7 @@ it.each(["refuse", "native", "symlink", "generated", "source"])(
     else await writeFile(config, contents);
     try {
       const results = await installHarnessBridges({
+        prepareSkills: async () => {},
         repoRoot: "/fixture/clankie",
         env: { HOME: home },
         consent: async () => kind !== "refuse",
@@ -62,6 +63,7 @@ it("refuses a configuration swap while the owner is reviewing consent", async ()
   const calls: string[] = [];
   try {
     const result = await installHarnessBridges({
+      prepareSkills: async () => {},
       repoRoot: "/fixture",
       env: { HOME: home },
       execute: async (command, args) => {

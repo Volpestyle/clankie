@@ -28,4 +28,7 @@ export async function copySkillAssets(repoRoot, targetRoot) {
       });
     }
   }
+  // The standalone worker is copied/installed without the repository beside it.
+  const { prepareWorkerSkill } = await import("../../integrations/claude-plugin/worker/bin/skill-bundle.mjs");
+  await prepareWorkerSkill(join(targetRoot, "integrations/claude-plugin/worker"));
 }
