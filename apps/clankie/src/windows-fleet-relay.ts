@@ -103,7 +103,7 @@ public static class ClankieRelay {
     uint next = 0;
     try {
       while (!stopped) {
-        TcpClient client = listener.AcceptTcpClient(); client.NoDelay = true;
+        TcpClient client = listener.AcceptTcpClient(); client.NoDelay = true; client.SendTimeout = 5000;
         uint id = ++next;
         if (id == 0) {client.Close(); throw new Exception("Relay stream ids exhausted");}
         lock (clientsLock) {

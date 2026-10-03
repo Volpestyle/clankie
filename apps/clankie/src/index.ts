@@ -52,6 +52,10 @@ import {
   turnTelemetry,
 } from "@clankie/observability/body-telemetry";
 import {
+  observeLocalProjectWorktreeRoot,
+  observeLocalProjectGitWorktree,
+  type ObserveProjectWorktreeRoot,
+  type ObserveProjectGitWorktree,
   applyDiscordSettingsToEnvironment,
   applyRelaySettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
@@ -84,7 +88,12 @@ import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
 import { createProjectMembershipResolver, createProjectWorkspaceResolver } from "./project-membership.ts";
-import { createRemoteProjectObserver, createRemoteWorkspaceCanonical } from "./remote-project-proof.ts";
+import {
+  createRemoteProjectObserver,
+  createRemoteWorkspaceCanonical,
+  createRemoteGitWorktreeObserver,
+  createRemoteWorktreeRootObserver,
+} from "./remote-project-proof.ts";
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
 import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
@@ -566,13 +575,21 @@ const localProjectProcessObserver = createProjectProcessObserver({
   binding: localFleetBinding,
   herdrBinary: "herdr",
 });
+let proofFleetLinks: FleetLinks | undefined;
 const remoteProofOptions = {
   fleet: async (id: string) => (await runtimes.fleets()).find((fleet) => fleet.id === id),
   shell: (fleet: Parameters<typeof runtimes.fleetShell>[0]) =>
-    fleetLinks.observer(fleet) ?? runtimes.fleetShell(fleet),
+    proofFleetLinks?.observer(fleet) ?? runtimes.fleetShell(fleet),
 };
 const remoteProjectObserver = createRemoteProjectObserver(remoteProofOptions);
 const remoteCanonical = createRemoteWorkspaceCanonical(remoteProofOptions);
+const remoteGitWorktree = createRemoteGitWorktreeObserver(remoteProofOptions);
+const remoteWorktreeRoot = createRemoteWorktreeRootObserver(remoteProofOptions);
+const projectWorktreeRoot: ObserveProjectWorktreeRoot = (input) =>
+  input.machineId === "local" ? observeLocalProjectWorktreeRoot(input) : remoteWorktreeRoot(input);
+const projectGitWorktree: ObserveProjectGitWorktree = (root, cwd) =>
+  root.machineId === "local" ? observeLocalProjectGitWorktree(root, cwd) : remoteGitWorktree(root, cwd);
+
 const projectProcessObserver = (fleet: string, pane: string) =>
   fleet === "default" ? localProjectProcessObserver(fleet, pane) : remoteProjectObserver(fleet, pane);
 const localCodexSeats = new LocalCodexSeats(herdr.binding);
@@ -787,6 +804,8 @@ const captain = createCaptain(
       settings: async () => (await settingsStore.load()).projects,
       observe: projectProcessObserver,
       remoteCanonical,
+      worktreeRoot: projectWorktreeRoot,
+      gitWorktree: projectGitWorktree,
     }),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
@@ -842,6 +861,7 @@ const fleetLinks = new FleetLinks({
   projectProof: remoteProjectObserver,
   log: (message) => logger.info({ event: "fleet.link" }, message),
 });
+proofFleetLinks = fleetLinks;
 runtimes.linkStatus = (fleet) => fleetLinks.status(fleet);
 const localFleet = new LocalFleetLink({
   directory: join(homedir(), ".clankie", "links"),
@@ -860,6 +880,7 @@ const localFleet = new LocalFleetLink({
   }),
 });
 const clankie = await createClankieApp({
+  projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
   roomObservations,
   roomVoice: new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore),
@@ -928,6 +949,8 @@ const clankie = await createClankieApp({
       settings: async () => (await settingsStore.load()).projects,
       hire: (proof) => captain.lookupProjectHire(proof),
       remoteCanonical,
+      worktreeRoot: projectWorktreeRoot,
+      gitWorktree: projectGitWorktree,
     }),
   }),
   captain,

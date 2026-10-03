@@ -1,3 +1,4 @@
+import type { ProjectGitWorktreeObservation, ProjectWorktreeRootObservation } from "@clankie/settings";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { win32 } from "node:path";
@@ -198,30 +199,12 @@ export function createRemoteWorkspaceCanonical(options: Options) {
   };
 }
 
-interface GitWorktreeFacts {
-  cwd: string;
-  worktreePath: string;
-  gitDirectory: string;
-  commonDirectory: string;
-  repoPath: string;
-  repoCommonDirectory: string;
-  registeredWorktrees: readonly string[];
-  gitFilePath: string;
-  gitDirectoryBacklink: string;
-}
-interface WorktreeRootFacts {
-  path: string;
-  repoPath: string;
-  commonDirectory: string;
-  homePath: string;
-}
-
 /** These Git facts are evidence, not authority: project policy still compares the enrolled root. */
 export function createRemoteGitWorktreeObserver(options: Options) {
   return async (
     root: { machineId: string; repoPath: string },
     cwd: string,
-  ): Promise<GitWorktreeFacts | undefined> => {
+  ): Promise<ProjectGitWorktreeObservation | undefined> => {
     try {
       const fleet = await options.fleet(root.machineId);
       if (
@@ -248,7 +231,7 @@ export function createRemoteWorktreeRootObserver(options: Options) {
     platform: string;
     path: string;
     repoPath: string;
-  }): Promise<WorktreeRootFacts | undefined> => {
+  }): Promise<ProjectWorktreeRootObservation | undefined> => {
     try {
       const fleet = await options.fleet(input.machineId);
       if (

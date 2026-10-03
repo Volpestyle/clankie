@@ -1,7 +1,7 @@
 # Windows fleet process proof
 
 A Windows agent reaches project-granted tools through Clankie's configured fleet
-SSH connection. Hand-started agents and hires use the same proof. A project grant
+SSH connection. Hand-started agents and pane-native Claude hires use the same proof. A project grant
 still binds the connected account, and every request and tool call checks current
 membership, settings and revocation.
 
@@ -75,7 +75,9 @@ The same reader supplies fresh Git facts for enrolled repository worktree roots.
 
 Before Herdr reports a native session ID, an independently started process may
 receive workspace access under a disjoint process-lifetime identity. A pending
-native session cannot establish a hired/private seat assignment.
+native session cannot establish a hired/private seat assignment. Detached hired
+Codex app-servers do not have pane-shell ancestry and remain denied until a
+service-owned launch-lifetime and thread registry can independently bind them.
 
 ## Failure and operational limits
 
