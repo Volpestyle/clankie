@@ -170,14 +170,13 @@ async function inside() {
     assert.equal(body.error, undefined, JSON.stringify(body.error));
     return body.result;
   };
-  let assignment;
-  const intent = randomUUID();
+  let hired;
   const call = async (name, args) => {
     const result = await rpc("tools/call", { name, arguments: args });
     assert.notEqual(result.isError, true, JSON.stringify(result));
     const envelope = JSON.parse(result.content[0].text);
     assert.notEqual(envelope.ok, false, JSON.stringify(envelope));
-    return envelope.data;
+    return envelope;
   };
   try {
     await rpc("initialize", {
@@ -186,12 +185,12 @@ async function inside() {
       clientInfo: { name: "hosted-proof", version: "1" },
     });
     assert.equal((await fetch("http://127.0.0.1:4310/v1/mcp", { method: "POST" })).status, 401);
-    for (const skill of ["lead", "swarm-mcp"])
+    for (const skill of ["lead"])
       assert.ok((await readFile(`/opt/clankie/.agents/skills/${skill}/SKILL.md`, "utf8")).length > 0);
     assert.ok(JSON.parse(await readFile("/opt/clankie/SBOM.cdx.json", "utf8")).components.length > 0);
     const tools = await rpc("tools/list", {});
-    assert.ok(tools.tools.some((tool) => tool.name === "swarm_assign"));
-    await call("swarm_sync", {});
+    assert.ok(tools.tools.some((tool) => tool.name === "hire_agent"));
+    assert.ok(!tools.tools.some((tool) => tool.name.startsWith("swarm_")));
     run("clankie", ["send", "--conversation", "global-default", "Prove the hosted captain can answer."]);
     let captainReply = false;
     const captainDeadline = Date.now() + 30_000;
@@ -203,20 +202,14 @@ async function inside() {
       );
     }
     assert.ok(captainReply, "the compiled captain completes a synthetic model turn");
-    assignment = await call("swarm_assign", {
-      commandId: intent,
-      title: "Hosted worker execution proof",
-      routing: { intentId: intent, capabilities: ["code"], durable: true },
-      contract: {
-        objective:
-          "Write the authorized test marker to /workspace/hosted-proof.txt. Preserve other files. This isolated fixture supplies synthetic model responses.",
-        worktree: "/workspace",
-        acceptanceCriteria: ["The worker writes the marker inside its hosted workspace"],
-        expectedArtifacts: ["hosted-proof.txt"],
-        constraints: ["Only the isolated workspace; synthetic provider only"],
-      },
+    hired = await call("hire_agent", {
+      harness: "claude",
+      title: "hosted-proof",
+      workingDirectory: "/workspace",
+      brief:
+        "Write the authorized test marker to /workspace/hosted-proof.txt. Preserve other files. This isolated fixture supplies synthetic model responses. Report the result and checks.",
     });
-    assert.equal(assignment.status, "bound", JSON.stringify(assignment));
+    assert.equal(hired.outcome, "spawned", JSON.stringify(hired));
     const deadline = Date.now() + 90_000;
     while (Date.now() < deadline && writesConfirmed === 0) await sleep(250);
     assert.equal(await readFile("/workspace/hosted-proof.txt", "utf8"), marker);
@@ -227,8 +220,7 @@ async function inside() {
     console.log(
       JSON.stringify({
         passed: true,
-        taskId: assignment.taskId,
-        worker: assignment.actor,
+        worker: hired.seat,
         runtime: run("claude", ["--version"]).trim(),
         pi,
         writesRequested,
@@ -237,13 +229,13 @@ async function inside() {
       }),
     );
   } finally {
-    if (assignment?.taskId)
-      await call("swarm_task", {
-        commandId: randomUUID(),
-        action: "cancel",
-        taskId: assignment.taskId,
-        intentId: intent,
-      }).catch(() => {});
+    if (hired?.seat?.seatId) {
+      await fetch("http://127.0.0.1:4310/operator/v1/dispatch", {
+        method: "POST",
+        headers: { ...headers, authorization: `Bearer ${credentials.clankie_captain.key}` },
+        body: JSON.stringify({ op: "close_seat", schemaVersion: 1, seatId: hired.seat.seatId }),
+      });
+    }
     await fetch("http://127.0.0.1:4310/v1/mcp", { method: "DELETE", headers });
     model.closeAllConnections();
     await new Promise((done) => model.close(done));
@@ -364,7 +356,7 @@ async function outside() {
     assert.deepEqual(state(id), before, "credentials, settings and work survive container replacement");
     assert.equal(before.workdir, "/workspace/project");
     console.log(
-      "Hosted smoke passed: non-root captain turn + relay, real Claude/Herdr worker with synthetic model, Swarm assignment, captain-hired pi worker whose turn the captain's brief started, owner isolation, persistent credentials/settings/workspace.",
+      "Hosted smoke passed: non-root captain turn + relay, real Claude/Herdr worker with synthetic model, native hire, captain-hired pi worker whose turn the captain's brief started, owner isolation, persistent credentials/settings/workspace.",
     );
   } catch (error) {
     for (const project of projects) process.stderr.write(compose(project, ["logs", "--tail", "30"]));

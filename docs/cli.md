@@ -86,7 +86,6 @@ Do not edit `~/.config/clankie/clankie.json`,
 | [Read and send conversations](#conversation-commands)  | `conversations`, `send`, `file`, `memory`       |
 | [Use native seats and delegated tools](#seat-commands) | `seat`, `mcp`, `access`                         |
 | [Evaluate agent work](#evaluation-commands)            | `evaluator`                                     |
-| [Coordinate Swarm work](#swarm-commands)               | `swarm`                                         |
 
 ## Commands
 
@@ -1149,15 +1148,14 @@ clankie fleet set --size small --models efficient
 
 ### `connections` and `runtime`
 
-`clankie connections` combines execution runtime health, Swarm
-connections/diagnostics and the recorded Linear account identity as JSON. Its
+`clankie connections` combines execution runtime health and the recorded
+Linear account identity as JSON. Its
 operator API is `GET /v1/connections`; the companion app shows it under
 Settings, where it can also connect a local Herdr session by name.
 
 In the TUI, `/connections` opens a menu over the same data: execution runtimes
-(details, connect, disconnect, Herdr settings), Swarm (contacts, one row per
-actor, and messaging; external coordinators), agent sessions (hosts → sessions →
-read or send, add or remove SSH hosts), and accounts. `/runtime`, `/swarm` and
+(details, connect, disconnect, Herdr settings), agent sessions (hosts → sessions →
+read or send, add or remove SSH hosts), and accounts. `/runtime` and
 `/sessions` with no argument open their own section; with arguments they print JSON
 as before, and `/connections json` prints the raw inventory.
 
@@ -1176,8 +1174,8 @@ Disconnect disables routing and retains identity without stopping any worker.
 An unavailable named connection never selects another session. Native Herdr
 commands/viewers require a local Clankie service. These managed launch routes
 share the service's filesystem and executable paths. A Herdr fleet on another
-machine is an ssh connection (`herdr add`, below); its peers reach this
-coordinator through that fleet's relay (`swarm fleet-peer`).
+machine is an ssh connection (`herdr add`, below); its agents reach Clankie
+through that fleet's link.
 
 For custom capacity/capabilities, `runtime connect CONNECTION.json` accepts
 `{ "id": "build", "session": "workers", "capacity": 2, "capabilities": ["code"] }`.
@@ -1186,16 +1184,6 @@ A socket can replace `session`. `default` is reserved for the existing fleet;
 connections are stored under `execution.connections`.
 The operator API is GET/POST `/v1/runtime-connections` and DELETE
 `/v1/runtime-connections/ID`; GET `/v1/herdr?connection=ID` resolves a live binding.
-
-For new routed work, `swarm_assign` accepts `runtime: "build"` beside its `routing`
-object. This is independent of the coordinator's `connection` field; runtime
-selection applies only to the embedded coordinator. Retries keep their original
-runtime, intent and payload. The coordinator reloads route configuration before
-dispatch, and connect/disconnect synchronizes existing owned coordinators. Older
-coordinator processes report `restart-required` and refuse managed route changes
-until deliberately upgraded/restarted; replacing a package does not upgrade a
-running owner. Configuration failures return an error: inspect inventory before
-retrying rather than assuming a disconnect completed.
 
 Approve additional execution locations for the default or a named runtime through
 the operator API (the same commands work as `/runtime` in the TUI):
@@ -1206,44 +1194,9 @@ clankie runtime workspaces build --repo /absolute/project
 clankie runtime workspaces build --clear
 ```
 
-Dispatch budget and each runtime capacity default to 16. The owner can change either:
-`clankie runtime capacity ID N` sets a runtime limit and `clankie runtime budget N`
-sets the overall budget. Replace `N` with `--clear` for unlimited; `0`
-pauses new admission. The TUI accepts the same arguments after `/runtime`.
-Both counts apply per coordinator scope, including runtime capacity: two
-coordinators sharing one Herdr runtime can together exceed its configured limit.
-Settings are reconciled into existing owners without replacing in-flight receipts.
-`runtime status` reports each effective value and its source: default, owner or unlimited.
-These controls use the operator API; no Swarm tool or captain bearer can change them.
-
-`clankie runtime harness ID claude|codex|pi` selects the managed worker harness
-for the default or a named local runtime. The operator API accepts
-`POST /v1/runtime-connections` with `{ "action": "harness", "id": "default", "harness": "codex" }`;
-`runtime list` reports `workerHarness`. The TUI Connections → Runtimes → Worker
-harness menu uses the same command. Codex defaults to `gpt-6-astra`; pi uses its
-native model preference. All three require native-interactive support in the
-installed Swarm build. Unsupported selections return `harness_unsupported` or
-`harness_mode_unsupported`; unavailable executables block dispatch without a
-Claude fallback. New routed assignments inherit the selected runtime's harness;
-`swarm_assign harness: "claude" | "codex" | "pi"` explicitly constrains it.
-The intent and launch receipt retain the selected harness. Keep the original
-payload when reconciling an uncertain dispatch.
-
-`clankie runtime mode ID interactive` sets how Swarm runs the workers it
-dispatches into the default or a named local runtime; `runtime list` reports it as
-`workerMode`. Interactive is the default and runs each selected harness's native
-TUI in the Herdr pane. Codex's native UI owns its private app-server thread and
-approvals; Pi receives native follow-up turns through its worker extension.
-Claude receives Swarm mail over a channel and needs the owner-approved
-`clankie-worker@clankie` plugin in Claude Code's managed settings
-([ADR 0194](adr/0194-interactive-swarm-workers-receive-leased-channel-events.md))
-and a Swarm runtime that accepts that harness's interactive route: Clankie refuses
-the selection while the installed swarm-mcp does not. A saved stream setting stays
-readable for recovery, but its launch route is disabled; new stream settings are
-refused. A blocked or uncertain native start never falls back to headless execution.
-Connecting or reconnecting a runtime remains possible for its existing peers.
-An ssh fleet has no worker
-mode, because its peers enroll themselves.
+Runtime capacity defaults to 16. `clankie runtime capacity ID N` changes it;
+`--clear` selects unlimited and `0` pauses new admission. The operator endpoint
+owns these settings. `runtime status` reports the effective value and source.
 
 Each call **replaces** that runtime's extra approvals; `--clear` restores the
 conversation-directory-only default. `runtime list` shows the stored policy.
@@ -1259,17 +1212,13 @@ written, because this host can neither resolve nor stat them.
 
 The operator-only POST `/v1/runtime-connections` accepts
 `{ "action": "workspaces", "id": "default", "workspaces": [{ "kind": "repository", "path": "/absolute/project" }] }`.
-Named `connect` JSON also accepts `workspaces`. No Swarm tool changes this policy;
+Named `connect` JSON also accepts `workspaces`;
 captain/Discord credentials cannot call this endpoint. Existing operator-machine
 shell authority remains unchanged.
 
-Set `contract.worktree` to the actual approved checkout. Rejection includes
-`requestedWorktree` and same-scope `routes`, each with `routeId`, `worktree`,
-`allowedWorktrees` and `reasons`. The worker starts and enrolls there while keeping
-the requester's coordination scope and instruction snapshot. Removing approval
-blocks new launches; it does not redirect or duplicate existing assignments.
-Old owners report `restart-required` until deliberately upgraded; coordinate the
-restart with running work. See [ADR 0193](adr/0193-runtime-workspaces-are-owner-approved.md).
+Use the actual approved checkout as `hire_agent.workingDirectory`. A remote
+hire needs an exact remote directory grant. See
+[ADR 0193](adr/0193-runtime-workspaces-are-owner-approved.md).
 
 ### `agents [list]` / `agents read` / `agents resume` / `agents hosts`
 
@@ -1368,7 +1317,7 @@ and DELETE `/v1/agent-hosts/ID`. The resume route delegates to the existing
 are `agent_sessions` and `agent_session_read`, available where he has machine
 access. `hire_agent` accepts `resume: "host:sessionId"` with the recorded harness
 and workingDirectory; follow-ups use `message_seat`. Reading never starts or
-resumes a harness. Enrolled Swarm workers retain their Swarm identity and fenced
+resumes a harness. Workers retain their native identity and
 ownership; a native resume does not enroll or replace them. Headless continuation
 remains retired (ADR 0203).
 
@@ -1401,7 +1350,7 @@ unavailable until restart; it never redirects existing work to a replacement fle
 `clankie herdr disable` (also `/herdr disable`, or **Run without Herdr** in the
 TUI menu) saves `runtime: disabled`. Apply with `clankie restart captain`.
 Clankie starts without probing, downloading or starting Herdr. Conversations,
-connected services and Swarm peer communication remain available. Terminal actions
+connected services and conversations remain available. Terminal actions
 for that default fleet report unavailable. Named execution connections remain
 independent; existing workers are not stopped.
 Use `herdr use NAME` or `herdr create` and restart to enable execution again.
@@ -1631,7 +1580,7 @@ message: PNG, JPEG, HEIC/HEIF, GIF and WebP up to 20 MiB, and MP4 or MOV up to
 images and video as keyframes. A local agent seat receives copies under
 `.clankie/inbox/<message>/` in its working directory (git-ignored by the
 inbox's own `.gitignore`), with keyframes beside a video when ffmpeg is
-installed, and a message listing their paths. A Swarm peer or an agent on
+installed, and a message listing their paths. An agent on
 another machine cannot receive files: that send is refused as
 `seat_undelivered` and nothing is delivered. See
 [ADR 0209](adr/0209-owner-attachments-reach-agents-as-files.md).
@@ -1889,7 +1838,7 @@ Skill selection is reapplied at launch, but resumed history can still contain pr
 resolves its cwd through `/v1/captain/seat-context`, and opens Claude there. That
 workspace must exist on the native host. The prompt includes its agent
 instructions and the owner's persona/fleet preferences. The MCP bank and channel
-share its conversation/Swarm actor. Inherited worker capabilities and conversation
+share its conversation. Inherited worker capabilities and conversation
 selections do not select the seat. The default remains the global conversation.
 Selected project seats do not rename themselves as the global Herdr head.
 
@@ -1971,30 +1920,18 @@ development-channels dialog but then rejects `server:` as not on the approved
 allowlist. The service's hire path persists the server and passes the dangerous
 flag for a claude seat.
 
-### `access`, `mcp --swarm`, `mcp --grant FILE` and `mcp --swarm-grant ID`
+### `access` and `mcp --grant FILE`
 
-`clankie access linear [verify]` shows or verifies the connected Linear API-key or OAuth
-account. `access list`, `access issue REQUEST.json --out GRANT.json`, and
-`access revoke ID` manage worker grants. `access fleet NAME SERVER [--tool NAME]...`
-gives every agent in that fleet (one Herdr session) those tools over its link
-until revoked, with no bearer; see [fleet access](worker-access.md#fleet-access). `/access` in the TUI exposes status,
-verification and revocation. Issue from the terminal. For enrolled workers,
-the built-in Herdr route supplies `clankie mcp --swarm` automatically. External
-workers can configure it with `SWARM_SCOPE`, `SWARM_SESSION_CAPABILITY` and the
-selected `CLANKIE_CONTROL_PLANE_URL`. It starts with no tools; explicit grants
-appear through MCP tool-list notifications. Each request checks the actor's
-current account and assignment authority. No operator credentials are loaded.
-`access issue REQUEST.json --deliver swarm` prints a non-secret grant ID and
-bridge command, with no grant-file handoff. `mcp --swarm-grant ID` retrieves only
-that worker's existing grant using `SWARM_SESSION_CAPABILITY`; it uses no operator
-credential. Select a remote service with `CLANKIE_CONTROL_PLANE_URL` (HTTPS).
+`clankie access linear [verify]` reads or verifies the connected account.
+`access list`, `access issue REQUEST.json --out GRANT.json` and `access revoke ID`
+manage individual worker grants. The private file feeds `clankie mcp --grant FILE`,
+which serves only granted tools and loads no operator bearer or seat channel.
+Tokens expire after at most 15 minutes and require explicit reissue.
 
-`clankie mcp --grant FILE` serves that worker's granted connected tools. It is
-mutually exclusive with `--swarm`, `--swarm-grant`, `--seat` and `--lane`, and loads no operator bearer or
-channel. Tokens last at most 15 minutes. Swarm-bound grants with `renewable: true`
-renew automatically while the same assignment remains authorized; others need
-explicit reissue. Verified Linear API keys and MCP OAuth connections support delegation.
-See [worker access](worker-access.md) for request fields, delivery and restrictions.
+`access fleet NAME SERVER [--tool NAME]...` grants agents in that Herdr session
+connected tools through its fleet link until revoked, with no bearer delivery.
+`/access` exposes status, verification and revocation; issue from the terminal.
+See [worker access](worker-access.md) for restrictions and account bindings.
 
 ### `stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]`
 
@@ -2084,7 +2021,7 @@ the existing `replay`/`tail` operations reads the harness session on demand,
 including messages, tools, typing state and contained images. Native cursors are
 opaque; clients follow the returned recovery cursor after a session or history
 change. The host persists the source locator, not a second native transcript.
-Explicit app sends and Swarm exchanges remain durable host communications.
+Explicit app sends and native messages remain durable host communications.
 Clankie can inspect panes and arm completion watches independently of chat views.
 See [the native chat decision](adr/0188-native-agent-chats-read-their-own-history.md).
 
@@ -2144,7 +2081,7 @@ Raw evidence remains local; findings carry redacted excerpts to Linear. See
 ### Hired seat lifecycle hooks
 
 `clankie seat-hook` is the `clankie-worker` plugin's hook (VUH-1458). Inside a
-pane Clankie hired (`HERDR_PANE_ID` set, no `SWARM_WORKER_LAUNCH`), it reads
+pane Clankie hired (`HERDR_PANE_ID` set), it reads
 Claude's `SessionStart`, `UserPromptSubmit`, `Stop` or `StopFailure` JSON on
 stdin and posts `{ event, sessionId, lastMessage?, error? }` to
 `/v1/fleet/seats/{paneId}/hook` with the operator credential. The final text is
@@ -2171,167 +2108,6 @@ conversation's native sessions; launch a new seat afterward so old history canno
 repopulate the cleared conversation. Sync failures never
 instruct the harness to continue or block a stop. The current 9,000-entry display tail
 is the replay bound. Image files use `clankie file publish` separately.
-
-<a id="swarm-commands"></a>
-
-### Swarm coordination
-
-Swarm is optional for independent peers. Local hires use the harness's channel or
-session API, and work stays in the repo's existing tracker or files. `clankie swarm
-off` (or `/swarm off`) saves `swarm.enabled: false`; `swarm on` enables it again.
-The setting takes effect on the next deliberate captain restart. It does not stop
-running workers, erase coordinator state or connections, or switch the tracker.
-The default is **on**, including fresh installs; disabling it is explicit.
-`PUT /v1/swarm/config` accepts `{ "enabled": true | false }`; its response and
-`swarm status` distinguish configured `enabled`, running `active`, and
-`restartRequired`. The Connections menu exposes the same setting.
-
-`clankie swarm status` (or `/swarm status` in the TUI) reads the authenticated
-`GET /v1/swarm` diagnostic view: configured connections, active conversation actors
-and coordinator state. `swarm connections` is the same inventory.
-`clankie swarm contacts` lists discovered Swarm personas, including saved offline
-contacts. `clankie swarm tasks` lists every unfinished Swarm task on the connected
-coordinators with its lead, owner, state, worktree and blocker: the same board the
-app shows ([ADR 0205](adr/0205-the-fleet-carries-its-open-swarm-tasks.md)).
-`clankie swarm message PERSONA TEXT` opens its DM and submits one message;
-`clankie swarm thread PERSONA` reads a bounded history page. The same commands work
-under `/swarm` in the TUI. Select the exact persona ID from the catalog. Replaced
-sessions have new contacts; old threads do not redirect. An accepted local turn
-is queued, not proof of peer processing; the thread records delivery failures.
-See [Swarm contact identity](adr/0182-swarm-peers-are-messageable-personas.md).
-
-Each operator conversation has an isolated inbox. The service delivers messages
-through its existing turn queue; processing requires explicit acknowledgment.
-`clankie seat --conversation ID` uses the selected service conversation actor
-through the Clankie MCP server; omission selects the global head. Its launch
-directory does not select another Swarm scope.
-With the plugin channel enabled, queued envelopes reach the native seat through
-that channel; processing still requires `swarm_inbox` acknowledgment. The projected
-plugin uses its `clankie@inline` channel identity. See the [seat plugin](../integrations/claude-plugin/README.md)
-for context, resume and native-workspace requirements.
-
-When included, use `lead` for leadership and `swarm-mcp` when participating in
-this optional peer connection. Turning opinionated skills off retains the
-captain's own leadership instructions and native hire/message tools.
-Through `clankie mcp`, Pi or the Claude seat, `swarm_assign` accepts optional
-`skills: ["installed-name"]`. Selected skills and supporting files travel with the
-assignment's pinned project context. The existing conversation composer catalog
-supplies names. See [skill selection and limits](../packages/swarm/README.md#working-preferences-and-portable-skills-slices-36).
-
-`clankie swarm connect PRIVATE.json` (also `/swarm connect PRIVATE.json`) imports
-an externally enrolled Clankie session into an existing operator conversation.
-The regular file must be private (0600) and at most 16 KiB. Its exact shape is:
-
-```json
-{
-  "id": "project-team",
-  "conversationId": "global-default",
-  "endpoint": "/private/path/coordinator.sock",
-  "capability": "<dedicated Clankie session capability from the trusted launcher>"
-}
-```
-
-Use a session enrolled for Clankie, distinct from worker sessions. The service
-verifies its actor/scope and stores only a broker reference in settings. This
-connects to the refactored coordinator protocol, not the legacy database API.
-An operator-managed SSH Unix-socket forward can provide the local endpoint.
-Alternatively, name a registered, enabled SSH fleet with `ssh`; `endpoint` then
-names the existing coordinator socket or Windows named pipe on that machine:
-
-```json
-{
-  "id": "rivals",
-  "conversationId": "global-default",
-  "ssh": "pc",
-  "endpoint": "\\\\.\\pipe\\swarm-mcp-<owner-endpoint-hash>",
-  "capability": "<dedicated Clankie session capability from the PC launcher>"
-}
-```
-
-Discover the endpoint from that coordinator; do not guess its hash. This uses
-the fleet's SSH target and shell, without calling Herdr. For each connection,
-Clankie starts a stdlib `node -e` splice on the remote machine, listening only
-on `127.0.0.1` at an OS-allocated port and connecting to the existing endpoint.
-The same SSH connection carries a local forward from a private Mac/Linux Unix
-socket (0600, inside a process-private 0700 directory). Nothing is installed.
-The remote splice exits when SSH stdin closes. The loopback listener is reachable
-by other users/processes on that remote machine; the coordinator still requires
-a session capability for every operation. The splice holds no credentials.
-
-Clankie supervises the link with bounded backoff, restores it for saved bindings
-on service start, and refreshes its local clients after reconnection. Disconnect
-and service shutdown close the link and remove its local sockets. A failed
-import closes a newly created link. Existing manually forwarded local endpoints
-remain operator-managed. Clankie does not start, modify or stop the external
-owner. An oversight peer leaves the project lead's dispatch authority and workers
-in place; joining a coordinator does not require a lead handoff. Provisioning uses
-that coordinator's configured routes. A configured connection belongs to one
-conversation; that conversation can address several independent coordinators.
-Import starts inbox listening immediately, including before its next model turn.
-
-Pass `connection: "project-team"` on any `swarm_*` call. Omit it (or use
-`"embedded"`) for the built-in coordinator. Keep the same connection when
-replying, acknowledging, reading evidence or retrying an intent. Incoming wake
-context names the connection. Instruction snapshots come from the selected
-Clankie conversation and stay pinned to that coordinator's work. Reusing a
-connection ID for another actor, scope, endpoint, SSH fleet or conversation is refused.
-
-`clankie swarm disconnect project-team` disables access, closes its sessions and
-removes the brokered capability. External workers and work records stay with
-their owner. Import a valid capability for the same retained identity to reconnect;
-use a new ID for a different identity. A disconnected or unreachable connection
-never falls back to another coordinator. Connection loss does not enroll another
-session or replay uncertain assignments.
-
-For grants on external work, add `swarm.connectionId` to the issuance request.
-Enrolled workers use `CLANKIE_SWARM_CONNECTION=project-team` with
-`clankie mcp --swarm`, alongside their own `SWARM_SCOPE` and
-`SWARM_SESSION_CAPABILITY`. Their Clankie service URL must be reachable privately
-(for example over SSH); the public app gateway does not expose worker MCP routes.
-Enrollment still grants no provider tools. [Grant contract](worker-access.md).
-
-#### Peers on another machine: `swarm fleet-peer`
-
-One coordinator serves every fleet ([ADR 0198](adr/0198-one-coordinator-reaches-every-fleet.md)).
-A peer on a registered ssh fleet joins a conversation's embedded coordinator
-through that fleet's relay:
-
-```sh
-clankie swarm fleet-peer pc rivals-worker --conversation global-default --out ./pc-rivals-worker.json
-```
-
-The first enrollment pins the fleet's relay to that conversation's coordinator
-(`execution.connections[].relay`) and starts it; the service restores it on
-every start and reconnects with backoff. The peer is its own actor in that
-conversation's scope, keyed by fleet and name, so enrolling the same name again
-resumes the same actor with a new generation. The capability is written once,
-to the private `--out` file (0600, never overwritten), and never printed. That
-file's `environment` is exactly what the peer's stock `swarm-mcp` adapter needs
-on its machine: `SWARM_COORDINATOR_ENDPOINT` (the relay endpoint there),
-`SWARM_SESSION_CAPABILITY` and `SWARM_SCOPE`. Move it to that machine over the
-owner's ssh and keep it readable only by the peer's user. The operator API is
-POST `/v1/swarm/fleet-peers` `{ "conversationId", "fleet", "name" }`.
-
-The relay is one ssh connection per fleet, separate from the Herdr calls:
-
-- On this machine, `ssh -R 127.0.0.1:0:<owner socket>` asks sshd for a
-  loopback-only port on the remote host that forwards to the coordinator's Unix
-  socket. Nothing listens on a network address on either side.
-- On the remote host, a small Node program started by that same connection
-  (`node -e`, nothing installed) serves `\\.\pipe\clankie-swarm-<fleet>` on
-  Windows, where OpenSSH cannot forward a named pipe, or
-  `~/.clankie/swarm-relay-<fleet>.sock` (0600) elsewhere, and splices each
-  client to that port. It exits when the connection closes, so the endpoint
-  exists only while the link is up. Node must be on that host's PATH.
-- Exposure on the remote host is that loopback port and that endpoint. Any
-  local process there can open them, but the coordinator admits nothing
-  without a session capability; the relay carries bytes and holds none.
-- `runtime list` reports each fleet's `relayState`: `starting`, `ready` (with
-  the endpoint and port) or `unreachable` (with the last ssh error). While the
-  link is down a peer cannot fetch, so its mail waits unleased instead of
-  dead-lettering; it resumes when the relay is back.
-
-See [Swarm architecture](adr/0180-swarm-is-the-coordination-layer.md).
 
 ## Services
 
@@ -2525,7 +2301,7 @@ Clankie's seats include his process and leadership skill bundle. Local hired
 Claude, Codex and Pi workers receive it through their launch configuration; a
 plain harness keeps the owner's independent global selection. See
 [bundled working skills](bundled-skills.md) for the inventory, source revisions,
-per-harness mechanisms, deployment gate and remote/Swarm limitations.
+per-harness mechanisms, deployment gate and remote limitations.
 
 ### Current agent assignment
 

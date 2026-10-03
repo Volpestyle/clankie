@@ -331,9 +331,6 @@ describe("authenticated operator conversation relay", () => {
     const inventory = {
       observedAt: NOW,
       runtimes: [],
-      swarms: [],
-      swarmsTruncated: false,
-      unavailableSwarms: 0,
       linear: { status: "verified" as const, email: "clankie@example.com", workspace: "Example" },
     };
     const dispatch = vi.fn<OperatorConversationServiceDispatch>(async () => ({
@@ -359,7 +356,7 @@ describe("authenticated operator conversation relay", () => {
     });
   });
 
-  it.each(["list", "connect_runtime", "disconnect_runtime", "reconnect_runtime", "disconnect_swarm"])(
+  it.each(["list", "connect_runtime", "disconnect_runtime", "reconnect_runtime"])(
     "requires steer for connection action %s",
     async (action) => {
       const dispatch = vi.fn();

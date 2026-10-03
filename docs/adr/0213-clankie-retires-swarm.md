@@ -1,13 +1,13 @@
 # ADR 0213: Clankie retires Swarm
 
-Status: accepted (James, 2026-10-02). Phase 1 implemented; phases 2 and 3 are
-tracked in Linear. Amends [ADR 0180](0180-swarm-is-the-coordination-layer.md),
-[ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md) (Swarm leaves the
-keep-and-invest list) and [ADR 0207](0207-work-records-and-native-agent-delivery.md).
-Phase 3 will supersede [ADR 0182](0182-swarm-peers-are-messageable-personas.md),
-[ADR 0194](0194-interactive-swarm-workers-receive-leased-channel-events.md),
-[ADR 0198](0198-one-coordinator-reaches-every-fleet.md) and
-[ADR 0205](0205-the-fleet-carries-its-open-swarm-tasks.md).
+Status: accepted (James, 2026-10-02). All three phases implemented.
+Supersedes ADRs [0180](0180-swarm-is-the-coordination-layer.md),
+[0182](0182-swarm-peers-are-messageable-personas.md),
+[0194](0194-interactive-swarm-workers-receive-leased-channel-events.md),
+[0198](0198-one-coordinator-reaches-every-fleet.md) and
+[0205](0205-the-fleet-carries-its-open-swarm-tasks.md). Amends
+[ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md) and
+[ADR 0207](0207-work-records-and-native-agent-delivery.md).
 
 ## Context
 
@@ -72,14 +72,28 @@ flowchart LR
 James's own agent fleet may keep using Swarm on its own; this decision covers
 Clankie.
 
+## Implementation and disposition
+
+VUH-1527 supplied native remote hires, the per-fleet link, `message_clankie`
+and fleet grants. VUH-1528 removes the embedded runtime, coordinator relays,
+Swarm tools and controls, task/contact protocol fields and task-bound grants.
+The private app removes those consumers in step. Manual grants and fleet grants
+remain. Existing settings discard retired coordinator and dispatch fields;
+saved task-bound grants confer no access. Saved personas and conversations
+remain offline, and coordinator state under `~/.clankie/swarm` remains on disk.
+
+James cancelled VUH-1517 on 2026-10-03, disposing of the retained Mac dispatch
+work. The worker plugin keeps its MCP server key `swarm` for compatibility with
+hire permissions and installed PC configuration; only its native hire/link
+channel remains. James's independent Swarm fleet and installs are unaffected.
+
 ## Consequences
 
 - One launch path means tracker isolation, model and effort selection, roles and
   attachments apply to every worker Clankie starts.
-- A lead that wants parallel workers hires them and assigns work in the repo's
-  tracker (ADR 0191). An agent that asks Swarm to dispatch gets a refusal that
-  names `hire_agent`.
-- Until phase 2, remote fleets keep Swarm messaging through the relay.
-  Starting a remote worker still uses the terminal lane it used before.
+- A lead hires parallel workers through native channels and assigns work in
+  the repo's tracker (ADR 0191).
+- Remote workers use the fleet link and their native harness channels or
+  session APIs. Independent linked agents can initiate messages to Clankie.
 - Fenced task claims between agents go away in phase 3. Work ownership already
   lives in the tracker.

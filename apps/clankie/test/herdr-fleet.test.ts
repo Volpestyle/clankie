@@ -548,15 +548,6 @@ describe("registering an ssh fleet", () => {
         state: "healthy",
         transport: "ssh",
       });
-      // Swarm dispatches no workers into an ssh fleet, so it has no worker mode (ADR 0194).
-      expect((await runtimes.list()).find((entry) => entry.id === "pc")).not.toHaveProperty("workerMode");
-      await expect(runtimes.connect({ action: "mode", id: "pc", mode: "interactive" })).rejects.toThrow(
-        /ssh fleet/u,
-      );
-      up = false;
-      const unreachable = (await runtimes.list()).find((entry) => entry.id === "pc");
-      expect(unreachable).toMatchObject({ state: "unreachable", transport: "ssh" });
-      expect(unreachable).toHaveProperty("lastSeenAt");
       await runtimes.disconnect("pc");
       expect(await runtimes.fleets()).toEqual([]);
     } finally {

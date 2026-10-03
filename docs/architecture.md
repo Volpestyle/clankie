@@ -21,11 +21,9 @@ flowchart LR
   Discord["Configured Discord body"] --> Service
   Service --> State["Host-owned state<br/>memory · files · credential broker"]
   Service --> Models["Configured models and services"]
-  Service -.-> Swarm["Optional Swarm coordinators<br/>independent peer coordination"]
   Service --> Runtime["Execution connections<br/>built-in route: Herdr"]
   Runtime --> Workers["Native interactive worker agents"]
   Service <-->|"harness channels / session APIs"| Workers
-  Workers -.-> Swarm
   Service <--> Work["Repo tracker or task files"]
   Service --> World["Clankie's own PokeAgents seat"]
   World --> Viewer["Optional game watch surface"]
@@ -35,8 +33,8 @@ flowchart LR
 Capabilities are configured per host. A managed Linux deployment does not
 implicitly provide desktop input, Discord media, or a game world.
 The [Linux guide](../infra/hosted/README.md) owns that deployment's capability
-set; [Swarm](../packages/swarm/README.md#support-at-a-glance) owns worker-route
-support. [ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)
+set; the [agent-host guide](../packages/agent-hosts/README.md) owns native
+worker support. [ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)
 records the separation between Clankie and his connections.
 
 ## Device and host authority
@@ -117,8 +115,7 @@ dropped, duplicate, and backlog catch-up messages do not start typing.
 
 The TUI and relay speak the same operator-conversation contract
 (`/operator/v1/dispatch`): durable agent personas, their current fleet seats,
-one coherent cursor-long-polled fleet snapshot (including every unfinished Swarm
-task with its lead and owner, [ADR 0205](adr/0205-the-fleet-carries-its-open-swarm-tasks.md)),
+one coherent cursor-long-polled fleet snapshot,
 revision-fenced sends, cursored replay,
 and long-polled tails. A tail carries two things: the durable events, and the
 message the captain is typing right now — a volatile draft held in memory,
@@ -351,8 +348,8 @@ address — no tool call, no guess, and silence if the selection cannot be resol
   `herdr_watch` through [harness adapters](../packages/agent-hosts/README.md#tool-flow-and-current-support).
   Claude and Codex are implemented; the researched Pi, OpenCode, and Prime paths
   are not local adapters yet. Skills explain tool use while delivery code enforces
-  the no-terminal-fallback boundary. Swarm is optional for independent peer
-  messages and task ownership; its connection [defaults on](../packages/swarm/README.md).
+  the no-terminal-fallback boundary. Remote agents use the per-fleet link
+  and native harness delivery.
   Herdr supplies the native terminals and process control. The service's
   selected runtime supplies every console's fleet view. Current binding and
   fallback behavior live in [the CLI reference](cli.md#herdr-statusopencreate--herdr-use-name).
@@ -469,9 +466,7 @@ play host share one service
 ([ADR 0101](adr/0101-pi-owns-the-captain-model-runtime.md)).
 The repo's tracker or task files hold work and results. Herdr contains the native
 interactive workers; Clankie uses their supported channels or session APIs for
-delivery. Swarm is optional for independent peers requiring its durable inboxes
-and task ownership. Turning it off applies at the next service start and retains
-its saved state; local hires and work tracking do not require it. Untrusted input stays fenced, secrets stay in the credential
+delivery. Linked independent agents can write first with `message_clankie`. Untrusted input stays fenced, secrets stay in the credential
 broker, and every report describes observed outcomes rather than intentions.
 
 [`adr/`](adr/) records the active decisions for play mechanics, voice, presence,

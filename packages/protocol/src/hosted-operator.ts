@@ -53,7 +53,6 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
     );
   }
   const routes: Record<string, readonly string[]> = {
-    PUT: ["/v1/swarm/config"],
     GET: [
       "/health",
       "/v1/operator/persona",
@@ -64,7 +63,6 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/runtime-connections",
       "/v1/agent-hosts",
       "/v1/agent-sessions",
-      "/v1/swarm",
     ],
     POST: [
       "/v1/operator/persona",
@@ -80,8 +78,6 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/accounts/disconnect",
       "/v1/runtime-connections",
       "/v1/agent-hosts",
-      "/v1/swarm/connections",
-      "/v1/swarm/fleet-peers",
     ],
   };
   return routes[method]?.includes(path) ?? false;

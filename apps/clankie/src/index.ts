@@ -7,7 +7,6 @@ import { createHostedPairing } from "./hosted-pairing.ts";
 import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
 import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
-import { interactiveWorkersSupported, managedWorkersSupported, SwarmHost } from "@clankie/swarm";
 import { WorkerMcp } from "./worker-mcp.ts";
 import { createAgentSessions } from "./agent-sessions.ts";
 /**
@@ -15,7 +14,7 @@ import { createAgentSessions } from "./agent-sessions.ts";
  * surface plus its in-process capabilities (play host, browser,
  * activity observation), one process, one port (4310).
  */
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -55,7 +54,6 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
-import { ExternalCoordinatorRelays, FleetRelays } from "./fleet-coordinator-relay.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
@@ -513,44 +511,13 @@ const email = createEmailPort({
 });
 
 const rivals = createRivalsClient({ settings: settingsStore, credentials: operatorCredentialStore });
-const compiledWorkerCli = join(repoRoot, "apps/tui/bin/clankie.js");
 const runtimes = new ExecutionConnections({
   settings: settingsStore,
   primary: herdr,
   sshControlDirectory: join(stateRoot, "ssh"),
-  interactiveWorkers: (harness) =>
-    startupSettings.swarm.enabled ? interactiveWorkersSupported(harness) : Promise.resolve(false),
-  managedWorkers: () => (startupSettings.swarm.enabled ? managedWorkersSupported() : Promise.resolve(false)),
 });
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
-const externalRelays = new ExternalCoordinatorRelays({
-  fleets: () => runtimes.fleets(),
-  log: (message) => logger.info({ event: "swarm.relay" }, message),
-});
-const swarm = startupSettings.swarm.enabled
-  ? new SwarmHost({
-      stateDirectory: join(stateRoot, "swarm"),
-      connections: {
-        settings: settingsStore,
-        credentials: operatorCredentialStore,
-        transport: externalRelays,
-      },
-      socketPath: herdr.binding()?.socketPath,
-      runtimeConnections: () => runtimes.list(),
-      dispatchBudget: () => runtimes.dispatchBudget(),
-      workerMcp: {
-        command: process.execPath,
-        args: [
-          existsSync(compiledWorkerCli) ? compiledWorkerCli : compiledWorkerCli.replace(/\.js$/u, ".ts"),
-          "mcp",
-          "--swarm",
-        ],
-        env: { CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${String(port)}` },
-      },
-      warn: (message) => logger.warn({ event: "swarm.unavailable" }, message),
-    })
-  : undefined;
 const agentSessions = createAgentSessions(settingsStore);
 // Work items in each repo's own convention (ADR 0191): Linear rides his
 // connected account, GitHub the owner's GitHub connection or gh login (a
@@ -757,7 +724,6 @@ const captain = createCaptain(
       ? {}
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
-    ...(swarm === undefined ? {} : { swarm }),
     settings: settingsStore,
     personaImages,
     linearFollowing,
@@ -779,53 +745,6 @@ const hostedDiscord =
         captain,
         onWork: () => hostedHeartbeat?.interactive(),
       });
-// One coordinator reachable from every fleet (VUH-1381): each ssh fleet pinned
-// to a conversation gets a supervised relay into that conversation's owner.
-const fleetOwnerEndpoint = async (conversationId: string) => {
-  if (swarm === undefined) throw new Error("Swarm is disabled; enable it and restart the captain first");
-  const binding = captain.seatContext(conversationId);
-  if (!binding) throw new Error("Unknown Clankie conversation");
-  return swarm.ownerEndpoint(conversationId, binding.cwd);
-};
-const fleetRelays = new FleetRelays({
-  fleets: () => runtimes.fleets(),
-  relayConversation: (fleet) => runtimes.relayConversation(fleet),
-  ownerEndpoint: fleetOwnerEndpoint,
-  log: (message) => logger.info({ event: "fleet.relay" }, message),
-});
-runtimes.relayStatus = (fleet) => fleetRelays.status(fleet);
-if (swarm !== undefined) void fleetRelays.restore();
-const fleetPeers = {
-  async enroll(input: { conversationId: string; fleet: string; name: string }) {
-    if (swarm === undefined) throw new Error("Swarm is disabled; enable it and restart the captain first");
-    const fleet = (await runtimes.fleets()).find((entry) => entry.id === input.fleet);
-    if (fleet === undefined) throw new Error(`No enabled ssh fleet ${input.fleet}`);
-    const binding = captain.seatContext(input.conversationId);
-    if (!binding) throw new Error("Unknown Clankie conversation");
-    await runtimes.setRelay(fleet.id, input.conversationId);
-    const relay = await (await fleetRelays.ensure(fleet, input.conversationId)).ready();
-    if (relay.state !== "ready")
-      throw new Error(`Fleet ${fleet.id} relay is ${relay.state}: ${"error" in relay ? relay.error : ""}`);
-    const peer = await swarm.enrollFleetPeer(input.conversationId, binding.cwd, {
-      fleet: fleet.id,
-      name: input.name,
-    });
-    return {
-      fleet: fleet.id,
-      name: input.name,
-      actor: peer.actor,
-      scope: peer.scope,
-      relay,
-      // What the peer's swarm-mcp adapter on that machine needs, and nothing else.
-      environment: {
-        SWARM_COORDINATOR_ENDPOINT: relay.endpoint,
-        SWARM_SESSION_CAPABILITY: peer.capability,
-        SWARM_SCOPE: peer.scope,
-      },
-    };
-  },
-};
-
 async function linearFollowing(): Promise<boolean> {
   const current = await settingsStore.load();
   const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
@@ -879,7 +798,6 @@ const clankie = await createClankieApp({
     directory: join(stateRoot, "worker-grants"),
     credentials: operatorCredentialStore,
     host: mcpHost,
-    ...(swarm === undefined ? {} : { swarm }),
   }),
   captain,
   fleetLinks,
@@ -892,7 +810,6 @@ const clankie = await createClankieApp({
       workerPluginDir: workerPluginDir(repoRoot),
     });
   },
-  ...(swarm === undefined ? {} : { swarm, fleetPeers }),
   deliveredFiles,
   herdrRuntime: herdr.status,
   herdrBinding: herdr.binding,
@@ -1060,7 +977,6 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await linearNotifications.close();
     await captain.close().catch(() => undefined);
-    fleetRelays.close();
     await herdr.close();
     await browserHost?.close().catch(() => undefined);
     await mcpHost.close().catch(() => undefined);

@@ -55,7 +55,7 @@ export type HireSeat = (seat: SpawnOperatorSeat, brief?: string) => Promise<Oper
 
 /**
  * The captain's own message into a hired seat, down the same lane an operator
- * DM takes (harness control, native queue, or bound mailbox). A herdr seat is not a Swarm actor, so this
+ * DM takes (harness control, native queue, or bound mailbox). This
  * is how he follows up with one (VUH-1373). `seat` is the seatId,
  * personaId, or conversationId `hire_agent` returned.
  */

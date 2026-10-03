@@ -46,7 +46,7 @@ Expiry, revocation, and grant removal therefore take effect without a reconnect.
 device credentials never cross it.
 
 The `connections` operation requires `steer` for inventory and mutations. It
-projects bounded runtime/Swarm metadata and recorded provider identity; private
+projects bounded runtime metadata and recorded provider identity; private
 socket paths, raw diagnostics and credentials remain on the service. Named runtime
 connect, reconnect and disconnect reuse the local API's manager. Only the operator
 captain lane can serve this operation.

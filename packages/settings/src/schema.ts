@@ -381,17 +381,6 @@ export const HerdrSshTransportSchema = z
   .strict();
 export type HerdrSshTransport = z.infer<typeof HerdrSshTransportSchema>;
 
-/**
- * How Swarm runs a dispatched worker in a runtime (ADR 0194/0203). Unset is
- * native interactive. Stream remains readable for legacy settings; new writes
- * and local dispatch refuse it, preserving retained receipts for reconciliation.
- */
-export const ExecutionWorkerHarnessSchema = z.enum(["claude", "codex", "pi"]);
-export type ExecutionWorkerHarness = z.infer<typeof ExecutionWorkerHarnessSchema>;
-
-export const ExecutionWorkerModeSchema = z.enum(["stream", "interactive"]);
-export type ExecutionWorkerMode = z.infer<typeof ExecutionWorkerModeSchema>;
-
 /** Named execution endpoints are pinned; disabling a connection keeps its identity. */
 export const ExecutionConnectionSchema = z
   .object({
@@ -413,14 +402,6 @@ export const ExecutionConnectionSchema = z
      * remote server is never started, stopped or replaced from here.
      */
     ssh: HerdrSshTransportSchema.optional(),
-    /**
-     * The embedded coordinator this ssh fleet's peers reach through its relay
-     * (VUH-1381): the conversation whose scope they join. One per fleet.
-     */
-    relay: z
-      .object({ conversationId: z.string().min(1).max(256) })
-      .strict()
-      .optional(),
     capabilities: z
       .array(
         z
@@ -433,54 +414,9 @@ export const ExecutionConnectionSchema = z
       .default(["code", "review", "research"]),
     capacity: z.number().int().min(0).nullable().optional(),
     workspaces: ExecutionWorkspacesSchema.optional(),
-    workerMode: ExecutionWorkerModeSchema.optional(),
-    workerHarness: ExecutionWorkerHarnessSchema.optional(),
     enabled: z.boolean().default(true),
   })
   .strict();
-
-/** External coordinator identities are explicit; capabilities live in the broker. */
-export const SwarmConnectionSchema = z
-  .object({
-    id: z
-      .string()
-      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
-      .refine((id) => id !== "embedded"),
-    conversationId: z.string().min(1).max(256),
-    endpoint: z
-      .string()
-      .max(4096)
-      .refine(
-        (value) =>
-          !value.includes("\0") &&
-          !value.includes("\r") &&
-          !value.includes("\n") &&
-          (value.startsWith("/") || /^\\\\\.\\pipe\\[^\\/]+$/u.test(value)),
-        "Expected an absolute Unix socket or Windows named pipe",
-      ),
-    /** Registered SSH fleet; endpoint is on that machine when present. */
-    ssh: z
-      .string()
-      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
-      .optional(),
-    scope: z.string().min(1).max(256),
-    actor: z.string().min(1).max(256),
-    credential: z.string().min(1).max(128),
-    enabled: z.boolean().default(true),
-  })
-  .strict();
-export type SwarmConnection = z.infer<typeof SwarmConnectionSchema>;
-export const SwarmSettingsSchema = z
-  .object({
-    /** Applies on captain startup; disabling retains coordinator records and connections. */
-    enabled: z.boolean().default(true),
-    connections: z.array(SwarmConnectionSchema).max(32).default([]),
-  })
-  .strict()
-  .refine(
-    (value) => new Set(value.connections.map((entry) => entry.id)).size === value.connections.length,
-    "Swarm connection IDs must be unique",
-  );
 
 /** The captain's own runtime home, distinct from what he is allowed to do. */
 export const CaptainSettingsSchema = z
@@ -849,9 +785,6 @@ export const ClankieSettingsSchema = z
         connections: z.array(ExecutionConnectionSchema).max(15).default([]),
         workspaces: ExecutionWorkspacesSchema.optional(),
         capacity: z.number().int().min(0).nullable().optional(),
-        workerMode: ExecutionWorkerModeSchema.optional(),
-        workerHarness: ExecutionWorkerHarnessSchema.optional(),
-        budget: z.number().int().min(0).nullable().optional(),
       })
       .strict()
       .refine(
@@ -865,7 +798,6 @@ export const ClankieSettingsSchema = z
       )
       .default(() => ({ connections: [] })),
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
-    swarm: SwarmSettingsSchema.default(() => SwarmSettingsSchema.parse({})),
     skills: SkillsSettingsSchema.default(() => SkillsSettingsSchema.parse({})),
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
@@ -889,7 +821,7 @@ export function emptySettings(): ClankieSettings {
  * - `linear`: a default team id, back when a hand-written GraphQL port needed
  *   one. Linear is reached over MCP now and its server resolves the team.
  */
-const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear"];
+const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear", "swarm"];
 const RETIRED_DISCORD_SETTINGS_KEYS: readonly string[] = ["possessorVoiceEnabled"];
 const RETIRED_GAMEPLAY_SETTINGS_KEYS: readonly string[] = ["pokemonEmulatorEnabled"];
 
@@ -907,6 +839,23 @@ export function dropRetiredSettings(parsed: unknown): unknown {
   const settings = Object.fromEntries(
     Object.entries(parsed as Record<string, unknown>).filter(([key]) => !RETIRED_SETTINGS_KEYS.includes(key)),
   );
+  const execution = settings["execution"];
+  if (execution !== null && typeof execution === "object" && !Array.isArray(execution)) {
+    const retire = (value: Record<string, unknown>) =>
+      Object.fromEntries(
+        Object.entries(value).filter(
+          ([key]) => !["workerMode", "workerHarness", "budget", "relay"].includes(key),
+        ),
+      );
+    const value = retire(execution as Record<string, unknown>);
+    if (Array.isArray(value.connections))
+      value.connections = value.connections.map((entry: unknown) =>
+        entry !== null && typeof entry === "object" && !Array.isArray(entry)
+          ? retire(entry as Record<string, unknown>)
+          : entry,
+      );
+    settings["execution"] = value;
+  }
   const discord = settings["discord"];
   if (discord !== null && typeof discord === "object" && !Array.isArray(discord)) {
     settings["discord"] = Object.fromEntries(

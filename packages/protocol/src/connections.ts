@@ -25,7 +25,6 @@ export const OperatorConnectionCommandSchema = z.discriminatedUnion("action", [
       capacity: z.number().int().min(1).max(RUNTIME_CAPACITY_MAX),
     })
     .strict(),
-  z.object({ action: z.literal("disconnect_swarm"), id: connectionId }).strict(),
 ]);
 export type OperatorConnectionCommand = z.infer<typeof OperatorConnectionCommandSchema>;
 
@@ -42,44 +41,11 @@ export const OperatorConnectionInventorySchema = z
             state: label,
             enabled: z.boolean(),
             capacity: z.number().int().nonnegative().nullable(),
-            /** How Swarm runs workers dispatched into this runtime (ADR 0194); absent on older bodies. */
-            workerMode: z.enum(["stream", "interactive"]).optional(),
-            workerHarness: z.enum(["claude", "codex", "pi"]).optional(),
             capabilities: z.array(label).max(64),
           })
           .strict(),
       )
       .max(16),
-    swarms: z
-      .array(
-        z
-          .object({
-            id: connectionId,
-            conversationId: label,
-            enabled: z.boolean(),
-            state: z.enum(["connected", "unavailable", "disabled"]),
-            actor: label.optional(),
-            scope: label.optional(),
-            runtimeConfiguration: z.enum(["live", "restart-required"]).optional(),
-            agents: z
-              .array(
-                z
-                  .object({
-                    id: label,
-                    generation: z.number().int().positive(),
-                    state: label,
-                    runtime: label,
-                  })
-                  .strict(),
-              )
-              .max(20),
-            agentsTruncated: z.boolean(),
-          })
-          .strict(),
-      )
-      .max(64),
-    swarmsTruncated: z.boolean(),
-    unavailableSwarms: z.number().int().nonnegative(),
     linear: z
       .object({
         status: z.enum(["verified", "unverified", "disconnected", "unavailable"]),

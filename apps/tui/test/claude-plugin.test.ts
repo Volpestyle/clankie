@@ -168,37 +168,5 @@ describe("clankie-worker claude plugin", () => {
       });
     expect(await call({ HERDR_PANE_ID: "w1:p1" })).toBe('seat-hook:{"hook_event_name":"Stop"}');
     expect(await call({})).toBe("");
-    expect(await call({ HERDR_PANE_ID: "w1:p1", SWARM_WORKER_LAUNCH: "/tmp/launch.json" })).toBe("");
-  });
-
-  it("serves only inside a Swarm-dispatched interactive launch", async () => {
-    const echo = join(await mkdtemp(join(tmpdir(), "clankie-worker-")), "echo.mjs");
-    await writeFile(
-      echo,
-      "process.stdin.on('data', (d) => process.stdout.write(`${process.env.SWARM_SESSION_CAPABILITY}:${d}`));",
-    );
-    const launch = {
-      SWARM_MCP_CHANNEL: "1",
-      SWARM_WORKER_LAUNCH: "/tmp/launch.json",
-    };
-    expect((await run({})).code).toBe(1);
-    expect(
-      (
-        await run({
-          ...launch,
-          SWARM_WORKER_MCP: JSON.stringify(["node", echo]),
-        })
-      ).stderr,
-    ).toContain("absolute");
-    expect(
-      await run(
-        {
-          ...launch,
-          SWARM_SESSION_CAPABILITY: "worker-cap",
-          SWARM_WORKER_MCP: JSON.stringify([process.execPath, echo]),
-        },
-        "ping",
-      ),
-    ).toEqual({ code: 0, stdout: "worker-cap:ping", stderr: "" });
   });
 });

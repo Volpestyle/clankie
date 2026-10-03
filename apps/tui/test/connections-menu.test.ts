@@ -1,14 +1,12 @@
 import { expect, it, vi } from "vitest";
 import {
   accountsHint,
-  contactOptions,
   formatTranscript,
   projectLabel,
   relativeAge,
   runConnectionsMenu,
   runConnectionsSection,
   runtimesHint,
-  swarmHint,
   type ConnectionsMenuServices,
 } from "../src/connections-menu.ts";
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
@@ -27,14 +25,6 @@ it("formats hints a person can scan", () => {
   expect(projectLabel("-Users-james--clankie-captain-evaluator")).toBe("~/.clankie-captain-evaluator");
   expect(runtimesHint([])).toBe("none");
   expect(runtimesHint([{ id: "default", state: "healthy", enabled: true }])).toBe("1 configured · 1 healthy");
-  expect(swarmHint({ mode: "swarm", conversations: [1, 2, 3], connections: [] })).toBe(
-    "3 conversations · 0 external coordinators",
-  );
-  expect(swarmHint({ mode: "unavailable" })).toBe("unavailable");
-  expect(swarmHint({ mode: "disabled" })).toBe("disabled");
-  expect(swarmHint({ mode: "swarm", enabled: false, restartRequired: true })).toBe(
-    "off after captain restart",
-  );
   expect(accountsHint({ linear: { status: "connected", account: { name: "James" } } })).toBe(
     "Linear: connected as James",
   );
@@ -46,20 +36,6 @@ it("formats hints a person can scan", () => {
     ]),
   ).toBe("you: status?\n  · bash completed — ls -la\nagent: all green");
   expect(formatTranscript([])).toBe("(nothing new)");
-  expect(
-    contactOptions([
-      {
-        personaId: "a",
-        name: "clankie:global-default",
-        swarm: { available: false, conversationId: "inbox" },
-      },
-      { personaId: "b", name: "clankie:global-default", swarm: { available: true, conversationId: "inbox" } },
-      { personaId: "c", name: "runtime:claude-code", swarm: { available: false, conversationId: "conv-1" } },
-    ]),
-  ).toEqual([
-    { value: "b", label: "clankie:global-default", hint: "available · inbox · 1 older" },
-    { value: "c", label: "runtime:claude-code", hint: "offline · conv-1" },
-  ]);
 });
 
 function fakeShell(selections: (string | undefined)[], texts: (string | undefined)[] = []) {
@@ -82,19 +58,6 @@ function fakeShell(selections: (string | undefined)[], texts: (string | undefine
 }
 
 const values = (call: unknown[]) => (call[0] as { options: { value: string }[] }).options.map((o) => o.value);
-
-it("changes the Swarm startup setting from the connections menu", async () => {
-  const { shell, readSelect, lines } = fakeShell(["enabled", undefined]);
-  const swarm = vi.fn(async (args: readonly string[]) =>
-    args[0] === "status"
-      ? { mode: "disabled", enabled: false, active: false, restartRequired: false, connections: [] }
-      : { enabled: true, active: false, restartRequired: true },
-  );
-  await runConnectionsSection("swarm", shell, services({ swarm }).services);
-  expect(values(readSelect.mock.calls[0]!)).toEqual(["enabled", "contacts"]);
-  expect(swarm).toHaveBeenCalledWith(["on"]);
-  expect(lines).toContain("Swarm configuration saved. Restart the captain to apply it.");
-});
 
 function services(overrides: Partial<ConnectionsMenuServices> = {}) {
   const agentsCalls: string[][] = [];
@@ -129,11 +92,9 @@ function services(overrides: Partial<ConnectionsMenuServices> = {}) {
         args[0] === "inventory"
           ? {
               runtimes: [{ id: "default", state: "healthy", enabled: true }],
-              swarms: { mode: "swarm", conversations: [], connections: [] },
               accounts: {},
             }
           : { connections: [] },
-      swarm: async () => ({}),
       agents,
       now: () => NOW,
       ...overrides,
@@ -154,14 +115,7 @@ it("drills from the hub to a remote session and shows its latest turns", async (
   ]);
   const { services: deps, agentsCalls } = services();
   await runConnectionsMenu(shell, deps);
-  expect(values(readSelect.mock.calls[0]!)).toEqual([
-    "runtimes",
-    "swarm",
-    "agents",
-    "accounts",
-    "json",
-    "done",
-  ]);
+  expect(values(readSelect.mock.calls[0]!)).toEqual(["runtimes", "agents", "accounts", "json", "done"]);
   expect(values(readSelect.mock.calls[1]!)).toEqual(["host:local", "host:pc", "add"]);
   expect(values(readSelect.mock.calls[2]!)).toEqual(["pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "remove"]);
   expect(agentsCalls).toContainEqual(["list", "--host", "pc", "--limit", "30"]);
@@ -226,8 +180,7 @@ it("reports a refused read in place instead of leaving the modal", async () => {
 it("puts an error that ends the menu into the chat, where it outlives the status line", async () => {
   const { shell, results } = fakeShell(["runtimes"]);
   const { services: deps } = services({
-    runtime: async (args: readonly string[]) => {
-      if (args[0] === "inventory") return { runtimes: [], swarms: {}, accounts: {} };
+    runtime: async () => {
       throw new Error("Runtime connections need the operator credential");
     },
   });
@@ -235,50 +188,4 @@ it("puts an error that ends the menu into the chat, where it outlives the status
   expect(results).toEqual([
     { prompt: "/connections", message: "Runtime connections need the operator credential" },
   ]);
-});
-
-it("shows each runtime's worker mode and changes it through the runtime command", async () => {
-  const { shell, readSelect, lines } = fakeShell(["runtime:named", "mode", "interactive", undefined]);
-  const calls: string[][] = [];
-  const { services: deps } = services({
-    runtime: async (args: readonly string[]) => {
-      calls.push([...args]);
-      return args[0] === "list"
-        ? {
-            connections: [
-              { id: "named", state: "healthy", enabled: true, capacity: 2, workerMode: "stream" },
-              { id: "pc", state: "healthy", enabled: true, transport: "ssh" },
-            ],
-          }
-        : { id: "named", workerMode: "interactive" };
-    },
-  });
-  await runConnectionsSection("runtimes", shell, deps);
-  const list = (readSelect.mock.calls[0] as unknown[])[0] as { options: { value: string; hint?: string }[] };
-  expect(list.options[0]!.hint).toBe("healthy · 2 workers per coordinator · stream workers");
-  // An ssh fleet's peers enroll themselves: no worker mode to show or change.
-  expect(list.options[1]!.hint).toBe("healthy");
-  expect(values(readSelect.mock.calls[1]!)).toContain("mode");
-  expect(values(readSelect.mock.calls[2]!)).toEqual(["interactive"]);
-  expect(calls).toContainEqual(["mode", "named", "interactive"]);
-  expect(lines).toContain("named runs interactive workers.");
-});
-
-it("selects a managed harness through the runtime CLI", async () => {
-  const { shell, readSelect, lines } = fakeShell(["runtime:default", "harness", "codex", undefined]);
-  const calls: string[][] = [];
-  const { services: deps } = services({
-    runtime: async (args: readonly string[]) => {
-      calls.push([...args]);
-      return args[0] === "list"
-        ? {
-            connections: [{ id: "default", state: "healthy", workerHarness: "claude", workerMode: "stream" }],
-          }
-        : { id: "default", workerHarness: "codex" };
-    },
-  });
-  await runConnectionsSection("runtimes", shell, deps);
-  expect(values(readSelect.mock.calls[2]!)).toEqual(["codex", "pi", "claude"]);
-  expect(calls).toContainEqual(["harness", "default", "codex"]);
-  expect(lines).toContain("default uses codex workers.");
 });

@@ -2,13 +2,6 @@ import { createRequire } from "node:module";
 import { cp, mkdir, readFile, realpath, symlink } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 
-// These runtimes launch sibling Node entrypoints, so preserve their package
-// graphs instead of folding them into Clankie's bundle.
-export function copySwarmRuntime(repoRoot, targetRoot) {
-  // Skills are assembled from the current catalog, not the legacy npm archive.
-  return copyRuntime("swarm-mcp", join(repoRoot, "packages/swarm"), targetRoot);
-}
-
 export function copyBrowserUseRuntime(repoRoot, targetRoot) {
   return copyRuntime("@browser_use/pi", join(repoRoot, "apps/clankie"), targetRoot);
 }

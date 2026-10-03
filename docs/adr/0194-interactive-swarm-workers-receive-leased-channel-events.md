@@ -1,6 +1,6 @@
 # ADR 0194: Interactive Swarm workers receive leased channel events
 
-Status: Accepted, 2026-09-27 (proposed 2026-09-26). [VUH-1380](https://linear.app/vuhlp/issue/VUH-1380).
+Status: superseded by [ADR 0213](0213-clankie-retires-swarm.md).
 
 ## Decision
 

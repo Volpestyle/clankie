@@ -1,9 +1,6 @@
 # ADR 0198: One coordinator reaches every fleet
 
-Status: proposed (2026-09-27), [VUH-1381](https://linear.app/vuhlp/issue/VUH-1381).
-Extends [ADR 0184](0184-clankie-leads-more-than-one-fleet.md) (fleets) and
-[ADR 0180](0180-swarm-is-the-coordination-layer.md) (Swarm). The coordinator's
-single-owner, local-storage contract is unchanged.
+Status: superseded by [ADR 0213](0213-clankie-retires-swarm.md).
 
 ## Context
 

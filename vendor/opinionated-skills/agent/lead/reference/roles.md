@@ -35,7 +35,7 @@ flowchart TD
 
 ## Effort follows the task
 
-These are starting defaults for the user's Astra swarm, not a measured optimum
+These are starting defaults for the user's Astra fleet, not a measured optimum
 or a mapping between different providers' effort scales. Verify supported settings
 in the active harness. Explicit user settings take precedence.
 
@@ -73,7 +73,7 @@ does not own those boundaries; research is not automatically low-judgment work.
 Verify the actual configured pair rather than trusting a pane label or inherited
 default. Judge the allocation by accepted results, rework and missed defects.
 
-The owner's model mode, set beside the swarm size (see `lead`, "Size to the
+The owner's model mode, set beside the fleet size (see `lead`, "Size to the
 owner's budget"), moves these defaults. Under `optimal` (the default) the table is
 a floor: pick the stronger pair whenever the job could use it. Under `efficient` take
 the smallest tier and lowest effort that meet each job's acceptance, and keep the
@@ -118,4 +118,4 @@ next-turn settings API requires a reachable app-server endpoint.
 Clankie's `fleet` notes express routing preferences; they do
 not configure workers. Its service effort setting governs its own captain, not
 external Codex or Claude seats. Inspect `clankie help` and current settings before
-changing either. Do not change a user's global model default to tune one swarm.
+changing either. Do not change a user's global model default to tune one fleet.

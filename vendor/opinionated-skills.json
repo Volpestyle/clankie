@@ -13,6 +13,7 @@
     "solution-space": "agent/solution-space"
   },
   "localChanges": [
+    "VUH-1528: bundled lead uses native hire/message channels; embedded Swarm dispatch instructions removed without changing owner-global skills.",
     "VUH-1457: merge leadership into agent/lead (including Herdr references); remove the vendored dashboard and update linear-grind leadership reference.",
     "lead: workers end with a compact final report; the lead harvests from it and reads transcripts only for gaps (also applied upstream in agent/lead).",
     "Unbundled 12 process skills with near-zero loads (audit C22 plus robust-review, testing-archive and herdr-handoff, James 2026-10-02); the lead skill's Herdr fallback no longer names herdr-handoff."

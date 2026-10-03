@@ -2,7 +2,6 @@ import { createAgentSessionRoutes } from "./agent-session-routes.ts";
 import { loadPersonaImages, personaImageBriefing, personaImageStatus } from "@clankie/persona-images";
 import type { PersonaImageSource } from "./persona-images.ts";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
-import { WorkerHarnessError } from "./herdr-session.ts";
 import { createDiscordIngressRoutes, type DiscordIngress } from "./discord-ingress.ts";
 import { createModelKeyRoutes } from "./model-key-routes.ts";
 import { createHostedCreditsRoutes } from "./hosted-credits-routes.ts";
@@ -16,7 +15,6 @@ import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/proto
 import type { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import type { HostedBodyClient } from "./hosted-body.ts";
 import { changeRuntime, manageConnections } from "./connections.ts";
-import { SwarmConnectSchema, type SwarmHost } from "@clankie/swarm";
 import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
 import { bodyLimit } from "hono/body-limit";
 import { ExecutionConnectSchema, type ExecutionConnections, HerdrUnavailableError } from "./herdr-session.ts";
@@ -365,14 +363,6 @@ type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
-const FleetPeerEnrollSchema = z
-  .object({
-    conversationId: z.string().min(1).max(256),
-    fleet: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
-    name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
-  })
-  .strict();
-
 export interface ClankieAppDependencies {
   discordIngress?: DiscordIngress;
   modelKeys?: ModelKeysPort;
@@ -389,18 +379,7 @@ export interface ClankieAppDependencies {
   /** Work items in each repo's own tracking convention (ADR 0191). */
   workItems?: WorkItemsService;
   workerMcp?: WorkerMcp;
-  /** Swarm communication is independent of execution runtime availability. */
   runtimes?: ExecutionConnections;
-  swarm?: Pick<SwarmHost, "status"> &
-    Partial<Pick<SwarmHost, "connect" | "disconnect" | "syncRuntimeConnections">>;
-  /**
-   * Enrolls a peer on a registered ssh fleet into a conversation's coordinator
-   * through that fleet's relay (VUH-1381). The capability is returned once, to
-   * the authenticated operator, for that peer alone.
-   */
-  fleetPeers?: {
-    enroll(input: { conversationId: string; fleet: string; name: string }): Promise<unknown>;
-  };
   /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;
   /** Only a currently available connection has an active binding. */
@@ -504,23 +483,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Read per briefing rather than cached: the owner edits persona and a
   // refreshed voice session must pick it up without a restart.
   const settingsSource = dependencies.settings ?? new SettingsStore();
-  const swarmConfiguration = async () => {
-    const enabled = (await settingsSource.load()).swarm.enabled;
-    const active = dependencies.swarm !== undefined;
-    return { enabled, active, restartRequired: enabled !== active };
-  };
-  const swarmStatus = async () => {
-    const configuration = await swarmConfiguration();
-    const status = dependencies.swarm
-      ? ((await dependencies.swarm.status()) as Record<string, unknown>)
-      : { mode: configuration.enabled ? "unavailable" : "disabled", conversations: [] };
-    return {
-      ...status,
-      connections:
-        "connections" in status ? status.connections : (await settingsSource.load()).swarm.connections,
-      ...configuration,
-    };
-  };
   const voiceTranscriptStore = dependencies.voiceTranscriptStore ?? new DiscordVoiceTranscriptStore();
   const instanceId = randomUUID();
   const hostDisplayName = dependencies.hostDisplayName ?? hostname();
@@ -908,12 +870,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    const [runtimes, swarms, linear] = await Promise.all([
+    const [runtimes, linear] = await Promise.all([
       dependencies.runtimes?.list() ?? [],
-      swarmStatus(),
       dependencies.workerMcp?.linearAccount() ?? { status: "unavailable" },
     ]);
-    return context.json({ runtimes, swarms, accounts: { linear } });
+    return context.json({ runtimes, accounts: { linear } });
   });
 
   app.get("/v1/runtime-connections", async (context) => {
@@ -937,7 +898,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     } catch (error) {
       return context.json(
         {
-          error: error instanceof WorkerHarnessError ? error.code : "runtime_connection_refused",
+          error: "runtime_connection_refused",
           detail: error instanceof Error ? error.message : "Connection refused",
         },
         409,
@@ -1001,91 +962,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     ),
   );
 
-  app.get("/v1/swarm", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    return context.json(await swarmStatus());
-  });
-
-  app.put("/v1/swarm/config", bodyLimit({ maxSize: 1024 }), async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
-    const parsed = z
-      .object({ enabled: z.boolean() })
-      .strict()
-      .safeParse(await context.req.json().catch(() => undefined));
-    if (!parsed.success) return context.json({ error: "invalid_swarm_configuration" }, 400);
-    const updated = await settingsSource.update((current) => ({
-      ...current,
-      swarm: { ...current.swarm, enabled: parsed.data.enabled },
-    }));
-    const active = dependencies.swarm !== undefined;
-    const restartRequired = updated.swarm.enabled !== active;
-    return context.json({
-      enabled: updated.swarm.enabled,
-      active,
-      restartRequired,
-      ...(restartRequired ? { restart: "Restart the captain to apply Swarm configuration." } : {}),
-    });
-  });
-
-  app.post("/v1/swarm/connections", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.swarm?.connect) return context.json({ error: "swarm_unavailable" }, 503);
-    const parsed = SwarmConnectSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!parsed.success) return context.json({ error: "invalid_swarm_connection" }, 400);
-    const binding = dependencies.captain.seatContext(parsed.data.conversationId);
-    if (!binding) return context.json({ error: "unknown_captain_conversation" }, 404);
-    try {
-      return context.json(await dependencies.swarm.connect(parsed.data, binding.cwd));
-    } catch {
-      return context.json({ error: "swarm_connection_refused" }, 409);
-    }
-  });
-
-  app.post("/v1/swarm/fleet-peers", bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.fleetPeers) return context.json({ error: "swarm_unavailable" }, 503);
-    const parsed = FleetPeerEnrollSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!parsed.success) return context.json({ error: "invalid_fleet_peer" }, 400);
-    try {
-      return context.json(await dependencies.fleetPeers.enroll(parsed.data));
-    } catch (error) {
-      return context.json(
-        {
-          error: "fleet_peer_refused",
-          detail: error instanceof Error ? error.message : "Enrollment refused",
-        },
-        409,
-      );
-    }
-  });
-
-  app.delete("/v1/swarm/connections/:id", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!dependencies.swarm?.disconnect) return context.json({ error: "swarm_unavailable" }, 503);
-    try {
-      await dependencies.swarm.disconnect(context.req.param("id"));
-      return context.json({ ok: true });
-    } catch {
-      return context.json({ error: "swarm_disconnect_refused" }, 409);
-    }
-  });
-
   app.all("/v1/worker-mcp", async (context) =>
     dependencies.workerMcp
       ? dependencies.workerMcp.handle(context.req.raw)
@@ -1105,22 +981,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       (presented) => dependencies.fleetLinks?.authenticate(presented) === fleet,
     );
   });
-  app.all("/v1/worker-mcp/swarm/:scope", async (context) =>
-    dependencies.workerMcp
-      ? dependencies.workerMcp.handleSwarm(context.req.param("scope"), context.req.raw)
-      : context.json({ error: "worker_mcp_unavailable" }, 503),
-  );
-  app.post("/v1/worker-mcp/renew", async (context) =>
-    dependencies.workerMcp
-      ? dependencies.workerMcp.renew(context.req.raw)
-      : context.json({ error: "worker_mcp_unavailable" }, 503),
-  );
-  app.post("/v1/worker-mcp/claim/:id", async (context) =>
-    dependencies.workerMcp
-      ? dependencies.workerMcp.claim(context.req.param("id"), context.req.raw)
-      : context.json({ error: "worker_mcp_unavailable" }, 503),
-  );
-
   app.use("/v1/worker-grants/*", async (context, next) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")

@@ -19,7 +19,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { build } from "esbuild";
-import { copyBrowserUseRuntime, copySwarmRuntime } from "./release/swarm-runtime.mjs";
+import { copyBrowserUseRuntime } from "./release/node-runtime.mjs";
 import { buildHerdr, herdrPin, herdrSource } from "./build-herdr.mjs";
 import { bundleHerdrSkill } from "./release/herdr-skill.mjs";
 
@@ -98,7 +98,7 @@ try {
     absWorkingDir: repoRoot,
     banner: { js: bundleBanner },
     bundle: true,
-    external: ["swarm-mcp", "@browser_use/pi"],
+    external: ["@browser_use/pi"],
     entryPoints: entrypoints,
     format: "esm",
     logLevel: "info",
@@ -110,10 +110,7 @@ try {
   });
   await writeFile(metafile, JSON.stringify(bundle.metafile));
 
-  externalPackageRoots = [
-    ...(await copySwarmRuntime(repoRoot, releaseRoot)),
-    ...(await copyBrowserUseRuntime(repoRoot, releaseRoot)),
-  ];
+  externalPackageRoots = [...(await copyBrowserUseRuntime(repoRoot, releaseRoot))];
   await copyRuntimeAssets(releaseRoot);
   await copyDynamicRuntimePackages(releaseRoot, metafile);
   if (hosted) {
@@ -206,7 +203,6 @@ async function copyRuntimeAssets(targetRoot) {
     ["docs/rivals.md", "docs/rivals.md"],
     ["docs/discord-ingress.md", "docs/discord-ingress.md"],
     ["infra/hosted/README.md", "infra/hosted/README.md"],
-    ["packages/swarm/README.md", "packages/swarm/README.md"],
     ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
     ["apps/vox/LICENSE", "apps/vox/LICENSE"],
     ["apps/vox/PROVENANCE.md", "apps/vox/PROVENANCE.md"],

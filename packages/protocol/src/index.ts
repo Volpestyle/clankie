@@ -534,19 +534,6 @@ export function defaultOperatorAgentAppearance(
   choice = Math.floor(choice / accessories.length);
   return { variant, accessory, shape: shapes[choice % shapes.length]! };
 }
-/** One peer session at one already connected coordinator; never a network address. */
-export const OperatorSwarmContactSchema = z
-  .object({
-    conversationId: OperatorConversationIdSchema,
-    connectionId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
-    coordinator: z.string().regex(/^[a-f0-9]{64}$/u),
-    scope: z.string().min(1).max(128),
-    actor: z.string().min(1).max(128),
-    generation: z.number().int().positive(),
-  })
-  .strict();
-export type OperatorSwarmContact = z.infer<typeof OperatorSwarmContactSchema>;
-
 export const OperatorAgentPersonaSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -559,8 +546,6 @@ export const OperatorAgentPersonaSchema = z
     harness: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
     /** Present while this character occupies a live Herdr seat. */
     activeSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
-    /** A Swarm peer is messageable without occupying any terminal. */
-    swarm: OperatorSwarmContactSchema.extend({ available: z.boolean() }).optional(),
     /** Present once the persona's durable DM exists. */
     conversationId: OperatorConversationIdSchema.optional(),
     /** SHA-256 of the current host-served PNG; also busts Discord's avatar cache. */
@@ -573,20 +558,6 @@ export const OperatorAgentPersonaSchema = z
   })
   .strict();
 export type OperatorAgentPersona = z.infer<typeof OperatorAgentPersonaSchema>;
-
-/** Reserved coordinator labels are diagnostics, not people in Messages.
- * This is presentation only: it never merges identities or grants authority.
- * Keep saved records/threads accessible by ID when hiding legacy contacts.
- */
-export function isInternalSwarmContact(persona: {
-  readonly name: string;
-  readonly swarm?: unknown;
-}): boolean {
-  return (
-    persona.swarm !== undefined &&
-    (/^clankie:[^\s]+$/u.test(persona.name) || /^runtime:[^\s]+ transport:[^\s]+$/u.test(persona.name))
-  );
-}
 
 export const UpdateOperatorAgentPersonaSchema = z
   .object({
@@ -1091,51 +1062,6 @@ export type OperatorFleetEdge = z.infer<typeof OperatorFleetEdgeSchema>;
  */
 export const OPERATOR_FLEET_EDGE_MAX = 128;
 
-/** A task's objective and blocker as the board shows them, never the full contract. */
-export const OPERATOR_FLEET_TASK_TEXT_MAX = 1024;
-export const OPERATOR_FLEET_TASK_MAX = 128;
-
-/**
- * One side of a Swarm task (ADR 0205), named the way the board says it.
- * `clankie` marks one of his own conversation actors. `personaId` is present
- * only when that Swarm actor is a messageable contact; the task names an
- * actor, never a seat, so no surface may place it on a figure by guessing.
- */
-export const OperatorFleetTaskAgentSchema = z
-  .object({
-    name: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
-    clankie: z.literal(true).optional(),
-    personaId: OperatorAgentPersonaIdSchema.optional(),
-  })
-  .strict();
-export type OperatorFleetTaskAgent = z.infer<typeof OperatorFleetTaskAgentSchema>;
-
-/**
- * One unfinished Swarm task, read from its coordinator on every fleet read
- * (ADR 0205). Finished work is not carried: the board shows what is being
- * worked on now, and a task's result stays with its coordinator.
- */
-export const OperatorFleetTaskSchema = z
-  .object({
-    taskId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
-    title: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX),
-    status: z.enum(["open", "blocked", "running", "cancel_requested"]),
-    /** Who assigned it: the lead whose branch this task belongs to. */
-    lead: OperatorFleetTaskAgentSchema,
-    /** Who holds it now; absent while nobody has claimed it. */
-    owner: OperatorFleetTaskAgentSchema.optional(),
-    objective: z.string().trim().min(1).max(OPERATOR_FLEET_TASK_TEXT_MAX).optional(),
-    /** The directory the contract names, which is what a commons district is keyed by. */
-    worktree: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
-    /** Why it is blocked or being cancelled, in the coordinator's words. */
-    reason: z.string().trim().min(1).max(OPERATOR_FLEET_TASK_TEXT_MAX).optional(),
-    /** Running, but its owner's lease lapsed or its progress deadline passed. */
-    stale: z.literal(true).optional(),
-    updatedAt: z.string().datetime(),
-  })
-  .strict();
-export type OperatorFleetTask = z.infer<typeof OperatorFleetTaskSchema>;
-
 /** A full live-fleet read plus the cursor that wakes its next long poll. */
 export const OPERATOR_FLEET_WAIT_MS_MAX = 30_000;
 export const OperatorFleetSnapshotSchema = z
@@ -1168,16 +1094,11 @@ export const OperatorFleetSnapshotSchema = z
      * a quiet fleet.
      */
     edges: z.array(OperatorFleetEdgeSchema).max(OPERATOR_FLEET_EDGE_MAX).optional(),
-    /**
-     * Unfinished Swarm work across every connected coordinator (ADR 0205).
-     * Absent from a host that does not publish tasks; empty when none is open.
-     */
-    tasks: z.array(OperatorFleetTaskSchema).max(OPERATOR_FLEET_TASK_MAX).optional(),
   })
   .strict();
 export type OperatorFleetSnapshot = z.infer<typeof OperatorFleetSnapshotSchema>;
 
-/** Home needs seated people, reachable Swarm threads, and room participants.
+/** Home needs seated people and room participants.
  * Archived personas remain addressable through personas/get; never delete them.
  * Shared by the service projection and older-host client fallback.
  */
@@ -1188,13 +1109,7 @@ export function operatorFleetHome(snapshot: OperatorFleetSnapshot): OperatorFlee
   }
   return {
     ...snapshot,
-    personas: snapshot.personas.filter(
-      (persona) =>
-        visible.has(persona.personaId) ||
-        (!isInternalSwarmContact(persona) &&
-          persona.swarm !== undefined &&
-          (persona.swarm.available || persona.conversationId !== undefined)),
-    ),
+    personas: snapshot.personas.filter((persona) => visible.has(persona.personaId)),
   };
 }
 

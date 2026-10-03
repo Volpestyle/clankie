@@ -77,7 +77,7 @@ report and marks truncation. The lead starts there and follows the evidence;
 it reads the retained worker thread or terminal only when something is missing
 or needs investigation. There is no second summarizer or transcript copy.
 
-Publish durable results on the issue; keep routine coordination in Swarm or
+Publish durable results on the issue; keep routine coordination in native messages or
 the worker's native thread. The lead still owns review and integration.
 
 ## Portrait assets and activation

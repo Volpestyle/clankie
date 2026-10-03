@@ -1,7 +1,7 @@
 # Agent hosts
 
 Discovery and byte-range access to Claude, Codex, Grok and Pi JSONL transcripts,
-independent of terminal placement, Swarm enrollment, and process control.
+independent of terminal placement, process control.
 `AgentHost` exposes `list` and `readBytes`; `@clankie/agent-transcript` owns parsing
 and pagination. Modification time describes a file, never proves a live agent.
 
@@ -77,15 +77,14 @@ flowchart TD
 | OpenCode    | Session endpoint on the existing TUI's server        | Researched; not implemented in this local hire path       |
 | Prime Agent | Daemon-backed messages to the active session         | Researched for PrimeIntellect's CLI; not implemented here |
 
-Transcript discovery, an available native CLI, and Swarm managed-worker support
+Transcript discovery and an available native CLI
 do not imply a local hire adapter exists. Unsupported automated briefs fail
 without creating a worker or typing into a terminal. Upstream source links and
 the distinction between automated checks and live evidence are recorded in the
 [delivery verification notes](../../docs/testing/2026-10-01-native-agent-delivery/README.md).
 
 Work records stay in the repo's [tracker or files](../work-items/README.md).
-These tools do not require Swarm; [Swarm](../swarm/README.md) is an optional
-connection for independent peer coordination.
+Remote agents use the per-fleet link and native adapters.
 
 `SeatLaunch.resumeSessionId` continues an exact session in the native view.
 The normal hire path resolves its transcript, reuses a live seat on that host,
@@ -99,4 +98,4 @@ after a service restart. Codex sends stay bound to the original thread: if the
 owner switches the TUI to another thread, this connection does not follow UI
 focus. Report unavailable control without falling back to terminal input.
 See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md)
-for the boundary between task records, native terminals, and optional Swarm.
+for the boundary between task records, native terminals and harness delivery.

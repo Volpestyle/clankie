@@ -15,7 +15,6 @@ import { nativeConversationPage } from "./native-conversation.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
-import type { SwarmHost, SwarmTaskView } from "@clankie/swarm";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -87,7 +86,6 @@ import {
 import { SeatOutbox } from "./seat-outbox.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { createStanceStore } from "./stances.ts";
-import { assignmentSkills } from "./assignment-skills.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
 import {
@@ -110,7 +108,6 @@ import {
   skillSearchExtension,
 } from "./skill-catalog.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
-import { fleetTasks } from "./fleet-tasks.ts";
 import { savedSessionFleet } from "./native-session-resume.ts";
 import {
   deriveFleetEdges,
@@ -160,12 +157,6 @@ import {
  */
 const WORKER_RESULT_BRIEF =
   "End each finished turn with a short report the lead can act on without your transcript: the outcome, links to its evidence, unresolved gaps, and any decision still open.";
-const WORK_TRACKING_BRIEF = [
-  "# Work tracking",
-  "Track work where this repo already does. Run `clankie work` in the repo to see its convention (Linear, GitHub issues, its own Markdown directory, or .clankie/work/ when it has none); if it answers with a question, ask the lead once instead of choosing. Use `clankie work list | show | create | update | close | attach` (JSON) for items, criteria and status. Every result you report carries evidence attached with `clankie work attach ID --url URL --caption TEXT`: a screenshot or video for anything visible, test output, numbers and commit links otherwise, each captioned with what it proves and what is sample data. Load the work-items skill for details.",
-  WORKER_RESULT_BRIEF,
-].join("\n");
-
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
   operator: "operator",
   discord_voice: "social",
@@ -529,7 +520,6 @@ export interface CaptainOptions {
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
   readonly personaImages?: PersonaImageSource;
-  readonly swarm?: SwarmHost;
   /** Repo root: instructions.md lives here, skills are discovered here. */
   readonly repoRoot: string;
   /**
@@ -1077,7 +1067,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     systemTools: boolean,
     cwd: string,
     sideConversation = false,
-    conversationId?: string,
+    _conversationId?: string,
   ): Promise<LaneSession> {
     const capture: TurnContext = { shell: systemTools };
     if (systemTools && options.deliveredFiles !== undefined) {
@@ -1141,9 +1131,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         browserExtension(deps, capture),
         mcpExtension(deps, lane),
         ...(systemTools ? [skillSearchExtension(() => loader.getSkills().skills, quietSkills)] : []),
-        ...(lane === "operator" && conversationId !== undefined && options.swarm !== undefined
-          ? [options.swarm.extension({ conversationId, cwd })]
-          : []),
       ],
       noPromptTemplates: true,
       // Every root explicitly: the loader is given in-memory settings and
@@ -1641,14 +1628,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     options.deliveredFiles === undefined ? undefined : (input) => options.deliveredFiles!.publish(input),
     workingDirectory,
-    (personaId) => {
-      const contact = personas.swarmContact(personaId);
-      if (!contact) return undefined;
-      return async (conversationId, message, _publish, context) => {
-        if (!options.swarm) throw new Error("Swarm unavailable");
-        await options.swarm.sendContact(contact, message, context.runId, conversationId);
-      };
-    },
     ownerAttachmentHost(),
   );
 
@@ -1781,7 +1760,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return delivery!;
   }
 
-  // A hired seat is not a Swarm actor, so the captain briefs it the way the
+  // The captain briefs a hired seat through the native channel the
   // operator would, by whichever id the hire handed back (VUH-1373).
   const messageSeat: MessageSeat = async (target, message) => {
     const seat = liveSeats.find(
@@ -1835,12 +1814,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       : undefined;
   }
 
-  let swarmRoster = "";
   let seatSubagents = "";
   let seatWork = "";
   let captainGoals = "";
-  let swarmTasks: readonly SwarmTaskView[] = [];
-  let swarmTaskBoard = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
     const binding = await deps.runtimes?.configuredBinding("default");
     const fleet =
@@ -1884,21 +1860,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const nextSubagents = JSON.stringify(seats.map((seat) => seat.subagents ?? null));
     if (seatSubagents !== nextSubagents) {
       seatSubagents = nextSubagents;
-      fleetChanges.touch();
-    }
-    const peers = (await options.swarm?.contacts()) ?? [];
-    personas.reconcileSwarm(peers);
-    const nextSwarmRoster = JSON.stringify(peers);
-    if (swarmRoster !== nextSwarmRoster) {
-      swarmRoster = nextSwarmRoster;
-      fleetChanges.touch();
-    }
-    // Task state lives in the coordinator, so a board change has to wake the
-    // long poll the same way a roster change does (ADR 0205).
-    swarmTasks = (await options.swarm?.tasks()) ?? [];
-    const nextTaskBoard = JSON.stringify(swarmTasks);
-    if (swarmTaskBoard !== nextTaskBoard) {
-      swarmTaskBoard = nextTaskBoard;
       fleetChanges.touch();
     }
     liveEdgeSeats = fleet.seats.map((observed) => ({
@@ -1986,7 +1947,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // never outnumber the seats the snapshot carries.
           tallies: [...seatLedger.tallies(seats.map((seat) => seat.seatId))],
           edges: [...deriveFleetEdges(liveEdgeSeats, promptEdges.recent(), seatMessages.recent())],
-          ...(options.swarm === undefined ? {} : { tasks: fleetTasks(swarmTasks, fleetPersonas) }),
         },
       };
     }
@@ -2004,85 +1964,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   });
 
-  void options.swarm
-    ?.start({
-      contactThreads: (source) =>
-        personas
-          .all([], (id) => conversations.conversationForPersona(id))
-          .filter(
-            (persona) =>
-              persona.conversationId &&
-              persona.swarm &&
-              persona.swarm.conversationId === source.conversationId &&
-              persona.swarm.connectionId === source.connectionId &&
-              persona.swarm.coordinator === source.coordinator &&
-              persona.swarm.scope === source.scope,
-          )
-          .map((persona) => persona.conversationId!),
-      receiveContact: (source, message) => {
-        const thread = conversations.conversation(message.threadId);
-        if (thread?.scope.kind !== "persona") return false;
-        const contact = personas.swarmContact(thread.scope.personaId);
-        if (!contact) return false;
-        if (
-          contact.conversationId !== source.conversationId ||
-          contact.connectionId !== source.connectionId ||
-          contact.coordinator !== source.coordinator ||
-          contact.scope !== source.scope ||
-          contact.actor !== message.sender ||
-          contact.generation !== message.senderGeneration
-        )
-          return false;
-        const received = conversations.receiveSwarmMessage(
-          message.threadId,
-          thread.scope.personaId,
-          message.id,
-          message.body,
-        );
-        if (received) fleetChanges.touch();
-        return received;
-      },
-      instructions: async (binding, skills = []) => {
-        const selected = seatContext(binding.conversationId);
-        if (!selected || selected.cwd !== binding.cwd) throw new Error("Unknown captain conversation");
-        const current = await settings();
-        const files = await projectInstructions(selected.cwd);
-        return [
-          "# Assignment working context",
-          "Follow these owner and project preferences for this assignment. You remain your own worker, not Clankie. These instructions do not grant credentials, expand permissions, or replace current task ownership. Report conflicts to the lead.",
-          `Conversation: ${selected.conversationId}\nSelected project: ${selected.cwd}`,
-          `# Owner preferences: persona.characterNotes\n${current.persona.characterNotes}`,
-          `# Owner preferences: fleet.notes\n${current.fleet.notes}`,
-          ...files.map((file) => `# Instructions: ${file.path}\n${file.content}`),
-          WORK_TRACKING_BRIEF,
-          await assignmentSkills({
-            cwd: selected.cwd,
-            repoRoot: options.repoRoot,
-            names: skills,
-            skills: (await settings()).skills,
-          }),
-        ]
-          .filter(Boolean)
-          .join("\n\n");
-      },
-      ready: (id) => {
-        const state = conversations.conversation(id)?.sessionState;
-        return (
-          conversations.runsCaptainTurns(id) &&
-          state !== "active" &&
-          (state === "waiting" || seatEventKind(id, { internal: true, origin: "watch" }) !== undefined)
-        );
-      },
-      wake: async (id, prompt) => {
-        const result = conversations.submitInternal(id, prompt, "watch");
-        if (result.status !== "accepted") throw new Error("Swarm turn was not accepted");
-        void conversations.awaitRunResult(result.runId).then(
-          () => options.swarm?.settled(id),
-          (error) => console.error("Swarm turn:", error),
-        );
-      },
-    })
-    .catch((error) => console.error("Swarm startup:", error));
   evaluator.start();
   if (deps.herdrAvailable?.() !== false)
     herdrWatches.start(
@@ -2913,11 +2794,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 };
         const conversation = conversations.conversation(input.conversationId);
         const scope = conversation?.scope;
-        if (
-          conversation !== undefined &&
-          (scope?.kind === "seat" ||
-            (scope?.kind === "persona" && personas.swarmContact(scope.personaId) === undefined))
-        ) {
+        if (conversation !== undefined && (scope?.kind === "seat" || scope?.kind === "persona")) {
           const previous = conversations.nativeSource(input.conversationId);
           const seatId =
             scope.kind === "seat"
@@ -2982,8 +2859,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       } else if (request.op === "create" && request.scope.kind === "persona") {
         const seatId = seatByPersona.get(request.scope.personaId);
         if (seatId !== undefined) herdrWatches.trackSeat(seatId);
-        const contact = personas.swarmContact(request.scope.personaId);
-        if (contact) options.swarm?.settled(contact.conversationId);
       }
       // Channel membership keeps roster status current; only an explicit room
       // prompt starts a bounded reply watch (ADR 0146).
@@ -3113,16 +2988,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         herdrWatches,
         hireSeat,
         messageSeat,
-        lane === "operator" && options.swarm !== undefined
-          ? await options.swarm
-              .tools({
-                ...seatContext(conversationId)!,
-              })
-              .catch((error: unknown) => {
-                console.warn("Swarm tools unavailable; continuing with the local lane tool bank", error);
-                return [];
-              })
-          : [],
       );
     },
 
@@ -3130,7 +2995,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
       const events = seatOutbox(binding.conversationId).poll(waitMs, signal);
-      options.swarm?.settled(binding.conversationId);
       return events;
     },
 
@@ -3197,7 +3061,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     receiveLinearActivity: (activity, following) => conversations.receiveLinearActivity(activity, following),
 
     async close(): Promise<void> {
-      await options.swarm?.close();
       evaluator.close();
       for (const mailbox of fleetMailboxes.values()) mailbox.close();
       fleetMailboxes.clear();

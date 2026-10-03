@@ -77,7 +77,6 @@ function persona(personaId: string, extra: Partial<OperatorAgentPersona> = {}): 
 it("lists live agents and keeps past agents with a thread behind one entry", async () => {
   const agents = [
     persona("live", { activeSeatId: "term_1" }),
-    persona("peer", { harness: "swarm", swarm: { connectionId: "remote", available: true } as never }),
     persona("older", { conversationId: "older-thread", updatedAt: "2026-09-29T12:00:00.000Z" }),
     persona("newer", { conversationId: "newer-thread", updatedAt: "2026-09-30T18:00:00.000Z" }),
     persona("gone"),
@@ -88,10 +87,10 @@ it("lists live agents and keeps past agents with a thread behind one entry", asy
   const menus = (
     readSelect.mock.calls as unknown as [{ message: string; options: { value: string }[] }][]
   ).map(([menu]) => menu);
-  expect(menus[0]!.message).toBe("Live agents (2)");
-  expect(menus[0]!.options.map((option) => option.value)).toEqual(["live", "peer", "past"]);
+  expect(menus[0]!.message).toBe("Live agents (1)");
+  expect(menus[0]!.options.map((option) => option.value)).toEqual(["live", "past"]);
   expect(menus[1]!.options.map((option) => option.value)).toEqual(["newer", "older"]);
-  expect(openAgent).toHaveBeenCalledWith(agents[2]);
+  expect(openAgent).toHaveBeenCalledWith(agents[1]);
 });
 
 it("says so instead of listing agents that cannot be opened", async () => {
@@ -100,18 +99,4 @@ it("says so instead of listing agents that cannot be opened", async () => {
   expect(readSelect).not.toHaveBeenCalled();
   expect(openAgent).not.toHaveBeenCalled();
   expect(renderLine).toHaveBeenCalledWith(expect.stringContaining("No live agents"));
-});
-
-it("opens available Swarm agents without requiring an existing thread", async () => {
-  const agent = persona("peer", {
-    name: "Reviewer",
-    harness: "swarm",
-    swarm: { connectionId: "remote", available: true } as never,
-  });
-  const { commands, shell, openAgent, readSelect } = setup([agent], "peer");
-  await commands.find((command) => command.name === "agents")!.run("", shell);
-  expect(openAgent).toHaveBeenCalledWith(agent);
-  expect(readSelect).toHaveBeenCalledWith(
-    expect.objectContaining({ options: [expect.objectContaining({ hint: "Swarm · remote" })] }),
-  );
 });

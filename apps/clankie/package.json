@@ -33,7 +33,6 @@
     "@clankie/protocol": "workspace:*",
     "@clankie/rendered-surface-client": "workspace:*",
     "@clankie/settings": "workspace:*",
-    "@clankie/swarm": "workspace:*",
     "@clankie/work-items": "workspace:*",
     "@earendil-works/pi-ai": "1.0.0",
     "@earendil-works/pi-coding-agent": "1.0.0",
@@ -51,7 +50,6 @@
     "@types/node": "24.12.4",
     "@types/nodemailer": "7.0.4",
     "@types/ws": "8.18.1",
-    "swarm-mcp": "file:../../vendor/swarm-mcp-2.0.0-rc.1.tgz",
     "tsx": "4.23.0",
     "typescript": "5.9.3",
     "vitest": "4.1.10"

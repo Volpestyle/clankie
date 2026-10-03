@@ -56,9 +56,8 @@ videos. See the [browser contract](docs/adr/0082-clankie-holds-the-browser.md).
 using supported harnesses such as Claude Code and Codex. Herdr supplies their
 native interactive terminals; harness channels and session APIs carry automated
 messages without typing into your draft. Work stays in your repo's tracker or
-files. Swarm is optional for independent peer coordination. See
-[agent control](packages/agent-hosts/README.md#seat-adapters) and
-[Swarm support](packages/swarm/README.md#support-at-a-glance).
+files. Remote hires use the fleet link and native channels. See
+[agent control](packages/agent-hosts/README.md#seat-adapters).
 
 **A familiar face on your phone.** Messages is home. Commons shows the team as
 a small world of agent figures, each leading back to a real conversation.

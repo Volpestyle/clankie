@@ -7,6 +7,8 @@ rules out; reading stays. Extends
 [ADR 0188](0188-native-agent-chats-read-their-own-history.md) and applies
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md). [ADR 0212](0212-machines-and-devices.md)
 (proposed) folds its separate SSH host list into one record per machine.
+Amended by [ADR 0213](0213-clankie-retires-swarm.md): messaging uses native
+harness channels and fleet links; the Swarm identity proposals are retired.
 
 ## Context
 
@@ -19,7 +21,7 @@ Reading their terminals by screenshot would be slow and lossy.
 
 A session is read from its harness transcript, independent of any terminal host.
 Reading, messaging and execution are separate connections: transcripts for
-reading, Swarm for messages, and Herdr or another launcher only for starting
+reading, native harness channels for messages, and Herdr or another launcher for starting
 processes.
 
 A host exposes two primitives: list its Claude, Codex, Grok and Pi transcript files and return
@@ -41,7 +43,7 @@ flowchart LR
   Read --> Local[Local host: fs]
   Read --> SSH[SSH host: list + byte range]
   SSH --> PC[PC transcripts, any terminal]
-  Clankie -->|messages| Swarm[Swarm]
+  Clankie -->|messages| Channels[Native harness channels / fleet links]
   Clankie -->|start processes| Launcher[Herdr or launcher]
 ```
 
@@ -81,10 +83,5 @@ Unregistered terminals are outside this inventory, so their owners must close
 them before resuming that history. Quiet history is not proof they are closed.
 
 CLI, API and TUI project the same hire path (`agents resume`,
-`POST /v1/agent-sessions/resume`, and the saved-session action). Enrolled Swarm
-workers keep Swarm fencing; resumption never creates a replacement actor or claim.
-
-## Not yet decided
-
-Binding a read session to its Swarm identity, and waking an idle enrolled Claude
-or Codex process with a Swarm message, need per-harness verification.
+`POST /v1/agent-sessions/resume`, and the saved-session action). Remote Claude
+and Codex delivery uses their native channels over the per-fleet link (ADR 0213).

@@ -7,10 +7,6 @@ import { isDeepStrictEqual, promisify } from "node:util";
 import {
   ExecutionWorkspacesSchema,
   ExecutionConnectionSchema,
-  ExecutionWorkerModeSchema,
-  ExecutionWorkerHarnessSchema,
-  type ExecutionWorkerHarness,
-  type ExecutionWorkerMode,
   type SettingsStore,
   type HerdrSettings,
 } from "@clankie/settings";
@@ -163,7 +159,7 @@ export async function startHerdrConnection(
           socketPath: input.env.HERDR_SOCKET_PATH,
           onLost: () => {
             state = "unavailable";
-            input.warn("Herdr connection lost; conversations and Swarm remain active. Reconnect on restart.");
+            input.warn("Herdr connection lost; conversations remain active. Reconnect on restart.");
           },
         });
       }
@@ -196,7 +192,7 @@ export async function startHerdrConnection(
   };
 }
 
-const NamedExecutionConnectSchema = ExecutionConnectionSchema.omit({ enabled: true, relay: true })
+const NamedExecutionConnectSchema = ExecutionConnectionSchema.omit({ enabled: true })
   .partial({ socketPath: true, session: true })
   .refine(
     (value) => value.socketPath !== undefined || value.session !== undefined,
@@ -214,21 +210,6 @@ export const ExecutionConnectSchema = z.union([
       action: z.literal("capacity"),
       id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
       capacity: z.number().int().min(0).nullable(),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal("harness"),
-      id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
-      harness: ExecutionWorkerHarnessSchema,
-    })
-    .strict(),
-  z.object({ action: z.literal("budget"), budget: z.number().int().min(0).nullable() }).strict(),
-  z
-    .object({
-      action: z.literal("mode"),
-      id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
-      mode: ExecutionWorkerModeSchema,
     })
     .strict(),
   z
@@ -263,14 +244,6 @@ function sameRemoteDirectory(granted: string, requested: string, shell: "posix" 
   if (shell === "posix") return granted.replace(/\/+$/u, "") === requested.replace(/\/+$/u, "");
   const normal = (path: string) => win32.normalize(path).replace(/\\+$/u, "").toLowerCase();
   return normal(granted) === normal(requested);
-}
-
-/** Keep the selected native mode explicit; legacy stream values remain readable. */
-function withWorkerMode<T extends { workerMode?: ExecutionWorkerMode | undefined }>(
-  value: T,
-  mode: ExecutionWorkerMode,
-): T {
-  return { ...value, workerMode: mode };
 }
 
 async function resolveExecutionWorkspaces(entries: z.infer<typeof ExecutionWorkspacesSchema>) {
@@ -311,17 +284,8 @@ export class ExecutionConnections {
     /** Where each ssh fleet keeps its multiplexed control socket (ADR 0184). */
     sshControlDirectory?: string;
     fleetRun?: (fleet: HerdrFleet) => HerdrFleetRun;
-    /**
-     * Whether the installed Swarm runtime accepts an interactive worker route
-     * (ADR 0194). Absent means it does not: an older owner rejects the field
-     * and with it the whole dispatch configuration.
-     */
-    interactiveWorkers?: (harness?: ExecutionWorkerHarness) => Promise<boolean>;
-    managedWorkers?: () => Promise<boolean>;
   };
   private readonly fleetRuns = new Map<string, { key: string; run: HerdrFleetRun }>();
-  /** Each ssh fleet's coordinator relay, reported beside its reachability (VUH-1381). */
-  relayStatus: ((fleet: string) => unknown) | undefined;
   /** Each ssh fleet's link back to this service (VUH-1527), reported beside its reachability. */
   linkStatus: ((fleet: string) => unknown) | undefined;
   /** When each ssh fleet last answered; an unreachable fleet reports it (ADR 0184). */
@@ -371,33 +335,6 @@ export class ExecutionConnections {
     );
   }
 
-  /** The conversation whose coordinator an ssh fleet's relay exposes, if one was chosen. */
-  async relayConversation(fleetId: string): Promise<string | undefined> {
-    const connection = (await this.options.settings.load()).execution.connections.find(
-      (entry) => entry.id === fleetId,
-    );
-    return connection?.enabled && connection.ssh !== undefined ? connection.relay?.conversationId : undefined;
-  }
-
-  /** Pin a fleet's relay to one conversation's coordinator; a second scope needs its own fleet entry. */
-  async setRelay(fleetId: string, conversationId: string): Promise<void> {
-    await this.options.settings.update((current) => {
-      const connection = current.execution.connections.find((entry) => entry.id === fleetId);
-      if (connection?.ssh === undefined || !connection.enabled) throw new Error("Unknown ssh fleet");
-      if (connection.relay !== undefined && connection.relay.conversationId !== conversationId)
-        throw new Error(`Fleet ${fleetId} already relays another conversation's coordinator`);
-      return {
-        ...current,
-        execution: {
-          ...current.execution,
-          connections: current.execution.connections.map((entry) =>
-            entry.id === fleetId ? { ...entry, relay: { conversationId } } : entry,
-          ),
-        },
-      };
-    });
-  }
-
   /** The owner's exact-directory grant for a remote fleet (ADR 0193). */
   async remoteWorkspace(fleetId: string, directory: string): Promise<boolean> {
     const connection = (await this.options.settings.load()).execution.connections.find(
@@ -415,138 +352,11 @@ export class ExecutionConnections {
       ? this.options.run(command, args, env)
       : exec(command, [...args], { env, timeout: 5_000, maxBuffer: 8 * 1024 * 1024 });
 
-  private async requireInteractiveWorkers(harness: ExecutionWorkerHarness = "claude") {
-    if (!(await this.options.interactiveWorkers?.(harness)))
-      throw new WorkerHarnessError(
-        "harness_mode_unsupported",
-        `Native ${harness} workers need an upgraded Swarm runtime; this install cannot launch them interactively`,
-      );
-  }
-
-  private async setWorkerHarness(id: string, harness: ExecutionWorkerHarness) {
-    const settings = await this.options.settings.load();
-    const target =
-      id === "default" ? settings.execution : settings.execution.connections.find((entry) => entry.id === id);
-    if (!target) throw new Error("Unknown runtime connection");
-    if ("ssh" in target && target.ssh)
-      throw new WorkerHarnessError(
-        "harness_unsupported",
-        "Remote peers enroll through the shared coordinator relay; managed spawning is local only",
-      );
-    await this.requireWorkerHarness(harness, target.workerMode);
-    await this.options.settings.update((current) => ({
-      ...current,
-      execution: {
-        ...current.execution,
-        ...(id === "default"
-          ? { workerHarness: harness }
-          : {
-              connections: current.execution.connections.map((entry) =>
-                entry.id === id ? { ...entry, workerHarness: harness } : entry,
-              ),
-            }),
-      },
-    }));
-    for (const listener of this.changes) listener(id);
-    return { id, workerHarness: harness };
-  }
-
-  private async requireWorkerHarness(harness: ExecutionWorkerHarness, mode?: ExecutionWorkerMode) {
-    if (mode === "stream")
-      throw new WorkerHarnessError(
-        "harness_mode_unsupported",
-        "Headless workers are retired; select interactive mode",
-      );
-    if (harness !== "claude" && !(await this.options.managedWorkers?.()))
-      throw new WorkerHarnessError(
-        "harness_unsupported",
-        "Codex and pi workers require an upgraded Swarm runtime",
-      );
-    await this.requireInteractiveWorkers(harness);
-  }
-
-  /** How Swarm runs workers it dispatches into this runtime (ADR 0194). */
-  private async setWorkerMode(id: string, mode: ExecutionWorkerMode) {
-    if (mode !== "interactive")
-      throw new WorkerHarnessError(
-        "harness_mode_unsupported",
-        "Headless workers are retired; use interactive mode",
-      );
-    const settings = await this.options.settings.load();
-    const selected =
-      id === "default" ? settings.execution : settings.execution.connections.find((entry) => entry.id === id);
-    if (!selected) throw new Error("Unknown runtime connection");
-    if ("ssh" in selected && selected.ssh !== undefined)
-      throw new Error("An ssh fleet's peers enroll themselves; Swarm dispatches no workers into it");
-    await this.requireWorkerHarness(selected.workerHarness ?? "claude", mode);
-    await this.options.settings.update((current) => {
-      if (id === "default") return { ...current, execution: withWorkerMode(current.execution, mode) };
-      const connection = current.execution.connections.find((entry) => entry.id === id);
-      if (connection === undefined) throw new Error("Unknown runtime connection");
-      if (connection.ssh !== undefined && mode === "interactive")
-        throw new Error("An ssh fleet's peers enroll themselves; Swarm dispatches no workers into it");
-      return {
-        ...current,
-        execution: {
-          ...current.execution,
-          connections: current.execution.connections.map((entry) =>
-            entry.id === id ? withWorkerMode(entry, mode) : entry,
-          ),
-        },
-      };
-    });
-    for (const listener of this.changes) listener(id);
-    return { id, workerMode: mode };
-  }
-
   async connect(raw: unknown) {
     const parsed = ExecutionConnectSchema.parse(raw);
-    if ("action" in parsed && parsed.action === "harness")
-      return this.setWorkerHarness(parsed.id, parsed.harness);
-    const prior =
-      "action" in parsed
-        ? undefined
-        : (await this.options.settings.load()).execution.connections.find((entry) => entry.id === parsed.id);
-    const sameWorker =
-      prior !== undefined &&
-      !("action" in parsed) &&
-      (prior.workerHarness ?? "claude") === (parsed.workerHarness ?? prior.workerHarness ?? "claude") &&
-      (prior.workerMode ?? "interactive") === (parsed.workerMode ?? prior.workerMode ?? "interactive");
-    if (!("action" in parsed) && parsed.workerMode === "stream" && !sameWorker)
-      throw new WorkerHarnessError(
-        "harness_mode_unsupported",
-        "Headless workers are retired; use interactive mode",
-      );
-    // Reconnecting an existing transport retains its worker selection. A missing
-    // installed worker adapter disables dispatch, not the connection to its peers.
-    if (!("action" in parsed) && parsed.workerHarness && !sameWorker) {
-      if (parsed.ssh)
-        throw new WorkerHarnessError(
-          "harness_unsupported",
-          "Remote peers enroll through the shared coordinator relay",
-        );
-      await this.requireWorkerHarness(parsed.workerHarness, parsed.workerMode ?? prior?.workerMode);
-    }
-    if ("action" in parsed && parsed.action === "mode") return this.setWorkerMode(parsed.id, parsed.mode);
-    if (!("action" in parsed) && parsed.workerMode === "interactive" && !sameWorker) {
-      if (parsed.ssh !== undefined)
-        throw new Error("An ssh fleet's peers enroll themselves; Swarm dispatches no workers into it");
-      await this.requireInteractiveWorkers(parsed.workerHarness ?? "claude");
-    }
-    const input =
-      "action" in parsed || parsed.ssh !== undefined
-        ? parsed
-        : withWorkerMode(
-            {
-              ...parsed,
-              workerHarness: parsed.workerHarness ?? prior?.workerHarness,
-            },
-            parsed.workerMode ?? prior?.workerMode ?? "interactive",
-          );
+    const input = parsed;
     if ("action" in input && input.action !== "workspaces") {
       await this.options.settings.update((current) => {
-        if (input.action === "budget")
-          return { ...current, execution: { ...current.execution, budget: input.budget } };
         if (input.id !== "default" && !current.execution.connections.some((entry) => entry.id === input.id))
           throw new Error("Unknown runtime connection");
         return {
@@ -563,7 +373,7 @@ export class ExecutionConnections {
           },
         };
       });
-      for (const listener of this.changes) listener(input.action === "budget" ? "default" : input.id);
+      for (const listener of this.changes) listener(input.id);
       return input;
     }
     if ("action" in input) {
@@ -681,7 +491,6 @@ export class ExecutionConnections {
             {
               ...connection,
               ...(previous?.workspaces && !input.workspaces ? { workspaces: previous.workspaces } : {}),
-              ...(previous?.relay ? { relay: previous.relay } : {}),
             },
           ],
         },
@@ -725,11 +534,6 @@ export class ExecutionConnections {
     for (const listener of this.changes) listener(id);
   }
 
-  async dispatchBudget() {
-    const budget = (await this.options.settings.load()).execution.budget;
-    return budget === undefined ? 16 : budget;
-  }
-
   async list() {
     const settings = await this.options.settings.load();
     const configured = settings.execution.connections;
@@ -743,12 +547,7 @@ export class ExecutionConnections {
             : connection.capacity === null
               ? "unlimited"
               : "owner",
-        ...(connection.ssh === undefined
-          ? {
-              workerMode: connection.workerMode ?? ("interactive" as const),
-              workerHarness: connection.workerHarness ?? ("claude" as const),
-            }
-          : { transport: "ssh" as const }),
+        ...(connection.ssh === undefined ? {} : { transport: "ssh" as const }),
         state: !connection.enabled
           ? "disabled"
           : connection.ssh !== undefined
@@ -765,9 +564,6 @@ export class ExecutionConnections {
               : "unavailable",
         ...(connection.ssh !== undefined && this.lastSeen.has(connection.id)
           ? { lastSeenAt: this.lastSeen.get(connection.id) }
-          : {}),
-        ...(connection.ssh !== undefined && this.relayStatus?.(connection.id) !== undefined
-          ? { relayState: this.relayStatus(connection.id) }
           : {}),
         ...(connection.ssh !== undefined && this.linkStatus?.(connection.id) !== undefined
           ? { linkState: this.linkStatus(connection.id) }
@@ -791,15 +587,6 @@ export class ExecutionConnections {
           settings.execution.capacity === undefined
             ? "default"
             : settings.execution.capacity === null
-              ? "unlimited"
-              : "owner",
-        workerMode: settings.execution.workerMode ?? ("interactive" as const),
-        workerHarness: settings.execution.workerHarness ?? ("claude" as const),
-        budget: settings.execution.budget === undefined ? 16 : settings.execution.budget,
-        budgetSource:
-          settings.execution.budget === undefined
-            ? "default"
-            : settings.execution.budget === null
               ? "unlimited"
               : "owner",
         capabilities: ["code", "review", "research"],
@@ -844,13 +631,5 @@ export class ExecutionConnections {
     return isDeepStrictEqual(connection, current)
       ? { runtime: "external", session: connection.session, socketPath: connection.socketPath }
       : undefined;
-  }
-}
-
-export class WorkerHarnessError extends Error {
-  readonly code: "harness_unsupported" | "harness_mode_unsupported";
-  constructor(code: "harness_unsupported" | "harness_mode_unsupported", message: string) {
-    super(message);
-    this.code = code;
   }
 }

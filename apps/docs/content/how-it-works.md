@@ -79,21 +79,16 @@ to watch and use. Clankie sends assignments through each supported harness's
 message connection, without typing into your draft. If delivery is unavailable
 or uncertain, he reports that outcome.
 
-**Swarm is optional:** connect it when independent agents need shared messaging
-and task ownership. Local hires and work tracking can run without it. These are
-separate connections; a tracker account is not a worker login.
-
 Native local message adapters currently cover Claude Code and Codex. Pi,
 OpenCode, and Prime Agent have been researched but are not integrated into this
-hire path. Swarm defaults on; `clankie swarm off` disables it after the captain
-restarts. See the [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
+hire path. Remote Claude and Codex hires use the fleet link and native channels. See the [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
 for the message flow and current limits.
 
 The app presents those agents in Messages and, where execution seats exist,
 Commons and Terminal. A worker's contact can outlive its terminal session.
 Live activity and a completion claim are evidence to inspect, not substitutes
-for the finished result and its checks. The [Swarm support table](https://github.com/Volpestyle/clankie/blob/main/packages/swarm/README.md#support-at-a-glance)
-explains runtime choices, external peers, and the current limits.
+for the finished result and its checks. Independent linked agents can initiate
+messages to Clankie through `message_clankie`.
 
 ## Finding your way in the console
 

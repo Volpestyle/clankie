@@ -262,17 +262,11 @@ different supported harnesses, including Claude Code, Codex, and pi. Install
 and authenticate the harnesses you want on the machine that runs them. Choosing
 a worker harness does not replace Clankie's own model or runtime.
 
-Open `/connections` to inspect execution runtimes, Swarm connections, and
-accounts. **Swarm** carries messages and task ownership; **Herdr** supplies
-the terminals for the built-in worker routes. The release includes Herdr.
-Its optional UI plugin makes the console and fleet board convenient to open
-inside Herdr, but is not required to hire workers.
-
-You can connect an existing runtime or coordinator, approve project directories
-for workers, and reach agents on other machines. Managed spawning and peer
-communication have different requirements. The [Swarm support table](https://github.com/Volpestyle/clankie/blob/main/packages/swarm/README.md#support-at-a-glance)
-names the implemented routes and limits; the [connection commands](/cli/#connections-and-runtime)
-own their setup.
+Open `/connections` to inspect execution runtimes and accounts. Herdr supplies
+the native worker terminals. Clankie hires and messages supported agents through
+their harness channels or session APIs, including remote agents over the fleet
+link. See the [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md)
+and [connection commands](/cli/#connections-and-runtime).
 
 ### Give him ongoing work
 

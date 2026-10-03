@@ -146,7 +146,7 @@ credential holder.
 - `/chats` (aliases `/chat`, `/conversation`, `/conversations`) opens only
   personal and workspace chats with Clankie. `/chats <name-or-path>` switches directly.
 - `/agents` opens the agents that are live now (a Herdr seat here or on a
-  remote fleet, or an available Swarm peer). Offline agents that kept a thread
+  remote fleet). Offline agents that kept a thread
   sit behind one "Past agents" entry, newest first; offline agents without a
   thread are not listed, since there is nothing to open.
 - `/rooms` opens group channels and Discord text/voice rooms. A Discord channel

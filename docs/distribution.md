@@ -100,7 +100,7 @@ are on PATH. The headless command contract is
 skills under `.agents/dev-skills` stay out of the archive. The release also
 ships `docs/bundled-skills.md`, the pinned process-skill manifest and MIT license,
 `docs/worker-access.md`, `docs/model-keys.md`, `docs/rivals.md`,
-`docs/discord-ingress.md`, `packages/swarm/README.md`, and
+`docs/discord-ingress.md` and
 `infra/hosted/README.md` for the installed skills' operational references.
 Other repository documentation does not ship.
 
@@ -137,7 +137,7 @@ Shared provider registration includes Pi's static OAuth flows in the bundle;
 
 `pnpm herdr:linux:smoke` builds and exercises the same pinned Herdr runtime
 inside Docker. `pnpm hosted:build` builds the single-owner Linux captain,
-Swarm/Herdr worker and relay image; `pnpm hosted:smoke` checks isolated execution
+native Herdr worker and relay image; `pnpm hosted:smoke` checks isolated execution
 and persistence. The [hosted deployment guide](../infra/hosted/README.md) owns
 setup, supported capabilities and remaining managed-hosting requirements.
 

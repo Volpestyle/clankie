@@ -42,26 +42,13 @@ export async function runRuntimeCommand(
       session: flags.get("--session"),
       ssh: { host: flags.get("--ssh"), shell },
     });
-  } else if ((args[0] === "capacity" && args.length === 3) || (args[0] === "budget" && args.length === 2)) {
+  } else if (args[0] === "capacity" && args.length === 3) {
     const raw = args.at(-1)!;
     if (raw !== "--clear" && (!/^\d+$/u.test(raw) || !Number.isSafeInteger(Number(raw))))
       throw new Error("Use a nonnegative integer limit or --clear for unlimited");
     const limit = raw === "--clear" ? null : Number(raw);
     method = "POST";
-    body = JSON.stringify(
-      args[0] === "budget"
-        ? { action: "budget", budget: limit }
-        : { action: "capacity", id: args[1], capacity: limit },
-    );
-  } else if (args[0] === "harness" && args.length === 3) {
-    if (!["claude", "codex", "pi"].includes(args[2]!)) throw new Error("Use harness ID claude|codex|pi");
-    method = "POST";
-    body = JSON.stringify({ action: "harness", id: args[1], harness: args[2] });
-  } else if (args[0] === "mode" && args.length === 3) {
-    // How Swarm runs the workers it dispatches here (ADR 0194).
-    if (args[2] !== "interactive") throw new Error("Headless workers are retired; use mode ID interactive");
-    method = "POST";
-    body = JSON.stringify({ action: "mode", id: args[1], mode: args[2] });
+    body = JSON.stringify({ action: "capacity", id: args[1], capacity: limit });
   } else if (args[0] === "workspaces" && args.length >= 3) {
     const workspaces: Array<{ kind: "repository" | "directory"; path: string }> = [];
     if (!(args.length === 3 && args[2] === "--clear")) {

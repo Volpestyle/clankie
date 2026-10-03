@@ -14,7 +14,6 @@ import {
   applyDiscordSettingsToEnvironment,
   applyVoiceSettingsToEnvironment,
   SettingsStore,
-  SwarmSettingsSchema,
   assertNoSecretShapedValue,
   defaultSettingsPath,
   discordSettingsToEnvironment,
@@ -31,10 +30,45 @@ async function tempStore(): Promise<SettingsStore> {
 }
 
 describe("settings store", () => {
-  it("keeps existing Swarm enabled unless the owner explicitly disables it", () => {
-    expect(emptySettings().swarm).toEqual({ enabled: true, connections: [] });
-    expect(SwarmSettingsSchema.parse({ connections: [] })).toEqual({ enabled: true, connections: [] });
-    expect(SwarmSettingsSchema.parse({ enabled: false })).toEqual({ enabled: false, connections: [] });
+  it("loads retired coordinator settings without losing native execution grants", async () => {
+    const store = await tempStore();
+    await writeFile(
+      store.path,
+      JSON.stringify({
+        schemaVersion: 1,
+        swarm: { enabled: true },
+        execution: {
+          workerMode: "interactive",
+          workerHarness: "codex",
+          budget: 25,
+          connections: [
+            {
+              id: "pc",
+              session: "work",
+              ssh: { host: "pc", shell: "powershell" },
+              relay: { conversationId: "old" },
+              workerMode: "stream",
+              workspaces: [{ kind: "directory", path: "C:\\src" }],
+            },
+          ],
+        },
+      }),
+    );
+    const loaded = await store.load();
+    expect(loaded).not.toHaveProperty("swarm");
+    expect(loaded.execution).toEqual({
+      connections: [
+        {
+          id: "pc",
+          kind: "herdr",
+          session: "work",
+          ssh: { host: "pc", shell: "powershell" },
+          workspaces: [{ kind: "directory", path: "C:\\src" }],
+          capabilities: ["code", "review", "research"],
+          enabled: true,
+        },
+      ],
+    });
   });
   it("defaults the herdr binding to herdr's own default session (ADR 0149)", () => {
     expect(emptySettings().herdr).toEqual({ runtime: "auto", session: "default" });

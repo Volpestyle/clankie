@@ -40,7 +40,6 @@ source setup and checks.
 | Service HTTP contract             | [OpenAPI](../apps/clankie/openapi.yaml), rendered as the [API docs](https://docs.clankie.bot/api/)                                                                   |
 | Public wire contracts             | [`packages/protocol`](../packages/protocol/README.md)                                                                                                                |
 | Native hire and message delivery  | [Harness adapters and current support](../packages/agent-hosts/README.md#tool-flow-and-current-support)                                                              |
-| Optional peer coordination        | [Swarm host](../packages/swarm/README.md)                                                                                                                            |
 | Harness discovery and transcripts | [Agent hosts](../packages/agent-hosts/README.md), [transcripts](../packages/agent-transcript/README.md)                                                              |
 | Project work tracking             | [Work items](../packages/work-items/README.md)                                                                                                                       |
 | Models                            | [Provider resolution](../packages/model-provider/README.md), [catalog](../packages/model-registry/README.md)                                                         |
@@ -71,8 +70,8 @@ source setup and checks.
 - [Ruthless cut audit](proposals/2026-09-30-ruthless-cut-audit.md) is a dated
   keep, cut or fold proposal for every surface under ADR 0203, awaiting James's
   line-by-line decision.
-- [Fleet-lead transfer](fleet-lead-handoff.md) is a retained, inactive runbook.
-  Normal external-coordinator connection is documented in the Swarm reference.
+- [Fleet-lead transfer](fleet-lead-handoff.md) records the retired coordinator
+  runbook and directs current work to native hires.
 
 Every fact has an owning source. The public site renders canonical command and
 API references rather than maintaining another copy. Its user guides explain

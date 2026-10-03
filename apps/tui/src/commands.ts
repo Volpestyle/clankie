@@ -1,7 +1,6 @@
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runLinearCommand } from "./command/linear.ts";
-import { runSwarmCommand } from "./command/swarm.ts";
 import { runAgentsCommand, splitQuotedArguments } from "./command/agents.ts";
 import {
   runConnectionsMenu,
@@ -145,7 +144,6 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   const commands: FaceShellCommand[] = [];
   const connectionServices = (shell: ClankieFaceShell): ConnectionsMenuServices => ({
     runtime: (args) => runRuntimeCommand(args),
-    swarm: (args) => runSwarmCommand(args),
     agents: (args) => runAgentsCommand(args),
     openHerdrSettings: () => showHerdrMenu(shell, context),
   });
@@ -223,7 +221,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "connections",
       aliases: [],
-      description: "See and manage runtimes, Swarm, agent sessions and accounts",
+      description: "See and manage runtimes, agent sessions and accounts",
       argumentHint: "[json]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -294,9 +292,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           const option = (agent: OperatorAgentPersona) => ({
             value: agent.personaId,
             label: agent.name,
-            hint: agent.swarm
-              ? `Swarm · ${agent.swarm.connectionId}${agentIsLive(agent) ? "" : " · offline"}`
-              : `Herdr · ${agent.harness}${agent.role ? ` · ${agent.role}` : ""}${agentIsLive(agent) ? "" : " · offline"}`,
+            hint: `Herdr · ${agent.harness}${agent.role ? ` · ${agent.role}` : ""}${agentIsLive(agent) ? "" : " · offline"}`,
             description: agent.personaId,
           });
           let id = await flow.readSelect({
@@ -354,30 +350,6 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
-      name: "swarm",
-      aliases: [],
-      description: "Inspect or connect authorized Swarm coordinators",
-      takesArgument: true,
-      argumentHint:
-        "[status|on|off|contacts|thread PERSONA|message PERSONA TEXT|connections|connect PRIVATE.json|disconnect ID]",
-      async run(argument, shell): Promise<void> {
-        if (argument.trim() === "") {
-          await runConnectionsSection("swarm", shell, connectionServices(shell));
-          return;
-        }
-        try {
-          const result = await runSwarmCommand(argument.trim().split(/\s+/u).filter(Boolean));
-          shell.insertCommandResult("/swarm", JSON.stringify(result, null, 2), "success");
-        } catch (error) {
-          shell.insertCommandResult(
-            "/swarm",
-            error instanceof Error ? error.message : String(error),
-            "error",
-          );
-        }
-      },
-    },
-    {
       name: "access",
       aliases: [],
       description: "Inspect and revoke worker access to connected accounts",
@@ -388,7 +360,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           const args = argument.trim().split(/\s+/u).filter(Boolean);
           if (args[0] === "issue")
             throw new Error(
-              "Issue from your terminal: clankie access issue REQUEST.json --deliver swarm (or --out GRANT.json for private file delivery)",
+              "Issue from your terminal: clankie access issue REQUEST.json --out GRANT.json, or clankie access fleet NAME SERVER",
             );
           const result = await runAccessCommand(args);
           shell.insertCommandResult("/access", JSON.stringify(result, null, 2), "success");
@@ -1368,9 +1340,9 @@ function formatGameplaySettings(settings: GameplaySettings): string {
   return `PokeAgent MMO: ${settings.pokeagentMmoEnabled ? "enabled" : "disabled"}`;
 }
 
-/** Reachable now: a live Herdr seat, or an available Swarm contact. */
+/** Reachable now: a live Herdr seat. */
 function agentIsLive(agent: OperatorAgentPersona): boolean {
-  return agent.swarm ? agent.swarm.available : agent.activeSeatId !== undefined;
+  return agent.activeSeatId !== undefined;
 }
 
 /** `/evaluator` with no arguments: the same controls as the CLI, as a menu. */
@@ -1539,7 +1511,7 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
         {
           value: "disable",
           label: "Run without Herdr",
-          hint: "Keep conversations and Swarm; no terminal runtime",
+          hint: "Keep conversations; no terminal runtime",
         },
         { value: "open", label: "Open active session" },
         ...(context.restartCaptain

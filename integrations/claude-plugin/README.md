@@ -3,16 +3,13 @@
 Workers can use Clankie's connected tools without taking his operator seat:
 configure `clankie mcp --grant FILE` using an individually issued private grant.
 See [worker access](../../docs/worker-access.md) for account verification,
-restrictions and expiry. Swarm enrollment does not automatically issue a grant.
+restrictions and expiry. Fleet membership grants only the explicitly issued fleet tools.
 
 An optional alternative to Clankie's primary TUI lead: his operator seat as a Claude Code plugin
 ([ADR 0152](../../docs/adr/0152-a-harness-takes-the-operator-seat.md)). Sit in
 Claude Code on your own plan and you are talking to Clankie: his identity, the
 owner persona, his tools over MCP, the newest memory card on every turn, and
 his skills. The service keeps running his body, Discord, voice, and play.
-When assigning work through `swarm_assign`, `skills: ["installed-name"]` attaches
-selected skill files from that conversation's catalog to the worker's immutable
-context. See [portable skill selection](../../packages/swarm/README.md#working-preferences-and-portable-skills-slices-36).
 
 Running Claude Code as a worker in Clankie's Herdr fleet does not require
 replacing the lead with this seat. Linear notifications follow the connected account's inbox into the operator
@@ -25,13 +22,13 @@ plugin can uniquely declare. Everything else lives in the service and the
 
 ## What the plugin carries
 
-| Piece                                                                                                                                                                                | File                       | What it does                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Output style `Clankie`                                                                                                                                                               | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`. |
-| `SessionStart` hook                                                                                                                                                                  | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card                                 |
-| `UserPromptSubmit` hook                                                                                                                                                              | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card, once per session and again when it changes                                             |
-| MCP server `clankie`                                                                                                                                                                 | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                               |
-| Skills `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:swarm-mcp`, `/clankie:work-items`, `/clankie:computer-use-delegation`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                            |
+| Piece                                                                                                                                                          | File                       | What it does                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Output style `Clankie`                                                                                                                                         | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`. |
+| `SessionStart` hook                                                                                                                                            | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card                                 |
+| `UserPromptSubmit` hook                                                                                                                                        | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card, once per session and again when it changes                                             |
+| MCP server `clankie`                                                                                                                                           | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                               |
+| Skills `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:work-items`, `/clankie:computer-use-delegation`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                            |
 
 The output style is generated: edit `apps/clankie/src/captain/instructions.md`
 and run `node integrations/claude-plugin/build.mjs`. `node
@@ -82,7 +79,7 @@ refuses a different ID. Without a selection, the seat uses the default global
 conversation. A selected project seat does not claim the global Herdr head name.
 
 The launcher sets `CLANKIE_CONVERSATION_ID` for the plugin's hooks and MCP bridge;
-inherited selections and worker Swarm capabilities are cleared. The prompt adds
+inherited selections and worker capabilities are cleared. The prompt adds
 the selected workspace's agent instructions through the same resource loader Pi
 uses, with source paths, plus the owner's persona and fleet preferences. The
 memory card remains the operator lane's shared recall; it is not project-filtered.
@@ -96,7 +93,7 @@ because that mode does not register channel notifications.
 Without an available execution runtime, peer communication remains usable. The
 plugin's operator bearer belongs to this trusted seat; it is not a worker credential.
 Scoped access for other workers is tracked in the
-[shared-account plan](../../packages/swarm/README.md#shared-connected-accounts-slices-35).
+[worker access contract](../../docs/worker-access.md).
 
 The bundled seat needs no marketplace installation. If an older seat plugin is
 installed, leave it disabled at user scope: its forced style otherwise applies
@@ -113,15 +110,11 @@ loads his install skill, and `clankie model status` runs without a prompt.
 ## Worker channel plugin (`clankie-worker`)
 
 [`worker/`](worker/) is a second plugin in the same marketplace,
-`clankie-worker@clankie`, for Swarm-dispatched **interactive** workers
-([ADR 0194](../../docs/adr/0194-interactive-swarm-workers-receive-leased-channel-events.md)).
-It is not the seat and carries none of the seat's identity, skills or operator
-MCP. Its one MCP server, `swarm`, has two launches:
+`clankie-worker@clankie` serves native hired seats and linked fleet agents.
+Its MCP server key stays `swarm` for installed permission/configuration compatibility;
+it runs the native seat mailbox or fleet link, with no coordinator runtime.
 
-- **Swarm-dispatched worker**: runs the Swarm MCP that the Herdr launcher names
-  in `SWARM_WORKER_MCP`, in channel mode, with the worker's own enrolled
-  capability, so its leased Swarm mail arrives as channel events.
-- **Seat Clankie hired** (VUH-1458): inside the hire's herdr pane it runs
+- **Clankie hire** (VUH-1458): inside the hire's herdr pane it runs
   `clankie mcp --seat`, so the seat's mailbox (brief, `message_seat`, DMs)
   arrives as channel events. The bridge polls only when the Claude session that
   launched it loaded `plugin:clankie-worker@clankie` under `--channels`.
@@ -148,8 +141,7 @@ Either launch enables the plugin for that session only (`enabledPlugins`) and
 starts Claude Code with `--channels plugin:clankie-worker@clankie`. Outside
 both it refuses to start. Its hooks (`SessionStart`, `UserPromptSubmit`,
 `Stop`, `StopFailure`) call `clankie seat-hook` only in a Clankie hire's pane, so
-Clankie learns each settled turn and its final text; for a Swarm worker they do
-nothing.
+Clankie learns each settled turn and its final text.
 
 Claude Code only runs a non-official channel plugin unattended when the owner's
 managed settings allow it. That is the owner's action, never the dispatcher's:
@@ -173,10 +165,8 @@ unavailable control includes `control.reason`. A folder-trust prompt reports
 or delivery must be inspected before retrying. See
 [native delivery](../../docs/adr/0207-work-records-and-native-agent-delivery.md).
 
-Swarm workers use native interactive mode. `clankie runtime mode ID interactive`
-selects it explicitly; new stream selections are refused. An interactive startup
-that blocks stays visibly blocked in its pane. Swarm is a separate optional
-connection; local Claude hires use the worker channel without enrolling a Swarm peer.
+Workers use their harness's native interactive TUI. Local Claude hires and linked
+fleet agents use the worker channel.
 
 ## Codex
 

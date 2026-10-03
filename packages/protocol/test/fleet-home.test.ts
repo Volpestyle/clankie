@@ -52,38 +52,3 @@ it("removes historical personas without losing seated people or room participant
   expect(projected.cursor).toBe(snapshot.cursor);
   expect(snapshot.personas).toHaveLength(420);
 });
-
-it("keeps room members and offline Swarm threads, but hides unused coordinator records", () => {
-  const swarm = {
-    conversationId: "peer-thread",
-    connectionId: "swarm",
-    coordinator: "a".repeat(64),
-    scope: "repo",
-    actor: "peer",
-    generation: 1,
-    available: false,
-  };
-  const snapshot: OperatorFleetSnapshot = {
-    schemaVersion: 1,
-    cursor: "fleet:2",
-    seats: [],
-    channels: [
-      {
-        schemaVersion: 1,
-        channelId: "room",
-        conversationId: "room-thread",
-        title: "Room",
-        members: [{ personaId: "member", position: 0, joinedAt: at }],
-        createdAt: at,
-        updatedAt: at,
-      },
-    ],
-    personas: [
-      persona("member"),
-      { ...persona("peer"), swarm, conversationId: "dm" },
-      { ...persona("internal"), name: "clankie:coordinator", swarm, conversationId: "internal-thread" },
-      persona("archived"),
-    ],
-  };
-  expect(operatorFleetHome(snapshot).personas.map((p) => p.personaId)).toEqual(["member", "peer"]);
-});

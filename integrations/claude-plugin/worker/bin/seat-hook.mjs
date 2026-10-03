@@ -2,12 +2,12 @@
 // The clankie-worker plugin's lifecycle hook (VUH-1458). A seat Clankie hired
 // into a herdr pane reports each settled turn through `clankie seat-hook`; on
 // a machine linked to his fleet (VUH-1527) it reports over that link instead.
-// A Swarm worker, or any session outside a pane, has nothing to report here.
+// A session outside a pane has nothing to report here.
 import { spawn } from "node:child_process";
 import { authorization, hasLinks, readLink, seatRoute, SUMMARY_MAX, TEXT_MAX } from "./link.mjs";
 
 const paneId = process.env.HERDR_PANE_ID?.trim();
-if (process.env.SWARM_WORKER_LAUNCH || !paneId) process.exit(0);
+if (!paneId) process.exit(0);
 if (hasLinks()) {
   // On a linked machine; a pane outside his fleets has nothing to report.
   const link = readLink();

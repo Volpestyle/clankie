@@ -81,17 +81,10 @@ test("without the final text in the hook, the transcript's last reply is reporte
   }
 });
 
-test("outside a hired pane, or for a Swarm worker, or for a pane Clankie does not drive, nothing is reported", async () => {
+test("outside a hired pane, or for a pane Clankie does not drive, nothing is reported", async () => {
   const fetchImpl = vi.fn(async () => new Response("{}", { status: 404 })) as unknown as typeof fetch;
   const hook = { hook_event_name: "Stop", session_id: SESSION };
   expect(await runSeatHookCommand([], { env: {}, fetchImpl, stdin: stdin(hook) })).toBe(0);
-  expect(
-    await runSeatHookCommand([], {
-      env: { HERDR_PANE_ID: "w1:p1", SWARM_WORKER_LAUNCH: "/tmp/launch.json" },
-      fetchImpl,
-      stdin: stdin(hook),
-    }),
-  ).toBe(0);
   expect(fetchImpl).not.toHaveBeenCalled();
   expect(
     await runSeatHookCommand([], {

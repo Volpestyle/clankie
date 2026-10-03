@@ -417,7 +417,7 @@ export function linearActivityPrompt(activity: LinearActivityEvent): string {
     "An account name does not identify the human: workers and you may post through the same account.",
     ...(activity.replyTo
       ? [
-          "This comments on your own post. Get it to whoever owns the work (the worker named here, the Swarm or Herdr task owner, or the project's lead lane) with its link, so they answer on the thread. If nobody owns it, answer on the thread yourself or tell the operator. Do not let it pass silently.",
+          "This comments on your own post. Get it to whoever owns the work (the worker named here, the native agent owning the assignment, or the project's lead lane) with its link, so they answer on the thread. If nobody owns it, answer on the thread yourself or tell the operator. Do not let it pass silently.",
         ]
       : [
           "Read what changed and decide whether anything needs your attention. Routine updates can pass silently.",

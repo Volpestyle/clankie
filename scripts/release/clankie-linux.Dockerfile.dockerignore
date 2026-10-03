@@ -22,7 +22,6 @@
 !packages/*/
 !packages/*/package.json
 !packages/*/src/**
-!packages/swarm/README.md
 !integrations/herdr-plugin/**
 !integrations/claude-plugin/**
 !integrations/codex-plugin/**

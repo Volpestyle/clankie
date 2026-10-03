@@ -3,7 +3,7 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { commandHost } from "./io.ts";
 
 const USAGE =
-  "Usage: clankie access list | issue REQUEST.json (--out GRANT.json | --deliver swarm) | fleet NAME SERVER [--tool NAME]... | revoke ID | linear [verify]";
+  "Usage: clankie access list | issue REQUEST.json --out GRANT.json | fleet NAME SERVER [--tool NAME]... | revoke ID | linear [verify]";
 export async function runAccessCommand(
   args: readonly string[],
   options: {
@@ -17,7 +17,6 @@ export async function runAccessCommand(
     method = "GET",
     body: string | undefined;
   let output: string | undefined;
-  let deliverSwarm = false;
   if (args.length === 0 || (args.length === 1 && args[0] === "list")) {
     /* list */
   } else if (args.length === 2 && args[0] === "revoke") {
@@ -46,12 +45,6 @@ export async function runAccessCommand(
     body = JSON.stringify(JSON.parse(await readFile(args[1]!, "utf8")));
     output = args[3]!;
     method = "POST";
-  } else if (args.length === 4 && args[0] === "issue" && args[2] === "--deliver" && args[3] === "swarm") {
-    const input = JSON.parse(await readFile(args[1]!, "utf8"));
-    if (!input.swarm) throw new Error("Swarm delivery requires an assignment-bound grant");
-    body = JSON.stringify(input);
-    method = "POST";
-    deliverSwarm = true;
   } else throw new Error(USAGE);
   const credential = await resolveOperatorCredential({
     env: options.env ?? process.env,
@@ -68,11 +61,6 @@ export async function runAccessCommand(
   const result = (await response.json()) as Record<string, unknown>;
   if (!response.ok)
     throw new Error(typeof result.detail === "string" ? result.detail : `Worker access: ${response.status}`);
-  if (deliverSwarm) {
-    const { token: _token, ...summary } = result;
-    const id = (result.grant as { grantId: string }).grantId;
-    return { ...summary, workerCommand: ["clankie", "mcp", "--swarm-grant", id], host };
-  }
   if (output === undefined) return result;
   if (typeof result.token !== "string") throw new Error("Service returned no worker credential");
   // A caller explicitly chooses the destination; never overwrite another grant
@@ -84,7 +72,6 @@ export async function runAccessCommand(
         endpoint: `${host}/v1/worker-mcp`,
         token: result.token,
         grant: result.grant,
-        renewable: result.renewable === true,
       }),
       { flag: "wx", mode: 0o600 },
     );

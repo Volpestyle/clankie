@@ -25,37 +25,6 @@ afterEach(async () => {
 });
 
 describe("clankie app smoke", () => {
-  it("keeps Swarm diagnostics behind operator authentication", async () => {
-    let reads = 0;
-    const clankie = await createClankieApp({
-      captain: createStubCaptain(),
-      swarm: {
-        status: async () => {
-          reads++;
-          return { mode: "swarm", conversations: [] };
-        },
-      },
-      authenticateOperator: async (request) =>
-        request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
-    });
-    try {
-      expect((await clankie.app.request("/v1/swarm")).status).toBe(401);
-      expect(reads).toBe(0);
-      const response = await clankie.app.request("/v1/swarm", { headers: { authorization: "Bearer owner" } });
-      expect(await response.json()).toEqual({
-        mode: "swarm",
-        conversations: [],
-        active: true,
-        enabled: true,
-        restartRequired: false,
-        connections: [],
-      });
-      expect(reads).toBe(1);
-    } finally {
-      clankie.close();
-    }
-  });
-
   it("does not interpret a client TUI's pane ID inside the private runtime", async () => {
     for (const bundled of [false, true]) {
       let receivedPane: string | undefined;

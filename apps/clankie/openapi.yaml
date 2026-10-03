@@ -522,10 +522,10 @@ paths:
     get:
       tags: [Operator]
       operationId: getConnectionInventory
-      summary: Inspect execution runtimes, Swarm coordinators and verified Linear identity
+      summary: Inspect execution runtimes and verified Linear identity
       security: [{ operatorBearer: [] }]
       responses:
-        "200": { description: Current runtime health, Swarm diagnostics and recorded account identity }
+        "200": { description: Current runtime health and recorded account identity }
         "401": { description: Operator authentication required }
         "503": { description: Operator authentication unavailable }
   /v1/runtime-connections:
@@ -542,7 +542,7 @@ paths:
       tags: [Operator]
       operationId: connectRuntime
       summary: Connect a Herdr runtime or configure owner execution policy
-      description: Resolves an explicit session or socket and pins that endpoint to the ID. Reconnection cannot retarget an existing ID. Live coordinator configuration is synchronized before success. action=workspaces replaces additional repository/directory approvals for a named or default runtime; it never starts or stops workers. action=capacity sets one runtime limit; action=budget sets the overall limit per coordinator scope. Unset limits default to 16; null clears a limit to unlimited; zero pauses new admission. Runtime capacity is also counted per coordinator, not across coordinators sharing a runtime.
+      description: Resolves an explicit session or socket and pins that endpoint to the ID. Reconnection cannot retarget an existing ID. action=workspaces replaces additional repository/directory approvals for a named or default runtime; it never starts or stops workers. action=capacity sets one runtime limit; Unset limits default to 16; null clears a limit to unlimited; zero pauses new admission.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -554,7 +554,7 @@ paths:
               oneOf:
                 - required: [id]
                   anyOf: [{ required: [session] }, { required: [socketPath] }]
-                  not: { anyOf: [{ required: [action] }, { required: [budget] }] }
+                  not: { required: [action] }
                 - required: [id, action, workspaces]
                   properties: { action: { const: workspaces } }
                   not:
@@ -565,7 +565,6 @@ paths:
                           { required: [socketPath] },
                           { required: [kind] },
                           { required: [capacity] },
-                          { required: [budget] },
                           { required: [capabilities] },
                         ],
                     }
@@ -575,22 +574,6 @@ paths:
                     {
                       anyOf:
                         [
-                          { required: [workspaces] },
-                          { required: [budget] },
-                          { required: [session] },
-                          { required: [socketPath] },
-                          { required: [kind] },
-                          { required: [capabilities] },
-                        ],
-                    }
-                - required: [action, budget]
-                  properties: { action: { const: budget } }
-                  not:
-                    {
-                      anyOf:
-                        [
-                          { required: [id] },
-                          { required: [capacity] },
                           { required: [workspaces] },
                           { required: [session] },
                           { required: [socketPath] },
@@ -605,7 +588,7 @@ paths:
                     pattern: "^[a-z][a-z0-9-]{0,63}$",
                     description: "default is reserved except for workspace and capacity configuration",
                   }
-                action: { type: string, enum: [workspaces, capacity, budget] }
+                action: { type: string, enum: [workspaces, capacity] }
                 workspaces:
                   type: array
                   maxItems: 32
@@ -631,7 +614,6 @@ paths:
                     description: "Absolute Unix socket path, at most 102 UTF-8 bytes",
                   }
                 capacity: { type: [integer, "null"], minimum: 0, default: 16 }
-                budget: { type: [integer, "null"], minimum: 0, default: 16 }
                 capabilities:
                   { type: array, maxItems: 32, items: { type: string }, default: [code, review, research] }
       responses:
@@ -861,113 +843,6 @@ paths:
                   following: { type: boolean }
                   active: { const: false }
                   detail: { type: string }
-  /v1/swarm:
-    get:
-      tags: [Operator]
-      operationId: inspectSwarmConnections
-      summary: Inspect Swarm selection, configured connections and active conversation actors
-      security: [{ operatorBearer: [] }]
-      responses:
-        "200":
-          description: Non-secret connection configuration and coordinator observations, including configured enabled, running active, and restartRequired
-        "401": { description: Operator authentication required }
-        "503": { description: Operator authentication unavailable }
-  /v1/swarm/config:
-    put:
-      tags: [Operator]
-      operationId: configureSwarmStartup
-      summary: Select whether Swarm starts with the captain
-      description: Saves the selection for the next captain restart. Does not stop running workers or delete coordinator state, saved connections, or credentials. Local hires and repo work tracking do not require Swarm.
-      security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [enabled]
-              properties:
-                enabled: { type: boolean }
-      responses:
-        "200":
-          description: Saved startup selection and current service state
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [enabled, active, restartRequired]
-                properties:
-                  enabled: { type: boolean, description: Configured selection for the next captain start }
-                  active: { type: boolean, description: This captain has a Swarm host }
-                  restartRequired: { type: boolean }
-                  restart:
-                    {
-                      type: string,
-                      description: Restart instruction when the selection differs from the running service,
-                    }
-        "400": { description: Invalid configuration request }
-        "401": { description: Operator authentication required }
-        "413": { description: Request exceeds 1 KiB }
-        "503": { description: Operator authentication or settings persistence unavailable }
-  /v1/swarm/connections:
-    post:
-      tags: [Operator]
-      operationId: connectSwarmCoordinator
-      summary: Connect an externally enrolled Clankie session
-      description: Verifies the actor and scope at an explicit local socket, or a remote socket/named pipe through the optional registered SSH fleet. The service supervises that private SSH relay without managing the external owner. Capabilities stay in the broker. A retained ID cannot change endpoint, fleet, coordinator identity or owning conversation. Maximum body size is 16 KiB.
-      security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [id, conversationId, endpoint, capability]
-              properties:
-                id:
-                  {
-                    type: string,
-                    pattern: "^[a-z][a-z0-9-]{0,63}$",
-                    description: External name; embedded is reserved,
-                  }
-                conversationId: { type: string, minLength: 1, maxLength: 256 }
-                endpoint:
-                  {
-                    type: string,
-                    maxLength: 4096,
-                    description: Absolute Unix socket path or Windows named pipe (the latter requires ssh). Remote when ssh is supplied.,
-                  }
-                ssh:
-                  {
-                    type: string,
-                    pattern: "^[a-z][a-z0-9-]{0,63}$",
-                    description: Registered enabled SSH fleet; omit for a local endpoint.,
-                  }
-                capability: { type: string, minLength: 32, maxLength: 512, writeOnly: true }
-      responses:
-        "200": { description: Verified actor, scope, endpoint, conversation and non-secret broker reference }
-        "400": { description: Invalid connection request }
-        "401": { description: Operator authentication required }
-        "404": { description: Unknown or unsupported conversation }
-        "409": { description: Connection refused or retained identity conflicts }
-        "413": { description: Request exceeds 16 KiB }
-        "503": { description: External connection management unavailable }
-  /v1/swarm/connections/{id}:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string } }
-    delete:
-      tags: [Operator]
-      operationId: disconnectSwarmCoordinator
-      summary: Disable a named connection without redirecting its work
-      description: Closes Clankie's sessions and removes its brokered capability. Retains the identity and work binding; does not stop the external coordinator or workers.
-      security: [{ operatorBearer: [] }]
-      responses:
-        "200": { description: Connection disabled }
-        "401": { description: Operator authentication required }
-        "409": { description: Unknown connection or disconnect refused }
-        "503": { description: External connection management unavailable }
   /v1/worker-grants/:
     get:
       tags: [Operator]
@@ -982,7 +857,7 @@ paths:
       tags: [Operator]
       operationId: issueWorkerGrant
       summary: Issue a scoped grant for one verified connected account
-      description: Work ID is provenance. Exact top-level argument restrictions enforce resource boundaries; omitted arguments remain unrestricted. An optional Swarm binding requires the live enrolled task owner, creator conversation and unchanged attempt/fence on every request.
+      description: Work ID is provenance. Exact top-level argument restrictions enforce resource boundaries; omitted arguments remain unrestricted. A fleet grant binds access to an authenticated fleet link until revoked; a manual grant requires private bearer delivery.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -992,31 +867,24 @@ paths:
               type: object
               additionalProperties: false
               required: [principalId, workId, server, tools]
+              anyOf:
+                - required: [fleet]
+                - properties:
+                    tools: { minItems: 1 }
               properties:
                 principalId: { type: string, minLength: 1, maxLength: 256 }
                 workId: { type: string, minLength: 1, maxLength: 256 }
                 server: { type: string, minLength: 1, maxLength: 128 }
                 ttlSeconds: { type: integer, minimum: 1, maximum: 900, default: 900 }
-                renewable:
-                  type: boolean
-                  default: false
-                  description: Requires swarm. Permits renewal of the same authority while its assignment remains active; expired tokens cannot renew.
-                swarm:
-                  type: object
-                  additionalProperties: false
-                  required: [conversationId, taskId]
-                  properties:
-                    conversationId: { type: string, minLength: 1, maxLength: 256 }
-                    connectionId:
-                      {
-                        type: string,
-                        pattern: "^[a-z][a-z0-9-]{0,63}$",
-                        description: Named external connection; omit for embedded,
-                      }
-                    taskId: { type: string, minLength: 1, maxLength: 128 }
+                fleet:
+                  {
+                    type: string,
+                    pattern: "^[a-z][a-z0-9-]{0,63}$",
+                    description: Fleet link identity; omit for a manual grant,
+                  }
                 tools:
                   type: array
-                  minItems: 1
+                  minItems: 0
                   maxItems: 64
                   items:
                     type: object
@@ -1071,77 +939,6 @@ paths:
         "200": { description: Verified account identity }
         "401": { description: Operator authentication required }
         "409": { description: Verification unavailable or failed }
-  /v1/worker-mcp/swarm/{scope}:
-    parameters:
-      - in: path
-        name: scope
-        required: true
-        schema: { type: string }
-      - {
-          name: connection,
-          in: query,
-          required: false,
-          schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" },
-          description: Named external connection; omit for embedded,
-        }
-    post:
-      tags: [Workers]
-      operationId: enrolledWorkerMcpRequest
-      summary: Connect an enrolled worker and use its explicitly granted tools
-      description: Authenticates the Swarm session at a known service scope. Starts with no tools; issuance and revocation send MCP tool-list notifications. Every request rechecks actor, scope, grants, account and task bindings. Renewable grants require a live runtime and assignment; nonrenewable grants retain their initial expiry. No provider secret or operator channel is exposed.
-      security: [{ swarmWorkerBearer: [] }]
-      responses:
-        "200": { description: MCP response }
-        "202": { description: MCP notification accepted }
-        "401": { description: Swarm session bearer required }
-        "403": { description: Runtime unavailable or session belongs to another principal }
-        "404": { description: MCP session unavailable }
-        "503": { description: Worker service unavailable }
-    get:
-      tags: [Workers]
-      operationId: enrolledWorkerMcpStream
-      summary: Stream tool-list changes to an authenticated enrolled worker
-      security: [{ swarmWorkerBearer: [] }]
-      responses:
-        "200": { description: MCP stream }
-        "403": { description: Swarm runtime unavailable }
-    delete:
-      tags: [Workers]
-      operationId: closeEnrolledWorkerMcpSession
-      summary: Close an enrolled worker MCP session
-      security: [{ swarmWorkerBearer: [] }]
-      responses:
-        "200": { description: Session closed }
-        "403": { description: Swarm runtime unavailable }
-  /v1/worker-mcp/claim/{id}:
-    post:
-      tags: [Workers]
-      operationId: claimWorkerGrant
-      summary: Privately retrieve an existing grant using the enrolled Swarm session
-      description: Authenticates at the grant's selected coordinator and verifies actor, scope, live assignment and account. A grant ID alone grants no access. Renewable grants permit fresh delivery after prior token expiry; nonrenewable grants retain their original expiry. No new authority is issued.
-      security: [{ swarmWorkerBearer: [] }]
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        "200": { description: Private worker token, grant metadata and renewal flag; Cache-Control no-store }
-        "401": { description: Swarm session bearer required }
-        "403": { description: Worker or grant unavailable or unauthorized }
-        "503": { description: Worker access service unavailable }
-  /v1/worker-mcp/renew:
-    post:
-      tags: [Workers]
-      operationId: renewWorkerToken
-      summary: Renew an unexpired token for opted-in live Swarm work
-      description: Preserves grant ID, account, worker, work, task attempt, restrictions and token lifetime. Revocation invalidates all tokens for this grant. No provider credential is returned. Issuance records retain the initial token timestamps.
-      security: [{ workerBearer: [] }]
-      responses:
-        "200": { description: Fresh worker token, grant metadata and renewable true; Cache-Control no-store }
-        "401": { description: Worker bearer required }
-        "403": { description: Expired, revoked, nonrenewable or no longer authorized }
-        "503": { description: Worker access service unavailable }
   /v1/worker-mcp:
     post:
       tags: [Workers]
@@ -1621,7 +1418,7 @@ paths:
         return 503 with herdr_unavailable when the default runtime is unavailable;
         ordinary conversations and their durable records remain accessible.
         `fleet` returns one cursor-coherent snapshot. Optional `view: home`
-        omits historical personas that are neither seated, reachable Swarm
+        omits historical personas that are neither seated
         contacts nor channel participants. Seats, channels, tallies and edges
         are unchanged. Omitting the selector preserves the full directory;
         `personas` and conversation IDs still address retained history.
@@ -1650,9 +1447,9 @@ paths:
         disabled or changed connections with a typed unavailable result, without
         falling back to the default fleet. Terminal catalog/tail require the relay's
         `terminalObserve` grant; control/input require `terminalControl`.
-        `connections` reads bounded runtime, Swarm and account metadata or manages
+        `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
-        session), `reconnect_runtime`, `disconnect_runtime`, and `disconnect_swarm`
+        session), `reconnect_runtime`, `disconnect_runtime`
         (id). It requires the operator captain lane; the device relay requires
         `steer`. No provider credential, socket path or session capability is returned.
       parameters:
@@ -3072,10 +2869,6 @@ components:
       required: true
       schema: { type: string }
   securitySchemes:
-    swarmWorkerBearer:
-      type: http
-      scheme: bearer
-      description: Runtime's enrolled SWARM_SESSION_CAPABILITY, verified at the grant's selected coordinator; never an operator or provider credential
     workerBearer:
       type: http
       scheme: bearer

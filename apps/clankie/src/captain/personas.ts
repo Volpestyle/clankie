@@ -3,15 +3,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import {
   defaultOperatorAgentAppearance,
-  isInternalSwarmContact,
   OPERATOR_AGENT_ROLES,
   operatorAgentRoleKey,
   OperatorAgentNameSchema,
   OperatorCodexAccountSchema,
   OperatorAgentPersonaIdSchema,
   OperatorAgentPersonaSchema,
-  OperatorSwarmContactSchema,
-  type OperatorSwarmContact,
   SetOperatorAgentPersonaRoleSchema,
   UpdateOperatorAgentPersonaSchema,
   type OperatorAgentPersona,
@@ -25,10 +22,19 @@ import {
 import { z } from "zod";
 import type { ObservedFleetSeat } from "./herdr-census.ts";
 
+function retiredPersona(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const { swarm: _swarm, ...persona } = input as Record<string, unknown>;
+  return persona;
+}
+
 const MAX_AVATAR_BYTES = 512 * 1024;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const LegacyPersonaFileSchema = z
-  .object({ schemaVersion: z.literal(1), personas: z.array(OperatorAgentPersonaSchema) })
+  .object({
+    schemaVersion: z.literal(1),
+    personas: z.array(z.preprocess(retiredPersona, OperatorAgentPersonaSchema)),
+  })
   .strict();
 const PersonaBindingSchema = z
   .object({
@@ -43,7 +49,7 @@ const PersonaFileSchema = z.discriminatedUnion("schemaVersion", [
   z
     .object({
       schemaVersion: z.literal(2),
-      personas: z.array(OperatorAgentPersonaSchema),
+      personas: z.array(z.preprocess(retiredPersona, OperatorAgentPersonaSchema)),
       bindings: z.array(PersonaBindingSchema),
     })
     .strict(),
@@ -57,7 +63,6 @@ export class PersonaStore {
   private readonly avatarDir: string;
   private readonly records = new Map<string, OperatorAgentPersona>();
   private readonly bindings = new Map<string, PersonaBinding>();
-  private liveSwarm = new Set<string>();
   private unreadable = false;
 
   public constructor(stateDir: string) {
@@ -73,7 +78,6 @@ export class PersonaStore {
         const { activeSeatId: _activeSeatId, conversationId: _conversationId, ...persisted } = persona;
         this.records.set(persona.personaId, {
           ...persisted,
-          ...(persisted.swarm ? { swarm: { ...persisted.swarm, available: false } } : {}),
         });
       }
       if (state.schemaVersion === 2) {
@@ -160,16 +164,12 @@ export class PersonaStore {
   ): readonly OperatorAgentPersona[] {
     const active = new Map(seats.map((seat) => [seat.personaId, seat.seatId]));
     return [...this.records.values()]
-      .filter((persona) => !isInternalSwarmContact(persona))
       .map((persona) => {
         const activeSeatId = active.get(persona.personaId);
         const conversation = conversationForPersona(persona.personaId);
         return {
           persona: {
             ...persona,
-            ...(persona.swarm
-              ? { swarm: { ...persona.swarm, available: this.liveSwarm.has(persona.personaId) } }
-              : {}),
             ...(activeSeatId === undefined ? {} : { activeSeatId }),
             ...(conversation === undefined ? {} : { conversationId: conversation.conversationId }),
           },
@@ -182,47 +182,6 @@ export class PersonaStore {
           left.persona.name.localeCompare(right.persona.name),
       )
       .map(({ persona }) => persona);
-  }
-
-  public reconcileSwarm(peers: readonly { contact: OperatorSwarmContact; label: string }[]): void {
-    const previous = new Map(this.records);
-    const live = new Set<string>();
-    for (const peer of peers) {
-      if (isInternalSwarmContact({ name: peer.label, swarm: peer.contact })) continue;
-      const contact = OperatorSwarmContactSchema.parse(peer.contact);
-      const personaId = `swarm-${createHash("sha256").update(JSON.stringify(contact)).digest("hex")}`;
-      live.add(personaId);
-      if (this.records.has(personaId) || this.records.size >= 1000) continue;
-      const now = new Date().toISOString();
-      const name = OperatorAgentNameSchema.safeParse(peer.label);
-      this.records.set(personaId, {
-        schemaVersion: 1,
-        personaId,
-        name: name.success ? name.data : "Swarm agent",
-        harness: "swarm",
-        appearance: defaultOperatorAgentAppearance("swarm", personaId),
-        swarm: { ...contact, available: false },
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-    if (previous.size !== this.records.size) {
-      try {
-        this.save();
-      } catch (error) {
-        this.records.clear();
-        for (const [id, persona] of previous) this.records.set(id, persona);
-        throw error;
-      }
-    }
-    this.liveSwarm = live;
-  }
-
-  public swarmContact(personaId: string): OperatorSwarmContact | undefined {
-    const swarm = this.records.get(personaId)?.swarm;
-    if (!swarm) return undefined;
-    const { available: _available, ...contact } = swarm;
-    return contact;
   }
 
   public update(input: UpdateOperatorAgentPersona): OperatorAgentPersona {
@@ -260,7 +219,7 @@ export class PersonaStore {
   public roles(): readonly OperatorAgentRoleSummary[] {
     const held = new Map<string, { role: string; count: number; updatedAt: string }>();
     for (const persona of this.records.values()) {
-      if (persona.role === undefined || isInternalSwarmContact(persona)) continue;
+      if (persona.role === undefined) continue;
       const key = operatorAgentRoleKey(persona.role);
       const current = held.get(key);
       held.set(key, {

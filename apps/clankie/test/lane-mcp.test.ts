@@ -3,9 +3,6 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SettingsStore } from "@clankie/settings";
-import type { SwarmHost } from "@clankie/swarm";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { TSchema } from "typebox";
 import { createCaptain } from "../src/captain/captain.ts";
 import { describe, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
@@ -321,29 +318,7 @@ describe("a lane's tool bank", () => {
 });
 
 it("binds native tools, project doctrine and channel delivery to selected service conversations", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clankie-seat-swarm-"));
-  let callbacks!: Parameters<SwarmHost["start"]>[0];
-  const execute = vi.fn(async () => ({
-    content: [{ type: "text" as const, text: "shared actor" }],
-    details: {},
-  }));
-  const tools = vi.fn(
-    async () =>
-      [
-        {
-          name: "swarm_sync",
-          label: "swarm_sync",
-          description: "Sync",
-          parameters: {
-            type: "object",
-            properties: { checkpoint: { type: "string" } },
-            required: ["checkpoint"],
-          } as TSchema,
-          execute,
-        },
-      ] satisfies ToolDefinition[],
-  );
-  const settled = vi.fn();
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-context-"));
   let webhookReady = true;
   const ownerSettings = new SettingsStore(join(root, "settings.json"));
   await ownerSettings.update((settings) => ({
@@ -359,55 +334,10 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       workingDirectory: root,
       settings: ownerSettings,
       linearFollowing: async () => webhookReady,
-      swarm: {
-        start: async (input: typeof callbacks) => {
-          callbacks = input;
-        },
-        tools,
-        settled,
-        close: async () => {},
-      } as unknown as SwarmHost,
     },
   );
   try {
-    const bank = await captain.laneToolBank("operator");
-    const binding = tools.mock.calls[0] as unknown as [{ conversationId: string; cwd: string }];
-    expect(binding[0].cwd).toBe(root);
-    const sync = bank.tools.find((tool) => tool.name === "swarm_sync")!;
-    expect((await sync.call({})).isError).toBe(true);
-    expect(execute).not.toHaveBeenCalled();
-    expect(await sync.call({ checkpoint: "known" })).toMatchObject({ content: [{ text: "shared actor" }] });
-    expect(
-      (await captain.laneToolBank("discord_presence")).tools.some((tool) => tool.name === "swarm_sync"),
-    ).toBe(false);
-    expect(tools).toHaveBeenCalledTimes(1);
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      tools.mockRejectedValueOnce(new Error("Not connected"));
-      const degraded = await captain.laneToolBank("operator");
-      expect(degraded.tools.map((tool) => tool.name)).toContain("hire_agent");
-      expect(degraded.tools.map((tool) => tool.name)).not.toContain("swarm_sync");
-      expect(warning).toHaveBeenCalledWith(
-        "Swarm tools unavailable; continuing with the local lane tool bank",
-        expect.objectContaining({ message: "Not connected" }),
-      );
-      expect((await captain.laneToolBank("operator")).tools.map((tool) => tool.name)).toContain("swarm_sync");
-    } finally {
-      warning.mockRestore();
-    }
-    const id = binding[0].conversationId;
-    expect(callbacks.ready(id)).toBe(false);
-    const waiting = captain.pollSeatEvents(1000);
-    expect(callbacks.ready(id)).toBe(true);
-    expect(settled).toHaveBeenCalledWith(id);
-    settled.mockClear();
-    await callbacks.wake(id, "Swarm peer envelope");
-    expect(await waiting).toMatchObject([
-      { conversationId: id, kind: "watch", content: "Swarm peer envelope" },
-    ]);
-    // Taking a channel event settles the service turn; Swarm acknowledgment remains explicit.
-    await captain.pollSeatEvents(0);
-    await expect.poll(() => callbacks.ready(id)).toBe(true);
+    const id = captain.seatContext()!.conversationId;
     const projects: Array<{ conversationId: string; cwd: string }> = [];
     for (const name of ["alpha", "beta"]) {
       const cwd = join(root, name);
@@ -430,33 +360,12 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       projects.push({ conversationId, cwd });
       expect(captain.seatContext(conversationId)).toEqual({ conversationId, cwd });
       await captain.laneToolBank("operator", conversationId);
-      expect(tools).toHaveBeenLastCalledWith({ conversationId, cwd });
       const prompt = await captain.lanePrompt({ lane: "operator", conversationId, sections: ["fleet"] });
       expect(prompt).toContain(`Project ${name} doctrine marker`);
-      const instructions = await callbacks.instructions!({ conversationId, cwd });
-      expect(instructions).toContain(`Project ${name} doctrine marker`);
-      expect(instructions).not.toContain(`Project ${name === "alpha" ? "beta" : "alpha"} doctrine marker`);
-      expect(instructions).toContain("You remain your own worker");
-      expect(instructions).toContain("Owner style marker");
-      expect(instructions).toContain("Owner fleet marker");
-      expect(instructions).not.toContain("selected skill marker");
-      const withSkill = await callbacks.instructions!({ conversationId, cwd }, ["project-fixture"]);
-      expect(withSkill).toContain(`${name} selected skill marker`);
-      expect(withSkill).not.toContain(`${name === "alpha" ? "beta" : "alpha"} selected skill marker`);
-      await expect(callbacks.instructions!({ conversationId, cwd: root })).rejects.toThrow("Unknown captain");
       expect(prompt).not.toContain(`Project ${name === "alpha" ? "beta" : "alpha"} doctrine marker`);
     }
     const a = projects[0]!.conversationId,
       b = projects[1]!.conversationId;
-    const alpha = captain.pollSeatEvents(1000, undefined, a);
-    const beta = captain.pollSeatEvents(1000, undefined, b);
-    await callbacks.wake(a, "Only alpha");
-    expect(await alpha).toMatchObject([{ conversationId: a, content: "Only alpha" }]);
-    await captain.pollSeatEvents(0, undefined, a);
-    await callbacks.wake(b, "Only beta");
-    expect(await beta).toMatchObject([{ conversationId: b, content: "Only beta" }]);
-    await captain.pollSeatEvents(0, undefined, b);
-    expect(await captain.pollSeatEvents(0)).toEqual([]);
     await ownerSettings.update((settings) => ({
       ...settings,
       linearWebhook: { ...settings.linearWebhook, following: true },
@@ -505,86 +414,68 @@ it("binds native tools, project doctrine and channel delivery to selected servic
   }
 });
 
-it.each(["disabled", "disconnected"] as const)(
-  "initializes an operator MCP session with local tools while Swarm is %s",
-  async (mode) => {
-    const root = await mkdtemp(join(tmpdir(), "clankie-seat-offline-"));
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const workItems = createWorkItemsService({
-      stateDirectory: root,
-      workspace: () => root,
-      run: async () => {
-        throw new Error("fixture has no git repository");
-      },
-    });
-    const captain = createCaptain(
-      {
-        ...bankDeps(),
-        workItems,
-        agentSessions: {
-          list: async () => ({ sessions: [], errors: [] }),
-          read: async () => {
-            throw new Error("no transcript in fixture");
-          },
+it("initializes an operator MCP session with native and connected tools", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-offline-"));
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const workItems = createWorkItemsService({
+    stateDirectory: root,
+    workspace: () => root,
+    run: async () => {
+      throw new Error("fixture has no git repository");
+    },
+  });
+  const captain = createCaptain(
+    {
+      ...bankDeps(),
+      workItems,
+      agentSessions: {
+        list: async () => ({ sessions: [], errors: [] }),
+        read: async () => {
+          throw new Error("no transcript in fixture");
         },
       },
-      {
-        repoRoot: root,
-        stateDir: root,
-        workingDirectory: root,
-        ...(mode === "disabled"
-          ? {}
-          : {
-              swarm: {
-                start: async () => {},
-                tools: async () => {
-                  throw new Error("Not connected");
-                },
-                close: async () => {},
-              } as unknown as SwarmHost,
-            }),
-      },
-    );
-    const app = await createClankieApp({
-      captain,
-      authenticateOperator: async () => ({ operatorId: "operator-james" }),
-    });
-    try {
-      const sessionId = await connect(app, "operator");
-      const names = await toolNames(app, "operator", sessionId);
-      for (const name of ["hire_agent", "message_seat", "agent_sessions", "agent_session_read", "work_items"])
-        expect(names).toContain(name);
-      for (const [index, name, args] of [
-        [3, "work_items", { action: "repos" }],
-        [4, "agent_sessions", {}],
-      ] as const) {
-        const response = await call(
-          app,
-          "operator",
-          {
-            jsonrpc: "2.0",
-            id: index,
-            method: "tools/call",
-            params: { name, arguments: args },
-          },
-          sessionId,
-        );
-        expect(response.status).toBe(200);
-        const reply = (await response.json()) as Rpc;
-        expect(reply).toMatchObject({ result: { content: expect.any(Array) } });
-        expect(reply.result?.isError).not.toBe(true);
-      }
-      if (mode === "disconnected")
-        expect(warning).toHaveBeenCalledWith(
-          "Swarm tools unavailable; continuing with the local lane tool bank",
-          expect.objectContaining({ message: "Not connected" }),
-        );
-    } finally {
-      app.close();
-      await captain.close();
-      warning.mockRestore();
-      // The session store can still be flushing after close; retry ENOTEMPTY.
-      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    },
+    {
+      repoRoot: root,
+      stateDir: root,
+      workingDirectory: root,
+    },
+  );
+  const app = await createClankieApp({
+    captain,
+    authenticateOperator: async () => ({ operatorId: "operator-james" }),
+  });
+  try {
+    const sessionId = await connect(app, "operator");
+    const names = await toolNames(app, "operator", sessionId);
+    expect(names.some((name) => name.startsWith("swarm_"))).toBe(false);
+    for (const name of ["hire_agent", "message_seat", "agent_sessions", "agent_session_read", "work_items"])
+      expect(names).toContain(name);
+    for (const [index, name, args] of [
+      [3, "work_items", { action: "repos" }],
+      [4, "agent_sessions", {}],
+    ] as const) {
+      const response = await call(
+        app,
+        "operator",
+        {
+          jsonrpc: "2.0",
+          id: index,
+          method: "tools/call",
+          params: { name, arguments: args },
+        },
+        sessionId,
+      );
+      expect(response.status).toBe(200);
+      const reply = (await response.json()) as Rpc;
+      expect(reply).toMatchObject({ result: { content: expect.any(Array) } });
+      expect(reply.result?.isError).not.toBe(true);
     }
-  },
-);
+  } finally {
+    app.close();
+    await captain.close();
+    warning.mockRestore();
+    // The session store can still be flushing after close; retry ENOTEMPTY.
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});

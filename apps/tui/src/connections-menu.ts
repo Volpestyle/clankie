@@ -1,7 +1,7 @@
 /**
  * `/connections` as a modal: what Clankie is connected to — execution runtimes,
- * Swarm, the agent sessions he can read and resume, and linked accounts — as
- * menus you drill into instead of one JSON blob. `/runtime`, `/swarm` and
+ * the agent sessions he can read and resume, and linked accounts — as
+ * menus you drill into instead of one JSON blob. `/runtime` and
  * `/agents` open their own section. Every read goes through the same command
  * clients the CLI uses, so the modal and `clankie connections` never disagree.
  */
@@ -13,7 +13,6 @@ type Run = (args: readonly string[]) => Promise<unknown>;
 
 export interface ConnectionsMenuServices {
   readonly runtime: Run;
-  readonly swarm: Run;
   readonly agents: Run;
   /** The existing `/herdr` menu, for the runtime Clankie runs his own workers in. */
   readonly openHerdrSettings?: () => Promise<void>;
@@ -30,11 +29,6 @@ interface Runtime {
   readonly enabled?: boolean;
   readonly capacity?: number | null;
   readonly capacitySource?: string;
-  /** How Swarm runs the workers it dispatches here (ADR 0194); absent for an ssh fleet. */
-  readonly workerHarness?: "claude" | "codex" | "pi";
-  readonly workerMode?: "stream" | "interactive";
-  readonly budget?: number | null;
-  readonly budgetSource?: string;
   readonly capabilities?: readonly string[];
 }
 interface AgentSession {
@@ -58,13 +52,6 @@ interface TranscriptEntry {
   readonly phase?: string;
   readonly detail?: string;
 }
-interface Contact {
-  readonly personaId: string;
-  readonly name: string;
-  readonly updatedAt?: string;
-  readonly swarm?: { readonly available?: boolean; readonly conversationId?: string };
-}
-
 const array = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
 const record = (value: unknown): Json => (value !== null && typeof value === "object" ? (value as Json) : {});
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -102,9 +89,7 @@ function runtimeHint(runtime: Runtime): string {
       ? undefined
       : runtime.capacity === null
         ? "unlimited workers"
-        : `${runtime.capacity} workers per coordinator${runtime.capacitySource === "default" ? " (default)" : ""}`,
-    runtime.workerHarness === undefined ? undefined : `${runtime.workerHarness} harness`,
-    runtime.workerMode === undefined ? undefined : `${runtime.workerMode} workers`,
+        : `${runtime.capacity} workers${runtime.capacitySource === "default" ? " (default)" : ""}`,
   ];
   return parts.filter(Boolean).join(" · ");
 }
@@ -113,16 +98,6 @@ export function runtimesHint(runtimes: readonly Runtime[]): string {
   if (runtimes.length === 0) return "none";
   const healthy = runtimes.filter((runtime) => runtime.state === "healthy" && runtime.enabled !== false);
   return `${runtimes.length} configured · ${healthy.length} healthy`;
-}
-
-export function swarmHint(swarm: Json): string {
-  if (swarm.restartRequired === true)
-    return `${swarm.enabled === false ? "off" : "on"} after captain restart`;
-  if (swarm.mode === "disabled") return "disabled";
-  if (swarm.mode === "unavailable") return "unavailable";
-  const conversations = array(swarm.conversations).length;
-  const external = array(swarm.connections).length;
-  return `${conversations} conversation${conversations === 1 ? "" : "s"} · ${external} external coordinator${external === 1 ? "" : "s"}`;
 }
 
 export function accountsHint(accounts: Json): string {
@@ -148,36 +123,6 @@ function sessionOption(session: AgentSession, now: number): MenuOption {
     label: `${session.harness.padEnd(6)} ${session.project === undefined ? "—" : projectLabel(session.project)}`,
     hint: `${relativeAge(session.modifiedAt, now)} · ${session.sessionId.slice(0, 8)}`,
   };
-}
-
-/**
- * One row per actor: Swarm keeps each re-enrolled generation as its own
- * contact, so prefer the one that is available, else the newest, and say how
- * many older ones were folded in.
- */
-export function contactOptions(contacts: readonly Contact[]): MenuOption[] {
-  const groups = new Map<string, Contact[]>();
-  for (const contact of contacts) {
-    const key = `${contact.name}\u0000${contact.swarm?.conversationId ?? ""}`;
-    groups.set(key, [...(groups.get(key) ?? []), contact]);
-  }
-  return [...groups.values()].map((group) => {
-    const chosen =
-      group.find((contact) => contact.swarm?.available === true) ??
-      [...group].sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""))[0]!;
-    const older = group.length - 1;
-    return {
-      value: chosen.personaId,
-      label: chosen.name,
-      hint: [
-        chosen.swarm?.available === true ? "available" : "offline",
-        chosen.swarm?.conversationId,
-        older > 0 ? `${older} older` : undefined,
-      ]
-        .filter(Boolean)
-        .join(" · "),
-    };
-  });
 }
 
 /** A transcript page as readable lines: who said what, and which tools ran. */
@@ -227,11 +172,6 @@ export async function runConnectionsMenu(
             hint: runtimesHint(array<Runtime>(inventory.runtimes)),
           },
           {
-            value: "swarm",
-            label: "Swarm",
-            hint: swarmHint(record(inventory.swarms)),
-          },
-          {
             value: "agents",
             label: "Agent sessions",
             hint: hosts.length === 0 ? "unavailable" : hostsHint(hosts),
@@ -247,7 +187,6 @@ export async function runConnectionsMenu(
       });
       if (choice === undefined || choice === "done") return;
       if (choice === "runtimes") await runtimesSection(shell, services);
-      else if (choice === "swarm") await swarmSection(shell, services);
       else if (choice === "agents") await agentsSection(shell, services);
       else if (choice === "accounts") await accountsSection(flow, record(inventory.accounts));
       else shell.insertCommandResult("/connections json", JSON.stringify(inventory, null, 2), "success");
@@ -260,9 +199,9 @@ export async function runConnectionsMenu(
   }
 }
 
-/** One section on its own, for `/runtime`, `/swarm` and `/agents` with no argument. */
+/** One section on its own, for `/runtime` and `/agents` with no argument. */
 export async function runConnectionsSection(
-  section: "runtimes" | "swarm" | "agents",
+  section: "runtimes" | "agents",
   shell: ClankieFaceShell,
   services: ConnectionsMenuServices,
 ): Promise<void> {
@@ -270,7 +209,6 @@ export async function runConnectionsSection(
   flow.begin(section);
   try {
     if (section === "runtimes") await runtimesSection(shell, services);
-    else if (section === "swarm") await swarmSection(shell, services);
     else await agentsSection(shell, services);
   } catch (error) {
     // Closing the flow resets the status line, so a fatal error goes to the chat.
@@ -412,27 +350,9 @@ async function runtimeDetail(
                 : `${runtime.capacity} (${runtime.capacitySource ?? "owner"})`,
           },
         ]),
-    ...(runtime.budget === undefined
-      ? []
-      : [
-          {
-            value: "info:budget",
-            label: "Budget per coordinator",
-            hint:
-              runtime.budget === null
-                ? "unlimited"
-                : `${runtime.budget} (${runtime.budgetSource ?? "owner"})`,
-          },
-        ]),
     ...(runtime.capabilities?.length
       ? [{ value: "info:capabilities", label: "Capabilities", hint: runtime.capabilities.join(", ") }]
       : []),
-    ...(runtime.workerHarness === undefined
-      ? []
-      : [{ value: "harness", label: "Worker harness…", hint: runtime.workerHarness }]),
-    ...(runtime.workerMode === undefined
-      ? []
-      : [{ value: "mode", label: "Worker mode…", hint: runtime.workerMode }]),
   ];
   for (;;) {
     const action = await flow.readSelect({
@@ -447,50 +367,6 @@ async function runtimeDetail(
       allowBack: true,
     });
     if (action === undefined) return;
-    if (action === "harness") {
-      const harness = await flow.readSelect({
-        message: `Worker harness in ${runtime.id}`,
-        options: [
-          { value: "codex", label: "Codex", hint: "gpt-6-astra; native terminal" },
-          { value: "pi", label: "pi", hint: "native model preference; native terminal" },
-          { value: "claude", label: "Claude", hint: "native terminal; approved worker channel" },
-        ],
-        allowBack: true,
-      });
-      if (harness === undefined || harness === runtime.workerHarness) continue;
-      if (
-        await attempt(
-          flow,
-          () => services.runtime(["harness", runtime.id, harness]),
-          `${runtime.id} uses ${harness} workers.`,
-        )
-      )
-        return;
-      continue;
-    }
-    if (action === "mode") {
-      const mode = await flow.readSelect({
-        message: `How Swarm runs workers in ${runtime.id}`,
-        options: [
-          {
-            value: "interactive",
-            label: "Interactive",
-            hint: "native terminal; requires a supported Swarm runtime",
-          },
-        ],
-        allowBack: true,
-      });
-      if (mode === undefined || mode === runtime.workerMode) continue;
-      if (
-        await attempt(
-          flow,
-          () => services.runtime(["mode", runtime.id, mode]),
-          `${runtime.id} runs ${mode} workers.`,
-        )
-      )
-        return;
-      continue;
-    }
     if (action !== "disconnect") continue;
     if (!(await confirm(flow, `Disconnect ${runtime.id}?`, "Disconnect"))) continue;
     if (
@@ -498,70 +374,6 @@ async function runtimeDetail(
     )
       return;
   }
-}
-
-async function swarmSection(shell: ClankieFaceShell, services: ConnectionsMenuServices): Promise<void> {
-  const flow = shell.setupFlow;
-  for (;;) {
-    const status = record(await services.swarm(["status"]));
-    const external = array<Json>(status.connections);
-    const choice = await flow.readSelect({
-      message: `Swarm — ${swarmHint(status)}`,
-      options: [
-        {
-          value: "enabled",
-          label: `${status.enabled === false ? "Enable" : "Disable"} Swarm`,
-          hint: "applies after captain restart; keeps saved connections and work",
-        },
-        { value: "contacts", label: "Contacts", hint: "message an agent" },
-        ...external.map((connection) => ({
-          value: `connection:${String(connection.id)}`,
-          label: `Coordinator ${String(connection.id)}`,
-          hint: connection.enabled === false ? "disabled" : "connected",
-        })),
-      ],
-      allowBack: true,
-    });
-    if (choice === undefined) return;
-    if (choice === "enabled") {
-      await attempt(
-        flow,
-        () => services.swarm([status.enabled === false ? "on" : "off"]),
-        "Swarm configuration saved. Restart the captain to apply it.",
-      );
-      continue;
-    }
-    if (choice === "contacts") {
-      await contactsSection(flow, services);
-      continue;
-    }
-    const id = choice.slice("connection:".length);
-    if (await confirm(flow, `Disconnect coordinator ${id}?`, "Disconnect"))
-      await attempt(flow, () => services.swarm(["disconnect", id]), `Disconnected ${id}.`);
-  }
-}
-
-async function contactsSection(flow: SetupFlow, services: ConnectionsMenuServices): Promise<void> {
-  const contacts = array<Contact>(await services.swarm(["contacts"]));
-  if (contacts.length === 0) {
-    flow.renderLine("No Swarm contacts yet.", "info");
-    return;
-  }
-  const personaId = await flow.readSelect({
-    message: "Swarm contacts",
-    options: contactOptions(contacts),
-    allowBack: true,
-  });
-  if (personaId === undefined) return;
-  const contact = contacts.find((entry) => entry.personaId === personaId)!;
-  const text = await flow.readText({
-    message: `Message ${contact.name}`,
-    multiline: true,
-    allowBack: true,
-    validate: (value) => (value.trim() ? undefined : "Write a message."),
-  });
-  if (text === undefined) return;
-  await attempt(flow, () => services.swarm(["message", personaId, text.trim()]), `Sent to ${contact.name}.`);
 }
 
 async function agentsSection(shell: ClankieFaceShell, services: ConnectionsMenuServices): Promise<void> {

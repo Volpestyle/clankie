@@ -14,8 +14,8 @@ and do not treat the conversation workspace as your body.
 
 Doctor reports the service root as `repoRoot`. Read files there when you need
 your own README or plugin path. `README.md` in the current workspace is whoever
-you are helping. Portals, runtime connections, Swarm and work trackers are
-independent choices. Read `packages/swarm/README.md` under `repoRoot` for current
+you are helping. Portals, runtime connections and work trackers are
+independent choices. Read `packages/agent-hosts/README.md` under `repoRoot` for current
 connection support; do not infer support from the architecture alone.
 
 ## Three cards

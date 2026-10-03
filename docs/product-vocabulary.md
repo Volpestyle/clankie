@@ -11,10 +11,10 @@ agent nor a complete history of connections.
 | Room       | A shared group channel or a Discord text/voice inspection view                     | `/rooms`                |
 | History    | All retained threads, including ongoing chats and offline agent threads            | `/history`              |
 | Session    | A harness execution record that can be read or resumed                             | `/sessions`             |
-| Connection | Infrastructure that reaches agents or services: Swarm, Herdr, SSH, accounts        | `/connections`          |
+| Connection | Infrastructure that reaches agents or services: Herdr, SSH, accounts               | `/connections`          |
 | Thread     | The saved messages for a chat, agent, or room; `conversation` remains the API term | `clankie conversations` |
 
-Agent rows show their Swarm connection or Herdr source and observed availability.
+Agent rows show their Herdr source and observed availability.
 Availability is a snapshot, not a delivery guarantee. Discovery does not require
 an existing thread; offline identities may have no messages to read. Multiple
 identities can share a display name, so the picker also shows their identity IDs.

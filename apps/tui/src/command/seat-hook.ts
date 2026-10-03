@@ -30,8 +30,7 @@ export async function runSeatHookCommand(
   if (args.length) throw new Error("Usage: clankie seat-hook (Claude hook JSON on stdin)");
   const env = options.env ?? process.env;
   const paneId = env.HERDR_PANE_ID?.trim();
-  // A Swarm-dispatched worker loads the same plugin; Swarm owns its lifecycle.
-  if (!paneId || env.SWARM_WORKER_LAUNCH) return 0;
+  if (!paneId) return 0;
   let input = "";
   for await (const chunk of options.stdin ?? process.stdin) {
     input += chunk.toString();

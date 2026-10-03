@@ -29,7 +29,6 @@ it("defaults on, validates selection, and classifies leadership as optional", ()
     "research-team",
     "computer-use-delegation",
     "desktop-control",
-    "swarm-mcp",
     "herdr",
     "trip-planning",
   ])

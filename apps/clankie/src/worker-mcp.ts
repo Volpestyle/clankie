@@ -17,25 +17,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { verifyLinearMcpAccount, type McpHost } from "./mcp-host.ts";
-import type { SwarmHost } from "@clankie/swarm";
 import { isLinearWorkerTool } from "./linear-publishing.ts";
-
-const SwarmAssignmentSchema = z
-  .object({
-    conversationId: z.string().min(1).max(256),
-    connectionId: z
-      .string()
-      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
-      .optional(),
-    taskId: z.string().min(1).max(128),
-  })
-  .strict();
-const SwarmBindingSchema = SwarmAssignmentSchema.extend({
-  scope: z.string().min(1),
-  actor: z.string().min(1),
-  attemptId: z.string().min(1),
-  fence: z.number().int().positive(),
-});
 
 const ToolRuleSchema = z
   .object({
@@ -54,21 +36,14 @@ export const WorkerGrantRequestSchema = z
     /** Empty only for a fleet grant, which then takes the server's whole worker-safe set. */
     tools: z.array(ToolRuleSchema).max(64),
     ttlSeconds: z.number().int().min(1).max(900).default(900),
-    swarm: SwarmAssignmentSchema.optional(),
     /**
      * Every agent in that fleet (one Herdr session Clankie is connected to)
      * holds this grant over the fleet's link until it is revoked (VUH-1527).
      * Membership is the binding: no bearer is delivered and none expires.
      */
     fleet: FleetIdSchema.optional(),
-    renewable: z.boolean().default(false),
   })
   .strict()
-  .refine((value) => !value.renewable || value.swarm !== undefined, "Renewal requires a Swarm assignment")
-  .refine(
-    (value) => value.fleet === undefined || value.swarm === undefined,
-    "A grant binds a fleet or a Swarm task, not both",
-  )
   .refine((value) => value.tools.length > 0 || value.fleet !== undefined, "Name at least one tool");
 const RecordSchema = z.object({
   grant: CapabilityGrantSchema,
@@ -77,9 +52,7 @@ const RecordSchema = z.object({
   tools: z.array(ToolRuleSchema),
   account: ProviderAccountSchema,
   revokedAt: z.string().datetime().optional(),
-  swarm: SwarmBindingSchema.optional(),
   fleet: FleetIdSchema.optional(),
-  renewable: z.boolean().default(false),
 });
 type GrantRecord = z.infer<typeof RecordSchema>;
 type WorkerAuthorization = {
@@ -91,8 +64,6 @@ type WorkerAuthorization = {
 };
 const uuid = z.string().uuid();
 const KEY_ID = "clankie_worker_mcp_signing";
-const swarmPrincipalKey = (scope: string, actor: string, connectionId?: string) =>
-  JSON.stringify(["swarm", connectionId ?? "embedded", scope, actor]);
 const fleetPrincipalKey = (fleet: string) => JSON.stringify(["fleet", fleet]);
 
 /** Immutable grants plus a durable revocation marker; only the service writes them. */
@@ -102,7 +73,6 @@ export class WorkerMcp {
     directory: string;
     credentials: CredentialStore;
     host: McpHost;
-    swarm?: Pick<SwarmHost, "assignment"> & Partial<Pick<SwarmHost, "worker" | "workerInScope">>;
   };
   private readonly sessions = new Map<
     string,
@@ -114,12 +84,7 @@ export class WorkerMcp {
       expiresAt: number;
     }
   >();
-  constructor(options: {
-    directory: string;
-    credentials: CredentialStore;
-    host: McpHost;
-    swarm?: Pick<SwarmHost, "assignment"> & Partial<Pick<SwarmHost, "worker" | "workerInScope">>;
-  }) {
+  constructor(options: { directory: string; credentials: CredentialStore; host: McpHost }) {
     this.options = options;
   }
 
@@ -145,7 +110,16 @@ export class WorkerMcp {
     return join(this.options.directory, `${uuid.parse(id)}.json`);
   }
   private async read(id: string): Promise<GrantRecord> {
-    return RecordSchema.parse(JSON.parse(await readFile(this.path(id), "utf8")));
+    const record = await this.loadRecord(id);
+    if (!record) throw new Error("Retired worker grant");
+    return record;
+  }
+
+  private async loadRecord(id: string): Promise<GrantRecord | undefined> {
+    const raw = JSON.parse(await readFile(this.path(id), "utf8"));
+    // Retired task-bound authority must never become an unbound manual grant.
+    if (raw.swarm !== undefined || raw.renewable === true) return undefined;
+    return RecordSchema.parse(raw);
   }
 
   async linearAccount(verify = false) {
@@ -177,8 +151,6 @@ export class WorkerMcp {
 
   async issue(input: z.input<typeof WorkerGrantRequestSchema>) {
     const request = WorkerGrantRequestSchema.parse(input);
-    const swarm =
-      request.swarm === undefined ? undefined : await this.assignment(request.swarm, request.principalId);
     const { account, binding } = await this.options.host.account(request.server, "operator");
     const catalog = await this.options.host.catalog("operator");
     if (request.tools.length === 0)
@@ -209,8 +181,6 @@ export class WorkerMcp {
       lane: "operator",
       tools: request.tools,
       account,
-      renewable: request.renewable,
-      ...(swarm === undefined ? {} : { swarm }),
       ...(request.fleet === undefined ? {} : { fleet: request.fleet }),
       grant: {
         version: 1,
@@ -234,12 +204,7 @@ export class WorkerMcp {
   }
 
   private async notify(record: GrantRecord) {
-    const key =
-      record.fleet !== undefined
-        ? fleetPrincipalKey(record.fleet)
-        : record.swarm !== undefined
-          ? swarmPrincipalKey(record.swarm.scope, record.grant.principalId, record.swarm.connectionId)
-          : undefined;
+    const key = record.fleet === undefined ? undefined : fleetPrincipalKey(record.fleet);
     if (key === undefined) return;
     await Promise.all(
       [...this.sessions.values()]
@@ -253,9 +218,10 @@ export class WorkerMcp {
       if (error.code === "ENOENT") return [];
       throw error;
     });
-    return Promise.all(
-      files.filter((file) => file.endsWith(".json")).map((file) => this.read(file.slice(0, -5))),
+    const records = await Promise.all(
+      files.filter((file) => file.endsWith(".json")).map((file) => this.loadRecord(file.slice(0, -5))),
     );
+    return records.filter((record): record is GrantRecord => record !== undefined);
   }
 
   async revoke(id: string) {
@@ -279,12 +245,9 @@ export class WorkerMcp {
   private async authorize(token: string): Promise<GrantRecord> {
     const verified = (await this.issuer()).verify(token);
     const record = await this.read(verified.grant.grantId);
-    const presented = record.renewable
-      ? { ...verified.grant, issuedAt: record.grant.issuedAt, expiresAt: record.grant.expiresAt }
-      : verified.grant;
     if (
       record.revokedAt !== undefined ||
-      !isDeepStrictEqual(record.grant, presented) ||
+      !isDeepStrictEqual(record.grant, verified.grant) ||
       verified.grant.issuedAt < record.grant.issuedAt ||
       verified.grant.expiresAt - verified.grant.issuedAt > record.grant.expiresAt - record.grant.issuedAt
     )
@@ -297,82 +260,6 @@ export class WorkerMcp {
     if (record.revokedAt !== undefined) throw new Error("Worker grant revoked");
     const current = await this.options.host.account(record.server, record.lane);
     if (current.binding !== record.grant.profileHash) throw new Error("Delegated account changed");
-    if (
-      record.swarm !== undefined &&
-      !isDeepStrictEqual(record.swarm, await this.assignment(record.swarm, record.grant.principalId))
-    )
-      throw new Error("Swarm assignment changed");
-  }
-
-  /** Exchange an authenticated Swarm session for this worker's existing grant.
-   * This is delivery, never enrollment-based issuance of new authority. */
-  async claim(id: string, request: Request): Promise<Response> {
-    const capability = request.headers.get("authorization")?.match(/^Bearer (\S+)$/u)?.[1];
-    if (!capability) return Response.json({ error: "worker_authentication_required" }, { status: 401 });
-    try {
-      const record = await this.read(id);
-      if (!record.swarm || !this.options.swarm?.worker) throw new Error("Swarm delivery unavailable");
-      const identity = await this.options.swarm.worker(
-        record.swarm.conversationId,
-        capability,
-        record.swarm.connectionId,
-      );
-      if (identity.actor !== record.grant.principalId || identity.scope !== record.swarm.scope)
-        throw new Error("Grant belongs to another worker");
-      await this.checkBinding(record);
-      const issuedAt = Math.floor(Date.now() / 1000);
-      const grant = record.renewable
-        ? {
-            ...record.grant,
-            issuedAt,
-            expiresAt: issuedAt + record.grant.expiresAt - record.grant.issuedAt,
-          }
-        : record.grant;
-      if (grant.expiresAt <= issuedAt) throw new Error("Grant expired");
-      return Response.json(
-        { grant, token: (await this.issuer()).issue(grant), renewable: record.renewable },
-        { headers: { "cache-control": "no-store" } },
-      );
-    } catch {
-      return Response.json({ error: "worker_claim_refused" }, { status: 403 });
-    }
-  }
-
-  /** Renew the same authority, never a new grant or a new revocation lineage. */
-  async renew(request: Request): Promise<Response> {
-    const token = request.headers.get("authorization")?.match(/^Bearer (\S+)$/u)?.[1];
-    if (!token) return Response.json({ error: "worker_authentication_required" }, { status: 401 });
-    try {
-      const record = await this.authorize(token);
-      if (!record.renewable || !record.swarm) throw new Error("Grant is not renewable");
-      const issuedAt = Math.floor(Date.now() / 1000);
-      const grant = {
-        ...record.grant,
-        issuedAt,
-        expiresAt: issuedAt + record.grant.expiresAt - record.grant.issuedAt,
-      };
-      for (const session of this.sessions.values()) {
-        if (session.grantId === grant.grantId)
-          session.expiresAt = Math.max(session.expiresAt, grant.expiresAt);
-      }
-      return Response.json(
-        { token: (await this.issuer()).issue(grant), grant, renewable: true },
-        {
-          headers: { "cache-control": "no-store" },
-        },
-      );
-    } catch {
-      return Response.json({ error: "worker_renewal_refused" }, { status: 403 });
-    }
-  }
-
-  private async assignment(input: z.infer<typeof SwarmAssignmentSchema>, actor: string) {
-    if (!this.options.swarm) throw new Error("Swarm assignment verification unavailable");
-    const binding = SwarmBindingSchema.parse(
-      await this.options.swarm.assignment(input.conversationId, input.taskId, actor, input.connectionId),
-    );
-    if (binding.connectionId !== input.connectionId) throw new Error("Swarm connection binding changed");
-    return binding;
   }
 
   async handle(request: Request): Promise<Response> {
@@ -384,43 +271,6 @@ export class WorkerMcp {
         records: [record],
         expiresAt: record.grant.expiresAt,
         grantId: record.grant.grantId,
-      };
-    });
-  }
-
-  /** An enrolled worker starts with no tools and sees only explicitly issued, live grants. */
-  async handleSwarm(scope: string, request: Request): Promise<Response> {
-    return this.handleAuthorized(request, async (capability) => {
-      if (!this.options.swarm?.workerInScope) throw new Error("Swarm worker access unavailable");
-      const connectionId = new URL(request.url).searchParams.get("connection") ?? undefined;
-      if (connectionId !== undefined && !/^[a-z][a-z0-9-]{0,63}$/u.test(connectionId))
-        throw new Error("Invalid Swarm connection");
-      const identity = await this.options.swarm.workerInScope(scope, capability, connectionId);
-      if (identity.scope !== scope) throw new Error("Worker belongs to another scope");
-      const now = Math.floor(Date.now() / 1000);
-      const records: GrantRecord[] = [];
-      // ponytail: scan issued grants; index by worker/scope if grant volume warrants it.
-      for (const record of await this.list()) {
-        if (
-          record.swarm?.scope !== scope ||
-          record.swarm.connectionId !== connectionId ||
-          record.grant.principalId !== identity.actor ||
-          record.revokedAt !== undefined ||
-          (!record.renewable && record.grant.expiresAt <= now)
-        )
-          continue;
-        try {
-          await this.checkBinding(record);
-          records.push(record);
-        } catch {
-          /* Unavailable grants confer no tools. */
-        }
-      }
-      return {
-        key: swarmPrincipalKey(scope, identity.actor, connectionId),
-        principalId: identity.actor,
-        records,
-        expiresAt: now + 900,
       };
     });
   }

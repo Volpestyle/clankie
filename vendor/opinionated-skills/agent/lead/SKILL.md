@@ -1,6 +1,6 @@
 ---
 name: lead
-description: Lead authorized agent work through ownership, review, integration and delivery. Swarm first, with an explicit Herdr fallback; a status question alone does not authorize dispatch.
+description: Lead authorized agent work through ownership, review, integration and delivery. Native hires and harness delivery; a status question alone does not authorize dispatch.
 ---
 
 # Lead
@@ -47,7 +47,7 @@ the path to the attempt. Do not commission another audit of the same plan.
 
 ## Size to the owner's budget
 
-The owner's budget is two targets, never caps: a **swarm size** and a **model
+The owner's budget is two targets, never caps: a **fleet size** and a **model
 mode**. Read them where the runtime states them (Clankie: his "Your fleet" prompt
 section, or `clankie fleet status` as `fleet.size` and `fleet.models`); otherwise
 use what the user said. With neither, assume `max` and `optimal`.
@@ -168,8 +168,8 @@ not choose a tracker, workspace or product. If none is configured, use the exist
 work record or conversation without introducing a tracker. Give each shared record
 one editing owner; workers must not overwrite it from their own snapshots.
 
-For Clankie's swarm, the owner-connected tracker account is the identity of the
-whole swarm, including every hired worker. Tracker writes use Clankie's connected
+For Clankie's fleet, the owner-connected tracker account is the identity of the
+whole fleet, including every hired worker. Tracker writes use Clankie's connected
 tools or explicitly granted worker bridge, never an independently authenticated
 harness connector. Without delegated access, have the lead make the write. This
 rule selects no fixed email, account name, workspace or tracker provider.
@@ -215,68 +215,21 @@ the recipient needs to act on that pane.
   sources before using them to justify an architectural gate.
 - Open optional dashboards or rearrange terminals only when requested.
 
-## Swarm first
+## Native hires and delivery
 
-Load `swarm-mcp` for the installed protocol. Discover the available tools and
-sync the current scope before dispatch.
+Clankie hires workers with `hire_agent`. Give each hire its owned deliverable,
+checkout, acceptance and final report in `brief`; pick the harness and effort
+for that responsibility. Remote hires select the registered `fleet` and an
+approved `workingDirectory`. Herdr contains every native interactive worker.
 
-Use Swarm for assignments, questions, blockers, decisions and completion notices.
-Every participating worker loads `swarm-mcp`; leadership alone cannot establish a
-shared protocol. Address stable actor IDs, not pane IDs or role labels. Keep the
-message thread when replying. The configured work tracker holds deliverables and
-evidence; no tracker is required for coordination. Execution runtimes such as
-Herdr own terminals and processes. Use Swarm for communication even inside Herdr.
-User-started agents can participate in the same reachable, authorized coordinator
-scope; installing the same MCP alone does not connect separate coordinators.
+Deliver follow-ups with `message_seat` through the harness's channel or session
+API. Independent linked agents can initiate messages with `message_clankie`.
+Use `herdr_watch` for completion and inspect the final report and artifact before
+accepting. Work ownership, dependencies and evidence stay in the repo's tracker
+or files. Missing delivery is an actionable limitation; reconcile uncertainty
+in that same native path before another attempt. Automated briefs and messages
+never fall back to terminal typing.
 
-Persist the objective, worktree, acceptance criteria, expected artifacts and
-constraints in the task contract. Use `swarm_assign` with a configured route;
-missing capability or uncertain dispatch is a condition to resolve under the same
-intent, never permission to spawn again through a shell. Keep stable command IDs
-on retries. Shared files require explicit ownership; workers preserve others' work.
-
-Read the actual completion evidence and carry accepted work to its destination.
-A task finish, processing acknowledgment, accepted review and integrated delivery
-are different facts. Use runtime inbox delivery or bounded waits to receive work;
-no model polling loop. Acknowledge a leased envelope only after processing it,
-and deduplicate effects when the runtime redelivers it. After accepting a terminal
-dispatched result, release its allocation through `swarm_task` cancel with its
-original `intentId` and `taskId`; the provider verifies the fenced outcome. A
-completed task alone does not release dispatch capacity.
-
-Native children remain useful for private bounded work that fits their host and
-lifetime. Cross-session ownership and handoffs use Swarm. Do not manufacture a
-second task or relay every private child message through the lead.
-
-If Swarm is unavailable, state the limitation and use the Herdr fallback only
-under the conditions below.
-
-## Herdr fallback
-
-Use this workflow when explicitly selected or the relevant agents lack Swarm
-integration; name that fallback once. Never duplicate an uncertain assignment
-across transports.
-
-Load `herdr` for the CLI; prefer `herdr --skill` from the running binary. A
-socket-attached lead uses its configured socket and explicit pane identity, never
-the UI-focused pane. For a real context transfer, write a handoff file and send
-a one-line pointer to it.
-
-### Dispatch and receive
-
-Create a worker in its own named tab in the lead's workspace by default, preserving
-the working directory and the user's focus. Reuse existing owners where they are.
-Before an assignment or scope change, use [roles and effort](reference/roles.md)
-to verify the actual model and effort. Set both on launch; changing `/model` in a
-running pane can rewrite the user's global default.
-
-Read the receiving pane's full visible composer immediately before every send.
-Idle/done does not establish an empty composer. Preserve drafts, questions, menus
-and history views; wait for the operator to finish, then read again. Never clear or
-submit their input. Use [dispatch and waits](reference/operations.md#dispatch-and-waits)
-and confirm pickup once.
-
-One harvest owner holds the completion watcher. Use the
-[watch sequence](reference/operations.md#watch-dispatched-work); Clankie's service
-uses its own `herdr_watch` wake path. Completion is a cue to inspect the artifact,
-not acceptance. Do not read pane output on a timer.
+Load `this-machine` for live install and fleet details and `herdr` for explicit
+terminal observation or process control. The native harness owns model consent,
+trust and approvals. Preserve operator input and close only workers you own.

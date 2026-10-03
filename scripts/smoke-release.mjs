@@ -31,16 +31,13 @@ try {
   for (const path of [
     join(extracted, ".agents", "skills", "this-machine", "SKILL.md"),
     join(extracted, ".agents", "skills", "trace-clankie", "SKILL.md"),
-    ...["lead", "swarm-mcp"].map((name) => join(extracted, ".agents/skills", name, "SKILL.md")),
-    join(extracted, "node_modules/swarm-mcp/dist/coordination/owner-cli.js"),
-    join(extracted, "node_modules/swarm-mcp/dist/coordination/herdr-worker-cli.js"),
+    ...["lead"].map((name) => join(extracted, ".agents/skills", name, "SKILL.md")),
     join(extracted, "node_modules/@browser_use/pi/dist/worker.js"),
     join(extracted, ".agents/skills/browser-use/SKILL.md"),
     join(extracted, "integrations/claude-plugin/skills/lead/SKILL.md"),
     ...["cli.md", "worker-access.md", "model-keys.md", "rivals.md", "discord-ingress.md"].map((name) =>
       join(extracted, "docs", name),
     ),
-    join(extracted, "packages/swarm/README.md"),
     join(extracted, "infra/hosted/README.md"),
     join(extracted, "integrations", "herdr-plugin", "herdr-plugin.toml"),
   ]) {

@@ -17,7 +17,7 @@ wrong priority. Research leadership considers the whole effort, connects its
 activities to the person's goal and changes direction when the evidence warrants it.
 
 For authorized dispatch, load `lead`. Local hires use `hire_agent` and
-`message_seat`; Swarm is optional for independent enrolled peers. Missing
+`message_seat`; remote agents use the fleet link. Missing
 harness control never permits automated terminal typing. Use `work-items` when
 a tracker is in play and `shared-checkout`
 before commits. An advisory check-in does not itself authorize more workers,

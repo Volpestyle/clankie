@@ -43,7 +43,7 @@ it("limits hosted device authority to explicit routes and validated conversation
   ])
     expect(hostedOperatorAllows("POST", path, "{}")).toBe(false);
   expect(hostedOperatorAllows("POST", "/operator/v1/dispatch", '{"op":"send"}')).toBe(false);
-  expect(hostedOperatorAllows("PUT", "/v1/swarm/config", '{"enabled":false}')).toBe(true);
+  expect(hostedOperatorAllows("PUT", "/v1/swarm/config", '{"enabled":false}')).toBe(false);
   expect(hostedOperatorAllows("PUT", "/v1/swarm/connections", "{}")).toBe(false);
   expect(hostedOperatorAllows("PUT", "/v1/swarm/future-route", "{}")).toBe(false);
 });

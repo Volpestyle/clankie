@@ -620,7 +620,7 @@ function hireAgentTool(
       "model_reasoning_effort); omit both for the harness default. Outcomes are typed: unknown_directory, " +
       "harness_unavailable (the harness has no wired flag for what you asked), not_ready (it rejected the " +
       "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, at_capacity (this body already runs as many hired agents " +
-      "as its plan allows; close or reuse one). A hired seat is not a Swarm peer: pass brief to hand it " +
+      "as its plan allows; close or reuse one). Pass brief to hand it " +
       "its first prompt (codex needs one, since its session starts with its first turn). A briefed local seat is " +
       "driven through its harness (claude: the clankie-worker plugin's channel and Stop hooks) and " +
       "stays interactive in its pane. control.mode says how: channel for Claude, adapter for Codex, terminal only " +
@@ -722,7 +722,7 @@ function messageSeatTool(message: MessageSeat): ToolDefinition {
       "message up), unconfirmed, undelivered, seat_offline, unknown_seat. Delivery uses the harness " +
       "channel or session API and never types into the owner's terminal draft. A steered receipt means " +
       "guidance reached the active turn, not an after-turn queue. Inspect uncertain delivery before resending. " +
-      "Independent enrolled Swarm peers use swarm_send.",
+      "Linked agents can initiate messages with message_clankie.",
     parameters: Type.Object({
       seat: Type.String({ minLength: 1, maxLength: 200 }),
       message: Type.String({ minLength: 1, maxLength: SEAT_MESSAGE_MAX }),
@@ -907,7 +907,7 @@ function agentSessionTools(sessions: NonNullable<CaptainDeps["agentSessions"]>):
       description:
         "Read an agent session's messages and tool calls from its transcript. Give tail for the latest entries, " +
         "or pass the cursor from a previous read as after to get only what happened since. reset means the " +
-        "transcript was replaced and this page restarted from its tail. To talk to the agent, use Swarm, not this.",
+        "transcript was replaced and this page restarted from its tail. To talk to the agent, use message_seat.",
       parameters: Type.Object({
         ref: Type.String({
           minLength: 1,

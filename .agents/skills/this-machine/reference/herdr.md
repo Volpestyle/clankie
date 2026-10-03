@@ -17,7 +17,7 @@ The binding is resolved fresh at every service start and never written back
 The invoking terminal never selects the fleet. A candidate that does not answer is stepped
 over. If his own runtime cannot start, he continues with Herdr unavailable.
 `clankie herdr disable` (or **Run without Herdr** in `/herdr`) selects no execution
-runtime; restart to apply it. Conversations and Swarm communication still work.
+runtime; restart to apply it. Conversations and native communication still work.
 `use NAME` or `create` and a restart enable Herdr again. His own session checks
 official stable releases at startup and every six hours. Verified updates stage
 without replacing a live fleet's executable; the next Clankie start without a

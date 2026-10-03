@@ -188,8 +188,6 @@ interface ConversationMeta {
   /** Harness-native messages already folded into this durable persona thread. */
   seatTranscript?: SeatTranscriptCheckpoint;
   roomTranscripts?: Record<string, SeatTranscriptCheckpoint>;
-  /** Pinned Swarm deliveries stay deduplicated after transcript retention. */
-  swarmMessages?: string[];
   /** Native launcher sessions are pinned to one service conversation. */
   nativeSeatSessions?: Record<string, "current" | "retired">;
   /**
@@ -479,7 +477,6 @@ export class ConversationStore {
   private readonly reportSeatEdge: SeatEdgeReporter | undefined;
   private readonly publishDeliveredFile: DeliveredFilePublisher | undefined;
   private readonly defaultWorkingDirectory: string;
-  private readonly personaRunner: ((personaId: string) => ConversationRunner | undefined) | undefined;
   private readonly ownerAttachments: OwnerAttachmentHost | undefined;
   private readonly forkConversation: ConversationForker | undefined;
   private readonly projection: ChannelProjection | undefined;
@@ -510,7 +507,6 @@ export class ConversationStore {
     reportSeatEdge?: SeatEdgeReporter,
     publishDeliveredFile?: DeliveredFilePublisher,
     defaultWorkingDirectory = process.cwd(),
-    personaRunner?: (personaId: string) => ConversationRunner | undefined,
     ownerAttachments?: OwnerAttachmentHost,
   ) {
     this.root = root;
@@ -526,7 +522,6 @@ export class ConversationStore {
     this.reportSeatEdge = reportSeatEdge;
     this.publishDeliveredFile = publishDeliveredFile;
     this.defaultWorkingDirectory = defaultWorkingDirectory;
-    this.personaRunner = personaRunner;
     this.ownerAttachments = ownerAttachments;
     mkdirSync(root, { recursive: true });
     // Complete a reset interrupted after archiving but before installing fresh metadata.
@@ -1056,7 +1051,7 @@ export class ConversationStore {
       ...(id === LINEAR_INBOX_CONVERSATION_ID
         ? []
         : [
-            `Read this work with clankie linear inbox read --conversation ${id}. Check current Swarm task ownership before dispatching or replying.`,
+            `Read this work with clankie linear inbox read --conversation ${id}. Check current work ownership before dispatching or replying.`,
           ]),
       "Most events need no tool call. The this-machine skill has the inbox read and acknowledgment protocol.",
     ].join("\n");
@@ -1196,42 +1191,6 @@ export class ConversationStore {
     meta.title = title;
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
-  }
-
-  /** Persist before the coordinator acknowledges; a crash after append reuses the event identity. */
-  public receiveSwarmMessage(
-    conversationId: string,
-    personaId: string,
-    messageId: string,
-    text: string,
-  ): boolean {
-    const meta = this.metas.get(conversationId);
-    if (meta?.scope.kind !== "persona" || meta.scope.personaId !== personaId) return false;
-    if (meta.swarmMessages?.includes(messageId)) return true;
-    if (
-      !this.readEvents(conversationId).some(
-        (event) => event.type === "message" && event.swarmMessageId === messageId,
-      )
-    ) {
-      this.append(meta, {
-        type: "message",
-        role: "agent",
-        text,
-        streaming: false,
-        swarmMessageId: messageId,
-      });
-    }
-    const previous = meta.swarmMessages;
-    meta.swarmMessages = [...(previous ?? []), messageId];
-    meta.updatedAt = new Date().toISOString();
-    try {
-      this.saveMeta(meta);
-    } catch (error) {
-      if (previous === undefined) delete meta.swarmMessages;
-      else meta.swarmMessages = previous;
-      throw error;
-    }
-    return true;
   }
 
   /**
@@ -2033,36 +1992,6 @@ export class ConversationStore {
       return this.queueSeatSend(meta, meta.scope.seatId, turn, { seatId: meta.scope.seatId }, attachments);
     }
     if (meta.scope.kind === "persona") {
-      const runner = this.personaRunner?.(meta.scope.personaId);
-      if (runner) {
-        if (turn.expectedRevision !== meta.revision)
-          return {
-            schemaVersion: 1,
-            status: "revision_conflict",
-            conversationId: meta.conversationId,
-            expectedRevision: turn.expectedRevision,
-            currentRevision: meta.revision,
-            safeCursor: this.lastCursor(meta),
-          };
-        // A Swarm peer shares no filesystem with this machine, and its mailbox
-        // carries text. Refusing keeps the owner's draft rather than sending
-        // a message that silently lost what it was about.
-        if (attachments !== undefined)
-          return {
-            schemaVersion: 1,
-            status: "seat_undelivered",
-            conversationId: meta.conversationId,
-            personaId: meta.scope.personaId,
-            detail:
-              "Attachments cannot reach a Swarm peer: it shares no filesystem with this machine. Send the text alone, or put the files somewhere the peer can read.",
-            currentRevision: meta.revision,
-            safeCursor: this.lastCursor(meta),
-          };
-        return this.enqueue(meta, turn.message, undefined, true, runner, {
-          surfaceClientId: turn.surfaceClientId,
-          delivery: "queue",
-        });
-      }
       const seatId =
         this.seatForPersona === undefined ? meta.scope.personaId : this.seatForPersona(meta.scope.personaId);
       return this.queueSeatSend(meta, seatId, turn, { personaId: meta.scope.personaId }, attachments);

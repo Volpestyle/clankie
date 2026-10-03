@@ -301,7 +301,6 @@ describe("sending attachments", () => {
       undefined,
       undefined,
       root,
-      undefined,
       hostFor(files, forSeat),
     );
     try {
@@ -391,7 +390,6 @@ describe("sending attachments", () => {
       undefined,
       undefined,
       root,
-      undefined,
       hostFor(files, async () => ({ undeliverable: "This agent runs on another machine." })),
     );
     try {
@@ -445,7 +443,6 @@ describe("sending attachments", () => {
       undefined,
       undefined,
       root,
-      undefined,
       hostFor(files),
     );
     try {

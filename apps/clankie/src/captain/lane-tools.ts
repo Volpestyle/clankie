@@ -4,7 +4,7 @@
  * The pi session and a seat reached over MCP must never disagree about what a
  * lane may do, so both start here: `laneAuthoredTools` is what `buildSession`
  * hands pi as `customTools`, and `buildLaneToolBank` is the same list plus the
- * browser, connected-service and conversation-bound Swarm catalogs pi registers
+ * browser and connected-service catalogs pi registers
  * from extensions — flattened into callables. There is one registry; this file
  * projects it, and never restates a schema.
  */
@@ -62,7 +62,6 @@ export async function buildLaneToolBank(
   herdrWatches?: HerdrWatchPort,
   hireSeat?: HireSeat,
   messageSeat?: MessageSeat,
-  swarmTools: readonly ToolDefinition[] = [],
 ): Promise<LaneToolBank> {
   const tools: LaneTool[] = laneAuthoredTools(
     deps,
@@ -81,7 +80,6 @@ export async function buildLaneToolBank(
     tools.push(browserLaneTool(deps, turn, tool, lane === "operator" || turn.shell === true));
   }
   for (const tool of await deps.mcp.catalog(lane)) tools.push(mcpLaneTool(deps, lane, tool));
-  if (lane === "operator") tools.push(...swarmTools.map((tool) => authoredLaneTool(tool, turn)));
   return { lane, tools };
 }
 

@@ -50,11 +50,10 @@ import {
   type OperatorSeatEvent,
 } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
-import { runWorkerMcp, runSwarmWorkerMcp, runEnrolledWorkerMcp } from "./worker-mcp.ts";
+import { runWorkerMcp } from "./worker-mcp.ts";
 
 const execFileAsync = promisify(execFileCallback);
-const MCP_USAGE =
-  "Usage: clankie mcp [--lane operator [--conversation ID] | --seat | --grant FILE | --swarm-grant ID | --swarm]";
+const MCP_USAGE = "Usage: clankie mcp [--lane operator [--conversation ID] | --seat | --grant FILE]";
 const FLEET_CHANNEL_SERVER = `server:${FLEET_SEAT_MCP_SERVER}`;
 /** A hired seat's worker plugin channel (VUH-1458), approved under `--channels`. */
 const WORKER_CHANNEL_PLUGIN = `plugin:${CLAUDE_WORKER_PLUGIN_ID}`;
@@ -127,13 +126,9 @@ export interface McpCommandOptions {
 export type McpArgs =
   | { readonly lane: CaptainSessionLaneV2; readonly conversationId?: string }
   | { readonly seat: true }
-  | { readonly swarm: true }
-  | { readonly swarmGrant: string }
   | { readonly grantFile: string };
 
 export function parseMcpArgs(args: readonly string[]): McpArgs {
-  if (args.length === 1 && args[0] === "--swarm") return { swarm: true };
-  if (args.length === 2 && args[0] === "--swarm-grant" && args[1]?.trim()) return { swarmGrant: args[1] };
   if (args.length === 2 && args[0] === "--grant" && args[1]?.trim()) return { grantFile: args[1] };
   let conversationId: string | undefined;
   let seat = false;
@@ -672,8 +667,6 @@ export async function runMcpCommand(
   options: McpCommandOptions = {},
 ): Promise<number> {
   const parsed = parseMcpArgs(args);
-  if ("swarm" in parsed) return runEnrolledWorkerMcp(options);
-  if ("swarmGrant" in parsed) return runSwarmWorkerMcp(parsed.swarmGrant, options);
   if ("grantFile" in parsed) return runWorkerMcp(parsed.grantFile, options.transport);
   if ("seat" in parsed) return runFleetSeatMcp(options);
 

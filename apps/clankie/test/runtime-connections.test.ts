@@ -30,15 +30,8 @@ it("connects two pinned runtimes through API/CLI, survives restart, and never ad
     },
   };
   let runtimes = new ExecutionConnections(options);
-  let reloadSupported = true;
   const app = await createClankieApp({
     captain: createStubCaptain(),
-    swarm: {
-      status: async () => ({ mode: "unavailable" }),
-      syncRuntimeConnections: async () => {
-        if (!reloadSupported) throw new Error("Coordinator upgrade required");
-      },
-    },
     get runtimes() {
       return runtimes;
     },
@@ -70,7 +63,6 @@ it("connects two pinned runtimes through API/CLI, survives restart, and never ad
     ]);
     expect(await runRuntimeCommand(["inventory"], cli)).toMatchObject({
       runtimes: listed.connections,
-      swarms: { mode: "unavailable" },
       accounts: { linear: { status: "unavailable" } },
     });
     const binding = await readHerdrBinding({ ...cli, repoRoot: root, connectionId: "two" });
@@ -85,16 +77,6 @@ it("connects two pinned runtimes through API/CLI, survives restart, and never ad
     await expect(
       runRuntimeCommand(["connect", "duplicate", "--socket", "/tmp/two.sock"], cli),
     ).rejects.toThrow(/already/u);
-    reloadSupported = false;
-    await expect(runRuntimeCommand(["disconnect", "one"], cli)).rejects.toThrow(/upgrade required/u);
-    await expect(runRuntimeCommand(["connect", "three", "--socket", "/tmp/other.sock"], cli)).rejects.toThrow(
-      /upgrade required/u,
-    );
-    expect((await settings.load()).execution.connections).toMatchObject([
-      { id: "one", enabled: true },
-      { id: "two", enabled: true },
-    ]);
-    reloadSupported = true;
     await runRuntimeCommand(["disconnect", "one"], cli);
     expect(await runtimes.binding("one")).toBeUndefined();
     sockets.delete("/tmp/two.sock");
@@ -129,7 +111,6 @@ it("serves bounded connection metadata through the operator client and refuses s
     capacity: 2,
     capabilities: ["review"],
   });
-  let disconnected = "";
   const app = await createClankieApp({
     captain: createStubCaptain(),
     runtimes,
@@ -139,46 +120,6 @@ it("serves bounded connection metadata through the operator client and refuses s
         : request.headers.get("authorization") === "Bearer social"
           ? { captainId: "social", steerSourceLane: "discord_text" }
           : undefined,
-    swarm: {
-      status: async () => ({
-        connections: [
-          {
-            id: "remote",
-            conversationId: "project",
-            enabled: true,
-            scope: "scope",
-            actor: "lead",
-            credential: "secret-reference",
-          },
-        ],
-        conversations: [
-          {
-            connection: "remote",
-            conversationId: "project",
-            actor: "lead",
-            state: {
-              scope: "scope",
-              sessions: {
-                items: [
-                  {
-                    actor: "worker",
-                    generation: 1,
-                    state: "active",
-                    runtime: "available",
-                    capability: "secret",
-                  },
-                ],
-                truncated: true,
-              },
-              arbitrary: "must-not-leak",
-            },
-          },
-        ],
-      }),
-      disconnect: async (id) => {
-        disconnected = id;
-      },
-    },
   });
   const call = (body: unknown, bearer = "operator") =>
     app.app.request("/operator/v1/dispatch", {
@@ -195,14 +136,6 @@ it("serves bounded connection metadata through the operator client and refuses s
       outcome: "ready",
       inventory: {
         runtimes: [{ id: "default" }, { id: "named", capacity: 2 }],
-        swarms: [
-          {
-            id: "remote",
-            state: "connected",
-            agents: [{ id: "worker", generation: 1 }],
-            agentsTruncated: true,
-          },
-        ],
       },
     });
     expect(JSON.stringify(result)).not.toMatch(/secret|must-not-leak|pinned.sock/u);
@@ -227,8 +160,6 @@ it("serves bounded connection metadata through the operator client and refuses s
     expect((await settings.load()).execution.connections).toMatchObject([
       { id: "named", socketPath: "/tmp/pinned.sock", capacity: 2, capabilities: ["review"], enabled: true },
     ]);
-    await client.connections!({ action: "disconnect_swarm", id: "remote" });
-    expect(disconnected).toBe("remote");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -250,19 +181,12 @@ it("only the operator can approve repositories and exact directories through run
     run: async () => ({ stdout: JSON.stringify({ result: { snapshot: { workspaces: [] } } }) }),
   };
   const runtimes = new ExecutionConnections(options);
-  let reloadSupported = true;
   const app = await createClankieApp({
     captain: createStubCaptain(),
     runtimes,
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
     authenticateCaptain: async () => ({ captainId: "machine-grant", steerSourceLane: "discord_text" }),
-    swarm: {
-      status: async () => ({}),
-      syncRuntimeConnections: async () => {
-        if (!reloadSupported) throw new Error("Coordinator upgrade required");
-      },
-    },
   });
   const cli = {
     host: "http://localhost",
@@ -272,14 +196,9 @@ it("only the operator can approve repositories and exact directories through run
   try {
     expect((await runtimes.list())[0]).toMatchObject({
       capacity: 16,
-      budget: 16,
       capacitySource: "default",
-      budgetSource: "default",
     });
-    for (const args of [
-      ["capacity", "default", "25"],
-      ["budget", "25"],
-    ]) {
+    for (const args of [["capacity", "default", "25"]]) {
       await expect(
         runRuntimeCommand(args, { ...cli, env: { CLANKIE_OPERATOR_TOKEN: "discord" } }),
       ).rejects.toThrow();
@@ -287,18 +206,12 @@ it("only the operator can approve repositories and exact directories through run
     }
     expect((await runtimes.list())[0]).toMatchObject({
       capacity: 25,
-      budget: 25,
       capacitySource: "owner",
-      budgetSource: "owner",
     });
-    expect(await new ExecutionConnections(options).dispatchBudget()).toBe(25);
     await runRuntimeCommand(["capacity", "default", "--clear"], cli);
-    await runRuntimeCommand(["budget", "--clear"], cli);
     expect((await runtimes.list())[0]).toMatchObject({
       capacity: null,
-      budget: null,
       capacitySource: "unlimited",
-      budgetSource: "unlimited",
     });
     await expect(runRuntimeCommand(["capacity", "default", "-1"], cli)).rejects.toThrow();
     const request = { action: "workspaces", id: "default", workspaces: [{ kind: "repository", path: repo }] };
@@ -335,209 +248,8 @@ it("only the operator can approve repositories and exact directories through run
     await expect(
       runRuntimeCommand(["workspaces", "default", "--dir", join(root, "file")], cli),
     ).rejects.toThrow(/directory/);
-    reloadSupported = false;
-    await expect(runRuntimeCommand(["workspaces", "default", "--clear"], cli)).rejects.toThrow(/upgrade/);
-    expect((await settings.load()).execution.workspaces).toEqual(workspaces);
-    reloadSupported = true;
     await runRuntimeCommand(["workspaces", "default", "--clear"], cli);
     expect((await settings.load()).execution.workspaces).toEqual([]);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-it("uses native interactive workers, refuses headless selection, and requires installed support for new worker selection", async () => {
-  const { manageConnections } = await import("../src/connections.ts");
-  const root = await mkdtemp("/tmp/clankie-worker-mode-");
-  const settings = new SettingsStore(join(root, "settings.json"));
-  let supported = false;
-  const runtimes = new ExecutionConnections({
-    settings,
-    primary: { binding: () => undefined, status: () => "disabled" },
-    run: async () => ({ stdout: JSON.stringify({ result: { snapshot: { workspaces: [] } } }) }),
-    interactiveWorkers: async () => supported,
-  });
-  const swarm = { status: async () => ({ mode: "unavailable" }), syncRuntimeConnections: async () => {} };
-  const app = await createClankieApp({
-    captain: createStubCaptain(),
-    swarm,
-    runtimes,
-    authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
-  });
-  const cli = {
-    host: "http://localhost",
-    env: { CLANKIE_OPERATOR_TOKEN: "owner" },
-    fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
-  };
-  const named = async () =>
-    (await settings.load()).execution.connections.find((entry) => entry.id === "named");
-  try {
-    await runRuntimeCommand(["connect", "named", "--socket", "/tmp/named.sock"], cli);
-    expect((await runRuntimeCommand(["list"], cli)).connections).toMatchObject([
-      { id: "default", workerMode: "interactive" },
-      { id: "named", workerMode: "interactive" },
-    ]);
-    expect(await named()).toMatchObject({ workerMode: "interactive" });
-    await expect(runRuntimeCommand(["mode", "named", "sideways"], cli)).rejects.toThrow(/mode ID/u);
-    // The vendored owner would reject the route, and with it every route.
-    await expect(runRuntimeCommand(["mode", "named", "interactive"], cli)).rejects.toThrow(
-      /upgraded Swarm runtime/u,
-    );
-    await expect(
-      runtimes.connect({ id: "unsupported", socketPath: "/tmp/named.sock", workerMode: "interactive" }),
-    ).rejects.toThrow(/upgraded Swarm runtime/u);
-    expect(await named()).toMatchObject({ workerMode: "interactive" });
-    supported = true;
-    expect(await runRuntimeCommand(["mode", "named", "interactive"], cli)).toEqual({
-      id: "named",
-      workerMode: "interactive",
-    });
-    await expect(runRuntimeCommand(["mode", "missing", "interactive"], cli)).rejects.toThrow(/Unknown/u);
-    expect(await named()).toMatchObject({ workerMode: "interactive" });
-    // A paired-device reconnect carries the owner's choice through.
-    await manageConnections({ runtimes, swarm }, { action: "disconnect_runtime", id: "named" });
-    const inventory = await manageConnections(
-      { runtimes, swarm },
-      { action: "reconnect_runtime", id: "named" },
-    );
-    expect(inventory.runtimes).toMatchObject([
-      { id: "default", workerMode: "interactive" },
-      { id: "named", enabled: true, workerMode: "interactive" },
-    ]);
-    // A paired device sets a session's capacity; the default stays unwritten until then.
-    expect(inventory.runtimes).toMatchObject([
-      { id: "default", capacity: 16 },
-      { id: "named", capacity: 16 },
-    ]);
-    expect(
-      (
-        await manageConnections(
-          { runtimes, swarm },
-          { action: "set_runtime_capacity", id: "named", capacity: 6 },
-        )
-      ).runtimes,
-    ).toMatchObject([
-      { id: "default", capacity: 16 },
-      { id: "named", capacity: 6, workerMode: "interactive" },
-    ]);
-    await manageConnections(
-      { runtimes, swarm },
-      { action: "set_runtime_capacity", id: "default", capacity: 24 },
-    );
-    expect((await settings.load()).execution.capacity).toBe(24);
-    await expect(
-      manageConnections({ runtimes, swarm }, { action: "set_runtime_capacity", id: "missing", capacity: 4 }),
-    ).rejects.toThrow(/Unknown/u);
-    await expect(runRuntimeCommand(["mode", "named", "stream"], cli)).rejects.toThrow(/Headless/u);
-    expect(await named()).toMatchObject({ workerMode: "interactive" });
-    await runRuntimeCommand(["mode", "default", "interactive"], cli);
-    expect((await settings.load()).execution.workerMode).toBe("interactive");
-    await expect(runRuntimeCommand(["mode", "default", "stream"], cli)).rejects.toThrow(/Headless/u);
-    expect((await settings.load()).execution.workerMode).toBe("interactive");
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-it("reconnects retained native and legacy worker choices without requiring a new adapter or changing the harness", async () => {
-  const { manageConnections } = await import("../src/connections.ts");
-  const root = await mkdtemp("/tmp/clankie-retained-worker-choice-");
-  const settings = new SettingsStore(join(root, "settings.json"));
-  const runtimes = new ExecutionConnections({
-    settings,
-    primary: { binding: () => undefined, status: () => "disabled" },
-    run: async () => ({ stdout: JSON.stringify({ result: { snapshot: { workspaces: [] } } }) }),
-    managedWorkers: async () => false,
-    interactiveWorkers: async () => false,
-  });
-  try {
-    for (const workerMode of ["interactive", "stream"] as const) {
-      await settings.update((current) => ({
-        ...current,
-        execution: {
-          ...current.execution,
-          connections: [
-            {
-              id: "retained",
-              kind: "herdr",
-              capabilities: [],
-              socketPath: "/tmp/retained.sock",
-              session: "retained",
-              enabled: false,
-              workerHarness: "codex",
-              workerMode,
-            },
-          ],
-        },
-      }));
-      await runtimes.connect({ id: "retained", socketPath: "/tmp/retained.sock" });
-      await runtimes.disconnect("retained");
-      await manageConnections({ runtimes }, { action: "reconnect_runtime", id: "retained" });
-      expect((await settings.load()).execution.connections[0]).toMatchObject({
-        enabled: true,
-        workerHarness: "codex",
-        workerMode,
-      });
-    }
-    await expect(
-      runtimes.connect({ id: "new", socketPath: "/tmp/new.sock", workerMode: "stream" }),
-    ).rejects.toMatchObject({ code: "harness_mode_unsupported" });
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-it("selects managed harnesses through API/CLI and rejects unsupported harness-mode pairs without changing settings", async () => {
-  const root = await mkdtemp("/tmp/clankie-worker-harness-");
-  const settings = new SettingsStore(join(root, "settings.json"));
-  let supported = false;
-  const runtimes = new ExecutionConnections({
-    settings,
-    primary: { binding: () => undefined, status: () => "disabled" },
-    managedWorkers: async () => supported,
-    interactiveWorkers: async (harness) => {
-      expect(["claude", "codex", "pi"]).toContain(harness);
-      return true;
-    },
-  });
-  const app = await createClankieApp({
-    captain: createStubCaptain(),
-    runtimes,
-    authenticateOperator: async () => ({ operatorId: "owner" }),
-  });
-  const cli = {
-    host: "http://localhost",
-    env: { CLANKIE_OPERATOR_TOKEN: "owner" },
-    fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
-  };
-  try {
-    const refused = await app.app.request("/v1/runtime-connections", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "harness", id: "default", harness: "codex" }),
-    });
-    expect(refused.status).toBe(409);
-    expect(await refused.json()).toMatchObject({ error: "harness_unsupported" });
-    expect((await settings.load()).execution.workerHarness).toBeUndefined();
-    supported = true;
-    for (const harness of ["codex", "pi", "claude"]) {
-      expect(await runRuntimeCommand(["harness", "default", harness], cli)).toEqual({
-        id: "default",
-        workerHarness: harness,
-      });
-      expect((await settings.load()).execution.workerHarness).toBe(harness);
-    }
-    await runRuntimeCommand(["harness", "default", "codex"], cli);
-    await expect(runRuntimeCommand(["mode", "default", "interactive"], cli)).resolves.toEqual({
-      id: "default",
-      workerMode: "interactive",
-    });
-    expect((await settings.load()).execution).toMatchObject({ workerHarness: "codex" });
-    await expect(runRuntimeCommand(["harness", "default", "unknown"], cli)).rejects.toThrow(/harness ID/u);
-    expect((await runRuntimeCommand(["list"], cli)).connections).toMatchObject([
-      { id: "default", workerHarness: "codex", workerMode: "interactive" },
-    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

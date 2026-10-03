@@ -1,6 +1,6 @@
 # 0182. Swarm peers are messageable personas
 
-Status: accepted (2026-09-24). Extends [ADR 0181](0181-clankie-is-independent-of-his-connections.md).
+Status: superseded by [ADR 0213](0213-clankie-retires-swarm.md).
 
 ## Decision
 
@@ -61,7 +61,7 @@ contact path.
 ## Surfaces and limits
 
 The public `fleet`/`personas`, `create`, `send` and `replay` operations carry this
-flow. [CLI/TUI commands](../cli.md#swarm-coordination) use that same contract.
+flow. [CLI/TUI commands](0213-clankie-retires-swarm.md) use that same contract.
 The app shows Swarm reachability independently of terminal presence, clears it
 on service disconnect, and retains offline Swarm threads with history.
 

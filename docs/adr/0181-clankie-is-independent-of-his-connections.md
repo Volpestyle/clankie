@@ -5,7 +5,7 @@ The connection contract replaces ambient runtime selection as the architectural
 default in [ADR 0170](0170-a-session-that-stops-is-unbound.md) and scopes
 [ADR 0184](0184-clankie-leads-more-than-one-fleet.md) to Herdr connections.
 Acceptance ratifies the design; current support and remaining acceptance live in
-the [Swarm host README](../../packages/swarm/README.md#connection-contract-status).
+the [Swarm host README](0213-clankie-retires-swarm.md).
 
 ## Context and decision
 
@@ -115,7 +115,7 @@ placement does not select the account, and missing or revoked access never falls
 back to the human's credentials. Grants are enforced on every call and do not
 broaden after restart. Linear is the first integration; the same contract applies
 to subsequent supported connectors. Implementation boundaries and acceptance live
-in the [shared-account plan](../../packages/swarm/README.md#shared-connected-accounts-slices-35).
+in the [shared-account plan](0213-clankie-retires-swarm.md).
 
 The broker serializes Linear token refresh with credential replacement and
 disconnect across processes. An existing-entry update transaction holds the same
@@ -265,7 +265,7 @@ owner/project instructions as immutable Swarm artifacts; retries keep that
 snapshot, including explicitly selected installed skills and their supporting
 files. Skill snapshots transfer no credentials and do not execute scripts. The
 implementation boundaries and remaining work are tracked in the
-[working-preferences plan](../../packages/swarm/README.md#working-preferences-and-portable-skills-slices-36).
+[working-preferences plan](0213-clankie-retires-swarm.md).
 
 ## Local and hosted packaging
 

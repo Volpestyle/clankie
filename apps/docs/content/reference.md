@@ -6,17 +6,17 @@ Choose the reference for the job. [Get started](/get-started/) covers setup;
 
 ## Operate Clankie
 
-| I want to…                                            | Read                                                                                                              |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Find a console command or keyboard shortcut           | [Console](/console/)                                                                                              |
-| Script configuration, inspect status, or troubleshoot | [CLI](/cli/)                                                                                                      |
-| Install a pinned release or understand its files      | [Distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md)                              |
-| Understand credentials and access                     | [Credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md)                                |
-| Inspect what he remembers                             | [Memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)                                          |
-| Configure Discord voice, music, or a watch surface    | [Discord media](https://github.com/Volpestyle/clankie/blob/main/docs/discord-media.md)                            |
-| Connect coding agents and other machines              | [Swarm support and runtime connections](https://github.com/Volpestyle/clankie/blob/main/packages/swarm/README.md) |
-| Grant a worker limited use of a connected account     | [Worker access](https://github.com/Volpestyle/clankie/blob/main/docs/worker-access.md)                            |
-| Run the service on Linux                              | [Self-hosted Linux](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)                       |
+| I want to…                                            | Read                                                                                                                            |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Find a console command or keyboard shortcut           | [Console](/console/)                                                                                                            |
+| Script configuration, inspect status, or troubleshoot | [CLI](/cli/)                                                                                                                    |
+| Install a pinned release or understand its files      | [Distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md)                                            |
+| Understand credentials and access                     | [Credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md)                                              |
+| Inspect what he remembers                             | [Memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)                                                        |
+| Configure Discord voice, music, or a watch surface    | [Discord media](https://github.com/Volpestyle/clankie/blob/main/docs/discord-media.md)                                          |
+| Connect coding agents and other machines              | [Native agent adapters and runtime connections](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md) |
+| Grant a worker limited use of a connected account     | [Worker access](https://github.com/Volpestyle/clankie/blob/main/docs/worker-access.md)                                          |
+| Run the service on Linux                              | [Self-hosted Linux](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)                                     |
 
 ## Integrate and contribute
 

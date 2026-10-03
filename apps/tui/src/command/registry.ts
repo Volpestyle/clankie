@@ -16,15 +16,14 @@ const HEADLESS_COMMAND_HELP = [
   },
   {
     nouns: ["connections"],
-    lines: ["  connections              Inspect runtime, Swarm and connected-account inventory (JSON)"],
+    lines: ["  connections              Inspect runtime and connected-account inventory (JSON)"],
   },
   {
     nouns: ["runtime"],
     lines: [
       "  runtime [list|status] | connect ID (--session NAME | --socket PATH) | disconnect ID",
       "          workspaces ID (--repo /checkout | --dir /directory)... | workspaces ID --clear",
-      "          capacity ID N|--clear | budget N|--clear (per coordinator scope; default 16; clear = unlimited)",
-      "          harness ID claude|codex|pi | mode ID interactive (native worker terminal)",
+      "          capacity ID N|--clear (default 16; clear = unlimited)",
       "                           Manage named execution connections (JSON)",
     ],
   },
@@ -39,7 +38,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["access"],
     lines: [
-      "  access list | issue REQUEST.json (--out GRANT.json | --deliver swarm) | revoke ID | linear [verify]",
+      "  access list | issue REQUEST.json --out GRANT.json | revoke ID | linear [verify]",
+      "  access fleet NAME SERVER [--tool NAME]...",
       "                           Delegate connected MCP tools to a worker (JSON)",
     ],
   },
@@ -54,14 +54,6 @@ const HEADLESS_COMMAND_HELP = [
       "  agents resume HOST:SESSION [--fleet ID] [--brief TEXT]",
       "  agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID",
       "                           Read any Claude/Codex/Grok/Pi session, here or over SSH (JSON)",
-    ],
-  },
-  {
-    nouns: ["swarm"],
-    lines: [
-      "  swarm [status|connections] | connect PRIVATE.json | disconnect ID",
-      "  swarm contacts | tasks | thread PERSONA | message PERSONA TEXT",
-      "                           Inspect or connect an authorized Swarm coordinator (JSON)",
     ],
   },
   {
@@ -329,8 +321,6 @@ const HEADLESS_COMMAND_HELP = [
       "  mcp [--lane operator] [--conversation ID] Serve Clankie's lane tool bank over stdio for a seated harness",
       "  mcp --seat               Serve a fleet pane's message channel over stdio (no tools)",
       "  mcp --grant FILE         Serve only a worker's granted connected tools over stdio",
-      "  mcp --swarm              Serve an enrolled worker's explicit grants; no operator access",
-      "  mcp --swarm-grant ID     Retrieve a worker grant using its enrolled Swarm session",
     ],
   },
   {

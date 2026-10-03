@@ -13,7 +13,7 @@ or reset the service conversation to remove already-loaded guidance; no service
 restart is needed for the setting itself. Never edit settings JSON directly.
 
 Turning guidance off leaves Clankie able to lead using his own instructions and
-native hire/message tools. Swarm is optional for independent enrolled peers.
+native hire/message tools.
 Local `hire_agent` can use `skills: "plain"` or
 `"bundled"` for a single hire; its result records the condition. Global/project
 skills discovered independently by a harness are outside Clankie's bundle switch.
@@ -69,30 +69,16 @@ extra locations with `clankie runtime workspaces ID --repo /checkout --dir /scra
 (or `--clear`); each call replaces that runtime's extras. Repository approval pins
 Git's common directory and permits its current registered worktrees; a directory
 entry is exact, never a prefix. The caller conversation directory remains the default.
-Use the actual checkout as `swarm_assign.contract.worktree`; do not falsify it to
-match a route or change conversation identity. A blocked result lists the canonical
-request and each candidate's allowed worktrees/reasons. Workspace changes require
-the operator endpoint; Swarm tools cannot grant themselves another location.
-A `restart-required` owner needs a coordinated update, not duplicate dispatch.
-
-Dispatch budget and each runtime capacity default to 16. The owner can change either:
-`clankie runtime capacity ID N` sets a runtime limit and `clankie runtime budget N`
-sets the overall budget. Replace `N` with `--clear` for unlimited; `0`
-pauses new admission. The TUI accepts the same arguments after `/runtime`.
-Both counts apply per coordinator scope, including runtime capacity: two
-coordinators sharing one Herdr runtime can together exceed its configured limit.
-Settings are reconciled into existing owners without replacing in-flight receipts.
-`runtime status` reports each effective value and its source: default, owner or unlimited.
-These controls use the operator API; no Swarm tool or captain bearer can change them.
+Use the actual approved checkout as the hire's `workingDirectory`. Workspace
+changes use the operator endpoint; a hire cannot grant itself another location.
+Capacity is configured per runtime with `clankie runtime capacity ID N|--clear`.
 
 ## Cross-device agent conversations
 
 Messages includes seats from registered execution fleets. Opening a remote seat
 reads its native history on demand over the fleet's SSH connection; replies use
 that seat's qualified fleet address. `clankie conversations show ID` reads the
-same conversation API. Swarm relay traffic does not import harness history.
-Internal `clankie:<conversation>` and runtime-controller Swarm contacts are hidden
-from the roster without deleting saved threads. Remote native images are not
+same conversation API. Remote native images are not
 published through the local file service.
 
 ## Hiring and hearing from another machine
@@ -115,10 +101,10 @@ did not start on another machine receives it through that machine's `codex queue
 ## External agent history
 
 Herdr discovery is identity and status, not transcript enrollment. Inspect panes
-through Herdr and message supported seats through their native control. Swarm
+through Herdr and message supported seats through their native control. The fleet link
 can coordinate independent enrolled peers. The app's native agent chats read the
 harness history on demand through replay/tail; viewing one does not call Clankie
-or copy its transcript into his event log. Explicit sends and Swarm messages are
+or copy its transcript into his event log. Explicit sends and native messages are
 host-owned communications.
 
 ## Chats, agents, rooms, and history
@@ -149,5 +135,5 @@ inventory and source revision. Local Claude hires receive a skills-only plugin,
 Pi hires an explicit skill path, and Codex hires a private home overlay. The
 operator Claude seat retains the full Clankie plugin. No global skill installation
 is needed for these local launches after the service reloads the change.
-Remote hires and Swarm dispatch have separate coverage limits documented there;
+Remote hires have their own coverage limits documented there;
 do not infer full-bundle delivery from a successful local canary.

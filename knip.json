@@ -38,9 +38,6 @@
     },
     "packages/play": {
       "ignoreExportsUsedInFile": true
-    },
-    "packages/swarm": {
-      "ignoreDependencies": ["@volpestyle/lead-skills"]
     }
   },
   "ignoreIssues": {

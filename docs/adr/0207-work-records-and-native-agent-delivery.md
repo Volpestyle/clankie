@@ -5,7 +5,7 @@ Status: accepted (James, 2026-10-01). Amends
 [ADR 0187](0187-clankie-hires-his-own-seats.md), and
 [ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md). Amended by
 [ADR 0213](0213-clankie-retires-swarm.md): `hire_agent` is the only way Clankie
-starts a worker, and Swarm is being retired.
+starts a worker, and the embedded Swarm has been removed.
 
 ## Context
 
@@ -42,15 +42,12 @@ flowchart LR
   Owner -->|"drafts and approvals"| View["Herdr native terminal"]
   View <--> Harness
   Harness -->|"receipts and turn events"| Clankie
-  Clankie -.->|"optional independent peers"| Swarm
+  Clankie <-->|"fleet link and native channels"| Peers["Independent linked agents"]
 ```
 
-Swarm remains an optional connection for independent peers that need durable
-mailboxes, task claims, and recovery across sessions or machines. It is not a
-prerequisite for local hiring, harness messages, or work tracking. The owner can
-disable Swarm at the next service start without deleting its saved state or
-changing the running fleet. The setting defaults on, including fresh installs;
-disabling it is explicit.
+Independent linked agents reach Clankie through `message_clankie` and the
+per-fleet link. Remote hires use their native harness channels or session APIs.
+Coordinator state remains on disk for inspection; it is no longer a connection.
 
 ## Consequences
 

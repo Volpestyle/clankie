@@ -1,27 +1,8 @@
 {
-  "swarmSource": "https://github.com/Volpestyle/swarm-mcp",
-  "swarmBase": "0981253fc4b81fb4794ceaa706aeec363d900a32",
-  "swarmPatch": "swarm-mcp.patch",
   "skillsSource": "https://github.com/Volpestyle/skills",
   "skillsBase": "d31026f3676c180ed30b7f71b9d99ebf45f04b17",
   "artifacts": {
     "volpestyle-lead-skills-0.1.1.tgz": "b4d9bc5267b4569d0228c8f85608c15f11781936eea9f252434797fac7c52508",
-    "swarm-mcp-2.0.0-rc.1.tgz": "0a5b2ab97dfa1a092750ab3ff1b08184f3fac1a6c95e759b1729c464f2cc76ee",
     "volpestyle-lead-skills-0.1.2.tgz": "f26dd51b501d1750ed2c14e7952000bc02fff6366ccbd7e367cb3c0076ff69a5"
-  },
-  "patchSha256": "0dd5aaebbc84839a35f415e911d7172165008993c06b5c0c8fe4bdd56bc3fa5c",
-  "swarmRevision": "a72a2d3afa88274a60747216b8d401ab279204b5",
-  "swarmIncludes": [
-    "a6ca8df: worker stop proof, control expiry, progress deadlines, idle owner retirement and diagnostics",
-    "de071a1: long-transcript and subagent hook delivery fixes",
-    "0981253: supported Claude and Codex launcher CLIs",
-    "b62a68f: managed Codex app-server and pi RPC workers, immutable harness selection and per-session MCP",
-    "f91cd49: real-binary-proven MCP mount, scoped lifecycle approval and disabled-route stop reconciliation",
-    "a72a2d3: conservative permission-denied stop handling and packaged real-harness lifecycle/clean-exit fixtures"
-  ],
-  "swarmLocalChanges": [
-    "Retry transient inbox disconnects indefinitely with capped backoff and reset after a healthy watch.",
-    "Expose CoordinationClient.connected so embeddings reconnect before new requests without replaying mutations.",
-    "Include observer recovery regression tests and updated runtime embedding documentation."
-  ]
+  }
 }

@@ -5,7 +5,7 @@ Linux host. For the managed product and app onboarding, use
 [Get started](https://docs.clankie.bot/get-started/). Running this image does not
 provision a managed account or promise the same enabled features.
 
-This Compose deployment runs one owner's Clankie service, embedded Swarm coordinator,
+This Compose deployment runs one owner's Clankie service,
 Herdr workers and app relay on a Linux host. It does not need an owner's desktop
 or an open TUI. Each Compose project has separate state and workspace volumes;
 use a dedicated VM for mutually untrusted owners. Containers within one deployment
@@ -19,10 +19,8 @@ flowchart LR
     CLI --> Captain[Clankie's persistent service]
     Gateway <-->|Authenticated outbound connection| Captain
     Captain <--> Relay[App relay]
-    Captain <--> Swarm[Swarm coordinator]
     Captain --> Herdr[Bundled Herdr]
     Herdr --> Workers[Configured worker harnesses]
-    Workers <--> Swarm
     Workers -->|Explicit tool grants| Captain
     Captain --> Broker[Owner credential broker]
     Captain --> State[Persistent settings / memory / work]
@@ -57,7 +55,7 @@ The pinned npm installation follows the [Claude setup documentation](https://cod
 The image contains no owner subscription, API key or personal skill.
 
 Headless setup uses the same [CLI](../../docs/cli.md), including `model`, `persona`,
-`fleet`, `workdir`, `herdr`, `swarm` and `access`. Its first start selects `/workspace`
+`fleet`, `workdir`, `herdr` and `access`. Its first start selects `/workspace`
 only if no workdir preference exists; subsequent starts preserve owner settings.
 Clone project repositories there. User-installed skills live in
 `/state/home/.agents/skills` or the project's own skill roots. SSH and Git are
@@ -103,7 +101,7 @@ with the deployment stopped. Replacing a container ends its live processes;
 persisted tasks and dispatch intents require reconciliation, not blind reassignment.
 This is different from restarting only the captain while Herdr remains alive.
 
-`state` holds the owner home, settings, memory, broker, Swarm databases and Herdr
+`state` holds the owner home, settings, memory, broker and Herdr
 state. `workspace` holds project files. Both run as UID 1000; the file credential
 broker writes mode 0600. Do not share these volumes between owners or mount a
 host home/Docker socket into a worker. The Docker host administrator can access
@@ -125,7 +123,7 @@ node scripts/smoke-hosted.mjs
 
 The smoke creates and removes two isolated Compose deployments. A real Claude
 process in Herdr executes a file tool under canned, local model responses after
-an assignment through Clankie's MCP/Swarm path. The captain also completes a
+a native hire through Clankie's MCP path. The captain also completes a
 conversation through its compiled model client, then hires a real pi worker with
 `hire_agent`; the seat must carry Herdr's pi session and the worker completes a
 turn. It checks non-root execution,

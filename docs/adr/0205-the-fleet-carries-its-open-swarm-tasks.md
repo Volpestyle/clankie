@@ -1,9 +1,6 @@
 # ADR 0205: The fleet carries its open Swarm tasks
 
-Status: proposed (2026-09-30), for James to accept with the app's bulletin
-board. Extends [ADR 0150](0150-the-fleet-is-a-live-cursor.md) and
-[ADR 0163](0163-the-fleet-carries-its-own-edges.md) without a new route: the
-fleet snapshot gains one optional field.
+Status: superseded by [ADR 0213](0213-clankie-retires-swarm.md).
 
 ## Context
 
