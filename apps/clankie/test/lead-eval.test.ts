@@ -277,6 +277,10 @@ it("grades through the network-off sandbox with fixed argv and retained provenan
   await expect(gradeCandidate(output)).rejects.toThrow("credential-free home");
   expect(sandbox).not.toHaveBeenCalled();
   rmSync(join(output, "home/owner-secret"));
+  writeFileSync(join(output, "worktree/untracked-source.ts"), "fixture");
+  await expect(gradeCandidate(output)).rejects.toThrow("Untracked source changed");
+  expect(sandbox).not.toHaveBeenCalled();
+  rmSync(join(output, "worktree/untracked-source.ts"));
   const result = await gradeCandidate(output);
   expect(result).toMatchObject({
     status: "passed",
@@ -298,7 +302,7 @@ it("grades through the network-off sandbox with fixed argv and retained provenan
       ],
     }),
   );
-  expect(sandbox.mock.calls[0][0].env).not.toHaveProperty("PATH");
+  expect(sandbox.mock.calls[0]![0].env).not.toHaveProperty("PATH");
   expect(JSON.parse(readFileSync(join(output, "grading-result.json"), "utf8"))).toMatchObject({
     status: "passed",
   });

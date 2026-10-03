@@ -400,6 +400,9 @@ export async function gradeCandidate(directory) {
     throw Error("Not a prepared candidate");
   verifyTask(task);
   const local = (...args) => command("/usr/bin/git", args, workspace);
+  const untracked = local("ls-files", "--others", "--directory", "--no-empty-directory", "-z").toString().split("\0").filter(Boolean);
+  if (untracked.some((path) => path !== "candidate.patch" && !/(^|\/)node_modules\/$/.test(path)))
+    throw Error("Untracked source changed after preparation");
   if (
     receipt.baseCommit !== task.baseCommit ||
     receipt.sourceTree !== task.baseTree ||
