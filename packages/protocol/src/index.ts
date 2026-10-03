@@ -1,3 +1,5 @@
+import { DeliveryStageSchema } from "./delivery.ts";
+export * from "./delivery.ts";
 import {
   OperatorGoalSchema,
   OperatorWorkAssignmentSchema,
@@ -1221,6 +1223,7 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("spawned"),
+      deliveryStage: DeliveryStageSchema.optional(),
       seat: OperatorFleetSeatSchema,
       control: SeatControlModeSchema.optional(),
       skills: z
@@ -1238,6 +1241,7 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("failed"),
+      deliveryStage: DeliveryStageSchema.optional(),
       /** `at_capacity`: a hosted body already runs as many hired agents as its plan allows (VUH-1388). */
       reason: z.enum([
         "unknown_directory",
@@ -1886,6 +1890,7 @@ export const OperatorConversationTurnAcceptedSchema = z
   .object({
     schemaVersion: z.literal(1),
     status: z.literal("accepted"),
+    deliveryStage: DeliveryStageSchema.optional(),
     conversationId: OperatorConversationIdSchema,
     runId: OperatorConversationRunIdSchema,
     revision: z.number().int().nonnegative(),
@@ -1919,6 +1924,7 @@ export const OperatorConversationSeatOfflineSchema = z
   .object({
     schemaVersion: z.literal(1),
     status: z.literal("seat_offline"),
+    deliveryStage: DeliveryStageSchema.optional(),
     conversationId: OperatorConversationIdSchema,
     /** Present for a legacy seat-scoped conversation. */
     seatId: OperatorConversationEventRefSchema.optional(),
@@ -4014,6 +4020,7 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
   z
     .object({
       state: z.literal("settled"),
+      deliveryStage: DeliveryStageSchema.optional(),
       captainSessionId: z.string().min(1),
       turnId: z.string().min(1),
       response: z.string().trim().min(1).max(16_384),
@@ -4024,6 +4031,7 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
   z
     .object({
       state: z.literal("silent"),
+      deliveryStage: DeliveryStageSchema.optional(),
       captainSessionId: z.string().min(1),
       turnId: z.string().min(1),
     })
@@ -4038,6 +4046,7 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
   z
     .object({
       state: z.literal("absorbed"),
+      deliveryStage: DeliveryStageSchema.optional(),
       /** The delivery whose Discord reply also answers this message. */
       replyDeliveryId: z.string().min(1).optional(),
       captainSessionId: z.string().min(1),
@@ -4047,6 +4056,7 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
   z
     .object({
       state: z.literal("waiting_user"),
+      deliveryStage: DeliveryStageSchema.optional(),
       captainSessionId: z.string().min(1),
       turnId: z.string().min(1),
       prompt: z.string().trim().min(1).max(16_384),
@@ -4056,6 +4066,7 @@ export const CaptainChannelTurnResultSchema = z.discriminatedUnion("state", [
   z
     .object({
       state: z.literal("failed"),
+      deliveryStage: DeliveryStageSchema.optional(),
       captainSessionId: z.string().min(1).optional(),
       turnId: z.string().min(1).optional(),
       code: z.string().min(1).max(128),
