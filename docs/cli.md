@@ -1081,8 +1081,8 @@ Inspect who holds Clankie's Discord mouth, voice/Go Live, browser, or play body:
 
 ```sh
 clankie body status
-clankie body request '{"action":"queue","resource":"browser","conversationId":"CONVERSATION_ID","text":"Notify me when the browser is free","ttlMs":300000}'
-clankie body request '{"action":"ask","resource":"voice","conversationId":"CONVERSATION_ID","text":"Can you finish this voice stay?","ttlMs":300000}'
+clankie body request '{"action":"queue","resource":"browser","conversationId":"CONVERSATION_ID","request":"Notify me when the browser is free","ttlMs":300000}'
+clankie body request '{"action":"ask","resource":"voice","conversationId":"CONVERSATION_ID","request":"Can you finish this voice stay?","ttlMs":300000}'
 ```
 
 `GET /v1/body-leases` returns `{leases:[...]}` with resource, owning stable

@@ -2398,6 +2398,48 @@ paths:
         "404":
           description: Unknown
 
+  /v1/body-leases:
+    get:
+      tags: [Captain]
+      operationId: getBodyLeases
+      summary: Conversation ownership of Clankie's body resources
+      description: Operator or active paired device observe grant. Read-only public projection; no incarnation, actor, room text or request content.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Public body lease status
+          content:
+            application/json:
+              example:
+                leases:
+                  - resource: browser
+                    conversationId: conversation-1
+                    state: active
+                    expiresAt: 1791000000000
+        "403":
+          description: Observe authority required
+    post:
+      tags: [Captain]
+      operationId: requestBodyLease
+      summary: Explicitly acquire, renew, release, queue, ask or recover a body resource
+      description: Strict BodyLeaseRequest protocol union. Operator bound to a selected runnable conversation. Renew/release require the acquisition incarnation. Ordinary release is owner-only and confirms termination; explicit recover uses the current private host claim under operator authority. Queue/ask are bounded notifications and never run body effects.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              action: queue
+              resource: browser
+              conversationId: conversation-1
+              request: Notify me when the browser is free
+              ttlMs: 300000
+      responses:
+        "200":
+          description: Typed acquired, renewed, released, queued or asked result
+        "409":
+          description: Typed busy with public holder and queue/ask choices, or rejected reason; no silent takeover
+
   /v1/browser/harnesses:
     get:
       tags: [Browser]
@@ -2446,8 +2488,14 @@ paths:
     post:
       tags: [Browser]
       operationId: postBrowserCall
+      parameters:
+        - in: header
+          name: x-clankie-conversation-id
+          required: true
+          schema: { type: string }
+          description: Exact selected runnable operator conversation
       summary: Call a browser tool
-      description: Calls one Browser Use Pi tool. Native JavaScript requires operator authentication; captain bearers may use browser-only operations.
+      description: Calls one Browser Use Pi tool under the selected operator conversation and existing machine authority. Direct captain requests without a host-admitted conversation binding are refused.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       requestBody:
         required: true
