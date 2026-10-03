@@ -191,7 +191,12 @@ export async function readAgentSession(
     const page = await readAfter(host, file, cursor, options.channelPrompts === true);
     if (page !== undefined) return page;
   }
-  const page = await readTail(host, file, options.tail ?? AGENT_SESSION_TAIL_DEFAULT, options.channelPrompts === true);
+  const page = await readTail(
+    host,
+    file,
+    options.tail ?? AGENT_SESSION_TAIL_DEFAULT,
+    options.channelPrompts === true,
+  );
   return cursor === undefined ? page : { ...page, reset: true };
 }
 
@@ -269,7 +274,8 @@ async function readTail(
     // Past the start of the file, the first line is almost always cut mid-record.
     const start = from === 0 ? 0 : bytes.indexOf(0x0a) + 1;
     const end = bytes.lastIndexOf(0x0a) + 1;
-    const entries = (from === 0 || start > 0) && end > start ? parse(file, bytes.subarray(start, end), channelPrompts) : [];
+    const entries =
+      (from === 0 || start > 0) && end > start ? parse(file, bytes.subarray(start, end), channelPrompts) : [];
     const exhausted = from === 0 || window >= MAX_WINDOW_BYTES;
     if (entries.length >= tail || exhausted) {
       return {
