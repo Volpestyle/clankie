@@ -1,10 +1,16 @@
 # ADR 0211: A delivery says how far it got
 
-Status: proposed (2026-10-02), for James to accept;
+Status: accepted by James (2026-10-03), with the amendments below;
 [VUH-1521](https://linear.app/vuhlp/issue/VUH-1521) tracks it. Applies
 [ADR 0207](0207-work-records-and-native-agent-delivery.md) and
 [ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md). Prompted by
 the external architecture spec's receipt ladder (review of 2026-10-02).
+
+James accepted the ladder with three amendments: remove the retired Swarm
+mapping ([ADR 0213](0213-clankie-retires-swarm.md)); reconcile an `uncertain`
+delivery before any retry; and treat a native queue acknowledgment as
+`consumed`, without claiming the model has seen the message. Native mechanism
+detail (`queued`, `started`, `steered`) remains alongside the stage.
 
 ## Context
 
@@ -16,7 +22,6 @@ reports its result in its own words:
 | Head seat outbox (ADR 0152)          | `delivered`, `replied`, `unconfirmed`, `unbound`, `aborted`                         |
 | Fleet seat mailbox (ADR 0161)        | `delivered` (`queued`/`started`/`steered`), `unconfirmed`, `undelivered`, `offline` |
 | Harness seat control (`agent-hosts`) | `accepted` (`queued`/`started`/`steered`), `released`, `offline`, `unconfirmed`     |
-| Swarm leased inbox (ADR 0180)        | pending, leased, acknowledged, expired with a reason, dead-lettered                 |
 | Discord channel turn (ADR 0177)      | `pending`, `settled`, `silent`, `absorbed`, `waiting_user`, `failed`                |
 
 The same word means different things. The head outbox says `delivered` once
@@ -34,12 +39,12 @@ Every delivery result that leaves its mechanism, whether in a tool result, an
 API response, the fleet or the app, reports one stage from a shared ladder.
 The mechanism's own detail rides alongside; it does not replace the stage.
 
-| Stage       | Means                                                                                       | Does not mean                    |
-| ----------- | ------------------------------------------------------------------------------------------- | -------------------------------- |
-| `stored`    | Clankie durably accepted it for delivery                                                    | Anyone is reachable              |
-| `delivered` | It reached the recipient's channel, bridge or inbox                                         | The harness or model has seen it |
-| `consumed`  | The harness acknowledged it: queued, started or steered a turn, or acked a leased envelope  | The work is done                 |
-| `responded` | A correlated reply or turn outcome exists (including a chosen silence or an absorbing turn) | An external effect succeeded     |
+| Stage       | Means                                                                                       | Does not mean                             |
+| ----------- | ------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `stored`    | Clankie durably accepted it for delivery                                                    | Anyone is reachable                       |
+| `delivered` | It reached the recipient's channel, bridge or inbox                                         | The harness or model has seen it          |
+| `consumed`  | The harness acknowledged it: queued, started or steered a turn                              | The model has seen it or the work is done |
+| `responded` | A correlated reply or turn outcome exists (including a chosen silence or an absorbing turn) | An external effect succeeded              |
 
 And the stops short of the ladder:
 
@@ -57,7 +62,6 @@ flowchart LR
   subgraph Mechanisms
     HO["head outbox<br/>delivered · replied · unconfirmed · unbound · aborted"]
     FS["fleet mailbox / agent-hosts<br/>accepted|delivered(queued·started·steered)<br/>unconfirmed · released|undelivered|offline"]
-    SW["Swarm inbox<br/>pending · leased · acked · expired · dead-lettered"]
     DC["Discord channel turn<br/>pending · settled · silent · absorbed · waiting_user · failed"]
   end
   subgraph Ladder
@@ -75,10 +79,6 @@ flowchart LR
   FS -->|queued · started · steered| consumed
   FS -->|unconfirmed| uncertain
   FS -->|released · undelivered · offline| unavailable
-  SW -->|pending| stored
-  SW -->|leased| delivered
-  SW -->|acked| consumed
-  SW -->|expired · dead-lettered| expired
   DC -->|pending| stored
   DC -->|settled · silent · absorbed| responded
   DC -->|waiting_user| consumed
@@ -90,6 +90,12 @@ decision; the question it raises is its own message. A Discord `failed` turn
 maps to `rejected` only for a refusal; an interrupted or stalled turn maps to
 `expired`. The mapping lives once in `@clankie/protocol`, beside the existing
 types, so each mechanism keeps its precise internal vocabulary.
+
+A native queue acknowledgment is `consumed` even when an active turn or goal
+keeps the message pending. Report the `queued` detail and that delay; it does
+not establish that the model has read the message. An `uncertain` result must
+be reconciled before any retry, including an explicit retry, so a missing
+receipt never creates a duplicate turn.
 
 ## Options weighed
 
@@ -109,7 +115,7 @@ types, so each mechanism keeps its precise internal vocabulary.
 
 - A tool result or app badge can say "reached the pane, not yet consumed"
   truthfully, on any path.
-- `uncertain` is the one stage that blocks an automatic retry everywhere,
+- `uncertain` blocks every retry until reconciled,
   which is how ADR 0207's rule becomes checkable in tests.
 - `consumed` is never presented as task progress or completion; work state
   stays with the repo tracker (ADR 0191).
