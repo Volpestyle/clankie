@@ -13,7 +13,8 @@ export async function prepareWorkerSkill(workerRoot) {
   const codexVersion = JSON.parse(
     await readFile(join(workerRoot, ".codex-plugin/plugin.json"), "utf8"),
   ).version;
-  if (version !== codexVersion) throw new Error("Worker plugin versions differ; rebuild both packages");
+  if (typeof version !== "string" || version.length === 0 || version !== codexVersion)
+    throw new Error("Worker plugin versions differ or are missing; rebuild both packages");
   const hash = (text) => createHash("sha256").update(text).digest("hex");
   if (
     await Promise.all([

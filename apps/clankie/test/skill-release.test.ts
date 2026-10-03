@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { cp, mkdtemp, readdir, readFile, rm, writeFile, lstat, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,6 +64,12 @@ it("assembles only selected skills in all release projections, with no checkout 
   const worker = join(standalone, "worker");
   await cp(join(release, "integrations/claude-plugin/worker"), worker, { recursive: true });
   await expect(prepareWorkerSkill(worker)).resolves.toBeUndefined();
+  const nativePackageCheck = spawnSync(process.execPath, [join(worker, "bin/skill-bundle.mjs")], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  expect(nativePackageCheck.status, nativePackageCheck.stderr).toBe(0);
+
   const profile = join(standalone, ".claude");
   await mkdir(join(profile, "plugins"), { recursive: true });
   await writeFile(
@@ -89,6 +96,11 @@ it("assembles only selected skills in all release projections, with no checkout 
   const metadata = JSON.parse(await readFile(manifest, "utf8"));
   await writeFile(manifest, JSON.stringify({ ...metadata, version: "old" }));
   await expect(prepareWorkerSkill(worker)).rejects.toThrow("versions differ");
+  const claudeManifest = join(worker, ".claude-plugin/plugin.json");
+  const claudeMetadata = JSON.parse(await readFile(claudeManifest, "utf8"));
+  await writeFile(claudeManifest, JSON.stringify({ ...claudeMetadata, version: "old" }));
+  await expect(prepareWorkerSkill(worker)).rejects.toThrow("stale");
+
   const off = bundledSkills(release, { opinionated: false, exclude: [] });
   expect(off.find((skill) => skill.name === "lead")?.included).toBe(false);
   expect(off.find((skill) => skill.name === "herdr")?.included).toBe(true);
