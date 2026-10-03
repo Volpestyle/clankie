@@ -140,7 +140,7 @@ export async function runProjectCommand(
           .map((workspace) => workspace.path),
       );
       for (const saved of current.projects.projects)
-        for (const workspace of saved.workspaces)
+        for (const workspace of [...saved.workspaces, ...saved.worktreeRoots])
           if (
             workspace.machineId === machineId &&
             workspace.platform === project.workspaces[0]!.platform &&

@@ -2674,3 +2674,35 @@ OpenCode and Pi automatic plugin installation remains unsupported and appears
 explicitly in doctor; use their native setup. Restart native harnesses after
 installation. No launcher flags, project approvals, grants or owner credentials
 are changed by linking a plugin.
+
+### Repository-bound linked worktree roots
+
+Enroll a dedicated directory for future linked worktrees of an already approved
+repository with `clankie project add NAME --worktree-root ROOT --repo APPROVED_REPO`.
+`--machine ID --platform windows|posix` selects a registered remote machine;
+the service must observe that machine's real filesystem and Git state. The CLI
+uses the owner API and does not treat a supplied path as filesystem evidence.
+
+The root must exist at its exact canonical path. Filesystem roots, home/repository
+ancestors, aliases, and namespaces overlapping another project are refused.
+`APPROVED_REPO` must exactly match an existing workspace of the same project and
+machine. Enrollment records its canonical Git common directory and grants no tools.
+
+A native agent qualifies only when its actual canonical cwd lies in a real linked
+worktree strictly inside that root. Clankie checks the linked Git admin directory
+under the enrolled repository's `worktrees` metadata, the `.git` backlink, and the
+repository's current `git worktree list`. A plain folder, copied `.git` pointer,
+foreign repository, alias, or changed repository identity does not qualify. Missing
+or invalid roots deny their own matches; unrelated registrations continue working.
+
+Remove an enrollment with `clankie project remove-worktree-root NAME --worktree-root ROOT`
+(and the same remote machine/platform flags if needed). Remove a repo's enrolled
+roots before removing its ordinary workspace approval. Removal does not delete
+worktrees, change repository files, or alter grants.
+
+The owner endpoints are `POST /v1/operator/projects/add-worktree-root`
+(`projectId`, `machineId`, `platform`, `path`, `repoPath`, `expectedRevision`) and
+`POST /v1/operator/projects/remove-worktree-root`
+(`projectId`, `rootId`, `expectedRevision`). Read the current revision from
+`GET /v1/operator/projects`. Both writes recheck owner authority and settings
+immediately before persistence; enrollment also re-observes the native root/repo.

@@ -2092,6 +2092,46 @@ paths:
         "404":
           description: That pane holds no Claude seat with this session
 
+  /v1/operator/projects/add-worktree-root:
+    post:
+      tags: [Operator]
+      operationId: addProjectWorktreeRoot
+      summary: Enroll a repository-bound linked-worktree root
+      description: |
+        Owner only. Requires projectId, machineId, platform, path, repoPath and
+        expectedRevision. The service observes canonical root/repository paths
+        and Git common-directory identity, then rechecks native facts, authority
+        and revision before saving. The repo must exactly match an approved
+        workspace in the project. This confers no tool grant.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Project snapshot and new revision
+        "400":
+          description: Malformed request
+        "403":
+          description: Owner authority required
+        "409":
+          description: Unverified root, namespace conflict, or changed authority/settings
+  /v1/operator/projects/remove-worktree-root:
+    post:
+      tags: [Operator]
+      operationId: removeProjectWorktreeRoot
+      summary: Remove a linked-worktree root enrollment
+      description: |
+        Owner only. Requires projectId, rootId and expectedRevision. Rechecks
+        authority and revision before persistence. Deletes no filesystem content.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Project snapshot and new revision
+        "400":
+          description: Malformed request
+        "403":
+          description: Owner authority required
+        "409":
+          description: Unknown root or changed authority/settings
+
   /v1/memory:
     get:
       tags: [Memory, Operator]

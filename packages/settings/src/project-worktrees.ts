@@ -65,7 +65,9 @@ export function validateProjectWorktreeRoot(
     observed.repoPath === root.repoPath &&
     Object.values(observed).every((path) => canonicalProjectPath(path, root.platform)) &&
     !projectPathContains(root.path, root.repoPath, root.platform) &&
-    !projectPathContains(root.path, observed.homePath, root.platform)
+    !projectPathContains(root.path, observed.homePath, root.platform) &&
+    !projectPathContains(root.path, observed.commonDirectory, root.platform) &&
+    !projectPathContains(observed.commonDirectory, root.path, root.platform)
   );
 }
 

@@ -133,7 +133,14 @@ it("requires ledger membership and the exact linked admin directory and backlink
 });
 it("rejects unsafe root enrollment and cross-project overlaps without granting tools", async () => {
   const f = await fixture();
-  for (const path of ["/", f.repo, f.temporary, f.observation.homePath])
+  for (const path of [
+    "/",
+    f.repo,
+    f.temporary,
+    f.observation.homePath,
+    f.observation.commonDirectory,
+    join(f.observation.commonDirectory, "roots"),
+  ])
     expect(() =>
       addProjectWorktreeRoot(f.before, { ...f.request, path }, { ...f.observation, path }),
     ).toThrow();

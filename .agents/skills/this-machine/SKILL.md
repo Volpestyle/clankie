@@ -210,3 +210,16 @@ The owner's `clankie harness install` asks per local Claude/Codex profile;
 `clankie herdr prepare FLEET_ID` explicitly ships/enables remote profiles.
 Generated/symlinked Codex configuration requires its source-owned setup, never
 TOML appends. OpenCode/Pi setup gaps are reported, not silently called ready.
+
+## Repository-bound worktree roots
+
+An owner may enroll a dedicated root for a repo's future linked worktrees:
+`clankie project add NAME --worktree-root ROOT --repo APPROVED_REPO`.
+The repo must already be an exact approved workspace in that project. Add
+`--machine ID --platform windows|posix` for a registered remote machine.
+The service proves canonical paths and native Git registration; a root is never
+ordinary folder-containment authority. This changes project membership policy,
+not tool grants. Do not run it as a workaround for an unapproved workspace.
+Remove only the enrollment with `clankie project remove-worktree-root NAME
+--worktree-root ROOT` and the same machine/platform flags. Remove root enrollments
+before their repo workspace. Neither command deletes filesystem content.
