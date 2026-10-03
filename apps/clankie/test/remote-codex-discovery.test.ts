@@ -187,6 +187,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
       }),
     });
     expect(catalogReceived).toBe(false);
+    seat.expectTools?.(["linear_get_issue"]);
     const firstTurn = seat.send("first brief");
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(statusReads).toBeGreaterThan(0);

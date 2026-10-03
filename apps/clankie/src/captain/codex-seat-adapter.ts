@@ -232,7 +232,8 @@ export function createCodexSeatAdapter(
           report();
           await reporting;
           await view.guard?.();
-          await view.bound?.(ref);
+          const bound = await view.bound?.(ref);
+          seat.expectTools?.(bound?.expectedToolNames ?? []);
           let initialDispatch = Boolean(launch.brief);
           const control: SeatControl = {
             ref,

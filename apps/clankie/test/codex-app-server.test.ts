@@ -189,6 +189,7 @@ describe("trusted native seat policy", () => {
   it.each([
     {},
     { data: [] },
+    { data: [{ name: "clankie", runtimeStatus: "connected", tools: { message_clankie: {} } }] },
     { data: [{ name: "clankie", runtimeStatus: "starting", tools: { message_clankie: {} } }] },
     {
       data: [
@@ -223,6 +224,7 @@ describe("trusted native seat policy", () => {
       },
     );
     const seat = await f.pending;
+    seat.expectTools?.(["linear_get_issue"]);
     const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
     try {
       await expect(seat.send("first")).rejects.toThrow("no first turn was sent");
@@ -230,6 +232,29 @@ describe("trusted native seat policy", () => {
       expect(f.methods).not.toContain("turn/start");
     } finally {
       clock.mockRestore();
+      await seat.close();
+    }
+  });
+
+  it("permits an explicitly empty project expectation for a generic no-grant hire", async () => {
+    const f = await fixture(
+      {
+        connected: async () => {},
+        beforeTurn: async () => {},
+        audit: async () => {},
+        failed: async () => {},
+      },
+      undefined,
+      {
+        result: { data: [{ name: "clankie", runtimeStatus: "connected", tools: { message_clankie: {} } }] },
+        read: () => {},
+      },
+    );
+    const seat = await f.pending;
+    seat.expectTools?.([]);
+    try {
+      expect(await seat.send("generic brief")).toMatchObject({ turnId: "turn" });
+    } finally {
       await seat.close();
     }
   });

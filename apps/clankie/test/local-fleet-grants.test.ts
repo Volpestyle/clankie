@@ -123,6 +123,11 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
   const issued = await issueResponse.json();
   expect(issued.token).toBeUndefined();
   expect(issued.project).toBe("kh2");
+  expect(await worker.expectedProjectToolNames("kh2")).toEqual(["linear_get_issue"]);
+  expect(await worker.expectedProjectToolNames("ungranted")).toEqual([]);
+  const unavailableCatalog = vi.spyOn(host, "catalog").mockResolvedValueOnce([]);
+  await expect(worker.expectedProjectToolNames("kh2")).rejects.toThrow("project-granted tool is unavailable");
+  unavailableCatalog.mockRestore();
   const initialized = await rpc("w1:p1", "initialize", {
     protocolVersion: "2025-06-18",
     capabilities: {},
@@ -155,6 +160,7 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
     account: { ...account, connectionId: randomUUID() },
   });
   expect(await list()).toEqual([]);
+  await expect(worker.expectedProjectToolNames("kh2")).rejects.toThrow("account changed");
   expect((await call({ id: "A-1" })).isError).toBe(true);
   await credentials.set("linear", { type: "api", key: "provider-secret", account });
   // Membership can disappear after listener admission but before the SDK invokes the tool.
@@ -180,6 +186,7 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
     clientInfo: { name: "test", version: "1" },
   });
   session = reopened.headers.get("mcp-session-id")!;
+  expect(await worker.expectedProjectToolNames("kh2")).toContain("linear_get_issue");
   const originalAccount = host.account.bind(host);
   let bindingChecks = 0;
   const bindingSpy = vi.spyOn(host, "account").mockImplementation(async (...args) => {
@@ -191,6 +198,7 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
   expect((await call({ id: "A-1" })).isError).toBe(true);
   expect(calls).toHaveLength(1);
   bindingSpy.mockRestore();
+  expect(await worker.expectedProjectToolNames("kh2")).toEqual([]);
   expect(await list()).toEqual([]);
   expect((await call({ id: "A-1" })).isError).toBe(true);
   live = false;

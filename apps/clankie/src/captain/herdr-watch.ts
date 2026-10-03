@@ -684,6 +684,7 @@ export interface ProjectHirePolicy {
     authority?: ConversationAuthority,
   ): Promise<string | undefined>;
   proof?(fleet: string, pane: string): Promise<ProjectHireProcessProof | undefined>;
+  tools?(projectId: string): Promise<readonly string[]>;
 }
 
 export class HerdrWatchStore implements HerdrWatchPort {
@@ -1741,7 +1742,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
           {
             paneId,
             name: subject,
-            ...(authority === undefined ? {} : { guard: () => assertConversationAuthority(authority) }),
+            guard: async () => {
+              if (authority !== undefined) await assertConversationAuthority(authority);
+              await this.admitProjectLaunch(input);
+            },
             bound: async (ref) => {
               if (ref.paneId !== paneId || ref.harness !== input.harness || !ref.sessionId)
                 throw new Error("Native hire binding does not match the allocated pane and harness");
@@ -1756,11 +1760,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
                 nativeSessionId(current) === ref.sessionId;
               if (!matches(agent)) throw new Error("Native hire binding does not match the live session");
               await this.observeHireIdentity(receiptKey, agent, input, authority, true);
+              const project = this.projectContexts.get(input)?.projectId;
+              if (project && !this.projectPolicy?.tools)
+                throw new Error("Project catalog expectation is unavailable; no brief was sent");
+              const expectedToolNames = project ? await this.projectPolicy!.tools!(project) : [];
               const final = await this.runner.get(paneId);
               if (!matches(final) || final.terminalId !== agent.terminalId)
                 throw new Error("Native hire changed while binding; no brief was sent");
               if (authority !== undefined) await assertConversationAuthority(authority);
               await this.admitProjectLaunch(input);
+              return { expectedToolNames };
             },
             run: async (argv) => {
               if (authority !== undefined) await assertConversationAuthority(authority);

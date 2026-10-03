@@ -83,7 +83,7 @@ async function fixture() {
 
 it("hires, messages, and waits for Codex protocol completion even while the native view looks idle", async () => {
   const f = await fixture();
-  expect(f.send).toHaveBeenCalledWith("first brief");
+  expect(f.send).toHaveBeenCalledWith("first brief", expect.any(Function));
   expect(f.startAgent).toHaveBeenCalledWith(
     expect.objectContaining({
       kind: "codex",

@@ -75,6 +75,7 @@ async function fixture() {
     runner,
     projectHirePolicy: {
       settings: async () => projectSettings,
+      tools: async () => ["linear_get_issue"],
       project: async () => "game",
       proof: vi.fn(async (fleet: string, pane: string) =>
         fleet === "default" && pane === "p1" ? proof : undefined,
@@ -94,6 +95,8 @@ describe("project hiring", () => {
     "replacement",
     "retarget",
     "missing-proof",
+    "readiness-retarget",
+    "readiness-role",
   ])(
     "records project assignment before the first brief only for a current bound native seat: %s",
     async (mode) => {
@@ -115,11 +118,15 @@ describe("project hiring", () => {
             ...(mode === "wrong-session" ? { sessionId: "victim" } : {}),
           };
           try {
-            await view.bound?.(claimed);
+            const bound = await view.bound?.(claimed);
+            expect(bound).toEqual({ expectedToolNames: ["linear_get_issue"] });
             expect(store.projectHireAssignment("default", "p1", proof)).toMatchObject({
               state: "assigned",
               projectId: "game",
             });
+            if (mode === "readiness-retarget") f.options.projectHirePolicy.project = async () => "foreign";
+            if (mode === "readiness-role") f.projectSettings.projects[0]!.roles[0]!.model = "changed";
+            await view.guard?.();
             brief();
             return { outcome: "started", control: { ref } as SeatControl };
           } catch (error) {

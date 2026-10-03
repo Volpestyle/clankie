@@ -808,6 +808,7 @@ const captain = createCaptain(
   },
   {
     projectHireIdentity: projectProcessObserver,
+    projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),
     projectHireWorkspace: createProjectWorkspaceResolver({
       settings: async () => (await settingsStore.load()).projects,
       observe: projectProcessObserver,
@@ -889,6 +890,20 @@ const localFleet = new LocalFleetLink({
     privateSeat: async (chain, pane, binding) => localCodexSeats.allows(chain, pane, binding),
   }),
 });
+const workerMcp = new WorkerMcp({
+  directory: join(stateRoot, "worker-grants"),
+  credentials: operatorCredentialStore,
+  host: mcpHost,
+  projects: async () => (await settingsStore.load()).projects,
+  membership: createProjectMembershipResolver({
+    settings: async () => (await settingsStore.load()).projects,
+    hire: (proof) => captain.lookupProjectHire(proof),
+    remoteCanonical,
+    worktreeRoot: projectWorktreeRoot,
+    gitWorktree: projectGitWorktree,
+  }),
+});
+
 const clankie = await createClankieApp({
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
@@ -950,19 +965,7 @@ const clankie = await createClankieApp({
       }),
   agentSessions,
   workItems,
-  workerMcp: new WorkerMcp({
-    directory: join(stateRoot, "worker-grants"),
-    credentials: operatorCredentialStore,
-    host: mcpHost,
-    projects: async () => (await settingsStore.load()).projects,
-    membership: createProjectMembershipResolver({
-      settings: async () => (await settingsStore.load()).projects,
-      hire: (proof) => captain.lookupProjectHire(proof),
-      remoteCanonical,
-      worktreeRoot: projectWorktreeRoot,
-      gitWorktree: projectGitWorktree,
-    }),
-  }),
+  workerMcp,
   captain,
   fleetLinks,
   inspectFleetHarnesses: async (id: string) => {

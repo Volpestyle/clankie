@@ -316,6 +316,29 @@ export class WorkerMcp {
     });
   }
 
+  /** Read-only startup expectation. This never authorizes a request or creates an identity. */
+  async expectedProjectToolNames(projectId: string): Promise<readonly string[]> {
+    const records = (await this.list()).filter(
+      (record) =>
+        record.fleet === undefined &&
+        record.project === projectId &&
+        record.revokedAt === undefined &&
+        record.grant.principalId === `project:${projectId}` &&
+        record.grant.missionId === `project:${projectId}`,
+    );
+    if (!records.length) return [];
+    for (const record of records) await this.checkBinding(record);
+    const catalog = await this.options.host.catalog("operator");
+    const names = new Set<string>();
+    for (const record of records)
+      for (const rule of record.tools) {
+        const tool = catalog.find((tool) => tool.server === record.server && tool.name === rule.name);
+        if (!tool) throw new Error("A project-granted tool is unavailable in the current catalog");
+        names.add(tool.qualifiedName);
+      }
+    return [...names].sort();
+  }
+
   private async projectAuthorization(identity: LocalFleetIdentity): Promise<WorkerAuthorization> {
     const membership = await this.options.membership?.(identity);
     if (!membership) throw new Error("This agent does not have a verified project.");

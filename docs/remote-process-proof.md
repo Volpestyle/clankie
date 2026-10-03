@@ -117,7 +117,14 @@ callback checks the exact pane, harness, session, fresh process proof, project
 admission and allocation before recording project membership. It repeats host
 identity and admission checks after that observation. The first brief then waits
 at most 20 seconds for thread-specific `mcpServerStatus/list` to report Clankie
-connected with its catalog. A missing or failed catalog prevents the first turn;
+connected with every tool expected from the assigned project's current grants,
+plus the worker bridge's `message_clankie` tool. The service reads expected names
+from its grant records and account-bound provider catalog; this produces no
+request identity or grant. A connected fallback-only catalog cannot satisfy a
+project with granted tools. Generic hires and projects without grants explicitly
+expect only the bridge tool. Missing granted catalog entries or unavailable
+account bindings fail startup. Project admission is rechecked after readiness,
+immediately before dispatch. A missing or failed catalog prevents the first turn;
 this readiness state never substitutes for fresh per-tool authorization.
 
 The atomic launch inherits the remote machine's environment, including its

@@ -554,6 +554,7 @@ export interface CaptainOptions {
     fleet: string,
     pane: string,
   ) => Promise<ProjectHireProcessProof | undefined>;
+  readonly projectHireTools?: (projectId: string) => Promise<readonly string[]>;
   readonly projectHireWorkspace?: (proof: ProjectHireProcessProof) => Promise<string | undefined>;
   readonly nativeHerdrRunner?: HerdrWatchRunner;
   readonly nativeCensusRunner?: HerdrCensusRunner;
@@ -1013,6 +1014,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     validateOwner: validateConversationOwner,
     projectHirePolicy: {
       settings: async () => (await settings()).projects,
+      ...(options.projectHireTools === undefined ? {} : { tools: options.projectHireTools }),
       ...(options.projectHireIdentity === undefined ? {} : { proof: options.projectHireIdentity }),
       project: async (input, projects, authority) => {
         let source: string | undefined;

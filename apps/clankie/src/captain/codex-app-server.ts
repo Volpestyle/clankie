@@ -135,6 +135,8 @@ export interface CodexAppServerSeat {
     message: string,
     guard?: () => Promise<void>,
   ): Promise<{ turnId: string; state: "started" | "steered" }>;
+  /** Controller-owned catalog expectation; never an authorization credential. */
+  expectTools?(names: readonly string[]): void;
   interrupt(): Promise<boolean>;
   close(): Promise<void>;
 }
@@ -528,6 +530,7 @@ export async function startCodexAppServerSeat(options: {
     };
     if (options.resumeThreadId) await subscribe();
     let catalogReady = !server.waitForClankieCatalog;
+    let expectedTools: readonly string[] = ["message_clankie"];
     const waitForCatalog = async () => {
       if (catalogReady) return;
       const deadline = Date.now() + 20_000;
@@ -550,7 +553,7 @@ export async function startCodexAppServerSeat(options: {
             matches.length === 1 &&
             matches[0]!.runtimeStatus === "connected" &&
             matches[0]!.toolsError == null &&
-            Object.hasOwn(record(matches[0]!.tools), "message_clankie")
+            expectedTools.every((name) => Object.hasOwn(record(matches[0]!.tools), name))
           ) {
             catalogReady = true;
             return;
@@ -566,6 +569,10 @@ export async function startCodexAppServerSeat(options: {
     };
     let sending: Promise<unknown> = Promise.resolve();
     return {
+      expectTools(names) {
+        expectedTools = [...new Set(["message_clankie", ...names])];
+        catalogReady = !server.waitForClankieCatalog;
+      },
       threadId,
       ...(typeof thread.path === "string" ? { transcriptPath: thread.path } : {}),
       viewArgs,

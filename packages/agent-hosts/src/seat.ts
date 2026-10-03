@@ -47,7 +47,7 @@ export interface SeatView {
   /** Host authority is rechecked after readiness/lookup awaits and immediately before native launch or initial brief dispatch. */
   readonly guard?: () => Promise<void>;
   /** Trusted controller callback after native identity is reported, before the first brief. */
-  readonly bound?: (ref: SeatRef) => Promise<void>;
+  readonly bound?: (ref: SeatRef) => Promise<void | { readonly expectedToolNames: readonly string[] }>;
   /** Run one command in the pane's shell. The argv is quoted for the shell. */
   run(argv: readonly string[]): Promise<void>;
   /**
