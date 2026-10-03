@@ -143,7 +143,7 @@ describe("clankie-worker claude plugin", () => {
       `#!/bin/sh\nprintf '%s|%s|%s' "$*" "$CLANKIE_SEAT_PARENT_ARGV" "$HERDR_PANE_ID"\n`,
       { mode: 0o755 },
     );
-    const served = await run({ PATH: `${bin}:${process.env.PATH ?? ""}`, HERDR_PANE_ID: "w1:p1" });
+    const served = await run({ HOME: bin, PATH: `${bin}:${process.env.PATH ?? ""}`, HERDR_PANE_ID: "w1:p1" });
     expect(served.code).toBe(0);
     const [args, parent, pane] = served.stdout.split("|");
     expect(args).toBe("mcp --seat");
@@ -159,7 +159,7 @@ describe("clankie-worker claude plugin", () => {
     const call = (env: NodeJS.ProcessEnv) =>
       new Promise<string>((resolve) => {
         const child = spawn(process.execPath, [hook], {
-          env: { PATH: `${bin}:${process.env.PATH ?? ""}`, ...env },
+          env: { HOME: bin, PATH: `${bin}:${process.env.PATH ?? ""}`, ...env },
         });
         let stdout = "";
         child.stdout.on("data", (chunk: Buffer) => (stdout += String(chunk)));

@@ -1,0 +1,267 @@
+{
+  "schemaVersion": 1,
+  "status": "partial-native-execution-blocked",
+  "historical": [
+    {
+      "id": "roles-subagents-labels",
+      "kind": "historical",
+      "title": "Give agents a role, seats their subagents, and work items labels",
+      "sourceCommit": "1b779a1157beed91bd8adf013f08c799eddf02b5",
+      "baseCommit": "bbb1b551ee230b1f2cd4fe4c9c9b7167e7c68e1b",
+      "baseTree": "f9adee7eab83281bd4a8bd06c9667afadca23880",
+      "sourceTree": "a38d7a93569e3e52b507c0ddaab6f95c271e43d8",
+      "prompt": "Give agents roles, surface their native Claude subagents, and filter work items by labels. Add built-in planner/designer/builder/tester/reviewer/researcher roles to persisted personas, protocol, tools and CLI/TUI; preserve existing personas without roles. Read native Claude foreground/background subagent status from local transcripts without claiming remote visibility. Carry labels through file/GitHub/Linear work backends and case-insensitive list filtering. Keep existing host authorization and hosted projection boundaries. Update docs and focused tests.",
+      "promptSha256": "35c8d8f730b6dac8605d67f4d6e403e5d18fb670bfe285d3e5644366eef83fcb",
+      "timeBudgetSeconds": 3600,
+      "parallelWork": [
+        "apps/clankie",
+        "apps/relay",
+        "apps/tui",
+        "packages/agent-transcript",
+        "packages/protocol",
+        "packages/work-items"
+      ],
+      "graders": [
+        {
+          "path": "apps/clankie/test/herdr-seat.test.ts",
+          "blob": "30296bb1e3d0eeba38ec90be66d11387cca29a66",
+          "sha256": "d95f647d15ab075f9792da338aa5139077ca6427a2991ba8348839520e6b0932"
+        },
+        {
+          "path": "apps/clankie/test/persona-role.test.ts",
+          "blob": "58a50c2152385607a758157b90aa87ed0a735358",
+          "sha256": "85dfcd2ee40cc7fbfce607b49fd17cc17e6d70b3ba23c8f3ba94640c35196603"
+        },
+        {
+          "path": "apps/clankie/test/personas.test.ts",
+          "blob": "a783e1ad287fa808ebb141c9cee0f882306935e5",
+          "sha256": "240aab10ee433e4dab8235fece6aea68d66ca15483a45e0847d76b093b834770"
+        },
+        {
+          "path": "apps/clankie/test/seat-subagents.test.ts",
+          "blob": "c4bc93e8e6470aad9abb71029725ef0a283a96d4",
+          "sha256": "97012a0d119054557f14316a7dcfe6cd3e0c216d8facad7f117e4ffa13a468ff"
+        },
+        {
+          "path": "apps/clankie/test/work-items.test.ts",
+          "blob": "cfd6e34cb376d4d50f7cb28e086e08254c451176",
+          "sha256": "7608c57228157bc16dab54347c3b3e3f5cc58af182cc5351ed6e30ab38a73333"
+        },
+        {
+          "path": "apps/tui/test/agents-command.test.ts",
+          "blob": "6a62eaa1efb7407e87eca0e065a758847e419a04",
+          "sha256": "d3c22d785872d0a519cbd4ea52750fd7a2e613db508b3de247ad8cfffb79aaca"
+        },
+        {
+          "path": "packages/protocol/test/hosted-operator.test.ts",
+          "blob": "d6bfd36a22abb3aca7ecaf2a6f0f2b62264d1806",
+          "sha256": "d6747ab320d62dd38d7ece15c7e896051307e0f258af2a72381aab1f808de72e"
+        },
+        {
+          "path": "packages/protocol/test/protocol.test.ts",
+          "blob": "4325a3741cb1bb959b7d5fc74881782b50f3b052",
+          "sha256": "e38ca5bcd2ec7b9f9efe48cf14fda6876850a3fa7316a9bc88ab5d0b584981d2"
+        },
+        {
+          "path": "packages/work-items/test/backends.test.ts",
+          "blob": "fe3c9dcaaaedcc2eec45691a4e295700e96f4137",
+          "sha256": "2cd770dabdb54fc872af03c4eb62c74b277e00b49ff2b8c62fe7eac960e646fd"
+        }
+      ],
+      "provenance": "Unmodified complete test files changed by the landed fix; pre-fix tests at these paths are withheld too. Historical replay, not a novel benchmark."
+    },
+    {
+      "id": "owner-attachments",
+      "kind": "historical",
+      "title": "Let the owner attach images and video for Clankie and agents",
+      "sourceCommit": "6d1f7b13c0b9387cb072c0b97983b5a670d673f6",
+      "baseCommit": "2e6cf7a7f5a952bd2c82cea6e142eced6569e8d6",
+      "baseTree": "50ab141e8211c467f7994ef275a2232f8f52462f",
+      "sourceTree": "7e8396f105786f9c8e70615dbf8c754c9dd1d2e8",
+      "prompt": "Allow the owner to attach images and videos through the conversation API and clankie send --attach. Support chunked uploads that fit the relay body limit, verify length/hash and media signatures, retain files with conversation artifacts, and reject cross-conversation or unsafe paths. Feed images/video frames to Clankie and materialize local seat attachments under a git-ignored workspace inbox. Preserve explicit undelivered outcomes for unsupported remote seats. Update protocol and CLI plus tests and docs.",
+      "promptSha256": "51ff8e061831657f586a225e9afe534b43d9fafcd9b3fbaa1cf613c1f1377d5b",
+      "timeBudgetSeconds": 3600,
+      "parallelWork": ["apps/clankie", "apps/tui", "packages/protocol"],
+      "graders": [
+        {
+          "path": "apps/clankie/test/owner-attachments.test.ts",
+          "blob": "bdfc2f05b1b88aa5821b96de1001435dddd9ca58",
+          "sha256": "4a4eeb2014d43ffa551134690391f6d026852cea226cef42d4696fa14eaa0406"
+        },
+        {
+          "path": "apps/tui/test/send-attach.test.ts",
+          "blob": "fbf88f49580bbfe2a38bda63d1cc9308b9d0994e",
+          "sha256": "7c1bf4e698f1b811879262448b5897ba4c6680d66d78587bd9cdecf7dba12e34"
+        }
+      ],
+      "provenance": "Unmodified complete test files changed by the landed fix; pre-fix tests at these paths are withheld too. Historical replay, not a novel benchmark."
+    },
+    {
+      "id": "async-discord-text",
+      "kind": "historical",
+      "title": "Accept long Discord text turns immediately and poll their result",
+      "sourceCommit": "aa015e0eba4e5f1487ada359fedbaa62069b27dc",
+      "baseCommit": "d10d11a7a9e7e6828bfc9eba3a42cc975be7a878",
+      "baseTree": "198fd75947cf1cf89de44fc06a105d5b7fbcc860",
+      "sourceTree": "759c94de19a9bbbb519839868daed3fbfb890a0b",
+      "prompt": "Make long Discord text turns return promptly and let the bridge poll the result. Preserve idempotent delivery IDs across retries and restarts, return pending/completed/missing outcomes, support the API client and HTTP routes, and ensure progress messages are posted at most once from the durable inbox. Preserve existing synchronous compatibility and permission boundaries. Update OpenAPI and focused tests across service, bridge and API client.",
+      "promptSha256": "58aab1516c99cbecd3d99cb33a123478c7fcff63f838a4dd417f1e56470f6835",
+      "timeBudgetSeconds": 3600,
+      "parallelWork": ["apps/clankie", "apps/discord-bridge", "packages/api-client"],
+      "graders": [
+        {
+          "path": "apps/clankie/test/discord-channel.test.ts",
+          "blob": "0370463a0f048832d0192dc12f8741e857bd3d56",
+          "sha256": "4e86515dde3ed6cc54184d9178daa640d70215372ba5822bebe9560143e85685"
+        },
+        {
+          "path": "apps/discord-bridge/test/text-inbox.test.ts",
+          "blob": "68793e0538e363924c73e67e97aef47774b22831",
+          "sha256": "6eb3e07d43d9ddbde0a2882e0293026d7f8600bbe28c9be3fdb3be909b524a58"
+        },
+        {
+          "path": "packages/api-client/test/api-client.test.ts",
+          "blob": "71745a56442ad3cca4317d3c2324b0e54799d4db",
+          "sha256": "70e3249375b7811af5e13e4dcdeabca4d79558f7417b609b93f19e15ef86692a"
+        }
+      ],
+      "provenance": "Unmodified complete test files changed by the landed fix; pre-fix tests at these paths are withheld too. Historical replay, not a novel benchmark.",
+      "excludedTests": [
+        {
+          "path": "apps/clankie/test/app-smoke.test.ts",
+          "blob": "5a9d47b12fe07663e293398da4601a1ca754136e",
+          "sha256": "d8fcf09d1f4a4520b60e4724d4755943c769d6e17859b5cb47f09e22619d0c74",
+          "reason": "Unrelated Swarm diagnostics and state_work changes bundled in the same historical commit; not part of async Discord acceptance. Full file fails on the landed snapshot independently of this task."
+        }
+      ]
+    }
+  ],
+  "neutral": [
+    {
+      "id": "html-js-filter",
+      "kind": "terminal-bench",
+      "repository": "https://github.com/harbor-framework/terminal-bench",
+      "tag": "v4.0.0",
+      "commit": "452bf305c6daa62fc59061d22133a7cbc7c1572e",
+      "tree": "f77bc4b71db925fd88587930bfdd2a026645da92",
+      "license": "Apache-2.0",
+      "licenseSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "timeBudgetSeconds": 28800,
+      "files": [
+        {
+          "path": "tasks/html-js-filter/.gitignore",
+          "sha256": "9a8dd8d9b6c3adb8e9e56328df27deef859a3e98fffc9b8133c8b22207c25953"
+        },
+        {
+          "path": "tasks/html-js-filter/README.md",
+          "sha256": "1315dc25109a8f144e973df44e1292c6263abc1a8e175a30e485cb4542bfd9d0"
+        },
+        {
+          "path": "tasks/html-js-filter/environment/Dockerfile",
+          "sha256": "3e5dec7c555b1ace7ebacf0fd57a6575760084e6c47f7c1dfc3064accca72dbb"
+        },
+        {
+          "path": "tasks/html-js-filter/instruction.md",
+          "sha256": "bb76e0fdffe2b3ebf4f458729ab3b3e5a2360f593d24cd06f9235a111dce8a82"
+        },
+        {
+          "path": "tasks/html-js-filter/solution/filter.py",
+          "sha256": "64054b997418122a2c8a0923820c801c9c70c6a3bf8911fb9055c66e902c9197"
+        },
+        {
+          "path": "tasks/html-js-filter/solution/solve.sh",
+          "sha256": "85baf1add88cc40b81eef96a769d2831c6cc9d201760935473b3bd50fb8702b9"
+        },
+        {
+          "path": "tasks/html-js-filter/task.toml",
+          "sha256": "7827b16c102b8d48d09061ce4251b3f1f6ecb4f4e9e4879a3f06b0db095df985"
+        },
+        {
+          "path": "tasks/html-js-filter/tests/Dockerfile",
+          "sha256": "9fa546510278e545727641957b4015f1fa6c64b1ab546ab4bd4805ea42c90298"
+        },
+        {
+          "path": "tasks/html-js-filter/tests/test.sh",
+          "sha256": "558413c04cf97413153770a26007f581098b2e0ea5d082d55eadf84c934fbf1d"
+        },
+        {
+          "path": "tasks/html-js-filter/tests/test_outputs.py",
+          "sha256": "e95d10a2541b328a94181a614cd6319a0f5bf20ecb4946069b7f20c0d81cd699"
+        }
+      ],
+      "status": "source-pinned; container/native-fleet execution unsupported",
+      "notes": "Source inspected only; no task environment downloaded or built. Official separate verifier required. Agent timeout is eight hours, requires separate owner budget decision."
+    },
+    {
+      "id": "photonic-waveguide-routing",
+      "kind": "terminal-bench",
+      "repository": "https://github.com/harbor-framework/terminal-bench",
+      "tag": "v4.0.0",
+      "commit": "452bf305c6daa62fc59061d22133a7cbc7c1572e",
+      "tree": "32e0d0e771cd0db200b02e22a86cab0300ed1e00",
+      "license": "Apache-2.0",
+      "licenseSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "timeBudgetSeconds": 28800,
+      "files": [
+        {
+          "path": "tasks/photonic-waveguide-routing/README.md",
+          "sha256": "4b67704bb5f017a73d1b78f12f0afe56dc407f79f088733b90452c0641f21004"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/environment/Dockerfile",
+          "sha256": "acfbce96479581637576c3694d691607b257521659b43b80cabeea5237479a47"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/environment/check_routing.py",
+          "sha256": "9f6de6977cc225c5dfee1d0cd62039d16dc04c766d3c6d928b6dde4f5d95cce1"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/environment/layout_spec.json",
+          "sha256": "fa9883e144ccbd9105fae275199a859cfc7e7b77e1b8bb5ec83792af574a87b7"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/instruction.md",
+          "sha256": "4e980c5b49b1ce91f92d59e73d1b1b71b526a471c35e0fa0ecfe95b839388cb9"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/solution/solve.py",
+          "sha256": "184ac0bba5baec6121aecdba44dc70e8f82e6603ff992cc96e2306fa21f6fc82"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/solution/solve.sh",
+          "sha256": "ce36919c0a171bd70386f31be8a5b59fdad7c93f15d84dbe4fd0e84ed77f53e5"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/task.toml",
+          "sha256": "b9e17fb3072bb5cf02b98acb2980e891b7a51615ac4dce386771a868d6be3f33"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/tests/Dockerfile",
+          "sha256": "1b3826f0c4cdee5744dad969936ea13a2769e3382a394e7c5fab0c6bae657091"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/tests/render_result.py",
+          "sha256": "9e900fb7b6a6e6b052b8e345be7438d8b310325fb079c5cc4f3b8f795bdb45dc"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/tests/test.sh",
+          "sha256": "5334dfab48287c4c548a6f7f4eaedd5fd992946cd69f5f2f5f85454fdf8cf544"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/tests/test_routing.py",
+          "sha256": "ad96745411ea8d9e9dc6bf754c115d2428ad166d87c89a2b3961b73e05a2c0d3"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/tests/verifier_check_routing.py",
+          "sha256": "b6017513293c6a26c12d9beba3586ec7ec9e89baab9fc217afbea711bc1e0d62"
+        },
+        {
+          "path": "tasks/photonic-waveguide-routing/tests/verifier_layout_spec.json",
+          "sha256": "fa9883e144ccbd9105fae275199a859cfc7e7b77e1b8bb5ec83792af574a87b7"
+        }
+      ],
+      "status": "source-pinned; container/native-fleet execution unsupported",
+      "notes": "Source inspected only; no task environment downloaded or built. Official separate verifier required. Agent timeout is eight hours, requires separate owner budget decision."
+    }
+  ]
+}

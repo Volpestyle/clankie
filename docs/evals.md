@@ -409,3 +409,91 @@ Large campaigns remain on hold. These flags do not enlarge the call budget.
 The three-repetition broad gate preset is deferred; start a newly authorized
 uncertainty with a few relevant cases and one repetition. No campaign or model
 trial was run to validate this implementation; tests use deterministic callbacks.
+
+## Lead replay preparation (VUH-1474)
+
+**Partial implementation; native execution blocked; no lead trials have run.**
+[`lead.mjs`](../scripts/evals/lead.mjs) provides manual planning, isolated source
+preparation, held-out reference grading trees and imported evidence reduction.
+It does not yet launch the native interactive comparison. `run` fails before any
+process, credential read, usage probe or model turn. James's run decision is
+necessary but cannot replace the missing execution integration. No lead-eval
+command is part of `pnpm check`, CI, a timer or a post-reset launch.
+
+The [pinned manifest](../scripts/evals/lead-tasks.json) fixes three cross-package
+historical replays before trials: persona roles/subagents/work labels, owner
+attachments, and asynchronous Discord text. Each records the exact pre-fix
+parent and tree, landed fix/tree, prompt hash and complete landed test blob hashes.
+Both arms receive identical task text and one-hour budgets. Arm order rotates;
+only one-repetition plans are enabled. A three-repetition round and any
+recommendation remain deferred.
+
+```bash
+# Read-only: verify local git objects and print a plan, no credential access.
+node scripts/evals/lead.mjs plan --dry-run
+# Source preparation only. The destination must not exist.
+node scripts/evals/lead.mjs prepare owner-attachments /tmp/lead-attachment-replay 3
+# Separate trusted grader tree; does not execute tests or launch agents.
+node scripts/evals/lead.mjs reference owner-attachments /tmp/lead-attachment-before before
+# Reduce explicitly supplied normalized evidence; never claims live attestation.
+node scripts/evals/lead.mjs collect /tmp/lead-evidence.json
+```
+
+Preparation uses `git archive` of the pinned parent into a fresh repository
+without upstream history or remotes. Selected test files, existing eval scripts
+and historical evidence are withheld. Each worker gets a distinct worktree and
+index. This is a filesystem fixture, **not a security boundary**: a future
+execution adapter must restrict reads/network access so agents cannot inspect
+the source checkout, held-out trees, original commits or live owner state.
+Grader files are extracted from verified git objects into separate reference
+trees. `lead-grader.json` contains the exact narrow Vitest command. Install with
+`pnpm install --frozen-lockfile --prefer-offline --ignore-scripts` there, then run
+that command. The before/after checks validate the historical grader; they are
+not agent trials. Candidate-diff application and sandboxed grading after a live
+attempt remain unimplemented.
+
+The two neutral sources, `html-js-filter` and `photonic-waveguide-routing`, are
+pinned to the official [Terminal-Bench v4.0.0 release](https://github.com/harbor-framework/terminal-bench/releases/tag/v4.0.0)
+commit `452bf305c6daa62fc59061d22133a7cbc7c1572e`, with per-file, tree and Apache-2.0
+license hashes. The source repository was cloned and inspected; container images
+were not built or fetched, and no task was run. Their official agent timeout is
+eight hours and their verifiers use separate environments. These are source pins,
+not locally installed runnable datasets. They are excluded from the historical
+plan until native interactive fleet/container integration and an explicit budget
+decision exist. Do not replace these with an invented dataset/version alias.
+
+The intended comparison is one native interactive Claude Code lead with native
+subagents versus Clankie using the real `hire_agent` path; an optional single-agent
+floor is available in the plan. [ADR 0213](adr/0213-clankie-retires-swarm.md) applies:
+there is no embedded Swarm arm. The current seat-suite fake fleet/headless channel
+simulation cannot stand in for a lead trial.
+
+Remaining native work is specific:
+
+- Start an owned throwaway service and Herdr session/socket, with fake external
+  bodies, explicit account access, restricted filesystem/network access and
+  exact-session native deliveries. Preserve owner drafts and consent; stop on
+  unsupported or uncertain control. Apply the current service to historical task
+  checkouts so historical Swarm code is only task context.
+- Bind every lead/hire/native subagent to its actual session and subscription
+  account, retain full transcripts and discover all descendants throughout the
+  turn. The fleet's `readClaudeSubagents` is a display summary capped at 2 MiB and
+  64 calls; it supplies neither complete usage nor account identity.
+- Wire fresh account-bound five-hour and seven-day snapshots into a continuous
+  guard before dispatch and while agents work. `windowGuard` is a tested pure
+  gate, not a running monitor. Missing, stale, ambiguous or exhausted usage
+  stops; a reset never schedules another attempt. No native usage adapter is
+  connected to it yet.
+- Apply the candidate diff to a trusted isolated grading tree, record first
+  held-out green time, preserve transcripts and review the final integration.
+
+`collect` accepts explicitly supplied normalized session/call evidence. Tokens
+use disjoint input, output, cache-read and cache-write counts (normalize provider
+inclusive totals first); duplicate call IDs are counted once and conflicting
+values or missing agent coverage make the total unknown. It preserves raw window
+snapshots, interventions, diff reviews and a failure taxonomy: conflicting edits,
+shared-index sweeps, lost/duplicated work, idle workers, unsupported/uncertain
+control, unknown usage, budget stops, tests and infrastructure. It labels even
+complete supplied records `imported-unverified`; it cannot prove that the
+inventory is complete or that a native hire actually happened. Missing costs are
+never reported as zero. See [deterministic evidence and gaps](testing/2026-10-03-lead-eval/README.md).
