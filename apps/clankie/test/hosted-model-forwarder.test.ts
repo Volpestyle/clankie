@@ -170,22 +170,32 @@ describe("customer model loopback for hired pi workers (VUH-1373)", () => {
     );
   });
 
-  it("sends a subscription the way its API expects", async () => {
-    await withLoopback(
-      async () => target("anthropic-messages", "sk-ant-oat01-real", "https://api.anthropic.com"),
-      async (base, upstream) => {
-        await fetch(`${base}/v1/messages`, {
-          method: "POST",
-          headers: { "x-api-key": "local", authorization: "Bearer sk-ant-oat-clankie-loopback" },
-          body: "{}",
-        });
-        const headers = new Headers(upstream.mock.calls[0]![1]?.headers);
-        expect(String(upstream.mock.calls[0]![0])).toBe("https://api.anthropic.com/v1/messages");
-        expect(headers.get("authorization")).toBe("Bearer sk-ant-oat01-real");
-        expect(headers.get("x-api-key")).toBeNull();
-      },
-    );
-  });
+  it.each([
+    ["anthropic-messages", "sk-ant-oat01-real", "claude_subscription_removed", "Anthropic API key"],
+    [
+      "openai-codex-responses",
+      "old-chatgpt-token",
+      "hosted_chatgpt_approval_required",
+      "included model usage",
+    ],
+  ])(
+    "refuses %s subscription forwarding before any provider request",
+    async (api, key, code, alternative) => {
+      await withLoopback(
+        async () => target(api, key),
+        async (base, upstream) => {
+          const response = await fetch(`${base}/responses`, { method: "POST", body: "{}" });
+          expect(response.status).toBe(403);
+          expect(response.headers.get("x-should-retry")).toBe("false");
+          const result = await response.json();
+          expect(result.error.code).toBe(code);
+          expect(result.error.message).toContain(alternative);
+          expect(JSON.stringify(result)).not.toContain(key);
+          expect(upstream).not.toHaveBeenCalled();
+        },
+      );
+    },
+  );
 
   it("uses a credential replaced mid-run on the next call, without restarting the worker", async () => {
     let key = "sk-first";

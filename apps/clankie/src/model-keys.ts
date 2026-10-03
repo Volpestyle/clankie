@@ -3,6 +3,8 @@ import type { CredentialStore } from "@clankie/credential-broker";
 import { createModelRegistry, loadBundledCatalog } from "@clankie/model-registry";
 import {
   CODEX_PROVIDER_ID,
+  isHostedModelEnvironment,
+  modelCredentialAllowed,
   loadConfig,
   parseModelRef,
   piModelFor,
@@ -44,6 +46,7 @@ export function createModelKeys(options: {
   onModelChanged?: () => Promise<void>;
 }): ModelKeysPort {
   const { store } = options;
+  const env = options.env ?? process.env;
   const telemetryCatalog = options.telemetry === undefined ? undefined : loadBundledCatalog();
   const report = (
     action: BodyModelTelemetryInput["action"],
@@ -73,7 +76,7 @@ export function createModelKeys(options: {
     (initialized ??=
       options.runtime?.() ??
       ModelRuntime.create({
-        credentials: new BrokerCredentialStore(store),
+        credentials: new BrokerCredentialStore(store, { env }),
         modelsPath: null,
         refreshOnCreate: false,
       }));
@@ -108,8 +111,15 @@ export function createModelKeys(options: {
       try {
         effectiveModel = resolvePiModelSelection(state.config, state.models, {
           catalog: state.catalog,
-          hasCodexSubscription: credentials[CODEX_PROVIDER_ID] !== undefined,
+          hasCodexSubscription:
+            !isHostedModelEnvironment(env) && credentials[CODEX_PROVIDER_ID] !== undefined,
         }).ref;
+        const effectiveProvider = parseModelRef(effectiveModel)?.providerId;
+        if (
+          effectiveProvider !== undefined &&
+          !modelCredentialAllowed(effectiveProvider, credentials[effectiveProvider], { env })
+        )
+          effectiveModel = null;
       } catch {
         /* A new body has no model yet. */
       }
@@ -131,7 +141,11 @@ export function createModelKeys(options: {
       const [state, credentials] = await Promise.all([snapshot(), store.list()]);
       return {
         subscriptions: state.providers
-          .filter((provider) => credentials[provider.id]?.type === "oauth")
+          .filter(
+            (provider) =>
+              credentials[provider.id]?.type === "oauth" &&
+              modelCredentialAllowed(provider.id, credentials[provider.id], { env }),
+          )
           .map((provider) => ({ providerId: provider.id, name: provider.name }))
           .sort((a, b) => a.name.localeCompare(b.name)),
       };
@@ -139,7 +153,10 @@ export function createModelKeys(options: {
     async set(providerId, apiKey) {
       let action: "key-set" | "key-replaced" = "key-set";
       try {
-        if ((await apiProvider(providerId)) === undefined) {
+        if (
+          !modelCredentialAllowed(providerId, { type: "api", key: apiKey }, { env }) ||
+          (await apiProvider(providerId)) === undefined
+        ) {
           report(action, "unsupported_provider", providerId);
           return { ok: false, error: "unsupported_provider" };
         }
@@ -165,6 +182,12 @@ export function createModelKeys(options: {
       if (model === undefined) return { ok: false, error: "unsupported_model" };
       const credential = await store.get(providerId);
       if (credential?.type !== "api") return { ok: false, error: "key_missing" };
+      if (
+        !modelCredentialAllowed(model.api === "anthropic-messages" ? "anthropic" : providerId, credential, {
+          env,
+        })
+      )
+        return { ok: false, error: "validation_failed" };
       const signal = AbortSignal.timeout(15_000);
       try {
         // No customer context, tools, conversation, or telemetry callbacks. Explicit auth
@@ -208,10 +231,13 @@ export function createModelKeys(options: {
           report("model-selected", "unsupported_provider", providerId);
           return { ok: false, error: "unsupported_provider" };
         }
+        if (!modelCredentialAllowed(providerId, await store.get(providerId), { env }))
+          return { ok: false, error: "unsupported_model" };
         try {
           resolvePiModelSelection({ ...state.config, model }, state.models, {
             catalog: state.catalog,
-            hasCodexSubscription: (await store.get(CODEX_PROVIDER_ID)) !== undefined,
+            hasCodexSubscription:
+              !isHostedModelEnvironment(env) && (await store.get(CODEX_PROVIDER_ID)) !== undefined,
           });
         } catch {
           report("model-selected", "unsupported_model", providerId, ref.modelId);

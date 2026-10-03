@@ -11,6 +11,7 @@ import {
   formatModelBanner,
   newestFirst,
   readinessFooter,
+  readCaptainReadiness,
   runThinkingSetup,
   validateApiKey,
   type ProviderServices,
@@ -240,9 +241,6 @@ async function testServices(
       },
       registry,
       oauth: {
-        async anthropicBrowser() {
-          throw new Error("unexpected Anthropic OAuth call");
-        },
         async codexBrowser() {
           throw new Error("unexpected Codex browser OAuth call");
         },
@@ -291,7 +289,7 @@ describe("auth command", () => {
     expect(text).toMatch(/openai\s+API key/);
     expect(text).toMatch(/openai-codex\s+ChatGPT subscription/);
     expect(text).toContain("(account-safe-summary)");
-    expect(text).toMatch(/anthropic\s+Claude subscription \(claude-account-summary\)/);
+    expect(text).toMatch(/anthropic\s+Unsupported Claude subscription/);
     expect(text).not.toContain("sk-l…");
     expect(text).not.toContain("sk-live-secret-value");
     expect(text).not.toContain(oauthCredential.access);
@@ -462,54 +460,22 @@ describe("auth command", () => {
     expect(fixture.notifications.count).toBe(1);
   });
 
-  it("runs Anthropic browser login with masked code entry and broker persistence", async () => {
+  it("takes /auth anthropic directly to API key entry", async () => {
     const fixture = await testServices();
-    const pastedCode = "authorization-code#returned-state";
-    const services: ProviderServices = {
-      ...fixture.services,
-      oauth: {
-        ...fixture.services.oauth,
-        anthropicBrowser: async (options) => {
-          const code = await options.readCode({
-            state: "expected-state",
-            verifier: "pkce-verifier",
-            url: "https://claude.ai/oauth/authorize?state=expected-state",
-          });
-          expect(code).toBe(pastedCode);
-          await options.store.set("anthropic", oauthCredential);
-        },
-      },
-    };
-    const view = testShell(["anthropic-oauth", "browser", "done"], [pastedCode]);
-
-    await command(buildProviderCommands(services), "auth").run("", view.shell);
-
-    expect(fixture.credentials.get("anthropic")).toEqual(oauthCredential);
-    expect(rendered(view)).toContain("Claude Pro / Max subscription connected");
-    expect(rendered(view)).not.toContain(pastedCode);
-    expect(rendered(view)).not.toContain(oauthCredential.access);
+    const view = testShell([], ["sk-ant-api03-owned"]);
+    await command(buildProviderCommands(fixture.services), "auth").run("anthropic", view.shell);
+    expect(fixture.credentials.get("anthropic")).toEqual({ type: "api", key: "sk-ant-api03-owned" });
+    expect(rendered(view)).not.toContain("sk-ant-api03-owned");
   });
 
-  it("exposes Anthropic's non-secret authorization URL for remote terminals", async () => {
+  it("refuses hosted ChatGPT before browser or device sign-in", async () => {
     const fixture = await testServices();
-    const authorizationUrl = "https://claude.ai/oauth/authorize?state=public-request-state";
-    const services: ProviderServices = {
-      ...fixture.services,
-      oauth: {
-        ...fixture.services.oauth,
-        anthropicBrowser: async (options) => {
-          options.openUrl?.(authorizationUrl);
-          await options.readCode({ state: "state", verifier: "verifier", url: authorizationUrl });
-          await options.store.set("anthropic", oauthCredential);
-        },
-      },
-    };
-    const view = testShell(["anthropic-oauth", "manual", "done"], ["authorization-code#state"]);
-
-    await command(buildProviderCommands(services), "auth").run("", view.shell);
-
-    expect(view.results.some((result) => result.text.includes(authorizationUrl))).toBe(true);
-    expect(fixture.credentials.get("anthropic")).toEqual(oauthCredential);
+    fixture.env.CLANKIE_HOSTED_BOOTSTRAP_FILE = "/owned-test/bootstrap.json";
+    const view = testShell(["codex", "done"]);
+    await command(buildProviderCommands(fixture.services), "auth").run("", view.shell);
+    expect(rendered(view)).toContain("pending OpenAI approval");
+    expect(rendered(view)).toContain("API key or included model usage");
+    expect(fixture.credentials.size).toBe(0);
   });
 
   it("does not render provider errors that may contain secret material", async () => {
@@ -888,4 +854,15 @@ describe("model order", () => {
       ] as never).map((model) => model.id),
     ).toEqual(["b-new", "a-old", "undated-1", "undated-2"]);
   });
+});
+
+it("does not count legacy Claude OAuth as ready or offer its removed login", async () => {
+  const fixture = await testServices();
+  fixture.credentials.set("anthropic", oauthCredential);
+  await updateGlobalConfig((config) => void (config.model = "anthropic/claude-test"), { env: fixture.env });
+  expect((await readCaptainReadiness(fixture.services)).ready).toBe(false);
+  const view = testShell(["done"]);
+  await command(buildProviderCommands(fixture.services), "auth").run("", view.shell);
+  expect(JSON.stringify(view.selects)).not.toContain("anthropic-oauth");
+  expect(fixture.credentials.get("anthropic")).toEqual(oauthCredential);
 });

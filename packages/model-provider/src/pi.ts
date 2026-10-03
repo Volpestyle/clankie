@@ -11,6 +11,7 @@ import type { ModelRuntime, ProviderConfig } from "@earendil-works/pi-coding-age
 import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { parseModelRef, type ClankieConfig } from "./config.ts";
 import { providerFamilyFor } from "./instantiate.ts";
+import { assertModelCredentialAllowed } from "./subscription-policy.ts";
 import { LOCAL_PLACEHOLDER_API_KEY } from "./local-endpoint.ts";
 import { mergedCatalog, subscriptionRefFor } from "./resolve.ts";
 import { effortVariantsFor, thinkingLevelForVariant } from "./variants.ts";
@@ -70,6 +71,18 @@ export interface PiModelSelection {
   readonly model: Model<Api>;
   readonly thinkingLevel: ModelThinkingLevel;
   readonly ref: string;
+}
+
+/** Check the actual Anthropic transport key even when a builtin uses another provider id. */
+export async function assertPiModelAuthAllowed(
+  runtime: Pick<ModelRuntime, "getAuth">,
+  model: Model<Api>,
+): Promise<void> {
+  if (model.api !== "anthropic-messages") return;
+  const resolved = await runtime.getAuth(model);
+  if (resolved?.auth.apiKey !== undefined) {
+    assertModelCredentialAllowed("anthropic", { type: "api", key: resolved.auth.apiKey });
+  }
 }
 
 /** Resolves the captain ref and effort exactly as Pi will execute them. */

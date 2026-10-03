@@ -1,5 +1,8 @@
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { assertPiModelAuthAllowed } from "@clankie/model-provider";
 import type { CredentialStore, ProviderCredential } from "@clankie/credential-broker";
-import { describe, expect, it } from "vitest";
+import { MemoryCredentialStore } from "../../../packages/credential-broker/test/memory-store.ts";
+import { describe, expect, it, vi } from "vitest";
 import { BrokerCredentialStore } from "../src/captain/model.ts";
 
 describe("captain Pi credential bridge", () => {
@@ -65,4 +68,43 @@ describe("captain Pi credential bridge", () => {
     expect(refreshes).toBe(1);
     await expect(loopback.read("openai-codex")).resolves.toMatchObject({ access: "a1", refresh: "r1" });
   });
+});
+
+describe("removed and hosted subscription credentials", () => {
+  it("refuses stale tokens before refresh and preserves them for owner removal", async () => {
+    const broker = new MemoryCredentialStore();
+    const token = { type: "oauth" as const, access: "old", refresh: "old-refresh", expires: 1 };
+    await broker.set("anthropic", token);
+    await broker.set("openai-codex", token);
+    for (const [provider, policy, message] of [
+      ["anthropic", { env: {} }, "no longer supports Claude"],
+      ["openai-codex", { hosted: true }, "pending OpenAI approval"],
+    ] as const) {
+      const bridge = new BrokerCredentialStore(broker, policy);
+      const refresh = vi.fn();
+      await expect(bridge.read(provider)).rejects.toThrow(message);
+      await expect(bridge.modify(provider, refresh)).rejects.toThrow(message);
+      expect(refresh).not.toHaveBeenCalled();
+      expect(await broker.get(provider)).toEqual(token);
+    }
+    await broker.set("anthropic", { type: "api", key: "sk-ant-api03-owned" });
+    expect(await new BrokerCredentialStore(broker, { hosted: true }).read("anthropic")).toEqual({
+      type: "api_key",
+      key: "sk-ant-api03-owned",
+    });
+  });
+});
+
+it("refuses a Claude subscription key resolved through a Pi builtin alias before inference", async () => {
+  const broker = new MemoryCredentialStore({ opencode: { type: "api", key: "sk-ant-oat01-old" } });
+  const runtime = await ModelRuntime.create({
+    credentials: new BrokerCredentialStore(broker),
+    modelsPath: null,
+    refreshOnCreate: false,
+  });
+  const model = runtime.getModels("opencode").find((entry) => entry.api === "anthropic-messages")!;
+  expect(model).toBeDefined();
+  await expect(assertPiModelAuthAllowed(runtime, model)).rejects.toThrow("no longer supports Claude");
+  await broker.set("opencode", { type: "api", key: "opencode-api-owned" });
+  await expect(assertPiModelAuthAllowed(runtime, model)).resolves.toBeUndefined();
 });

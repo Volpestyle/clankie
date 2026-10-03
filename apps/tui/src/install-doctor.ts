@@ -11,6 +11,7 @@ import {
 } from "@clankie/credential-broker";
 import {
   captainReadiness,
+  modelCredentialAllowed,
   loadConfig,
   parseModelRef,
   type CaptainReadiness,
@@ -208,7 +209,9 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     ...(lastSleep === undefined ? {} : { lastSleep }),
   });
   const model = unsetToNull(config.config.model);
-  const credentialIds = new Set(credentials.map((entry) => entry.id));
+  const credentialIds = new Set(
+    credentials.filter((entry) => modelCredentialAllowed(entry.id, entry, { env })).map((entry) => entry.id),
+  );
   const selectedModel = await inspectSelectedModel(
     model,
     config.config,

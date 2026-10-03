@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CatalogSchema } from "@clankie/model-registry";
 import { generateText } from "ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfiguredLanguageModel } from "../src/index.ts";
 
 const tempDirs: string[] = [];
@@ -75,45 +75,22 @@ describe("configured Anthropic captain models", () => {
     });
   });
 
-  it("uses the brokered Pro/Max credential for a headless captain turn", async () => {
+  it("refuses a legacy Pro/Max credential before any captain request", async () => {
     const { cwd, env } = await configEnvironment();
     const store = new MemoryCredentialStore({
       anthropic: {
         type: "oauth",
         access: "subscription-access",
         refresh: "subscription-refresh",
-        expires: Date.now() + 60_000,
+        expires: 1,
       },
     });
-    let capturedUrl = "";
-    let capturedHeaders = new Headers();
-    let capturedBody = "";
-    const configured = await resolveConfiguredLanguageModel({
-      cwd,
-      env,
-      catalog,
-      store,
-      fetchImpl: async (input, init) => {
-        capturedUrl = String(input);
-        capturedHeaders = new Headers(init?.headers);
-        capturedBody = String(init?.body);
-        return anthropicResponse("subscription works");
-      },
-    });
-
-    const result = await generateText({ model: configured.model, prompt: "Say it works." });
-
-    expect(result.text).toBe("subscription works");
-    expect(configured.ref).toBe("anthropic/claude-test");
-    expect(capturedUrl).toBe("https://api.anthropic.com/v1/messages");
-    expect(capturedHeaders.get("authorization")).toBe("Bearer subscription-access");
-    expect(capturedHeaders.get("x-api-key")).toBeNull();
-    const features = capturedHeaders.get("anthropic-beta")?.split(",") ?? [];
-    for (const feature of ["oauth-2025-04-20", "claude-code-20250219"]) {
-      expect(features).toContain(feature);
-    }
-    expect(capturedBody).not.toContain("subscription-access");
-    expect(capturedBody).not.toContain("subscription-refresh");
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(resolveConfiguredLanguageModel({ cwd, env, catalog, store, fetchImpl })).rejects.toThrow(
+      "no longer supports Claude",
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect((await store.get("anthropic"))?.type).toBe("oauth");
   });
 
   it("keeps Anthropic API keys on the normal AI SDK path", async () => {
@@ -142,4 +119,30 @@ describe("configured Anthropic captain models", () => {
     expect(features).not.toContain("oauth-2025-04-20");
     expect(features).not.toContain("claude-code-20250219");
   });
+});
+
+it("refuses a subscription-shaped key on a custom provider using the Anthropic transport", async () => {
+  const { cwd, env } = await configEnvironment();
+  await writeFile(
+    join(env.XDG_CONFIG_HOME!, "clankie", "clankie.json"),
+    JSON.stringify({
+      model: "custom-claude/claude-test",
+      provider: {
+        "custom-claude": {
+          npm: "@ai-sdk/anthropic",
+          models: { "claude-test": { limit: { context: 200000, output: 32000 } } },
+        },
+      },
+    }),
+  );
+  const fetchImpl = vi.fn<typeof fetch>();
+  const store = new MemoryCredentialStore({ "custom-claude": { type: "api", key: "sk-ant-oat01-old" } });
+  await expect(resolveConfiguredLanguageModel({ cwd, env, catalog, store, fetchImpl })).rejects.toThrow(
+    "no longer supports Claude",
+  );
+  expect(fetchImpl).not.toHaveBeenCalled();
+  await store.set("custom-claude", { type: "api", key: "sk-ant-api03-owned" });
+  expect((await resolveConfiguredLanguageModel({ cwd, env, catalog, store, fetchImpl })).providerId).toBe(
+    "custom-claude",
+  );
 });

@@ -1,7 +1,8 @@
 import type { CredentialStore } from "@clankie/credential-broker";
 import { createModelRegistry } from "@clankie/model-registry";
 import {
-  CODEX_PROVIDER_ID,
+  assertModelCredentialAllowed,
+  ModelSubscriptionPolicyError,
   loadConfig,
   registerConfiguredPiProviders,
   resolvePiModelSelection,
@@ -14,7 +15,6 @@ import { BrokerCredentialStore } from "./captain/model.ts";
 /** The provider id a hosted pi worker sees for the customer's own model (VUH-1373). */
 const CUSTOMER_PI_PROVIDER = "clankie-customer";
 const INCLUDED_PROVIDER = "clankie";
-const ANTHROPIC_OAUTH_MARKER = "sk-ant-oat";
 
 /** The customer's selected model and its current credential, fresh for one call. */
 export interface CustomerModelTarget {
@@ -51,7 +51,10 @@ export function createHostedCustomerModels(options: {
       if (config.model === undefined || config.model.startsWith(`${INCLUDED_PROVIDER}/`)) return undefined;
       const catalog = await registry.catalog();
       runtime ??= ModelRuntime.create({
-        credentials: new BrokerCredentialStore(options.store),
+        credentials: new BrokerCredentialStore(options.store, {
+          hosted: true,
+          ...(options.env ? { env: options.env } : {}),
+        }),
         modelsPath: null,
         refreshOnCreate: false,
       });
@@ -61,15 +64,20 @@ export function createHostedCustomerModels(options: {
       try {
         model = resolvePiModelSelection(config, models, {
           catalog,
-          hasCodexSubscription: (await options.store.get(CODEX_PROVIDER_ID)) !== undefined,
+          hasCodexSubscription: false,
         }).model;
       } catch {
         return undefined;
       }
       if (model.provider === INCLUDED_PROVIDER) return undefined;
+      if (model.api === "openai-codex-responses")
+        throw new ModelSubscriptionPolicyError("hosted_chatgpt_approval_required");
+      assertModelCredentialAllowed(model.provider, await options.store.get(model.provider), { hosted: true });
       const resolved = await models.getAuth(model);
       const apiKey = resolved?.auth.apiKey;
       if (apiKey === undefined || apiKey.length === 0) return undefined;
+      if (model.api === "anthropic-messages")
+        assertModelCredentialAllowed("anthropic", { type: "api", key: apiKey }, { hosted: true });
       return {
         model,
         baseUrl: resolved?.auth.baseUrl ?? model.baseUrl,
@@ -84,41 +92,10 @@ export function createHostedCustomerModels(options: {
   };
 }
 
-/** The ChatGPT account a codex subscription token belongs to (an identifier, not a secret). */
-function chatgptAccountId(token: string): string | undefined {
-  const payload = token.split(".")[1];
-  if (payload === undefined) return undefined;
-  try {
-    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<string, unknown>;
-    const auth = claims["https://api.openai.com/auth"] as { chatgpt_account_id?: unknown } | undefined;
-    return typeof auth?.chatgpt_account_id === "string" ? auth.chatgpt_account_id : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * What pi is given instead of the credential, shaped so pi builds the same
- * request it would with the real one; the loopback swaps in the real
- * credential. None of these is a secret:
- * - codex: an unsigned token carrying only the ChatGPT account id, which pi
- *   reads into `chatgpt-account-id`;
- * - an Anthropic subscription: a marker pi recognizes as OAuth, so it sends
- *   the subscription's request shape;
- * - everything else: a placeholder bearer.
- */
+/** Workers receive a placeholder; Claude/ChatGPT subscription routes are unavailable. */
 export function customerPlaceholderKey(api: string, apiKey: string): string | undefined {
-  if (api === "openai-codex-responses") {
-    const account = chatgptAccountId(apiKey);
-    if (account === undefined) return undefined;
-    const claims = Buffer.from(
-      JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: account } }),
-    ).toString("base64");
-    return `e30.${claims}.clankie-loopback`;
-  }
-  if (api === "anthropic-messages" && apiKey.includes(ANTHROPIC_OAUTH_MARKER)) {
-    return `${ANTHROPIC_OAUTH_MARKER}-clankie-loopback`;
-  }
+  if (api === "openai-codex-responses" || (api === "anthropic-messages" && apiKey.startsWith("sk-ant-oat")))
+    return undefined;
   return "local";
 }
 
@@ -162,19 +139,13 @@ const AUTH_HEADERS = ["authorization", "x-api-key", "x-goog-api-key", "chatgpt-a
 
 /** The real credential, the way `api` sends it. */
 export function customerAuthHeaders(api: string, apiKey: string): Record<string, string> {
+  if (api === "openai-codex-responses")
+    throw new ModelSubscriptionPolicyError("hosted_chatgpt_approval_required");
   if (api === "anthropic-messages") {
-    return apiKey.includes(ANTHROPIC_OAUTH_MARKER)
-      ? { authorization: `Bearer ${apiKey}` }
-      : { "x-api-key": apiKey };
+    assertModelCredentialAllowed("anthropic", { type: "api", key: apiKey }, { hosted: true });
+    return { "x-api-key": apiKey };
   }
   if (api === "google-generative-ai") return { "x-goog-api-key": apiKey };
-  if (api === "openai-codex-responses") {
-    const account = chatgptAccountId(apiKey);
-    return {
-      authorization: `Bearer ${apiKey}`,
-      ...(account === undefined ? {} : { "chatgpt-account-id": account }),
-    };
-  }
   return { authorization: `Bearer ${apiKey}` };
 }
 

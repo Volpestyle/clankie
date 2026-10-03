@@ -1,6 +1,7 @@
 import { loadBundledCatalog } from "@clankie/model-registry";
 import { parseModelRef, type ClankieConfig } from "./config.ts";
 import { CODEX_PROVIDER_ID } from "./oauth/openai-codex.ts";
+import { modelCredentialAllowed, isHostedModelEnvironment } from "./subscription-policy.ts";
 import { subscriptionRefFor } from "./resolve.ts";
 
 /**
@@ -35,6 +36,9 @@ export function captainReadiness(input: {
   if (model === undefined || parsed === undefined) return { ready: false, reason: "no_model" };
   const { providerId } = parsed;
   const credentialIds = new Set(input.credentialIds);
+  if (!modelCredentialAllowed(providerId, undefined, { env: input.env ?? process.env }))
+    return { ready: false, reason: "no_credential", model, providerId };
+  if (isHostedModelEnvironment(input.env)) credentialIds.delete(CODEX_PROVIDER_ID);
   if (credentialIds.has(providerId)) return { ready: true, model, providerId, auth: "credential" };
   if (providerEnvConnected(providerId, input.env ?? process.env)) {
     return { ready: true, model, providerId, auth: "env" };
@@ -51,5 +55,6 @@ export function captainReadiness(input: {
 
 /** A provider key exported in the environment under any name models.dev lists for it. */
 export function providerEnvConnected(providerId: string, env: NodeJS.ProcessEnv): boolean {
+  if (!modelCredentialAllowed(providerId, undefined, { env })) return false;
   return (loadBundledCatalog()[providerId]?.env ?? []).some((variable) => (env[variable] ?? "") !== "");
 }

@@ -20,7 +20,10 @@ import { createModelRegistry, type Catalog, type ModelEntry } from "@clankie/mod
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
-  ANTHROPIC_PROVIDER_ID,
+  assertModelCredentialAllowed,
+  modelCredentialAllowed,
+  assertChatgptLoginAllowed,
+  isHostedModelEnvironment,
   captainReadiness,
   CODEX_PROVIDER_ID,
   XAI_PROVIDER_ID,
@@ -34,7 +37,6 @@ import {
   providerEnvConnected,
   resolvePiModelSelection,
   registerConfiguredPiProviders,
-  runAnthropicBrowserLogin,
   runCodexBrowserLogin,
   runCodexDeviceLogin,
   runXaiDeviceLogin,
@@ -76,7 +78,6 @@ export interface ProviderServices {
     register(config: ClankieConfig): Promise<void>;
   };
   readonly oauth: {
-    readonly anthropicBrowser: typeof runAnthropicBrowserLogin;
     readonly codexBrowser: typeof runCodexBrowserLogin;
     readonly codexDevice: typeof runCodexDeviceLogin;
     readonly xaiDevice: typeof runXaiDeviceLogin;
@@ -132,7 +133,8 @@ export function createProviderServices(options: {
       },
       async resolveSelection(config) {
         return resolvePiModelSelection(config, await runtime(), {
-          hasCodexSubscription: (await store.get(CODEX_PROVIDER_ID)) !== undefined,
+          hasCodexSubscription:
+            !isHostedModelEnvironment(env) && (await store.get(CODEX_PROVIDER_ID)) !== undefined,
           catalog: await registry.catalog(),
         });
       },
@@ -149,7 +151,6 @@ export function createProviderServices(options: {
       },
     },
     oauth: {
-      anthropicBrowser: runAnthropicBrowserLogin,
       codexBrowser: runCodexBrowserLogin,
       codexDevice: runCodexDeviceLogin,
       xaiDevice: runXaiDeviceLogin,
@@ -235,7 +236,7 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
       name: "auth",
       aliases: [],
       description: "Manage API keys, subscription OAuth, and harness logins",
-      argumentHint: "[status]",
+      argumentHint: "[status | anthropic]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         const selector = argument.trim().toLowerCase();
@@ -249,6 +250,15 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
             "Service connections moved to /connect (linear, email, discord). /auth stays provider keys and subscriptions.",
             "success",
           );
+          return;
+        }
+        if (selector === "anthropic") {
+          shell.setupFlow.begin("auth");
+          try {
+            await addApiKeyFlow(shell, services, { providerId: "anthropic" });
+          } finally {
+            shell.setupFlow.end();
+          }
           return;
         }
         await runAuthWizard(shell, services);
@@ -455,7 +465,7 @@ function mediaModelCommand(
           role === "image_model"
             ? (await imageModelStatus({ env: services.env, cwd: services.cwd })).imageModel
             : (await videoModelStatus({ env: services.env, cwd: services.cwd })).videoModel;
-        const credentialIds = Object.keys(await services.store.list());
+        const credentialIds = Object.keys(await usableModelCredentials(services));
         const parsed = configured === null ? undefined : parseModelRef(configured);
         const connected =
           parsed !== undefined &&
@@ -500,7 +510,7 @@ function mediaModelCommand(
       if (role === "image_model") await imageModelSet(ref, { env: services.env });
       else await videoModelSet(ref, { env: services.env });
       await notifyModelSelectionChanged(services);
-      const credentialIds = Object.keys(await services.store.list());
+      const credentialIds = Object.keys(await usableModelCredentials(services));
       const needsAuth =
         !credentialIds.includes(providerId) && !providerEnvConnected(providerId, services.env);
       shell.insertCommandResult(
@@ -520,6 +530,7 @@ function providerConnectionHint(
   now: number = Date.now(),
 ): string {
   const redacted = listed[id];
+  if (id === CODEX_PROVIDER_ID && isHostedModelEnvironment(env)) return "unavailable pending OpenAI approval";
   if (redacted !== undefined) return describeCredentialKind(id, redacted, now);
   if (providerEnvConnected(id, env)) return "env";
   return "needs /auth";
@@ -620,7 +631,7 @@ function describeCredentialKind(id: string, redacted: RedactedCredential, now: n
   const account = formatOauthAccount(redacted.accountId);
   const expiry = formatOauthExpiry(redacted.expires, now);
   if (id === CODEX_PROVIDER_ID) return `ChatGPT subscription${account} · ${expiry}`;
-  if (id === ANTHROPIC_PROVIDER_ID) return `Claude subscription${account} · ${expiry}`;
+  if (id === "anthropic") return "Unsupported Claude subscription · replace via /auth anthropic";
   if (id === XAI_PROVIDER_ID) return `SuperGrok subscription${account} · ${expiry}`;
   return `OAuth${account} · ${expiry}`;
 }
@@ -669,14 +680,8 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
         {
           value: "codex",
           label: "Connect ChatGPT subscription",
-          hint: "Codex OAuth",
+          hint: isHostedModelEnvironment(services.env) ? "pending OpenAI approval on hosted" : "Codex OAuth",
           description: "Reuses your ChatGPT plan for Clankie's turns. Stored as openai-codex.",
-        },
-        {
-          value: "anthropic-oauth",
-          label: "Connect Claude Pro/Max subscription",
-          hint: "Anthropic OAuth",
-          description: "Manual-code PKCE sign-in; tokens stay in the credential broker.",
         },
         {
           value: "xai-oauth",
@@ -718,10 +723,6 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
       await codexOauthFlow(shell, services);
       continue;
     }
-    if (choice === "anthropic-oauth") {
-      await anthropicOauthFlow(shell, services);
-      continue;
-    }
     if (choice === "xai-oauth") {
       await xaiOauthFlow(shell, services);
       continue;
@@ -737,7 +738,7 @@ async function runAuthWizard(shell: ClankieFaceShell, services: ProviderServices
 async function addApiKeyFlow(
   shell: ClankieFaceShell,
   services: ProviderServices,
-  options: { readonly modelProvidersOnly?: boolean } = {},
+  options: { readonly modelProvidersOnly?: boolean; readonly providerId?: string } = {},
 ): Promise<string | undefined> {
   const flow = shell.setupFlow;
   const catalog = await services.registry.catalog();
@@ -754,15 +755,17 @@ async function addApiKeyFlow(
           ...option,
           ...(listed[option.value] !== undefined ? { hint: "configured" } : {}),
         }));
-  const picked = await flow.readSelect({
-    message: "Provider",
-    options: [
-      ...featured,
-      ...featuredServices,
-      { value: "__other__", label: "Other…", hint: "enter a provider id" },
-    ],
-    allowBack: true,
-  });
+  const picked =
+    options.providerId ??
+    (await flow.readSelect({
+      message: "Provider",
+      options: [
+        ...featured,
+        ...featuredServices,
+        { value: "__other__", label: "Other…", hint: "enter a provider id" },
+      ],
+      allowBack: true,
+    }));
   let providerId = picked;
   if (providerId === undefined) return undefined;
   if (providerId === "__other__") {
@@ -776,9 +779,19 @@ async function addApiKeyFlow(
   }
   const key = await flow.readSecret({
     message: `API key for ${providerId}`,
-    validate: validateApiKey,
+    validate: (value) => {
+      const invalid = validateApiKey(value);
+      if (invalid !== undefined) return invalid;
+      try {
+        assertModelCredentialAllowed(providerId, { type: "api", key: value.trim() }, { env: services.env });
+      } catch (error) {
+        return String(error);
+      }
+      return undefined;
+    },
   });
   if (key === undefined) return undefined;
+  assertModelCredentialAllowed(providerId, { type: "api", key: key.trim() }, { env: services.env });
   await services.store.set(providerId, { type: "api", key: key.trim() });
   flow.renderLine(`Stored API key for ${providerId}.`, "success");
   shell.insertCommandResult(
@@ -796,6 +809,12 @@ async function codexOauthFlow(
   shell: ClankieFaceShell,
   services: ProviderServices,
 ): Promise<string | undefined> {
+  try {
+    assertChatgptLoginAllowed(services.env);
+  } catch (error) {
+    shell.insertCommandResult("/auth", String(error), "error");
+    return undefined;
+  }
   const flow = shell.setupFlow;
   const method = await flow.readSelect({
     message: "ChatGPT / Codex OAuth",
@@ -812,7 +831,7 @@ async function codexOauthFlow(
     if (pickedMethod === "browser") {
       flow.setStatus("waiting for browser sign-in… (/cancel to abort)");
       const credential = await Promise.race([
-        services.oauth.codexBrowser({}),
+        services.oauth.codexBrowser({ env: services.env }),
         interrupt.promise.then(() => undefined),
       ]);
       if (credential === undefined) {
@@ -824,6 +843,7 @@ async function codexOauthFlow(
       flow.setStatus("requesting device code…");
       const credential = await Promise.race([
         services.oauth.codexDevice({
+          env: services.env,
           onUserCode: (code, url) => {
             flow.setStatus(`Visit ${url} and enter code ${code} (/cancel to abort)`);
           },
@@ -849,72 +869,6 @@ async function codexOauthFlow(
     return undefined;
   } finally {
     interrupt.dispose();
-  }
-}
-
-class AuthFlowCancelled extends Error {}
-
-async function anthropicOauthFlow(
-  shell: ClankieFaceShell,
-  services: ProviderServices,
-): Promise<string | undefined> {
-  const flow = shell.setupFlow;
-  const method = await flow.readSelect({
-    message: "Claude Pro / Max OAuth",
-    options: [
-      { value: "browser", label: "Browser sign-in", hint: "opens claude.ai" },
-      {
-        value: "manual",
-        label: "Show authorization URL",
-        hint: "headless / remote terminal",
-        description: "Open the URL in any browser, then paste Anthropic's returned code.",
-      },
-    ],
-    allowBack: true,
-  });
-  const pickedMethod = method;
-  if (pickedMethod === undefined) return undefined;
-
-  try {
-    flow.setStatus("starting Claude Pro / Max sign-in…");
-    await services.oauth.anthropicBrowser({
-      store: services.store,
-      ...(pickedMethod === "manual"
-        ? {
-            openUrl: (url: string) => {
-              shell.insertCommandResult(
-                "/auth",
-                `Open this Anthropic authorization URL in a browser:\n${url}`,
-                "success",
-              );
-            },
-          }
-        : {}),
-      readCode: async () => {
-        const code = await flow.readSecret({
-          message: "Paste the authorization-code#state value shown by Anthropic",
-          allowBack: true,
-          validate: validateAnthropicAuthorizationCode,
-        });
-        if (code === undefined) throw new AuthFlowCancelled();
-        flow.setStatus("exchanging Anthropic authorization code…");
-        return code.trim();
-      },
-    });
-    flow.renderLine("Claude Pro / Max subscription connected.", "success");
-    shell.insertCommandResult(
-      "/auth",
-      `Claude Pro / Max subscription connected (stored as ${ANTHROPIC_PROVIDER_ID}).`,
-      "success",
-    );
-    return ANTHROPIC_PROVIDER_ID;
-  } catch (error) {
-    if (error instanceof AuthFlowCancelled) {
-      flow.renderLine("Sign-in cancelled.", "warning");
-      return undefined;
-    }
-    renderOauthFailure(flow, "Claude Pro / Max");
-    return undefined;
   }
 }
 
@@ -960,14 +914,6 @@ export function validateApiKey(value: string): string | undefined {
   if (trimmed.length > 4096) return "That API key is unexpectedly long.";
   if (/\s/u.test(trimmed)) return "API keys cannot contain whitespace.";
   return undefined;
-}
-
-function validateAnthropicAuthorizationCode(value: string): string | undefined {
-  const trimmed = value.trim();
-  const separator = trimmed.indexOf("#");
-  return separator <= 0 || separator === trimmed.length - 1 || trimmed.indexOf("#", separator + 1) >= 0
-    ? "Paste the complete authorization-code#state value."
-    : undefined;
 }
 
 function renderOauthFailure(flow: SetupFlow, provider: string): void {
@@ -1106,7 +1052,7 @@ async function runProviderWizard(
     for (;;) {
       const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
       const listed = await services.store.list();
-      const credentialIds = Object.keys(listed);
+      const credentialIds = Object.keys(await usableModelCredentials(services));
       const providers = await captainProviders(services, config, credentialIds);
       const configured = config.model === undefined ? undefined : parseModelRef(config.model);
       const currentProvider = selectedProvider ?? configured?.providerId;
@@ -1278,7 +1224,7 @@ async function runModelWizard(
   try {
     for (;;) {
       const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
-      const credentialIds = Object.keys(await services.store.list());
+      const credentialIds = Object.keys(await usableModelCredentials(services));
       const providers = await captainProviders(services, config, credentialIds);
       const configured = config.model === undefined ? undefined : parseModelRef(config.model);
       const providerId = selectedProvider ?? configured?.providerId;
@@ -1458,7 +1404,7 @@ export async function readCaptainReadiness(services: ProviderServices): Promise<
   const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
   return captainReadiness({
     config,
-    credentialIds: Object.keys(await services.store.list()),
+    credentialIds: Object.keys(await usableModelCredentials(services)),
     env: services.env,
   });
 }
@@ -1488,9 +1434,9 @@ export async function runThinkingSetup(
     for (;;) {
       const { config } = await loadConfig({ env: services.env, cwd: services.cwd });
       const listed = await services.store.list();
-      const signedIn = (await captainProviders(services, config, Object.keys(listed))).filter(
-        (provider) => provider.connected,
-      );
+      const signedIn = (
+        await captainProviders(services, config, Object.keys(await usableModelCredentials(services)))
+      ).filter((provider) => provider.connected);
       const current = config.model === undefined ? undefined : parseModelRef(config.model);
       const choice = await flow.readSelect({
         message: "How should Clankie think?",
@@ -1500,11 +1446,6 @@ export async function runThinkingSetup(
             label: `Use ${provider.name}`,
             hint: providerConnectionHint(provider.id, listed, services.env),
           })),
-          {
-            value: "anthropic-oauth",
-            label: "Claude Pro / Max subscription",
-            hint: "sign in with Anthropic",
-          },
           { value: "codex", label: "ChatGPT Plus / Pro subscription", hint: "sign in with OpenAI" },
           { value: "xai-oauth", label: "SuperGrok / X Premium", hint: "sign in with xAI" },
           { value: "api", label: "An API key", hint: "anthropic, openai, google, openrouter, …" },
@@ -1515,7 +1456,6 @@ export async function runThinkingSetup(
       let providerId: string | undefined;
       let addedEndpoint = false;
       if (choice.startsWith("provider:")) providerId = choice.slice("provider:".length);
-      else if (choice === "anthropic-oauth") providerId = await anthropicOauthFlow(shell, services);
       else if (choice === "codex") providerId = await codexOauthFlow(shell, services);
       else if (choice === "xai-oauth") providerId = await xaiOauthFlow(shell, services);
       else if (choice === "api")
@@ -1566,4 +1506,14 @@ export async function runThinkingSetup(
   } finally {
     flow.end();
   }
+}
+
+async function usableModelCredentials(
+  services: ProviderServices,
+): Promise<Record<string, RedactedCredential>> {
+  return Object.fromEntries(
+    Object.entries(await services.store.list()).filter(([id, credential]) =>
+      modelCredentialAllowed(id, credential, { env: services.env }),
+    ),
+  );
 }

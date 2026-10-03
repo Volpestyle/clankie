@@ -29,15 +29,8 @@ describe("the customer model loopback's pieces (VUH-1373)", () => {
     expect(customerPlaceholderKey("openai-responses", "sk-proj-real")).toBe("local");
     expect(customerPlaceholderKey("anthropic-messages", "sk-ant-api03-real")).toBe("local");
     const anthropicOAuth = customerPlaceholderKey("anthropic-messages", "sk-ant-oat01-real-token");
-    expect(anthropicOAuth).toContain("sk-ant-oat");
-    expect(anthropicOAuth).not.toContain("real");
-    const real = codexToken("acct-123");
-    const codex = customerPlaceholderKey("openai-codex-responses", real)!;
-    // pi reads the account id from the payload with atob, so standard base64.
-    const payload = JSON.parse(Buffer.from(codex.split(".")[1]!, "base64").toString("utf8"));
-    expect(payload).toEqual({ "https://api.openai.com/auth": { chatgpt_account_id: "acct-123" } });
-    expect(codex).not.toContain("real-signature-part");
-    expect(codex).not.toContain(real.split(".")[1]!);
+    expect(anthropicOAuth).toBeUndefined();
+    expect(customerPlaceholderKey("openai-codex-responses", codexToken("acct-123"))).toBeUndefined();
     expect(customerPlaceholderKey("openai-codex-responses", "not-a-jwt")).toBeUndefined();
   });
 
@@ -46,15 +39,12 @@ describe("the customer model loopback's pieces (VUH-1373)", () => {
     expect(customerAuthHeaders("anthropic-messages", "sk-ant-api03-real")).toEqual({
       "x-api-key": "sk-ant-api03-real",
     });
-    expect(customerAuthHeaders("anthropic-messages", "sk-ant-oat01-real")).toEqual({
-      authorization: "Bearer sk-ant-oat01-real",
-    });
+    expect(() => customerAuthHeaders("anthropic-messages", "sk-ant-oat01-real")).toThrow(
+      "no longer supports Claude",
+    );
     expect(customerAuthHeaders("google-generative-ai", "g-real")).toEqual({ "x-goog-api-key": "g-real" });
     const real = codexToken("acct-9");
-    expect(customerAuthHeaders("openai-codex-responses", real)).toEqual({
-      authorization: `Bearer ${real}`,
-      "chatgpt-account-id": "acct-9",
-    });
+    expect(() => customerAuthHeaders("openai-codex-responses", real)).toThrow("pending OpenAI approval");
   });
 
   it("forwards only under the selected provider's base URL", () => {
@@ -137,6 +127,21 @@ describe("the customer model loopback's pieces (VUH-1373)", () => {
       // A key replaced mid-run is used on the very next call, with no restart.
       await store.set("openai", { type: "api", key: "sk-second" });
       expect((await models.resolve())?.apiKey).toBe("sk-second");
+      // A stale ChatGPT login must not silently outrank the hosted API key.
+      await store.set("openai-codex", { type: "oauth", access: "stale", refresh: "stale", expires: 1 });
+      expect((await models.resolve())?.apiKey).toBe("sk-second");
+      writeFileSync(
+        join(dir, "clankie", "clankie.json"),
+        JSON.stringify({ model: "openai-codex/gpt-6-luna" }),
+      );
+      await expect(models.resolve()).rejects.toThrow("pending OpenAI approval");
+      writeFileSync(
+        join(dir, "clankie", "clankie.json"),
+        JSON.stringify({ model: "anthropic/claude-opus-5-5" }),
+      );
+      await store.set("anthropic", { type: "oauth", access: "stale", refresh: "stale", expires: 1 });
+      await expect(models.resolve()).rejects.toThrow("no longer supports Claude");
+      writeFileSync(join(dir, "clankie", "clankie.json"), JSON.stringify({ model: "openai/gpt-6-luna" }));
       // No credential behind the selection: nothing to forward to.
       await store.delete("openai");
       expect(await models.resolve()).toBeUndefined();

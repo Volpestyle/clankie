@@ -20,7 +20,7 @@ import {
   type VariantCallOptions,
 } from "./instantiate.ts";
 import { CODEX_PROVIDER_ID, createCodexFetch } from "./oauth/openai-codex.ts";
-import { ANTHROPIC_PROVIDER_ID, createAnthropicFetch } from "./oauth/anthropic.ts";
+import { assertModelCredentialAllowed, isHostedModelEnvironment } from "./subscription-policy.ts";
 import { XAI_PROVIDER_ID, createXaiFetch } from "./oauth/xai.ts";
 import {
   mergedCatalog,
@@ -83,7 +83,6 @@ function subscriptionFetch(
 ): typeof fetch | undefined {
   if (credential?.type !== "oauth") return undefined;
   const options = { store, ...(fetchImpl === undefined ? {} : { fetchImpl }) };
-  if (providerId === ANTHROPIC_PROVIDER_ID) return createAnthropicFetch(options);
   if (providerId === XAI_PROVIDER_ID) return createXaiFetch(options);
   return undefined;
 }
@@ -131,9 +130,10 @@ function hasEffortLadder(variants: readonly ModelVariant[]): boolean {
  */
 async function withSubscriptionPrecedence(
   role: ResolvedRole,
-  input: { config: ClankieConfig; catalog: Catalog; store: CredentialStore },
+  input: { config: ClankieConfig; catalog: Catalog; store: CredentialStore; env: NodeJS.ProcessEnv },
 ): Promise<ResolvedRole> {
-  if (subscriptionRefFor(role, input.config) === undefined) return role;
+  if (isHostedModelEnvironment(input.env) || subscriptionRefFor(role, input.config) === undefined)
+    return role;
   const credential = await input.store.get(CODEX_PROVIDER_ID);
   const override = subscriptionOverrideFor(role, {
     config: input.config,
@@ -168,7 +168,12 @@ export async function resolveConfiguredLanguageModel(
   const configured = resolveRole(role, { config, catalog: sourceCatalog });
   if (configured === undefined)
     throw new ConfiguredModelError(`No ${role.replace("_", " ")} is configured; run /model`);
-  const resolved = await withSubscriptionPrecedence(configured, { config, catalog: sourceCatalog, store });
+  const resolved = await withSubscriptionPrecedence(configured, {
+    config,
+    catalog: sourceCatalog,
+    store,
+    env,
+  });
   const catalog = mergedCatalog(config, sourceCatalog);
   const provider = catalog[resolved.providerId];
   if (provider === undefined || resolved.model === undefined) {
@@ -177,6 +182,7 @@ export async function resolveConfiguredLanguageModel(
     );
   }
   const credential = await store.get(resolved.providerId);
+  assertModelCredentialAllowed(resolved.providerId, credential, { env });
   const baseURL = configuredBaseUrl(config, resolved.providerId);
   if (credential === undefined && baseURL === undefined && !hasEnvironmentCredential(provider, env)) {
     throw new ConfiguredModelError(`No credential is configured for ${resolved.providerId}; run /auth`);
@@ -193,6 +199,7 @@ export async function resolveConfiguredLanguageModel(
           modelId: resolved.modelId,
           fetchImpl: createCodexFetch({
             store,
+            env,
             ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
             ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
           }),

@@ -887,7 +887,7 @@ Verified transport settings (2026-09-04):
 | `openai/gpt-6-astra`       | OpenAI Responses | 1,050,000 / 128,000 tokens          |
 
 The subscription context value is conservative, not a measured backend ceiling.
-An `openai` selection uses the subscription when available; disable the
+A local/self-hosted `openai` selection uses the subscription when available; disable the
 `openai-codex` provider to select the metered API transport explicitly.
 In a checkout, `pnpm --filter @clankie/clankie verify-model provider/model@effort`
 checks a captain tool-and-image turn, a gameplay action, and commentary using
@@ -2217,6 +2217,18 @@ There is no `clankie start`, `clankie up`, or `clankie auth`. Local model
 servers are not supervised.
 
 ### Where a provider key lives
+
+`/auth anthropic` opens API-key entry directly. Clankie no longer offers Claude
+subscription login or refresh; replace any legacy token with an Anthropic API
+key (or remove it through `/auth`). Doctor/setup do not count that legacy OAuth
+entry as usable authentication. Native Claude Code and Codex retain their own
+login.
+
+Hosted Clankie/Pi refuses ChatGPT subscription login and token forwarding pending
+OpenAI approval, before opening a browser or requesting a device code. Use a
+provider API key or included model usage. Local/self-hosted ChatGPT login remains
+available. Approval and waitlist submission are owner actions; see
+[ADR 0052](adr/0052-subscription-precedence-over-metered-api-key.md).
 
 One credential store backs both surfaces: `/auth <providerId>` writes it, and
 every service this CLI starts reads it. Provider config in `clankie.json` never

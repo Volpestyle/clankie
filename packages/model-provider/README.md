@@ -83,7 +83,7 @@ Codex client visibility alone is not evidence that Clankie's third-party
 
 ### Subscription precedence
 
-A stored ChatGPT subscription outranks the metered OpenAI API key for every
+On local/self-hosted Clankie, a stored ChatGPT subscription outranks the metered OpenAI API key for every
 model the Codex backend serves
 ([ADR 0052](../../docs/adr/0052-subscription-precedence-over-metered-api-key.md)).
 `subscriptionRefFor` names the superseding ref and
@@ -131,7 +131,9 @@ still reports the configured effort. The catalog already gated the variant on
 
 `oauth/openai-codex.ts` implements ChatGPT/Codex subscription OAuth for the `openai-codex` provider: the browser flow (PKCE + localhost callback), the headless device flow, refresh-token rotation, and the fetch adapter that reroutes Responses API requests to the Codex backend with subscription headers.
 
-`oauth/anthropic.ts` implements Claude Pro/Max subscription OAuth for the `anthropic` provider: a manual-code browser PKCE flow, credential-broker persistence, single-flight refresh, immediate local revocation, and the OAuth/Claude Code beta headers required by Anthropic's Messages API. `resolveConfiguredLanguageModel` selects this adapter only for an `anthropic` OAuth credential; an Anthropic API key and `ANTHROPIC_API_KEY` keep using the normal AI SDK path. The browser exchange requires a live Pro/Max subscription and remains an operator acceptance check; URL construction, state validation, exchange, refresh, broker persistence, request adaptation, and revocation are covered headlessly.
+Anthropic is API-key-only in Clankie: `/auth anthropic` or `ANTHROPIC_API_KEY`. The Claude subscription adapter and login are removed; stale OAuth credentials and subscription-shaped keys are refused without automatically deleting owner credentials. Native Claude Code retains its own authentication.
+
+`subscription-policy.ts` gates hosted ChatGPT login and inference pending owner-obtained OpenAI approval. Managed bodies are identified by `CLANKIE_HOSTED_BOOTSTRAP_FILE`; their API-key and included-usage paths remain available. Browser/device login fails before opening a URL or making a request, and the hosted customer loopback refuses token forwarding. Local/self-hosted ChatGPT precedence remains as described above. See [ADR 0052](../../docs/adr/0052-subscription-precedence-over-metered-api-key.md) and [ADR 0197](../../docs/adr/0197-hosted-workers-reach-the-owners-model-through-the-body.md).
 
 `oauth/xai.ts` implements SuperGrok/X Premium device-code OAuth on the same
 `xai` slot as an API key, including single-flight refresh and Bearer request

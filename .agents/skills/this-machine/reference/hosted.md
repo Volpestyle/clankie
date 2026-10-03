@@ -43,11 +43,15 @@ re-registration attempt. Persistent `body_signature_invalid` after three
 attempts indicates clock skew beyond five minutes or a pairing-key mismatch;
 inspect those conditions without exposing tokens, signatures or private keys.
 A hired pi worker runs on the body's own model path (ADR 0197): on included
-usage, `clankie/default` through the loopback forwarder; on the owner's key or
-subscription, `clankie-customer/<model>` through the same loopback's
+usage, `clankie/default` through the loopback forwarder; on the owner's supported provider key, `clankie-customer/<model>` through the same loopback's
 `/customer` route, which attaches the credential from the broker. Pi holds no
 key there. Do not log pi into a provider or put a key in its `models.json`; if
 a worker cannot reach the model, check the owner's selection and credential.
+Clankie's Claude subscription auth is removed; `/auth anthropic` is API-key-only.
+Hosted ChatGPT login and forwarding refuse pending OpenAI approval; offer a
+provider API key or included usage. Never submit the waitlist, invent an approval
+date or enable this path on the owner's behalf. Local/self-hosted ChatGPT and
+native unmodified Claude Code/Codex seat logins keep their own supported paths.
 
 ## Managed Discord connection
 

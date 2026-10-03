@@ -6,6 +6,7 @@ import { createXai } from "@ai-sdk/xai";
 import type { ProviderCredential } from "@clankie/credential-broker";
 import type { ProviderEntry } from "@clankie/model-registry";
 import { wrapLanguageModel, type JSONValue, type LanguageModel } from "ai";
+import { assertModelCredentialAllowed } from "./subscription-policy.ts";
 import type { ModelVariant } from "./variants.ts";
 
 // ---------------------------------------------------------------------------
@@ -91,6 +92,11 @@ export function createLanguageModel(input: CreateLanguageModelInput): LanguageMo
 
   switch (family) {
     case "anthropic":
+      assertModelCredentialAllowed(
+        "anthropic",
+        { type: "api", key: apiKey },
+        { env: input.env ?? process.env },
+      );
       return createAnthropic({
         apiKey,
         ...(fetchImpl !== undefined && { fetch: fetchImpl }),

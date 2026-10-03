@@ -6,6 +6,10 @@ import {
 import { createModelRegistry } from "@clankie/model-registry";
 import {
   CODEX_PROVIDER_ID,
+  assertModelCredentialAllowed,
+  assertPiModelAuthAllowed,
+  modelCredentialAllowed,
+  isHostedModelEnvironment,
   configForRef,
   loadConfig,
   registerConfiguredPiProviders,
@@ -41,7 +45,13 @@ export class BrokerCredentialStore {
   // the token twice and strand the second. In-process chain per provider.
   private readonly locks: Map<string, Promise<unknown>>;
 
-  public constructor(broker: ClankieCredentialStore) {
+  private readonly policy: { env?: NodeJS.ProcessEnv; hosted?: boolean };
+
+  public constructor(
+    broker: ClankieCredentialStore,
+    policy: { env?: NodeJS.ProcessEnv; hosted?: boolean } = {},
+  ) {
+    this.policy = policy;
     this.broker = broker;
     const shared = brokerLocks.get(broker) ?? new Map<string, Promise<unknown>>();
     brokerLocks.set(broker, shared);
@@ -49,7 +59,9 @@ export class BrokerCredentialStore {
   }
 
   public async read(providerId: string): Promise<Credential | undefined> {
-    return toPiCredential(await this.broker.get(providerId));
+    const credential = await this.broker.get(providerId);
+    assertModelCredentialAllowed(providerId, credential, this.policy);
+    return toPiCredential(credential);
   }
 
   public async delete(providerId: string): Promise<void> {
@@ -58,10 +70,12 @@ export class BrokerCredentialStore {
 
   public async list(): Promise<readonly CredentialInfo[]> {
     const entries = await this.broker.list();
-    return Object.entries(entries).map(([providerId, redacted]) => ({
-      providerId,
-      type: redacted.type === "oauth" ? ("oauth" as const) : ("api_key" as const),
-    }));
+    return Object.entries(entries)
+      .filter(([id, credential]) => modelCredentialAllowed(id, credential, this.policy))
+      .map(([providerId, redacted]) => ({
+        providerId,
+        type: redacted.type === "oauth" ? ("oauth" as const) : ("api_key" as const),
+      }));
   }
 
   public modify(
@@ -70,9 +84,11 @@ export class BrokerCredentialStore {
   ): Promise<Credential | undefined> {
     const run = (this.locks.get(providerId) ?? Promise.resolve()).then(async () => {
       const stored = await this.broker.get(providerId);
+      assertModelCredentialAllowed(providerId, stored, this.policy);
       const next = await fn(toPiCredential(stored));
       if (next === undefined) return toPiCredential(stored);
       const mapped = fromPiCredential(next, stored);
+      assertModelCredentialAllowed(providerId, mapped, this.policy);
       if (mapped !== undefined) await this.broker.set(providerId, mapped);
       return next;
     });
@@ -154,10 +170,14 @@ export async function createCaptainModelRuntime(repoRoot: string): Promise<Capta
     label?: string,
   ): Promise<PiModelSelection> => {
     try {
-      return resolvePiModelSelection(config, runtime, {
-        hasCodexSubscription: (await broker.get(CODEX_PROVIDER_ID)) !== undefined,
+      const selection = resolvePiModelSelection(config, runtime, {
+        hasCodexSubscription:
+          !isHostedModelEnvironment() && (await broker.get(CODEX_PROVIDER_ID)) !== undefined,
         catalog,
       });
+      assertModelCredentialAllowed(selection.model.provider, await broker.get(selection.model.provider));
+      await assertPiModelAuthAllowed(runtime, selection.model);
+      return selection;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new CaptainModelError(label === undefined ? message : `${label}: ${message}`);

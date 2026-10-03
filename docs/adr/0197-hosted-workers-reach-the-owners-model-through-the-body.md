@@ -1,14 +1,15 @@
 # ADR 0197: Hosted workers reach the owner's model through the body
 
-Status: accepted (2026-09-26; James chose option c). Tracks
+Status: accepted (2026-09-26; James chose option c), corrected 2026-10-02 for VUH-1520. Tracks
 [VUH-1373](https://linear.app/vuhlp/issue/VUH-1373). Builds on the included
 model forwarder (VUH-1371) and the customer-model rule of `96cb9f9b`.
 
 ## Context
 
 A hosted body's captain runs on one of two paths: included usage through the
-fleet's model proxy, or the customer's own credential (an API key, or a
-subscription login such as ChatGPT or Claude). The captain gets that
+fleet's model proxy, or the customer's own supported provider credential.
+Anthropic uses API keys only. Hosted ChatGPT subscription use is gated pending
+OpenAI approval. The captain gets that
 credential from the body's broker. A pi worker the captain hires is a separate
 process with its own configuration, so on the customer path it had no way to
 reach the customer's model. Three options were weighed:
@@ -38,12 +39,10 @@ flowchart LR
   no key, and the worker starts on `clankie/default`.
 - **The customer's credential:** pi's `models.json` declares `clankie-customer`
   with the customer model's own API and limits. Its base URL is the same
-  loopback server's `/customer` prefix, and its key is a placeholder shaped so
-  that pi builds the request it would build with the real credential:
-  - plain API keys get `local`;
-  - an Anthropic subscription gets a marker pi recognizes as OAuth;
-  - a ChatGPT subscription gets an unsigned token that carries only the
-    account id, which pi puts in `chatgpt-account-id`.
+  loopback server's `/customer` prefix, and its key is the non-secret `local`
+  placeholder. Claude subscription markers and unsigned ChatGPT account tokens
+  are no longer generated. The runtime rejects legacy Claude subscription
+  credentials and hosted ChatGPT selections before token refresh or forwarding.
 
   The worker starts on `clankie-customer/<model>`.
 
@@ -54,7 +53,15 @@ flowchart LR
   - paths that leave the base;
   - anything but POST;
   - browser requests (any `Origin` header);
-  - calls when no customer model is selected.
+  - calls when no customer model is selected;
+  - Claude subscription tokens, including tokens entered as API keys;
+  - ChatGPT subscription requests while hosted approval is pending.
+
+  The refusal names a provider API key or included usage as alternatives.
+  [OpenAI's usage policy](https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt)
+  requires access approval for paid or remotely hosted offerings. The owner
+  must submit the request and record any approval; the gate has no inferred
+  approval or automatic date-based bypass.
 
   It relays the answer as it streams and logs only statuses.
 
@@ -74,4 +81,8 @@ flowchart LR
 - A model whose compat pi derives from its provider id or URL loses that
   inference under `clankie-customer`, for example xAI's completions quirks.
   The model's declared `compat` is copied across.
-- Self-hosted bodies are unchanged: pi keeps its own configuration.
+- Local/self-hosted ChatGPT remains available. Clankie's Claude subscription
+  login is removed in all deployments; `/auth anthropic` is API-key-only.
+- Native unmodified Claude Code and Codex seats retain their own authentication.
+  See [Anthropic's native-client conditions](https://code.claude.com/docs/en/legal-and-compliance).
+- Other self-hosted Pi configuration remains owner-managed.

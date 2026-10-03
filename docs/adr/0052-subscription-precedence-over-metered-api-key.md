@@ -1,6 +1,6 @@
 # ADR 0052: A stored subscription outranks the metered API key
 
-Status: accepted (2026-07-25).
+Status: accepted (2026-07-25), corrected 2026-10-02 for VUH-1520.
 
 ## Context
 
@@ -17,7 +17,7 @@ in usage bills or the session ledger.
 
 ## Decision
 
-While a subscription credential is stored, it supersedes the API key for every
+For local/self-hosted Clankie, a stored ChatGPT subscription supersedes the API key for every
 model the Codex backend serves. The shared subscription policy redirects an
 `openai/<model>` ref to `openai-codex/<model>` before any credential lookup;
 `gpt-5.6` maps to `gpt-5.6-sol`, the slug the backend answers.
@@ -45,13 +45,27 @@ The configured effort survives the redirect. Both transports expose the same
 per-model ladder, and an effort configured against the subscription ref wins
 over one configured against the API-key ref.
 
-Anthropic and SuperGrok need no equivalent rule: subscription OAuth and API
-key share one provider id (`anthropic`, `xai`) and one credential slot, so
-storing the OAuth already displaces the key, and a stored credential already
-outranks `ANTHROPIC_API_KEY` / `XAI_API_KEY`. SuperGrok also covers Grok
-image and video: `ConfiguredMediaGenerator` prefers the `xai` OAuth Bearer
-over a metered key so pictures and clips ride the plan the operator already
-pays for.
+Hosted Clankie/Pi does not offer ChatGPT subscription login or inference pending
+OpenAI approval. A stored token cannot override an OpenAI API key there; an
+explicit `openai-codex` selection refuses with API-key/included-usage alternatives.
+The gate follows the managed body's `CLANKIE_HOSTED_BOOTSTRAP_FILE` boundary.
+OpenAI's [Sign in with ChatGPT usage policy](https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt)
+requires paid or remotely hosted offerings to request access before offering it.
+Waitlist submission, dates and approval remain owner actions; none is implied by
+this implementation.
+
+Clankie no longer supports Claude subscription auth. `/auth anthropic` accepts
+an Anthropic API key; legacy OAuth/token-shaped entries are refused and can be
+replaced or removed by the owner. Native, unmodified Claude Code and Codex seats
+retain their own login. This is the VUH-1520 engineering decision. Anthropic's
+[current legal guidance](https://code.claude.com/docs/en/legal-and-compliance)
+prohibits third-party applications from offering Claude.ai login or forwarding
+users' subscription credentials. It separately permits users to authenticate
+in an unmodified Claude Code binary under its native-client conditions.
+
+SuperGrok remains unchanged: its subscription and API key share `xai`, so the
+stored credential determines the transport. Its existing media behavior is
+outside this change.
 
 ## Options weighed
 

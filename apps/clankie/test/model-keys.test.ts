@@ -460,3 +460,39 @@ describe("owner model keys", () => {
     expect((await call("/v1/model-keys/subscriptions", undefined, "captain")).status).toBe(401);
   });
 });
+
+it("keeps subscription APIs honest and rejects token-shaped keys before provider calls", async () => {
+  const { store, env, dir } = await setup();
+  const hostedEnv = { ...env, CLANKIE_HOSTED_BOOTSTRAP_FILE: "/scratch/bootstrap.json" };
+  const runtime = await ModelRuntime.create({
+    credentials: new BrokerCredentialStore(store, { env: hostedEnv }),
+    modelsPath: null,
+    refreshOnCreate: false,
+  });
+  const complete = vi.spyOn(runtime, "complete");
+  const hosted = createModelKeys({ store, env: hostedEnv, cwd: dir, runtime: async () => runtime });
+  const token = { type: "oauth" as const, access: "old", refresh: "old-refresh", expires: 1 };
+  await store.set("anthropic", token);
+  await store.set("openai-codex", token);
+  expect(await hosted.subscriptions?.()).toEqual({ subscriptions: [] });
+  expect(await hosted.set("anthropic", "sk-ant-oat01-stale")).toEqual({
+    ok: false,
+    error: "unsupported_provider",
+  });
+  expect(await store.get("anthropic")).toEqual(token);
+  await store.set("anthropic", { type: "api", key: "sk-ant-oat01-stale" });
+  expect(await hosted.validate("anthropic", "claude-opus-5-5")).toEqual({
+    ok: false,
+    error: "validation_failed",
+  });
+  const alias = runtime.getModels("opencode").find((entry) => entry.api === "anthropic-messages")!;
+  await store.set("opencode", { type: "api", key: "sk-ant-oat01-stale" });
+  expect(await hosted.validate("opencode", alias.id)).toEqual({ ok: false, error: "validation_failed" });
+  expect(complete).not.toHaveBeenCalled();
+  expect(await hosted.select("openai-codex/gpt-6-luna")).toEqual({ ok: false, error: "unsupported_model" });
+  expect(await hosted.set("anthropic", "sk-ant-api03-owned")).toEqual({ ok: true });
+  const local = createModelKeys({ store, env, cwd: dir, runtime: async () => runtime });
+  expect((await local.subscriptions?.())?.subscriptions.map((entry) => entry.providerId)).toContain(
+    "openai-codex",
+  );
+});

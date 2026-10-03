@@ -1,3 +1,4 @@
+import { ModelSubscriptionPolicyError } from "@clankie/model-provider";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
@@ -184,7 +185,10 @@ export async function startHostedModelForwarder(options: {
     );
   };
   const server: Server = createServer((request, response) => {
-    void handle(request, response).catch(() => {
+    void handle(request, response).catch((error: unknown) => {
+      if (error instanceof ModelSubscriptionPolicyError) {
+        return openAiError(response, 403, error.code, error.message);
+      }
       openAiError(response, 502, "forwarder_failed", "Clankie's model service could not be reached.");
     });
   });

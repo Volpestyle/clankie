@@ -1,3 +1,4 @@
+import { assertChatgptLoginAllowed } from "../subscription-policy.ts";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
@@ -124,6 +125,7 @@ function extractCodexAccountId(token: string): string | undefined {
 }
 
 export interface CodexBrowserLoginOptions {
+  readonly env?: NodeJS.ProcessEnv;
   /** Local callback port; 0 binds an ephemeral port. Defaults to 1455 (the registered Codex port). */
   port?: number;
   /** Receives the authorize URL. Defaults to macOS `open`; other platforms should supply their own. */
@@ -140,6 +142,7 @@ export interface CodexBrowserLoginOptions {
 export async function runCodexBrowserLogin(
   options: CodexBrowserLoginOptions = {},
 ): Promise<ProviderCredential> {
+  assertChatgptLoginAllowed(options.env);
   const port = options.port ?? DEFAULT_OAUTH_PORT;
   const fetchImpl = options.fetchImpl ?? fetch;
   const openUrl = options.openUrl ?? openWithDefaultBrowser;
@@ -228,6 +231,7 @@ export async function runCodexBrowserLogin(
 }
 
 export interface CodexDeviceLoginOptions {
+  readonly env?: NodeJS.ProcessEnv;
   /** Receives the user code and the verification URL to show the user. */
   onUserCode: (code: string, verificationUrl: string) => void;
   fetchImpl?: typeof fetch;
@@ -242,6 +246,7 @@ export interface CodexDeviceLoginOptions {
  * interval; any other failure aborts. Resolves an oauth credential.
  */
 export async function runCodexDeviceLogin(options: CodexDeviceLoginOptions): Promise<ProviderCredential> {
+  assertChatgptLoginAllowed(options.env);
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
@@ -289,6 +294,7 @@ export async function runCodexDeviceLogin(options: CodexDeviceLoginOptions): Pro
 }
 
 export interface CodexFetchOptions {
+  readonly env?: NodeJS.ProcessEnv;
   store: CredentialStore;
   fetchImpl?: typeof fetch;
   /** Sent as the `session-id` header when provided (one conversation/session per id). */
@@ -304,6 +310,7 @@ export interface CodexFetchOptions {
  * originator, User-Agent, and session-id headers the Codex backend expects.
  */
 export function createCodexFetch(options: CodexFetchOptions): typeof fetch {
+  assertChatgptLoginAllowed(options.env);
   const fetchImpl = options.fetchImpl ?? fetch;
   let refreshInFlight: Promise<OauthCredential> | undefined;
 
