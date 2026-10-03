@@ -1,3 +1,5 @@
+import { BodyVoiceLeaseRequestSchema } from "@clankie/protocol";
+import type { BodyVoiceStays } from "./body-voice-stays.ts";
 import { BodyLeaseRequestSchema, BodyResourceSchema } from "@clankie/protocol";
 import type { BodyLeaseRouter, BodyConversationIdentity } from "./body-lease-router.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
@@ -424,6 +426,7 @@ export interface ClankieAppDependencies {
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
+  bodyVoiceStays?: BodyVoiceStays;
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;
@@ -2649,6 +2652,61 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Which harnesses here can drive the owner's apps and Chrome (ADR 0199). It
   // describes the owner's machine and sessions, so only the operator reads it;
   // an explicit read re-probes rather than trusting the prompt's cache.
+  app.post("/v1/discord/voice-lease", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === undefined || captain === "unavailable")
+      return context.json({ error: "captain_authentication_required" }, 401);
+    const parsed = BodyVoiceLeaseRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_voice_lease_request" }, 400);
+    const voice = dependencies.bodyVoiceStays;
+    if (voice === undefined) return context.json({ outcome: "rejected", reason: "unavailable" }, 409);
+    const input = parsed.data;
+    const target = input.stay.target;
+    const transport = captainTransportKind(captain);
+    const registered = () =>
+      [...discordPresenceLiveSessions.values()].find(
+        (session) =>
+          session.sessionId === target.presenceSessionId && session.transportKind === target.transportKind,
+      );
+    if (transport !== target.transportKind || registered() === undefined)
+      return context.json({ outcome: "rejected", reason: "identity_required" }, 409);
+    const authorize = async () => {
+      const current = await authenticateCaptain(context.req.raw, dependencies);
+      return (
+        current !== undefined &&
+        current !== "unavailable" &&
+        captainTransportKind(current) === transport &&
+        registered() !== undefined &&
+        (transport !== "user_session" || discordUserSessionOptIns.resolveActive(PROFILE_HASH) !== undefined)
+      );
+    };
+    // Only registered body ingress can resolve this room; the request has no conversation ID.
+    const identity: BodyConversationIdentity = {
+      conversationId: dependencies.captain.bodyRoomConversation(
+        "discord_voice",
+        `${target.guildId}:${target.channelId}`,
+      ),
+      current: () =>
+        !context.req.raw.signal.aborted &&
+        registered() !== undefined &&
+        (input.action === "finish" || registered()?.gatewayConnected === true),
+      authorize,
+    };
+    try {
+      if (!(await authorize()) || !identity.current())
+        return context.json({ outcome: "rejected", reason: "not_authorized" }, 409);
+      const result =
+        input.action === "claim"
+          ? await voice.claim(input.stay, identity, input.ticket)
+          : input.action === "heartbeat"
+            ? await voice.heartbeat(input.stay, input.incarnation, identity)
+            : voice.finish(input.stay, input.incarnation);
+      return context.json(result, result.outcome === "rejected" || result.outcome === "busy" ? 409 : 200);
+    } catch {
+      return context.json({ outcome: "rejected", reason: "store_unavailable" }, 503);
+    }
+  });
+
   app.get("/v1/body-leases", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (!operator || operator === "unavailable")

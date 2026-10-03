@@ -1,3 +1,4 @@
+import { VoiceBodyLeaseDenied } from "@clankie/discord-presence-core";
 import type { JoinDiscordVoiceInput } from "@clankie/discord-presence-core";
 import type { DiscordVoicePresenceResult } from "@clankie/protocol";
 import {
@@ -21,6 +22,7 @@ export interface VoicePresenceExecutionConfig {
   readonly voiceChannelIds: ReadonlySet<string>;
   readonly voiceSession: VoicePresenceSessionPort | undefined;
   readonly transcriptLoggingEnabled: boolean;
+  readonly beforeJoin?: () => Promise<void>;
 }
 
 export interface VoicePresenceExecutionInput {
@@ -64,6 +66,15 @@ export async function executeVoicePresenceIntent(
   ) {
     return { action: "join_refused", reason: "allowlist" };
   }
+  try {
+    await config.beforeJoin?.();
+  } catch (error) {
+    return {
+      action: "join_refused",
+      reason: "failed",
+      ...(error instanceof VoiceBodyLeaseDenied ? { bodyLease: error.bodyLease } : {}),
+    };
+  }
   const active = session.status();
   if (active.active && active.guildId !== input.guildId) {
     return { action: "join_refused", reason: "other_guild" };
@@ -85,8 +96,12 @@ export async function executeVoicePresenceIntent(
         ...(input.requestText === undefined ? {} : { requestText: input.requestText }),
       },
     });
-  } catch {
-    return { action: "join_refused", reason: "failed" };
+  } catch (error) {
+    return {
+      action: "join_refused",
+      reason: "failed",
+      ...(error instanceof VoiceBodyLeaseDenied ? { bodyLease: error.bodyLease } : {}),
+    };
   }
   return {
     action: "joined",

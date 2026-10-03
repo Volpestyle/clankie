@@ -86,3 +86,25 @@ export const BodyLeaseResultSchema = z.discriminatedUnion("outcome", [
   }),
 ]);
 export type BodyLeaseResult = z.infer<typeof BodyLeaseResultSchema>;
+
+/** Resolved by the authenticated gateway body, never supplied by a model tool. */
+export const BodyVoiceTargetSchema = z.strictObject({
+  guildId: z.string().min(1).max(128),
+  channelId: z.string().min(1).max(128),
+  actorId: z.string().min(1).max(128),
+  presenceSessionId: z.string().min(1).max(128),
+  transportKind: z.enum(["bot", "user_session"]),
+});
+export type BodyVoiceTarget = z.infer<typeof BodyVoiceTargetSchema>;
+export const BodyVoiceStaySchema = z.strictObject({
+  target: BodyVoiceTargetSchema,
+  stayId: z.uuid(),
+  generation: z.number().int().nonnegative(),
+});
+export type BodyVoiceStay = z.infer<typeof BodyVoiceStaySchema>;
+export const BodyVoiceLeaseRequestSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("claim"), stay: BodyVoiceStaySchema, ticket: z.uuid().optional() }),
+  z.strictObject({ action: z.literal("heartbeat"), stay: BodyVoiceStaySchema, incarnation }),
+  z.strictObject({ action: z.literal("finish"), stay: BodyVoiceStaySchema, incarnation }),
+]);
+export type BodyVoiceLeaseRequest = z.infer<typeof BodyVoiceLeaseRequestSchema>;

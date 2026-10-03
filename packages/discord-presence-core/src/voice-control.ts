@@ -1,4 +1,8 @@
-import type { DiscordVoicePresenceResult } from "@clankie/protocol";
+import {
+  BodyVoiceTargetSchema,
+  type BodyVoiceTarget,
+  type DiscordVoicePresenceResult,
+} from "@clankie/protocol";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 export const VOICE_JOIN_REQUEST_MAX_CHARS = 1_000;
@@ -12,6 +16,8 @@ export interface VoicePresenceControlInput {
   readonly actorId?: string;
   /** Host-copied invitation, untrusted context only; never consent or authority. */
   readonly requestText?: string;
+  /** Host-issued one-use ticket; never a model argument. */
+  readonly bodyLeaseTicket?: string;
 }
 
 export interface OwnerVoiceCandidate {
@@ -58,10 +64,12 @@ export function tryHandleVoicePresenceControlRequest(
     action: VoicePresenceControlAction,
     input: VoicePresenceControlInput,
   ) => Promise<DiscordVoicePresenceResult>,
+  resolve?: (input: VoicePresenceControlInput) => Promise<BodyVoiceTarget | undefined>,
 ): boolean {
   if (request.method !== "POST") return false;
+  const resolving = (request.url ?? "").split("?")[0] === "/voice/resolve" && resolve !== undefined;
   const action = parseVoicePresenceControlPath(request.url ?? "/");
-  if (action === undefined) return false;
+  if (action === undefined && !resolving) return false;
   const chunks: Buffer[] = [];
   request.on("data", (chunk: Buffer) => chunks.push(chunk));
   request.on("end", () => {
@@ -69,7 +77,9 @@ export function tryHandleVoicePresenceControlRequest(
       try {
         const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
         const input = voicePresenceControlInput(body);
-        const result = await execute(action, input);
+        const result = resolving
+          ? BodyVoiceTargetSchema.parse(await resolve!(input))
+          : await execute(action!, input);
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify(result));
       } catch {
@@ -89,12 +99,14 @@ function voicePresenceControlInput(value: unknown): VoicePresenceControlInput {
   const guildId = optionalControlId(body.guildId);
   const actorId = optionalControlId(body.actorId);
   const requestText = body.requestText;
+  const bodyLeaseTicket = optionalControlId(body.bodyLeaseTicket);
   if (
     requestText !== undefined &&
     (typeof requestText !== "string" || requestText.length > VOICE_JOIN_REQUEST_MAX_CHARS)
   )
     throw new Error("invalid_voice_presence_request");
   return {
+    ...(bodyLeaseTicket === undefined ? {} : { bodyLeaseTicket }),
     ...(requestText === undefined ? {} : { requestText }),
     ...(guildId === undefined ? {} : { guildId }),
     ...(actorId === undefined ? {} : { actorId }),

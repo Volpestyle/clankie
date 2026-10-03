@@ -1,0 +1,269 @@
+import { randomUUID } from "node:crypto";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import {
+  BodyVoiceStaySchema,
+  BodyVoiceTargetSchema,
+  type BodyLeaseResult,
+  type BodyVoiceStay,
+  type BodyVoiceTarget,
+} from "@clankie/protocol";
+import { z } from "zod";
+import type { BodyConversationIdentity } from "./body-lease-router.ts";
+import type { BodyLeaseStore } from "./body-leases.ts";
+
+type Ref = NonNullable<ReturnType<BodyLeaseStore["recoveryReference"]>>;
+const RefSchema = z.strictObject({
+  resource: z.literal("voice"),
+  conversationId: z.string(),
+  token: z.uuid(),
+});
+const TicketSchema = z.strictObject({
+  target: BodyVoiceTargetSchema,
+  conversationId: z.string(),
+  expiresAt: z.number(),
+  consumed: z.boolean(),
+});
+const StaySchema = z.strictObject({
+  stay: BodyVoiceStaySchema,
+  reference: RefSchema,
+  operationId: z.uuid(),
+  finished: z.boolean(),
+});
+const StateSchema = z.strictObject({
+  tickets: z.record(z.string(), TicketSchema),
+  stays: z.record(z.string(), StaySchema),
+});
+type State = z.infer<typeof StateSchema>;
+const refused = (reason: Extract<BodyLeaseResult, { outcome: "rejected" }>["reason"]): BodyLeaseResult => ({
+  outcome: "rejected",
+  reason,
+});
+const matches = (left: BodyVoiceTarget, right: BodyVoiceTarget): boolean =>
+  left.guildId === right.guildId &&
+  left.channelId === right.channelId &&
+  left.actorId === right.actorId &&
+  left.presenceSessionId === right.presenceSessionId &&
+  left.transportKind === right.transportKind;
+const sameStay = (left: BodyVoiceStay, right: BodyVoiceStay): boolean =>
+  left.stayId === right.stayId && left.generation === right.generation && matches(left.target, right.target);
+
+/** Host-only lifecycle. The surrounding BodyLeaseStore owns process exclusion for this directory. */
+export class BodyVoiceStays {
+  private state: State = { tickets: {}, stays: {} };
+  private unavailable = false;
+  private readonly ticketIdentities = new Map<string, BodyConversationIdentity>();
+  private readonly restartClaims = new Map<string, Ref>();
+  private readonly stayAuthority = new Map<string, BodyConversationIdentity["authorize"]>();
+  private readonly store: BodyLeaseStore;
+  private readonly path: string;
+  private readonly clock: () => number;
+  public constructor(store: BodyLeaseStore, path: string, clock = Date.now) {
+    this.store = store;
+    this.path = path;
+    this.clock = clock;
+    try {
+      this.state = StateSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+      // No reconstructed turn grants after restart. Existing stays require trusted observed termination.
+      for (const ticket of Object.values(this.state.tickets)) ticket.consumed = true;
+      const current = this.store.recoveryReference("voice");
+      const unfinished = Object.values(this.state.stays).filter((record) => !record.finished);
+      if (
+        current !== undefined &&
+        this.store.status("voice")?.state === "recovery_required" &&
+        unfinished.length === 1
+      ) {
+        const previous = unfinished[0]!;
+        if (previous.reference.conversationId === current.conversationId)
+          this.restartClaims.set(previous.stay.stayId, current);
+      }
+      this.save();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.unavailable = true;
+    }
+  }
+
+  public async ticket(
+    identity: BodyConversationIdentity,
+    target: BodyVoiceTarget,
+  ): Promise<{ ticket: string } | BodyLeaseResult> {
+    if (this.unavailable) return refused("store_unavailable");
+    if (!identity.current() || !(await identity.authorize("voice", "effect")) || !identity.current())
+      return refused("not_authorized");
+    // Bound and persisted before the control request is dispatched to the body.
+    for (const [key, ticket] of Object.entries(this.state.tickets)) {
+      if (ticket.expiresAt <= this.clock()) {
+        delete this.state.tickets[key];
+        this.ticketIdentities.delete(key);
+      }
+    }
+    if (Object.keys(this.state.tickets).length >= 128) return refused("queue_full");
+    const id = randomUUID();
+    this.state.tickets[id] = {
+      target: BodyVoiceTargetSchema.parse(target),
+      conversationId: identity.conversationId,
+      expiresAt: this.clock() + 30_000,
+      consumed: false,
+    };
+    this.save();
+    this.ticketIdentities.set(id, identity);
+    return { ticket: id };
+  }
+
+  /** routeIdentity is resolved only after authenticated physical gateway/session proof. */
+  public async claim(
+    stay: BodyVoiceStay,
+    routeIdentity: BodyConversationIdentity,
+    ticketId?: string,
+  ): Promise<BodyLeaseResult> {
+    if (this.unavailable) return refused("store_unavailable");
+    if (
+      !routeIdentity.current() ||
+      !(await routeIdentity.authorize("voice", "effect")) ||
+      !routeIdentity.current()
+    )
+      return refused("not_authorized");
+    if (Object.values(this.state.stays).filter((record) => !record.finished).length >= 128)
+      return refused("queue_full");
+    if (this.state.stays[stay.stayId] !== undefined) return refused("stale_lease");
+    if (Object.keys(this.state.stays).length >= 256) {
+      for (const [key, record] of Object.entries(this.state.stays)) {
+        if (record.finished) {
+          delete this.state.stays[key];
+          this.restartClaims.delete(key);
+        }
+        if (Object.keys(this.state.stays).length < 128) break;
+      }
+    }
+    let owner = routeIdentity;
+    if (ticketId !== undefined) {
+      const ticket = this.state.tickets[ticketId];
+      const identity = this.ticketIdentities.get(ticketId);
+      if (
+        ticket === undefined ||
+        ticket.consumed ||
+        ticket.expiresAt <= this.clock() ||
+        !matches(ticket.target, stay.target) ||
+        identity === undefined
+      )
+        return refused("stale_lease");
+      if (
+        !identity.current() ||
+        !(await identity.authorize("voice", "effect")) ||
+        !identity.current() ||
+        !routeIdentity.current()
+      )
+        return refused("not_authorized");
+      // Recheck after the authorization await; concurrent consumers cannot reuse a ticket.
+      if (ticket.consumed || ticket.expiresAt <= this.clock()) return refused("stale_lease");
+      ticket.consumed = true;
+      this.save();
+      this.ticketIdentities.delete(ticketId);
+      owner = identity;
+    }
+    const acquired = this.store.acquire("voice", owner.conversationId, 30_000);
+    if (acquired.outcome === "busy") return { ...acquired, actions: ["queue", "ask"] };
+    if (acquired.outcome !== "acquired") return acquired;
+    const begun = this.store.begin(acquired.lease);
+    if (begun.outcome !== "admitted") return begun;
+    this.state.stays[stay.stayId] = {
+      stay: BodyVoiceStaySchema.parse(stay),
+      reference: acquired.lease as Ref & { resource: "voice" },
+      operationId: begun.operationId,
+      finished: false,
+    };
+    this.save();
+    // Admission capture can expire on the next turn; ongoing authority keeps the original source grant.
+    this.stayAuthority.set(stay.stayId, owner.authorize);
+    return { outcome: "acquired", lease: this.store.status("voice")!, incarnation: acquired.lease.token };
+  }
+
+  public async heartbeat(
+    stay: BodyVoiceStay,
+    incarnation: string,
+    routeIdentity: BodyConversationIdentity,
+  ): Promise<BodyLeaseResult> {
+    if (this.unavailable) return refused("store_unavailable");
+    const record = this.state.stays[stay.stayId];
+    const authority = this.stayAuthority.get(stay.stayId);
+    if (
+      record === undefined ||
+      record.finished ||
+      !sameStay(record.stay, stay) ||
+      record.reference.token !== incarnation
+    )
+      return refused("stale_lease");
+    if (
+      authority === undefined ||
+      !routeIdentity.current() ||
+      !(await authority("voice", "effect")) ||
+      !(await routeIdentity.authorize("voice", "effect")) ||
+      !routeIdentity.current()
+    )
+      return refused("not_authorized");
+    const valid = this.store.validate(record.reference, record.operationId);
+    if (valid.outcome !== "valid") return valid;
+    const renewed = this.store.renew(record.reference, 30_000);
+    return renewed.outcome === "renewed"
+      ? { outcome: "renewed", lease: this.store.status("voice")! }
+      : renewed;
+  }
+
+  /** Only the authenticated body's observed gateway-leave callback invokes this, never a caller boolean. */
+  public finish(stay: BodyVoiceStay, incarnation: string): BodyLeaseResult {
+    if (this.unavailable) return refused("store_unavailable");
+    const record = this.state.stays[stay.stayId];
+    if (record === undefined || !sameStay(record.stay, stay) || record.reference.token !== incarnation)
+      return refused("stale_lease");
+    if (record.finished) return { outcome: "released" };
+    const current = this.store.recoveryReference("voice");
+    const expected = this.restartClaims.get(stay.stayId) ?? record.reference;
+    if (
+      current === undefined ||
+      current.token !== expected.token ||
+      current.conversationId !== record.reference.conversationId
+    )
+      return refused("stale_lease");
+    // Persist the observed termination before freeing any registry ownership.
+    record.finished = true;
+    this.save();
+    // On restart only this exact persisted stay's gateway termination can reconcile the rotated claim.
+    if (current.token === record.reference.token) this.store.finish(current, record.operationId, "settled");
+    const result = this.store.reconcileStopped(current);
+    if (
+      result.outcome !== "released" &&
+      !(result.outcome === "rejected" && result.reason === "recovery_required")
+    )
+      return result;
+    this.stayAuthority.delete(stay.stayId);
+    return { outcome: "released" }; // Actual termination recorded; an enclosing recovery pin may still hold the registry.
+  }
+
+  public stopped(): boolean {
+    return !this.unavailable && Object.values(this.state.stays).every((record) => record.finished);
+  }
+
+  private save(): void {
+    try {
+      mkdirSync(dirname(this.path), { recursive: true });
+      const temporary = `${this.path}.${randomUUID()}.tmp`;
+      const file = openSync(temporary, "wx", 0o600);
+      try {
+        writeFileSync(file, JSON.stringify(this.state));
+        fsyncSync(file);
+      } finally {
+        closeSync(file);
+      }
+      renameSync(temporary, this.path);
+      const directory = openSync(dirname(this.path), "r");
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
+    } catch (error) {
+      this.unavailable = true;
+      throw error;
+    }
+  }
+}

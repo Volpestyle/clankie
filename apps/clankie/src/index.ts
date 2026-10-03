@@ -1,3 +1,4 @@
+import { BodyVoiceStays } from "./body-voice-stays.ts";
 import { BodyLeaseStore } from "./body-leases.ts";
 import { BodyLeaseRouter } from "./body-lease-router.ts";
 import { createPersonaImageSource } from "./persona-images.ts";
@@ -552,6 +553,7 @@ const localFleetBinding = async () => {
 const localCodexSeats = new LocalCodexSeats(herdr.binding);
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
+const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const captain = createCaptain(
   {
     workItems,
@@ -663,7 +665,10 @@ const captain = createCaptain(
             current: () => Promise.resolve(boundApp().streamWatch()),
           },
           discordMusic: createDiscordMusicClient(),
-          discordVoicePresence: createDiscordVoicePresenceClient(),
+          discordVoicePresence: createDiscordVoicePresenceClient(process.env, fetch, {
+            voice: bodyVoiceStays,
+            router: bodyLeases,
+          }),
         }
       : {}),
     discordActions: createDiscordCaptainActionClient(),
@@ -802,6 +807,7 @@ const localFleet = new LocalFleetLink({
   }),
 });
 const clankie = await createClankieApp({
+  bodyVoiceStays,
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,
@@ -816,7 +822,10 @@ const clankie = await createClankieApp({
         );
         return result.outcome === "ok" && !result.isError;
       }
-      if (resource === "voice") return (await createDiscordVoicePresenceClient().leave({})).action === "left";
+      if (resource === "voice") {
+        const result = await createDiscordVoicePresenceClient().leave({});
+        return result.action === "left" && bodyVoiceStays.stopped();
+      }
       if (resource === "play") {
         const result = await playHost.stopAndWait({ deadlineMs: 12_000, reason: "operator_body_recovery" });
         return result.status === "settled";

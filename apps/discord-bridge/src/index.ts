@@ -1,3 +1,4 @@
+import { VoiceBodyLease, type VoiceBodyAdmission } from "@clankie/discord-presence-core";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { gatewayDiagnostic } from "./gateway-diagnostics.ts";
 import { ClankieApiClient } from "@clankie/api-client";
@@ -313,6 +314,14 @@ const vox = await startOfficialBotVox({
   onError: (message) => console.error({ message }, "Vox media process failed"),
   onLog: (message) => console.info({ message }, "Vox media process"),
 });
+let pendingLeaseLeft: Extract<DiscordVoiceEvidence, { type: "left" }> | undefined;
+const voiceBodyLease = new VoiceBodyLease({
+  rpc: (request) => api.voiceLease(request),
+  onLost: async (stay) => {
+    const current = voiceSession?.status().stayId;
+    if (current === undefined || current === stay.stayId) await voiceGateway?.leave("body_lease_lost");
+  },
+});
 const voiceSession =
   realtimeCredential?.type !== "api" ||
   voiceApi === undefined ||
@@ -369,6 +378,11 @@ const voiceGateway =
           console.error({ message }, "Discord Vox gateway adapter failed");
         },
         onLeaveConfirmed: async ({ guildId, channelId }) => {
+          const left = pendingLeaseLeft;
+          if (left?.guildId === guildId && left.channelId === channelId && left.stayId !== undefined) {
+            await voiceBodyLease.confirmedLeave(left.stayId);
+            if (pendingLeaseLeft === left) pendingLeaseLeft = undefined;
+          }
           await recordReceipt("discord.voice.left", {
             guildId,
             channelId,
@@ -1073,6 +1087,13 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
         current.active && current.guildId === interaction.guild.id && current.channelId === channel.id
           ? await voiceSession.setConsent(interaction.guild.id, channel.id, interaction.user.id, true)
           : await voiceGateway!.join(interaction.guild, {
+              bodyLease: await voiceBodyLease.admit({
+                guildId: interaction.guild.id,
+                channelId: channel.id,
+                actorId: interaction.user.id,
+                presenceSessionId: presenceSession.record.sessionId,
+                transportKind: "bot",
+              }),
               channelId: channel.id,
               guildId: interaction.guild.id,
               invokingUserId: interaction.user.id,
@@ -1266,9 +1287,35 @@ async function executeCaptainVoicePresence(
       reason: target.reason,
     };
   }
+  let bodyAdmission: VoiceBodyAdmission | undefined;
   const result = await executeVoicePresenceIntent(
     {
       bindings: roleBindings,
+      beforeJoin: async () => {
+        const channelId = target.member.voice.channelId;
+        if (channelId === null) throw new Error("Voice target changed");
+        bodyAdmission = await voiceBodyLease.admit(
+          {
+            guildId: target.guildId,
+            channelId,
+            actorId: target.actorId,
+            presenceSessionId: presenceSession.record.sessionId,
+            transportKind: "bot",
+          },
+          input.bodyLeaseTicket,
+          () =>
+            presenceSession.record.gatewayConnected &&
+            voiceGuildIds.has(target.guildId) &&
+            (voiceChannelIds.size === 0 || voiceChannelIds.has(channelId)) &&
+            authorizeVoicePresenceCommand(
+              { userId: target.actorId, roleIds: new Set(target.member.roles.cache.keys()) },
+              roleBindings,
+              voiceJoinPolicy,
+            ).allowed,
+        );
+        await bodyAdmission.guard();
+        if (target.member.voice.channelId !== channelId) throw new Error("Voice target changed");
+      },
       joinPolicy: voiceJoinPolicy,
       voiceGuildIds,
       voiceChannelIds,
@@ -1278,7 +1325,10 @@ async function executeCaptainVoicePresence(
           : {
               status: () => voiceSession.status(),
               canHear: (userId) => voiceSession.canHear(userId),
-              join: (joinInput) => voiceGateway.join(target.guild, joinInput),
+              join: (joinInput) => {
+                if (bodyAdmission === undefined) throw new Error("Voice body admission missing");
+                return voiceGateway.join(target.guild, { ...joinInput, bodyLease: bodyAdmission });
+              },
               leave: () => voiceGateway.leave(),
             },
       transcriptLoggingEnabled: voiceTranscriptLoggingEnabled,
@@ -1659,6 +1709,7 @@ function recordReceipt(
 }
 
 async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void> {
+  if (evidence.type === "left") pendingLeaseLeft = evidence;
   // The idle auto-leave watches the same stream the receipts do, so "activity"
   // is exactly what the evidence says happened.
   voiceIdleAutoLeave?.observe(evidence);
@@ -1785,7 +1836,20 @@ const musicServer = createServer((request, response) => {
     )
   )
     return;
-  if (tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence)) return;
+  if (
+    tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence, async (input) => {
+      const target = await resolveVoicePresenceControlTarget("join", input);
+      if ("reason" in target || target.member.voice.channelId === null) return undefined;
+      return {
+        guildId: target.guildId,
+        channelId: target.member.voice.channelId,
+        actorId: target.actorId,
+        presenceSessionId: presenceSession.record.sessionId,
+        transportKind: "bot",
+      };
+    })
+  )
+    return;
   if (tryHandleCaptainDiscordActionRequest(request, response, executeCaptainDiscordAction)) return;
   response.writeHead(404);
   response.end();

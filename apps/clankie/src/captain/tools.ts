@@ -1124,20 +1124,23 @@ function discordVoicePresenceTools(
     if (voice === undefined) {
       return json({ action: action === "join" ? "join_refused" : "leave_refused", reason: "failed" });
     }
-    if (lane === "operator") return json(await voice[action]({}));
+    if (lane === "operator") return json(await voice[action]({}, turn.bodyIdentity));
     const guildId = turn.guildId;
     const actorId = turn.actorId;
     if (guildId === undefined || actorId === undefined) {
       return json({ action: action === "join" ? "join_refused" : "leave_refused", reason: "failed" });
     }
     return json(
-      await voice[action]({
-        guildId,
-        actorId,
-        ...(action !== "join" || turn.requestText === undefined
-          ? {}
-          : { requestText: turn.requestText.slice(0, VOICE_JOIN_REQUEST_MAX_CHARS) }),
-      }),
+      await voice[action](
+        {
+          guildId,
+          actorId,
+          ...(action !== "join" || turn.requestText === undefined
+            ? {}
+            : { requestText: turn.requestText.slice(0, VOICE_JOIN_REQUEST_MAX_CHARS) }),
+        },
+        turn.bodyIdentity,
+      ),
     );
   };
   const fromOperator = lane === "operator";

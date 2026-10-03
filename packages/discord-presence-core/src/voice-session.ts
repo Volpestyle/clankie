@@ -1,3 +1,4 @@
+import type { VoiceBodyAdmission } from "./body-voice-lease.ts";
 /**
  * Transport-neutral policy coordinator for one guild voice channel, rewired for
  * [ADR 0057](../../../docs/adr/0057-realtime-voice-with-captain-handoff.md)'s
@@ -234,6 +235,8 @@ export const ADDRESSED_OFFER_TURN_ITEM =
   "produce no output at all. Silence is the correct answer then.";
 
 export interface JoinDiscordVoiceInput {
+  /** Host-only admission, acquired before any gateway/session effect. */
+  readonly bodyLease?: VoiceBodyAdmission;
   readonly guildId: string;
   readonly channelId: string;
   /**
@@ -594,6 +597,7 @@ export class DiscordVoiceSession {
   private lastNarrationResponseAtMs = Number.NEGATIVE_INFINITY;
   private readonly narrationMinIntervalMs: number;
   private stayId: string | undefined;
+  private bodyLease: VoiceBodyAdmission | undefined;
   private stayInputTokens = 0;
   private stayOutputTokens = 0;
   private staySpokenCount = 0;
@@ -681,12 +685,15 @@ export class DiscordVoiceSession {
 
   public async join(input: JoinDiscordVoiceInput): Promise<DiscordVoiceSessionStatus> {
     if (this.disposed) throw new Error("Discord voice session is disposed");
+    await input.bodyLease?.guard();
     await this.leave();
+    await input.bodyLease?.guard();
+    this.bodyLease = input.bodyLease;
     this.guildId = input.guildId;
     this.channelId = input.channelId;
     const connectionId = randomUUID();
     this.connectionId = connectionId;
-    this.stayId = randomUUID();
+    this.stayId = input.bodyLease?.stay.stayId ?? randomUUID();
     this.stayInputTokens = 0;
     this.stayOutputTokens = 0;
     this.staySpokenCount = 0;
@@ -969,6 +976,7 @@ export class DiscordVoiceSession {
     this.guildId = undefined;
     this.channelId = undefined;
     this.stayId = undefined;
+    this.bodyLease = undefined;
     this.stayInputTokens = 0;
     this.stayOutputTokens = 0;
     this.staySpokenCount = 0;
@@ -2960,6 +2968,11 @@ export class DiscordVoiceSession {
   // ------------------------------------------------------------------
 
   private handleAudioDelta(pcm: Buffer, itemId: string): void {
+    if (this.bodyLease?.current() === false) {
+      pcm.fill(0);
+      this.leaveSafely("body_lease_lost");
+      return;
+    }
     if (this.invalidPlaybackItemIds.has(itemId)) {
       pcm.fill(0);
       return;
@@ -3107,6 +3120,8 @@ export class DiscordVoiceSession {
       }
       return;
     }
+    await this.bodyLease?.guard();
+    if (job.generation !== this.sessionGeneration || this.bodyLease?.current() === false) return;
     this.playingJob = job;
     this.music.duck();
     const result = await new Promise<"drained" | "stopped" | "failed" | "timeout">((resolve) => {

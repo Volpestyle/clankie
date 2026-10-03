@@ -1,3 +1,4 @@
+import { VoiceBodyLease, VoiceBodyLeaseDenied } from "@clankie/discord-presence-core";
 import { ClankieApiClient } from "@clankie/api-client";
 import {
   createDefaultCredentialStore,
@@ -282,6 +283,13 @@ const voxGateway = new VoxGatewayBridge({
   onRejected: (reason) => console.warn({ reason }, "Rejected Vox gateway event"),
 });
 
+const voiceBodyLease = new VoiceBodyLease({
+  rpc: (request) => api.voiceLease(request),
+  onLost: async (stay) => {
+    const current = voiceSession?.status().stayId;
+    if (current === undefined || current === stay.stayId) await leaveVoiceConfirmed(stay.target.guildId);
+  },
+});
 const voiceSession =
   realtimeCredential?.type !== "api" || voiceApi === undefined || voiceConfig === undefined
     ? undefined
@@ -564,7 +572,15 @@ async function executeCaptainVoicePresence(
   action: VoicePresenceControlAction,
   input: VoicePresenceControlInput,
 ): Promise<DiscordVoicePresenceResult> {
-  return runVoiceOperation(() => executeCaptainVoicePresenceNow(action, input));
+  try {
+    return await runVoiceOperation(() => executeCaptainVoicePresenceNow(action, input));
+  } catch (error) {
+    return {
+      action: action === "join" ? "join_refused" : "leave_refused",
+      reason: "failed",
+      ...(error instanceof VoiceBodyLeaseDenied ? { bodyLease: error.bodyLease } : {}),
+    };
+  }
 }
 
 async function executeCaptainVoicePresenceNow(
@@ -597,6 +613,24 @@ async function executeCaptainVoicePresenceNow(
   if (!guildIds.has(target.guildId) || !voiceChannelIds.has(target.channelId)) {
     return { action: "join_refused", reason: "allowlist" };
   }
+  const bodyAdmission = await voiceBodyLease.admit(
+    { ...target, presenceSessionId: presenceSession.record.sessionId, transportKind: "user_session" },
+    input.bodyLeaseTicket,
+    () =>
+      presenceSession.record.gatewayConnected &&
+      target.actorId === ownerUserId &&
+      guildIds.has(target.guildId) &&
+      voiceChannelIds.has(target.channelId),
+  );
+  await bodyAdmission.guard();
+  const latestTarget = resolveUserSessionVoiceTarget("join", input);
+  if (
+    "reason" in latestTarget ||
+    latestTarget.guildId !== target.guildId ||
+    latestTarget.channelId !== target.channelId ||
+    latestTarget.actorId !== target.actorId
+  )
+    throw new Error("Voice target changed");
   if (active.active && currentTarget?.channelId === target.channelId) {
     return {
       action: "joined",
@@ -611,11 +645,13 @@ async function executeCaptainVoicePresenceNow(
     }
     if (shuttingDown) return { action: "join_refused", reason: "failed" };
   }
+  await bodyAdmission.guard();
   if (!voxGateway.prepareVoiceTarget(target.guildId, target.channelId)) {
     return { action: "join_refused", reason: "failed" };
   }
   const confirmed = await voxGateway.confirmVoiceJoin(target.guildId, target.channelId, () =>
     voiceSession.join({
+      bodyLease: bodyAdmission,
       guildId: target.guildId,
       channelId: target.channelId,
       invokingUserId: target.actorId,
@@ -854,6 +890,7 @@ async function leaveVoiceConfirmed(guildId: string): Promise<boolean> {
 async function recordConfirmedVoiceLeave(guildId: string): Promise<void> {
   const evidence = pendingLeftEvidence;
   if (evidence === undefined || evidence.guildId !== guildId) return;
+  if (evidence.stayId !== undefined) await voiceBodyLease.confirmedLeave(evidence.stayId);
   pendingLeftEvidence = undefined;
   await recordReceipt(voiceEvidenceReceiptType(evidence), {
     ...voiceEvidenceReceiptData(evidence),
@@ -992,7 +1029,18 @@ const server = createServer((request, response) => {
     )
   )
     return;
-  if (tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence)) return;
+  if (
+    tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence, async (input) => {
+      const target = resolveUserSessionVoiceTarget("join", input);
+      if ("reason" in target) return undefined;
+      return {
+        ...target,
+        presenceSessionId: presenceSession.record.sessionId,
+        transportKind: "user_session",
+      };
+    })
+  )
+    return;
   if (tryHandleCaptainDiscordActionRequest(request, response, executeCaptainDiscordAction)) return;
   response.writeHead(404);
   response.end();

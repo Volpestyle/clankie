@@ -1,3 +1,8 @@
+import {
+  BodyVoiceLeaseRequestSchema,
+  type BodyVoiceLeaseRequest,
+  type BodyLeaseResult,
+} from "@clankie/protocol";
 import { BodyLeaseResultSchema } from "@clankie/protocol";
 import { HERDR_BINDING_PATH, HerdrBindingSchema, type HerdrBinding } from "@clankie/protocol";
 import {
@@ -226,6 +231,23 @@ export class ClankieApiClient {
    * Requests a policy-evaluated action gated by the bridge-owned Discord presence session.
    * Bot credentials stay behind the credential broker used by the trusted presence runtime module.
    */
+  public async voiceLease(input: BodyVoiceLeaseRequest): Promise<BodyLeaseResult> {
+    try {
+      const result = await this.request<unknown>("/v1/discord/voice-lease", {
+        method: "POST",
+        headers: this.captainHeaders(),
+        body: JSON.stringify(BodyVoiceLeaseRequestSchema.parse(input)),
+      });
+      return BodyLeaseResultSchema.parse(result);
+    } catch (error) {
+      const result = BodyLeaseResultSchema.safeParse(
+        error !== null && typeof error === "object" && "bodyLease" in error ? error.bodyLease : undefined,
+      );
+      if (result.success) return result.data;
+      throw error;
+    }
+  }
+
   public async executeDiscordPresenceAction(
     input: DiscordPresenceWrite,
     liveClaim: DiscordPresenceLiveClaim,

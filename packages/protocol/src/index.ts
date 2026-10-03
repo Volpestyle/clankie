@@ -4371,9 +4371,21 @@ export const DiscordVoicePresenceResultSchema = z.discriminatedUnion("action", [
       transcriptLoggingEnabled: z.boolean(),
     })
     .strict(),
-  z.object({ action: z.literal("join_refused"), reason: DiscordVoicePresenceResultReasonSchema }).strict(),
+  z
+    .object({
+      action: z.literal("join_refused"),
+      reason: DiscordVoicePresenceResultReasonSchema,
+      bodyLease: BodyLeaseResultSchema.optional(),
+    })
+    .strict(),
   z.object({ action: z.literal("left"), channelId: z.string().min(1).optional() }).strict(),
-  z.object({ action: z.literal("leave_refused"), reason: DiscordVoicePresenceResultReasonSchema }).strict(),
+  z
+    .object({
+      action: z.literal("leave_refused"),
+      reason: DiscordVoicePresenceResultReasonSchema,
+      bodyLease: BodyLeaseResultSchema.optional(),
+    })
+    .strict(),
 ]);
 export type DiscordVoicePresenceResult = z.infer<typeof DiscordVoicePresenceResultSchema>;
 

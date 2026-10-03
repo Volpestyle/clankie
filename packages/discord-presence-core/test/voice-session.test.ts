@@ -4241,3 +4241,34 @@ it("drops in-flight wording when the last retention subscriber leaves", async ()
   await flush();
   expect(spoken).toEqual([]);
 });
+
+it("fences voice join before effects and again after awaited cleanup", async () => {
+  const { session, vox } = buildHarness();
+  let checks = 0;
+  await expect(
+    session.join({
+      guildId: "guild",
+      channelId: "room",
+      bodyLease: {
+        stay: {
+          stayId: "00000000-0000-4000-8000-000000000001",
+          generation: 1,
+          target: {
+            guildId: "guild",
+            channelId: "room",
+            actorId: "actor",
+            presenceSessionId: "body",
+            transportKind: "bot",
+          },
+        },
+        current: () => checks < 2,
+        guard: async () => {
+          checks += 1;
+          if (checks === 2) throw new Error("lease revoked during cleanup");
+        },
+      },
+    }),
+  ).rejects.toThrow("lease revoked during cleanup");
+  expect(vox.joins).toEqual([]);
+  await session.dispose();
+});

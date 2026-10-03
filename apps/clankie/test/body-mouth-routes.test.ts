@@ -1,3 +1,5 @@
+import { BodyVoiceStays } from "../src/body-voice-stays.ts";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +34,7 @@ async function fixture() {
       request.headers.get("authorization") === "Bearer fixture"
         ? { captainId: "body", steerSourceLane: "discord_text" }
         : undefined,
+    bodyVoiceStays: new BodyVoiceStays(store, join(root, "voice.json")),
     bodyLeases: { store, router: new BodyLeaseRouter(store), confirmStopped: async () => false },
     discordPresenceRuntime: {
       execute: async (write, _session, guard) => {
@@ -114,6 +117,7 @@ async function fixture() {
       "x-clankie-discord-presence-revision": String(session.record.revision),
     });
   return {
+    post,
     store,
     effect,
     send,
@@ -164,4 +168,45 @@ it.each(["reply", "join_thread"] as const)("rejects %s directed outside the sour
       : { ...write, action: "discord.presence.join_thread", payload: { kind, channelId: "foreign-thread" } };
   expect(await (await send(foreign)).json()).toEqual({ outcome: "rejected", reason: "identity_required" });
   expect(effect).not.toHaveBeenCalled();
+});
+
+it("voice RPC binds the registered physical session and exact stay generation", async () => {
+  const { post, session } = await fixture();
+  const stay = {
+    stayId: randomUUID(),
+    generation: 1,
+    target: {
+      guildId: "guild",
+      channelId: "room",
+      actorId: "actor",
+      presenceSessionId: session.record.sessionId,
+      transportKind: "bot",
+    },
+  };
+  expect(
+    (
+      await post("/v1/discord/voice-lease", {
+        action: "claim",
+        stay: { ...stay, target: { ...stay.target, presenceSessionId: "foreign" } },
+      })
+    ).status,
+  ).toBe(409);
+  const claim = await (await post("/v1/discord/voice-lease", { action: "claim", stay })).json();
+  expect(claim).toMatchObject({
+    outcome: "acquired",
+    lease: { conversationId: "room:discord_voice:guild:room" },
+  });
+  expect(
+    (
+      await post("/v1/discord/voice-lease", {
+        action: "heartbeat",
+        stay: { ...stay, generation: 2 },
+        incarnation: claim.incarnation,
+      })
+    ).status,
+  ).toBe(409);
+  expect(
+    (await post("/v1/discord/voice-lease", { action: "finish", stay, incarnation: claim.incarnation }))
+      .status,
+  ).toBe(200);
 });

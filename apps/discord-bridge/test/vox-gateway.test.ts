@@ -354,3 +354,79 @@ async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
 }
+
+it("a denied joining conversation cannot stop the current gateway stay", async () => {
+  const vox = new FakeVox();
+  const session = new FakeSession(vox);
+  const guild = new FakeGuild(GUILD_A);
+  const bridge = new DiscordVoxGatewayBridge(vox, session);
+  await bridge.join(guild, { guildId: GUILD_A, channelId: CHANNEL_A });
+  const leaves = session.leaveReasons.length;
+  await expect(
+    bridge.join(guild, {
+      guildId: GUILD_A,
+      channelId: CHANNEL_B,
+      bodyLease: {
+        stay: {
+          stayId: "00000000-0000-4000-8000-000000000001",
+          generation: 1,
+          target: {
+            guildId: GUILD_A,
+            channelId: CHANNEL_B,
+            actorId: "actor",
+            presenceSessionId: "body",
+            transportKind: "bot",
+          },
+        },
+        current: () => false,
+        guard: async () => {
+          throw new Error("busy");
+        },
+      },
+    }),
+  ).rejects.toThrow("busy");
+  expect(session.leaveReasons).toHaveLength(leaves);
+  expect(session.status().channelId).toBe(CHANNEL_A);
+  bridge.dispose();
+});
+
+it("revocation while confirmed leave awaits prevents new adapter registration", async () => {
+  const vox = new FakeVox();
+  const session = new FakeSession(vox);
+  const first = new FakeGuild(GUILD_A);
+  const next = new FakeGuild(GUILD_B);
+  let current = true;
+  const bridge = new DiscordVoxGatewayBridge(vox, session, {
+    onLeaveConfirmed: () => {
+      current = false;
+    },
+  });
+  await bridge.join(first, { guildId: GUILD_A, channelId: CHANNEL_A });
+  const joining = bridge.join(next, {
+    guildId: GUILD_B,
+    channelId: CHANNEL_B,
+    bodyLease: {
+      stay: {
+        stayId: "00000000-0000-4000-8000-000000000001",
+        generation: 1,
+        target: {
+          guildId: GUILD_B,
+          channelId: CHANNEL_B,
+          actorId: "actor",
+          presenceSessionId: "body",
+          transportKind: "bot",
+        },
+      },
+      current: () => current,
+      guard: async () => {
+        if (!current) throw new Error("revoked");
+      },
+    },
+  });
+  for (let step = 0; step < 6; step += 1) await Promise.resolve();
+  first.emitVoiceState(null);
+  await expect(joining).rejects.toThrow("revoked");
+  expect(next.callbacks).toBeUndefined();
+  expect(next.sent).toEqual([]);
+  bridge.dispose();
+});

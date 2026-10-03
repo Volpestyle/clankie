@@ -99,7 +99,9 @@ export class DiscordVoxGatewayBridge {
 
     this.joinInFlight = true;
     try {
-      await this.leave("voice_rejoin");
+      if (input.bodyLease !== undefined) await input.bodyLease.guard();
+      await this.leave("voice_rejoin", input.bodyLease?.guard);
+      if (input.bodyLease !== undefined) await input.bodyLease.guard();
       this.register(guild, input.channelId);
       let rejectJoin: ((error: Error) => void) | undefined;
       const adapterFailure = new Promise<never>((_resolve, reject) => {
@@ -120,7 +122,8 @@ export class DiscordVoxGatewayBridge {
     }
   }
 
-  public leave(reason = "session_leave"): Promise<void> {
+  public leave(reason = "session_leave", guard?: () => Promise<void>): Promise<void> {
+    if (guard !== undefined) return guard().then(() => this.leave(reason));
     if (this.leavePromise !== undefined) return this.leavePromise;
     const leaving = this.leaveNow(reason);
     this.leavePromise = leaving;
