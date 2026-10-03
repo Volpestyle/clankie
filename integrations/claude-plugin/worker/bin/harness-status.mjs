@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { nativeCodexExecutable } from "./native-codex.mjs";
 const exec = promisify(execFile);
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 const exists = async (path) => {
@@ -32,16 +33,19 @@ export async function claudeProfileDirectories(env = process.env) {
   ];
 }
 
-export async function inspectHarnessProfiles({
-  env = process.env,
-  expectedVersion,
-  execute = async (command, args) => (await exec(command, args, { env, timeout: 10_000 })).stdout,
-} = {}) {
+export async function inspectHarnessProfiles({ env = process.env, expectedVersion, execute } = {}) {
+  let codexExecutablePath = null;
+  const run =
+    execute ??
+    (async (command, args) => {
+      if (command === "codex") command = codexExecutablePath ??= await nativeCodexExecutable({ env });
+      return (await exec(command, args, { env, timeout: 10_000 })).stdout;
+    });
   const home = env.HOME || env.USERPROFILE || homedir();
   const profiles = await claudeProfileDirectories(env);
   const present = async (command) => {
     try {
-      await execute(command, ["--version"]);
+      await run(command, ["--version"]);
       return true;
     } catch {
       return false;
@@ -90,7 +94,7 @@ export async function inspectHarnessProfiles({
   );
   let codexPlugins = [];
   try {
-    const result = JSON.parse(await execute("codex", ["plugin", "list", "--json"]));
+    const result = JSON.parse(await run("codex", ["plugin", "list", "--json"]));
     codexPlugins = Array.isArray(result) ? result : (result.installed ?? result.plugins ?? []);
   } catch {
     /* Visible missing registration below. */
@@ -107,7 +111,7 @@ export async function inspectHarnessProfiles({
   let registration = "absent";
   let registrationIdentityForwarding = false;
   try {
-    const result = JSON.parse(await execute("codex", ["mcp", "get", "clankie", "--json"]));
+    const result = JSON.parse(await run("codex", ["mcp", "get", "clankie", "--json"]));
     const transport = result.transport ?? result;
     observedTransport = transport;
     registrationIdentityForwarding = forwardsIdentity(transport);
@@ -164,6 +168,10 @@ export async function inspectHarnessProfiles({
     claude,
     codex: {
       executable: installed.codex,
+      executablePath: codexExecutablePath,
+      executableDetail: installed.codex
+        ? "Native executable responded; static registration only."
+        : "Native Codex unavailable or ambiguous. On Windows, doctor requires a unique installed .exe; command shims are not executed.",
       registered,
       registration,
       registrationIdentityForwarding,

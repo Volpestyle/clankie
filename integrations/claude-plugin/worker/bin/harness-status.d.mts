@@ -21,6 +21,8 @@ export function inspectHarnessProfiles(options?: {
   }>;
   codex: {
     executable: boolean;
+    executablePath: string | null;
+    executableDetail: string;
     registered: boolean;
     registration: string;
     registrationIdentityForwarding: boolean;

@@ -1,3 +1,4 @@
+import { nativeCodexExecutable } from "./native-codex.mjs";
 import { claudeProfileDirectories } from "./harness-status.mjs";
 import { execFile } from "node:child_process";
 import { lstat, readFile, readlink, realpath } from "node:fs/promises";
@@ -47,7 +48,11 @@ async function installHarnessBridges(options) {
   const env = options.env ?? process.env;
   const run =
     options.execute ??
-    ((command, args, targetEnv) => exec(command, [...args], { env: targetEnv, timeout: 12e4 }));
+    (async (command, args, targetEnv) =>
+      exec(command === "codex" ? await nativeCodexExecutable({ env: targetEnv }) : command, [...args], {
+        env: targetEnv,
+        timeout: 12e4,
+      }));
   const home = env.HOME || env.USERPROFILE || homedir();
   const marketplace = options.marketplaceRoot ?? join(options.repoRoot, "integrations", "claude-plugin");
   const results = [];
