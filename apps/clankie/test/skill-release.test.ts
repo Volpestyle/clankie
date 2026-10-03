@@ -48,12 +48,21 @@ it("assembles only selected skills in all release projections, with no checkout 
     );
   }
   const canonical = await readFile(join(repo, ".agents/skills/clankie/SKILL.md"), "utf8");
+  // A complete installed release also has no packages/settings TypeScript source.
+  const releasedCheck = spawnSync(
+    process.execPath,
+    [join(release, "integrations/claude-plugin/worker/bin/skill-bundle.mjs")],
+    { encoding: "utf8", timeout: 5_000 },
+  );
+  expect(releasedCheck.status, releasedCheck.stderr).toBe(0);
+
   // Rebuild from canonical target content with neither snapshot nor target builder.
   // Only the repository-side helper's own materializer may be loaded.
   const releaseWorker = join(release, "integrations/claude-plugin/worker");
   await rm(join(releaseWorker, "skills/clankie"), { recursive: true });
   await rm(join(releaseWorker, "skills/clankie.bundle.json"));
   await rm(join(release, "integrations/codex-plugin/build.mjs"));
+  await rm(join(release, "integrations/codex-plugin/skill-materializer.mjs"));
   await expect(prepareWorkerSkill(releaseWorker)).resolves.toBeUndefined();
 
   for (const directory of [

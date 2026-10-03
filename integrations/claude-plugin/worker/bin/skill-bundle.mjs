@@ -16,7 +16,7 @@ export async function prepareWorkerSkill(workerRoot) {
   if (typeof version !== "string" || version.length === 0 || version !== codexVersion)
     throw new Error("Worker plugin versions differ or are missing; rebuild both packages");
   const hash = (text) => createHash("sha256").update(text).digest("hex");
-  const builder = new URL("../../../codex-plugin/build.mjs", import.meta.url);
+  const builder = new URL("../../../codex-plugin/skill-materializer.mjs", import.meta.url);
   if (
     await Promise.all([access(join(source, "SKILL.md")), access(fileURLToPath(builder))]).then(
       () => true,
