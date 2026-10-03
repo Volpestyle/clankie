@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { delimiter, isAbsolute, join } from "node:path";
 import { access, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
+import { createHash } from "node:crypto";
 import { OPERATOR_SEAT_HARNESSES, type HerdrBinding } from "@clankie/protocol";
 import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
@@ -51,6 +52,8 @@ export interface ProjectProcessProof {
   readonly fleet: string;
   readonly pane: string;
   readonly nativeOccupantId: string;
+  /** Kernel-proven startup process, before native session reporting. Never a hired/private seat. */
+  readonly nativeSessionPending?: true;
   /** Only the local listener may set this after checking the private native-process registry. */
   readonly privateSeat?: true;
   readonly binding: { readonly socketPath: string; readonly session?: string };
@@ -99,14 +102,10 @@ export function createProjectProcessObserver(options: {
             pinHerdrEnvironment({ ...process.env }, binding.socketPath),
           ),
         );
-        if (
-          agent.paneId !== pane ||
-          !agent.session ||
-          !OPERATOR_SEAT_HARNESSES.some((harness) => harness === agent.agent)
-        )
-          throw new Error("Native session unavailable");
+        if (agent.paneId !== pane || !OPERATOR_SEAT_HARNESSES.some((harness) => harness === agent.agent))
+          throw new Error("Native harness unavailable");
         return {
-          nativeOccupantId: occupantIdForHerdrSession(agent.session),
+          nativeOccupantId: agent.session ? occupantIdForHerdrSession(agent.session) : undefined,
           terminalId: agent.terminalId,
           harness: agent.agent,
         };
@@ -168,7 +167,15 @@ export function createProjectProcessObserver(options: {
       return {
         fleet,
         pane,
-        nativeOccupantId: nativeInitial.nativeOccupantId,
+        // SessionStart reporting can depend on MCP startup completing. The actual installed
+        // foreground process is already proven above; a disjoint process identity permits
+        // only owner-started workspace access until a native session is reported.
+        nativeOccupantId:
+          nativeInitial.nativeOccupantId ??
+          `process-${createHash("sha256")
+            .update(JSON.stringify([binding, pane, nativeInitial, shell, agent]))
+            .digest("hex")}`,
+        ...(nativeInitial.nativeOccupantId === undefined ? { nativeSessionPending: true as const } : {}),
         binding: {
           socketPath: binding.socketPath,
           ...(binding.session === undefined ? {} : { session: binding.session }),

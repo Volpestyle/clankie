@@ -33,7 +33,9 @@ function fixture() {
               pane_id: args.at(-1),
               terminal_id: "terminal",
               agent: state.harness,
-              agent_session: { source: state.harness, kind: "id", value: state.native },
+              ...(state.native
+                ? { agent_session: { source: state.harness, kind: "id", value: state.native } }
+                : {}),
             },
           },
         });
@@ -67,6 +69,33 @@ it("captures the actual native foreground process and shell lifetimes", async ()
     processes: [{ pid: 40, startTime: f.state.start }],
     shell: { pid: 30 },
   });
+});
+it("proves a hand-started native process before Herdr reports its session", async () => {
+  const f = fixture();
+  f.state.native = "";
+  const pending = await f.observe("default", "w1:p1");
+  expect(pending).toMatchObject({
+    nativeSessionPending: true,
+    nativeOccupantId: expect.stringMatching(/^process-/u),
+    processes: [{ pid: 40, startTime: f.state.start }],
+    shell: { pid: 30 },
+  });
+  f.state.native = "session";
+  const reported = await f.observe("default", "w1:p1");
+  expect(reported?.nativeSessionPending).toBeUndefined();
+  expect(reported?.nativeOccupantId).toMatch(/^session-/u);
+});
+it("still denies an uninstalled executable before session reporting", async () => {
+  const f = fixture();
+  f.state.native = "";
+  f.state.mapped = "/untrusted/codex";
+  expect(await f.observe("default", "w1:p1")).toBeUndefined();
+});
+it("denies a session that appears during the same proof", async () => {
+  const f = fixture();
+  f.state.native = "";
+  f.state.change = "session";
+  expect(await f.observe("default", "w1:p1")).toBeUndefined();
 });
 it.each(["process", "pane", "binding", "session"])(
   "denies a changed %s during observation",
