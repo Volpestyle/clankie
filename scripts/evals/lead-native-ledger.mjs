@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const integer = (n) => Number.isSafeInteger(n) && n >= 0;
 
-export function codexWindows(response, accountId, atMs) {
+function codexWindows(response, accountId, atMs) {
   const bucket = response?.rateLimitsByLimitId?.codex;
   if (!bucket || bucket.rateLimitReachedType != null || bucket.spendControlReached !== false)
     throw Error("Codex quota unknown/limited");

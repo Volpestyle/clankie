@@ -16,7 +16,7 @@ export interface CodexSeatEvent {
 }
 
 /** Reads from this exact native server; callers cannot dispatch through this facade. */
-export interface CodexNativeRead {
+interface CodexNativeRead {
   request(
     method: "account/read" | "account/rateLimits/read" | "thread/list" | "config/read",
     params: RecordValue,

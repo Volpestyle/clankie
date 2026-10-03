@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 // @ts-expect-error -- manual checkout-only ESM runner.
 import * as policy from "../../../scripts/evals/lead-native-policy.mjs";
 // @ts-expect-error -- manual checkout-only ESM runner.
-import { LeadContainer } from "../../../scripts/evals/lead-containment.mjs";
+import { LeadContainer, dockerTransport } from "../../../scripts/evals/lead-containment.mjs";
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -123,4 +123,29 @@ it("refuses every native lifecycle action with imported or missing capability pr
     await expect(action()).rejects.toThrow("controller-origin");
   }
   expect(command).not.toHaveBeenCalled();
+});
+
+it("refuses imported transport/build claims before filesystem or command effects", async () => {
+  const f = fixture();
+  // These entry functions stop before any native/Docker subprocess or build/probe.
+  // The fake command must never be invoked, even with a plausible imported record.
+  // @ts-expect-error -- manual checkout-only ESM runner.
+  const { buildNativeImage } = await import("../../../scripts/evals/lead-native-image.mjs");
+  // @ts-expect-error -- manual checkout-only ESM runner.
+  const { probeNativeRuntime } = await import("../../../scripts/evals/lead-native-capability.mjs");
+  const command = vi.fn(async () => "unexpected");
+  await expect(buildNativeImage({ command, output: join(f.root, "never-built") })).rejects.toThrow(
+    "Controller-created",
+  );
+  await expect(
+    probeNativeRuntime({
+      command,
+      root: join(f.root, "never-probed"),
+      build: { image: "sha256:" + "a".repeat(64) },
+    }),
+  ).rejects.toThrow();
+  expect(command).not.toHaveBeenCalled();
+  expect(() =>
+    dockerTransport({ socketPath: join(f.accountHome, "auth.json"), configDirectory: f.root }),
+  ).toThrow("socket");
 });

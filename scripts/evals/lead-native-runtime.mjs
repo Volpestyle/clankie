@@ -55,7 +55,7 @@ export function writeNativeWrapper(path, environment, config, endpoint, { paneId
 }
 
 /** One allocated root; arbitrary descendants and resuming other roots are refused. */
-export function createNativeRuntime({ container, allocation, ownerAttachment, now = Date.now }) {
+function createNativeRuntime({ container, allocation, ownerAttachment, now = Date.now }) {
   const { hostCwd, containerCwd, accountHome, accountId, email, accountLabel, model, effort } = allocation;
   if (!hostCwd || realpathSync(hostCwd) !== hostCwd || !accountId || !email || !accountLabel)
     throw Error("Exact controller allocation required");

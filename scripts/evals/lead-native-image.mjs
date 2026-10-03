@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync, lstatSync, realpathSync } from 
 import { join } from "node:path";
 import { dockerTransportIdentity } from "./lead-containment.mjs";
 const builds = new WeakMap();
-export const NATIVE_SOURCE = Object.freeze({
+const NATIVE_SOURCE = Object.freeze({
   codex: "008bbd5884122dc95aaece19ecfe0fc6a59dcf36",
   herdr: "4812c9054cfce3e294a300c60d30d78d2a447d38",
 });
