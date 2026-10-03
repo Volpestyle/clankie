@@ -88,7 +88,7 @@ export async function inspectHarnessBridges(
         local.membership = response.status === 400 ? "verified" : "unavailable";
         local.detail =
           response.status === 400
-            ? "Local process membership verified. Tools still require live owner-issued fleet grants (clankie access list)."
+            ? "Local process membership verified. Tools still require a verified project and live owner-issued project grants (clankie access list)."
             : local.sharedDaemon
               ? "Local process membership unavailable. Exit and restart Codex in this Herdr pane under the existing daemon_auto_start=false configuration; shared daemon MCP processes cannot prove pane ownership."
               : "Local process membership unavailable. Check clankie herdr status and the current pane. Private hires require a process registration owned by the running service; a pane ID alone grants nothing.";

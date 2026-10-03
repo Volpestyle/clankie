@@ -67,8 +67,11 @@ Load `lead` for leadership and the fleet reference for native delivery.
 
 For shared Linear tools, inspect `clankie access linear`; verify an API-key
 or OAuth connection with `clankie access linear verify` and check the intended automation identity.
-Use `clankie access fleet FLEET SERVER [--tool NAME]...` to grant connected
-service tools to agents in a linked Herdr session until revoked. For an individual
+Use `clankie access project PROJECT SERVER [--tool NAME]...` to grant connected
+service tools to verified agents of that project until revoked. Actual native
+hire assignments take precedence; otherwise the agent's actual cwd must be in
+an approved project workspace. Old fleet grants no longer confer tools, and
+remote links alone cannot prove project membership. For an individual
 manual grant, `clankie access issue REQUEST.json --out GRANT.json` creates a
 private file for `clankie mcp --grant FILE`; tokens last at most 15 minutes.
 Use `access list` and `access revoke ID` to inspect or revoke.

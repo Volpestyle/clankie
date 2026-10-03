@@ -53,7 +53,7 @@ tracker tools and pi extensions still need effective-configuration review. Remot
 launches must establish their own native isolation and reach the selected service
 through its fleet link. No missing bridge permits using a personal connector.
 
-Reuse [manual and fleet grants](worker-access.md) for account verification,
+Reuse [manual and project grants](worker-access.md) for account verification,
 argument restrictions, revocation and provenance. Keep provider tokens in the
 broker and owner-global configuration unchanged. When a grant is unavailable,
 the lead makes the tracker write through Clankie's connected account.

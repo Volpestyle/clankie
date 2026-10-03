@@ -1,3 +1,5 @@
+import { ProjectIdSchema, type ProjectsSettings } from "@clankie/protocol/projects";
+import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -33,18 +35,13 @@ export const WorkerGrantRequestSchema = z
     principalId: z.string().min(1).max(256),
     workId: z.string().min(1).max(256),
     server: z.string().min(1).max(128),
-    /** Empty only for a fleet grant, which then takes the server's whole worker-safe set. */
+    /** Empty only for a project grant, which then takes the server's whole worker-safe set. */
     tools: z.array(ToolRuleSchema).max(64),
     ttlSeconds: z.number().int().min(1).max(900).default(900),
-    /**
-     * Every agent in that fleet (one Herdr session Clankie is connected to)
-     * holds this grant over the fleet's link until it is revoked (VUH-1527).
-     * Membership is the binding: no bearer is delivered and none expires.
-     */
-    fleet: FleetIdSchema.optional(),
+    project: ProjectIdSchema.optional(),
   })
   .strict()
-  .refine((value) => value.tools.length > 0 || value.fleet !== undefined, "Name at least one tool");
+  .refine((value) => value.tools.length > 0 || value.project !== undefined, "Name at least one tool");
 const RecordSchema = z.object({
   grant: CapabilityGrantSchema,
   server: z.string(),
@@ -53,6 +50,7 @@ const RecordSchema = z.object({
   account: ProviderAccountSchema,
   revokedAt: z.string().datetime().optional(),
   fleet: FleetIdSchema.optional(),
+  project: ProjectIdSchema.optional(),
 });
 type GrantRecord = z.infer<typeof RecordSchema>;
 type WorkerAuthorization = {
@@ -64,7 +62,6 @@ type WorkerAuthorization = {
 };
 const uuid = z.string().uuid();
 const KEY_ID = "clankie_worker_mcp_signing";
-const fleetPrincipalKey = (fleet: string) => JSON.stringify(["fleet", fleet]);
 
 /** Immutable grants plus a durable revocation marker; only the service writes them. */
 export class WorkerMcp {
@@ -73,6 +70,8 @@ export class WorkerMcp {
     directory: string;
     credentials: CredentialStore;
     host: McpHost;
+    projects?(): Promise<ProjectsSettings>;
+    membership?(identity: LocalFleetIdentity): Promise<{ projectId: string; occupantId: string } | undefined>;
   };
   private readonly sessions = new Map<
     string,
@@ -84,7 +83,7 @@ export class WorkerMcp {
       expiresAt: number;
     }
   >();
-  constructor(options: { directory: string; credentials: CredentialStore; host: McpHost }) {
+  constructor(options: WorkerMcp["options"]) {
     this.options = options;
   }
 
@@ -150,11 +149,23 @@ export class WorkerMcp {
   }
 
   async issue(input: z.input<typeof WorkerGrantRequestSchema>) {
+    if ("fleet" in input)
+      throw new Error(
+        "Fleet grants are retired. Use clankie access project NAME SERVER, then revoke the old grant with clankie access revoke ID.",
+      );
     const request = WorkerGrantRequestSchema.parse(input);
+    if (request.project !== undefined) {
+      const project = (await this.options.projects?.())?.projects.find(
+        (project) => project.id === request.project,
+      );
+      if (!project) throw new Error("Create this project before granting its tools.");
+      if (request.principalId !== `project:${project.id}` || request.workId !== `project:${project.id}`)
+        throw new Error("Project grants must name their project as the principal and work.");
+    }
     const { account, binding } = await this.options.host.account(request.server, "operator");
     const catalog = await this.options.host.catalog("operator");
     if (request.tools.length === 0)
-      // A fleet's standing access: the server's tools, minus worker publishing,
+      // A project's standing access: the server's tools, minus worker publishing,
       // which must name the persona it writes as.
       request.tools = catalog
         .filter(
@@ -181,7 +192,7 @@ export class WorkerMcp {
       lane: "operator",
       tools: request.tools,
       account,
-      ...(request.fleet === undefined ? {} : { fleet: request.fleet }),
+      ...(request.project === undefined ? {} : { project: request.project }),
       grant: {
         version: 1,
         grantId: randomUUID(),
@@ -204,11 +215,10 @@ export class WorkerMcp {
   }
 
   private async notify(record: GrantRecord) {
-    const key = record.fleet === undefined ? undefined : fleetPrincipalKey(record.fleet);
-    if (key === undefined) return;
+    if (record.project === undefined) return;
     await Promise.all(
       [...this.sessions.values()]
-        .filter((session) => session.principalKey === key)
+        .filter((session) => session.grantId === undefined)
         .map((session) => session.server.sendToolListChanged().catch(() => undefined)),
     );
   }
@@ -252,6 +262,8 @@ export class WorkerMcp {
       verified.grant.expiresAt - verified.grant.issuedAt > record.grant.expiresAt - record.grant.issuedAt
     )
       throw new Error("Worker grant revoked or changed");
+    if (record.fleet !== undefined || record.project !== undefined)
+      throw new Error("This grant requires current project membership");
     await this.checkBinding(record);
     return { ...record, grant: verified.grant };
   }
@@ -276,12 +288,9 @@ export class WorkerMcp {
   }
 
   /** Per-request proofs live only in service memory, never in HTTP responses or worker files. */
-  private readonly localRequests = new Map<string, { pane: string; validate(): Promise<boolean> }>();
+  private readonly localRequests = new Map<string, LocalFleetIdentity>();
 
-  async handleLocalFleet(
-    request: Request,
-    identity: { pane: string; validate(): Promise<boolean> },
-  ): Promise<Response> {
+  async handleLocalFleet(request: Request, identity: LocalFleetIdentity): Promise<Response> {
     const proof = randomUUID();
     this.localRequests.set(proof, identity);
     const headers = new Headers(request.headers);
@@ -290,7 +299,7 @@ export class WorkerMcp {
       return await this.handleAuthorized(new Request(request, { headers }), async (token) => {
         const current = this.localRequests.get(token);
         if (!current || !(await current.validate())) throw new Error("Local fleet membership unavailable");
-        return this.fleetAuthorization("default", `local:${current.pane}`);
+        return this.projectAuthorization(current);
       });
     } finally {
       this.localRequests.delete(proof);
@@ -301,14 +310,25 @@ export class WorkerMcp {
   async handleFleet(fleet: string, request: Request, linked: (token: string) => boolean): Promise<Response> {
     return this.handleAuthorized(request, async (token) => {
       if (!linked(token)) throw new Error("Not this fleet's link");
-      return this.fleetAuthorization(fleet);
+      throw new Error(
+        `Project tools need verified agent identity on ${fleet}; this fleet link alone cannot prove it.`,
+      );
     });
   }
 
-  private async fleetAuthorization(fleet: string, pane?: string): Promise<WorkerAuthorization> {
+  private async projectAuthorization(identity: LocalFleetIdentity): Promise<WorkerAuthorization> {
+    const membership = await this.options.membership?.(identity);
+    if (!membership) throw new Error("This agent does not have a verified project.");
     const records: GrantRecord[] = [];
     for (const record of await this.list()) {
-      if (record.fleet !== fleet || record.revokedAt !== undefined) continue;
+      if (
+        record.fleet !== undefined ||
+        record.project !== membership.projectId ||
+        record.revokedAt !== undefined ||
+        record.grant.principalId !== `project:${membership.projectId}` ||
+        record.grant.missionId !== `project:${membership.projectId}`
+      )
+        continue;
       try {
         await this.checkBinding(record);
         records.push(record);
@@ -317,8 +337,8 @@ export class WorkerMcp {
       }
     }
     return {
-      key: `${fleetPrincipalKey(fleet)}${pane === undefined ? "" : `:${pane}`}`,
-      principalId: pane ?? `fleet:${fleet}`,
+      key: JSON.stringify(["project", membership.projectId, membership.occupantId]),
+      principalId: `project:${membership.projectId}:pane:${identity.pane}`,
       records,
       expiresAt: Math.floor(Date.now() / 1000) + 900,
     };
@@ -401,6 +421,12 @@ export class WorkerMcp {
         );
         if (!current) throw new Error("Tool or arguments are not granted");
         const rule = current.tools.find((rule) => `${current.server}_${rule.name}` === call.params.name)!;
+        // Membership proof can perform OS I/O. Re-read durable authority after that work,
+        // immediately before the external dispatch; the host also fences account/config use.
+        await this.checkBinding(current);
+        const latest = await this.read(current.grant.grantId);
+        if (latest.revokedAt !== undefined || !isDeepStrictEqual(latest, current))
+          throw new Error("Worker grant revoked or changed");
         const result = await this.options.host.call({
           lane: current.lane,
           server: current.server,

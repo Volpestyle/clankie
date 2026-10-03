@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { Socket } from "node:net";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
 import type { HerdrBinding } from "@clankie/protocol";
+import { createProjectProcessObserver, type ProjectProcessProof } from "./project-process-proof.ts";
 
 const exec = promisify(execFile);
 type Run = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
@@ -38,10 +39,19 @@ export function ancestors(output: string, pid: number): number[] {
   return current <= 1 ? chain : [];
 }
 
-export interface LocalFleetProofOptions {
+export interface LocalFleetProofOptions extends Pick<
+  Parameters<typeof createProjectProcessObserver>[0],
+  "launcher" | "canonical"
+> {
   binding(): Promise<HerdrBinding | undefined>;
   /** Server-owned private app-server registry; never supplied by a caller. */
   privateSeat?(ancestors: readonly number[], pane: string, binding: HerdrBinding): Promise<boolean>;
+  privateProjectSeat?(
+    ancestors: readonly number[],
+    pane: string,
+    binding: HerdrBinding,
+    proof: ProjectProcessProof,
+  ): Promise<boolean>;
   herdrBinary: string;
   run?: Run;
   platform?: string;
@@ -99,6 +109,67 @@ export function localFleetProof(options: LocalFleetProofOptions) {
       );
     } catch {
       return false;
+    }
+  };
+}
+
+/** Project access additionally needs the live native foreground agent, not just its pane shell. */
+export function localProjectProof(options: LocalFleetProofOptions) {
+  const execute = options.run ?? run;
+  const prove = localFleetProof(options);
+  const observe = createProjectProcessObserver(options);
+  return async (socket: Socket, pane: string): Promise<ProjectProcessProof | undefined> => {
+    try {
+      if (!(await prove(socket, pane))) return undefined;
+      const proof = await observe("default", pane);
+      if (!proof || !socket.remotePort || !socket.localPort) return undefined;
+      const pid = clientPid(
+        await execute("/usr/sbin/lsof", [
+          "-nP",
+          "-a",
+          `-iTCP:${socket.localPort}`,
+          "-sTCP:ESTABLISHED",
+          "-Fpn",
+        ]),
+        socket.remotePort,
+        socket.localPort,
+      );
+      if (!pid) return undefined;
+      const chain = ancestors(await execute("/bin/ps", ["-axo", "pid=,ppid="]), pid);
+      const binding = await options.binding();
+      if (
+        !binding ||
+        binding.socketPath !== proof.binding.socketPath ||
+        binding.session !== proof.binding.session
+      )
+        return undefined;
+      const direct = proof.processes.some((process) => chain.includes(process.pid));
+      const privateSeat =
+        !direct && (await options.privateProjectSeat?.(chain, pane, binding, proof)) === true;
+      if (!direct && !privateSeat) return undefined;
+      if (
+        !(await prove(socket, pane)) ||
+        JSON.stringify(await observe("default", pane)) !== JSON.stringify(proof)
+      )
+        return undefined;
+      const finalPid = clientPid(
+        await execute("/usr/sbin/lsof", [
+          "-nP",
+          "-a",
+          `-iTCP:${socket.localPort}`,
+          "-sTCP:ESTABLISHED",
+          "-Fpn",
+        ]),
+        socket.remotePort,
+        socket.localPort,
+      );
+      const finalChain = ancestors(await execute("/bin/ps", ["-axo", "pid=,ppid="]), pid);
+      if (finalPid !== pid || JSON.stringify(finalChain) !== JSON.stringify(chain)) return undefined;
+      if (privateSeat && (await options.privateProjectSeat?.(finalChain, pane, binding, proof)) !== true)
+        return undefined;
+      return privateSeat ? { ...proof, privateSeat: true } : proof;
+    } catch {
+      return undefined;
     }
   };
 }

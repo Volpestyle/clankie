@@ -38,7 +38,7 @@ export async function runWorkerMcp(path: string, transport?: Transport): Promise
     })
     .parse(JSON.parse(await readFile(grantPath, "utf8")));
   if (JSON.parse(await readFile(grantPath, "utf8")).renewable === true)
-    throw new Error("Retired renewable worker grant; issue a manual or fleet grant");
+    throw new Error("Retired renewable worker grant; issue a manual or project grant");
   const url = workerEndpoint(grant.endpoint);
   const upstream = new Client({ name: "clankie-worker-bridge", version: "1" });
   const server = new Server({ name: "clankie-worker", version: "1" }, { capabilities: { tools: {} } });

@@ -1,6 +1,10 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["project"],
+    lines: ["  project add NAME --workspace /absolute/path  Approve one local project workspace (JSON)"],
+  },
+  {
     nouns: ["update"],
     lines: [
       "  update [--ref REF] | status  Stage local main, detach safe restart, or read durable result (JSON)",
@@ -49,7 +53,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["access"],
     lines: [
       "  access list | issue REQUEST.json --out GRANT.json | revoke ID | linear [verify]",
-      "  access fleet NAME SERVER [--tool NAME]...",
+      "  access project NAME SERVER [--tool NAME]...",
       "                           Delegate connected MCP tools to a worker (JSON)",
     ],
   },

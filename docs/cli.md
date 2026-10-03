@@ -2114,22 +2114,42 @@ a hint, not a credential. Private hired Codex app-servers use the service's live
 process-to-pane registry. Shared Codex daemon MCP processes cannot prove which
 pane owns them: exit and restart the pane's Codex under the existing
 `daemon_auto_start=false` configuration. Local process proof on other platforms
-is not implemented; SSH fleet links keep their existing authentication.
+is not implemented; SSH fleet links keep their native-message authentication
+but cannot confer project tools until remote process proof is implemented.
 
-The owner grants `default` through `clankie access fleet default linear --tool
-get_issue` (repeat `--tool` for the needed tools); `clankie access list` inspects
-those grants, and `clankie access revoke ID` revokes them immediately, including
-on existing MCP sessions. Tools and argument restrictions are checked on every
-call against the same connected account. Fleet grants are standing until revoked
-as in VUH-1527; they are not short-lived bearer grants. MCP sessions expire after
-15 minutes idle and reinitialize while membership and grants remain valid.
-No bearer or provider credential is written to the local discovery file.
+The owner grants a saved project through `clankie access project PROJECT linear
+--tool get_issue` (repeat `--tool` for the needed tools). `clankie access list`
+inspects grants and `clankie access revoke ID` revokes them. Every list and call
+checks the connected account and current native occupant: actual host-recorded
+hire assignment first, otherwise the agent process's canonical cwd inside the
+approved project workspace. Ambiguous or stale membership denies access. Local
+workspaces use the service machine ID `local`; a fleet token or pane claim alone
+confers no project tools. The foreground native harness process must be
+proven; service-owned private Codex app-servers additionally require their exact
+registered process lifetime/native thread and actual hire assignment. Shared
+daemons, unregistered detached processes and wrappers without the installed native executable or exact retained Node-script
+argv currently lack that proof. Mailbox membership alone is insufficient.
+
+Project grants persist until revoked. MCP sessions bind to the exact project and
+occupant and expire after 15 minutes idle. No bearer or provider credential is
+written to the local discovery file. Old fleet grants confer no tools; explicit
+owner reissue and retirement steps, including owner-pane cutover, are in
+[worker access](worker-access.md).
 
 `doctor.harnessBridges` separates Claude installation/enabling, Codex registration
 and its config source, shared-daemon ancestry, and the invoking process's live
 local membership probe. A successful probe does not imply a grant exists. Run
 `access list` to inspect owner grants. Installer output offers the explicit
 harness registration commands; it never enables a plugin or grants tools itself.
+
+### `project add NAME --workspace PATH`
+
+The owner can approve one local project workspace with `clankie project add NAME
+--workspace /absolute/canonical/path`. This local settings command requires the
+canonical broker operator credential, an existing directory with exact canonical spelling, a new
+project ID and no overlap with another local project's workspace. It creates no
+roles, assignments or tool grants. Existing projects and their role/cap settings
+are preserved. Use `access project` separately to grant selected tools.
 
 ### `access` and `mcp --grant FILE`
 
@@ -2139,8 +2159,9 @@ manage individual worker grants. The private file feeds `clankie mcp --grant FIL
 which serves only granted tools and loads no operator bearer or seat channel.
 Tokens expire after at most 15 minutes and require explicit reissue.
 
-`access fleet NAME SERVER [--tool NAME]...` grants agents in that Herdr session
-connected tools through its fleet link until revoked, with no bearer delivery.
+`access project NAME SERVER [--tool NAME]...` grants the saved project's verified
+agents connected tools until revoked, with no bearer delivery. `access fleet`
+is retired and explains the explicit project reissue/revoke commands.
 `/access` exposes status, verification and revocation; issue from the terminal.
 See [worker access](worker-access.md) for restrictions and account bindings.
 

@@ -440,7 +440,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           const args = argument.trim().split(/\s+/u).filter(Boolean);
           if (args[0] === "issue")
             throw new Error(
-              "Issue from your terminal: clankie access issue REQUEST.json --out GRANT.json, or clankie access fleet NAME SERVER",
+              "Issue from your terminal: clankie access issue REQUEST.json --out GRANT.json, or clankie access project NAME SERVER",
             );
           const result = await runAccessCommand(args);
           shell.insertCommandResult("/access", JSON.stringify(result, null, 2), "success");

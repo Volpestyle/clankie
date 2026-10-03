@@ -4,10 +4,12 @@ import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 import type { HttpBindings, Http2Bindings } from "@hono/node-server";
 import type { HerdrBinding } from "@clankie/protocol";
+import type { ProjectProcessProof } from "./project-process-proof.ts";
 
 export interface LocalFleetIdentity {
   readonly pane: string;
   validate(): Promise<boolean>;
+  projectProof?(): Promise<ProjectProcessProof | undefined>;
 }
 
 /** Authority exists only for a request admitted by the separate local listener. */
@@ -19,6 +21,7 @@ export class LocalFleetLink {
     directory: string;
     binding(): Promise<HerdrBinding | undefined>;
     prove(socket: Socket, pane: string): Promise<boolean>;
+    projectProof?(socket: Socket, pane: string): Promise<ProjectProcessProof | undefined>;
   };
   constructor(options: LocalFleetLink["options"]) {
     this.options = options;
@@ -45,6 +48,8 @@ export class LocalFleetLink {
       const identity = {
         pane,
         validate: async () => this.open && this.options.prove(env.incoming.socket, pane),
+        projectProof: async () =>
+          this.open ? this.options.projectProof?.(env.incoming.socket, pane) : undefined,
       };
       if (!(await identity.validate()))
         return Response.json({ error: "local_process_membership_required" }, { status: 403 });

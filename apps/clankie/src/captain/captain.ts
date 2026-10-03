@@ -1,3 +1,4 @@
+import type { LocalCodexRegistration } from "../local-codex-seats.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { localWorkspaceProject, selectHireProject, nativeHireProject } from "./project-hire-context.ts";
 import type { ProjectHireProcessProof } from "./project-hires.ts";
@@ -554,7 +555,7 @@ export interface CaptainOptions {
   readonly nativeHerdrRunner?: HerdrWatchRunner;
   readonly nativeCensusRunner?: HerdrCensusRunner;
   readonly nativeSummariesPath?: string;
-  readonly localCodexProcess?: (pid: number, pane: string) => () => void;
+  readonly localCodexProcess?: (pid: number, pane: string) => LocalCodexRegistration;
   readonly localCodexSocket?: () => string | undefined;
   readonly personaImages?: PersonaImageSource;
   /** Repo root: instructions.md lives here, skills are discovered here. */

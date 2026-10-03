@@ -112,3 +112,110 @@ it.each(["owner", "binding", "socket"])("rejects a changed %s during native proo
   });
   expect(await prove(connected, "w1:p1")).toBe(false);
 });
+
+it("project proof requires the socket to descend from the current native agent, not another job in its pane", async () => {
+  const { localProjectProof } = await import("../src/local-fleet-proof.ts");
+  let chain = "55 44\n44 33\n33 1\n";
+  let foreground = 44;
+  let nativeStart = "Sat Oct  3 10:00:00 2026";
+  const prove = localProjectProof({
+    platform: "darwin",
+    launcher: async () => ({ executable: "/trusted/codex" }),
+    canonical: async (path) => path,
+    herdrBinary: "herdr",
+    binding: async () => binding,
+    run: async (command, args) => {
+      if (command === "herdr" && args[0] === "agent")
+        return JSON.stringify({
+          result: {
+            agent: {
+              pane_id: args.at(-1),
+              terminal_id: "terminal",
+              agent: "codex",
+              agent_session: { source: "codex", kind: "id", value: "session" },
+            },
+          },
+        });
+      if (command === "/usr/sbin/lsof") return args.includes("txt") ? "p44\nftxt\nn/trusted/codex\n" : owner;
+      if (command === "/bin/ps" && args[0] === "-axo") return chain;
+      if (command === "/bin/ps")
+        return `${nativeStart} ${Number(args[1]) === 33 ? "/bin/zsh" : "/usr/local/bin/codex"}\n`;
+      return JSON.stringify({
+        result: {
+          process_info: { pane_id: args.at(-1), shell_pid: 33, foreground_process_group_id: foreground },
+        },
+      });
+    },
+  });
+  const first = await prove(socket(), "w1:p1");
+  expect(first?.processes).toEqual([{ pid: 44, startTime: nativeStart }]);
+  chain = "55 99\n99 33\n33 1\n44 33\n";
+  expect(await prove(socket(), "w1:p1")).toBeUndefined();
+  chain = "55 44\n44 33\n33 1\n";
+  foreground = 99;
+  expect(await prove(socket(), "w1:p1")).toBeUndefined();
+  foreground = 44;
+  nativeStart = "Sat Oct  3 10:00:01 2026";
+  expect(await prove(socket(), "w1:p1")).not.toEqual(first);
+});
+
+it("admits only a live registered private server matching the foreground native thread", async () => {
+  const { localProjectProof } = await import("../src/local-fleet-proof.ts");
+  const { LocalCodexSeats } = await import("../src/local-codex-seats.ts");
+  let serverStart = "server-start";
+  let nativeThread = "thread";
+  const registry = new LocalCodexSeats(
+    () => binding,
+    async () => serverStart,
+  );
+  const registration = registry.register(99, "w1:p1");
+  const options = {
+    platform: "darwin",
+    herdrBinary: "herdr",
+    binding: async () => binding,
+    launcher: async () => ({ executable: "/trusted/codex" }),
+    canonical: async (path: string) => path,
+    privateSeat: async (chain: readonly number[], pane: string) => registry.allows(chain, pane, binding),
+    privateProjectSeat: async (
+      chain: readonly number[],
+      pane: string,
+      _binding: unknown,
+      proof: { nativeOccupantId: string },
+    ) => registry.allows(chain, pane, binding, proof.nativeOccupantId),
+    run: async (command: string, args: string[]) => {
+      if (command === "/usr/sbin/lsof") return args.includes("txt") ? "p44\nftxt\nn/trusted/codex\n" : owner;
+      if (command === "/bin/ps" && args[0] === "-axo") return "55 99\n99 1\n44 33\n33 1\n";
+      if (command === "/bin/ps")
+        return `Sat Oct  3 10:00:00 2026 ${Number(args[1]) === 33 ? "/bin/zsh" : "/trusted/codex"}\n`;
+      if (args[0] === "agent")
+        return JSON.stringify({
+          result: {
+            agent: {
+              pane_id: args.at(-1),
+              terminal_id: "terminal",
+              agent: "codex",
+              agent_session: { source: "herdr:codex", kind: "id", value: nativeThread },
+            },
+          },
+        });
+      return JSON.stringify({
+        result: { process_info: { pane_id: args.at(-1), shell_pid: 33, foreground_process_group_id: 44 } },
+      });
+    },
+  };
+  const prove = localProjectProof(options);
+  expect(await prove(socket(), "w1:p1")).toBeUndefined();
+  registration.bindSession?.("thread");
+  expect(await prove(socket(), "w1:p1")).toMatchObject({ privateSeat: true, processes: [{ pid: 44 }] });
+  expect(await prove(socket(), "w1:p2")).toBeUndefined();
+  nativeThread = "replacement-thread";
+  expect(await prove(socket(), "w1:p1")).toBeUndefined();
+  nativeThread = "thread";
+  serverStart = "reused";
+  expect(await prove(socket(), "w1:p1")).toBeUndefined();
+  serverStart = "server-start";
+  registration.bindSession?.("replacement-thread");
+  expect(await prove(socket(), "w1:p1")).toBeUndefined();
+  registration();
+  expect(await prove(socket(), "w1:p1")).toBeUndefined();
+});

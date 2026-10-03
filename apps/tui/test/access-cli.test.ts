@@ -113,3 +113,24 @@ it("bridges only the manual grant's tools and refuses retired command modes", as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("issues explicit project grants and refuses fleet cutover without touching grants", async () => {
+  const fetchImpl = vi.fn(async (_input, init) => {
+    expect(JSON.parse(String(init?.body))).toEqual({
+      principalId: "project:kh2",
+      workId: "project:kh2",
+      server: "linear",
+      project: "kh2",
+      tools: [{ name: "get_issue" }],
+    });
+    return Response.json({ project: "kh2" });
+  }) as typeof fetch;
+  const options = { env: { CLANKIE_OPERATOR_TOKEN: "owner" }, fetchImpl };
+  expect(await runAccessCommand(["project", "kh2", "linear", "--tool", "get_issue"], options)).toEqual({
+    project: "kh2",
+  });
+  await expect(runAccessCommand(["fleet", "kh2", "linear"], options)).rejects.toThrow(
+    "Fleet grants are retired",
+  );
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});

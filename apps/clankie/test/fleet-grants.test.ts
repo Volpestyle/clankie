@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -11,7 +11,7 @@ import { fleetLinkFetch } from "../src/fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
-it("gives a linked fleet's agents the tools granted to that fleet, until revoked (VUH-1527)", async () => {
+it("retires fleet grants without copying or mutating them and denies remote pane claims", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-fleet-grants-"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const account: ProviderAccount = {
@@ -79,23 +79,16 @@ it("gives a linked fleet's agents the tools granted to that fleet, until revoked
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       }),
     );
-  const open = async (token: string) => {
-    const response = await rpc(token, "initialize", {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: { name: "bridge", version: "1" },
-    });
-    expect(response.status).toBe(200);
-    return response.headers.get("mcp-session-id")!;
-  };
-  const tools = async (token: string, session: string) =>
-    (
-      (await (await rpc(token, "tools/list", {}, session)).json()) as {
-        result: { tools: { name: string }[] };
-      }
-    ).result.tools.map((tool) => tool.name);
-
-  // The owner's one step, with no tools named: the server's worker-safe set, and no bearer.
+  const grant = await worker.issue({
+    principalId: "fleet:kh2",
+    workId: "fleet:kh2",
+    server: "linear",
+    tools: [{ name: "get_issue" }],
+  });
+  const path = join(root, "grants", `${grant.grant.grantId}.json`);
+  const saved = JSON.parse(await readFile(path, "utf8"));
+  await writeFile(path, JSON.stringify({ ...saved, fleet: "kh2" }));
+  const original = await readFile(path, "utf8");
   const issued = await clankie.app.request("/v1/worker-grants/", {
     method: "POST",
     headers: { authorization: "Bearer owner", "content-type": "application/json" },
@@ -107,27 +100,34 @@ it("gives a linked fleet's agents the tools granted to that fleet, until revoked
       tools: [],
     }),
   });
-  expect(issued.status).toBe(201);
-  const grant = (await issued.json()) as { token?: string; fleet: string; grant: { grantId: string } };
-  expect(grant.token).toBeUndefined();
-  expect(grant.fleet).toBe("kh2");
-
-  const kh2 = await open("kh2-link");
-  // Worker publishing must name a persona, so a fleet grant leaves it out.
-  expect(await tools("kh2-link", kh2)).toEqual(["linear_get_issue", "linear_save_comment"]);
-  const called = (await (
-    await rpc("kh2-link", "tools/call", { name: "linear_save_comment", arguments: { issueId: "A-1" } }, kh2)
-  ).json()) as { result: { content: { text: string }[]; isError: boolean } };
-  expect(called.result).toMatchObject({ isError: false, content: [{ text: "ran save_comment" }] });
-  expect(calls).toEqual([{ name: "save_comment", args: { issueId: "A-1" } }]);
-
-  // Another fleet's link sees none of it, and nothing without a link gets in.
-  expect(await tools("pc-link", await open("pc-link"))).toEqual([]);
+  expect(issued.status).toBe(400);
+  for (const token of ["kh2-link", "pc-link"]) {
+    expect((await rpc(token, "initialize", {})).status).toBe(403);
+    expect((await rpc(token, "tools/call", { name: "linear_get_issue", arguments: {} })).status).toBe(403);
+  }
   expect((await rpc("nope", "initialize", {})).status).toBe(401);
-  // Another fleet's link cannot ride this fleet's session.
-  expect((await rpc("pc-link", "tools/list", {}, kh2)).status).toBe(403);
-
+  expect(
+    (
+      await worker.handle(
+        new Request("http://local/v1/worker-mcp", {
+          method: "POST",
+          headers: { authorization: `Bearer ${grant.token}` },
+        }),
+      )
+    ).status,
+  ).toBe(403);
+  expect(await readFile(path, "utf8")).toBe(original);
+  expect(await worker.list()).toMatchObject([{ fleet: "kh2" }]);
+  const listed = await clankie.app.request("/v1/worker-grants/", {
+    headers: { authorization: "Bearer owner" },
+  });
+  expect(await listed.json()).toMatchObject([
+    { fleet: "kh2", status: "retired", detail: expect.stringContaining("access project") },
+  ]);
+  expect(calls).toEqual([]);
   await worker.revoke(grant.grant.grantId);
-  expect(await tools("kh2-link", kh2)).toEqual([]);
+  expect((await worker.list())[0]!.revokedAt).toBeDefined();
   await worker.close();
+  await host.close();
+  clankie.close();
 });

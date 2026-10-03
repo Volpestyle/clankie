@@ -435,7 +435,7 @@ export interface ClankieAppDependencies {
    * fleet seat routes for that fleet's panes and nothing else.
    */
   fleetLinks?: { authenticate(token: string): string | undefined };
-  localFleet?: { identity(request: Request): { pane: string; validate(): Promise<boolean> } | undefined };
+  localFleet?: { identity(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined };
   /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
   prepareFleet?: (id: string) => Promise<unknown>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
@@ -1294,8 +1294,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? dependencies.workerMcp.handle(context.req.raw)
       : context.json({ error: "worker_mcp_unavailable" }, 503),
   );
-  // A linked fleet's agents use the tools granted to that fleet (VUH-1527).
-  // The link token is the identity; it names exactly one fleet.
+  // The local listener proves an agent; a remote fleet link alone cannot prove a project.
   app.all("/v1/fleet/mcp", async (context) => {
     const local = dependencies.localFleet?.identity(context.req.raw);
     if (local && dependencies.workerMcp)
@@ -1320,14 +1319,37 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     context.header("Cache-Control", "no-store");
     return next();
   });
-  app.get("/v1/worker-grants/", async (context) => context.json(await dependencies.workerMcp!.list()));
+  app.get("/v1/worker-grants/", async (context) =>
+    context.json(
+      (await dependencies.workerMcp!.list()).map((record) =>
+        record.fleet === undefined
+          ? record
+          : {
+              ...record,
+              status: "retired",
+              detail:
+                "This fleet grant no longer gives tools. Reissue selected tools with clankie access project NAME SERVER, then revoke this old grant.",
+            },
+      ),
+    ),
+  );
   app.post("/v1/worker-grants/", async (context) => {
-    const parsed = WorkerGrantRequestSchema.safeParse(await context.req.json().catch(() => undefined));
+    const input = await context.req.json().catch(() => undefined);
+    if (input && typeof input === "object" && "fleet" in input)
+      return context.json(
+        {
+          error: "fleet_grants_retired",
+          detail:
+            "Fleet grants are retired. Use clankie access project NAME SERVER, then clankie access revoke ID for each old grant.",
+        },
+        400,
+      );
+    const parsed = WorkerGrantRequestSchema.safeParse(input);
     if (!parsed.success) return context.json({ error: "invalid_worker_grant" }, 400);
     try {
       const issued = await dependencies.workerMcp!.issue(parsed.data);
-      // A fleet grant travels by membership; it never hands out a bearer (VUH-1527).
-      if (issued.fleet !== undefined) {
+      // A project grant travels by verified membership; it never hands out a bearer.
+      if (issued.project !== undefined) {
         const { token: _token, ...grant } = issued;
         return context.json(grant, 201);
       }

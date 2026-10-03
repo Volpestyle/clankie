@@ -148,3 +148,25 @@ per-hire project recording and cap execution; live acceptance remains unrun.
 Neither live owner settings nor real grants/hires are changed by this engineering
 verification. Existing fleet grants remain unchanged until VUH-1558 explicitly
 retires or replaces them; this release does not claim they are project-scoped.
+
+### VUH-1558 project-tool cutover
+
+Fleet grants now remain readable/revocable but confer no tools. Reissue is an
+explicit owner action; no owner grant or settings migration is performed by the
+implementation. `project add` provides only the narrow local workspace
+registration prerequisite and requires broker-consistent owner authentication.
+General project editing/onboarding remains separate.
+
+The local service resolves actual native process and session identity before
+consulting the host hire ledger or canonical approved workspace. Settings and
+assignment changes are fenced again after OS reads. Each tool call rechecks the
+durable grant immediately before dispatch, and the MCP host retains its account
+and server-configuration checks. A service-owned private Codex server additionally
+needs its captured PID lifetime and immutably bound native thread plus an actual
+matching hire; it never gets a workspace fallback. Full details and explicit
+owner cutover commands are in [worker access](../worker-access.md).
+
+Native Codex/Claude/OpenCode and registered private Codex paths have deterministic
+coverage. Installed Pi rewrites its command title, so generic Node cannot prove
+the installed script: trusted Pi launch provenance remains engineering within
+VUH-1558. Remote process proof remains VUH-1563. Live owner cutover is unrun.

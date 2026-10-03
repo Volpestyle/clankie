@@ -1,3 +1,4 @@
+import type { LocalCodexRegistration } from "../local-codex-seats.ts";
 import type {
   HarnessSeatAdapter,
   SeatControl,
@@ -33,7 +34,7 @@ export function createCodexSeatAdapter(
   options: {
     start?: typeof startCodexAppServerSeat;
     /** Service-owned process identity; returned cleanup revokes its local fleet access. */
-    localProcess?: (pid: number, pane: string) => () => void;
+    localProcess?: (pid: number, pane: string) => LocalCodexRegistration;
     herdr?: (args: readonly string[]) => Promise<unknown>;
     trackerOverrides?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<string[]>;
     server?: CodexServerLauncher;
@@ -65,7 +66,7 @@ export function createCodexSeatAdapter(
       let state: SeatStatus = "idle";
       let latest: SeatEvent = { type: "turn_completed", at: new Date().toISOString(), ok: true };
       let closed = false;
-      let releaseProcess: (() => void) | undefined;
+      let releaseProcess: LocalCodexRegistration | undefined;
       let reporting: Promise<unknown> = Promise.resolve();
       const waiters = new Set<(event: SeatEvent) => void>();
       const report = () => {
@@ -218,6 +219,7 @@ export function createCodexSeatAdapter(
           }
           if (launch.resumeSessionId !== undefined && seat.threadId !== launch.resumeSessionId)
             throw new Error("Codex resumed a different thread; no brief was sent");
+          releaseProcess?.bindSession?.(seat.threadId);
           ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
           report();
           await reporting;

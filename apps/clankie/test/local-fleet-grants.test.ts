@@ -1,3 +1,4 @@
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -56,7 +57,15 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
       close: async () => undefined,
     }),
   });
-  const worker = new WorkerMcp({ directory: join(root, "grants"), credentials, host });
+  let project = "kh2";
+  let occupant = "first";
+  const worker = new WorkerMcp({
+    directory: join(root, "grants"),
+    credentials,
+    host,
+    projects: async () => ProjectsSettingsSchema.parse({ projects: [{ id: "kh2", name: "KH2" }] }),
+    membership: async (identity) => ({ projectId: project, occupantId: `${identity.pane}:${occupant}` }),
+  });
   let live = true;
   let checks = 0;
   let failAfter = Infinity;
@@ -94,13 +103,26 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
     });
   const rpc = (pane: string, method: string, params: unknown, session?: string) =>
     linked(request(pane, method, params, session), { incoming: { socket: {} } } as HttpBindings);
-  const issued = await worker.issue({
-    principalId: "fleet:default",
-    workId: "fleet:default",
+  const grantRequest = {
+    principalId: "project:kh2",
+    workId: "project:kh2",
     server: "linear",
-    fleet: "default",
-    tools: [{ name: "get_issue", arguments: { id: "A-1" } }],
+    project: "kh2",
+    tools: [{ name: "get_issue", arguments: { id: "A-1" }, forbiddenArguments: ["alternateId"] }],
+  };
+  await expect(worker.issue({ ...grantRequest, project: "missing" })).rejects.toThrow("Create this project");
+  await expect(worker.issue({ ...grantRequest, principalId: "project:rivals" })).rejects.toThrow(
+    "must name their project",
+  );
+  const issueResponse = await clankie.app.request("/v1/worker-grants/", {
+    method: "POST",
+    headers: { authorization: "Bearer owner", "content-type": "application/json" },
+    body: JSON.stringify(grantRequest),
   });
+  expect(issueResponse.status).toBe(201);
+  const issued = await issueResponse.json();
+  expect(issued.token).toBeUndefined();
+  expect(issued.project).toBe("kh2");
   const initialized = await rpc("w1:p1", "initialize", {
     protocolVersion: "2025-06-18",
     capabilities: {},
@@ -117,9 +139,24 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
     (await (await rpc("w1:p1", "tools/call", { name: "linear_get_issue", arguments: args }, session)).json())
       .result;
   expect((await call({ id: "OTHER" })).isError).toBe(true);
+  expect((await call({ id: "A-1", alternateId: null })).isError).toBe(true);
   expect(calls).toHaveLength(0);
   expect((await call({ id: "A-1" })).isError).toBe(false);
   expect(calls).toHaveLength(1);
+  project = "rivals";
+  expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
+  project = "kh2";
+  occupant = "replacement";
+  expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
+  occupant = "first";
+  await credentials.set("linear", {
+    type: "api",
+    key: "rotated",
+    account: { ...account, connectionId: randomUUID() },
+  });
+  expect(await list()).toEqual([]);
+  expect((await call({ id: "A-1" })).isError).toBe(true);
+  await credentials.set("linear", { type: "api", key: "provider-secret", account });
   // Membership can disappear after listener admission but before the SDK invokes the tool.
   checks = 0;
   failAfter = 2;
@@ -143,7 +180,17 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
     clientInfo: { name: "test", version: "1" },
   });
   session = reopened.headers.get("mcp-session-id")!;
-  await worker.revoke(issued.grant.grantId);
+  const originalAccount = host.account.bind(host);
+  let bindingChecks = 0;
+  const bindingSpy = vi.spyOn(host, "account").mockImplementation(async (...args) => {
+    const result = await originalAccount(...args);
+    // Revoke after the handler has loaded its grant snapshot, before dispatch.
+    if (++bindingChecks === 2) await worker.revoke(issued.grant.grantId);
+    return result;
+  });
+  expect((await call({ id: "A-1" })).isError).toBe(true);
+  expect(calls).toHaveLength(1);
+  bindingSpy.mockRestore();
   expect(await list()).toEqual([]);
   expect((await call({ id: "A-1" })).isError).toBe(true);
   live = false;

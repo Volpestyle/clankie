@@ -82,7 +82,9 @@ import {
 import { createEmailPort } from "./email.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
-import { localFleetProof } from "./local-fleet-proof.ts";
+import { createProjectProcessObserver } from "./project-process-proof.ts";
+import { createProjectMembershipResolver, createProjectWorkspaceResolver } from "./project-membership.ts";
+import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
 import { FleetLinks, fleetLinkFetch } from "./fleet-link.ts";
 import { prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
@@ -559,6 +561,10 @@ const localFleetBinding = async () => {
     ? herdr.binding()
     : undefined;
 };
+const projectProcessObserver = createProjectProcessObserver({
+  binding: localFleetBinding,
+  herdrBinary: "herdr",
+});
 const localCodexSeats = new LocalCodexSeats(herdr.binding);
 const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-room-observations.json"));
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
@@ -766,6 +772,11 @@ const captain = createCaptain(
     resolveDiscordAttachments: createDiscordAttachmentResolver(),
   },
   {
+    projectHireIdentity: projectProcessObserver,
+    projectHireWorkspace: createProjectWorkspaceResolver({
+      settings: async () => (await settingsStore.load()).projects,
+      observe: projectProcessObserver,
+    }),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
     repoRoot,
@@ -822,6 +833,13 @@ runtimes.linkStatus = (fleet) => fleetLinks.status(fleet);
 const localFleet = new LocalFleetLink({
   directory: join(homedir(), ".clankie", "links"),
   binding: localFleetBinding,
+  projectProof: localProjectProof({
+    binding: localFleetBinding,
+    herdrBinary: "herdr",
+    privateSeat: async (chain, pane, binding) => localCodexSeats.allows(chain, pane, binding),
+    privateProjectSeat: async (chain, pane, binding, proof) =>
+      localCodexSeats.allows(chain, pane, binding, proof.nativeOccupantId),
+  }),
   prove: localFleetProof({
     binding: localFleetBinding,
     herdrBinary: "herdr",
@@ -892,6 +910,11 @@ const clankie = await createClankieApp({
     directory: join(stateRoot, "worker-grants"),
     credentials: operatorCredentialStore,
     host: mcpHost,
+    projects: async () => (await settingsStore.load()).projects,
+    membership: createProjectMembershipResolver({
+      settings: async () => (await settingsStore.load()).projects,
+      hire: (proof) => captain.lookupProjectHire(proof),
+    }),
   }),
   captain,
   fleetLinks,

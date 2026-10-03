@@ -179,8 +179,10 @@ seat: Claude plugin installation/enabling, Codex registration and generated conf
 source, and live local process membership. Use `clankie mcp --fleet` for the
 owner-granted tools. Missing tools do not authorize an operator-lane fallback or
 another account's Linear connector. Ask the lead/owner to inspect `access list`
-and grant only the needed tools with `access fleet default SERVER --tool NAME`.
-Fleet grants persist until revoked; `access revoke ID` removes them from running
+and grant only the needed tools with `access project PROJECT SERVER --tool NAME`.
+Project tools require a verified native hire or actual cwd inside an approved
+project workspace. A fleet link or persona role alone is insufficient. Old fleet
+grants are retired without automatic reissue. Project grants persist until revoked; `access revoke ID` removes them from running
 sessions too. Local discovery carries no bearer. Outward-facing sends still need
 the owner's instruction; the connection identity remains Clankie's connected
 account. A shared Codex app-server daemon cannot prove its pane; restart Codex in
