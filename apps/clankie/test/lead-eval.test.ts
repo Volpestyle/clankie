@@ -246,6 +246,8 @@ it("applies a retained candidate diff to the trusted base without executing cand
   });
   expect(receipt.candidatePatchSha256).toMatch(/^[a-f0-9]{64}$/);
   expect(receipt.candidateTree).toMatch(/^[a-f0-9]{40}$/);
+  expect(existsSync(join(output, "source-git/index"))).toBe(true);
+  expect(readFileSync(join(output, "worktree/.git"), "utf8")).toContain(join(output, "source-git"));
   expect(readFileSync(join(output, "worktree/candidate.txt"), "utf8")).toBe("candidate implementation\n");
   expect(readFileSync(join(output, "worktree/candidate.patch"))).toEqual(readFileSync(patchPath));
   expect(existsSync(join(root, "poison-index"))).toBe(false);
@@ -330,6 +332,16 @@ it("grades through the network-off sandbox with fixed argv and retained provenan
   expect(JSON.parse(readFileSync(join(output, "grading-result.json"), "utf8"))).toMatchObject({
     status: "passed",
   });
+  const outsideReport = join(root, "outside-report.json");
+  writeFileSync(outsideReport, JSON.stringify(verifierResult));
+  sandbox.mockImplementationOnce(async () => {
+    symlinkSync(outsideReport, join(output, "tmp/heldout-results.json"));
+    return { exitCode: 0, timedOut: false, overflow: false };
+  });
+  expect(await gradeCandidate(output)).toMatchObject({
+    status: "failed-or-infrastructure",
+    verifierReportSha256: null,
+  });
   sandbox.mockResolvedValueOnce({ exitCode: 0, timedOut: false, overflow: false });
   expect(await gradeCandidate(output)).toMatchObject({
     status: "failed-or-infrastructure",
@@ -349,8 +361,14 @@ it("grades through the network-off sandbox with fixed argv and retained provenan
   expect(await gradeCandidate(output)).toMatchObject({ status: "failed-or-infrastructure" });
   sandbox.mockResolvedValueOnce({ exitCode: 0, timedOut: true, overflow: false });
   expect(await gradeCandidate(output)).toMatchObject({ status: "failed-or-infrastructure" });
+  const outsideGrader = join(root, "outside-grader.ts");
+  const graderPath = join(output, "worktree", task.graders[0].path);
+  writeFileSync(outsideGrader, readFileSync(graderPath));
   sandbox.mockImplementationOnce(async () => {
-    writeFileSync(join(output, "worktree", task.graders[0].path), "tampered");
+    rmSync(graderPath);
+    symlinkSync(outsideGrader, graderPath);
+    writeFileSync(join(output, "worktree/.git"), "gitdir: /not-owned\n");
+    writeFileSync(join(output, "tmp/heldout-results.json"), JSON.stringify(verifierResult));
     return { exitCode: 0, timedOut: false, overflow: false };
   });
   expect(await gradeCandidate(output)).toMatchObject({ status: "grader-tampered" });
@@ -386,4 +404,18 @@ it("requires every pinned grader file and assertion rather than exit-zero or sum
   duplicate.testResults[1]!.name = duplicate.testResults[0]!.name;
   for (const report of [undefined, {}, skipped, missing, zero, truncated, duplicate])
     expect(lead.validateGraderReport(task, workspace, report)).toHaveProperty("complete", false);
+});
+
+it("rejects dependency ancestor links before following package roots outside the workspace", () => {
+  const root = scratch();
+  const workspace = join(root, "workspace");
+  const outside = join(root, "outside");
+  mkdirSync(join(workspace, "apps"), { recursive: true });
+  mkdirSync(join(outside, "node_modules"), { recursive: true });
+  writeFileSync(join(outside, "node_modules/private"), "fixture data");
+  symlinkSync(outside, join(workspace, "apps/redirect"));
+  expect(() => dependencySnapshot(workspace)).toThrow("External dependency");
+  rmSync(join(workspace, "apps"), { recursive: true });
+  symlinkSync(outside, join(workspace, "apps"));
+  expect(() => dependencySnapshot(workspace)).toThrow("External dependency");
 });

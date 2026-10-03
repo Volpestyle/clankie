@@ -478,7 +478,19 @@ Counts come from pinned test declarations reconciled with the retained successfu
 reference records (74, 11 and 35 tests); report and reference hashes are retained.
 Missing, malformed or empty coverage cannot produce green evidence. The pinned
 Vitest configs import only Node built-ins and `vitest/config`, with no setup imports;
-candidate changes to test/support files or test configuration are rejected. A nonzero exit is
+candidate changes to test/support files or test configuration are rejected.
+This intentionally limits grading: a candidate patch that adds or updates its own
+tests/support files must receive separate reviewed grading support; this runner
+rejects that patch rather than silently dropping those changes.
+
+Before parent-side provenance reads, generated reports and graders must be owned
+regular files resolving inside their disposable roots. Dependency traversal also
+checks every ancestor before reading, so package-directory symlinks cannot expose
+owner files. The grading repository metadata lives outside child-writable roots;
+parent Git queries use that explicit metadata path, not a candidate-controlled
+`.git` pointer. The JSON field/path contract was checked against the installed
+Vitest 4.1.10 reporter source; its version and source hashes are retained in the
+continuation evidence. These tests still use fake verifier process results. A nonzero exit is
 `failed-or-infrastructure`, requiring log review, not automatically a task failure.
 Deterministic tests fake the verifier process; no live candidate or model trial
 has been graded during this continuation.

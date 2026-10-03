@@ -81,7 +81,14 @@ A structured verifier report must prove complete execution of every pinned file
 and expected assertion count; exit zero without that evidence is not a pass.
 Counts reconcile pinned test declarations with the retained 74/11/35 reference
 totals. Missing reports, empty coverage, skips, partial files and duplicate suites
-fail closed, and the report/reference content hashes are retained.
+fail closed, and the report/reference content hashes are retained. The JSON
+contract was inspected in the installed Vitest 4.1.10 reporter source; source and
+type-declaration hashes are retained outside the repository with this evidence.
+Generated reports and graders must be owned regular files inside the disposable
+roots before parent-side reads; dependency ancestors cannot redirect traversal.
+Git metadata is outside child-writable roots and parent queries explicitly select
+it. Candidate changes to any test/support files are currently rejected, an
+explicit grading limitation requiring separately reviewed support.
 Deterministic tests use fake verifier process results and disposable repositories;
 they are not benchmark results or proof of a live native run.
 

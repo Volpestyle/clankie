@@ -10,6 +10,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -350,8 +351,25 @@ export function prepareCandidate(task, patchPath, output) {
     warning:
       "Candidate code has not run. A sandboxed verifier is required; do not execute on the owner host.",
   };
+  // Keep the parent provenance index/config outside every child-writable root.
+  renameSync(join(root, ".git"), join(sandbox, "source-git"));
+  writeFileSync(join(root, ".git"), `gitdir: ${join(sandbox, "source-git")}\n`);
   json(join(sandbox, "lead-grader.json"), receipt);
   return receipt;
+}
+
+function ownedPath(root, path) {
+  const real = realpathSync(path);
+  if (!real.startsWith(`${root}/`)) throw Error("External dependency symlink or artifact path");
+  return real;
+}
+
+function ownedRegularFile(root, path) {
+  const real = ownedPath(root, path);
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.nlink !== 1 || stat.uid !== process.getuid())
+    throw Error("Expected an owned regular file, without links");
+  return real;
 }
 
 /** Content-address staged dependencies; symlinks may only resolve within this sandbox. */
@@ -359,6 +377,7 @@ export function dependencySnapshot(directory) {
   const root = realpathSync(directory);
   const entries = [];
   const visit = (path) => {
+    ownedPath(root, path);
     const stat = lstatSync(path);
     const name = path.slice(root.length + 1);
     if (stat.isSymbolicLink()) {
@@ -367,20 +386,23 @@ export function dependencySnapshot(directory) {
       entries.push([name, "link", readlinkSync(path)]);
     } else if (stat.isDirectory()) {
       for (const child of readdirSync(path).sort()) visit(join(path, child));
-    } else if (stat.isFile()) entries.push([name, stat.mode & 0o777, sha(readFileSync(path))]);
+    } else if (stat.isFile())
+      entries.push([name, stat.mode & 0o777, sha(readFileSync(ownedRegularFile(root, path)))]);
     else throw Error(`Unsupported dependency file: ${name}`);
   };
   // Root and per-package node_modules are independent snapshots, not live links.
   for (const relative of [
     "node_modules",
-    ...["apps", "packages", "integrations"].flatMap((category) =>
-      existsSync(join(root, category))
-        ? readdirSync(join(root, category)).map((name) => `${category}/${name}/node_modules`)
-        : [],
-    ),
+    ...["apps", "packages", "integrations"].flatMap((category) => {
+      const path = join(root, category);
+      if (!existsSync(path)) return [];
+      ownedPath(root, path);
+      return readdirSync(path).map((name) => `${category}/${name}/node_modules`);
+    }),
   ]) {
     const path = join(root, relative);
     if (existsSync(path)) {
+      ownedPath(root, path);
       if (lstatSync(path).isSymbolicLink()) throw Error("Dependency directories must be owned copies");
       visit(path);
     }
@@ -479,7 +501,12 @@ export async function gradeCandidate(directory) {
   if (!task || receipt.status !== "prepared-requires-sandboxed-grader")
     throw Error("Not a prepared candidate");
   verifyTask(task);
-  const local = (...args) => command("/usr/bin/git", args, workspace);
+  const local = (...args) =>
+    command(
+      "/usr/bin/git",
+      ["--git-dir", join(root, "source-git"), "--work-tree", workspace, ...args],
+      workspace,
+    );
   const untracked = local("ls-files", "--others", "--directory", "--no-empty-directory", "-z")
     .toString()
     .split("\0")
@@ -489,13 +516,14 @@ export async function gradeCandidate(directory) {
   if (
     receipt.baseCommit !== task.baseCommit ||
     receipt.sourceTree !== task.baseTree ||
-    sha(readFileSync(join(workspace, "candidate.patch"))) !== receipt.candidatePatchSha256 ||
+    sha(readFileSync(ownedRegularFile(workspace, join(workspace, "candidate.patch")))) !==
+      receipt.candidatePatchSha256 ||
     local("write-tree").toString().trim() !== receipt.candidateTree ||
     local("diff", "--no-ext-diff", "--no-textconv", "--name-only").length
   )
     throw Error("Candidate provenance changed after preparation");
   for (const grader of task.graders)
-    if (sha(readFileSync(join(workspace, grader.path))) !== grader.sha256)
+    if (sha(readFileSync(ownedRegularFile(workspace, join(workspace, grader.path)))) !== grader.sha256)
       throw Error("Held-out grader changed after preparation");
   // No install, credential import, account discovery or arbitrary command flags.
   const vitest = join(workspace, "node_modules/vitest/vitest.mjs");
@@ -532,7 +560,9 @@ export async function gradeCandidate(directory) {
       local("write-tree").toString().trim() === receipt.candidateTree &&
       local("diff", "--no-ext-diff", "--no-textconv", "--name-only").length === 0 &&
       task.graders.every(
-        (g) => existsSync(join(workspace, g.path)) && sha(readFileSync(join(workspace, g.path))) === g.sha256,
+        (g) =>
+          existsSync(join(workspace, g.path)) &&
+          sha(readFileSync(ownedRegularFile(workspace, join(workspace, g.path)))) === g.sha256,
       );
   } catch {
     // Retain a failed result if the candidate removed files or replaced links.
@@ -540,7 +570,7 @@ export async function gradeCandidate(directory) {
   let coverage = { complete: false, detail: "Missing or malformed structured verifier report" };
   let verifierReportSha256 = null;
   try {
-    const bytes = readFileSync(reportPath);
+    const bytes = readFileSync(ownedRegularFile(join(root, "tmp"), reportPath));
     verifierReportSha256 = sha(bytes);
     coverage = validateGraderReport(task, workspace, JSON.parse(bytes));
   } catch {
