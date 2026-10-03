@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { createCaptain } from "../src/captain/captain.ts";
+import * as census from "../src/captain/herdr-census.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneToolBank } from "../src/captain/port.ts";
@@ -20,6 +21,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "clankie-hire-brief-"));
   roots.push(root);
+  vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
   const captain = createCaptain(
@@ -104,10 +106,10 @@ test.each([
             harness: "codex",
             status: "working",
             title: "Noor",
-            role: "builder",
             workingDirectory: root,
           },
         } as const;
+        vi.mocked(census.readFleet).mockResolvedValue({ seats: [result.seat] });
         adopt?.(result);
         return result;
       },
