@@ -1,0 +1,12 @@
+{
+  "account": "jamescvolpe",
+  "paneId": "w3Z:p5",
+  "elapsedMs": 15108,
+  "hookPromptVisible": true,
+  "loaded": {
+    "data": [],
+    "nextCursor": null
+  },
+  "configReadSucceeded": true,
+  "noApprovalOrModelTurn": true
+}

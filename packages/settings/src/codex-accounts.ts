@@ -3,7 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { ClankieSettingsSchema, dropRetiredSettings, type ClankieSettings } from "./schema.ts";
-import { readCodexRateLimits } from "./codex-rate-limits.ts";
+import { readCodexHookTrust, readCodexRateLimits } from "./codex-rate-limits.ts";
 import { defaultSettingsPath, SettingsStore } from "./store.ts";
 
 export interface CodexAccount {
@@ -178,13 +178,16 @@ export function selectCodexAccount(accounts: readonly CodexAccount[], label?: st
 
 /** Prefer current account quota, including homes with no rollout yet. */
 export async function readCodexAccountStatus(account: CodexAccount) {
-  if (existsSync(join(account.home, "auth.json"))) {
-    const text = await readCodexRateLimits(account.home).catch(() => null);
-    const limits = text === null ? null : codexRateLimit(text);
-    if (limits && (limits.five_hour !== null || limits.seven_day !== null || limits.limited))
-      return accountStatus(account, limits, new Date().toISOString(), Date.now());
-  }
-  return codexAccountStatus(account);
+  const [hookTrust, text] = await Promise.all([
+    readCodexHookTrust(account.home).catch(() => "unknown" as const),
+    existsSync(join(account.home, "auth.json"))
+      ? readCodexRateLimits(account.home).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  const limits = text === null ? null : codexRateLimit(text);
+  if (limits && (limits.five_hour !== null || limits.seven_day !== null || limits.limited))
+    return { ...accountStatus(account, limits, new Date().toISOString(), Date.now()), hookTrust };
+  return { ...codexAccountStatus(account), hookTrust };
 }
 
 export async function selectLiveCodexAccount(accounts: readonly CodexAccount[], label?: string) {

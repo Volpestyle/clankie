@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { spawn } from "node:child_process";
 import { afterEach, expect, test, vi } from "vitest";
-import { readCodexRateLimits } from "../src/codex-rate-limits.ts";
+import { readCodexRateLimits, readCodexHookTrust } from "../src/codex-rate-limits.ts";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 afterEach(() => {
@@ -82,4 +82,41 @@ test("unavailable executable returns unknown", async () => {
   const result = readCodexRateLimits("/fixture/offline");
   child.emit("error", new Error("ENOENT"));
   expect(await result).toBeNull();
+});
+
+test.each([
+  ["untrusted", "review_required"],
+  ["modified", "review_required"],
+  ["trusted", "ready"],
+  ["managed", "ready"],
+  ["future-status", "unknown"],
+])("hook diagnostics report %s without accepting trust", async (trustStatus, expected) => {
+  const child = server();
+  const methods: string[] = [];
+  child.stdin.on("data", (bytes) => {
+    const m = JSON.parse(bytes.toString());
+    methods.push(m.method);
+    if (m.id === 1) queueMicrotask(() => child.stdout.write('{"id":1,"result":{}}\n'));
+    if (m.id === 2) {
+      expect(m.params).toEqual({ cwds: ["/fixture/home"] });
+      queueMicrotask(() =>
+        child.stdout.write(
+          JSON.stringify({
+            id: 2,
+            result: {
+              data: [
+                {
+                  hooks: [{ enabled: true, trustStatus, command: "private-hook" }],
+                  errors: [],
+                  warnings: [],
+                },
+              ],
+            },
+          }) + "\n",
+        ),
+      );
+    }
+  });
+  expect(await readCodexHookTrust("/fixture/home")).toBe(expected);
+  expect(methods).toEqual(["initialize", "initialized", "hooks/list"]);
 });

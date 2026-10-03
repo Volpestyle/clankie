@@ -4,6 +4,7 @@ import type {
   SeatEvent,
   SeatRef,
   SeatStatus,
+  SeatStartResult,
   SeatView,
 } from "@clankie/agent-hosts";
 import { execFile } from "node:child_process";
@@ -129,105 +130,130 @@ export function createCodexSeatAdapter(
           waiters.clear();
         }
       };
+      const startupAbort = new AbortController();
+      const startupSignal = signal ? AbortSignal.any([signal, startupAbort.signal]) : startupAbort.signal;
+      let pendingReported = false;
+      let reportPending!: (result: SeatStartResult) => void;
+      const pending = new Promise<SeatStartResult>((resolve) => {
+        reportPending = resolve;
+      });
       let monitor: ReturnType<typeof setInterval> | undefined;
       const close = async () => {
         if (closed) return;
         closed = true;
+        startupAbort.abort(new Error("Codex native pane closed"));
         clearInterval(monitor);
         if (ref) controls.delete(ref.sessionId);
         await seat?.close();
         observe({ method: "connection/closed", params: { code: null } });
       };
-      try {
-        signal?.throwIfAborted();
-        // Its Linear writes go through Clankie's connected account, not an inherited connector.
-        const trackerOverrides = await (options.trackerOverrides ?? codexTrackerOverrides)(
-          launch.cwd,
-          launch.env,
-        );
-        seat = await (options.start ?? startCodexAppServerSeat)({
-          cwd: launch.cwd,
-          ...(trackerOverrides.length === 0 ? {} : { config: trackerOverrides }),
-          ...(launch.resumeSessionId ? { resumeThreadId: launch.resumeSessionId } : {}),
-          ...(launch.model ? { model: launch.model } : {}),
-          ...(launch.effort ? { effort: launch.effort } : {}),
-          ...(launch.env || options.viewEnv
-            ? { env: { ...launch.env, ...(await options.viewEnv?.(view)) } }
-            : {}),
-          ...(options.server === undefined ? {} : { server: options.server }),
-          ...(options.listenTimeoutMs === undefined ? {} : { listenTimeoutMs: options.listenTimeoutMs }),
-          startView: (args) => (view.start ? view.start("codex", args) : view.run(["codex", ...args])),
-          onEvent: observe,
-        });
-        signal?.throwIfAborted();
-        if (launch.resumeSessionId !== undefined && seat.threadId !== launch.resumeSessionId)
-          throw new Error("Codex resumed a different thread; no brief was sent");
-        ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
-        report();
-        await reporting;
-        const control: SeatControl = {
-          ref,
-          async send(message) {
-            if (closed || state === "offline")
-              return { outcome: "offline", detail: "Codex app-server is offline" };
-            const messageId = randomUUID();
-            try {
-              // A request reply may precede turn/started. Do not expose the
-              // preceding idle settlement as the result of this new message.
-              if (state === "idle") state = "working";
-              const accepted = await seat!.send(message);
-              return { outcome: "accepted", messageId: accepted.turnId, state: accepted.state };
-            } catch (error) {
-              return { outcome: "unconfirmed", messageId, detail: String(error) };
-            }
-          },
-          async status() {
-            return state;
-          },
-          settled(abort) {
-            if (abort?.aborted) return Promise.reject(abort.reason);
-            if (state !== "working") return Promise.resolve(latest);
-            return new Promise((resolve, reject) => {
-              const done = (event: SeatEvent) => {
-                abort?.removeEventListener("abort", cancel);
-                waiters.delete(done);
-                resolve(event);
-              };
-              const cancel = () => {
-                waiters.delete(done);
-                reject(abort?.reason);
-              };
-              waiters.add(done);
-              abort?.addEventListener("abort", cancel, { once: true });
-            });
-          },
-          interrupt: () => seat!.interrupt(),
-          close,
-        };
-        signal?.throwIfAborted();
-        if (launch.brief) {
-          const delivered = await control.send(launch.brief);
-          if (delivered.outcome !== "accepted")
-            throw new Error("brief_delivery_unverified: " + JSON.stringify(delivered));
-        }
-        controls.set(ref.sessionId, control);
-        // Closing the view must not strand an invisible worker. A transport
-        // error does not prove the pane is gone; only Herdr's typed result does.
-        monitor = setInterval(() => {
-          void herdr(["pane", "get", view.paneId]).catch((error: unknown) => {
-            if (/pane_not_found|unknown_pane/u.test(String(error))) void close();
+      const startup = async (): Promise<SeatStartResult> => {
+        try {
+          startupSignal.throwIfAborted();
+          // Its Linear writes go through Clankie's connected account, not an inherited connector.
+          const trackerOverrides = await (options.trackerOverrides ?? codexTrackerOverrides)(
+            launch.cwd,
+            launch.env,
+          );
+          seat = await (options.start ?? startCodexAppServerSeat)({
+            cwd: launch.cwd,
+            signal: startupSignal,
+            onThreadPending: () => {
+              pendingReported = true;
+              reportPending({
+                outcome: "failed",
+                reason: "not_ready",
+                detail: `Codex startup is pending in pane ${view.paneId}. The server and native TUI remain alive; review any hook or folder trust prompt there. The original brief will continue automatically after review; do not retry the hire.`,
+              });
+            },
+            ...(trackerOverrides.length === 0 ? {} : { config: trackerOverrides }),
+            ...(launch.resumeSessionId ? { resumeThreadId: launch.resumeSessionId } : {}),
+            ...(launch.model ? { model: launch.model } : {}),
+            ...(launch.effort ? { effort: launch.effort } : {}),
+            ...(launch.env || options.viewEnv
+              ? { env: { ...launch.env, ...(await options.viewEnv?.(view)) } }
+              : {}),
+            ...(options.server === undefined ? {} : { server: options.server }),
+            ...(options.listenTimeoutMs === undefined ? {} : { listenTimeoutMs: options.listenTimeoutMs }),
+            startView: async (args) => {
+              // Monitor while waiting for owner trust as well as after startup.
+              monitor = setInterval(() => {
+                void herdr(["pane", "get", view.paneId]).catch((error: unknown) => {
+                  if (/pane_not_found|unknown_pane/u.test(String(error))) void close();
+                });
+              }, 3_000);
+              monitor.unref();
+              await (view.start ? view.start("codex", args) : view.run(["codex", ...args]));
+            },
+            onEvent: observe,
           });
-        }, 3_000);
-        monitor.unref();
-        return { outcome: "started", control };
-      } catch (error) {
-        await close();
-        return {
-          outcome: "failed",
-          reason: /ENOENT|command not found/u.test(String(error)) ? "harness_unavailable" : "not_ready",
-          detail: String(error),
-        };
-      }
+          if (startupSignal.aborted) {
+            await seat.close();
+            startupSignal.throwIfAborted();
+          }
+          if (launch.resumeSessionId !== undefined && seat.threadId !== launch.resumeSessionId)
+            throw new Error("Codex resumed a different thread; no brief was sent");
+          ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
+          report();
+          await reporting;
+          const control: SeatControl = {
+            ref,
+            async send(message) {
+              if (closed || state === "offline")
+                return { outcome: "offline", detail: "Codex app-server is offline" };
+              const messageId = randomUUID();
+              try {
+                // A request reply may precede turn/started. Do not expose the
+                // preceding idle settlement as the result of this new message.
+                if (state === "idle") state = "working";
+                const accepted = await seat!.send(message);
+                return { outcome: "accepted", messageId: accepted.turnId, state: accepted.state };
+              } catch (error) {
+                return { outcome: "unconfirmed", messageId, detail: String(error) };
+              }
+            },
+            async status() {
+              return state;
+            },
+            settled(abort) {
+              if (abort?.aborted) return Promise.reject(abort.reason);
+              if (state !== "working") return Promise.resolve(latest);
+              return new Promise((resolve, reject) => {
+                const done = (event: SeatEvent) => {
+                  abort?.removeEventListener("abort", cancel);
+                  waiters.delete(done);
+                  resolve(event);
+                };
+                const cancel = () => {
+                  waiters.delete(done);
+                  reject(abort?.reason);
+                };
+                waiters.add(done);
+                abort?.addEventListener("abort", cancel, { once: true });
+              });
+            },
+            interrupt: () => seat!.interrupt(),
+            close,
+          };
+          startupSignal.throwIfAborted();
+          if (launch.brief) {
+            const delivered = await control.send(launch.brief);
+            if (delivered.outcome !== "accepted")
+              throw new Error("brief_delivery_unverified: " + JSON.stringify(delivered));
+          }
+          controls.set(ref.sessionId, control);
+          return { outcome: "started", control };
+        } catch (error) {
+          await close();
+          if (pendingReported) console.warn("Codex pending startup ended:", view.paneId, String(error));
+          return {
+            outcome: "failed",
+            reason: /ENOENT|command not found/u.test(String(error)) ? "harness_unavailable" : "not_ready",
+            detail: String(error),
+          };
+        }
+      };
+      return Promise.race([startup(), pending]);
     },
   };
 }

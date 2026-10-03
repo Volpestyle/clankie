@@ -1855,35 +1855,42 @@ describe("hiring a seat", () => {
     store.close();
   });
 
-  it("reports a folder trust blocker and keeps its native prompt available to the owner", async () => {
-    const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
-    const read = vi.fn(() => Promise.resolve("Do you trust the files in this folder?"));
-    const sendKeys = vi.fn(() => Promise.resolve());
-    const closePane = vi.fn(() => Promise.resolve());
-    const runner: HerdrWatchRunner = {
-      get: vi.fn(() => Promise.resolve(hired)),
-      resolveTerminal: vi.fn(() => Promise.resolve(hired)),
-      wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
-      read,
-      sendKeys,
-      closePane,
-      createTab: vi.fn(() => Promise.resolve("w1C:p9")),
-      startAgent,
-    };
-    const store = new HerdrWatchStore(await storePath(), { runner });
+  it.each([
+    ["claude", "Do you trust the files in this folder?"],
+    ["codex", "Trust this folder?"],
+    ["codex", "Hooks need review — 1 hook is new or changed"],
+  ] as const)(
+    "reports %s trust blocker %s and keeps its native prompt available",
+    async (harness, prompt) => {
+      const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
+      const read = vi.fn(() => Promise.resolve(prompt));
+      const sendKeys = vi.fn(() => Promise.resolve());
+      const closePane = vi.fn(() => Promise.resolve());
+      const runner: HerdrWatchRunner = {
+        get: vi.fn(() => Promise.resolve(hired)),
+        resolveTerminal: vi.fn(() => Promise.resolve(hired)),
+        wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
+        read,
+        sendKeys,
+        closePane,
+        createTab: vi.fn(() => Promise.resolve("w1C:p9")),
+        startAgent,
+      };
+      const store = new HerdrWatchStore(await storePath(), { runner });
 
-    const result = await store.spawnSeat({
-      schemaVersion: 1,
-      harness: "claude",
-      title: "Release prep",
-      workingDirectory: tmpdir(),
-    });
+      const result = await store.spawnSeat({
+        schemaVersion: 1,
+        harness,
+        title: "Release prep",
+        workingDirectory: tmpdir(),
+      });
 
-    expect(result).toMatchObject({ outcome: "failed", reason: "trust_required" });
-    expect(sendKeys).not.toHaveBeenCalled();
-    expect(closePane).not.toHaveBeenCalled();
-    store.close();
-  });
+      expect(result).toMatchObject({ outcome: "failed", reason: "trust_required" });
+      expect(sendKeys).not.toHaveBeenCalled();
+      expect(closePane).not.toHaveBeenCalled();
+      store.close();
+    },
+  );
 
   it("names a missing claude binary as harness_unavailable instead of throwing", async () => {
     const closePane = vi.fn(() => Promise.resolve());
@@ -2138,5 +2145,6 @@ it("keeps channel delivery prompts internal while allowing an explicit reply wat
 });
 
 vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+  readCodexHookTrust: vi.fn(async () => "unknown"),
   readCodexRateLimits: vi.fn(async () => null),
 }));

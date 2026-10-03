@@ -206,3 +206,55 @@ describe("Codex harness seat adapter", () => {
     }
   });
 });
+
+it("returns pending without teardown, then registers and briefs the same seat once review finishes", async () => {
+  const f = fixture();
+  const realStart = f.start.getMockImplementation()!;
+  let finishReview!: () => void;
+  const review = new Promise<void>((resolve) => {
+    finishReview = resolve;
+  });
+  f.start.mockImplementationOnce(async (options) => {
+    options.onThreadPending();
+    await review;
+    return realStart(options);
+  });
+  const result = await f.adapter.start(
+    { harness: "codex", cwd: "/scratch", brief: "original brief" },
+    f.view,
+  );
+  expect(result).toMatchObject({ outcome: "failed", detail: expect.stringContaining("do not retry") });
+  expect(f.send).not.toHaveBeenCalled();
+  expect(f.close).not.toHaveBeenCalled();
+  finishReview();
+  const ref = { harness: "codex" as const, paneId: f.view.paneId, sessionId: "thread-1" };
+  await vi.waitFor(async () => expect(await f.adapter.attach(ref)).toBeDefined());
+  expect(f.start).toHaveBeenCalledOnce();
+  expect(f.send).toHaveBeenCalledExactlyOnceWith("original brief");
+  await (await f.adapter.attach(ref))!.close();
+});
+
+it("cancels pending startup when its native pane closes", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  let signal: AbortSignal | undefined;
+  f.start.mockImplementationOnce(async (options) => {
+    signal = options.signal;
+    await options.startView([]);
+    options.onThreadPending();
+    return new Promise((_resolve, reject) =>
+      options.signal.addEventListener("abort", () => reject(options.signal.reason)),
+    );
+  });
+  try {
+    await f.adapter.start({ harness: "codex", cwd: "/scratch", brief: "never send" }, f.view);
+    f.herdr.mockRejectedValueOnce(new Error("pane_not_found"));
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(signal?.aborted).toBe(true);
+    expect(f.send).not.toHaveBeenCalled();
+  } finally {
+    warning.mockRestore();
+    vi.useRealTimers();
+  }
+});

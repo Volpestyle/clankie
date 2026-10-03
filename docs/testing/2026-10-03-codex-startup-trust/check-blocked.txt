@@ -1,0 +1,12 @@
+$ pnpm herdr:skill:check && pnpm fmt:check && pnpm lint && pnpm deadcode && pnpm docs:check && pnpm infra:check && pnpm typecheck && pnpm test
+$ node scripts/herdr-skill.mjs --check
+Herdr 0.9.3 skill verified in all bundled roots
+$ oxfmt --check . && pnpm --filter @clankie/vox fmt:check
+Checking formatting...
+
+packages/agent-transcript/src/sessions.ts (0ms)
+
+Format issues found in above 1 files. Run without `--check` to fix.
+Finished in 802ms on 1528 files using 18 threads.
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Command failed with exit code 1.

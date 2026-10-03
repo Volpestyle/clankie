@@ -112,6 +112,8 @@ export interface CodexAppServerSeat {
  * one, and resolves undefined while the server is not listening yet.
  */
 interface CodexServerConnection {
+  /** Local child identity; remote launchers must not expose a remote PID here. */
+  readonly pid?: number;
   readonly endpoint: string;
   connect(): Promise<WebSocket | undefined>;
   /** Why the server is gone, once it is. */
@@ -176,6 +178,7 @@ const localCodexServer: CodexServerLauncher = async (input) => {
     input.onExit(code);
   });
   return {
+    ...(child.pid === undefined ? {} : { pid: child.pid }),
     endpoint: `unix://${socketPath}`,
     connect: () => openCodexSocket(`ws+unix://${socketPath}:/`),
     failure: () => failure,
@@ -218,6 +221,12 @@ export async function startCodexAppServerSeat(options: {
   resumeThreadId?: string;
   /** Operator seats may need time for native hook trust before thread creation. */
   threadStartTimeoutMs?: number;
+  /** Report a pending native prompt and keep waiting on the same live server. */
+  onThreadPending?: () => void;
+  /** Server-owned local process identity, including while owner trust is pending. */
+  onServerStarted?: (pid: number) => void;
+  /** Drop any process binding on exit or explicit close (called at most once). */
+  onServerStopped?: () => void;
   signal?: AbortSignal;
   env?: Readonly<Record<string, string>>;
   /** Where the dedicated server runs; this machine unless a fleet supplies its own. */
@@ -232,11 +241,18 @@ export async function startCodexAppServerSeat(options: {
   const configArgs = (options.config ?? []).flatMap((value) => ["-c", value]);
   let client: CodexAppServerClient | undefined;
   let closed = false;
+  let stopped = false;
+  const stoppedServer = () => {
+    if (stopped) return;
+    stopped = true;
+    options.onServerStopped?.();
+  };
   const server = await (options.server ?? localCodexServer)({
     cwd: options.cwd,
     configArgs,
     ...(options.env === undefined ? {} : { env: options.env }),
     onExit: (code) => {
+      stoppedServer();
       client?.close();
       options.onEvent?.({ method: "connection/closed", params: { code } });
     },
@@ -246,9 +262,14 @@ export async function startCodexAppServerSeat(options: {
     if (closed) return;
     closed = true;
     client?.close();
-    await server.close();
+    try {
+      await server.close();
+    } finally {
+      stoppedServer();
+    }
   };
   try {
+    if (server.pid !== undefined && !stopped) options.onServerStarted?.(server.pid);
     const deadline = Date.now() + (options.listenTimeoutMs ?? 15_000);
     let socket: WebSocket | undefined;
     while (!socket) {
@@ -284,8 +305,15 @@ export async function startCodexAppServerSeat(options: {
     // cannot bootstrap it. Let the real TUI create its own thread. Only one
     // native root can exist before we send the first brief.
     options.signal?.throwIfAborted();
-    await options.startView(viewArgs);
+    try {
+      await options.startView(viewArgs);
+    } catch (error) {
+      // Herdr keeps a launched native agent alive when a startup dialog blocks it.
+      // Only that typed result establishes a live view; other launch errors fail.
+      if (!options.onThreadPending || !/agent_not_ready/u.test(String(error))) throw error;
+    }
     const threadDeadline = Date.now() + (options.threadStartTimeoutMs ?? 15_000);
+    let pendingReported = false;
     while (!threadId) {
       options.signal?.throwIfAborted();
       const loaded = record(await client.request("thread/loaded/list", {}));
@@ -296,7 +324,11 @@ export async function startCodexAppServerSeat(options: {
           throw new Error("Codex TUI resumed a different thread");
         threadId = ids[0];
       } else {
-        if (Date.now() >= threadDeadline) throw new Error("Codex TUI did not create its thread");
+        if (!pendingReported && Date.now() >= threadDeadline) {
+          if (!options.onThreadPending) throw new Error("Codex TUI did not create its thread");
+          pendingReported = true;
+          options.onThreadPending();
+        }
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }

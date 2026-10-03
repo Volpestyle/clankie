@@ -92,7 +92,10 @@ test("the eval parser tolerates partial records and maps the two Codex windows",
   expect(codexRateLimit("not JSON")).toBeNull();
 });
 
-vi.mock("../src/codex-rate-limits.ts", () => ({ readCodexRateLimits: vi.fn(async () => null) }));
+vi.mock("../src/codex-rate-limits.ts", () => ({
+  readCodexRateLimits: vi.fn(async () => null),
+  readCodexHookTrust: vi.fn(async () => "review_required"),
+}));
 import { readCodexRateLimits } from "../src/codex-rate-limits.ts";
 
 function weekly(used: number, reset = Date.now() / 1000 + 3600, limited = false) {
@@ -135,4 +138,10 @@ test("a limited weekly-only window recovers only when its reset passes", async (
   expect((await readCodexAccountStatus(a)).headroom).toBe(0);
   vi.mocked(readCodexRateLimits).mockResolvedValueOnce(weekly(100, Date.now() / 1000 - 1, true));
   expect((await readCodexAccountStatus(a)).headroom).toBe(1);
+});
+
+test("account diagnostics expose native hook review alongside quota", async () => {
+  const { readCodexAccountStatus } = await import("../src/codex-accounts.ts");
+  const status = await readCodexAccountStatus({ label: "unavailable", home: "/nonexistent-codex-fixture" });
+  expect(status.hookTrust).toBe("review_required");
 });

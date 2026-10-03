@@ -84,4 +84,5 @@ test("session-id transcript lookup searches the registered account home", async 
 
 vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
   readCodexRateLimits: vi.fn(async () => null),
+  readCodexHookTrust: vi.fn(async () => "unknown"),
 }));

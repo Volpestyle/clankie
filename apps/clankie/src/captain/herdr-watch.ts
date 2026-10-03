@@ -1286,7 +1286,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
                   ? "delivery_unconfirmed"
                   : "start_unconfirmed",
             control,
-            detail: `${failure.detail ?? started.detail}; inspect pane ${paneId} before retrying; no fallback was started`,
+            detail: `${failure.detail ?? started.detail}; inspect pane ${paneId}; no fallback was started`,
           };
         }
         if (started.outcome === "started") {
@@ -1370,12 +1370,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     let failure: HerdrSeatSpawnFailure = { outcome: "failed", reason, detail };
     if (
       (harness === "claude" && visible?.includes("Do you trust the files in this folder?")) ||
-      (harness === "codex" && visible?.includes("Trust this folder?"))
+      (harness === "codex" &&
+        (visible?.includes("Trust this folder?") || visible?.includes("Hooks need review")))
     )
       failure = {
         outcome: "failed",
         reason: "trust_required",
-        detail: `${harness} is waiting for folder trust. Review the trust prompt in pane ${paneId}; no trust was accepted.`,
+        detail: `${harness} is waiting for hook or folder trust. Review the trust prompt in pane ${paneId}; no trust was accepted. ${detail}`,
       };
     else if (harness === "claude" && visible?.includes(CHANNEL_DIALOG_MARKER))
       failure = { outcome: "failed", reason: "not_ready", detail: CLAUDE_CHANNEL_CONSENT_REQUIRED };

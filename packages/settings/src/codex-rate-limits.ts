@@ -12,8 +12,60 @@ interface Snapshot {
   rateLimitReachedType?: unknown;
 }
 
-/** Codex owns credentials. This client requests quota only, never a login or model turn. */
+/** Ask the native server; do not reproduce its hook hashing or trust decisions. */
+export async function readCodexHookTrust(home: string): Promise<"review_required" | "ready" | "unknown"> {
+  const result = await readAccountRpc<{
+    data?: { hooks?: { enabled?: boolean; trustStatus?: string }[]; errors?: unknown[] }[];
+  }>(home, "hooks/list", { cwds: [home] });
+  const entries = result?.data;
+  if (!Array.isArray(entries) || entries.length === 0) return "unknown";
+  let unknown = false;
+  for (const entry of entries) {
+    if (!Array.isArray(entry.hooks) || !Array.isArray(entry.errors) || entry.errors.length > 0)
+      unknown = true;
+    for (const hook of Array.isArray(entry.hooks) ? entry.hooks : []) {
+      if (hook.enabled === false) continue;
+      if (hook.trustStatus === "untrusted" || hook.trustStatus === "modified") return "review_required";
+      if (hook.trustStatus !== "trusted" && hook.trustStatus !== "managed") unknown = true;
+    }
+  }
+  return unknown ? "unknown" : "ready";
+}
+
+/** Codex owns credentials. Never starts a login or model turn. */
 export async function readCodexRateLimits(home: string): Promise<string | null> {
+  const result = await readAccountRpc<{ rateLimitsByLimitId?: { codex?: Snapshot }; rateLimits?: Snapshot }>(
+    home,
+    "account/rateLimits/read",
+    { excludeResetCreditDetails: true },
+  );
+  const snapshot: Snapshot | undefined = result?.rateLimitsByLimitId?.codex ?? result?.rateLimits;
+  if (!snapshot) return null;
+  const window = (value?: Window | null) =>
+    value
+      ? {
+          used_percent: value.usedPercent,
+          window_minutes: value.windowDurationMins,
+          resets_at: value.resetsAt,
+        }
+      : null;
+  return JSON.stringify({
+    payload: {
+      rate_limits: {
+        primary: window(snapshot.primary),
+        secondary: window(snapshot.secondary),
+        rate_limit_reached_type: snapshot.rateLimitReachedType,
+      },
+    },
+  });
+}
+
+/** Bounded read-only diagnostics; no thread, login or approval requests. */
+async function readAccountRpc<T>(
+  home: string,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<T | null> {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key)),
   );
@@ -22,9 +74,9 @@ export async function readCodexRateLimits(home: string): Promise<string | null> 
     stdio: ["pipe", "pipe", "ignore"],
   });
   const lines = createInterface({ input: child.stdout });
-  return await new Promise<string | null>((resolve) => {
+  return await new Promise<T | null>((resolve) => {
     let done = false;
-    const finish = (result: string | null) => {
+    const finish = (result: T | null) => {
       if (done) return;
       done = true;
       clearTimeout(timeout);
@@ -51,32 +103,8 @@ export async function readCodexRateLimits(home: string): Promise<string | null> 
         if (message.error) return finish(null);
         if (message.id === 1) {
           send({ method: "initialized", params: {} });
-          send({ id: 2, method: "account/rateLimits/read", params: { excludeResetCreditDetails: true } });
-        } else {
-          const snapshot: Snapshot | undefined =
-            message.result?.rateLimitsByLimitId?.codex ?? message.result?.rateLimits;
-          if (!snapshot) return finish(null);
-          const window = (value?: Window | null) =>
-            value
-              ? {
-                  used_percent: value.usedPercent,
-                  window_minutes: value.windowDurationMins,
-                  resets_at: value.resetsAt,
-                }
-              : null;
-          // Feed the same rate_limits parser as saved rollouts. Omit all other account metadata.
-          finish(
-            JSON.stringify({
-              payload: {
-                rate_limits: {
-                  primary: window(snapshot.primary),
-                  secondary: window(snapshot.secondary),
-                  rate_limit_reached_type: snapshot.rateLimitReachedType,
-                },
-              },
-            }),
-          );
-        }
+          send({ id: 2, method, params });
+        } else finish(message.result ?? null);
       } catch {
         finish(null);
       }

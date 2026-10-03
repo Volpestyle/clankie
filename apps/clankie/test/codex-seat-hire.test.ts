@@ -114,5 +114,6 @@ it("closing a hired pane also closes its protocol controller", async () => {
 });
 
 vi.mock("../../../packages/settings/src/codex-rate-limits.ts", () => ({
+  readCodexHookTrust: vi.fn(async () => "unknown"),
   readCodexRateLimits: vi.fn(async () => null),
 }));

@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/VUH-1551
+
+
+ Test Files  7 passed (7)
+      Tests  104 passed (104)
+   Start at  21:48:18
+   Duration  3.56s (transform 303ms, setup 0ms, import 1.26s, tests 1.82s, environment 0ms)
+
