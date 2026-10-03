@@ -666,7 +666,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly runner: HerdrWatchRunner;
   private readonly seatAdapters: ReadonlyMap<string, HarnessSeatAdapter>;
   private readonly remoteSeatAdapters:
-    | ((fleet: string) => ReadonlyMap<string, HarnessSeatAdapter>)
+    | ((fleet: string) => ReadonlyMap<string, HarnessSeatAdapter> | undefined)
     | undefined;
   private readonly seatControl: ReturnType<typeof createFleetSeatControl>;
   private readonly skillBundle:

@@ -1165,7 +1165,7 @@ A machine is where agents run; a device is a paired phone or desktop portal.
 `machines` prints one row per machine: Herdr sessions, state and worker count
 (`?` when unavailable). `--json` returns `{ observedAt, machines }` from
 `GET /v1/machines`. Discovery reads local Herdr sessions and literal aliases in
-the owner's SSH config. Probes use BatchMode and strict known-host checking,
+the owner's SSH config (including bounded `Include` expansion). Probes use BatchMode and strict known-host checking,
 never prompt, start a server or install remote software. Four probes run at
 most concurrently, with a three-second probe deadline and a 6.5-second listing
 budget. Unreachable and still-discovering candidates remain visible. Results

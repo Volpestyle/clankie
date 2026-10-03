@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { glob, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { AgentHostConnectionSchema, type SettingsStore } from "@clankie/settings";
 import type { Machine, MachineInventory } from "@clankie/protocol";
@@ -27,6 +27,38 @@ export function sshConfigHosts(config: string): string[] {
   ].slice(0, 30);
 }
 
+/** Bounded Include expansion; like OpenSSH, relative includes start in ~/.ssh. */
+export async function readSshConfig(path = join(homedir(), ".ssh", "config")): Promise<string> {
+  const root = dirname(path);
+  const seen = new Set<string>();
+  const contents: string[] = [];
+  async function read(file: string): Promise<void> {
+    const absolute = resolve(file);
+    if (seen.has(absolute) || seen.size >= 32) return;
+    seen.add(absolute);
+    try {
+      if ((await stat(absolute)).size > 256 * 1024) return;
+      const content = await readFile(absolute, "utf8");
+      contents.push(content);
+      for (const line of content.split(/\r?\n/u)) {
+        const include = /^\s*Include\s+([^#]+)/iu.exec(line);
+        if (!include) continue;
+        for (const token of include[1]!.match(/"[^"]*"|'[^']*'|\S+/gu) ?? []) {
+          const pattern = token.replace(/^["']|["']$/gu, "").replace(/^~\//u, `${homedir()}/`);
+          for await (const entry of glob(pattern, { cwd: root })) {
+            if (seen.size >= 32) return;
+            await read(resolve(root, entry));
+          }
+        }
+      }
+    } catch {
+      /* An unreadable include is not a reachable candidate. */
+    }
+  }
+  await read(path);
+  return contents.join("\n");
+}
+
 type Probe = (
   command: string,
   args: readonly string[],
@@ -48,7 +80,11 @@ export class Machines {
     this.options = options;
   }
 
-  private async probe(machine: Pick<Machine, "transport" | "ssh" | "shell">, args: readonly string[]) {
+  private async probe(
+    machine: Pick<Machine, "transport" | "ssh" | "shell">,
+    args: readonly string[],
+    socketPath?: string,
+  ) {
     if (this.active >= 4)
       await new Promise<void>((resolve, reject) => {
         const admit = () => {
@@ -65,6 +101,7 @@ export class Machines {
     else this.active += 1;
     const env = { ...(this.options.env ?? process.env) };
     for (const key of Object.keys(env)) if (key.startsWith("HERDR_")) delete env[key];
+    if (machine.transport === "local" && socketPath) env.HERDR_SOCKET_PATH = socketPath;
     const command = machine.transport === "local" ? "herdr" : "ssh";
     const argv =
       machine.transport === "local"
@@ -166,6 +203,7 @@ export class Machines {
   }
 
   private async discover(): Promise<MachineInventory> {
+    const started = Date.now();
     const settings = await this.options.settings.load();
     const primary = this.options.primary();
     const configured: Machine[] = [
@@ -190,9 +228,14 @@ export class Machines {
         }),
       ),
     ];
-    const config = await (
-      this.options.sshConfig?.() ?? readFile(join(homedir(), ".ssh", "config"), "utf8")
-    ).catch(() => "");
+    let configTimer: ReturnType<typeof setTimeout> | undefined;
+    const config = await Promise.race([
+      (this.options.sshConfig?.() ?? readSshConfig()).catch(() => ""),
+      new Promise<string>((resolve) => {
+        configTimer = setTimeout(() => resolve(""), 500);
+      }),
+    ]);
+    clearTimeout(configTimer);
     const candidates = sshConfigHosts(config).filter((ssh) => !configured.some((entry) => entry.ssh === ssh));
     for (const [index, ssh] of candidates.entries()) {
       let id = ssh
@@ -238,7 +281,13 @@ export class Machines {
           machine.state = "available";
           for (const row of parsed.sessions.slice(0, 64)) {
             if (!row.name || !/^[\w][\w.-]{0,63}$/u.test(row.name)) continue;
-            const existing = machine.sessions.find((entry) => entry.name === row.name);
+            const existing = machine.sessions.find(
+              (entry) =>
+                entry.name === row.name &&
+                (machine.transport !== "local" ||
+                  entry.socketPath === undefined ||
+                  entry.socketPath === row.socket_path),
+            );
             if (existing) {
               if (existing.state !== "disabled") existing.state = "connected";
             } else
@@ -253,7 +302,13 @@ export class Machines {
           await Promise.all(
             machine.sessions.map(async (session) => {
               try {
-                const result = await this.probe(machine, ["--session", session.name, "agent", "list"]);
+                const result = await this.probe(
+                  machine,
+                  machine.transport === "local" && session.socketPath
+                    ? ["agent", "list"]
+                    : ["--session", session.name, "agent", "list"],
+                  session.socketPath,
+                );
                 session.workerCount = parseHerdrAgentList(result.stdout).length;
                 if (session.state !== "disabled")
                   session.state = session.connectionId ? "connected" : "available";
@@ -274,7 +329,7 @@ export class Machines {
     await Promise.race([
       pending,
       new Promise<void>((resolve) => {
-        deadline = setTimeout(resolve, 6500);
+        deadline = setTimeout(resolve, Math.max(0, 6500 - (Date.now() - started)));
       }),
     ]);
     clearTimeout(deadline);

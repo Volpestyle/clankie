@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
-import { Machines, sshConfigHosts } from "../src/machines.ts";
+import { Machines, sshConfigHosts, readSshConfig } from "../src/machines.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
 import { MachineInventorySchema, OperatorConnectionCommandSchema } from "@clankie/protocol";
 import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
@@ -122,4 +122,59 @@ test("runtime routing observes add and removal live without redirecting qualifie
       session: "work",
     }),
   ).toMatchObject({ machine: "desktop" });
+});
+
+test("discovery never counts a replacement local session as the pinned connection", async () => {
+  const dir = await mkdtemp("/tmp/clankie-machine-pinned-");
+  try {
+    const settings = new SettingsStore(join(dir, "settings.json"));
+    await settings.update((current) => ({
+      ...current,
+      execution: {
+        connections: [
+          {
+            id: "work",
+            kind: "herdr",
+            session: "work",
+            socketPath: "/tmp/old.sock",
+            enabled: true,
+            capabilities: [],
+          },
+        ],
+      },
+    }));
+    const machines = new Machines({
+      settings,
+      primary: () => undefined,
+      changed: () => {},
+      sshConfig: async () => "",
+      run: async (_cmd, args, env) => {
+        if (args[0] === "session")
+          return { stdout: JSON.stringify({ sessions: [{ name: "work", socket_path: "/tmp/new.sock" }] }) };
+        if (env.HERDR_SOCKET_PATH === "/tmp/old.sock") throw new Error("old session unavailable");
+        expect(env.HERDR_SOCKET_PATH).toBe("/tmp/new.sock");
+        return { stdout: JSON.stringify({ agents: [] }) };
+      },
+    });
+    expect((await machines.list()).machines[0]!.sessions).toMatchObject([
+      { connectionId: "work", socketPath: "/tmp/old.sock", state: "unreachable" },
+      { socketPath: "/tmp/new.sock", state: "available" },
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("SSH discovery expands owner Includes without duplicating recursive files", async () => {
+  const dir = await mkdtemp("/tmp/clankie-machine-ssh-config-");
+  try {
+    await writeFile(join(dir, "config"), "Host desktop\nInclude more-*.conf\n");
+    await writeFile(
+      join(dir, "more-hosts.conf"),
+      "Host pc laptop\nInclude config\nHost *.private !excluded\n",
+    );
+    expect(sshConfigHosts(await readSshConfig(join(dir, "config")))).toEqual(["desktop", "pc", "laptop"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
