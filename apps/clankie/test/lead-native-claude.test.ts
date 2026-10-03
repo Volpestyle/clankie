@@ -198,7 +198,16 @@ it("sums only observed root/child messages without promoting hook or transcript 
   observation.observe(hook("SubagentStop", { agent_id: "child-one", agent_type: "worker" }));
   observation.observe(hook("Stop"));
   observation.transcript(bytes(assistant()));
-  observation.transcript(bytes(assistant({ agentId: "child-one", isSidechain: true })), "child-one");
+  observation.transcript(
+    bytes(
+      assistant({
+        agentId: "child-one",
+        isSidechain: true,
+        message: { id: "child-message", usage, content: [] },
+      }),
+    ),
+    "child-one",
+  );
   const report = observation.seal();
   expect(report).toMatchObject({
     issues: [],
@@ -287,4 +296,28 @@ it("uses exact owned container kill/inspection and retains stop uncertainty (fak
     code: "native-claude-stop-unconfirmed",
   });
   expect(calls.filter((args) => args[0] === "kill")).toHaveLength(1);
+});
+it("bounds aggregate encoded hook bytes even when each event is individually small", () => {
+  const observation = new NativeClaudeObservation({ sessionId });
+  const event = hook("SessionStart", { source: "startup", fixturePadding: "x".repeat(32 * 1024) });
+  expect(() => {
+    for (let i = 0; i < 40; i++) observation.observe(event);
+  }).toThrow(/aggregate.*capacity/i);
+  expect(observation.seal().issues).toContain("aggregate-observation-capacity-exceeded");
+});
+it("makes repeated provider message identity across root and child copies unknown", () => {
+  const observation = new NativeClaudeObservation({ sessionId });
+  observation.observe(hook("SessionStart", { source: "startup" }));
+  observation.observe(hook("UserPromptSubmit"));
+  observation.observe(hook("SubagentStart", { agent_id: "child-one", agent_type: "worker" }));
+  observation.observe(hook("SubagentStop", { agent_id: "child-one", agent_type: "worker" }));
+  observation.observe(hook("Stop"));
+  observation.transcript(bytes(assistant()));
+  observation.transcript(bytes(assistant({ agentId: "child-one", isSidechain: true })), "child-one");
+  expect(observation.seal()).toMatchObject({
+    observedTokens: null,
+    issues: expect.arrayContaining(["duplicate-provider-message-across-transcripts"]),
+    authoritative: false,
+    complete: false,
+  });
 });

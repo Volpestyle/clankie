@@ -82,6 +82,7 @@ export function inspectNativeClaudeTranscript(bytes, { sessionId, agentId = null
     sha256: digest(bytes),
     bytes: bytes.length,
     messageCount: messages.size,
+    providerMessageIdsSha256: [...messages.keys()].map((messageId) => digest(messageId)),
     issues: [...issues],
     observedTokens: issues.size ? null : total,
     // Well-formed bytes are still model-writable observations, never provider authority.
@@ -101,6 +102,7 @@ export class NativeClaudeObservation {
   #issues = new Set();
   #events = [];
   #lastHash = "0".repeat(64);
+  #encodedEventBytes = 0;
   #closed = false;
   #rootTranscript;
   constructor({ sessionId }) {
@@ -110,8 +112,16 @@ export class NativeClaudeObservation {
   observe(event) {
     if (this.#closed) throw Error("Claude observation already sealed");
     const encoded = JSON.stringify(event);
-    if (!encoded || Buffer.byteLength(encoded) > 65536 || this.#events.length >= 10000)
+    if (!encoded || Buffer.byteLength(encoded) > 65536 || this.#events.length >= 10000) {
+      this.#issues.add("observation-capacity-exceeded");
       throw Error("Claude observation capacity exceeded");
+    }
+    const eventBytes = Buffer.byteLength(encoded);
+    if (this.#encodedEventBytes + eventBytes > 1024 * 1024) {
+      this.#issues.add("aggregate-observation-capacity-exceeded");
+      throw Error("Claude aggregate observation capacity exceeded");
+    }
+    this.#encodedEventBytes += eventBytes;
     if (event?.session_id !== this.#sessionId) this.#issues.add("hook-session-mismatch");
     else
       switch (event.hook_event_name) {
@@ -197,6 +207,13 @@ export class NativeClaudeObservation {
     ].filter(Boolean);
     for (const transcript of transcripts)
       for (const issue of transcript.issues) issues.add(`${transcript.agentId ?? "root"}:${issue}`);
+    const providerMessages = new Set();
+    for (const transcript of transcripts) {
+      for (const messageHash of transcript.providerMessageIdsSha256) {
+        if (providerMessages.has(messageHash)) issues.add("duplicate-provider-message-across-transcripts");
+        providerMessages.add(messageHash);
+      }
+    }
     const observedTokens = transcripts.reduce(
       (total, transcript) => total + (transcript.observedTokens ?? 0),
       0,

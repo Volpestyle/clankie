@@ -33,9 +33,12 @@ A root hook acknowledgement is never a stop receipt. This is deterministic fake
 transport coverage only; actual descendant termination remains unrun.
 
 `lead-native-claude-observation.mjs` bounds supplied transcript bytes and hook events,
-retains hashes, rejects mismatched roots/children and conflicting message counters,
+retains hashes, caps aggregate encoded hook bytes at 1 MiB, rejects mismatched
+roots/children and conflicting message counters,
 and avoids counting repeated provider message IDs twice within a transcript.
-Missing counters, malformed records, unfinished children and later active turns
+Repeated provider message IDs across root/child transcripts make the aggregate
+unknown; exported accounting retains only hashes of those IDs. Missing counters,
+malformed records, unfinished children and later active turns
 make the observed aggregate unknown. Nested cache detail is not added twice.
 Well-formed observations still report `complete: false`, `authoritative: false`,
 unknown account-wide usage and no confirmed containment stop. These are supplied
