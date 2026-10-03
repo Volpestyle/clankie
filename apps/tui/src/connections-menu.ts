@@ -212,7 +212,7 @@ async function hostSessions(
     }
     const choice = await flow.readSelect({
       message: `Sessions on ${host.id}`,
-      options: [...sessions.map((session) => sessionOption(session, now()))],
+      options: sessions.map((session) => sessionOption(session, now())),
       allowBack: true,
     });
     if (choice === undefined) return;
