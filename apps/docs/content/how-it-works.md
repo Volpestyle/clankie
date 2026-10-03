@@ -42,6 +42,9 @@ him, and the authority each caller carries. Optional
 and [Codex operator seats](https://github.com/Volpestyle/clankie/blob/main/integrations/codex-plugin/README.md)
 use the same service through their native harnesses. Their setup, hook trust,
 delivery, and continuation limits are documented separately.
+Each fresh native launch gets its own workspace chat, including simultaneous
+launches in the same directory. Resume keeps that chat; an explicit conversation
+ID selects an existing one. Transcripts and wake channels follow the selected chat.
 
 ## History, memory, and goals
 

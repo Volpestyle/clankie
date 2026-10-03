@@ -75,7 +75,7 @@ flowchart LR
   the tool list a connection sees is that lane's authority plan and never a
   second catalog. Each connection gets its own turn context; media a tool
   attaches rides the result the way it rides a pi reply. Operator-lane calls
-  attribute to the selected conversation (the global head by default), so `remember_episode`, `schedule_wake`,
+  attribute to the selected conversation, so `remember_episode`, `schedule_wake`,
   and `herdr_watch` land where a pi turn would have landed them.
 - **The prompt and the memory card are readable headlessly.** `clankie prompt`
   prints the sections a pi session starts from (identity, persona, reach, fleet preferences,
@@ -107,7 +107,9 @@ flowchart LR
   time: the newest seat wins, a second pane claiming the name stays an ordinary
   fleet agent with a warning, and the TUI operator lane is the head again the
   moment no seat is open.
-- **Seats bind a service conversation.** `--conversation ID` selects an existing
+- **Seats bind a service conversation.** Each fresh native launch creates its
+  own workspace chat, even for simultaneous launches in the same directory or
+  account. Dry runs create nothing. `--conversation ID` selects an existing
   global/workspace conversation and its working directory; resume retains that
   binding. Prompt assembly loads its workspace instructions, MCP sessions pin
   its tools/Swarm actor, and polls/replies use its own outbox. See

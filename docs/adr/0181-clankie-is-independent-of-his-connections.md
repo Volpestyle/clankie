@@ -175,12 +175,12 @@ bootstrap access or restarting the harness when access arrives. The built-in
 Herdr route composes the bridge into trusted launch configuration; Swarm itself
 stays independent of Clankie. Single-grant bearer delivery remains available.
 
-The native Claude seat uses its selected service conversation actor (global by
-default) via
+The native Claude seat uses its selected service conversation actor via
 Clankie's operator MCP bank. A separate native enrollment would split task creator
 identity from the conversation that verifies grants. Sharing the existing tools
 preserves one task owner across Pi and Claude; the existing channel delivers its
 leased envelopes. Launch-directory context cannot select a different coordinator.
+Each fresh native seat creates a separate workspace chat at its launch directory.
 `clankie seat --conversation ID` selects an existing global/workspace conversation,
 resolves its service-owned cwd, and retains the binding on resume. Prompt assembly
 loads the same workspace agent instructions as Pi. MCP sessions pin the

@@ -1,6 +1,6 @@
 import { SettingsStore } from "@clankie/settings";
 import type { CredentialStore } from "@clankie/credential-broker";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,9 +35,13 @@ async function stateEnv(extra: NodeJS.ProcessEnv = {}): Promise<NodeJS.ProcessEn
     // An empty Claude config: no inherited connectors beyond the account one.
     CLAUDE_CONFIG_DIR: root,
     HOME: root,
+    CLANKIE_OPERATOR_TOKEN: `clankie_op_${"a".repeat(43)}`,
     ...extra,
   };
 }
+
+const globalContext: typeof fetch = async () =>
+  Response.json({ conversationId: "global-default", cwd: process.cwd() });
 
 /** A fake `claude` and `herdr`: which plugins are listed, and what herdr says about the pane. */
 function fakeExec(input: {
@@ -124,7 +128,7 @@ describe("clankie seat", () => {
           },
         },
       ),
-    ).rejects.toThrow("Claude Code is not on PATH");
+    ).rejects.toThrow("claude is unavailable");
   });
 
   it("prints the plan on --dry-run through the dispatcher without launching anything", async () => {
@@ -157,10 +161,11 @@ describe("clankie seat", () => {
     const calls: string[][] = [];
     const spawned: { args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv | undefined }[] = [];
     const stderr = outputBuffer();
-    const exit = await runSeatCommand([], {
+    const exit = await runSeatCommand(["--conversation", "global-default"], {
       repoRoot,
       env,
       execFileImpl: fakeExec({ paneAgent: "claude", calls }),
+      fetchImpl: globalContext,
       fleetSocketPath: async () => "/tmp/fleet.sock",
       spawnImpl: async (_command, args, cwd, childEnv) => {
         spawned.push({ args, cwd, env: childEnv });
@@ -192,7 +197,7 @@ describe("clankie seat", () => {
 
     const resumed = await planSeat(
       { resume: true, dryRun: true },
-      { repoRoot, env, execFileImpl: fakeExec({}) },
+      { repoRoot, env, execFileImpl: fakeExec({}), fetchImpl: globalContext },
     );
     expect(resumed.resumed).toBe(true);
     expect(resumed.args).toContain("--resume");
@@ -207,11 +212,12 @@ describe("clankie seat", () => {
       HERDR_SOCKET_PATH: "/tmp/fleet.sock",
     });
     const stderr = outputBuffer();
-    const exit = await runSeatCommand([], {
+    const exit = await runSeatCommand(["--conversation", "global-default"], {
       repoRoot,
       env,
       fleetSocketPath: async () => "/tmp/fleet.sock",
       execFileImpl: fakeExec({ paneAgent: "claude", renameFails: "agent name clankie is already in use" }),
+      fetchImpl: globalContext,
       spawnImpl: async () => 0,
       sleepImpl: async () => undefined,
       stdout: outputBuffer().stream,
@@ -230,11 +236,12 @@ describe("clankie seat", () => {
     });
     const calls: string[][] = [];
     const stdout = outputBuffer();
-    const exit = await runSeatCommand(["--dry-run"], {
+    const exit = await runSeatCommand(["--conversation", "global-default", "--dry-run"], {
       repoRoot,
       env,
       fleetSocketPath: async () => "/tmp/fleet.sock",
       execFileImpl: fakeExec({ paneAgent: "claude", calls }),
+      fetchImpl: globalContext,
       spawnImpl: async () => 0,
       sleepImpl: async () => undefined,
       stdout: stdout.stream,
@@ -251,6 +258,31 @@ describe("clankie seat", () => {
       planSeat({ resume: true, dryRun: true }, { repoRoot, env, execFileImpl: fakeExec({}) }),
     ).rejects.toThrow("No seat to resume");
   });
+
+  it("keeps pre-isolation resume records on their original global chat", async () => {
+    const env = await stateEnv();
+    await mkdir(join(env.XDG_STATE_HOME!, "clankie"), { recursive: true });
+    await writeFile(
+      join(env.XDG_STATE_HOME!, "clankie/seat.json"),
+      JSON.stringify({
+        sessionId: "old-native-session",
+        cwd: process.cwd(),
+        startedAt: "2026-09-01T00:00:00Z",
+      }),
+    );
+    const plan = await planSeat(
+      { resume: true, dryRun: true, conversationId: "global-default" },
+      {
+        repoRoot,
+        env,
+        execFileImpl: fakeExec({}),
+        fetchImpl: globalContext,
+      },
+    );
+    expect(plan.conversationId).toBe("global-default");
+    expect(plan.sessionId).toBe("old-native-session");
+    expect(plan.newConversation).toBeUndefined();
+  });
 });
 
 it("selects service project context, preserves it on resume and strips inherited selection", async () => {
@@ -264,7 +296,9 @@ it("selects service project context, preserves it on resume and strips inherited
     operatorCredentialStore: {
       get: async () => ({ type: "api", key: `clankie_op_${"a".repeat(43)}` }),
     } as unknown as CredentialStore,
-    fetchImpl: (async (url: URL) => {
+    fetchImpl: (async (url: URL, init?: RequestInit) => {
+      if (init?.method === "POST")
+        return Response.json({ conversationId: "fresh-seat", cwd: process.cwd() }, { status: 201 });
       requests.push(url.searchParams.get("conversationId")!);
       return Response.json({ conversationId: "project-a", cwd: "/selected/project-a" });
     }) as typeof fetch,
@@ -294,5 +328,49 @@ it("selects service project context, preserves it on resume and strips inherited
     "keeps its conversation",
   );
   await runSeatCommand([], options);
-  expect(launches.at(-1)?.conversationId).toBeUndefined();
+  expect(launches.at(-1)?.conversationId).toBe("fresh-seat");
+});
+
+it.each(["claude", "claude2", "claude3"])(
+  "routes clankie %s to the selected Claude command",
+  async (command) => {
+    const env = await stateEnv();
+    const stdout = outputBuffer();
+    const calls: string[][] = [];
+    const exit = await runHeadlessCaptainCommand([command, "--dry-run"], {
+      repoRoot,
+      env,
+      stdout: stdout.stream,
+      execFileImpl: async (name, args) => {
+        calls.push([name, ...args]);
+        return { stdout: "Claude Code", stderr: "" };
+      },
+    });
+    expect(exit).toBe(0);
+    expect(JSON.parse(stdout.text()).command).toBe(command);
+    expect(calls).toContainEqual([command, "--version"]);
+  },
+);
+
+it("resolves a numbered Claude shell function and preserves launch arguments", async () => {
+  const env = await stateEnv({ SHELL: "/bin/zsh", PATH: process.env.PATH });
+  env.ZDOTDIR = env.HOME;
+  const result = join(env.HOME!, "launch.json");
+  await writeFile(
+    join(env.HOME!, ".zshrc"),
+    `claude2() { node -e 'require("fs").writeFileSync(process.env.LAUNCH_RESULT, JSON.stringify(process.argv.slice(1)))' -- "$@"; }\n`,
+  );
+  env.LAUNCH_RESULT = result;
+  expect(
+    await runSeatCommand([], {
+      repoRoot,
+      env,
+      claudeCommand: "claude2",
+      fetchImpl: async () => Response.json({ conversationId: "claude2-seat", cwd: process.cwd() }),
+    }),
+  ).toBe(0);
+  const args = JSON.parse(await readFile(result, "utf8"));
+  expect(args).toContain("--plugin-dir");
+  expect(args).toContain("--permission-mode");
+  expect(JSON.parse(args[args.indexOf("--settings") + 1]).enabledPlugins["clankie@inline"]).toBe(true);
 });

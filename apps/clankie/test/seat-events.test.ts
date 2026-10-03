@@ -178,3 +178,29 @@ it("accepts only bounded display transcripts for operator conversations", async 
     clankie.close();
   }
 });
+
+it("requires operator authority and a workspace create request for a fresh seat chat", async () => {
+  const clankie = await app();
+  const body = {
+    op: "create",
+    schemaVersion: 1,
+    scope: { kind: "workspace", workspaceId: "/project" },
+    title: "Clankie Claude",
+  };
+  const send = (bearer: string, payload: unknown = body) =>
+    clankie.app.request("/v1/captain/seat-context", {
+      method: "POST",
+      headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  try {
+    expect((await send("anonymous")).status).toBe(401);
+    expect((await send("discord")).status).toBe(403);
+    expect((await send("operator", { ...body, scope: { kind: "global" } })).status).toBe(400);
+    expect((await send("operator", { ...body, title: "" })).status).toBe(400);
+    expect((await send("operator", { ...body, sessionId: "extra" })).status).toBe(400);
+    expect((await send("operator", { op: "list", schemaVersion: 1 })).status).toBe(400);
+  } finally {
+    clankie.close();
+  }
+});

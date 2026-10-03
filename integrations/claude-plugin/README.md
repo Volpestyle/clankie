@@ -45,11 +45,15 @@ before new sessions receive the change.
 ## Launch
 
 ```bash
-clankie seat              # sit down with a projection of the selected skills
-clankie seat --conversation ID  # select an existing service project conversation
-clankie seat --resume     # reopen the last seat's conversation
-clankie seat --dry-run    # print the launch plan as JSON without starting Claude Code
+clankie claude            # open a new Clankie chat with the selected skills
+clankie claude --conversation ID  # select an existing service project conversation
+clankie claude --resume     # reopen the last seat's conversation
+clankie claude --dry-run    # print the launch plan as JSON without starting Claude Code
+clankie claude2           # use your claude2 shell alias/function for another account
 ```
+
+`clankie seat` is also supported. Numbered Claude commands load your interactive
+`$SHELL` to resolve account aliases and functions.
 
 `clankie seat` needs Claude Code on `PATH` and a TTY. It projects this plugin into
 a fresh private directory, linking the same identity, hooks and MCP config with
@@ -64,7 +68,8 @@ older installed `clankie@clankie` for this session, enables the projected
 Claude's [session plugin identity and precedence](https://code.claude.com/docs/en/plugins/loading)
 keep the old marketplace skill catalog from leaking into this seat. The session
 keeps its MCP tools, hooks and wake channel with either skill setting. It starts
-with `--name Clankie` and names the Herdr pane `clankie` when appropriate.
+with `--name Clankie`. An explicit `--conversation global-default` names the
+Herdr pane `clankie` inside the service's fleet.
 `--plugin-dir` chooses the component source while retaining skill filtering.
 
 Use `clankie skills opinionated off` or `/skills` to change the selection.
@@ -75,8 +80,13 @@ changing conditions because resumed history can contain previously loaded skills
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and
 binds the prompt, MCP tools and channel to that conversation. The selected
 workspace must exist on the native host. `--resume` retains the binding and
-refuses a different ID. Without a selection, the seat uses the default global
-conversation. A selected project seat does not claim the global Herdr head name.
+refuses a different ID. Without a selection, each fresh launch creates its own
+workspace chat through `POST /v1/captain/seat-context`, even when several seats
+use the same directory or Claude account. Its transcript, tools and wake channel
+belong to that chat. `--resume` reopens the last seat and its chat for the selected
+Claude command; `--conversation global-default` explicitly selects the shared
+global chat. Workspace seats do not claim the global Herdr head name.
+`--dry-run` describes the new conversation without creating it.
 
 The launcher sets `CLANKIE_CONVERSATION_ID` for the plugin's hooks and MCP bridge;
 inherited selections and worker capabilities are cleared. The prompt adds

@@ -79,7 +79,12 @@ test("closing native hook review aborts startup and preserves the previous resum
       { resume: false, dryRun: false },
       {
         repoRoot,
-        env: { XDG_STATE_HOME: root, CLANKIE_SETTINGS_FILE: join(root, "settings.json") },
+        env: {
+          XDG_STATE_HOME: root,
+          CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+          CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
+        },
+        fetchImpl: async () => Response.json({ conversationId: "fresh-codex-seat", cwd: root }),
         execFileImpl: async (_command, args) => ({
           stdout: args.includes("list")
             ? JSON.stringify({ installed: [{ pluginId: "clankie@clankie-seat" }] })

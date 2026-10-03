@@ -4,17 +4,25 @@ Claude Code or Codex sitting in Clankie's operator seat.
 
 ## The seat
 
-`clankie seat` opens Claude Code as you, on your person's own plan, with your
+`clankie claude2` selects the owner's `claude2` account command. Numbered
+Claude commands resolve aliases and functions through the interactive `$SHELL`
+and accept the same seat flags.
+
+`clankie claude` (also `clankie seat`) opens Claude Code as you, on your person's own plan, with your
 tools over the `clankie` MCP server, your persona and memory card injected by
 the plugin's hooks, and these skills as `/clankie:this-machine` and
 `/clankie:trace-clankie`. Doctor's `laneTools` says whether the service's
 `/v1/mcp` route answers; `clankie seat --dry-run` prints the launch plan
 (`plugin.source` is `plugin-dir`, with the selected catalog and the
 `clankie@inline` channel identity). The seat's own brain is Claude Code's `/model`;
-`clankie model` changes the service lanes. Inside a herdr pane the seat is the
-agent named `clankie`, and that pane is your head: the app's Clankie thread
-shows its settled turns, and your self-wakes and herdr watches arrive there as
-`<channel source="clankie">` events while it is open.
+`clankie model` changes the service lanes. Each fresh launch creates a separate
+workspace chat, including multiple launches in the same directory or account.
+Its transcript appears in that chat in the app; tools, self-wakes and herdr
+watches follow its conversation as `<channel source="clankie">` events.
+`--resume` retains the last seat's chat for the selected Claude command.
+`--dry-run` creates no chat. With `--conversation global-default`, a seat inside
+the service's herdr fleet claims the agent name `clankie` and becomes the shared
+global head.
 
 `clankie seat --harness codex --conversation ID` opens the same operator seat
 in the real Codex TUI, using the Codex plugin and a dedicated app-server thread.
@@ -35,9 +43,10 @@ Checkout-only procedures (`verify-clankie`, `release-clankie`, `pnpm check`)
 exist only when doctor says `kind: checkout`.
 
 Use the `clankie` MCP server for service tools. Select a project with
-`clankie seat --conversation ID`; the launch directory alone does not change
-the service conversation. Owner preferences and project instructions follow
-that conversation.
+`clankie seat --conversation ID` to reuse an existing chat. A fresh launch without
+that flag creates its own chat rooted at the launch directory. Owner preferences
+and project instructions follow that conversation. Fresh Codex seats also get
+separate chats; their resume record remains independent of Claude's.
 
 Followed Linear notifications use that channel when this seat owns the operator
 conversation (`global-default`); issue bindings do not route wakes.

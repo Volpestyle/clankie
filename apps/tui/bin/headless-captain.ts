@@ -333,8 +333,9 @@ export async function runHeadlessCaptainCommand(
     // speaks JSON-RPC on stdout, so it never goes through outputJson.
     if (command === "seat-sync") return await runSeatSyncCommand(rest, options);
     if (command === "seat-hook") return await runSeatHookCommand(rest, options);
-    if (command === "seat") {
+    if (command === "seat" || /^claude\d*$/u.test(command ?? "")) {
       return await runSeatCommand(rest, {
+        ...(command === "seat" ? {} : { claudeCommand: command }),
         repoRoot: options.repoRoot,
         ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),

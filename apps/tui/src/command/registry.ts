@@ -309,8 +309,9 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
-    nouns: ["seat"],
+    nouns: ["seat", "claude", "claude2"],
     lines: [
+      "  claude[N]               Open a separate chat using claude or a numbered shell account command (e.g. claude2)",
       "  seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
       "                           Sit in Claude Code or Codex as Clankie (TTY); --dry-run prints the launch plan (JSON)",
     ],
@@ -341,7 +342,11 @@ export const HEADLESS_NOUNS: readonly string[] = [
 
 export function isHeadlessCaptainCommand(command: string | undefined): boolean {
   return (
-    command === "help" || command === "--help" || command === "-h" || HEADLESS_NOUNS.includes(command ?? "")
+    /^claude\d*$/u.test(command ?? "") ||
+    command === "help" ||
+    command === "--help" ||
+    command === "-h" ||
+    HEADLESS_NOUNS.includes(command ?? "")
   );
 }
 

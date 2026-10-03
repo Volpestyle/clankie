@@ -16,8 +16,9 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { readHerdrBinding } from "../session/herdr-connection.ts";
 import { clankieStateHome } from "../state-home.ts";
-import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
-import { commandHost, outputJson, type Writable } from "./io.ts";
+import type { CredentialStore } from "@clankie/credential-broker";
+import { outputJson, type Writable } from "./io.ts";
+import { resolveSeatContext, type NewSeatConversation } from "./seat-context.ts";
 import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
 
 const execFileAsync = promisify(execFileCallback);
@@ -60,6 +61,8 @@ export interface SeatPlan {
   readonly sessionId: string;
   readonly resumed: boolean;
   readonly conversationId?: string;
+  /** A fresh chat to create at launch; --dry-run leaves the registry untouched. */
+  readonly newConversation?: NewSeatConversation;
   readonly cwd: string;
   readonly herdrPaneId?: string;
 }
@@ -73,6 +76,8 @@ interface SeatRecord {
 
 export interface SeatCommandOptions {
   readonly repoRoot: string;
+  /** Claude command selected by `clankie claude[N]`. */
+  readonly claudeCommand?: string;
   readonly host?: string;
   readonly fetchImpl?: typeof fetch;
   readonly operatorCredentialStore?: CredentialStore;
@@ -138,13 +143,13 @@ export function parseSeatArgs(args: readonly string[]): SeatFlags {
   };
 }
 
-function seatRecordPath(env: NodeJS.ProcessEnv): string {
-  return join(clankieStateHome(env), "clankie", "seat.json");
+function seatRecordPath(env: NodeJS.ProcessEnv, command = "claude"): string {
+  return join(clankieStateHome(env), "clankie", command === "claude" ? "seat.json" : `seat-${command}.json`);
 }
 
-function readSeatRecord(env: NodeJS.ProcessEnv): SeatRecord | undefined {
+function readSeatRecord(env: NodeJS.ProcessEnv, command: string): SeatRecord | undefined {
   try {
-    const parsed = JSON.parse(readFileSync(seatRecordPath(env), "utf8")) as Partial<SeatRecord>;
+    const parsed = JSON.parse(readFileSync(seatRecordPath(env, command), "utf8")) as Partial<SeatRecord>;
     return typeof parsed.sessionId === "string" && typeof parsed.cwd === "string"
       ? {
           sessionId: parsed.sessionId,
@@ -158,17 +163,25 @@ function readSeatRecord(env: NodeJS.ProcessEnv): SeatRecord | undefined {
   }
 }
 
-function writeSeatRecord(env: NodeJS.ProcessEnv, record: SeatRecord): void {
-  const path = seatRecordPath(env);
+function writeSeatRecord(env: NodeJS.ProcessEnv, record: SeatRecord, command: string): void {
+  const path = seatRecordPath(env, command);
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Numbered account commands may be aliases or functions in the owner's shell. */
+function claudeLaunch(command: string, args: readonly string[], env: NodeJS.ProcessEnv) {
+  return /^claude\d+$/u.test(command)
+    ? { command: env.SHELL || "/bin/zsh", args: ["-ic", `${command} "$@"`, "clankie-seat", ...args] }
+    : { command, args: [...args] };
 }
 
 async function defaultExecFile(
   command: string,
   args: readonly string[],
+  env?: NodeJS.ProcessEnv,
 ): Promise<{ readonly stdout: string; readonly stderr: string }> {
-  const result = await execFileAsync(command, [...args], { timeout: 15_000, encoding: "utf8" });
+  const result = await execFileAsync(command, [...args], { timeout: 15_000, encoding: "utf8", env });
   return { stdout: String(result.stdout), stderr: String(result.stderr) };
 }
 
@@ -178,8 +191,13 @@ function defaultSpawn(
   cwd: string,
   env?: NodeJS.ProcessEnv,
 ): Promise<number> {
+  const launch = claudeLaunch(command, args, env ?? process.env);
   return new Promise((resolve, reject) => {
-    const child = spawn(command, [...args], { cwd, stdio: "inherit", ...(env === undefined ? {} : { env }) });
+    const child = spawn(launch.command, launch.args, {
+      cwd,
+      stdio: "inherit",
+      ...(env === undefined ? {} : { env }),
+    });
     child.once("error", reject);
     child.once("exit", (code, signal) => resolve(code ?? (signal === null ? 1 : 128)));
   });
@@ -202,16 +220,26 @@ function herdrFailureText(caught: unknown): string {
 }
 
 export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): Promise<SeatPlan> {
+  if (options.claudeCommand !== undefined && flags.harness === "codex") throw new Error(SEAT_USAGE);
   if (flags.harness === "codex") {
     const { planCodexSeat } = await import("./codex-seat.ts");
     return planCodexSeat(flags, options);
   }
   const env = options.env ?? process.env;
-  const execFile = options.execFileImpl ?? defaultExecFile;
+  const command = options.claudeCommand ?? "claude";
+  if (!/^claude\d*$/u.test(command)) throw new Error("Invalid Claude command");
+  const execFile =
+    options.execFileImpl ??
+    ((name, args) => {
+      const launch = claudeLaunch(name, args, env);
+      return defaultExecFile(launch.command, launch.args, env);
+    });
   try {
-    await execFile("claude", ["--version"]);
+    await execFile(command, ["--version"]);
   } catch {
-    throw new Error("Claude Code is not on PATH; install it first (https://code.claude.com).");
+    throw new Error(
+      `${command} is unavailable; install Claude Code or define the command in your shell (https://code.claude.com).`,
+    );
   }
 
   const source = flags.pluginDir ?? join(options.repoRoot, "integrations", "claude-plugin");
@@ -227,7 +255,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     path: await projectSkillPlugin(source, join(clankieStateHome(env), "clankie"), skills),
   };
 
-  const previous = flags.resume ? readSeatRecord(env) : undefined;
+  const previous = flags.resume ? readSeatRecord(env, command) : undefined;
   if (flags.resume && previous === undefined) {
     throw new Error("No seat to resume; `clankie seat` first.");
   }
@@ -235,30 +263,20 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   if (
     previous !== undefined &&
     flags.conversationId !== undefined &&
-    flags.conversationId !== previous.conversationId
+    flags.conversationId !== (previous.conversationId ?? "global-default")
   )
     throw new Error("A resumed seat keeps its conversation; start a new seat to select another one.");
-  const conversationId = previous?.conversationId ?? flags.conversationId;
-  let cwd = previous?.cwd ?? process.cwd();
-  if (conversationId !== undefined) {
-    const credential = await resolveOperatorCredential({
-      env,
-      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
-    });
-    if (credential === undefined)
-      throw new Error("No operator credential is available; start Clankie first.");
-    const url = new URL("/v1/captain/seat-context", commandHost({ ...options, env }));
-    url.searchParams.set("conversationId", conversationId);
-    const response = await (options.fetchImpl ?? fetch)(url, {
-      headers: { authorization: `Bearer ${credential.token}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) throw new Error(`Seat conversation unavailable (${response.status})`);
-    const binding = (await response.json()) as { conversationId?: unknown; cwd?: unknown };
-    if (binding.conversationId !== conversationId || typeof binding.cwd !== "string" || !binding.cwd)
-      throw new Error("Invalid service seat context");
-    cwd = binding.cwd;
-  }
+  const context = await resolveSeatContext(
+    {
+      conversationId:
+        previous === undefined ? flags.conversationId : (previous.conversationId ?? "global-default"),
+      cwd: previous?.cwd ?? process.cwd(),
+      command,
+      dryRun: true,
+    },
+    options,
+  );
+  const { conversationId, cwd } = context;
   // Session-only plugins have the native @inline identity. Keep wakes on the
   // same projected plugin, without enabling an older installed skill catalog.
   const channel = true;
@@ -276,7 +294,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   // This pane is his head only inside the fleet the service leads (ADR 0164):
   // a seat opened in any other Herdr session names no pane there.
   const paneId =
-    conversationId === undefined && env.HERDR_ENV === "1" ? env.HERDR_PANE_ID?.trim() : undefined;
+    conversationId === "global-default" && env.HERDR_ENV === "1" ? env.HERDR_PANE_ID?.trim() : undefined;
   const fleetSocket =
     paneId === undefined || paneId.length === 0
       ? undefined
@@ -286,7 +304,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
         )().catch(() => undefined);
   const herdrPaneId = fleetSocket !== undefined && env.HERDR_SOCKET_PATH === fleetSocket ? paneId : undefined;
   return {
-    command: "claude",
+    command,
     skills,
     args,
     plugin,
@@ -294,6 +312,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     sessionId,
     resumed: previous !== undefined,
     ...(conversationId === undefined ? {} : { conversationId }),
+    ...(context.newConversation === undefined ? {} : { newConversation: context.newConversation }),
     cwd,
     ...(herdrPaneId === undefined || herdrPaneId.length === 0 ? {} : { herdrPaneId }),
   };
@@ -340,22 +359,33 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const flags = parseSeatArgs(args);
+  if (options.claudeCommand !== undefined && flags.harness === "codex") throw new Error(SEAT_USAGE);
   if (flags.harness === "codex") {
     const { runCodexSeat } = await import("./codex-seat.ts");
     return runCodexSeat(flags, options);
   }
-  const plan = await planSeat(flags, options);
+  let plan = await planSeat(flags, options);
   if (flags.dryRun) {
     outputJson(stdout, { ok: true, ...plan });
     return 0;
   }
+  if (plan.newConversation !== undefined) {
+    plan = {
+      ...plan,
+      ...(await resolveSeatContext({ cwd: plan.cwd, command: plan.command, dryRun: false }, options)),
+    };
+  }
   if (!plan.resumed) {
-    writeSeatRecord(env, {
-      sessionId: plan.sessionId,
-      cwd: plan.cwd,
-      startedAt: new Date().toISOString(),
-      ...(plan.conversationId === undefined ? {} : { conversationId: plan.conversationId }),
-    });
+    writeSeatRecord(
+      env,
+      {
+        sessionId: plan.sessionId,
+        cwd: plan.cwd,
+        startedAt: new Date().toISOString(),
+        ...(plan.conversationId === undefined ? {} : { conversationId: plan.conversationId }),
+      },
+      plan.command,
+    );
   }
   const execFile = options.execFileImpl ?? defaultExecFile;
   const sleep = options.sleepImpl ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));

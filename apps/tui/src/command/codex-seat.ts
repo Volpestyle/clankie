@@ -8,6 +8,7 @@ import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { clankieStateHome } from "../state-home.ts";
 import { commandHost, outputJson } from "./io.ts";
 import type { SeatCommandOptions, SeatPlan } from "./seat.ts";
+import { resolveSeatContext } from "./seat-context.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import { startCodexAppServerSeat } from "../../../clankie/src/captain/codex-app-server.ts";
 import { codexTrackerOverrides } from "../../../clankie/src/captain/tracker-isolation.ts";
@@ -40,29 +41,23 @@ export async function planCodexSeat(flags: Flags, options: SeatCommandOptions): 
       /* No recorded native thread yet. */
     }
     if (!previous?.sessionId) throw new Error("No Codex seat to resume; launch and trust its hooks first.");
-    if (flags.conversationId !== undefined && flags.conversationId !== previous.conversationId)
+    if (
+      flags.conversationId !== undefined &&
+      flags.conversationId !== (previous.conversationId ?? "global-default")
+    )
       throw new Error("A resumed seat keeps its conversation; start a new seat to select another one.");
   }
-  const conversationId = previous?.conversationId ?? flags.conversationId;
-  let cwd = previous?.cwd ?? process.cwd();
-  if (conversationId !== undefined) {
-    const credential = await resolveOperatorCredential({
-      env,
-      ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
-    });
-    if (!credential) throw new Error("No operator credential is available; start Clankie first.");
-    const url = new URL("/v1/captain/seat-context", commandHost({ ...options, env }));
-    url.searchParams.set("conversationId", conversationId);
-    const response = await (options.fetchImpl ?? fetch)(url, {
-      headers: { authorization: `Bearer ${credential.token}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) throw new Error(`Seat conversation unavailable (${response.status})`);
-    const binding = (await response.json()) as Binding;
-    if (binding.conversationId !== conversationId || typeof binding.cwd !== "string" || !binding.cwd)
-      throw new Error("Invalid service seat context");
-    cwd = binding.cwd;
-  }
+  const context = await resolveSeatContext(
+    {
+      conversationId:
+        previous === undefined ? flags.conversationId : (previous.conversationId ?? "global-default"),
+      cwd: previous?.cwd ?? process.cwd(),
+      command: "codex",
+      dryRun: true,
+    },
+    options,
+  );
+  const { conversationId, cwd } = context;
   const selection = (await new SettingsStore(defaultSettingsPath(env)).load()).skills;
   const skills = bundledSkills(options.repoRoot, selection);
   const excluded = skills
@@ -91,6 +86,7 @@ export async function planCodexSeat(flags: Flags, options: SeatCommandOptions): 
     sessionId: previous?.sessionId ?? "pending-native-thread",
     resumed: previous !== undefined,
     ...(conversationId === undefined ? {} : { conversationId }),
+    ...(context.newConversation === undefined ? {} : { newConversation: context.newConversation }),
     cwd,
   };
 }
@@ -105,7 +101,7 @@ export async function runCodexSeat(
   const env = options.env ?? process.env;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  const plan = await planCodexSeat(flags, options);
+  let plan = await planCodexSeat(flags, options);
   const ownerStep = {
     kind: "hook_trust_required",
     command: "/hooks",
@@ -124,6 +120,12 @@ export async function runCodexSeat(
     throw new Error(
       `Codex seat plugin is not installed. Run codex plugin marketplace add ${JSON.stringify(plan.plugin.path)}, then codex plugin add ${PLUGIN}. Disable it globally in /plugins; this launcher enables it only for the seat. Review its hooks in /hooks.`,
     );
+  }
+  if (plan.newConversation !== undefined) {
+    plan = {
+      ...plan,
+      ...(await resolveSeatContext({ cwd: plan.cwd, command: "codex", dryRun: false }, options)),
+    };
   }
   stderr.write(`clankie seat: ${ownerStep.kind}: ${ownerStep.detail}\n`);
   const directory = join(clankieStateHome(env), "clankie", "codex-seat-launches", randomUUID());

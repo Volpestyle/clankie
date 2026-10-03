@@ -1634,6 +1634,47 @@ paths:
           description: Operator authentication required
 
   /v1/captain/seat-context:
+    post:
+      tags: [Captain, Operator]
+      operationId: createCaptainSeatContext
+      summary: Create a separate workspace chat for a new native operator seat
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [op, schemaVersion, scope, title]
+              properties:
+                op: { type: string, enum: [create] }
+                schemaVersion: { type: integer, enum: [1] }
+                scope:
+                  type: object
+                  additionalProperties: false
+                  required: [kind, workspaceId]
+                  properties:
+                    kind: { type: string, enum: [workspace] }
+                    workspaceId: { type: string, minLength: 1, maxLength: 512 }
+                title: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "201":
+          description: A fresh service-owned conversationId and cwd; repeated launches create separate chats
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conversationId, cwd]
+                properties:
+                  conversationId: { type: string }
+                  cwd: { type: string }
+        "400":
+          description: Invalid workspace conversation creation request
+        "401":
+          description: Authentication required
+        "403":
+          description: Operator lane required
     get:
       tags: [Captain, Operator]
       operationId: getCaptainSeatContext

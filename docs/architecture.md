@@ -142,6 +142,12 @@ persisting a second world projection
 
 ### Native operator seats
 
+Each fresh Claude or Codex launch creates a separate workspace chat at its launch
+directory. Multiple native seats keep separate transcripts, tools and outboxes,
+even in the same directory or account. `--resume` retains the last seat's binding;
+`--conversation ID` selects an existing chat, including `global-default` for the
+shared global head. Dry runs create no conversation.
+
 `clankie seat --harness codex` selects the [Codex plugin](../integrations/codex-plugin/README.md).
 Its trusted native hooks add the shared identity, service context and memory card,
 and sync redacted transcript entries to the selected conversation. The real Codex

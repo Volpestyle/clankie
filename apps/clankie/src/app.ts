@@ -1101,6 +1101,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return "denial" in binding ? binding.denial : context.json(binding);
   });
 
+  // Native seats use the same registry as the app, with a fresh workspace chat
+  // per launch. The operator bearer can create only this kind of seat context.
+  app.post("/v1/captain/seat-context", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const parsed = OperatorConversationServiceRequestSchema.safeParse(
+      await context.req.json().catch(() => undefined),
+    );
+    if (!parsed.success || parsed.data.op !== "create" || parsed.data.scope.kind !== "workspace")
+      return context.json({ error: "invalid_seat_conversation" }, 400);
+    const result = await dependencies.captain.serveOperatorConversation(parsed.data);
+    if (result.op !== "create") return context.json({ error: "seat_conversation_unavailable" }, 503);
+    const binding = dependencies.captain.seatContext(result.conversation.conversationId);
+    return binding === undefined
+      ? context.json({ error: "seat_conversation_unavailable" }, 503)
+      : context.json(binding, 201);
+  });
+
   app.post("/v1/seat/transcript", bodyLimit({ maxSize: 1024 * 1024 }), async (context) => {
     const auth = await authenticateLane(context);
     if ("denial" in auth) return auth.denial;
