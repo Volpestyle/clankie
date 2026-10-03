@@ -21,7 +21,7 @@ Use `clankie skills` for each shipped skill's class and inclusion state,
 the console picker, also reachable through `/setup`. `clankie doctor` includes
 the configured selection and its catalog.
 
-Product/tool skills are always on: `this-machine`, `trace-clankie`, `work-items`,
+Product/tool skills are always on: `clankie`, `this-machine`, `trace-clankie`, `work-items`,
 `research-team`, `computer-use-delegation`, `desktop-control`, `browser-use`, `swarm-mcp`, `herdr`,
 and every other skill authored in this repo (including `comparison-shopping`,
 `daily-digest`, `inbox-triage` and `trip-planning`). Product exclusions are refused
@@ -38,7 +38,13 @@ Everything selected from `vendor/opinionated-skills/` is opinionated, including
 | Delivery        | c, p                         |
 | Working methods | solution-space               |
 
-The catalog contains **22 skills: 8 opinionated and 14 product/tool skills**.
+The `clankie` skill teaches agents started by hand how to recognize his fleet,
+reach him and report through their assignment's channel or handoff. It applies
+when Clankie is named or the fleet is confirmed; discovery alone does not hire
+an agent. Dotfiles can select the repo-owned source for Claude and Codex without
+copying it into the personal skills repository.
+
+The catalog contains **23 skills: 8 opinionated and 15 product/tool skills**.
 VUH-1457 merged the three leadership entries into `lead`, with shared judgment,
 Swarm-first coordination and an explicit Herdr fallback. Its Herdr references
 use the native CLI; the vendored dashboard plugin and board-specific references
