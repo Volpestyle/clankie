@@ -119,23 +119,12 @@ export function createProjectMembershipResolver(
         proof.processes.length !== 1
       )
         return undefined;
+      const occupantId = JSON.stringify(proof);
       const settings = await options.settings();
       const revision = projectsRevision(settings);
       const { privateSeat: _privateSeat, ...assignmentProof } = proof;
       const hire = await options.hire(assignmentProof);
-      if (
-        hire.state === "invalid" ||
-        (proof.privateSeat && hire.state !== "assigned") ||
-        (proof.nativeSessionPending && hire.state !== "none")
-      )
-        return undefined;
-      // Owner-started workspace sessions keep their process principal when native session reporting arrives.
-      const {
-        nativeOccupantId: _nativeOccupantId,
-        nativeSessionPending: _nativeSessionPending,
-        ...processProof
-      } = proof;
-      const occupantId = JSON.stringify(hire.state === "none" ? processProof : proof);
+      if (hire.state === "invalid" || (proof.privateSeat && hire.state !== "assigned")) return undefined;
       let projectId: string | undefined;
       if (hire.state === "assigned") {
         const membership = resolveProjectMembership(settings, {

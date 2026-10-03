@@ -212,18 +212,9 @@ it.each(["valid", "missing-other", "junction", "wrong-machine", "case", "boundar
     f.state.settings.projects[1]!.workspaces = [
       { id: "remote", machineId: "pc", platform: "windows", path: "C:\\gone" },
     ];
-    if (kind === "wrong-machine")
-      f.state.proof = { ...f.state.proof, workspace: { ...f.state.proof.workspace!, machineId: "another" } };
-    if (kind === "case")
-      f.state.proof = {
-        ...f.state.proof,
-        workspace: { ...f.state.proof.workspace!, canonicalPath: "c:\\code\\kh2\\src" },
-      };
-    if (kind === "boundary")
-      f.state.proof = {
-        ...f.state.proof,
-        workspace: { ...f.state.proof.workspace!, canonicalPath: "C:\\code\\kh2-other" },
-      };
+    if (kind === "wrong-machine") f.state.proof.workspace!.machineId = "another";
+    if (kind === "case") f.state.proof.workspace!.canonicalPath = "c:\\code\\kh2\\src";
+    if (kind === "boundary") f.state.proof.workspace!.canonicalPath = "C:\\code\\kh2-other";
     const resolve = createProjectMembershipResolver({
       settings: async () => f.state.settings,
       hire: async () => f.state.hire,
@@ -237,11 +228,7 @@ it.each(["valid", "missing-other", "junction", "wrong-machine", "case", "boundar
         expect(machineId).toBe("pc");
         if (kind === "missing-other" && path === "C:\\gone") return undefined;
         if (kind === "junction" && path === "C:\\code\\kh2") return "D:\\actual";
-        if (kind === "cwd-change")
-          f.state.proof = {
-            ...f.state.proof,
-            workspace: { ...f.state.proof.workspace!, canonicalPath: "C:\\outside" },
-          };
+        if (kind === "cwd-change") f.state.proof.workspace!.canonicalPath = "C:\\outside";
         return path;
       },
     });
@@ -250,33 +237,3 @@ it.each(["valid", "missing-other", "junction", "wrong-machine", "case", "boundar
     else expect(result).toBeUndefined();
   },
 );
-
-it("keeps owner-started workspace principals stable when the native session arrives, but not across process lifetimes", async () => {
-  const f = fixture();
-  f.state.proof = { ...f.state.proof, nativeOccupantId: "process-pending", nativeSessionPending: true };
-  const pending = await f.resolve();
-  expect(pending?.projectId).toBe("kh2");
-  const { nativeSessionPending: _pending, ...settled } = f.state.proof;
-  f.state.proof = { ...settled, nativeOccupantId: "native-session-now-known" };
-  expect(await f.resolve()).toEqual(pending);
-  f.state.proof = { ...f.state.proof, processes: [{ pid: 40, startTime: "new-process" }] };
-  expect((await f.resolve())?.occupantId).not.toEqual(pending?.occupantId);
-});
-it.each(["assigned", "invalid", "private"])("refuses session-pending %s hires", async (kind) => {
-  const f = fixture();
-  f.state.proof = {
-    ...f.state.proof,
-    nativeSessionPending: true,
-    ...(kind === "private" ? { privateSeat: true } : {}),
-  };
-  f.state.hire =
-    kind === "invalid" ? { state: "invalid" } : { state: "assigned", projectId: "kh2", occupantId: "hire" };
-  expect(await f.resolve()).toBeUndefined();
-});
-it("retains native session identity in assigned hire principals", async () => {
-  const f = fixture();
-  f.state.hire = { state: "assigned", projectId: "kh2", occupantId: "hire" };
-  const first = await f.resolve();
-  f.state.proof = { ...f.state.proof, nativeOccupantId: "replacement-session" };
-  expect((await f.resolve())?.occupantId).not.toEqual(first?.occupantId);
-});
