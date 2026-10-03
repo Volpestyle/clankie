@@ -80,4 +80,4 @@ Worker publishing grants must pin the exact `personaId`. Read
 OpenCode seats use the same isolation contract: a fresh `clankie seat --harness
 opencode` creates a separate workspace chat; `--conversation ID` reuses one,
 `--resume` keeps the exact native session and chat, and `--dry-run` creates none.
-See [the OpenCode seat guide](../../../../../integrations/opencode-plugin/README.md).
+See [the OpenCode seat guide](../../../../integrations/opencode-plugin/README.md).
