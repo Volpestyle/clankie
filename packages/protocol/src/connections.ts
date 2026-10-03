@@ -5,13 +5,54 @@ const label = z.string().max(4096);
 export const RUNTIME_CAPACITY_DEFAULT = 16;
 export const RUNTIME_CAPACITY_MAX = 256;
 
+export const MachineSessionSchema = z
+  .object({
+    name: label,
+    socketPath: label.optional(),
+    connectionId: connectionId.optional(),
+    state: z.enum(["available", "connected", "disabled", "unreachable"]),
+    workerCount: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
+export const MachineSchema = z
+  .object({
+    id: connectionId,
+    transport: z.enum(["local", "ssh"]),
+    ssh: label.optional(),
+    shell: z.enum(["posix", "powershell"]).optional(),
+    configured: z.boolean(),
+    state: z.enum(["available", "unreachable", "discovering"]),
+    workerCount: z.number().int().nonnegative().nullable(),
+    sessions: z.array(MachineSessionSchema).max(64),
+  })
+  .strict();
+export const MachineInventorySchema = z
+  .object({
+    observedAt: z.string(),
+    machines: z.array(MachineSchema).max(64),
+  })
+  .strict();
+export type MachineInventory = z.infer<typeof MachineInventorySchema>;
+export type Machine = z.infer<typeof MachineSchema>;
+
 /** Connection changes share the operator relay's steer authority. No credentials cross it. */
 export const OperatorConnectionCommandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list") }).strict(),
+  z.object({ action: z.literal("discover") }).strict(),
+  z
+    .object({
+      action: z.literal("add_machine"),
+      id: connectionId,
+      ssh: z.string().regex(/^(?:[a-zA-Z0-9_.-]+@)?[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/u),
+      shell: z.enum(["posix", "powershell"]).default("posix"),
+    })
+    .strict(),
+  z.object({ action: z.literal("remove_machine"), id: connectionId }).strict(),
   z
     .object({
       action: z.literal("connect_runtime"),
       id: connectionId,
+      machine: connectionId.optional(),
       session: z.string().regex(/^[\w][\w.-]{0,63}$/u),
     })
     .strict(),
@@ -31,11 +72,13 @@ export type OperatorConnectionCommand = z.infer<typeof OperatorConnectionCommand
 export const OperatorConnectionInventorySchema = z
   .object({
     observedAt: z.string(),
+    machines: z.array(MachineSchema).max(64).default([]),
     runtimes: z
       .array(
         z
           .object({
             id: connectionId,
+            machine: connectionId.default("local"),
             kind: z.literal("herdr"),
             session: label,
             state: label,

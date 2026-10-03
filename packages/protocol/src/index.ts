@@ -6607,3 +6607,11 @@ export const HerdrBindingSchema = z
   .strict();
 export type HerdrBinding = z.infer<typeof HerdrBindingSchema>;
 export { RivalsCommandSchema, RivalsStatusSchema, type RivalsCommand, type RivalsStatus } from "./rivals.ts";
+
+export {
+  MachineSchema,
+  MachineSessionSchema,
+  MachineInventorySchema,
+  type Machine,
+  type MachineInventory,
+} from "./connections.ts";
