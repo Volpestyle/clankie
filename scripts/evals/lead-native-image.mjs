@@ -36,7 +36,19 @@ export async function buildNativeImage({
   rustImage,
   nodeImage,
   taskEnvironment,
+  historicalEnvironment,
+  signal,
 }) {
+  signal?.throwIfAborted();
+  if (taskEnvironment !== undefined && historicalEnvironment !== undefined)
+    throw Error("Select one exact task environment");
+  const historical =
+    historicalEnvironment === undefined
+      ? undefined
+      : await (
+          await import("./lead-historical.mjs")
+        ).requireHistoricalEnvironment(historicalEnvironment, command, signal);
+  if (historical && historical.nodeImage !== nodeImage) throw Error("Historical native Node base mismatch");
   const daemon = dockerTransportIdentity(command);
   const environment =
     taskEnvironment === undefined
@@ -49,6 +61,15 @@ export async function buildNativeImage({
     !/^node:24\.20\.0-bookworm@sha256:[a-f0-9]{64}$/u.test(nodeImage)
   )
     throw Error("Explicit digest-pinned official Rust/Node build bases required");
+  if (historical) {
+    const [rust] = JSON.parse(await command(["image", "inspect", rustImage], { signal }));
+    if (
+      rust?.Os !== "linux" ||
+      `linux/${rust.Architecture}` !== historical.platform ||
+      !rust.RepoDigests?.includes(rustImage)
+    )
+      throw Error("Exact historical Rust platform required");
+  }
   mkdirSync(output, { mode: 0o700 });
   if (realpathSync(output) !== output || lstatSync(output).uid !== process.getuid())
     throw Error("Unowned native build directory");
@@ -71,7 +92,7 @@ RUN cargo build --release --locked --bin bwrap
 RUN CODEX_BWRAP_SHA256=$(sha256sum target/release/bwrap | cut -d' ' -f1) cargo build --release --locked --bin codex
 WORKDIR /src/herdr
 RUN cargo build --release --locked --bin herdr
-FROM ${environment?.image ?? nodeImage}
+FROM ${historical?.image ?? environment?.image ?? nodeImage}
 ${environment ? "COPY --from=node /usr/local/bin/node /usr/local/bin/node\n" : ""}RUN apt-get update && apt-get install -y --no-install-recommends libcap2 libasound2 ${environment ? "libstdc++6" : "python3"} git ca-certificates && rm -rf /var/lib/apt/lists/*
 ${environment ? "RUN ln -sf /usr/local/bin/python3 /usr/bin/python3\n" : ""}COPY --from=build /src/codex/codex-rs/target/release/codex /opt/codex/bin/codex
 COPY --from=build /src/codex/codex-rs/target/release/bwrap /opt/codex/bin/bwrap
@@ -87,14 +108,41 @@ WORKDIR /eval
 `;
   writeFileSync(join(output, "Dockerfile"), dockerfile, { flag: "wx", mode: 0o400 });
   const iid = join(output, "image-id");
-  await command(["build", "--iidfile", iid, "--file", join(output, "Dockerfile"), output], {
-    timeout: 7_200_000,
-  });
+  await command(
+    [
+      "build",
+      ...(historical ? ["--platform", historical.platform] : []),
+      "--iidfile",
+      iid,
+      "--file",
+      join(output, "Dockerfile"),
+      output,
+    ],
+    {
+      timeout: 7_200_000,
+      signal,
+    },
+  );
+  signal?.throwIfAborted();
   const stat = lstatSync(iid);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== process.getuid() || stat.size > 256)
     throw Error("Invalid native build result");
   const image = readFileSync(iid, "utf8").trim();
   if (!/^sha256:[a-f0-9]{64}$/u.test(image)) throw Error("Native build has no immutable image ID");
+  if (historical) {
+    await (
+      await import("./lead-historical.mjs")
+    ).requireHistoricalEnvironment(historicalEnvironment, command, signal);
+    const images = JSON.parse(await command(["image", "inspect", image], { signal }));
+    if (
+      images.length !== 1 ||
+      images[0].Id !== image ||
+      images[0].Os !== "linux" ||
+      `linux/${images[0].Architecture}` !== historical.platform
+    )
+      throw Error("Historical native image platform mismatch");
+  }
+  signal?.throwIfAborted();
   const result = Object.freeze({
     image,
     source: NATIVE_SOURCE,
@@ -106,6 +154,7 @@ WORKDIR /eval
     rustImage,
     nodeImage,
     ...(environment ? { taskEnvironment: environment } : {}),
+    ...(historical ? { historicalEnvironment: historical } : {}),
   });
   builds.set(result, { ...structuredClone(result), command, daemon });
   return result;

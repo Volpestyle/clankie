@@ -2,7 +2,7 @@
 
 This continuation adds executable worker transport, containment, protocol admission,
 usage accounting and verifier engineering. It does **not** complete the native
-Clankie evaluation arm. The landed historical candidate grader remains separate.
+Clankie evaluation arm. The historical Linux adapter reuses the landed candidate grader and pinned reports.
 `lead.mjs run` still refuses dispatch; the service entry point does not activate
 this factory. No model, native agent, provider/account probe, container build or
 execution, benchmark, live service or owner fleet operation was performed.
@@ -153,10 +153,12 @@ invalidates even an otherwise passing official report. There is no unsafe fallba
   future credential-free capability probe; generic distro Python is not accepted
   as the benchmark environment. The HTML verifier retains its separate mediated
   candidate boundary. Cancellation stops its exact verifier container.
-- Production defaults and the disabled campaign run entry remain. Historical
-  tasks still refuse isolated Linux dependency/grader preparation; the manual
-  bootstrap currently supports the two pinned neutral tasks only. No native
-  build, capability probe, auth import, provider call or campaign has been run.
+- Production defaults and the disabled campaign run entry remain. The manual
+  bootstrap now wires the pinned historical tasks through controller-staged exact
+  dependency inputs, a Linux dependency image, complete before/after calibration,
+  independent dependency materialization and the existing candidate grader. Missing
+  prerequisites return unsupported before account startup. No native build,
+  capability probe, auth import, provider call or campaign has been run.
 - Owner TTY edits/interventions are not measured. Never-started allocations are
   separate from started workers lacking token counters; incomplete accounting
   produces unknown totals rather than zeros. Each native turn needs its exact
@@ -179,3 +181,41 @@ and retained logs are recorded in the external evidence directory. Those fixture
 now use explicit scoped fake runners or disabled Herdr availability, with test-local
 ambient-process tripwires. No mutating fleet, account, model or container operation
 was authorized or performed as part of these checks.
+
+## Historical Linux prerequisites and evidence
+
+For a historical selection the strict private manual configuration additionally
+requires `historicalBuild: { platform, nodeImage, pnpmTarball, pnpmSha256 }`.
+`platform` is explicitly `linux/amd64` or `linux/arm64`; `nodeImage` must be the
+same digest-pinned `node:24.20.0-bookworm` image as `nativeBuild.nodeImage`.
+The private, bounded `pnpmTarball` is independently SHA-256 pinned and must contain
+pnpm 11.11.0. No ambient host dependency tree or default platform is accepted.
+The existing native Rust source/toolchain pins remain required; the daemon and
+Rust, dependency and composed native images must match the selected Linux platform.
+These inputs describe a future explicit manual run, not permission or a run result.
+
+The dependency recipe copies only the selected base's 51 package/lock/workspace,
+patch and vendored-package inputs, performs a frozen dependency installation and
+builds the required native artifacts. Installation occurs only in that controller
+image build. Candidate and grader invocation do not install packages. Private
+in-process capabilities bind the actual image, daemon/socket, input profile and
+native artifact hashes; exported JSON receipts cannot restore this authority.
+
+Calibration requires all pinned files and assertion counts on both revisions,
+unique matching test identities, finite durations and no missing/skipped tests.
+The before revision must execute failed assertions, and the fixed revision must
+pass the existing strict validator. An import crash cannot establish calibration.
+Reports retain actual outcomes; no failure-to-pass bookkeeping normalization is
+used as benchmark evidence. The held-out verifier sees a read-only source tree,
+network none, separate writable reports and exact container stop receipts.
+The existing in-process reporter limitation remains: these checks do not provide
+cryptographic resistance to candidate code sharing the report-producing process.
+
+After confirmed native shutdown, patch collection copies only regular source
+files into a fresh trusted repository; host Git never loads native-edited Git
+configuration. Protected candidate preparation and the existing grader then run
+against separately materialized dependencies. Only the lead's integrated changes
+are graded. Owner interruption precludes new grading. The fake fixture checks
+exercise these paths without Docker, builds, installs or real grading. Actual
+Linux before/after calibration and every historical/native run remain **unrun**.
+The native Claude arm remains separately unsupported.

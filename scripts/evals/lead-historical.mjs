@@ -2,6 +2,7 @@
  * Reports remain in-process evidence: containment does not make a reporter cryptographically
  * resistant to candidate code running in the same verifier process.
  */
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   constants,
@@ -14,6 +15,7 @@ import {
   readlinkSync,
   readdirSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -116,6 +118,75 @@ export function stageHistoricalWorkspace(profile, output) {
   return prepareHistoricalWorkspace(profileRecord(profile).task, output);
 }
 
+/** Never run host Git against native-edited .git/config, hooks, filters or indexes. */
+export function collectHistoricalPatch({ profile, candidateRoot, output }) {
+  const selected = profileRecord(profile).task;
+  owned(candidateRoot);
+  fresh(output);
+  const workspace = join(output, "worktree");
+  prepareHistoricalWorkspace(selected, workspace);
+  for (const name of readdirSync(workspace))
+    if (name !== ".git") rmSync(join(workspace, name), { recursive: true, force: true });
+  let entries = 0,
+    bytes = 0;
+  const copy = (source, destination, depth = 0) => {
+    if (depth > 64) throw Error("Candidate source depth exceeded");
+    for (const name of readdirSync(source)) {
+      if (name === "node_modules" || (source === candidateRoot && name === ".git")) continue;
+      if (++entries > 20000) throw Error("Candidate source entry limit exceeded");
+      if (name === ".git") throw Error("Nested native Git metadata refused");
+      const path = join(source, name),
+        target = join(destination, name),
+        stat = lstatSync(path);
+      if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile()))
+        throw Error("Unsupported native candidate artifact");
+      if (stat.isDirectory()) {
+        mkdirSync(target, { mode: 0o700 });
+        copy(path, target, depth + 1);
+      } else {
+        bytes += stat.size;
+        if (bytes > 512 * 1024 * 1024) throw Error("Candidate source byte limit exceeded");
+        writeFileSync(target, file(candidateRoot, path), { mode: stat.mode & 0o777, flag: "wx" });
+      }
+    }
+  };
+  copy(candidateRoot, workspace);
+  const git = (...args) =>
+    execFileSync(
+      "/usr/bin/git",
+      [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.attributesFile=/dev/null",
+        "-C",
+        workspace,
+        ...args,
+      ],
+      {
+        env: {
+          PATH: "/usr/bin:/bin",
+          HOME: "/nonexistent",
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_NO_REPLACE_OBJECTS: "1",
+          GIT_TERMINAL_PROMPT: "0",
+        },
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: 120000,
+      },
+    );
+  git("add", "--all", "--force");
+  const patchPath = join(output, "candidate.patch");
+  writeFileSync(patchPath, git("diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv", "HEAD"), {
+    mode: 0o600,
+    flag: "wx",
+  });
+  return patchPath;
+}
+
 function platform(value) {
   if (!["linux/amd64", "linux/arm64"].includes(value))
     throw Error("Explicit supported Linux platform required");
@@ -212,7 +283,7 @@ async function contained({ command, image: imageId, root, argv, logs, signal, ti
     }
   };
   signal?.addEventListener("abort", cancel, { once: true });
-  let exitCode, stopReceipt;
+  let exitCode, stopReceipt, completionError, stopFailure;
   try {
     await container.create(argv);
     signal?.throwIfAborted();
@@ -223,11 +294,17 @@ async function contained({ command, image: imageId, root, argv, logs, signal, ti
     if (state.State?.Running || !Number.isInteger(exitCode) || exitCode < 0 || exitCode > 255)
       throw Error("Historical verifier completion unconfirmed");
     signal?.throwIfAborted();
+  } catch (error) {
+    completionError = error;
   } finally {
     signal?.removeEventListener("abort", cancel);
     if (container.id) {
       try {
         stopReceipt = await (stop ?? container.stop("historical operation settled"));
+      } catch {
+        stopFailure = Object.assign(Error("Historical container stop unconfirmed"), {
+          code: "historical-stop-unconfirmed",
+        });
       } finally {
         persist(join(logs ?? root, "container-stop.json"), {
           containerId: container.id,
@@ -237,6 +314,8 @@ async function contained({ command, image: imageId, root, argv, logs, signal, ti
       }
     }
   }
+  if (stopFailure) throw stopFailure;
+  if (completionError) throw completionError;
   return { exitCode, containerId: container.id, stopReceipt, timedOut: false, overflow: false };
 }
 
@@ -465,15 +544,18 @@ export async function calibrateHistorical({ build, command, output, signal }) {
     results.push({ revision, ...result, sourceSha256: sourceBefore });
   }
   const [before, after] = results;
+  const beforeCoverage = validateGraderReport(selected, join(output, "before/worktree"), before.report, {
+    expectedFailure: true,
+  });
   if (
     before.exitCode === 0 ||
-    before.report.success !== false ||
-    !before.report.testResults?.length ||
-    !(before.report.numFailedTests > 0 || before.report.numFailedTestSuites > 0) ||
+    !beforeCoverage.complete ||
+    JSON.stringify(beforeCoverage.identities) !== JSON.stringify(after.coverage.identities) ||
     after.exitCode !== 0 ||
     !after.coverage.complete
   )
     throw Error("Linux before/after calibration failed; historical task remains unsupported");
+  before.coverage = beforeCoverage;
   const proof = Object.freeze({
     taskId: selected.id,
     image: record.image,
@@ -490,6 +572,7 @@ export async function requireHistoricalEnvironment(build, command, signal) {
   return structuredClone({
     image: record.image,
     platform: record.platform,
+    nodeImage: record.nodeImage,
     profileSha256: record.profileSha256,
     evidence: record.evidence,
   });

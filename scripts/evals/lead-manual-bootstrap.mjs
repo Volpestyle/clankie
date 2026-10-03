@@ -13,6 +13,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   writeFileSync,
   fsyncSync,
 } from "node:fs";
@@ -20,6 +21,16 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  stageHistorical,
+  stageHistoricalWorkspace,
+  buildHistoricalDependencies,
+  materializeHistoricalDependencies,
+  calibrateHistorical,
+  gradeHistorical,
+  collectHistoricalPatch,
+  requireHistoricalEnvironment,
+} from "./lead-historical.mjs";
 import { loadTasks } from "./lead.mjs";
 import { dockerTransport, LeadContainer } from "./lead-containment.mjs";
 import { buildNativeImage } from "./lead-native-image.mjs";
@@ -177,6 +188,7 @@ export function readManualInvocation(path) {
     "docker",
     "nativeBuild",
     "terminalBenchSource",
+    "historicalBuild",
   ]);
   if (
     config.schemaVersion !== 1 ||
@@ -250,7 +262,24 @@ export function readManualInvocation(path) {
     !/^node:24\.20\.0-bookworm@sha256:[a-f0-9]{64}$/u.test(config.nativeBuild.nodeImage)
   )
     throw Error("Official pinned native build bases required");
-  if (config.task.kind === "neutral") text(config.terminalBenchSource, 4096);
+  if (config.task.kind === "neutral") {
+    text(config.terminalBenchSource, 4096);
+    if (config.historicalBuild !== undefined) throw Error("Historical configuration on neutral task");
+  } else {
+    strict(config.historicalBuild, ["platform", "nodeImage", "pnpmTarball", "pnpmSha256"]);
+    if (
+      !["linux/amd64", "linux/arm64"].includes(config.historicalBuild.platform) ||
+      config.historicalBuild.nodeImage !== config.nativeBuild.nodeImage ||
+      !HEX64.test(config.historicalBuild.pnpmSha256)
+    )
+      throw Error("Explicit pinned historical Linux configuration required");
+    text(config.historicalBuild.pnpmTarball, 4096);
+    if (
+      hash(protectedBytes(config.historicalBuild.pnpmTarball, 128 * 1024 * 1024)) !==
+      config.historicalBuild.pnpmSha256
+    )
+      throw Error("Historical pnpm artifact changed");
+  }
   cleanSource(config);
   const invocation = Object.freeze({
     schemaVersion: 1,
@@ -332,14 +361,7 @@ export async function runManualBootstrap(invocation) {
       reason: "native-claude-subagents-arm-unimplemented",
       approvalEstablished: false,
     };
-  if (config.task.kind === "historical")
-    return {
-      status: "unsupported",
-      reason: "historical-linux-dependency-preparation-and-grading-unimplemented",
-      taskId: task.id,
-      approvalEstablished: false,
-    };
-  if (!["html-js-filter", "photonic-waveguide-routing"].includes(task.id))
+  if (config.task.kind === "neutral" && !["html-js-filter", "photonic-waveguide-routing"].includes(task.id))
     return {
       status: "unsupported",
       reason: "native-task-environment-unmapped",
@@ -377,7 +399,9 @@ export async function runManualBootstrap(invocation) {
     bridge,
     verifierImage,
     deadline,
-    armStartedAt;
+    armStartedAt,
+    historical,
+    historicalReady = false;
   const observers = new Map();
   const abort = new AbortController();
   const gradingAbort = new AbortController();
@@ -427,36 +451,78 @@ export async function runManualBootstrap(invocation) {
   };
   try {
     const command = dockerTransport(config.docker);
-    const staged = stageTerminalBench({
-      sourceRoot: config.terminalBenchSource,
-      taskId: task.id,
-      output: join(root, "official-staging"),
-    });
-    bridge = new TerminalBenchBridge({ staged, command });
-    const prompt = readFileSync(join(staged.output, "instruction.md"), "utf8");
-    const allocations = config.accounts.map((account, index) => {
-      const key = index === 0 ? "lead" : `worker-${index}`,
-        hostCwd = fresh(join(tasksRoot, key));
-      bridge.stageWorkspaceInputs(hostCwd);
-      verifyCandidateTree(hostCwd);
-      writeFileSync(
-        join(hostCwd, "TASK.md"),
-        `${prompt}\n\nTime budget: ${config.timeBudgetSeconds} seconds. Each supplied lead/worker path has an independent repository/index. Use only the preallocated native hires. Do not seek original fixes or held-out verifiers.\n`,
-        { mode: 0o600 },
-      );
-      initializeRepo(hostCwd);
-      const slot = fresh(join(control, key));
-      return Object.freeze({
-        hostCwd,
-        containerCwd: `/eval/tasks/${key}`,
-        accountHome: copyAuth(account, join(slot, "auth")),
-        accountId: account.accountId,
-        email: account.email,
-        accountLabel: account.label,
-        model: index === 0 ? config.leadModel : config.workerModel,
-        effort: "medium",
+    let prompt;
+    if (config.task.kind === "historical") {
+      const profile = stageHistorical({ taskId: task.id, output: join(root, "historical-profile") });
+      const dependencies = await buildHistoricalDependencies({
+        profile,
+        command,
+        output: join(root, "historical-dependencies"),
+        ...config.historicalBuild,
+        signal: abort.signal,
       });
-    });
+      current();
+      const calibration = await calibrateHistorical({
+        build: dependencies,
+        command,
+        output: join(root, "historical-calibration"),
+        signal: abort.signal,
+      });
+      current();
+      historical = { profile, dependencies, calibration };
+      prompt = task.prompt;
+    } else {
+      const staged = stageTerminalBench({
+        sourceRoot: config.terminalBenchSource,
+        taskId: task.id,
+        output: join(root, "official-staging"),
+      });
+      bridge = new TerminalBenchBridge({ staged, command });
+      prompt = readFileSync(join(staged.output, "instruction.md"), "utf8");
+    }
+    const allocations = [];
+    for (const [index, account] of config.accounts.entries()) {
+      const key = index === 0 ? "lead" : `worker-${index}`,
+        hostCwd = join(tasksRoot, key);
+      if (historical) {
+        const staging = fresh(join(root, `historical-workspace-${key}`));
+        const workspace = join(staging, "worktree");
+        stageHistoricalWorkspace(historical.profile, workspace);
+        verifyCandidateTree(workspace);
+        await materializeHistoricalDependencies({
+          build: historical.dependencies,
+          command,
+          root: staging,
+          containerCwd: `/eval/tasks/${key}`,
+          signal: abort.signal,
+        });
+        current();
+        renameSync(workspace, hostCwd);
+      } else {
+        fresh(hostCwd);
+        bridge.stageWorkspaceInputs(hostCwd);
+        verifyCandidateTree(hostCwd);
+        writeFileSync(
+          join(hostCwd, "TASK.md"),
+          `${prompt}\n\nTime budget: ${config.timeBudgetSeconds} seconds. Each supplied lead/worker path has an independent repository/index. Use only the preallocated native hires. Do not seek original fixes or held-out verifiers.\n`,
+          { mode: 0o600 },
+        );
+        initializeRepo(hostCwd);
+      }
+      const slot = fresh(join(control, key));
+      allocations.push(
+        Object.freeze({
+          hostCwd,
+          containerCwd: `/eval/tasks/${key}`,
+          accountHome: copyAuth(account, join(slot, "auth")),
+          accountId: account.accountId,
+          email: account.email,
+          accountLabel: account.label,
+          model: index === 0 ? config.leadModel : config.workerModel,
+          effort: "medium",
+        }),
+      );
+    }
     current();
     const taskEnvironment = bridge ? await bridge.build("environment") : undefined;
     current();
@@ -465,6 +531,8 @@ export async function runManualBootstrap(invocation) {
       output: join(root, "native-build"),
       ...config.nativeBuild,
       taskEnvironment,
+      historicalEnvironment: historical?.dependencies,
+      signal: abort.signal,
     });
     const capability = await probeNativeRuntime({
       build,
@@ -487,22 +555,40 @@ export async function runManualBootstrap(invocation) {
     // The native base currently lacks these official task runtimes. A real,
     // contained preflight must prove exact versions before any account starts;
     // merely building an unused environment image is not readiness.
-    const runtime =
-      task.id === "html-js-filter"
+    const runtime = historical
+      ? { node: "24.20.0", pnpm: "11.11.0", platform: config.historicalBuild.platform }
+      : task.id === "html-js-filter"
         ? { python: "3.12", packages: { beautifulsoup4: "4.13.4", lxml: "6.1.1" } }
         : { python: "3.13", packages: { numpy: "2.4.4", scipy: "1.17.1", shapely: "2.1.2", rtree: "1.4.1" } };
     try {
-      await container.exec([
-        "/usr/bin/env",
-        "-i",
-        "PATH=/usr/local/bin:/usr/bin:/bin",
-        "HOME=/tmp",
-        "python3",
-        "-I",
-        "-c",
-        "import sys,json,importlib.metadata as m; r=json.loads(sys.argv[1]); assert '.'.join(map(str,sys.version_info[:2]))==r['python']; assert all(m.version(k)==v for k,v in r['packages'].items())",
-        JSON.stringify(runtime),
-      ]);
+      if (historical) {
+        const environment = await requireHistoricalEnvironment(
+          historical.dependencies,
+          command,
+          abort.signal,
+        );
+        current();
+        await container.exec([
+          "/usr/bin/env",
+          "-i",
+          "PATH=/usr/local/bin:/usr/bin:/bin",
+          "/usr/local/bin/node",
+          "-e",
+          "const fs=require('node:fs'),c=require('node:crypto');const sha=p=>c.createHash('sha256').update(fs.readFileSync(p)).digest('hex');const r=JSON.parse(process.argv[1]);if(process.version!=='v24.20.0'||sha(process.execPath)!==r.nodeSha256||sha('/opt/pnpm/bin/pnpm.cjs')!==r.pnpmSha256)process.exit(1)",
+          JSON.stringify(environment.evidence),
+        ]);
+      } else
+        await container.exec([
+          "/usr/bin/env",
+          "-i",
+          "PATH=/usr/local/bin:/usr/bin:/bin",
+          "HOME=/tmp",
+          "python3",
+          "-I",
+          "-c",
+          "import sys,json,importlib.metadata as m; r=json.loads(sys.argv[1]); assert '.'.join(map(str,sys.version_info[:2]))==r['python']; assert all(m.version(k)==v for k,v in r['packages'].items())",
+          JSON.stringify(runtime),
+        ]);
     } catch {
       await stop("native-task-environment-unavailable");
       const result = {
@@ -517,6 +603,7 @@ export async function runManualBootstrap(invocation) {
       persist(join(root, "result.json"), result);
       return result;
     }
+    historicalReady = !!historical;
     persist(join(root, "task-runtime.json"), {
       taskId: task.id,
       image: build.image,
@@ -710,8 +797,25 @@ export async function runManualBootstrap(invocation) {
       modelConsumptionProven: false,
       controller: controller.evidence(),
     };
-    if (bridge && stopReason === "hard-deadline") {
+    if ((bridge || historical) && stopReason === "hard-deadline") {
       try {
+        let historicalResult;
+        if (historical) {
+          const patchPath = collectHistoricalPatch({
+            profile: historical.profile,
+            candidateRoot: allocations[0].hostCwd,
+            output: join(root, "historical-patch"),
+          });
+          historicalResult = await gradeHistorical({
+            profile: historical.profile,
+            build: historical.dependencies,
+            calibration: historical.calibration,
+            command,
+            patchPath,
+            output: join(root, "historical-verification"),
+            signal: gradingAbort.signal,
+          });
+        }
         persist(
           join(root, "verifier-result.json"),
           (result.taskResult = {
@@ -722,12 +826,14 @@ export async function runManualBootstrap(invocation) {
             acceptedRunId: sent.result.runId,
             candidateRoot: allocations[0].hostCwd,
             nativeImage: build.image,
-            verifier: await bridge.verify({
-              image: verifierImage,
-              candidateRoot: allocations[0].hostCwd,
-              output: join(root, "official-verification"),
-              signal: gradingAbort.signal,
-            }),
+            verifier:
+              historicalResult ??
+              (await bridge.verify({
+                image: verifierImage,
+                candidateRoot: allocations[0].hostCwd,
+                output: join(root, "official-verification"),
+                signal: gradingAbort.signal,
+              })),
           }),
         );
       } catch {
@@ -750,18 +856,25 @@ export async function runManualBootstrap(invocation) {
     };
     persist(join(root, "result.json"), result);
     return result;
-  } catch {
+  } catch (error) {
     let confirmed = false;
     try {
       await stop("bootstrap-or-run-failed");
-      confirmed = true;
+      confirmed = error?.code !== "historical-stop-unconfirmed";
     } catch {}
     const result = {
-      status: confirmed ? "failed" : "stop-unconfirmed",
+      status: confirmed
+        ? config.task.kind === "historical" && !historicalReady
+          ? "unsupported"
+          : "failed"
+        : "stop-unconfirmed",
       root,
       sendAttempted,
       retryAllowed: false,
-      reason: "manual-bootstrap-unavailable",
+      reason:
+        config.task.kind === "historical" && !historicalReady
+          ? "historical-linux-prerequisite-unavailable"
+          : "manual-bootstrap-unavailable",
       modelConsumptionProven: false,
     };
     persist(join(root, "failure.json"), result);

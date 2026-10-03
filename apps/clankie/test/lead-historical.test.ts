@@ -13,6 +13,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 const transports = vi.hoisted(() => new WeakMap<Function, object>());
+vi.mock("node:child_process", async (original) => {
+  const child = await original<typeof import("node:child_process")>();
+  return {
+    ...child,
+    execFileSync: (file: string, args: string[], options: any) => {
+      if (file !== "git") return child.execFileSync(file, args, options);
+      if (args[0] !== "-C") throw Error("Unexpected native archive fixture");
+      const codex = args[1]!.endsWith("codex");
+      if (args[2] === "remote")
+        return Buffer.from(
+          codex ? "git@github.com:openai/codex.git" : "git@github.com:Volpestyle/clankie-herdr.git",
+        );
+      if (args[2] === "rev-parse") return Buffer.from(args[3]!);
+      if (args[2] === "archive") return Buffer.from("inert native source archive");
+      throw Error("Unrecognized native archive fixture");
+    },
+  };
+});
+// @ts-expect-error -- manual checkout-only image builder, fake source and Docker boundaries.
+import { buildNativeImage } from "../../../scripts/evals/lead-native-image.mjs";
 vi.mock("../../../scripts/evals/lead-containment.mjs", async (original) => ({
   ...(await original<Record<string, unknown>>()),
   dockerTransportIdentity: (command: Function) => {
@@ -26,6 +46,7 @@ import * as historical from "../../../scripts/evals/lead-historical.mjs";
 const {
   stageHistorical,
   stageHistoricalWorkspace,
+  collectHistoricalPatch,
   buildHistoricalDependencies,
   materializeHistoricalDependencies,
   calibrateHistorical,
@@ -63,7 +84,11 @@ function fixture() {
     daemon: "fixture-daemon",
     architecture: "arm64",
     malformed: false,
+    beforeFault: undefined as string | undefined,
     failedAfter: false,
+    stopUnconfirmed: false,
+    waited: false,
+    stopInspections: 0,
     wait: undefined as undefined | (() => Promise<void>),
     onBuild: undefined as undefined | (() => void),
   };
@@ -87,7 +112,12 @@ function fixture() {
       return JSON.stringify({ ID: state.daemon, OSType: "linux", Architecture: state.architecture });
     if (args[0] === "image")
       return JSON.stringify([
-        { Id: imageId, Os: "linux", Architecture: state.architecture, RepoDigests: [nodeImage] },
+        {
+          Id: imageId,
+          Os: "linux",
+          Architecture: state.architecture,
+          RepoDigests: [nodeImage, "rust:1.96.1-bookworm@sha256:" + "d".repeat(64)],
+        },
       ]);
     if (args[0] === "build") {
       state.onBuild?.();
@@ -123,6 +153,8 @@ function fixture() {
     }
     const c = containers.get(args.at(-1)!) ?? containers.get(args[1]!);
     if (!c) throw Error(`Unexpected fixture command ${args[0]}`);
+    if (args[0] === "inspect" && state.stopUnconfirmed && state.waited && ++state.stopInspections > 1)
+      throw Error("fixture stop inspection unavailable");
     if (args[0] === "inspect")
       return JSON.stringify([
         {
@@ -159,6 +191,18 @@ function fixture() {
             duration: 1,
           })),
         }));
+        if (before && state.beforeFault) {
+          const assertions = testResults[0]!.assertionResults;
+          if (state.beforeFault === "import")
+            testResults.forEach((entry) => {
+              entry.assertionResults = [];
+            });
+          if (state.beforeFault === "missing") assertions.pop();
+          if (state.beforeFault === "skip") assertions[0]!.status = "pending";
+          if (state.beforeFault === "duplicate") assertions[1]!.fullName = assertions[0]!.fullName;
+          if (state.beforeFault === "duration") assertions[0]!.duration = NaN;
+          if (state.beforeFault === "identity") assertions[0]!.fullName = "different before test";
+        }
         writeFileSync(
           join(c.logs, "results.json"),
           JSON.stringify(
@@ -198,6 +242,7 @@ function fixture() {
     if (args[0] === "wait") {
       await state.wait?.();
       c.running = false;
+      state.waited = true;
       return String(c.exitCode);
     }
     if (args[0] === "kill") {
@@ -359,4 +404,75 @@ it("a failed fixed reference cannot mint calibration even with complete report c
   await expect(
     calibrateHistorical({ build, command: f.command, output: join(f.root, "failed-after") }),
   ).rejects.toThrow("calibration failed");
+});
+
+it.each(["import", "missing", "skip", "duplicate", "duration", "identity"])(
+  "refuses incomplete or unmatched before execution: %s",
+  async (fault) => {
+    const f = fixture(),
+      build = await f.build();
+    f.state.beforeFault = fault;
+    await expect(
+      calibrateHistorical({ build, command: f.command, output: join(f.root, "invalid-before") }),
+    ).rejects.toThrow("calibration failed");
+  },
+);
+it("collects source changes without executing native Git configuration or importing dependency trees", () => {
+  const f = fixture();
+  const { workspace } = stageHistoricalWorkspace(f.profile, join(f.root, "native"));
+  writeFileSync(join(workspace, ".git/config"), "[core]\n fsmonitor = /never/execute-native-config\n");
+  writeFileSync(join(workspace, "new-source.ts"), "export const changed = true;\n");
+  mkdirSync(join(workspace, "node_modules"));
+  writeFileSync(join(workspace, "node_modules/ignored"), "native dependencies");
+  const patch = readFileSync(
+    collectHistoricalPatch({ profile: f.profile, candidateRoot: workspace, output: join(f.root, "patch") }),
+    "utf8",
+  );
+  expect(patch).toContain("new-source.ts");
+  expect(patch).not.toContain("node_modules");
+  expect(patch).not.toContain("fsmonitor");
+  expect(f.calls).toEqual([]);
+});
+
+it("composes the native image from only the earned historical dependency image and platform", async () => {
+  const f = fixture(),
+    dependencies = await f.build();
+  for (const name of ["codex", "herdr"]) mkdirSync(join(f.root, name), { mode: 0o700 });
+  const options = {
+    command: f.command,
+    output: join(f.root, "native-build"),
+    codexSource: join(f.root, "codex"),
+    herdrSource: join(f.root, "herdr"),
+    nodeImage: f.nodeImage,
+    rustImage: "rust:1.96.1-bookworm@sha256:" + "d".repeat(64),
+    historicalEnvironment: dependencies,
+  };
+  await expect(
+    buildNativeImage({ ...options, historicalEnvironment: structuredClone(dependencies) }),
+  ).rejects.toThrow("Controller-built");
+  await expect(
+    buildNativeImage({ ...options, nodeImage: "node:24.20.0-bookworm@sha256:" + "e".repeat(64) }),
+  ).rejects.toThrow("Node base mismatch");
+  const built = await buildNativeImage(options);
+  expect(built.historicalEnvironment.profileSha256).toBe(f.profile.profileSha256);
+  const recipe = readFileSync(join(f.root, "native-build/Dockerfile"), "utf8");
+  expect(recipe).toContain(`FROM ${dependencies.image}\n`);
+  expect(recipe).not.toContain("COPY --from=node");
+  expect(f.calls.filter((args) => args[0] === "build").at(-1)).toContain("linux/arm64");
+});
+
+it("retains exact CID and typed uncertainty when final stop cannot be confirmed", async () => {
+  const f = fixture(),
+    build = await f.build();
+  const root = join(f.root, "uncertain");
+  mkdirSync(root, { mode: 0o700 });
+  stageHistoricalWorkspace(f.profile, join(root, "worktree"));
+  Object.assign(f.state, { waited: false, stopUnconfirmed: true, stopInspections: 0 });
+  await expect(materializeHistoricalDependencies({ build, command: f.command, root })).rejects.toMatchObject({
+    code: "historical-stop-unconfirmed",
+  });
+  expect(JSON.parse(readFileSync(join(root, "container-stop.json"), "utf8"))).toMatchObject({
+    containerId: expect.stringMatching(/^[a-f0-9]{64}$/),
+    stop: { confirmed: false },
+  });
 });

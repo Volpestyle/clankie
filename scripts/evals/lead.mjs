@@ -458,7 +458,7 @@ const referenceFileCounts = {
 const referenceSha256 = "e33d17ee80de218202f66b46c73a851f4fc869e3463cab7eb159d7327084ecfd";
 
 /** A process exit alone is never a green result: require every pinned file and test. */
-export function validateGraderReport(task, workspace, report) {
+export function validateGraderReport(task, workspace, report, { expectedFailure = false } = {}) {
   const bytes = readFileSync(referencePath);
   if (sha(bytes) !== referenceSha256) throw Error("Reference coverage pin changed");
   const reference = JSON.parse(bytes).results.find((r) => r.task === task.id);
@@ -474,51 +474,72 @@ export function validateGraderReport(task, workspace, report) {
   const failure = (detail) => ({ complete: false, detail, expectedTests, referenceSha256 });
   if (
     !report ||
-    report.success !== true ||
+    report.success !== !expectedFailure ||
     report.numTotalTests !== expectedTests ||
-    report.numPassedTests !== expectedTests ||
+    !Number.isSafeInteger(report.numPassedTests) ||
+    !Number.isSafeInteger(report.numFailedTests) ||
+    report.numPassedTests < 0 ||
+    (expectedFailure ? report.numFailedTests < 1 : report.numFailedTests !== 0) ||
+    report.numPassedTests + report.numFailedTests !== expectedTests ||
     !Array.isArray(report.testResults) ||
     report.testResults.length !== task.graders.length ||
-    ["numFailedTests", "numPendingTests", "numTodoTests", "numFailedTestSuites", "numPendingTestSuites"].some(
-      (key) => report[key] !== 0,
-    )
+    [
+      "numPendingTests",
+      "numTodoTests",
+      "numPendingTestSuites",
+      ...(expectedFailure ? [] : ["numFailedTestSuites"]),
+    ].some((key) => report[key] !== 0)
   )
     return failure("Missing, skipped, failed or incomplete held-out test coverage");
   const expectedFiles = new Map(
     task.graders.map((g, i) => [join(workspace, g.path), referenceFileCounts[task.id][i]]),
   );
-  let count = 0;
+  let count = 0,
+    failed = 0;
+  const identities = [];
   for (const file of report.testResults) {
     const expectedCount = expectedFiles.get(file.name);
     if (
       !expectedFiles.delete(file.name) ||
-      file.status !== "passed" ||
+      !["passed", ...(expectedFailure ? ["failed"] : [])].includes(file.status) ||
       !Array.isArray(file.assertionResults) ||
       file.assertionResults.length !== expectedCount
     )
       return failure("Missing, duplicate or unexpected grader file");
     const names = new Set();
+    let fileFailures = 0;
     for (const assertion of file.assertionResults) {
       if (
-        assertion.status !== "passed" ||
+        !["passed", ...(expectedFailure ? ["failed"] : [])].includes(assertion.status) ||
         typeof assertion.fullName !== "string" ||
         !assertion.fullName ||
         names.has(assertion.fullName) ||
         !Array.isArray(assertion.failureMessages) ||
-        assertion.failureMessages.length ||
+        (assertion.status === "passed"
+          ? assertion.failureMessages.length !== 0
+          : assertion.failureMessages.length === 0) ||
         !Number.isFinite(assertion.duration) ||
         assertion.duration < 0
       )
         return failure("Unexecuted, duplicate or failed grader assertion");
       names.add(assertion.fullName);
+      identities.push([file.name.slice(workspace.length + 1), assertion.fullName]);
+      if (assertion.status === "failed") {
+        failed++;
+        fileFailures++;
+      }
       count++;
     }
+    if (file.status !== (fileFailures ? "failed" : "passed"))
+      return failure("Grader file status contradicts executed assertions");
   }
-  return count === expectedTests && expectedFiles.size === 0
+  return count === expectedTests && expectedFiles.size === 0 && failed === report.numFailedTests
     ? {
         complete: true,
         expectedTests,
         executedTests: count,
+        failedTests: failed,
+        identities: identities.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
         files: report.testResults.length,
         referenceSha256,
       }

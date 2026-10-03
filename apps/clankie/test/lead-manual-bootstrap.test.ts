@@ -24,6 +24,7 @@ const fake = vi.hoisted(() => ({
   missingCensus: false,
   historicalReady: true,
   stopConfirmed: true,
+  calibrationStopUnconfirmed: false,
 }));
 vi.mock("node:fs", async (original) => {
   const fs = await original<typeof import("node:fs")>();
@@ -95,9 +96,60 @@ vi.mock("../../../scripts/evals/lead-containment.mjs", () => ({
 }));
 vi.mock("../../../scripts/evals/lead-native-image.mjs", () => ({
   buildNativeImage: async (input: any) => {
-    expect(input.taskEnvironment.fixtureEnvironmentBrand).toBe(true);
+    expect(
+      input.taskEnvironment?.fixtureEnvironmentBrand ?? input.historicalEnvironment?.fixtureHistoricalBrand,
+    ).toBe(true);
+    expect(!(input.taskEnvironment && input.historicalEnvironment)).toBe(true);
     fake.events.push("build");
     return { image: "sha256:" + "b".repeat(64) };
+  },
+}));
+vi.mock("../../../scripts/evals/lead-historical.mjs", () => ({
+  stageHistorical: () => {
+    fake.events.push("historical-stage");
+    return Object.freeze({ fixtureProfile: true });
+  },
+  stageHistoricalWorkspace: (profile: any, output: string) => {
+    expect(profile.fixtureProfile).toBe(true);
+    mkdirSync(output, { mode: 0o700 });
+    mkdirSync(join(output, ".git"));
+    writeFileSync(join(output, "TASK.md"), "Pinned historical task");
+    fake.events.push("historical-workspace");
+  },
+  buildHistoricalDependencies: async (input: any) => {
+    expect(input.platform).toBe("linux/arm64");
+    expect(input.profile.fixtureProfile).toBe(true);
+    fake.events.push("historical-build");
+    return Object.freeze({
+      fixtureHistoricalBrand: true,
+      evidence: { nodeSha256: "a".repeat(64), pnpmSha256: "b".repeat(64) },
+    });
+  },
+  calibrateHistorical: async (input: any) => {
+    expect(input.build.fixtureHistoricalBrand).toBe(true);
+    expect(fake.events).not.toContain("observer-create");
+    fake.events.push("historical-calibrate");
+    if (fake.calibrationStopUnconfirmed)
+      throw Object.assign(Error("stop uncertain"), { code: "historical-stop-unconfirmed" });
+    if (!fake.historicalReady) throw Error("calibration unavailable");
+    return Object.freeze({ fixtureCalibration: true });
+  },
+  materializeHistoricalDependencies: async (input: any) => {
+    expect(input.build.fixtureHistoricalBrand).toBe(true);
+    expect(input.containerCwd).toMatch(/^\/eval\/tasks\/(lead|worker-[12])$/);
+    mkdirSync(join(input.root, "worktree/node_modules"));
+    fake.events.push("historical-materialize");
+  },
+  requireHistoricalEnvironment: async (build: any) => ({ evidence: build.evidence }),
+  collectHistoricalPatch: ({ output }: any) => {
+    fake.events.push("historical-patch");
+    return join(output, "candidate.patch");
+  },
+  gradeHistorical: async (input: any) => {
+    expect(input.calibration.fixtureCalibration).toBe(true);
+    expect(fake.events).toContain("container-stop");
+    fake.events.push("historical-grade");
+    return { status: "passed", coverage: { executedTests: 11 } };
   },
 }));
 vi.mock("../../../scripts/evals/lead-native-capability.mjs", () => ({
@@ -298,6 +350,7 @@ beforeEach(() => {
     missingCensus: false,
     historicalReady: true,
     stopConfirmed: true,
+    calibrationStopUnconfirmed: false,
   });
   Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
   Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
@@ -326,7 +379,7 @@ function fixture() {
     mode: 0o600,
   });
   writeFileSync(socketPath, "fake socket");
-  const config = {
+  const config: any = {
     schemaVersion: 1,
     ownerDecisionReference: "explicit manual fixture; not approval",
     arm: "clankie-hires",
@@ -475,15 +528,58 @@ it("retains stop-unconfirmed rather than a finished claim", async () => {
   });
 });
 
-it("reports missing historical dependency preparation and grading before any native effects", async () => {
+function historicalFixture() {
   const f = fixture();
   f.config.task = { kind: "historical", id: "history" };
+  const pnpmTarball = join(f.root, "pnpm.tgz");
+  writeFileSync(pnpmTarball, "fake pnpm", { mode: 0o600 });
+  f.config.historicalBuild = {
+    platform: "linux/arm64",
+    nodeImage: f.config.nativeBuild.nodeImage,
+    pnpmTarball,
+    pnpmSha256: createHash("sha256").update("fake pnpm").digest("hex"),
+  };
   f.write();
+  return f;
+}
+it("requires exact strict historical artifact/platform configuration before effects", () => {
+  const f = historicalFixture();
+  f.config.historicalBuild.calibration = { passed: true };
+  f.write();
+  expect(() => bootstrap.readManualInvocation(f.path)).toThrow(/strict/);
+  delete f.config.historicalBuild.calibration;
+  f.config.historicalBuild.platform = undefined;
+  f.write();
+  expect(() => bootstrap.readManualInvocation(f.path)).toThrow(/pinned historical/);
+  f.config.historicalBuild.platform = "linux/arm64";
+  writeFileSync(f.config.historicalBuild.pnpmTarball, "changed");
+  f.write();
+  expect(() => bootstrap.readManualInvocation(f.path)).toThrow(/artifact changed/);
+  expect(fake.events).toEqual([]);
+});
+it("historical calibration failure remains unsupported before accounts/native lifecycle", async () => {
+  const f = historicalFixture();
+  fake.historicalReady = false;
   expect(await bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path))).toMatchObject({
     status: "unsupported",
-    reason: "historical-linux-dependency-preparation-and-grading-unimplemented",
+    reason: "historical-linux-prerequisite-unavailable",
+    sendAttempted: false,
   });
-  expect(fake.events).toEqual([]);
+  expect(fake.events).toContain("historical-calibrate");
+  expect(fake.events).not.toContain("build");
+  expect(fake.observers).toHaveLength(0);
+});
+it("composes historical dependencies and earned calibration before native accounts, grading only after stop", async () => {
+  vi.useFakeTimers();
+  const f = historicalFixture();
+  const running = bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path));
+  await vi.waitFor(() => expect(fake.events).toContain("task-send"));
+  expect(fake.events.indexOf("historical-calibrate")).toBeLessThan(fake.events.indexOf("build"));
+  expect(fake.events.filter((event) => event === "historical-materialize")).toHaveLength(3);
+  expect(fake.events).not.toContain("official-stage");
+  await vi.advanceTimersByTimeAsync(1100);
+  expect(await running).toMatchObject({ status: "stopped", taskResult: { verifier: { status: "passed" } } });
+  expect(fake.events.indexOf("container-stop")).toBeLessThan(fake.events.indexOf("historical-grade"));
 });
 it("refuses absent exact task runtime before observer/account startup", async () => {
   const f = fixture();
@@ -535,4 +631,14 @@ it("composes the HTML native environment before its separate mediated verifier",
   expect(await running).toMatchObject({
     taskResult: { taskId: "html-js-filter", verifier: { status: "passed" } },
   });
+});
+
+it("retains historical preparation stop uncertainty rather than an unsupported settled claim", async () => {
+  const f = historicalFixture();
+  fake.calibrationStopUnconfirmed = true;
+  expect(await bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path))).toMatchObject({
+    status: "stop-unconfirmed",
+    sendAttempted: false,
+  });
+  expect(fake.observers).toHaveLength(0);
 });
