@@ -1671,6 +1671,7 @@ describe("hiring a seat", () => {
       expect(result).toEqual({
         outcome: "failed",
         reason: "at_capacity",
+        deliveryStage: "rejected",
         detail: "4 of 4 hired agents are running on this Clankie; close one before hiring another.",
       });
       expect(createTab).not.toHaveBeenCalled();

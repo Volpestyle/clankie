@@ -1565,6 +1565,7 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("turn"),
+    deliveryStage: DeliveryStageSchema.optional(),
     runId: OperatorConversationRunIdSchema,
     phase: z.enum(["accepted", "completed", "failed", "cancelled"]),
     reasonCode: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX).optional(),

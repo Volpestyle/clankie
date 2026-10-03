@@ -5,7 +5,29 @@ export async function loadNativeContext(client, sessionId, bridge, signal) {
     throw new Error("Invalid native session identity");
   const session = await client.session.get({ path: { id: sessionId }, throwOnError: true, signal });
   if (session.data?.id !== sessionId) throw new Error("Native session identity mismatch");
-  await bridge("bind", { sessionId });
+  const binding = await bridge("bind", { sessionId });
+  if (binding?.uncertain) {
+    const receipt = binding.uncertain;
+    if (receipt.sessionId !== sessionId)
+      throw new Error("Uncertain event belongs to another native session; reconcile that session first");
+    const expected = `<clankie-seat-event>\n${JSON.stringify(receipt.event)}\n</clankie-seat-event>`;
+    const messages = await client.session.messages({ path: { id: sessionId }, throwOnError: true, signal });
+    const matched = messages.data?.some(
+      ({ info, parts }) =>
+        info.sessionID === sessionId &&
+        info.role === "user" &&
+        parts.some(
+          (part) =>
+            part.sessionID === sessionId &&
+            part.messageID === info.id &&
+            part.type === "text" &&
+            part.text === expected,
+        ),
+    );
+    if (!matched)
+      throw new Error("Uncertain native event has no exact transcript receipt; every retry remains blocked");
+    await bridge("reconcile", { sessionId, eventId: receipt.event.id, detail: expected });
+  }
   const context = await bridge("context", { sessionId });
   if (typeof context.text !== "string" || !context.text.trim())
     throw new Error("Clankie operator context unavailable");
@@ -17,11 +39,15 @@ export async function loadNativeContext(client, sessionId, bridge, signal) {
 export async function deliverNativeEvent(client, sessionId, event, bridge, signal) {
   const status = await client.session.status({ throwOnError: true, signal });
   if (status.data?.[sessionId]?.type && status.data[sessionId].type !== "idle")
-    return { status: "busy", detail: "Waiting for the bound session to become idle; no steering." };
+    return {
+      status: "busy",
+      deliveryStage: "stored",
+      detail: "Waiting for the bound session to become idle; no steering.",
+    };
   const session = await client.session.get({ path: { id: sessionId }, throwOnError: true, signal });
   if (session.data?.id !== sessionId) throw new Error("Native session identity mismatch");
-  // This per-launch journal claim precedes dispatch. A lost response stops
-  // this launcher from resending; journals are not a cross-launch dedupe fence.
+  // The binding-scoped durable claim precedes dispatch and blocks every launcher
+  // until native acceptance or an exact native transcript receipt reconciles it.
   await bridge("claim", { sessionId, eventId: event.id });
   try {
     await client.session.promptAsync({
@@ -45,7 +71,11 @@ export async function deliverNativeEvent(client, sessionId, event, bridge, signa
     );
   }
   await bridge("receipt", { sessionId, eventId: event.id, status: "delivered" });
-  return { status: "delivered", detail: "Accepted by the bound session API; completion is separate." };
+  return {
+    status: "delivered",
+    deliveryStage: "consumed",
+    detail: "Accepted by the bound session API; completion is separate.",
+  };
 }
 
 export function projectMessages(sessionId, messages) {

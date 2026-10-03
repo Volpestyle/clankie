@@ -1,6 +1,7 @@
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import type {
+  DeliveryStage,
   EvaluatorCommand,
   EvaluatorStatus,
   CaptainChannelTurnResult,
@@ -60,14 +61,15 @@ export type HireSeat = (seat: SpawnOperatorSeat, brief?: string) => Promise<Oper
  * personaId, or conversationId `hire_agent` returned.
  */
 export type MessageSeat = (seat: string, message: string) => Promise<SeatMessageResult>;
-type SeatMessageResult =
+type SeatMessageResult = { readonly deliveryStage?: DeliveryStage } & (
   | (Extract<FleetSeatDelivery, { outcome: "delivered" }> & {
       readonly seatId: string;
       readonly status: string;
     })
   | (Extract<FleetSeatDelivery, { outcome: "unconfirmed" | "undelivered" }> & { readonly seatId: string })
   | { readonly outcome: "seat_offline"; readonly seatId: string }
-  | { readonly outcome: "unknown_seat"; readonly seat: string };
+  | { readonly outcome: "unknown_seat"; readonly seat: string }
+);
 
 export interface LaneToolResult {
   readonly content: readonly (
@@ -140,6 +142,8 @@ export interface CaptainPort {
    * The seat's outbox (ADR 0152): wakes, watches, and escalations for a bound
    * head, long-polled by its bridge. Polling is what binds the head.
    */
+  acknowledgeSeatEvent(eventId: string, conversationId?: string): Promise<boolean>;
+  acknowledgeFleetSeatEvent(paneId: string, eventId: string): Promise<boolean>;
   pollSeatEvents(
     waitMs: number,
     signal?: AbortSignal,
@@ -239,6 +243,8 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
     laneMemoryCard: async () => "",
+    acknowledgeSeatEvent: async () => false,
+    acknowledgeFleetSeatEvent: async () => false,
     pollSeatEvents: async () => [],
     pollFleetSeatEvents: async () => undefined,
     recordSeatHook: async () => false,

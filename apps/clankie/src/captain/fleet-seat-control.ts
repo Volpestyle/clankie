@@ -1,3 +1,6 @@
+import { fleetDeliveryStage } from "@clankie/protocol";
+import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
+import { channelBody } from "./claude-worker-seat.ts";
 import type { ExternalCodexControl } from "./external-codex-control.ts";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import { basename } from "node:path";
@@ -18,7 +21,10 @@ export function createFleetSeatControl(
    */
   remoteCodexQueue?: (fleet: string, sessionId: string, text: string) => Promise<boolean>,
   remoteCodexControl?: (fleet: string, paneId: string) => ExternalCodexControl | undefined,
+  uncertaintyPath?: string,
 ) {
+  const fence = new DeliveryFence(uncertaintyPath);
+  const active = new Set<string>();
   const attach = async (agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> => {
     const fleet = splitFleetQualified(agent.paneId)?.fleet;
     const available = fleet === undefined ? adapters : remoteAdapters?.(fleet);
@@ -93,48 +99,145 @@ export function createFleetSeatControl(
     }
   };
 
+  const dispatch = async (
+    current: HerdrAgentSnapshot | undefined,
+    text: string,
+    begin: () => void,
+    clear: () => void,
+    /** A bound mailbox can work even while terminal discovery is unavailable. */
+    uncontrolled?: () => Promise<FleetSeatDelivery>,
+  ): Promise<FleetSeatDelivery> => {
+    const control = current === undefined ? undefined : await attach(current);
+    // A chosen channel is the sole delivery attempt. Uncertain delivery must
+    // never be replayed through a queue, mailbox or terminal.
+    if (control !== undefined) {
+      begin();
+      try {
+        const delivery = await control.send(text);
+        if (delivery.outcome === "accepted")
+          return { outcome: "delivered", messageId: delivery.messageId, state: delivery.state };
+        if (delivery.outcome === "unconfirmed" || delivery.outcome === "offline") return delivery;
+        return {
+          outcome: "undelivered",
+          detail: "The harness released its channel; no terminal input was sent.",
+        };
+      } catch (error) {
+        return { outcome: "unconfirmed", detail: String(error) };
+      }
+    }
+    if (isMessageableSeat(current) && current.agent === "codex") {
+      begin();
+      const delivery = await deliverCodexQueue(current, text);
+      if (delivery !== undefined) return delivery;
+      clear();
+    }
+    if (uncontrolled !== undefined) return uncontrolled();
+    return isMessageableSeat(current)
+      ? {
+          outcome: "undelivered",
+          detail: "No structured seat channel is available; no terminal input was sent.",
+        }
+      : { outcome: "offline", detail: "The native seat is unavailable." };
+  };
   return {
     attach,
     async deliverToSeat(
       seatId: string,
       text: string,
-      /** A bound mailbox can work even while terminal discovery is unavailable. */
       uncontrolled?: () => Promise<FleetSeatDelivery>,
     ): Promise<FleetSeatDelivery> {
-      let current: HerdrAgentSnapshot | undefined;
-      try {
-        current = await runner.resolveTerminal(seatId);
-      } catch {
-        return uncontrolled?.() ?? { outcome: "offline", detail: "Native seat discovery is unavailable." };
-      }
-      const control = current === undefined ? undefined : await attach(current);
-      // A chosen channel is the sole delivery attempt. Uncertain delivery must
-      // never be replayed through a queue, mailbox or terminal.
-      if (control !== undefined) {
-        try {
-          const delivery = await control.send(text);
-          if (delivery.outcome === "accepted")
-            return { outcome: "delivered", messageId: delivery.messageId, state: delivery.state };
-          if (delivery.outcome === "unconfirmed" || delivery.outcome === "offline") return delivery;
+      const agent = await runner.resolveTerminal(seatId).catch(() => undefined);
+      const session = agent?.session;
+      const sessionId =
+        session === undefined
+          ? undefined
+          : session.kind === "id"
+            ? session.value
+            : basename(session.value, ".jsonl");
+      const pending = fence.pending(seatId);
+      if (pending !== undefined) {
+        // Only a newly observed, complete operator message in the original session
+        // can reconcile a lost receipt. Inspection never sends a replacement.
+        const transcript =
+          !active.has(seatId) &&
+          agent !== undefined &&
+          sessionId !== undefined &&
+          sessionId === pending.sessionId &&
+          agent.paneId === pending.paneId &&
+          pending.beforeIds !== undefined
+            ? await runner.transcript?.(agent).catch(() => undefined)
+            : undefined;
+        const matched = transcript?.entries.find(
+          (entry) =>
+            entry.type === "message" &&
+            entry.role === "operator" &&
+            !pending.beforeIds?.includes(entry.id) &&
+            deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
+        );
+        if (matched !== undefined && fence.reconcile(seatId, pending.messageId)) {
+          if (pending.fingerprint !== deliveryFingerprint(text))
+            return {
+              outcome: "undelivered",
+              deliveryStage: "unavailable",
+              detail:
+                "The original uncertain receipt was reconciled. This different message was not sent; submit it again if still needed.",
+            };
           return {
-            outcome: "undelivered",
-            detail: "The harness released its channel; no terminal input was sent.",
+            outcome: "delivered",
+            deliveryStage: "consumed",
+            messageId: matched.id,
+            state: "started",
+            detail:
+              "The original uncertain message was found in its native session; no new message was sent.",
           };
-        } catch (error) {
-          return { outcome: "unconfirmed", detail: String(error) };
         }
+        return {
+          outcome: "unconfirmed",
+          deliveryStage: "uncertain",
+          messageId: pending.messageId,
+          detail:
+            "An earlier delivery remains uncertain; reconcile its original native receipt before any retry. No new message was sent.",
+        };
       }
-      if (isMessageableSeat(current) && current.agent === "codex") {
-        const delivery = await deliverCodexQueue(current, text);
-        if (delivery !== undefined) return delivery;
+      const transcript =
+        agent === undefined ? undefined : await runner.transcript?.(agent).catch(() => undefined);
+      // Recheck after asynchronous inspection so concurrent callers cannot both dispatch.
+      if (fence.pending(seatId) !== undefined)
+        return {
+          outcome: "unconfirmed",
+          deliveryStage: "uncertain",
+          detail: "A delivery is already awaiting its receipt; no new message was sent.",
+        };
+      const receiptData = {
+        fingerprint: deliveryFingerprint(text),
+        ...(sessionId === undefined ? {} : { sessionId }),
+        ...(agent === undefined ? {} : { paneId: agent.paneId }),
+        ...(transcript === undefined ? {} : { beforeIds: transcript.entries.map((entry) => entry.id) }),
+      };
+      let receipt: ReturnType<DeliveryFence["begin"]> | undefined;
+      const begin = () => {
+        receipt = fence.begin(seatId, receiptData);
+      };
+      const clear = () => {
+        if (receipt !== undefined) fence.reconcile(seatId, receipt.messageId);
+        receipt = undefined;
+      };
+      active.add(seatId);
+      try {
+        const result = await dispatch(agent, text, begin, clear, uncontrolled);
+        if (result.outcome !== "unconfirmed") clear();
+        return { ...result, deliveryStage: fleetDeliveryStage(result) };
+      } catch (error) {
+        if (receipt === undefined) throw error;
+        return {
+          outcome: "unconfirmed",
+          deliveryStage: "uncertain",
+          ...(receipt === undefined ? {} : { messageId: receipt.messageId }),
+          detail: String(error),
+        };
+      } finally {
+        active.delete(seatId);
       }
-      if (uncontrolled !== undefined) return uncontrolled();
-      return isMessageableSeat(current)
-        ? {
-            outcome: "undelivered",
-            detail: "No structured seat channel is available; no terminal input was sent.",
-          }
-        : { outcome: "offline", detail: "The native seat is unavailable." };
     },
   };
 }

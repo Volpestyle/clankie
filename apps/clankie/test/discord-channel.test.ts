@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
@@ -92,7 +95,7 @@ describe("Discord channel turn routes", () => {
     const first = await submit();
     const repeated = await submit();
     expect(first.status).toBe(202);
-    await expect(first.json()).resolves.toEqual({ state: "pending" });
+    await expect(first.json()).resolves.toEqual({ state: "pending", deliveryStage: "stored" });
     expect(repeated.status).toBe(202);
     expect((await status()).status).toBe(202);
     expect((await status("Bearer voice")).status).toBe(403);
@@ -133,7 +136,7 @@ describe("Discord channel turn routes", () => {
     expect(submitted[0]?.trigger).toMatchObject({ kind: "voice_event", actorId: "user-1" });
   });
 
-  it("does not cache a typed model failure as a completed delivery", async () => {
+  it("retains a typed failure without dispatching the same delivery again", async () => {
     let calls = 0;
     const { app } = await createClankieApp({
       captain: createStubCaptain({
@@ -151,12 +154,13 @@ describe("Discord channel turn routes", () => {
       state: "failed",
     });
     expect(await (await post(app, turnRequest(), "Bearer discord-captain")).json()).toMatchObject({
-      state: "silent",
+      state: "failed",
+      deliveryStage: "uncertain",
     });
-    expect(calls).toBe(2);
+    expect(calls).toBe(1);
   });
 
-  it("answers 502 on a failed turn and lets the same delivery retry", async () => {
+  it("answers uncertain on a rejected turn and never dispatches the same delivery again", async () => {
     let calls = 0;
     const { app } = await createClankieApp({
       captain: createStubCaptain({
@@ -177,8 +181,126 @@ describe("Discord channel turn routes", () => {
     const failed = await post(app, turnRequest(), "Bearer discord-captain");
     expect(failed.status).toBe(502);
     const retried = await post(app, turnRequest(), "Bearer discord-captain");
-    expect(retried.status).toBe(200);
-    await expect(retried.json()).resolves.toMatchObject({ response: "Second try." });
+    expect(retried.status).toBe(502);
+    await expect(retried.json()).resolves.toMatchObject({ deliveryStage: "uncertain" });
+    expect(calls).toBe(1);
+  });
+  it("persists before dispatch, survives restart and retention time, then records only the original late result", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "discord-receipts-"));
+    const path = join(directory, "receipts.json");
+    let finish!: (result: { state: "silent"; captainSessionId: string; turnId: string }) => void;
+    let calls = 0;
+    let now = new Date("2026-10-01T00:00:00Z");
+    const dependencies = {
+      discordTurnReceiptPath: path,
+      clock: () => now,
+      captain: createStubCaptain({
+        submitDiscordTurn: () => {
+          calls += 1;
+          expect(JSON.parse(readFileSync(path, "utf8"))["discord:message-1"]).toMatchObject({
+            lane: "discord_text",
+          });
+          return new Promise<{ state: "silent"; captainSessionId: string; turnId: string }>((resolve) => {
+            finish = resolve;
+          });
+        },
+      }),
+      authenticateCaptain: async () => ({
+        captainId: "discord-bridge",
+        steerSourceLane: "discord_text" as const,
+      }),
+    };
+    try {
+      const original = await createClankieApp(dependencies);
+      const request = () => ({
+        method: "POST",
+        headers: { "content-type": "application/json", prefer: "respond-async" },
+        body: JSON.stringify(turnRequest()),
+      });
+      expect((await original.app.request("/v1/captain/channel-turns", request())).status).toBe(202);
+      now = new Date("2026-10-03T00:00:00Z");
+      expect((await original.app.request("/v1/captain/channel-turns", request())).status).toBe(202);
+      original.close();
+      const restarted = await createClankieApp(dependencies);
+      const retry = await restarted.app.request("/v1/captain/channel-turns", request());
+      expect(retry.status).toBe(502);
+      expect(await retry.json()).toMatchObject({ deliveryStage: "uncertain" });
+      expect((await restarted.app.request("/v1/captain/channel-turns/message-1")).status).toBe(502);
+      expect((await post(restarted.app, { ...turnRequest(), contextMessages: [] })).status).toBe(409);
+      expect(calls).toBe(1);
+      finish({ state: "silent", captainSessionId: "original-session", turnId: "original-turn" });
+      await post(original.app, turnRequest());
+      const settledRestart = await createClankieApp(dependencies);
+      expect(await (await post(settledRestart.app, turnRequest())).json()).toMatchObject({
+        state: "silent",
+        deliveryStage: "responded",
+        turnId: "original-turn",
+      });
+      expect(calls).toBe(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["rejected", "typed-failure"] as const)(
+    "retains %s across restart without a replacement turn",
+    async (failure) => {
+      const directory = mkdtempSync(join(tmpdir(), "discord-receipts-"));
+      let calls = 0;
+      const dependencies = {
+        discordTurnReceiptPath: join(directory, "receipts.json"),
+        captain: createStubCaptain({
+          submitDiscordTurn: async () => {
+            calls += 1;
+            if (failure === "rejected") throw new Error("connection lost after dispatch");
+            return { state: "failed" as const, code: "captain_session_failed" };
+          },
+        }),
+        authenticateCaptain: async () => ({
+          captainId: "discord-bridge",
+          steerSourceLane: "discord_text" as const,
+        }),
+      };
+      try {
+        const original = await createClankieApp(dependencies);
+        await post(original.app, turnRequest());
+        original.close();
+        const restarted = await createClankieApp(dependencies);
+        expect(await (await post(restarted.app, turnRequest())).json()).toMatchObject({
+          deliveryStage: "uncertain",
+        });
+        expect(calls).toBe(1);
+        restarted.close();
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("fails closed on malformed or unwritable receipts without starting a turn", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "discord-receipts-"));
+    const malformed = join(directory, "bad.json");
+    writeFileSync(malformed, "not json");
+    let calls = 0;
+    try {
+      for (const path of [malformed, join(directory, "blocked", "child.json")]) {
+        const { app } = await createClankieApp({
+          discordTurnReceiptPath: path,
+          captain: createStubCaptain({
+            submitDiscordTurn: async () => {
+              calls += 1;
+              return { state: "failed", code: "unexpected" };
+            },
+          }),
+          authenticateCaptain: async () => ({ captainId: "discord-bridge", steerSourceLane: "discord_text" }),
+        });
+        if (path !== malformed) writeFileSync(join(directory, "blocked"), "blocks directory creation");
+        expect((await post(app, turnRequest())).status).toBe(502);
+      }
+      expect(calls).toBe(0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 

@@ -209,3 +209,40 @@ it("requires operator authority and a workspace create request for a fresh seat 
     clankie.close();
   }
 });
+
+it("acknowledges an exact head event only through its operator binding", async () => {
+  const calls: string[] = [];
+  const clankie = await createClankieApp({
+    captain: createStubCaptain({
+      acknowledgeSeatEvent: async (id) => {
+        calls.push(id);
+        return id === "seat-original";
+      },
+    }),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer operator"
+        ? { operatorId: "owner", steerSourceLane: "tui" }
+        : undefined,
+  });
+  try {
+    const uri = `${OPERATOR_SEAT_EVENTS_PATH}/seat-original/ack`;
+    expect((await clankie.app.request(uri, { method: "POST" })).status).toBe(401);
+    expect(calls).toEqual([]);
+    const ack = await clankie.app.request(uri, {
+      method: "POST",
+      headers: { authorization: "Bearer operator" },
+    });
+    expect(await ack.json()).toMatchObject({ acknowledged: true, deliveryStage: "delivered" });
+    expect(
+      (
+        await clankie.app.request(`${OPERATOR_SEAT_EVENTS_PATH}/different/ack`, {
+          method: "POST",
+          headers: { authorization: "Bearer operator" },
+        })
+      ).status,
+    ).toBe(404);
+    expect(calls).toEqual(["seat-original", "different"]);
+  } finally {
+    clankie.close();
+  }
+});

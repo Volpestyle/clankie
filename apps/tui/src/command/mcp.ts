@@ -95,13 +95,14 @@ export interface LaneToolUpstream {
   callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult>;
   /** Long-poll the seat's outbox; empty when nothing arrived inside `waitMs`, or once `signal` aborts. */
   pollEvents(waitMs: number, signal?: AbortSignal): Promise<readonly OperatorSeatEvent[]>;
+  acknowledge?(eventId: string): Promise<boolean>;
   /** Answer one escalation; false when the service no longer waits on it. */
   reply(eventId: string, text: string): Promise<boolean>;
   close(): Promise<void>;
 }
 
 /** The fleet mailbox as the seat bridge sees it: poll and close, no tools. */
-type FleetMailboxUpstream = Pick<LaneToolUpstream, "pollEvents" | "close">;
+type FleetMailboxUpstream = Pick<LaneToolUpstream, "pollEvents" | "acknowledge" | "close">;
 
 export interface McpCommandOptions {
   readonly repoRoot?: string;
@@ -305,7 +306,7 @@ export function createSeatBridge(
  */
 export async function pumpSeatEvents(
   server: Pick<Server<Request, ChannelNotification, Result>, "notification">,
-  upstream: Pick<LaneToolUpstream, "pollEvents">,
+  upstream: Pick<LaneToolUpstream, "pollEvents" | "acknowledge">,
   signal: AbortSignal,
   options: {
     readonly waitMs?: number;
@@ -345,6 +346,8 @@ export async function pumpSeatEvents(
           },
         },
       });
+      if (upstream.acknowledge !== undefined && !(await upstream.acknowledge(event.id)))
+        throw new Error("The bridge notification was sent but its receipt could not be reconciled.");
     }
   }
 }
@@ -461,6 +464,19 @@ export async function connectLaneUpstream(input: {
       if (!response.ok) throw new Error(`seat outbox answered ${String(response.status)}`);
       return OperatorSeatEventsPageSchema.parse(await response.json()).events;
     },
+    async acknowledge(eventId) {
+      const response = await fetchImpl(
+        urlFor(`${OPERATOR_SEAT_EVENTS_PATH}/${encodeURIComponent(eventId)}/ack`),
+        {
+          method: "POST",
+          headers,
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (response.status === 404) return false;
+      if (!response.ok) throw new Error(`seat acknowledgment answered ${String(response.status)}`);
+      return true;
+    },
     async reply(eventId, text) {
       const response = await fetchImpl(
         urlFor(`${OPERATOR_SEAT_EVENTS_PATH}/${encodeURIComponent(eventId)}/reply`),
@@ -506,7 +522,11 @@ const MESSAGE_CLANKIE_TOOL = {
  * output, never as the owner's instruction.
  */
 export function createFleetSeatBridge(
-  send?: (text: string) => Promise<boolean>,
+  send?: (
+    text: string,
+  ) => Promise<
+    boolean | { received: boolean; deliveryStage: "stored" | "unavailable" | "rejected" | "uncertain" }
+  >,
 ): Server<Request, ChannelNotification, Result> {
   const server = new Server<Request, ChannelNotification, Result>(
     { name: FLEET_SEAT_MCP_SERVER, version: "0.3.0" },
@@ -521,16 +541,38 @@ export function createFleetSeatBridge(
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: send === undefined ? [] : [MESSAGE_CLANKIE_TOOL],
   }));
+  let uncertain = false;
   if (send !== undefined)
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (request.params.name !== MESSAGE_CLANKIE_TOOL.name)
         return { content: [{ type: "text", text: `Unknown tool ${request.params.name}` }], isError: true };
       const text = String((request.params.arguments as { text?: unknown } | undefined)?.text ?? "").trim();
       if (text === "") return { content: [{ type: "text", text: "Say what to tell him." }], isError: true };
-      const sent = await send(text.slice(0, OPERATOR_CONVERSATION_TEXT_MAX)).catch(() => false);
-      return sent
-        ? { content: [{ type: "text", text: "Sent to Clankie." }] }
-        : { content: [{ type: "text", text: "Could not reach Clankie; not sent." }], isError: true };
+      if (uncertain)
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                received: false,
+                deliveryStage: "uncertain",
+                detail: "The original receipt is unresolved; no retry was sent.",
+              }),
+            },
+          ],
+          isError: true,
+        };
+      const sent = await send(text.slice(0, OPERATOR_CONVERSATION_TEXT_MAX)).catch(() => {
+        uncertain = true;
+        return { received: false, deliveryStage: "uncertain" as const };
+      });
+      const receipt =
+        typeof sent === "boolean" ? { received: sent, deliveryStage: sent ? "stored" : "unavailable" } : sent;
+      if (receipt.deliveryStage === "uncertain") uncertain = true;
+      return {
+        content: [{ type: "text", text: JSON.stringify(receipt) }],
+        ...(receipt.received ? {} : { isError: true }),
+      };
     });
   return server;
 }
@@ -553,6 +595,19 @@ function connectFleetMailbox(input: {
       );
       if (!response.ok) throw new Error(`fleet mailbox answered ${String(response.status)}`);
       return OperatorSeatEventsPageSchema.parse(await response.json()).events;
+    },
+    async acknowledge(eventId) {
+      const response = await fetchImpl(
+        new URL(`${fleetSeatEventsPath(input.paneId)}/${encodeURIComponent(eventId)}/ack`, input.host),
+        {
+          method: "POST",
+          headers,
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (response.status === 404) return false;
+      if (!response.ok) throw new Error(`fleet acknowledgment answered ${String(response.status)}`);
+      return true;
     },
     close: async () => undefined,
   };
@@ -604,7 +659,11 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
               signal: AbortSignal.timeout(20_000),
             },
           );
-          return response.ok;
+          if (response.ok) return true;
+          if ([400, 401, 403, 413].includes(response.status))
+            return { received: false, deliveryStage: "rejected" as const };
+          if (response.status === 404) return { received: false, deliveryStage: "unavailable" as const };
+          throw new Error(`Message receipt is uncertain (${response.status})`);
         },
   );
   const transport = options.transport ?? new StdioServerTransport();

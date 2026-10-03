@@ -3,6 +3,8 @@
  * a channel event while a `clankie mcp --seat` bridge is polling. An unavailable
  * or uncertain channel is reported without typing into the owner's pane.
  */
+import { join } from "node:path";
+import { headSeatDeliveryStage, type DeliveryStage } from "@clankie/protocol";
 import { SeatOutbox } from "./seat-outbox.ts";
 
 export interface FleetSeatMessageContext {
@@ -10,7 +12,7 @@ export interface FleetSeatMessageContext {
   readonly source: string;
 }
 
-export type FleetSeatDelivery =
+export type FleetSeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
   | {
       readonly outcome: "delivered";
       readonly detail?: string;
@@ -19,7 +21,8 @@ export type FleetSeatDelivery =
     }
   | { readonly outcome: "unconfirmed"; readonly detail: string; readonly messageId?: string }
   | { readonly outcome: "undelivered"; readonly detail: string }
-  | { readonly outcome: "offline"; readonly detail: string };
+  | { readonly outcome: "offline"; readonly detail: string }
+);
 
 /**
  * The extra argv a hired Codex pane gets. A Codex that joins the shared
@@ -93,10 +96,18 @@ export function fleetSeatChromeArgs(harness: string): readonly string[] | undefi
 }
 
 /** Create the seat's outbox on first poll (or any other first use). */
-export function fleetSeatMailbox(mailboxes: Map<string, SeatOutbox>, seatId: string): SeatOutbox {
+export function fleetSeatMailbox(
+  mailboxes: Map<string, SeatOutbox>,
+  seatId: string,
+  uncertaintyDir?: string,
+): SeatOutbox {
   const existing = mailboxes.get(seatId);
   if (existing !== undefined) return existing;
-  const created = new SeatOutbox();
+  const created = new SeatOutbox(
+    uncertaintyDir === undefined
+      ? {}
+      : { uncertaintyPath: join(uncertaintyDir, `${encodeURIComponent(seatId)}.json`) },
+  );
   mailboxes.set(seatId, created);
   return created;
 }
@@ -112,7 +123,7 @@ export async function deliverFleetSeatMessage(
   context: FleetSeatMessageContext,
 ): Promise<FleetSeatDelivery> {
   const mailbox = mailboxes.get(seatId);
-  if (mailbox?.bound() === true) {
+  if (mailbox !== undefined && (mailbox.bound() || mailbox.uncertain())) {
     const delivery = await mailbox.deliver({
       kind: "message",
       conversationId: context.conversationId,
@@ -120,7 +131,8 @@ export async function deliverFleetSeatMessage(
       content: message,
       wantsReply: false,
     });
-    if (delivery.outcome === "delivered" || delivery.outcome === "replied") return { outcome: "delivered" };
+    if (delivery.outcome === "delivered" || delivery.outcome === "replied")
+      return { outcome: "delivered", deliveryStage: headSeatDeliveryStage(delivery.outcome) };
     if (delivery.outcome === "unconfirmed") return delivery;
     return { outcome: "undelivered", detail: `Seat mailbox delivery was ${delivery.outcome}.` };
   }

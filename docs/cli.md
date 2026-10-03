@@ -2126,7 +2126,7 @@ Enabling creates its own pane and starts a harness;
 new work uses fresh agent context. Captures coalesce for a quiet minute, with
 fifteen-minute checkpoints for continuing activity. Only a schema-valid report
 from a settled agent completes an assessment. Restart resumes inspection of the
-existing assignment; uncertain failures require explicit retry. A busy evaluator
+existing assignment; uncertain failures block every retry until the original delivery is reconciled. A busy evaluator
 pane keeps new work queued rather than failing it. The pane is recognized by its
 Herdr name, or by its terminal plus harness session or process once a harness
 clears that name; a pane it can no longer prove is its own is left open and a
@@ -2402,3 +2402,19 @@ chat; dry-run creates none. `/seat opencode`
 in the console reviews the same plan. Installation, per-launch settings,
 removal, native delivery semantics and current verification limits are in the
 [OpenCode seat guide](../integrations/opencode-plugin/README.md).
+
+### Delivery receipt stages
+
+Delivery results add `deliveryStage` while retaining native outcome, queue state,
+and detail. `stored` means service retention; `delivered` means the bridge has
+acknowledged it; `consumed` means native queue/turn acceptance; `responded` means
+a correlated reply or turn outcome, including silence. A native queue is
+consumed even while waiting for the current turn or goal. None of these receipts
+proves the model read the message or that requested work succeeded.
+
+`unavailable`, `uncertain`, `expired`, and `rejected` are distinct stops. Every
+retry of an uncertain delivery is blocked until its original receipt is
+reconciled, including explicit retries and retries after service or launcher
+restart. An exact late bridge acknowledgment or original-session native
+transcript receipt can reconcile it without dispatching a replacement. Missing
+or corrupt evidence remains blocked; changing channels is not a repair.

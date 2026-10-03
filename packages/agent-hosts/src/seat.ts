@@ -1,3 +1,5 @@
+import type { DeliveryStage } from "@clankie/protocol";
+
 /**
  * The harness-adapter seam (ADR 0187 amendment, ADR 0203, VUH-1458).
  *
@@ -97,7 +99,7 @@ export type SeatStartResult =
  * arrived before the deadline; the message may still land, so the caller must
  * not resend it blindly.
  */
-export type SeatDelivery =
+export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
   | {
       readonly outcome: "accepted";
       readonly messageId: string;
@@ -105,7 +107,8 @@ export type SeatDelivery =
     }
   | { readonly outcome: "released" }
   | { readonly outcome: "offline"; readonly detail: string }
-  | { readonly outcome: "unconfirmed"; readonly messageId: string; readonly detail: string };
+  | { readonly outcome: "unconfirmed"; readonly messageId: string; readonly detail: string }
+);
 
 export type SeatStatus = "working" | "idle" | "blocked" | "released" | "offline";
 

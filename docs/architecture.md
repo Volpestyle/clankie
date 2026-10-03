@@ -78,7 +78,15 @@ Every other message posts to `POST /v1/captain/channel-turns`. The bridge asks f
 acknowledgment and polls `GET /v1/captain/channel-turns/{deliveryId}` until the turn settles, so a
 long model turn does not depend on one open HTTP request. A retry submits the same delivery ID;
 the service joins a surviving turn, and the bridge's inbox saves the final reply and permits only
-one progress post for that Discord message across restarts. The service normalizes it — untrusted body
+one progress post for that Discord message across restarts. Before dispatch, the service atomically
+records the exact ID, request fingerprint and authorized lane in `discord-turn-receipts.json`
+under its state directory. Completed results remain deduplicated. An unresolved receipt after restart,
+a rejected promise, or unreadable receipts return `uncertain`; neither an HTTP retry nor time passing
+starts a replacement turn. Only the original exact turn result settles that receipt. There is no
+blanket retry override or automatic reconciliation from another session's transcript. Pending means
+`stored`, an explicit native acknowledgment means `consumed` (not model-read), and a completed
+channel result reports `responded`; unknown failures stay `uncertain`.
+The service normalizes it — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context
 attached — and prompts a pi session. Every room gets a continuing session (a pi
 JSONL tree that survives restarts): operator conversations, voice channels under

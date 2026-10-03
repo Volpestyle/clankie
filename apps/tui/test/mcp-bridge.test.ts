@@ -504,3 +504,63 @@ describe("operator bridge restart recovery", () => {
     }
   });
 });
+
+it("acknowledges only after notification persistence and stops on a lost receipt without replay", async () => {
+  const order: string[] = [];
+  const event = wakeEvent();
+  await expect(
+    pumpSeatEvents(
+      {
+        notification: async () => {
+          order.push("notification-persisted");
+        },
+      },
+      {
+        pollEvents: async () => {
+          order.push("poll");
+          return [event];
+        },
+        acknowledge: async (id) => {
+          order.push(`ack:${id}`);
+          throw new Error("lost acknowledgment");
+        },
+      },
+      new AbortController().signal,
+      { waitMs: 0 },
+    ),
+  ).rejects.toThrow("lost acknowledgment");
+  expect(order).toEqual(["poll", "notification-persisted", `ack:${event.id}`]);
+});
+
+it.each(["stored", "lost"] as const)(
+  "message_clankie reports %s receipts and never retries an uncertain call",
+  async (mode) => {
+    let sends = 0;
+    const server = createFleetSeatBridge(async () => {
+      sends++;
+      if (mode === "lost") throw new Error("response lost");
+      return true;
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "worker", version: "1" }, { capabilities: {} });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      const result = await client.callTool({ name: "message_clankie", arguments: { text: "progress" } });
+      const content = result.content as { type: string; text: string }[];
+      expect(JSON.parse(content[0]!.text)).toMatchObject({
+        received: mode === "stored",
+        deliveryStage: mode === "stored" ? "stored" : "uncertain",
+      });
+      expect(JSON.parse(content[0]!.text).deliveryStage).not.toBe("consumed");
+      if (mode === "lost") {
+        const retry = await client.callTool({ name: "message_clankie", arguments: { text: "progress" } });
+        expect(retry.isError).toBe(true);
+        expect(sends).toBe(1);
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  },
+);

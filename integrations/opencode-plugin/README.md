@@ -67,21 +67,22 @@ server plugin; delivery remains pinned to the original ID and never follows UI
 focus. Do not use session switching as a way to transfer the seat. Exit and
 launch the selected exact session instead.
 
-Before dispatch the launcher writes an `uncertain` receipt atomically to its
-per-launch journal. This fences duplicate claims within that launcher, including
-plugin reconnects; a new random launch directory does not load earlier receipts
-and is not a cross-launch deduplication fence. A native
-acknowledgment changes it to `delivered`, which means accepted, not completed.
-A failed or lost acknowledgment stops delivery without retry, fallback typing,
-or another process launch. Inspect the native session and retained receipt
-before deciding whether a manual resend is appropriate. Pending queue entries
-are retained for inspection, not automatically replayed on restart. A new
-launcher always requires a fresh native binding; no restart reattachment is
-claimed from a saved ID alone. The current service pump acknowledges an event
-on its next poll after the launcher persisted it, potentially before native
-dispatch. That bridge acknowledgment is not evidence of native consumption, and
-a crash can strand a journaled event. No exactly-once guarantee across launcher
-or service restarts is claimed; persistent receipts are separate VUH-1521 work.
+Before dispatch the launcher exclusively creates a binding-scoped unresolved
+receipt under `opencode-seat-receipts/`, in addition to its per-launch audit
+journal. This fences every retry, including another launcher. Native queue
+acceptance changes the audit outcome to `delivered` with `deliveryStage:
+consumed`; it does not prove model attention or task completion. A lost receipt
+blocks dispatch until exact-session native history contains the complete
+original event, including its ID, or the original native acceptance arrives.
+A new session cannot reconcile an old session's event. A corrupt receipt fails
+closed. This read-only reconciliation never launches a replacement turn.
+
+The service bridge explicitly acknowledges the event ID after the launcher
+persists its pending event. That receipt is `delivered`, not `consumed`, and may
+precede native dispatch. Pending events retained only in a launch journal are
+inspection evidence and are not automatically replayed after restart. No
+exactly-once work completion guarantee is claimed. A new launcher still needs
+fresh native identity and context preflight; a saved ID alone never arms it.
 
 Missing binary/capability, absent broker credential, changed resume workspace,
 wrong conversation, plugin context failure, disconnected bridge, duplicate

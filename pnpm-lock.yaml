@@ -359,6 +359,9 @@ importers:
 
   packages/agent-hosts:
     dependencies:
+      '@clankie/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@clankie/settings':
         specifier: workspace:*
         version: link:../settings

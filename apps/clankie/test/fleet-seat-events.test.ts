@@ -109,3 +109,60 @@ describe("fleet seat hook route", () => {
     clankie.close();
   });
 });
+
+it("keeps exact fleet acknowledgments behind the same pane authorization as polling", async () => {
+  const calls: string[] = [];
+  const clankie = await createClankieApp({
+    captain: createStubCaptain({
+      acknowledgeFleetSeatEvent: async (pane, id) => {
+        calls.push(`${pane}/${id}`);
+        return pane === paneId && id === "original";
+      },
+    }),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer operator"
+        ? { operatorId: "owner", steerSourceLane: "tui" }
+        : undefined,
+    authenticateCaptain: async (request) =>
+      request.headers.get("authorization") === "Bearer social"
+        ? { captainId: "social", steerSourceLane: "discord_text" }
+        : undefined,
+  });
+  try {
+    const uri = `${fleetSeatEventsPath(paneId)}/original/ack`;
+    expect(
+      (await clankie.app.request(uri, { method: "POST", headers: { authorization: "Bearer social" } }))
+        .status,
+    ).toBe(403);
+    expect(calls).toEqual([]);
+    const ack = await clankie.app.request(uri, {
+      method: "POST",
+      headers: { authorization: "Bearer operator" },
+    });
+    expect(await ack.json()).toMatchObject({ acknowledged: true, deliveryStage: "delivered" });
+    expect(calls).toEqual([`${paneId}/original`]);
+  } finally {
+    clankie.close();
+  }
+});
+
+it("reports inbound conversation retention as stored, preserving its received boolean", async () => {
+  const clankie = await createClankieApp({
+    captain: createStubCaptain({ receiveFleetSeatMessage: async (pane) => pane === paneId }),
+    authenticateOperator: async () => ({ operatorId: "owner", steerSourceLane: "tui" }),
+  });
+  try {
+    const request = (pane: string, body: unknown) =>
+      clankie.app.request(`/v1/fleet/seats/${encodeURIComponent(pane)}/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const result = await request(paneId, { schemaVersion: 1, text: "progress" });
+    expect(await result.json()).toEqual({ schemaVersion: 1, received: true, deliveryStage: "stored" });
+    expect((await request("missing", { schemaVersion: 1, text: "progress" })).status).toBe(404);
+    expect(await (await request(paneId, {})).json()).toMatchObject({ deliveryStage: "rejected" });
+  } finally {
+    clankie.close();
+  }
+});

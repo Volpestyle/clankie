@@ -1,3 +1,4 @@
+import { fleetDeliveryStage, type DeliveryStage } from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
@@ -250,6 +251,8 @@ export interface ConversationTurnContext {
   /** Conversation-store run id; one metrics line uses this, including absorbed steers. */
   readonly runId: string;
   readonly acceptedAt: string;
+  /** Receipt of this delivery, separate from completion of the local run. */
+  readonly deliveryReceipt?: (stage: DeliveryStage) => void;
   /** Aborts when the operator interrupts this run (`cancel` op); the runner stops the live model turn. */
   readonly signal: AbortSignal;
   /**
@@ -2343,6 +2346,7 @@ export class ConversationStore {
         return {
           schemaVersion: 1,
           status: "seat_undelivered",
+          deliveryStage: "unavailable",
           conversationId: meta.conversationId,
           ...offlineIdentity,
           detail: prepared.undeliverable.slice(0, OPERATOR_CONVERSATION_SUMMARY_MAX),
@@ -2362,6 +2366,7 @@ export class ConversationStore {
       return {
         schemaVersion: 1,
         status: delivery.outcome === "unconfirmed" ? "seat_delivery_unconfirmed" : "seat_undelivered",
+        deliveryStage: fleetDeliveryStage(delivery),
         conversationId: meta.conversationId,
         ...offlineIdentity,
         detail: delivery.detail.slice(0, OPERATOR_CONVERSATION_SUMMARY_MAX),
@@ -2376,6 +2381,7 @@ export class ConversationStore {
       return {
         schemaVersion: 1,
         status: "seat_offline",
+        deliveryStage: "unavailable",
         conversationId: meta.conversationId,
         ...offlineIdentity,
         currentRevision: meta.revision,
@@ -2396,7 +2402,12 @@ export class ConversationStore {
     if (typeof delivery === "object" && delivery.state === "queued" && delivery.detail)
       this.append(meta, { type: "message", role: "captain", text: delivery.detail, streaming: false });
     this.append(meta, { type: "turn", runId, phase: "accepted" });
-    this.append(meta, { type: "turn", runId, phase: "completed" });
+    this.append(meta, {
+      type: "turn",
+      runId,
+      phase: "completed",
+      deliveryStage: typeof delivery === "object" ? fleetDeliveryStage(delivery) : "delivered",
+    });
     this.prune(meta.conversationId);
     return {
       schemaVersion: 1,
@@ -2405,6 +2416,7 @@ export class ConversationStore {
       runId,
       revision: meta.revision,
       safeCursor,
+      deliveryStage: typeof delivery === "object" ? fleetDeliveryStage(delivery) : "delivered",
       ...(typeof delivery === "object" && delivery.state !== undefined
         ? {
             seatDelivery: {
@@ -2463,6 +2475,7 @@ export class ConversationStore {
 
     const previous = this.chains.get(conversationId) ?? Promise.resolve();
     let invoked = false;
+    let deliveryStage: DeliveryStage | undefined;
     const invoke = (): Promise<void> => {
       if (provenance.origin === "hook") this.linearHookQueued.delete(conversationId);
       // Cancelled while still queued: settle without ever invoking the runner.
@@ -2483,6 +2496,9 @@ export class ConversationStore {
         {
           runId,
           acceptedAt: meta.updatedAt,
+          deliveryReceipt: (stage) => {
+            deliveryStage = stage;
+          },
           signal: controller.signal,
           draft: (text) => {
             this.setLiveDraft(conversationId, text);
@@ -2506,8 +2522,14 @@ export class ConversationStore {
         this.append(
           meta,
           cancelled
-            ? { type: "turn", runId, phase: "cancelled", reasonCode: "operator_interrupt" }
-            : { type: "turn", runId, phase: "completed" },
+            ? {
+                type: "turn",
+                runId,
+                phase: "cancelled",
+                reasonCode: "operator_interrupt",
+                deliveryStage: deliveryStage ?? "expired",
+              }
+            : { type: "turn", runId, phase: "completed", deliveryStage: deliveryStage ?? "responded" },
         );
         if (provenance.origin === "hook" && meta.linearWakePending) {
           if (cancelled) meta.linearWokeCursor = meta.linearWakePending.previous;
@@ -2577,6 +2599,7 @@ export class ConversationStore {
     return {
       schemaVersion: 1,
       status: "accepted",
+      deliveryStage: "stored",
       conversationId: meta.conversationId,
       runId,
       revision: meta.revision,

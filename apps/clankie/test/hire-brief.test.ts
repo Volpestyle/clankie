@@ -125,6 +125,7 @@ test.each([
       expect(send).toHaveBeenCalledTimes(3);
       expect(await call(bank, "message_seat", { seat: "nobody", message: "hello" })).toEqual({
         outcome: "unknown_seat",
+        deliveryStage: "unavailable",
         seat: "nobody",
       });
       expect(send).toHaveBeenCalledTimes(3);

@@ -154,6 +154,8 @@ it("an unconfirmed brief keeps its pane for inspection and never retries", async
     detail: expect.stringContaining("inspect pane w1:p1"),
     control: { mode: "channel" },
   });
+  expect(await hire("the brief")).toMatchObject({ outcome: "failed", deliveryStage: "uncertain" });
+  expect(runner.createTab).toHaveBeenCalledTimes(1);
   expect(runner.closePane).not.toHaveBeenCalled();
   expect(runner.promptAgent).not.toHaveBeenCalled();
 });
@@ -299,8 +301,9 @@ it("adapter uncertainty or release never becomes delivered or triggers another c
   expect(runner.promptAgent).not.toHaveBeenCalled();
 
   vi.mocked(adapter.attach).mockResolvedValue(undefined);
-  expect(await store.sendToSeat("term_0a1b2c", "via mailbox", mailbox)).toBe(true);
-  expect(mailbox).toHaveBeenCalledOnce();
+  expect(await store.sendToSeat("term_0a1b2c", "via mailbox", mailbox)).toBe(false);
+  expect(mailbox).not.toHaveBeenCalled();
+  expect(send).toHaveBeenCalledTimes(2);
   expect(await store.sendToSeat("term_0a1b2c", "no adapter")).toBe(false);
   expect(runner.promptAgent).not.toHaveBeenCalled();
   expect(control.ref.paneId).toBe("w1:p1");
@@ -381,4 +384,44 @@ it("a completion watch wakes on the harness's own settlement and quotes its fina
   // The terminal status wait was never the signal.
   expect(runner.wait).not.toHaveBeenCalled();
   store.close();
+});
+
+it("a restarted hire cannot create another pane, then recovers the original exact native brief", async () => {
+  const f = await fixture(async () => ({
+    outcome: "failed",
+    reason: "not_ready",
+    detail: "brief_delivery_unverified: missing receipt",
+  }));
+  f.runner.transcript.mockResolvedValue({ sessionKey: "k", entries: [] });
+  await expect(f.hire("the brief")).resolves.toMatchObject({ deliveryStage: "uncertain" });
+  const name = vi.mocked(f.adapter.start).mock.calls[0]?.[1].name;
+  expect(name).toBeDefined();
+  f.runner.get.mockResolvedValue({ ...f.agent, name: name! });
+  f.store.close();
+  const restarted = new HerdrWatchStore(join(f.root, "watches.json"), {
+    runner: f.runner,
+    seatAdapters: [f.adapter],
+  });
+  const input = {
+    schemaVersion: 1 as const,
+    harness: "claude" as const,
+    title: "worker",
+    workingDirectory: f.root,
+  };
+  await expect(restarted.spawnSeat(input, undefined, "the brief")).resolves.toMatchObject({
+    deliveryStage: "uncertain",
+  });
+  expect(f.runner.createTab).toHaveBeenCalledTimes(1);
+  f.runner.transcript.mockResolvedValue({
+    sessionKey: "k",
+    entries: [{ type: "message", id: "late", role: "operator", text: "the brief" }],
+  });
+  await expect(restarted.spawnSeat(input, undefined, "the brief")).resolves.toMatchObject({
+    outcome: "spawned",
+    deliveryStage: "consumed",
+    seat: { paneId: f.agent.paneId },
+  });
+  expect(f.adapter.start).toHaveBeenCalledTimes(1);
+  expect(f.runner.createTab).toHaveBeenCalledTimes(1);
+  restarted.close();
 });

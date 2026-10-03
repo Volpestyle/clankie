@@ -10,19 +10,27 @@
  * re-poll grace is gone, and what it never took goes back to pi.
  */
 import { randomUUID } from "node:crypto";
-import type { OperatorSeatEvent, OperatorSeatEventKind } from "@clankie/protocol";
+import {
+  headSeatDeliveryStage,
+  type DeliveryStage,
+  type OperatorSeatEvent,
+  type OperatorSeatEventKind,
+} from "@clankie/protocol";
+
+import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
 
 /** Covers the millisecond gap between a poll returning and the live bridge asking again. */
 const BOUND_GRACE_MS = 2_000;
 /** How long an escalation waits for the seat's `reply` before the run settles unanswered. */
 const REPLY_TIMEOUT_MS = 10 * 60_000;
 
-export type SeatDelivery =
+export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
   | { readonly outcome: "delivered" }
   | { readonly outcome: "replied"; readonly text: string }
   | { readonly outcome: "unconfirmed"; readonly messageId: string; readonly detail: string }
   | { readonly outcome: "unbound" }
-  | { readonly outcome: "aborted" };
+  | { readonly outcome: "aborted" }
+);
 
 export interface SeatDeliveryInput {
   readonly kind: OperatorSeatEventKind;
@@ -44,6 +52,7 @@ interface Pending {
   readonly event: OperatorSeatEvent;
   readonly wantsReply: boolean;
   taken: boolean;
+  acknowledged: boolean;
   settled: boolean;
   timer?: ReturnType<typeof setTimeout>;
   settle(outcome: SeatDelivery): void;
@@ -57,18 +66,26 @@ export class SeatOutbox {
   private readonly boundGraceMs: number;
   private readonly replyTimeoutMs: number;
   private readonly now: () => number;
+  private readonly fence: DeliveryFence;
+  private readonly active = new Set<string>();
   private lastPollAt: number | undefined;
 
   public constructor(
     options: {
+      readonly uncertaintyPath?: string;
       readonly boundGraceMs?: number;
       readonly replyTimeoutMs?: number;
       readonly now?: () => number;
     } = {},
   ) {
+    this.fence = new DeliveryFence(options.uncertaintyPath);
     this.boundGraceMs = options.boundGraceMs ?? BOUND_GRACE_MS;
     this.replyTimeoutMs = options.replyTimeoutMs ?? REPLY_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
+  }
+
+  public uncertain(): boolean {
+    return this.fence.entries().some(([id]) => !this.active.has(id));
   }
 
   /** A seat is bound while a poller is parked, or a parked poll resolved within the grace. */
@@ -84,8 +101,17 @@ export class SeatOutbox {
    * seat's answer; `aborted` when the operator cancels the run.
    */
   public deliver(input: SeatDeliveryInput): Promise<SeatDelivery> {
-    if (!this.bound()) return Promise.resolve({ outcome: "unbound" });
-    if (input.signal?.aborted === true) return Promise.resolve({ outcome: "aborted" });
+    const unresolved = this.fence.entries().find(([id]) => !this.active.has(id));
+    if (unresolved !== undefined)
+      return Promise.resolve({
+        outcome: "unconfirmed",
+        deliveryStage: "uncertain",
+        messageId: unresolved[1].messageId,
+        detail: "An earlier delivery is uncertain; its exact receipt must be reconciled before any retry.",
+      });
+    if (!this.bound()) return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
+    if (input.signal?.aborted === true)
+      return Promise.resolve({ outcome: "aborted", deliveryStage: "expired" });
     return new Promise((resolve) => {
       const event: OperatorSeatEvent = {
         schemaVersion: 1,
@@ -96,24 +122,41 @@ export class SeatOutbox {
         content: input.content,
         createdAt: new Date(this.now()).toISOString(),
       };
+      this.fence.begin(event.id, { messageId: event.id, fingerprint: deliveryFingerprint(input.content) });
+      this.active.add(event.id);
       const onAbort = (): void =>
         pending.settle(
-          pending.taken
-            ? {
-                outcome: "unconfirmed",
-                messageId: event.id,
-                detail: "The bridge took the event before cancellation; delivery may still land.",
-              }
-            : { outcome: "aborted" },
+          pending.acknowledged
+            ? { outcome: "delivered" }
+            : pending.taken
+              ? {
+                  outcome: "unconfirmed",
+                  messageId: event.id,
+                  detail: "The bridge took the event before cancellation; delivery may still land.",
+                }
+              : { outcome: "aborted" },
         );
       const pending: Pending = {
         event,
         wantsReply: input.wantsReply,
         taken: false,
+        acknowledged: false,
         settled: false,
         settle: (outcome) => {
           if (pending.settled) return;
           pending.settled = true;
+          this.active.delete(event.id);
+          if (outcome.outcome !== "unconfirmed") {
+            try {
+              this.fence.reconcile(event.id, event.id);
+            } catch (error) {
+              outcome = {
+                outcome: "unconfirmed",
+                messageId: event.id,
+                detail: `Receipt persistence failed: ${String(error)}`,
+              };
+            }
+          }
           if (pending.timer !== undefined) clearTimeout(pending.timer);
           input.signal?.removeEventListener("abort", onAbort);
           const queuedIndex = this.queued.indexOf(pending);
@@ -121,7 +164,7 @@ export class SeatOutbox {
           const flightIndex = this.inFlight.indexOf(pending);
           if (flightIndex >= 0) this.inFlight.splice(flightIndex, 1);
           this.awaitingReply.delete(event.id);
-          resolve(outcome);
+          resolve({ ...outcome, deliveryStage: headSeatDeliveryStage(outcome.outcome) });
         },
       };
       input.signal?.addEventListener("abort", onAbort, { once: true });
@@ -167,21 +210,31 @@ export class SeatOutbox {
   public reply(eventId: string, text: string): boolean {
     const pending =
       this.awaitingReply.get(eventId) ?? this.inFlight.find((candidate) => candidate.event.id === eventId);
-    if (pending === undefined) return false;
+    if (pending === undefined) return this.fence.reconcile(eventId, eventId);
     pending.settle({ outcome: "replied", text });
+    return true;
+  }
+
+  /** Exact bridge receipt, also usable after a timeout or service restart. */
+  public acknowledge(eventId: string): boolean {
+    const pending = this.inFlight.find((candidate) => candidate.event.id === eventId);
+    if (pending === undefined) return this.fence.reconcile(eventId, eventId);
+    this.ackPending(pending);
     return true;
   }
 
   public close(): void {
     for (const pending of [...this.queued, ...this.inFlight, ...this.awaitingReply.values()]) {
       pending.settle(
-        pending.taken
-          ? {
-              outcome: "unconfirmed",
-              messageId: pending.event.id,
-              detail: "The bridge took the event before the mailbox closed; delivery may still land.",
-            }
-          : { outcome: "aborted" },
+        pending.acknowledged
+          ? { outcome: "delivered" }
+          : pending.taken
+            ? {
+                outcome: "unconfirmed",
+                messageId: pending.event.id,
+                detail: "The bridge took the event before the mailbox closed; delivery may still land.",
+              }
+            : { outcome: "aborted" },
       );
     }
     // Each poller removes itself as it settles; a set never revisits a yielded entry.
@@ -197,16 +250,31 @@ export class SeatOutbox {
   /** The bridge came back: previous takes are delivered, escalations start their reply window. */
   private ackInFlight(): void {
     const acked = this.inFlight.splice(0);
-    for (const pending of acked) {
-      if (pending.timer !== undefined) clearTimeout(pending.timer);
-      if (!pending.wantsReply) {
-        pending.settle({ outcome: "delivered" });
-        continue;
-      }
-      this.awaitingReply.set(pending.event.id, pending);
-      pending.timer = setTimeout(() => pending.settle({ outcome: "delivered" }), this.replyTimeoutMs);
-      pending.timer.unref?.();
+    for (const pending of acked) this.ackPending(pending);
+  }
+
+  private ackPending(pending: Pending): void {
+    pending.acknowledged = true;
+    const index = this.inFlight.indexOf(pending);
+    if (index >= 0) this.inFlight.splice(index, 1);
+    try {
+      this.fence.reconcile(pending.event.id, pending.event.id);
+    } catch (error) {
+      pending.settle({
+        outcome: "unconfirmed",
+        messageId: pending.event.id,
+        detail: `Receipt persistence failed: ${String(error)}`,
+      });
+      throw error;
     }
+    if (pending.timer !== undefined) clearTimeout(pending.timer);
+    if (!pending.wantsReply) {
+      pending.settle({ outcome: "delivered" });
+      return;
+    }
+    this.awaitingReply.set(pending.event.id, pending);
+    pending.timer = setTimeout(() => pending.settle({ outcome: "delivered" }), this.replyTimeoutMs);
+    pending.timer.unref?.();
   }
 
   private take(): OperatorSeatEvent[] {

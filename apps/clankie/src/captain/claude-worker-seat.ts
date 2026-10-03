@@ -458,13 +458,18 @@ class ClaudeWorkerSeatControl implements SeatControl {
   public async send(message: string, options?: { readonly timeoutMs?: number }): Promise<SeatDelivery> {
     const agent = await this.deps.agent(this.ref.paneId).catch(() => undefined);
     if (agent === undefined || sessionIdOf(agent) !== this.ref.sessionId)
-      return { outcome: "offline", detail: "The seat's Claude session is gone" };
-    if (!this.deps.mailbox.bound(agent.terminalId)) return { outcome: "released" };
+      return {
+        outcome: "offline",
+        deliveryStage: "unavailable",
+        detail: "The seat's Claude session is gone",
+      };
+    if (!this.deps.mailbox.bound(agent.terminalId))
+      return { outcome: "released", deliveryStage: "unavailable" };
     const before = await transcriptIds(this.deps, agent);
     const busy = agent.status === "working";
     const delivery = await this.deps.mailbox.deliver(agent.terminalId, message);
-    if (typeof delivery !== "boolean") return delivery;
-    if (!delivery) return { outcome: "released" };
+    if (typeof delivery !== "boolean") return { ...delivery, deliveryStage: "uncertain" };
+    if (!delivery) return { outcome: "released", deliveryStage: "unavailable" };
     const id = await receipt(
       this.deps,
       agent,
@@ -476,10 +481,16 @@ class ClaudeWorkerSeatControl implements SeatControl {
     if (id === undefined)
       return {
         outcome: "unconfirmed",
+        deliveryStage: "uncertain",
         messageId: "",
         detail: "The worker channel took the message, but it has not appeared in the session transcript",
       };
-    return { outcome: "accepted", messageId: id, state: busy ? "queued" : "started" };
+    return {
+      outcome: "accepted",
+      deliveryStage: "consumed",
+      messageId: id,
+      state: busy ? "queued" : "started",
+    };
   }
 
   public async settled(signal?: AbortSignal): Promise<SeatEvent> {

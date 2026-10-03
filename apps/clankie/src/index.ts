@@ -796,6 +796,7 @@ const localFleet = new LocalFleetLink({
   }),
 });
 const clankie = await createClankieApp({
+  discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   localFleet,
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   accounts: createAccounts({

@@ -46,7 +46,7 @@ export function fleetDeliveryStage(result: {
       : "consumed";
 }
 
-/** Only an explicit refusal is rejected; interruption/unknown failure is expired. */
+/** Only explicit refusal/expiration is terminal; unknown failures retain uncertainty. */
 export function discordDeliveryStage(result: {
   readonly state: "pending" | "settled" | "silent" | "absorbed" | "waiting_user" | "failed";
   readonly code?: string;
@@ -66,9 +66,12 @@ export function discordDeliveryStage(result: {
         "validation_refused",
         "permission_denied",
         "captain_tools_not_allowed",
+        "captain_usage_limit_reached",
       ].includes(result.code ?? "")
         ? "rejected"
-        : "expired";
+        : result.code === "captain_turn_stalled"
+          ? "expired"
+          : "uncertain";
   }
 }
 

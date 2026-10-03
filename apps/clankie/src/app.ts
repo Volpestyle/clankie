@@ -1,3 +1,5 @@
+import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
+import { discordDeliveryStage } from "@clankie/protocol";
 import { createAgentSessionRoutes } from "./agent-session-routes.ts";
 import { loadPersonaImages, personaImageBriefing, personaImageStatus } from "@clankie/persona-images";
 import type { PersonaImageSource } from "./persona-images.ts";
@@ -365,6 +367,8 @@ const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
   discordIngress?: DiscordIngress;
+  /** Durable exact Discord turn receipts; production supplies its state directory. */
+  discordTurnReceiptPath?: string;
   modelKeys?: ModelKeysPort;
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;
@@ -606,6 +610,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     string,
     { fingerprint: string; result: DiscordPresenceWriteResult; expiresAtMs: number }
   >();
+  const discordTurnReceipts = new DiscordTurnReceipts(dependencies.discordTurnReceiptPath);
   const captainTurnResults = new Map<
     string,
     {
@@ -614,7 +619,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       result: Promise<CaptainChannelTurnResult>;
       settled?: CaptainChannelTurnResult;
       rejected?: boolean;
-      expiresAtMs: number;
     }
   >();
   /** A gateway redelivery must not run a channel round a second time (ADR 0146). */
@@ -1177,6 +1181,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json(page);
   });
 
+  app.post(`${OPERATOR_SEAT_EVENTS_PATH}/:id/ack`, async (context) => {
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const binding = seatBinding(context, auth.lane);
+    if ("denial" in binding) return binding.denial;
+    const acknowledged = await dependencies.captain.acknowledgeSeatEvent(
+      context.req.param("id"),
+      binding.conversationId,
+    );
+    return acknowledged
+      ? context.json({ schemaVersion: 1, acknowledged: true, deliveryStage: "delivered" })
+      : context.json({ error: "unknown_event" }, 404);
+  });
+
   app.post(`${OPERATOR_SEAT_EVENTS_PATH}/:id/reply`, async (context) => {
     const auth = await authenticateLane(context);
     if ("denial" in auth) return auth.denial;
@@ -1191,7 +1210,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       binding.conversationId,
     );
     return replied
-      ? context.json({ schemaVersion: 1 as const, replied: true as const })
+      ? context.json({
+          schemaVersion: 1 as const,
+          replied: true as const,
+          deliveryStage: "responded" as const,
+        })
       : context.json({ error: "unknown_event" }, 404);
   });
 
@@ -1243,17 +1266,29 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json(page);
   });
 
+  app.post(`${FLEET_SEAT_EVENTS_PATH}/:id/ack`, async (context) => {
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    const acknowledged = await dependencies.captain.acknowledgeFleetSeatEvent(
+      pane.paneId,
+      context.req.param("id"),
+    );
+    return acknowledged
+      ? context.json({ schemaVersion: 1, acknowledged: true, deliveryStage: "delivered" })
+      : context.json({ error: "unknown_event" }, 404);
+  });
+
   // An agent in a fleet pane writing to Clankie (ADR 0213 phase 2). It reaches
   // him as untrusted agent output and grants the sender nothing.
   app.post(FLEET_SEAT_MESSAGES_PATH, bodyLimit({ maxSize: 128 * 1024 }), async (context) => {
     const pane = await fleetSeatPane(context);
     if ("denial" in pane) return pane.denial;
     const parsed = FleetSeatMessageSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!parsed.success) return context.json({ error: "invalid_request", deliveryStage: "rejected" }, 400);
     const received = await dependencies.captain.receiveFleetSeatMessage(pane.paneId, parsed.data.text);
     return received
-      ? context.json({ schemaVersion: 1 as const, received: true as const })
-      : context.json({ error: "unknown_seat" }, 404);
+      ? context.json({ schemaVersion: 1 as const, received: true as const, deliveryStage: "stored" as const })
+      : context.json({ error: "unknown_seat", deliveryStage: "unavailable" }, 404);
   });
 
   // A hired seat's worker plugin reports each settled turn (VUH-1458), from
@@ -1759,27 +1794,39 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "discord_channel_authority_required" }, 403);
     }
     const fingerprint = createHash("sha256").update(JSON.stringify(request)).digest("hex");
-    pruneExpired(captainTurnResults, clock().getTime());
     const deliveryKey = `discord:${request.deliveryId}`;
-    let previous = captainTurnResults.get(deliveryKey);
-    if (previous?.settled?.state === "failed" || previous?.rejected === true) {
-      captainTurnResults.delete(deliveryKey);
-      previous = undefined;
+    let receipt;
+    try {
+      receipt = discordTurnReceipts.get(deliveryKey);
+    } catch {
+      return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
     }
-    if (previous !== undefined && previous.fingerprint !== fingerprint) {
+    if (receipt !== undefined && receipt.lane !== expectedLane) {
+      return context.json({ error: "discord_channel_authority_required" }, 403);
+    }
+    if (receipt !== undefined && receipt.fingerprint !== fingerprint) {
       return context.json({ error: "captain_turn_idempotency_conflict" }, 409);
     }
-    let record = previous;
+    if (receipt?.settled !== undefined) return context.json(receipt.settled);
+    let record = captainTurnResults.get(deliveryKey);
+    if (record === undefined && receipt !== undefined) {
+      return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
+    }
     if (record === undefined) {
-      const turn = Promise.resolve().then(async () =>
-        CaptainChannelTurnResultSchema.parse(await dependencies.captain.submitDiscordTurn(request)),
-      );
-      record = {
-        fingerprint,
-        lane: expectedLane,
-        result: turn,
-        expiresAtMs: clock().getTime() + DELIVERY_RETENTION_MS,
-      };
+      try {
+        discordTurnReceipts.begin(deliveryKey, { fingerprint, lane: expectedLane });
+      } catch {
+        return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
+      }
+      const turn = Promise.resolve().then(async () => {
+        const result = CaptainChannelTurnResultSchema.parse(
+          await dependencies.captain.submitDiscordTurn(request),
+        );
+        const staged = { ...result, deliveryStage: discordDeliveryStage(result) };
+        discordTurnReceipts.settle(deliveryKey, fingerprint, staged);
+        return staged;
+      });
+      record = { fingerprint, lane: expectedLane, result: turn };
       captainTurnResults.set(deliveryKey, record);
       const observed = record;
       void turn.then(
@@ -1792,9 +1839,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     }
     if (context.req.header("prefer") === "respond-async") {
-      if (record.rejected) return context.json({ error: "captain_channel_turn_failed" }, 502);
+      if (record.rejected)
+        return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
       return record.settled === undefined
-        ? context.json({ state: "pending" }, 202)
+        ? context.json({ state: "pending", deliveryStage: "stored" }, 202)
         : context.json(record.settled);
     }
     try {
@@ -1809,7 +1857,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
       return context.json(result);
     } catch {
-      return context.json({ error: "captain_channel_turn_failed" }, 502);
+      return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
     }
   });
 
@@ -1818,14 +1866,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
-    const record = captainTurnResults.get(`discord:${context.req.param("deliveryId")}`);
-    if (record === undefined) return context.json({ error: "captain_channel_turn_not_found" }, 404);
-    if (captain.steerSourceLane !== record.lane) {
+    const deliveryKey = `discord:${context.req.param("deliveryId")}`;
+    let receipt;
+    try {
+      receipt = discordTurnReceipts.get(deliveryKey);
+    } catch {
+      return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
+    }
+    if (receipt === undefined) return context.json({ error: "captain_channel_turn_not_found" }, 404);
+    if (captain.steerSourceLane !== receipt.lane) {
       return context.json({ error: "discord_channel_authority_required" }, 403);
     }
-    if (record.rejected) return context.json({ error: "captain_channel_turn_failed" }, 502);
+    if (receipt.settled !== undefined) return context.json(receipt.settled);
+    const record = captainTurnResults.get(deliveryKey);
+    if (record === undefined)
+      return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
+    if (record.rejected)
+      return context.json({ error: "captain_channel_turn_uncertain", deliveryStage: "uncertain" }, 502);
     return record.settled === undefined
-      ? context.json({ state: "pending" }, 202)
+      ? context.json({ state: "pending", deliveryStage: "stored" }, 202)
       : context.json(record.settled);
   });
 

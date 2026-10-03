@@ -218,16 +218,30 @@ export function createCodexSeatAdapter(
             ref,
             async send(message) {
               if (closed || state === "offline")
-                return { outcome: "offline", detail: "Codex app-server is offline" };
+                return {
+                  outcome: "offline",
+                  deliveryStage: "unavailable",
+                  detail: "Codex app-server is offline",
+                };
               const messageId = randomUUID();
               try {
                 // A request reply may precede turn/started. Do not expose the
                 // preceding idle settlement as the result of this new message.
                 if (state === "idle") state = "working";
                 const accepted = await seat!.send(message);
-                return { outcome: "accepted", messageId: accepted.turnId, state: accepted.state };
+                return {
+                  outcome: "accepted",
+                  deliveryStage: "consumed",
+                  messageId: accepted.turnId,
+                  state: accepted.state,
+                };
               } catch (error) {
-                return { outcome: "unconfirmed", messageId, detail: String(error) };
+                return {
+                  outcome: "unconfirmed",
+                  deliveryStage: "uncertain",
+                  messageId,
+                  detail: String(error),
+                };
               }
             },
             async status() {

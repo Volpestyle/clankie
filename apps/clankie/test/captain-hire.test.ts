@@ -109,8 +109,8 @@ describe("captain hire_agent", () => {
       },
       undefined,
     );
-    // The typed outcome comes back to the model exactly as the store produced it.
-    expect(result.details).toEqual({ outcome: "failed", reason: "not_ready" });
+    // The mechanism outcome stays intact beside its shared receipt stage.
+    expect(result.details).toEqual({ outcome: "failed", reason: "not_ready", deliveryStage: "unavailable" });
   });
 
   it("fails typed when herdr is unreachable, before asking anything to start", async () => {
@@ -134,7 +134,11 @@ describe("captain hire_agent", () => {
       undefined,
       {} as never,
     );
-    expect(result.details).toEqual({ outcome: "failed", reason: "herdr_unreachable" });
+    expect(result.details).toEqual({
+      outcome: "failed",
+      reason: "herdr_unreachable",
+      deliveryStage: "unavailable",
+    });
     expect(hireSeat).not.toHaveBeenCalled();
   });
 

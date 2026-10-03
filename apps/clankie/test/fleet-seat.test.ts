@@ -20,7 +20,7 @@ describe("fleet seat mailbox", () => {
     });
     // Take is acked on the next poll, not at dequeue.
     void mailbox.poll(0);
-    await expect(sending).resolves.toEqual({ outcome: "delivered" });
+    await expect(sending).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
   });
 
   it("an unbound mailbox reports undelivered without a terminal fallback", async () => {

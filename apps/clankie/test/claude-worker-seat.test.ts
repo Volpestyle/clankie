@@ -249,7 +249,7 @@ it("preserves a taken but unacknowledged channel event as uncertain without repl
     detail: "The bridge took the event but did not acknowledge it",
   };
   f.deliver.mockResolvedValueOnce(receipt);
-  expect(await started.control.send("follow-up")).toEqual(receipt);
+  expect(await started.control.send("follow-up")).toEqual({ ...receipt, deliveryStage: "uncertain" });
   expect(f.deliver).toHaveBeenCalledTimes(1);
   expect(f.view.run).not.toHaveBeenCalled();
   expect(f.entries).toEqual([]);
@@ -491,6 +491,9 @@ it("messages are acknowledged by the transcript, and completion is the Stop hook
 
   unbind();
   expect(await control.status()).toBe("released");
-  expect(await control.send("after the channel went away")).toEqual({ outcome: "released" });
+  expect(await control.send("after the channel went away")).toEqual({
+    outcome: "released",
+    deliveryStage: "unavailable",
+  });
   expect(await control.settled()).toMatchObject({ type: "released" });
 });

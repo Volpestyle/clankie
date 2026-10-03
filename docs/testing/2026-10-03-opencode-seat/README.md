@@ -60,10 +60,10 @@ turn, identity/context failure, and a session-switch race that cannot re-arm the
 old session. This startup change was not exercised with new live model calls;
 the earlier native transport/draft/approval evidence above is unchanged.
 
-The per-launch random receipt journal is not read by subsequent launches and
-cannot by itself fence uncertain delivery across launches. The current service
-pump's next poll acknowledges bridge receipt after local persistence, before
-native claim/dispatch may occur. An acknowledged event is removed from that
-in-memory outbox, but that neither proves native consumption nor makes restart
-recovery exactly once. Pending/uncertain journals remain inspection evidence;
-VUH-1521 owns persistent service receipts and explicit native acknowledgments.
+VUH-1521 adds a separate binding-scoped exclusive unresolved native receipt
+file, exact-event bridge acknowledgments, and read-only exact-session transcript
+reconciliation. Its deterministic tests cover launcher replacement and reject
+wrong-session or incomplete native receipts. The earlier live transport checks
+above do not validate these later changes. Pending per-launch queue records are
+still inspection evidence, not a restart replay queue; bridge delivery is not
+native consumption or exactly-once completion.

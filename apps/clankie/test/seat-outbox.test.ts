@@ -27,7 +27,7 @@ describe("seat outbox", () => {
     let now = 1_000;
     const outbox = new SeatOutbox({ boundGraceMs: 100, now: () => now });
     expect(outbox.bound()).toBe(false);
-    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound" });
+    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound", deliveryStage: "unavailable" });
 
     // wait=0 empty never parked, so it must not bind (F5).
     expect(await outbox.poll(0)).toEqual([]);
@@ -41,11 +41,11 @@ describe("seat outbox", () => {
     ]);
     // Delivered means the bridge came back for more, not that take() ran.
     expect(await outbox.poll(0)).toEqual([]);
-    await expect(delivery).resolves.toEqual({ outcome: "delivered" });
+    await expect(delivery).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
 
     now += 101;
     expect(outbox.bound()).toBe(false);
-    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound" });
+    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound", deliveryStage: "unavailable" });
   });
 
   it("wakes a parked poll the moment a turn arrives", async () => {
@@ -54,7 +54,7 @@ describe("seat outbox", () => {
     const delivery = wake(outbox);
     expect((await parked).map((event) => event.content)).toEqual(["wake up"]);
     await outbox.poll(0);
-    await expect(delivery).resolves.toEqual({ outcome: "delivered" });
+    await expect(delivery).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
   });
 
   it("holds an escalation open for the seat's reply, and lets a stale reply fall through", async () => {
@@ -71,7 +71,11 @@ describe("seat outbox", () => {
     expect(event?.kind).toBe("escalation");
     expect(outbox.reply("seat-nope", "late")).toBe(false);
     expect(outbox.reply(event!.id, "green, three minutes ago")).toBe(true);
-    await expect(delivery).resolves.toEqual({ outcome: "replied", text: "green, three minutes ago" });
+    await expect(delivery).resolves.toEqual({
+      deliveryStage: "responded",
+      outcome: "replied",
+      text: "green, three minutes ago",
+    });
     expect(outbox.reply(event!.id, "again")).toBe(false);
   });
 
@@ -88,13 +92,13 @@ describe("seat outbox", () => {
     await parked;
     // Reply window starts on the ack poll, on top of the take/ack grace.
     await outbox.poll(0);
-    await expect(delivery).resolves.toEqual({ outcome: "delivered" });
+    await expect(delivery).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
   });
 
   it("returns a turn to pi when the bridge dies before taking it, and honours the operator's cancel", async () => {
     const outbox = new SeatOutbox({ boundGraceMs: 40 });
     expect(await outbox.poll(5)).toEqual([]);
-    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound" });
+    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound", deliveryStage: "unavailable" });
 
     const live = new SeatOutbox({ boundGraceMs: 1_000 });
     const parked = live.poll(5_000);
@@ -125,7 +129,7 @@ describe("seat outbox", () => {
     expect(await outbox.poll(5)).toEqual([]);
     expect(outbox.bound()).toBe(true);
     const started = Date.now();
-    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound" });
+    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound", deliveryStage: "unavailable" });
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
@@ -141,7 +145,7 @@ describe("seat outbox", () => {
     await new Promise((resolve) => setTimeout(resolve, 15));
     expect(resolved).toBeUndefined();
     expect(await acked.poll(0)).toEqual([]);
-    await expect(delivery).resolves.toEqual({ outcome: "delivered" });
+    await expect(delivery).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
 
     const dropped = new SeatOutbox({ boundGraceMs: 30 });
     const first = dropped.poll(5_000);
@@ -159,7 +163,7 @@ describe("seat outbox", () => {
     const delivery = wake(outbox);
     expect((await newer).map((event) => event.content)).toEqual(["wake up"]);
     expect(await outbox.poll(0)).toEqual([]);
-    await expect(delivery).resolves.toEqual({ outcome: "delivered" });
+    await expect(delivery).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
   });
 
   it("delivers two successive turns in order to one live bridge that re-polls", async () => {
@@ -171,14 +175,14 @@ describe("seat outbox", () => {
     const second = message(outbox, "dm-2");
     expect((await secondPoll).map((event) => event.content)).toEqual(["dm-2"]);
     expect(await outbox.poll(0)).toEqual([]);
-    await expect(first).resolves.toEqual({ outcome: "delivered" });
-    await expect(second).resolves.toEqual({ outcome: "delivered" });
+    await expect(first).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
+    await expect(second).resolves.toEqual({ outcome: "delivered", deliveryStage: "delivered" });
   });
 
   it("a wait=0 empty poll does not bind", async () => {
     const outbox = new SeatOutbox({ boundGraceMs: 1_000 });
     expect(await outbox.poll(0)).toEqual([]);
     expect(outbox.bound()).toBe(false);
-    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound" });
+    await expect(wake(outbox)).resolves.toEqual({ outcome: "unbound", deliveryStage: "unavailable" });
   });
 });

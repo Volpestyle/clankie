@@ -11,6 +11,8 @@ import {
   OPERATOR_SEAT_HARNESSES,
   OPERATOR_SEAT_MODEL_MAX,
   SpawnOperatorSeatSchema,
+  hireDeliveryStage,
+  fleetDeliveryStage,
   type CaptainSessionLaneV2,
   type CaptainTurnMedia,
   type DrawDiagramResult,
@@ -696,14 +698,21 @@ function hireAgentTool(
     executionMode: "sequential",
     execute: async (_id, params) => {
       if (turn.autonomous === true) throw new Error("Autonomous turns may propose a hire, not execute one");
-      if (available?.() === false) return json({ outcome: "failed", reason: "herdr_unreachable" });
+      if (available?.() === false)
+        return json({ outcome: "failed", reason: "herdr_unreachable", deliveryStage: "unavailable" });
       const { brief, ...seat } = params as typeof params & { brief?: string };
       const result = await hire(SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }), brief);
-      if (result.outcome !== "spawned" || brief === undefined || message === undefined) return json(result);
+      if (result.outcome !== "spawned" || brief === undefined || message === undefined)
+        return json({ ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) });
       // spawnSeat submits once after readiness and verifies the complete receipt.
       return json({
         ...result,
-        brief: { outcome: "delivered", seatId: result.seat.seatId, status: result.seat.status },
+        brief: {
+          outcome: "delivered",
+          deliveryStage: "consumed",
+          seatId: result.seat.seatId,
+          status: result.seat.status,
+        },
       });
     },
   });
@@ -721,7 +730,7 @@ function messageSeatTool(message: MessageSeat): ToolDefinition {
       "conversationId hire_agent returned. Outcomes: delivered (with the seat's status once it picked the " +
       "message up), unconfirmed, undelivered, seat_offline, unknown_seat. Delivery uses the harness " +
       "channel or session API and never types into the owner's terminal draft. A steered receipt means " +
-      "guidance reached the active turn, not an after-turn queue. Inspect uncertain delivery before resending. " +
+      "guidance reached the active turn, not an after-turn queue. deliveryStage reports stored, delivered, consumed or responded; native queue acceptance is consumed, never model-seen. Uncertain blocks every retry until the original receipt is reconciled. " +
       "Linked agents can initiate messages with message_clankie.",
     parameters: Type.Object({
       seat: Type.String({ minLength: 1, maxLength: 200 }),
@@ -730,7 +739,10 @@ function messageSeatTool(message: MessageSeat): ToolDefinition {
     executionMode: "sequential",
     // A watch wake is an internal turn, and answering the seat it woke for is
     // the point of it, so unlike hiring this is not held back from one.
-    execute: async (_id, params) => json(await message(params.seat, params.message)),
+    execute: async (_id, params) => {
+      const result = await message(params.seat, params.message);
+      return json({ ...result, deliveryStage: fleetDeliveryStage(result) });
+    },
   });
 }
 

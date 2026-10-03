@@ -1,3 +1,4 @@
+import { hireDeliveryStage } from "@clankie/protocol";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
@@ -842,9 +843,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     agent: (paneId) => herdrRunner.get(paneId),
     transcript: async (agent) => herdrRunner.transcript?.(agent as HerdrAgentSnapshot),
     mailbox: {
-      bound: (seatId) => fleetMailboxes.get(seatId)?.bound() === true,
+      bound: (seatId) => {
+        const mailbox = fleetSeatMailbox(
+          fleetMailboxes,
+          seatId,
+          join(options.stateDir, "delivery-receipts", "fleet"),
+        );
+        return mailbox.bound() || mailbox.uncertain();
+      },
       deliver: async (seatId, text) => {
-        const delivery = await fleetSeatMailbox(fleetMailboxes, seatId).deliver({
+        const delivery = await fleetSeatMailbox(
+          fleetMailboxes,
+          seatId,
+          join(options.stateDir, "delivery-receipts", "fleet"),
+        ).deliver({
           kind: "message",
           conversationId: conversations.conversationIdForSeat(seatId) ?? seatId,
           source: "captain",
@@ -1025,7 +1037,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   function seatOutbox(conversationId: string): SeatOutbox {
     let outbox = seatOutboxes.get(conversationId);
     if (outbox === undefined) {
-      outbox = new SeatOutbox();
+      outbox = new SeatOutbox({
+        uncertaintyPath: join(
+          options.stateDir,
+          "delivery-receipts",
+          "head",
+          `${encodeURIComponent(conversationId)}.json`,
+        ),
+      });
       seatOutboxes.set(conversationId, outbox);
     }
     return outbox;
@@ -1292,7 +1311,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     conversationId: string,
     context: Pick<ConversationTurnContext, "internal" | "origin">,
   ): OperatorSeatEventKind | undefined {
-    if (!seatOutboxes.get(conversationId)?.bound()) return undefined;
+    const outbox = seatOutbox(conversationId);
+    if (!outbox.bound() && !outbox.uncertain()) return undefined;
     return seatEventKindFor(context, true);
   }
 
@@ -1329,6 +1349,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           wantsReply: kind === "escalation",
           signal: context.signal,
         });
+        if (delivery.deliveryStage !== undefined && delivery.outcome !== "unbound")
+          context.deliveryReceipt?.(delivery.deliveryStage);
         if (delivery.outcome === "replied") {
           publish({ type: "message", role: "captain", text: delivery.text, streaming: false });
           return;
@@ -1765,6 +1787,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   ): Promise<FleetSeatDelivery> {
     // An adapter-driven seat takes its message through the adapter, which
     // waits for the harness's own receipt; any other seat needs a structured lane.
+    fleetSeatMailbox(fleetMailboxes, seatId, join(options.stateDir, "delivery-receipts", "fleet"));
     const deliver = () =>
       herdrWatches.deliverToSeat(seatId, message, () =>
         deliverFleetSeatMessage(fleetMailboxes, seatId, message, context),
@@ -1793,12 +1816,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         current.seatId === target || current.personaId === target || current.conversationId === target,
     );
     const seatId = seat?.seatId ?? seatByPersona.get(target);
-    if (seatId === undefined) return { outcome: "unknown_seat", seat: target };
+    if (seatId === undefined) return { outcome: "unknown_seat", seat: target, deliveryStage: "unavailable" };
     const delivery = await deliverToSeat(seatId, message, {
       conversationId: seat?.conversationId ?? seatId,
       source: "captain",
     });
-    if (delivery.outcome === "offline") return { outcome: "seat_offline", seatId };
+    if (delivery.outcome === "offline")
+      return { outcome: "seat_offline", seatId, deliveryStage: "unavailable" };
     if (delivery.outcome !== "delivered") return { ...delivery, seatId };
     if (delivery.state === "queued" && delivery.detail !== undefined)
       return { ...delivery, seatId, status: "queued_until_turn_end" };
@@ -2743,7 +2767,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
       if (request.op === "spawn_seat") {
-        const result = await hireSeat(request.seat, request.brief);
+        const hired = await hireSeat(request.seat, request.brief);
+        const result = { ...hired, deliveryStage: hireDeliveryStage(hired, request.brief !== undefined) };
         return { op: "spawn_seat", schemaVersion: 1, result };
       }
       if (request.op === "move_seat") {
@@ -3066,13 +3091,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return undefined;
       const seatId = await herdrWatches.seatIdForPane(paneId);
       if (seatId === undefined) return undefined;
-      return fleetSeatMailbox(fleetMailboxes, seatId).poll(waitMs, signal);
+      return fleetSeatMailbox(
+        fleetMailboxes,
+        seatId,
+        join(options.stateDir, "delivery-receipts", "fleet"),
+      ).poll(waitMs, signal);
+    },
+
+    async acknowledgeFleetSeatEvent(paneId, eventId) {
+      const seatId = await herdrWatches.seatIdForPane(paneId);
+      return (
+        seatId !== undefined &&
+        fleetSeatMailbox(
+          fleetMailboxes,
+          seatId,
+          join(options.stateDir, "delivery-receipts", "fleet"),
+        ).acknowledge(eventId)
+      );
+    },
+
+    async acknowledgeSeatEvent(eventId, conversationId) {
+      const binding = seatContext(conversationId);
+      return binding !== undefined && seatOutbox(binding.conversationId).acknowledge(eventId);
     },
 
     replySeatEvent(eventId, text, conversationId) {
       const binding = seatContext(conversationId);
       return Promise.resolve(
-        binding !== undefined && (seatOutboxes.get(binding.conversationId)?.reply(eventId, text) ?? false),
+        binding !== undefined && seatOutbox(binding.conversationId).reply(eventId, text),
       );
     },
 

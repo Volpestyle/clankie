@@ -1,3 +1,6 @@
+import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
+import { channelBody } from "./claude-worker-seat.ts";
+import { hireDeliveryStage } from "@clankie/protocol";
 import { codexProxyControl, type ExternalCodexControl } from "./external-codex-control.ts";
 import { createFleetSeatControl, isMessageableSeat } from "./fleet-seat-control.ts";
 import {
@@ -658,6 +661,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     | undefined;
   private readonly remoteWorkspace: ((fleet: string, directory: string) => Promise<boolean>) | undefined;
   private readonly path: string;
+  private readonly hireReceipts: DeliveryFence;
+  private readonly activeHires = new Set<string>();
   private readonly runner: HerdrWatchRunner;
   private readonly seatAdapters: ReadonlyMap<string, HarnessSeatAdapter>;
   private readonly remoteSeatAdapters:
@@ -734,6 +739,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } = {},
   ) {
     this.path = path;
+    this.hireReceipts = new DeliveryFence(`${path}.hire-receipts.json`);
     this.skillBundle = options.skillBundle;
     this.accounts = options.codexAccounts ?? (async () => codexAccounts());
     this.remoteWorkspace = options.remoteWorkspace;
@@ -762,6 +768,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       this.remoteSeatAdapters,
       options.remoteCodexQueue,
       options.remoteCodexControl,
+      `${this.path}.delivery-receipts.json`,
     );
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;
@@ -967,16 +974,113 @@ export class HerdrWatchStore implements HerdrWatchPort {
     brief?: string,
     resume?: SavedAgentSession,
   ): Promise<HerdrSeatSpawnResult> {
+    if (resume === undefined) return this.performSpawnSeat(input, subjectOverride, brief, resume);
+    // Serialize starts only inside the existing hire path. Herdr remains the
+    // durable owner of the seat; there is no parallel run/lock store.
+    const key = JSON.stringify([
+      resume.host === "local" ? "local" : [resume.host.ssh, resume.host.shell],
+      resume.sessionId.toLowerCase(),
+    ]);
+    const previous = this.resumeStarts.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.resumeStarts.set(key, current);
+    await previous;
+    try {
+      return await this.performSpawnSeat(input, subjectOverride, brief, resume);
+    } finally {
+      release();
+      if (this.resumeStarts.get(key) === current) this.resumeStarts.delete(key);
+    }
+  }
+
+  private async performSpawnSeat(
+    input: SpawnOperatorSeat,
+    subjectOverride?: string,
+    brief?: string,
+    resume?: SavedAgentSession,
+  ): Promise<HerdrSeatSpawnResult> {
     if (input.resume !== undefined && resume === undefined)
       return {
         outcome: "failed",
         reason: "not_ready",
         detail: "Saved-session metadata must be resolved before hiring",
       };
-    const result =
-      resume === undefined
-        ? await this.startSeat(input, subjectOverride, brief)
-        : await this.resumeSeat(input, resume, brief);
+    const receiptKey = JSON.stringify([
+      input.fleet ?? "local",
+      input.harness,
+      input.workingDirectory,
+      resume?.sessionId ?? "new",
+    ]);
+    const pending = this.hireReceipts.pending(receiptKey);
+    if (pending !== undefined) {
+      const agent =
+        !this.activeHires.has(receiptKey) && pending.paneId !== undefined
+          ? await this.runner.get(pending.paneId).catch(() => undefined)
+          : undefined;
+      const exact =
+        agent !== undefined &&
+        agent.agent === input.harness &&
+        agent.session !== undefined &&
+        (pending.sessionId === undefined
+          ? pending.agentName !== undefined && agent.name === pending.agentName
+          : nativeSessionId(agent) === pending.sessionId);
+      const transcript =
+        exact && agent !== undefined
+          ? await this.runner.transcript?.(agent).catch(() => undefined)
+          : undefined;
+      const received =
+        brief === undefined
+          ? exact
+          : transcript?.entries.some(
+              (entry) =>
+                entry.type === "message" &&
+                entry.role === "operator" &&
+                pending.beforeIds !== undefined &&
+                !pending.beforeIds.includes(entry.id) &&
+                deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
+            ) === true;
+      if (
+        exact &&
+        received &&
+        pending.fingerprint === deliveryFingerprint(brief ?? "") &&
+        agent !== undefined &&
+        this.hireReceipts.reconcile(receiptKey, pending.messageId)
+      ) {
+        const recovered = spawnedSeat(agent, agent.paneId, agent.name ?? agent.terminalId, input, undefined);
+        return { ...recovered, deliveryStage: hireDeliveryStage(recovered, brief !== undefined) };
+      }
+      return {
+        outcome: "failed",
+        reason: "delivery_unconfirmed",
+        deliveryStage: "uncertain",
+        detail: `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
+      };
+    }
+    const receipt = this.hireReceipts.begin(receiptKey, {
+      fingerprint: deliveryFingerprint(brief ?? ""),
+      ...(resume === undefined ? {} : { sessionId: resume.sessionId }),
+      ...(resume === undefined ? { beforeIds: [] } : {}),
+    });
+    this.activeHires.add(receiptKey);
+    let result: HerdrSeatSpawnResult;
+    try {
+      result =
+        resume === undefined
+          ? await this.startSeat(input, subjectOverride, brief, undefined, receiptKey)
+          : await this.resumeSeat(input, resume, brief, receiptKey);
+      if (
+        result.outcome === "spawned" ||
+        !["start_unconfirmed", "delivery_unconfirmed"].includes(result.reason)
+      )
+        this.hireReceipts.reconcile(receiptKey, receipt.messageId);
+    } catch (error) {
+      result = { outcome: "failed", reason: "start_unconfirmed", detail: String(error) };
+    } finally {
+      this.activeHires.delete(receiptKey);
+    }
     console.info(
       "hire_agent:",
       JSON.stringify({
@@ -995,27 +1099,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
           : { reason: result.reason, detail: redactSensitiveText(result.detail ?? "") }),
       }),
     );
-    return result;
+    return { ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) };
   }
 
   private async resumeSeat(
     input: SpawnOperatorSeat,
     session: SavedAgentSession,
     brief?: string,
+    receiptKey?: string,
   ): Promise<HerdrSeatSpawnResult> {
-    // Serialize starts only inside the existing hire path. Herdr remains the
-    // durable owner of the seat; there is no parallel run/lock store.
-    const key = JSON.stringify([
-      session.host === "local" ? "local" : [session.host.ssh, session.host.shell],
-      session.sessionId.toLowerCase(),
-    ]);
-    const previous = this.resumeStarts.get(key) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.resumeStarts.set(key, current);
-    await previous;
     try {
       if (this.closed) throw new Error("Native hire service is closed");
       const inventory = this.resumeInventory ?? this.runner.list?.bind(this.runner);
@@ -1056,6 +1148,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
           const control = await this.seatControl.attach(live);
           if (!control)
             throw new Error(`The session is live in ${live.paneId}; message its existing seat explicitly`);
+          if (receiptKey !== undefined) {
+            const receipt = this.hireReceipts.pending(receiptKey)!;
+            const before = await this.runner.transcript?.(live).catch(() => undefined);
+            this.hireReceipts.update(receiptKey, receipt.messageId, {
+              paneId: live.paneId,
+              sessionId: nativeSessionId(live),
+              ...(before === undefined ? {} : { beforeIds: before.entries.map((entry) => entry.id) }),
+            });
+          }
           const delivery = await control
             .send(brief)
             .catch((error: unknown) => ({ outcome: "unconfirmed" as const, detail: String(error) }));
@@ -1075,12 +1176,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           account,
         );
       }
-      return await this.startSeat(input, undefined, brief, session);
+      return await this.startSeat(input, undefined, brief, session, receiptKey);
     } catch (error) {
       return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
-    } finally {
-      release();
-      if (this.resumeStarts.get(key) === current) this.resumeStarts.delete(key);
     }
   }
 
@@ -1089,6 +1187,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     subjectOverride?: string,
     brief?: string,
     resume?: SavedAgentSession,
+    receiptKey?: string,
   ): Promise<HerdrSeatSpawnResult> {
     const { createTab, startAgent } = this.runner;
     if (this.closed || createTab === undefined || startAgent === undefined) {
@@ -1222,6 +1321,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // reports; make sure the extension is there before starting one.
       if (input.harness === "pi" && remote === undefined) await this.runner.installPiIntegration?.();
       const subject = subjectOverride ?? herdrAgentName(input.title);
+      if (receiptKey !== undefined) {
+        const receipt = this.hireReceipts.pending(receiptKey)!;
+        this.hireReceipts.update(receiptKey, receipt.messageId, { paneId, agentName: subject });
+      }
       const model = input.harness === "pi" ? await this.hostedPiModel(input.model) : input.model;
       // A model or effort the harness cannot take fails the hire typed, before
       // herdr is asked to start anything — the alternative is a hire that

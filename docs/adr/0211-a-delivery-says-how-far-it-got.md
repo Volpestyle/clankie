@@ -121,3 +121,26 @@ receipt never creates a duplicate turn.
   stays with the repo tracker (ADR 0191).
 - Adding a new delivery mechanism requires its ladder mapping before it is
   advertised.
+
+## Implementation boundaries
+
+Protocol results retain mechanism-specific outcomes and add `deliveryStage`.
+Conversation acceptance is `stored`; a native seat acceptance is `consumed`;
+turn stream events retain the final receipt stage independently of the local
+run's completion phase. Plain mailbox acknowledgments remain `delivered`.
+The existing queue state and detail remain available for operator display.
+
+Head and fleet mailboxes persist unresolved event IDs and expose authenticated
+exact-ID acknowledgment endpoints. A fresh poll after restart cannot reconcile
+an old event. Native fleet sends and hires persist unresolved original session,
+pane and message evidence before dispatch. They never send a replacement while
+uncertain; a new complete matching operator transcript entry can reconcile the
+original session. If that evidence is unavailable, delivery remains blocked.
+An unbound channel does not authorize a fallback after an uncertain dispatch.
+
+OpenCode additionally fences native claims across launcher replacement. Native
+history must match the complete original synthetic event in the original
+session to reconcile a lost receipt. Bridge persistence and native consumption
+remain separate receipts. Pending launch journals do not become automatic
+restart replay queues. No new broker, harness transcript format, or Swarm path
+is introduced. Deterministic verification does not claim a live model trial.

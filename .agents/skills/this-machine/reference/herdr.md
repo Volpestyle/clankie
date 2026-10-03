@@ -67,8 +67,8 @@ Use `clankie seat --harness opencode --conversation ID --dry-run` to inspect the
 native launch before sitting as Clankie; `--resume` binds the exact saved native
 session. It is an operator seat, not an OpenCode `hire_agent` adapter. Native
 wakes use the bound session API, wait while busy, and never type into an owner's
-draft. Permissions stay with the owner. Uncertain delivery stops: inspect its
-native session and retained receipt before manually retrying. A service restart
+draft. Permissions stay with the owner. Uncertain delivery blocks every retry, including explicit retries, until its
+original native receipt is reconciled. A service restart
 does not reattach from a saved ID. See `integrations/opencode-plugin/README.md`
 for per-launch MCP isolation, settings, version checks and current live gaps.
 
@@ -87,3 +87,14 @@ thread from recent history, globally enable the daemon, or forge membership to
 repair it. Outbound owner-authorized control does not authorize inbound fleet
 MCP tools: shared-daemon local MCP membership continues to fail closed. Private
 `--no-daemon` sessions generally have no externally reachable control socket.
+
+## Delivery receipt stages
+
+Read `deliveryStage` separately from the native outcome and work status:
+`stored` is service retention, `delivered` is bridge receipt, `consumed` is native
+queue/turn acceptance, and `responded` is a correlated response or turn outcome.
+Native queues count as consumed even while waiting for an active turn or goal;
+this never means model-seen or completed work. `unavailable`, `expired`, and
+`rejected` say where delivery stopped. `uncertain` blocks every retry and every
+fallback until the original receipt is reconciled, including after restart.
+Keep the native queue/steer state and detail when reporting to James.
