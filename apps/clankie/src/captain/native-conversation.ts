@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import type {
-  OperatorConversation,
-  OperatorConversationEventBody,
-  OperatorConversationStreamEvent,
-  OperatorDeliveredFile,
-  ReplayOperatorConversationRequest,
-  ReplayOperatorConversationResult,
+import {
+  operatorConversationWindow,
+  type OperatorConversation,
+  type OperatorConversationEventBody,
+  type OperatorConversationStreamEvent,
+  type OperatorDeliveredFile,
+  type ReplayOperatorConversationRequest,
+  type ReplayOperatorConversationResult,
 } from "@clankie/protocol";
 import { isDeliveredImagePath, namedImagePaths } from "../delivered-files.ts";
 import type { HerdrSeatTranscript } from "./herdr-transcript.ts";
@@ -93,14 +94,49 @@ export async function nativeConversationPage(
       message: "The native session changed or its retained history moved; reload this chat.",
     };
   }
-  if (from !== safeCursor)
+  const backward = request.direction === "backward";
+  if (backward || from !== safeCursor)
     entries.push({
       cursor: safeCursor,
       occurredAt: entries.at(-1)?.occurredAt ?? conversation.createdAt,
       body: { type: "activity", phase },
     });
-  const remaining = from === safeCursor ? [] : entries.slice(index + 1);
-  const page = remaining.slice(0, request.limit ?? 200);
+  // Native cursors are chained hashes, not sortable counters. Resolve the
+  // exclusive upper boundary by identity before applying the shared window.
+  const remaining = backward
+    ? from === undefined
+      ? entries
+      : entries.slice(
+          0,
+          anchor === start || /^0+$/u.test(from)
+            ? 0
+            : /:(responding|waiting)$/u.test(from)
+              ? index + 1
+              : index,
+        )
+    : from === safeCursor
+      ? []
+      : entries.slice(index + 1);
+  const window = backward
+    ? operatorConversationWindow(
+        remaining.map((entry) => ({
+          schemaVersion: 1,
+          conversationId: conversation.conversationId,
+          revision: conversation.revision,
+          cursor: entry.cursor,
+          occurredAt: entry.occurredAt,
+          // An image remains part of its assistant turn, even if delivery fails.
+          ...(entry.body ?? { type: "tool", toolCallId: entry.cursor, name: "image", phase: "completed" }),
+        })) as OperatorConversationStreamEvent[],
+        {
+          ...(request.limit === undefined ? {} : { limit: request.limit }),
+          ...(request.turnLimit === undefined ? {} : { turnLimit: request.turnLimit }),
+        },
+      )
+    : undefined;
+  const page = backward
+    ? remaining.slice(remaining.length - window!.events.length)
+    : remaining.slice(0, request.limit ?? 200);
   const events: OperatorConversationStreamEvent[] = [];
   for (const entry of page) {
     let body = entry.body;
@@ -131,6 +167,7 @@ export async function nativeConversationPage(
     retainedFromCursor: start,
     nextCursor: page.at(-1)?.cursor ?? from ?? start,
     safeCursor,
-    hasMore: page.length < remaining.length,
+    hasMore: window?.hasOlder ?? page.length < remaining.length,
+    ...(window ? { hasOlder: window.hasOlder, previousCursor: page[0]?.cursor ?? start } : {}),
   };
 }

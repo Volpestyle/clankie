@@ -28,6 +28,55 @@ const transcript: HerdrSeatTranscript = {
   ],
 };
 
+it("opens a bounded recent native window and pages backward by opaque cursor identity", async () => {
+  const source: HerdrSeatTranscript = {
+    sessionKey: "long-native-chat",
+    entries: Array.from({ length: 53 }, (_, index) => ({
+      type: "message",
+      id: `m${index}`,
+      role: "agent",
+      text: `reply ${index}`,
+    })),
+  };
+  const backward = { ...request, direction: "backward" as const, turnLimit: 20, limit: 500 };
+  const latest = await nativeConversationPage(conversation, source, "idle", backward);
+  if (latest.status !== "page") throw new Error("page expected");
+  expect(latest.hasOlder).toBe(true);
+  expect(latest.events.filter((event) => event.type === "message")).toHaveLength(20);
+  expect(latest.events.at(-1)).toMatchObject({ type: "activity", phase: "waiting" });
+  const middle = await nativeConversationPage(conversation, source, "idle", {
+    ...backward,
+    cursor: latest.previousCursor,
+  });
+  if (middle.status !== "page") throw new Error("page expected");
+  const oldest = await nativeConversationPage(conversation, source, "idle", {
+    ...backward,
+    cursor: middle.previousCursor,
+  });
+  if (oldest.status !== "page") throw new Error("page expected");
+  expect(oldest.hasOlder).toBe(false);
+  expect(
+    [...oldest.events, ...middle.events, ...latest.events]
+      .filter((event) => event.type === "message")
+      .map((event) => event.text),
+  ).toEqual(source.entries.map((entry) => (entry.type === "message" ? entry.text : "")));
+  expect(
+    await nativeConversationPage(conversation, source, "idle", {
+      ...backward,
+      cursor: latest.retainedFromCursor,
+    }),
+  ).toMatchObject({ status: "page", events: [], hasOlder: false });
+  expect(
+    await nativeConversationPage(conversation, source, "idle", { ...backward, cursor: latest.safeCursor }),
+  ).toMatchObject({ status: "page", hasOlder: true });
+  expect(
+    await nativeConversationPage(conversation, { ...source, sessionKey: "replacement" }, "idle", {
+      ...backward,
+      cursor: latest.previousCursor,
+    }),
+  ).toMatchObject({ status: "recover", code: "cursor_reset" });
+});
+
 it("pages native chat, follows appends and status, and recovers after a branch or session changes", async () => {
   const first = await nativeConversationPage(conversation, transcript, "working", { ...request, limit: 2 });
   if (first.status !== "page") throw new Error("page expected");
