@@ -5,7 +5,8 @@ Status: proposed (Claude and Codex, 2026-09-25). Step 2 (resumed turns) retired
 it was never used, and a headless process replacing a worker is what ADR 0203
 rules out; reading stays. Extends
 [ADR 0188](0188-native-agent-chats-read-their-own-history.md) and applies
-[ADR 0181](0181-clankie-is-independent-of-his-connections.md).
+[ADR 0181](0181-clankie-is-independent-of-his-connections.md). [ADR 0212](0212-machines-and-devices.md)
+(proposed) folds its separate SSH host list into one record per machine.
 
 ## Context
 

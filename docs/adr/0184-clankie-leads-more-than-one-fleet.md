@@ -29,6 +29,9 @@ Acceptance remains the owner's. What landed differs from the text below in these
   - ssh-config discovery;
   - the app's fleet dropdown.
 
+  Discovery and the dropdown are planned in
+  [ADR 0212](0212-machines-and-devices.md) (proposed).
+
 The coordinator every fleet reaches is
 [ADR 0198](0198-one-coordinator-reaches-every-fleet.md).
 
