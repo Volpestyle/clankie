@@ -194,6 +194,7 @@ export class NativeClaudeObservation {
     };
     this.#lastHash = digest(JSON.stringify(record));
     this.#events.push({ ...record, sha256: this.#lastHash });
+    return structuredClone({ ...record, sha256: this.#lastHash });
   }
   transcript(bytes, agentId = null) {
     if (this.#closed) throw Error("Claude observation already sealed");

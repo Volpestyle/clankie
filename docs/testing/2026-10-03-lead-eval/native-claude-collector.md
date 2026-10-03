@@ -1,0 +1,86 @@
+# Protected native Claude collection seam
+
+This is source engineering with deterministic process/filesystem fixtures. No
+Claude CLI, credential, account, provider, model, Docker, probe or evaluation ran.
+The native arm remains unsupported. The collector cannot issue launch or quota
+authority, and the existing Codex capability cannot authorize a Claude binary.
+
+## Actual boundary
+
+`startNativeClaudeCollector` requires the real `LeadContainer` in native mode and
+its real `NativeOwnerAttachment`. The existing private runtime capability reader
+must bind `/opt/claude/bin/claude` to the selected executable hash. Native `pipe`
+still enforces the private image/daemon/runtime capability. No imported JSON,
+selected artifact label or fixture flag supplies that origin. The current issuer
+does not contain a Claude binary proof, so this seam remains unavailable until
+the actual Claude image/runtime capability is engineered and verified.
+
+A controller-supplied Python helper runs through the contained pipe. It selects
+one process by exact argv, session, cwd, config directory, pane, nonzero terminal,
+executable hash and PID/start ticks. The executable is hashed through its actual
+`/proc/PID/exe` descriptor; later checks retain the executable device/inode/size/
+ctime identity. It rejects PID reuse, changed argv/config/cwd, replaced executables,
+headless selections and missing or ambiguous roots. Every hook uses Linux Unix
+socket peer credentials and a bounded ancestor chain to that root; all ancestor
+lifetimes are rechecked. Snapshots recheck the selected root around reads and
+before transmission. These are process observations, not account attestation.
+
+The root's model tools must still be proven unable to access control files,
+collector sockets and parent process descriptors by the future Claude runtime
+capability. Codex sandbox evidence does not establish that for Claude. A native
+process or descendant able to write transcript/hook bytes can forge their contents;
+a valid peer chain does not prove an official hook fired, nor that all children or
+provider requests were seen. Every exported report therefore remains
+`authoritative: false`, `complete: false`, `launchAllowed: false` with no account-wide
+token total.
+
+## Collection and retention
+
+The first-party [hook reference](https://code.claude.com/docs/en/hooks), checked on
+2026-10-03, documents the registered names: SessionStart, UserPromptSubmit,
+SubagentStart, SubagentStop, Stop, StopFailure and SessionEnd. The writer stages a
+fixed Python hook bridge and explicit settings in the fresh private collector
+control directory. A future verified runtime must select those settings; this does
+not modify or launch the existing prepared plan. The documentation contract is not
+proof of compatibility with the selected binary. Unsupported, missing or mismatched
+hooks remain gaps. StopFailure is an observation only; hooks cannot provide the
+physical-request budget gate.
+
+Hook input reaches a controller-created Unix socket. The helper waits for the
+controller's durable append acknowledgement before replying. The host keeps only
+the observer's sanitized lifecycle fields and original-payload hash/byte count.
+It never retains hook prompts, responses, supplied paths or arbitrary extras.
+
+Root/child transcript paths are derived from the selected cwd/session and bounded
+native `agent-*.jsonl` names, never from hook `transcript_path`. The reader walks
+no-follow directory handles, opens nonblocking no-follow regular files, refuses
+hardlinks and rechecks exact descriptors and named paths. Concurrent appends may
+extend a file; rewriting or truncating a captured prefix, changing its inode, losing
+a previously seen file, or replacing a directory stops collection with a gap.
+The current fixed native path convention still needs selected-version verification.
+
+The host creates a fresh private evidence directory outside **every canonical
+inspected runtime mount source**, never mounts it into the runtime, and appends a
+hash-chained journal. Raw transcript snapshots remain private files there; exported
+summaries and the journal contain hashes and metadata, not transcript bodies.
+The boundary protects retention from the contained runtime; it does not claim to
+resist an unrelated privileged host process or the owner modifying local storage.
+
+Bounds: 64 KiB per hook, 1 MiB aggregate encoded hook input, 10,000 hooks, 16 MiB per
+transcript, 32 MiB per capture batch, 32 child files, 64 MiB cumulative retained raw
+snapshots, 8 MiB/20,000 journal records, one acknowledged protocol frame at a time,
+and a socket backlog of eight. Missing root proof after ten seconds, a stalled
+five-second helper heartbeat, failed owner proof, malformed frames, capacity loss
+or helper exit triggers and awaits exact container-wide stop. Failed stop receipts
+remain uncertain and cannot become a successful closure. A terminal partial batch
+is reported as missing coverage. Owner/process checks and all timers are bounded;
+no callback relies on a model-written claim to keep collection alive.
+
+## Remaining work
+
+Implement and verify the actual Claude image/control isolation capability, connect
+this seam to the manual native TUI runtime, establish effective hook configuration
+and process/path compatibility, and exercise live collection only after owner
+approval. Provider identity/quota observation, physical-request admission and native
+child/index routing remain separate missing engineering. Retained filesystem
+claims and their hashes cannot close any of those gaps.

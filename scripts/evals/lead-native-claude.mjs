@@ -23,7 +23,7 @@ const missing = [
   {
     code: "claude-transcript-provenance-collector-unavailable",
     detail:
-      "No protected live Claude transcript collector is bound to the exact native process. Supplied hook/transcript bytes cannot establish origin or accounting completeness.",
+      "A protected collection seam exists, but no private native Claude runtime capability binds its executable and live collection boundary yet. Hook/transcript bodies remain claims, never complete accounting.",
   },
 ];
 

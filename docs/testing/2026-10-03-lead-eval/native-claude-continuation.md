@@ -73,3 +73,8 @@ read-only capability check to James first. It is currently held, as are all live
 model, Docker and calibration checks. If the supported native surface cannot
 establish these properties, the arm stays unsupported; do not switch to an SDK or
 rename hook fixtures as acceptance.
+
+The [protected collector seam](native-claude-collector.md) now implements bounded
+process/peer-checked capture and outside-mount retention for a future verified
+Claude runtime. Its actual Claude capability and runtime integration remain
+unavailable; no launch or accounting authority is derived from collection.
