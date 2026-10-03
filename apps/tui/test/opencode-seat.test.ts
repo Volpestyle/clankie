@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
@@ -30,6 +30,50 @@ test("OpenCode plan discovers capabilities and exact resume refuses conversation
     await expect(
       planSeat(flags, { repoRoot, env, execFileImpl: async () => ({ stdout: "2.0.0", stderr: "" }) }),
     ).rejects.toThrow("Unsupported");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy OpenCode resume retains the global chat and refuses service identity or workspace drift", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-resume-"));
+  const env = {
+    HOME: root,
+    XDG_STATE_HOME: root,
+    CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+    CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
+  };
+  const flags = parseSeatArgs(["--harness", "opencode", "--resume"]);
+  try {
+    await mkdir(join(root, "clankie"));
+    await writeFile(join(root, "clankie/opencode-seat.json"), JSON.stringify({ sessionId: id, cwd: root }));
+    const fetchImpl = vi.fn(async (url: Parameters<typeof fetch>[0]) => {
+      expect(new URL(String(url)).searchParams.get("conversationId")).toBe("global-default");
+      return Response.json({ conversationId: "global-default", cwd: root });
+    });
+    const plan = await planSeat(flags, { repoRoot, env, execFileImpl, fetchImpl });
+    expect(plan.conversationId).toBe("global-default");
+    expect(plan.newConversation).toBeUndefined();
+    expect(plan.args.slice(-2)).toEqual(["--session", id]);
+    await expect(
+      planSeat(flags, {
+        repoRoot,
+        env,
+        execFileImpl,
+        fetchImpl: async () => Response.json({ conversationId: "global-default", cwd: "/foreign" }),
+      }),
+    ).rejects.toThrow("Resume workspace changed");
+    await expect(
+      planSeat(flags, {
+        repoRoot,
+        env,
+        execFileImpl,
+        fetchImpl: async () => Response.json({ conversationId: "foreign", cwd: root }),
+      }),
+    ).rejects.toThrow("Invalid service seat context");
+    await expect(planSeat(flags, { repoRoot, env, execFileImpl, claudeCommand: "claude2" })).rejects.toThrow(
+      "Usage:",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -122,7 +166,10 @@ test("launcher bridge authenticates and binds one session without copying operat
         repoRoot,
         env,
         execFileImpl,
-        fetchImpl: async () => new Response("context unavailable", { status: 503 }),
+        fetchImpl: async (url) =>
+          String(url).includes("/seat-context")
+            ? Response.json({ conversationId: "open-seat", cwd: root })
+            : new Response("context unavailable", { status: 503 }),
         stderr: {
           write: (text) => {
             output.push(text);
@@ -155,6 +202,7 @@ test("launcher bridge authenticates and binds one session without copying operat
       repoRoot,
       env,
       execFileImpl,
+      fetchImpl: async () => Response.json({ conversationId: "open-seat", cwd: root }),
     });
     expect(resumed.args.slice(-2)).toEqual(["--session", id]);
     await expect(

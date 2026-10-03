@@ -220,7 +220,8 @@ function herdrFailureText(caught: unknown): string {
 }
 
 export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): Promise<SeatPlan> {
-  if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude") throw new Error(SEAT_USAGE);
+  if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
+    throw new Error(SEAT_USAGE);
   if (flags.harness === "opencode") {
     const { planOpenCodeSeat } = await import("./opencode-seat.ts");
     return planOpenCodeSeat(flags, options);
@@ -363,7 +364,8 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const flags = parseSeatArgs(args);
-  if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude") throw new Error(SEAT_USAGE);
+  if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
+    throw new Error(SEAT_USAGE);
   if (flags.harness === "opencode") {
     const { runOpenCodeSeat } = await import("./opencode-seat.ts");
     return runOpenCodeSeat(flags, options);

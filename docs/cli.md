@@ -2396,7 +2396,9 @@ goals. Native goal state remains separate from turn activity.
 
 `clankie seat --harness opencode --conversation ID --dry-run` reviews the native
 launch, installed version, skill selection and required owner steps. Remove
-`--dry-run` to launch; `--resume` uses the exact recorded session. `/seat opencode`
+`--dry-run` to launch; `--resume` uses the exact recorded session and chat.
+Without `--conversation ID`, each fresh launch creates a separate workspace
+chat; dry-run creates none. `/seat opencode`
 in the console reviews the same plan. Installation, per-launch settings,
 removal, native delivery semantics and current verification limits are in the
 [OpenCode seat guide](../integrations/opencode-plugin/README.md).

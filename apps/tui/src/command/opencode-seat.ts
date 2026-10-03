@@ -13,6 +13,7 @@ import { commandHost, outputJson } from "./io.ts";
 import { fetchLaneText } from "./prompt.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import type { SeatCommandOptions, SeatPlan } from "./seat.ts";
+import { resolveSeatContext } from "./seat-context.ts";
 
 const exec = promisify(execCallback);
 const SESSION = /^ses_[A-Za-z0-9]{8,128}$/u;
@@ -55,31 +56,25 @@ export async function planOpenCodeSeat(
     }
     if (!previous || !SESSION.test(previous.sessionId) || typeof previous.cwd !== "string")
       throw new Error("No exact OpenCode seat to resume; start a seat and create its native session first.");
-    if (flags.conversationId !== undefined && flags.conversationId !== previous.conversationId)
+    if (
+      flags.conversationId !== undefined &&
+      flags.conversationId !== (previous.conversationId ?? "global-default")
+    )
       throw new Error("Exact-session resume cannot change its conversation.");
   }
-  const conversationId = previous?.conversationId ?? flags.conversationId;
-  let cwd = previous?.cwd ?? process.cwd();
-  if (conversationId !== undefined) {
-    const credential = await resolveOperatorCredential({
-      env,
-      ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
-    });
-    if (!credential) throw new Error("No operator credential; start Clankie first.");
-    const url = new URL("/v1/captain/seat-context", commandHost({ ...options, env }));
-    url.searchParams.set("conversationId", conversationId);
-    const response = await (options.fetchImpl ?? fetch)(url, {
-      headers: { authorization: `Bearer ${credential.token}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) throw new Error(`Seat conversation unavailable (${response.status})`);
-    const binding = (await response.json()) as Binding;
-    if (binding.conversationId !== conversationId || typeof binding.cwd !== "string" || !binding.cwd)
-      throw new Error("Invalid seat context");
-    if (previous && binding.cwd !== previous.cwd)
-      throw new Error("Resume workspace changed; refusing to redirect native session");
-    cwd = binding.cwd;
-  }
+  const context = await resolveSeatContext(
+    {
+      conversationId:
+        previous === undefined ? flags.conversationId : (previous.conversationId ?? "global-default"),
+      cwd: previous?.cwd ?? process.cwd(),
+      command: "opencode",
+      dryRun: true,
+    },
+    options,
+  );
+  const { conversationId, cwd } = context;
+  if (previous && cwd !== previous.cwd)
+    throw new Error("Resume workspace changed; refusing to redirect native session");
   const selection = (await new SettingsStore(defaultSettingsPath(env)).load()).skills;
   return {
     command,
@@ -98,13 +93,14 @@ export async function planOpenCodeSeat(
     resumed: !!previous,
     cwd,
     ...(conversationId ? { conversationId } : {}),
+    ...(context.newConversation ? { newConversation: context.newConversation } : {}),
     version,
     delivery: "Native session API; idle dispatch, busy waits, uncertain dispatch stops without retry.",
   };
 }
 
 export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions): Promise<number> {
-  const plan = await planOpenCodeSeat(flags, options);
+  let plan = await planOpenCodeSeat(flags, options);
   const stdout = options.stdout ?? process.stdout,
     stderr = options.stderr ?? process.stderr;
   if (flags.dryRun) {
@@ -133,6 +129,10 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
     autoupdate?: boolean;
   };
   config.autoupdate = false;
+  if (plan.newConversation !== undefined) {
+    const context = await resolveSeatContext({ cwd: plan.cwd, command: "opencode", dryRun: false }, options);
+    plan = { ...plan, ...context, args: [context.cwd, ...plan.args.slice(1)] };
+  }
   const stop = new AbortController();
   const token = randomBytes(32).toString("hex");
   const directory = join(clankieStateHome(env), "clankie", "opencode-seat-launches", randomUUID());

@@ -76,3 +76,8 @@ Never share operator bearers or grant contents in transcripts. Exact
 `tools[].arguments` and `forbiddenArguments` enforce resource restrictions.
 Worker publishing grants must pin the exact `personaId`. Read
 `docs/worker-access.md` under `repoRoot` for the contract.
+
+OpenCode seats use the same isolation contract: a fresh `clankie seat --harness
+opencode` creates a separate workspace chat; `--conversation ID` reuses one,
+`--resume` keeps the exact native session and chat, and `--dry-run` creates none.
+See [the OpenCode seat guide](../../../../../integrations/opencode-plugin/README.md).
