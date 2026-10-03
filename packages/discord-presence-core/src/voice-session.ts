@@ -258,6 +258,7 @@ export interface DiscordVoiceSessionStatus {
   readonly handoffCount: number;
   readonly activity: "speaking" | "listening" | "thinking" | "idle" | "unknown";
   readonly outputControlUncertain?: boolean;
+  readonly speakers?: readonly { userId: string; displayName?: string }[];
   readonly active: boolean;
   readonly guildId?: string;
   readonly channelId?: string;
@@ -979,6 +980,7 @@ export class DiscordVoiceSession {
     this.voiceReady = false;
     this.outputMuted = false;
     this.outputControlUncertain = false;
+    this.outputStops.clear();
     this.connectionId = undefined;
     this.guildId = undefined;
     this.channelId = undefined;
@@ -1302,6 +1304,7 @@ export class DiscordVoiceSession {
   }
   private outputMuted = false;
   private outputControlUncertain = false;
+  private readonly outputStops = new Map<string, PlaybackJob>();
   /** Stops Clankie's speech only. It does not mute room input or change consent. */
   public async setOutputMuted(stayId: string, muted: boolean, guard: () => Promise<void>): Promise<void> {
     if (this.stayId !== stayId || !this.voiceReady) throw new Error("voice_stay_stale");
@@ -1317,20 +1320,47 @@ export class DiscordVoiceSession {
       if (job === undefined) continue;
       job.encodedChunks.length = 0;
       job.stopping = true;
+      if (job !== this.playingJob) {
+        // This queued job never reached native playback.
+        this.settlePlayback(job, "stopped");
+        continue;
+      }
+      // Reliable IPC submission is not native silence. Keep exact playback
+      // correlation even after local timeout/failure until native confirms it.
+      this.outputStops.set(job.playbackId, job);
+      this.outputControlUncertain = true;
       try {
         this.options.vox.stopTtsPlayback(job.playbackId);
       } catch {
-        this.outputControlUncertain = true;
+        // Status remains unknown; unmute cannot replay into an uncertain mouth.
       }
-      this.settlePlayback(job, "stopped");
     }
-    if (this.outputControlUncertain) throw new Error("voice_output_uncertain");
   }
 
   public status(): DiscordVoiceSessionStatus {
     return {
       active: this.voiceReady,
       outputMuted: this.outputMuted,
+      ...(this.voiceReady &&
+      this.guildId !== undefined &&
+      this.channelId !== undefined &&
+      this.options.channelOccupants !== undefined
+        ? {
+            speakers: [...this.captures.keys()]
+              .filter(
+                (userId) =>
+                  this.roomRoster.has(userId) && this.consent.permits(this.guildId!, this.channelId!, userId),
+              )
+              .slice(0, 64)
+              .map((userId) => {
+                const displayName = this.roomRoster.get(userId)?.displayName;
+                return {
+                  userId,
+                  ...(displayName === undefined ? {} : { displayName: displayName.slice(0, 128) }),
+                };
+              }),
+          }
+        : {}),
       outputControlUncertain: this.outputControlUncertain,
       handoffCount: this.handoffs.size,
       activity: this.outputControlUncertain
@@ -3352,6 +3382,17 @@ export class DiscordVoiceSession {
   }
 
   private handlePlaybackState(event: Extract<VoxControlEvent, { type: "tts_playback_state" }>): void {
+    const stopped = this.outputStops.get(event.playbackId);
+    if (
+      stopped !== undefined &&
+      stopped.generation === this.sessionGeneration &&
+      (event.status === "stopped" || event.status === "drained")
+    ) {
+      this.outputStops.delete(event.playbackId);
+      this.outputControlUncertain = this.outputStops.size > 0;
+      this.settlePlayback(stopped, "stopped");
+      return;
+    }
     const job = this.playingJob;
     if (job === undefined || event.playbackId !== job.playbackId) return;
     if (event.status === "started") {

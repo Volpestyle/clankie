@@ -1773,12 +1773,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   app.post(DISCORD_ROOM_EVIDENCE_PATH, async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (!captain || captain === "unavailable" || captain.steerSourceLane !== "discord_text")
+    if (
+      !captain ||
+      captain === "unavailable" ||
+      !["discord_text", "discord_voice"].includes(captain.steerSourceLane ?? "")
+    )
       return context.json({ error: "discord_body_required" }, 403);
     const parsed = DiscordRoomEvidenceSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_room_evidence" }, 400);
     if (!dependencies.roomObservations) return context.json({ error: "room_observations_unavailable" }, 503);
     const evidence = parsed.data;
+    const voice = evidence.voiceStayId !== undefined;
+    if (captain.steerSourceLane !== (voice ? "discord_voice" : "discord_text"))
+      return context.json({ error: "discord_body_mismatch" }, 403);
     if (captainTransportKind(captain) !== evidence.transportKind)
       return context.json({ error: "discord_body_mismatch" }, 403);
     const capturedSource = [...discordPresenceLiveSessions.values()].find(
@@ -1794,6 +1801,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       !freshCaptain ||
       freshCaptain === "unavailable" ||
       freshCaptain.captainId !== captain.captainId ||
+      freshCaptain.steerSourceLane !== captain.steerSourceLane ||
       captainTransportKind(freshCaptain) !== evidence.transportKind
     )
       return context.json({ error: "discord_body_revoked" }, 403);
@@ -1808,8 +1816,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const channels = user ? settings.userSessionChannelIds : settings.ingressChannelIds;
     const dmPolicy = user ? settings.userSessionDmPolicy : settings.ingressDmPolicy;
     const dmUsers = user ? settings.userSessionDmUserIds : settings.ingressDmUserIds;
-    const admitted =
-      evidence.guildId === undefined
+    const admitted = voice
+      ? settings.voiceEnabled && evidence.guildId !== undefined
+      : evidence.guildId === undefined
         ? dmPolicy === "owner_only"
           ? evidence.actorId === settings.ownerUserId
           : dmPolicy === "allowlist" && dmUsers.includes(evidence.actorId)
@@ -1824,7 +1833,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (
       !admitted ||
       settings.activeBody !== (user ? "user_session" : "bot") ||
-      !(user ? settings.userSessionEnabled : settings.textIngressEnabled) ||
+      !(voice ? settings.voiceEnabled : user ? settings.userSessionEnabled : settings.textIngressEnabled) ||
       !live?.gatewayConnected ||
       live !== capturedSource ||
       (user &&
@@ -1832,9 +1841,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     )
       return context.json({ error: "room_evidence_source_stale" }, 403);
     const id = dependencies.captain.bodyRoomConversation(
-      "discord_presence",
+      voice ? "discord_voice" : "discord_presence",
       `${evidence.guildId ?? "dm"}:${evidence.channelId}`,
     );
+    if (
+      voice &&
+      !dependencies.bodyVoiceStays?.observesAudioSource({
+        stayId: evidence.voiceStayId!,
+        guildId: evidence.guildId!,
+        channelId: evidence.channelId,
+        presenceSessionId: evidence.presenceSessionId,
+      })
+    )
+      return context.json({ error: "room_evidence_stay_stale" }, 403);
     dependencies.roomObservations.record(id, evidence);
     return context.json({ accepted: true });
   });

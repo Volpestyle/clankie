@@ -1,3 +1,4 @@
+import { voiceRoomEvidence } from "@clankie/discord-presence-core";
 import { tryHandleVoiceOutputControl } from "@clankie/discord-presence-core";
 import { tryHandleBodyVoiceReconcile } from "@clankie/discord-presence-core";
 import { VoiceBodyLease, type VoiceBodyAdmission } from "@clankie/discord-presence-core";
@@ -1727,6 +1728,13 @@ function recordReceipt(
 }
 
 async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void> {
+  // Stamp the registered body generation before any receipt/IPC await.
+  const roomEvidence = voiceRoomEvidence(evidence, {
+    presenceSessionId: presenceSession.record.sessionId,
+    transportKind: "bot",
+  });
+  for (const event of roomEvidence) void voiceApi?.recordDiscordRoomEvidence(event).catch(() => undefined);
+
   if (evidence.type === "left") pendingLeaseLeft = evidence;
   // The idle auto-leave watches the same stream the receipts do, so "activity"
   // is exactly what the evidence says happened.

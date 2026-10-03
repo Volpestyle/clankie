@@ -21,6 +21,7 @@ const Snapshot = z.object({
   consentedParticipantCount: z.number(),
   activeCaptureCount: z.number(),
   handoffCount: z.number(),
+  speakers: DiscordRoomVoiceStatusSchema.shape.speakers,
 });
 /** Ephemeral operation guards, not a second lease or reconstructed room authority. */
 export class DiscordRoomVoice {
@@ -50,12 +51,14 @@ export class DiscordRoomVoice {
     if (!response.ok) throw Error("voice_unavailable");
     const snapshot = Snapshot.parse(await response.json());
     const lease = this.leases.status("voice");
-    const { active, outputControlUncertain, ...details } = snapshot;
+    const { active, outputControlUncertain, speakers, ...details } = snapshot;
+    const exact =
+      active && lease?.state === "active" && this.stays.observesActiveAudio(lease.conversationId, snapshot);
     return DiscordRoomVoiceStatusSchema.parse({
       state: outputControlUncertain
         ? "unknown"
         : active
-          ? lease?.state === "active" && this.stays.observesActiveAudio(lease.conversationId, snapshot)
+          ? exact
             ? "active"
             : "unknown"
           : lease === undefined
@@ -63,6 +66,7 @@ export class DiscordRoomVoice {
             : "unknown",
       ...(lease === undefined ? {} : { conversationId: lease.conversationId }),
       ...details,
+      ...(exact && speakers !== undefined ? { speakers } : {}),
     });
   }
   async join(

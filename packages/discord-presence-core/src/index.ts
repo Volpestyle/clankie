@@ -301,3 +301,5 @@ export {
   type BodyVoiceReconcilePorts,
 } from "./body-voice-reconcile.ts";
 export { tryHandleVoiceOutputControl, type VoiceOutputControlPort } from "./voice-output-control.ts";
+
+export { voiceRoomEvidence } from "./voice-room-evidence.ts";

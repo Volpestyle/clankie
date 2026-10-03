@@ -143,11 +143,12 @@ class FakeVox implements VoxClient {
     }
   }
 
+  public autoStop = true;
   public stopTtsPlayback(playbackId: string): void {
     if (this.stopError !== undefined) throw this.stopError;
     this.stops.push(playbackId);
     if (this.activePlaybackId === playbackId) this.activePlaybackId = undefined;
-    this.emit({ type: "tts_playback_state", playbackId, status: "stopped" });
+    if (this.autoStop) this.emit({ type: "tts_playback_state", playbackId, status: "stopped" });
   }
 
   public subscribeUserAudio(
@@ -4324,4 +4325,67 @@ describe("owner speech output control", () => {
     expect(harness.session.status().outputMuted).toBe(false);
     await harness.session.dispose();
   });
+});
+
+it("speech mute stays unknown until the exact native playback confirms stopped", async () => {
+  const harness = await engagedHarness();
+  harness.vox.autoDrain = false;
+  harness.vox.autoStop = false;
+  harness.conversation().input.onAudioDelta(pcmDelta(480), "pending-stop");
+  await flush();
+  const playbackId = harness.vox.audio.at(-1)!.playbackId;
+  const stay = harness.session.status().stayId!;
+  await harness.session.setOutputMuted(stay, true, async () => {});
+  expect(harness.session.status()).toMatchObject({
+    outputMuted: true,
+    outputControlUncertain: true,
+    activity: "unknown",
+  });
+  harness.vox.emit({ type: "tts_playback_state", playbackId: "old-generation-playback", status: "stopped" });
+  expect(harness.session.status().outputControlUncertain).toBe(true);
+  await expect(harness.session.setOutputMuted(stay, false, async () => {})).rejects.toThrow("uncertain");
+  harness.vox.emit({ type: "tts_playback_state", playbackId, status: "stopped" });
+  await flush();
+  expect(harness.session.status().outputControlUncertain).toBe(false);
+  await harness.session.setOutputMuted(stay, false, async () => {});
+  await harness.session.dispose();
+});
+
+it("successful stop IPC followed by native failure or timeout cannot claim quiet or unmute", async () => {
+  const harness = await engagedHarness();
+  harness.vox.autoDrain = false;
+  harness.vox.autoStop = false;
+  harness.conversation().input.onAudioDelta(pcmDelta(480), "lost-stop");
+  await flush();
+  const playbackId = harness.vox.audio.at(-1)!.playbackId;
+  const stay = harness.session.status().stayId!;
+  await harness.session.setOutputMuted(stay, true, async () => {});
+  harness.timers.fireLast(2 * 60_000);
+  await flush();
+  harness.vox.emit({ type: "tts_playback_state", playbackId, status: "failed", reason: "native_lost" });
+  expect(harness.session.status().outputControlUncertain).toBe(true);
+  await expect(harness.session.setOutputMuted(stay, false, async () => {})).rejects.toThrow("uncertain");
+  // Independent exact native proof can settle uncertainty even after local timeout.
+  harness.vox.emit({ type: "tts_playback_state", playbackId, status: "drained" });
+  expect(harness.session.status().outputControlUncertain).toBe(false);
+  await harness.session.dispose();
+});
+
+it("speaking identities come only from current consented captures and the current room roster", async () => {
+  const harness = await joinedHarness({
+    occupants: [
+      { userId: ALICE, displayName: "Alice" },
+      { userId: MALLORY, displayName: "Unconsented" },
+    ],
+  });
+  expect(harness.session.status().speakers).toEqual([]);
+  await harness.consent(ALICE);
+  harness.startCapture(ALICE);
+  harness.vox.emit({ type: "speaking_start", userId: MALLORY });
+  await flush();
+  expect(harness.session.status().speakers).toEqual([{ userId: ALICE, displayName: "Alice" }]);
+  await harness.session.setConsent(GUILD, CHANNEL, ALICE, false);
+  expect(harness.session.status().speakers).toEqual([]);
+  await harness.session.dispose();
+  expect(harness.session.status().speakers).toBeUndefined();
 });

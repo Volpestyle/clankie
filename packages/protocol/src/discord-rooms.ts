@@ -12,6 +12,8 @@ export const DiscordRoomEvidenceSchema = z
   .object({
     id: Id,
     presenceSessionId: Id,
+    /** Internal body evidence only; absent for text ingress. */
+    voiceStayId: Id.optional(),
     transportKind: z.enum(["bot", "user_session"]),
     guildId: Id.optional(),
     channelId: Id,
@@ -106,6 +108,11 @@ export const DiscordRoomVoiceStatusSchema = z
     outputMuted: z.boolean(),
     consentedParticipantCount: Count,
     activeCaptureCount: Count,
+    /** Absent when current speaking identities cannot be observed. Names are untrusted display text. */
+    speakers: z
+      .array(z.object({ userId: Id, displayName: z.string().max(128).optional() }).strict())
+      .max(64)
+      .optional(),
   })
   .strict();
 export type DiscordRoomVoiceStatus = z.infer<typeof DiscordRoomVoiceStatusSchema>;

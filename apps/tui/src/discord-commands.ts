@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { DiscordSettingsSchema } from "@clankie/protocol";
 import type { ClankieApiClient } from "@clankie/api-client";
 import { formatDiscordRoomStatus } from "./discord-room-view.ts";
@@ -100,7 +101,7 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
           const voice = await services.rooms.discordRoomVoice();
           shell.insertCommandResult(
             "/discord call",
-            `${voice.state} · ${voice.activity} · speech output ${voice.state === "unknown" ? "unconfirmed" : voice.outputMuted ? "muted" : "audible"}\n${voice.consentedParticipantCount} consented participants · ${voice.activeCaptureCount} active speakers · ${voice.handoffCount} captain handoffs\n${voice.conversationId ?? "Owner unknown"}\nOpt-in words: /voice transcripts. Music and Go Live audio use separate controls.`,
+            `${voice.state} · ${voice.activity} · speech output ${voice.state === "unknown" ? "unconfirmed" : voice.outputMuted ? "muted" : "audible"}\n${voice.consentedParticipantCount} consented participants · ${voice.activeCaptureCount} active captures · ${voice.handoffCount} captain handoffs\nSpeaking: ${voice.speakers === undefined ? "unknown" : voice.speakers.length === 0 ? "nobody observed" : voice.speakers.map((speaker) => stripVTControlCharacters(speaker.displayName ?? speaker.userId).replace(/[\r\n\t]/gu, " ")).join(", ")}\n${voice.conversationId ?? "Owner unknown"}\nOpt-in words: /voice transcripts. Music and Go Live audio use separate controls.`,
             "success",
           );
           const flow = shell.setupFlow;

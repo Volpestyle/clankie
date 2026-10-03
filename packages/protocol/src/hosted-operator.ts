@@ -1,3 +1,4 @@
+export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
 import { OperatorConversationServiceRequestSchema } from "./index.ts";
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */

@@ -40,6 +40,11 @@ publishing audio. Unmute never replays suppressed speech. These controls need
 actual operator authority and preserve the original voice owner's authority and
 lease incarnation. An unknown or replaced stay fails closed. Handoffs remain
 model-owned actions, shown as observations rather than a new synthetic trigger.
+Current speaker identities come only from consented active captures and the room
+roster. Missing identity observations remain unknown; names are untrusted display
+text. Mute suppresses immediately, but quiet remains unconfirmed until the exact
+native playback reports stopped or drained. Lost confirmation keeps status unknown
+and blocks unmute until exact native proof or the stay ends.
 
 Exact voice words remain in the existing opt-in transcript path. Turning logging
 off stops reads as well as retention. Room observation and transcripts require
@@ -59,5 +64,9 @@ field does not claim the running body already applied it.
 
 Body evidence uses an authenticated current Discord body session, exact transport
 and current room allowlists. It cannot grant tools or reconstruct a source owner.
+Voice health uses accepted input, explicit floor silence/failure, and actual audible
+playback completion in the same live stay. Provider completion and suppressed
+output never count as an answered room turn. Unattributed/ambient outputs and
+unobservable outcomes remain unknown; there is no inferred voice missed counter.
 Voice control nonces and lease references are host-only and never returned by
 room snapshots. No endpoint acquires a second body or bypasses recovery.

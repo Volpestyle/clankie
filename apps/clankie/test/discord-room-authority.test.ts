@@ -111,3 +111,90 @@ it("room evidence refuses settings revoked during fresh body authentication", as
   expect(await response.json()).toEqual({ error: "room_evidence_settings_changed" });
   expect(observations.list()).toEqual([]);
 });
+
+it("voice health requires the exact registered body and active physical stay, independently of its owning thread", async () => {
+  const { randomUUID } = await import("node:crypto");
+  const { DiscordPresenceSession } = await import("@clankie/discord-presence-core");
+  const { emptySettings } = await import("@clankie/settings");
+  const { BodyVoiceStays } = await import("../src/body-voice-stays.ts");
+  const { BodyLeaseStore } = await import("../src/body-leases.ts");
+  const root = mkdtempSync(join(tmpdir(), "voice-room-evidence-"));
+  const store = new DiscordRoomObservations(join(root, "rooms.json"));
+  const leases = new BodyLeaseStore(root);
+  const voice = new BodyVoiceStays(leases, join(root, "voice.json"));
+  const settings = emptySettings();
+  settings.discord.voiceEnabled = true;
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    roomObservations: store,
+    bodyVoiceStays: voice,
+    settings: { load: async () => structuredClone(settings) },
+    discordEnvironment: {},
+    authenticateCaptain: async () => ({ captainId: "voice-body", steerSourceLane: "discord_voice" }),
+  });
+  cleanups.push(() => {
+    app.close();
+    leases.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const post = (path: string, body: unknown) =>
+    app.app.request(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const session = new DiscordPresenceSession({
+    sessionId: "body",
+    characterId: "clankie",
+    credentialRef: "discord_bot",
+    transportKind: "bot",
+    emit: async (event) => {
+      const response = await post("/v1/discord/presence-session-events", event);
+      expect(response.status).toBe(200);
+      return (await response.json()).session;
+    },
+  });
+  await session.start();
+  await session.gatewayReady();
+  const stay = {
+    stayId: randomUUID(),
+    generation: 1,
+    target: {
+      guildId: "12345",
+      channelId: "67890",
+      actorId: "11111",
+      presenceSessionId: "body",
+      transportKind: "bot" as const,
+    },
+  };
+  const claim = await voice.claim(stay, {
+    conversationId: "separate-owning-thread",
+    current: () => true,
+    authorize: async () => true,
+  });
+  expect(claim.outcome).toBe("acquired");
+  if (claim.outcome === "acquired")
+    cleanups.unshift(() => {
+      voice.finish(stay, claim.incarnation);
+    });
+  const event = {
+    id: "utterance:settled",
+    deliveryId: "utterance",
+    presenceSessionId: "body",
+    transportKind: "bot",
+    voiceStayId: stay.stayId,
+    guildId: "12345",
+    channelId: "67890",
+    actorId: "11111",
+    outcome: "settled",
+  };
+  expect((await post("/v1/discord/room-evidence", { ...event, voiceStayId: randomUUID() })).status).toBe(403);
+  expect(
+    (await post("/v1/discord/room-evidence", { ...event, presenceSessionId: "foreign-body" })).status,
+  ).toBe(403);
+  expect((await post("/v1/discord/room-evidence", event)).status).toBe(200);
+  expect(store.status("room:discord_voice:12345:67890")).toMatchObject({ answered: 1, received: 1 });
+  await session.gatewayDisconnected();
+  expect((await post("/v1/discord/room-evidence", { ...event, deliveryId: "late" })).status).toBe(403);
+  expect(store.status("room:discord_voice:12345:67890").received).toBe(1);
+});

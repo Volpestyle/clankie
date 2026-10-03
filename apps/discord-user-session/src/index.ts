@@ -1,3 +1,4 @@
+import { voiceRoomEvidence } from "@clankie/discord-presence-core";
 import { tryHandleVoiceOutputControl } from "@clankie/discord-presence-core";
 import { BodyVoiceTargetSchema } from "@clankie/protocol";
 import {
@@ -892,6 +893,13 @@ async function recordReadyIfPossible(): Promise<void> {
 }
 
 async function recordVoiceEvidence(evidence: DiscordVoiceEvidence): Promise<void> {
+  // Stamp the registered body generation before any receipt/IPC await.
+  const roomEvidence = voiceRoomEvidence(evidence, {
+    presenceSessionId: presenceSession.record.sessionId,
+    transportKind: "user_session",
+  });
+  for (const event of roomEvidence) void voiceApi?.recordDiscordRoomEvidence(event).catch(() => undefined);
+
   voiceIdleAutoLeave?.observe(evidence);
   if (evidence.type === "joined" || evidence.type === "left") {
     playVoiceListener?.publishRoom({ listening: evidence.type === "joined" });

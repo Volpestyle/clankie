@@ -265,3 +265,21 @@ it("ordinary voice control requires exact audio owner and original authority wit
   if (claimed.outcome === "acquired" && claimed.incarnation) voice.finish(stay, claimed.incarnation);
   store.close();
 });
+
+it("health matches exact persisted audio source without treating its owning thread as the physical room", async () => {
+  const { voice, stay, store, path } = fixture();
+  const acquired = await voice.claim(stay, identity("owning-text-thread"));
+  if (acquired.outcome !== "acquired") throw Error("acquire");
+  const proof = {
+    stayId: stay.stayId,
+    guildId: stay.target.guildId,
+    channelId: stay.target.channelId,
+    presenceSessionId: stay.target.presenceSessionId,
+  };
+  expect(voice.observesAudioSource(proof)).toBe(true);
+  expect(voice.observesAudioSource({ ...proof, presenceSessionId: "replacement-body" })).toBe(false);
+  expect(voice.observesAudioSource({ ...proof, channelId: "foreign" })).toBe(false);
+  expect(new BodyVoiceStays(store, path).observesAudioSource(proof)).toBe(false);
+  voice.finish(stay, acquired.incarnation);
+  expect(voice.observesAudioSource(proof)).toBe(false);
+});

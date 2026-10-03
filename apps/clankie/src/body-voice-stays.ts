@@ -222,7 +222,12 @@ export class BodyVoiceStays {
   /** Read-only exact current audio binding; never projects the private incarnation. */
   public observesActiveAudio(
     conversationId: string,
-    input: { stayId?: string | undefined; guildId?: string | undefined; channelId?: string | undefined },
+    input: {
+      stayId?: string | undefined;
+      guildId?: string | undefined;
+      channelId?: string | undefined;
+      presenceSessionId?: string | undefined;
+    },
   ): boolean {
     if (this.unavailable || input.stayId === undefined) return false;
     const record = this.state.stays[input.stayId];
@@ -234,8 +239,21 @@ export class BodyVoiceStays {
       record.reference.conversationId === conversationId &&
       record.stay.target.guildId === input.guildId &&
       record.stay.target.channelId === input.channelId &&
+      (input.presenceSessionId === undefined ||
+        record.stay.target.presenceSessionId === input.presenceSessionId) &&
       this.store.validate(record.reference, record.operationId).outcome === "valid"
     );
+  }
+
+  /** Health is attributed to the physical voice room, even when another thread owns its stay. */
+  public observesAudioSource(input: {
+    stayId: string;
+    guildId: string;
+    channelId: string;
+    presenceSessionId: string;
+  }): boolean {
+    const owner = this.state.stays[input.stayId]?.reference.conversationId;
+    return owner !== undefined && this.observesActiveAudio(owner, input);
   }
 
   /** Owner portal control, separate from recovery. No incarnation or credentials leave the host. */
