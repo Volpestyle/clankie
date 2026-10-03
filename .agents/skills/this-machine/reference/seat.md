@@ -52,20 +52,11 @@ Inspect all connections with `clankie connections` or `/connections`. Use
 `clankie runtime list`, `runtime connect ID --session NAME` (or `--socket PATH`),
 and `runtime disconnect ID` for named execution connections. Native local
 inspection uses `clankie herdr --connection ID agent list`; opening a seat does
-not select its runtime. On embedded routed assignments, set `runtime: "ID"` to
-select execution; `connection` selects the separate Swarm coordinator. Never
-change either on a retry. For local managed workers, `clankie runtime harness ID
-claude|codex|pi` selects the harness through the operator API and TUI Connections
-menu. Codex uses `gpt-6-astra`; pi uses its native model preference. Codex/pi need
-native-interactive support in the installed Swarm build. Native is the default;
-legacy stream settings remain readable but disable new managed dispatch. The
-integrated upstream source requires a coordinated package rollout before those
-routes become available; never swap the active artifact while workers run.
-`swarm_assign harness` explicitly
-constrains the runtime choice; unsupported or unavailable routes refuse without
-falling back to Claude. Retain the original harness and payload on uncertain
-retries. Every managed worker has its own launch-local Swarm enrollment. Disconnect leaves workers alive. Managed Herdr launch
-routes share Clankie's filesystem. A registered ssh fleet joins the same embedded
+not select its runtime. Swarm no longer starts workers for Clankie (ADR 0213):
+`swarm_assign` with `routing` is refused. Hire with `hire_agent`, then assign or
+message that agent; `connection` still selects the Swarm coordinator. An earlier
+uncertain dispatch keeps its original intent: reconcile it with `swarm_find` and
+`swarm_task`, never by dispatching again. Disconnect leaves workers alive. A registered ssh fleet joins the same embedded
 coordinator through `clankie swarm fleet-peer FLEET NAME --conversation ID --out
 PRIVATE.json`. Transfer that private environment to the peer over the owner's ssh
 and launch its matching Swarm MCP runtime with it; do not start a second coordinator

@@ -20,7 +20,6 @@ it("discovers and messages a Swarm persona through the public API without a Herd
   const open = async () => {
     const swarm = new SwarmHost({
       stateDirectory: swarmDir,
-      canDispatch: () => false,
       warn: () => undefined,
     });
     const captain = createCaptain({ herdrAvailable: () => false } as unknown as CaptainDeps, {

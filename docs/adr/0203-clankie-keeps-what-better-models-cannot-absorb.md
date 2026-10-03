@@ -2,7 +2,9 @@
 
 Status: accepted (James, 2026-09-30). Amended by
 [ADR 0207](0207-work-records-and-native-agent-delivery.md): Swarm is optional and
-automated agent delivery no longer falls back to terminal typing.
+automated agent delivery no longer falls back to terminal typing. Amended by
+[ADR 0213](0213-clankie-retires-swarm.md): Swarm leaves the keep-and-invest list;
+Clankie is the cross-vendor hub through native channels.
 
 Date: 2026-09-30
 

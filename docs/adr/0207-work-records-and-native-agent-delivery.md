@@ -3,7 +3,9 @@
 Status: accepted (James, 2026-10-01). Amends
 [ADR 0180](0180-swarm-is-the-coordination-layer.md),
 [ADR 0187](0187-clankie-hires-his-own-seats.md), and
-[ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md).
+[ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md). Amended by
+[ADR 0213](0213-clankie-retires-swarm.md): `hire_agent` is the only way Clankie
+starts a worker, and Swarm is being retired.
 
 ## Context
 

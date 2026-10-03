@@ -39,6 +39,10 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 /** The owner-approved installed worker plugin that carries Swarm mail to an interactive worker (ADR 0194). */
 const INTERACTIVE_WORKER_CHANNEL_PLUGIN = "clankie-worker@clankie";
 
+/** Every worker Clankie starts goes through hire_agent (ADR 0213); Swarm only coordinates. */
+export const SWARM_LAUNCH_RETIRED =
+  "Swarm no longer starts workers for Clankie: hire one with hire_agent, then assign or message it here. An earlier uncertain dispatch keeps its original intent; reconcile it with swarm_find and swarm_task, never by dispatching again.";
+
 const interactiveWorkers = new Map<string, Promise<boolean>>();
 /**
  * Whether the installed swarm-mcp accepts an interactive worker route
@@ -197,7 +201,6 @@ interface Options {
   warn(message: string): void;
   /** A configured Herdr socket, never whichever session the UI happens to focus. */
   socketPath?: string | undefined;
-  canDispatch?: () => boolean;
   dispatchBudget?: () => Promise<number | null>;
   runtimeConnections?: () => Promise<
     readonly {
@@ -616,7 +619,8 @@ export class SwarmHost {
         (tool.description ?? tool.name) +
         (tool.name === "swarm_assign" && this.instructions
           ? " Clankie snapshots owner/project context and optional skills selected by installed catalog name."
-          : ""),
+          : "") +
+        (tool.name === "swarm_assign" ? ` ${SWARM_LAUNCH_RETIRED}` : ""),
       parameters: {
         ...tool.inputSchema,
         properties: {
@@ -627,22 +631,6 @@ export class SwarmHost {
             description:
               "Named Swarm connection for this conversation; omit for embedded. Keep the original connection when replying or retrying work.",
           },
-          ...(tool.name === "swarm_assign"
-            ? {
-                harness: {
-                  type: "string",
-                  enum: ["claude", "codex", "pi"],
-                  description:
-                    "Require this managed worker harness; no fallback. Runtime harness settings must agree.",
-                },
-                runtime: {
-                  type: "string",
-                  pattern: "^[a-z][a-z0-9-]{0,63}$",
-                  description:
-                    "Explicit local execution connection for routed new work; inspect clankie runtime list. Independent of the Swarm coordinator connection.",
-                },
-              }
-            : {}),
           ...(tool.name === "swarm_assign" && this.instructions
             ? {
                 skills: {
@@ -658,40 +646,12 @@ export class SwarmHost {
       } as TSchema,
       executionMode: "sequential",
       execute: async (_id, args) => {
-        const { connection, runtime, harness, ...forwarded } = args as Record<string, unknown>;
-        if (harness !== undefined) {
-          if (
-            tool.name !== "swarm_assign" ||
-            !["claude", "codex", "pi"].includes(String(harness)) ||
-            !forwarded.routing ||
-            typeof forwarded.routing !== "object"
-          )
-            throw new Error("Harness selection requires routed work");
-          const routing = forwarded.routing as Record<string, unknown>;
-          const host = harness === "claude" ? "claude-code" : harness;
-          if (routing.host !== undefined && routing.host !== host)
-            throw new Error("Conflicting harness and routing.host");
-          forwarded.routing = { ...routing, host };
-        }
-        if (runtime !== undefined) {
-          if (
-            tool.name !== "swarm_assign" ||
-            typeof runtime !== "string" ||
-            !/^[a-z][a-z0-9-]{0,63}$/u.test(runtime) ||
-            !forwarded.routing ||
-            typeof forwarded.routing !== "object" ||
-            (connection && connection !== "embedded")
-          )
-            throw new Error("Runtime selection requires routed work on the embedded coordinator");
-          const routing = forwarded.routing as Record<string, unknown>;
-          const capabilities = routing.capabilities ?? [];
-          if (!Array.isArray(capabilities) || !capabilities.every((value) => typeof value === "string"))
-            throw new Error("Invalid routing capabilities");
-          forwarded.routing = {
-            ...routing,
-            capabilities: [...new Set([...capabilities, `runtime:${runtime}`])],
-          };
-        }
+        const { connection, ...forwarded } = args as Record<string, unknown>;
+        // Clankie starts every worker with hire_agent, so its tracker isolation and
+        // native delivery apply to all of them (ADR 0213). Routed work would have
+        // Swarm launch one itself.
+        if (tool.name === "swarm_assign" && forwarded.routing !== undefined)
+          throw new Error(SWARM_LAUNCH_RETIRED);
         if (
           connection !== undefined &&
           (typeof connection !== "string" || !/^[a-z][a-z0-9-]{0,63}$/u.test(connection))
@@ -703,61 +663,15 @@ export class SwarmHost {
           ...(connection && connection !== "embedded" ? { connectionId: connection as string } : {}),
         };
         const active = await this.get(selected);
-        if (
-          tool.name === "swarm_assign" &&
-          forwarded.routing !== undefined &&
-          !selected.connectionId &&
-          this.options.runtimeConnections
-        ) {
-          await this.requireRuntimeReload(active);
-          const prepared = await this.prepareOwner(selected.cwd);
-          const selectedRuntime = prepared.runtimes?.find((entry) => entry.id === (runtime ?? "default"));
-          const routing = forwarded.routing as Record<string, unknown>;
-          if (routing.host === undefined && selectedRuntime?.workerHarness)
-            forwarded.routing = {
-              ...routing,
-              host:
-                selectedRuntime.workerHarness === "claude" ? "claude-code" : selectedRuntime.workerHarness,
-            };
-          if (
-            (runtime !== undefined && !selectedRuntime?.enabled) ||
-            (runtime !== undefined && selectedRuntime?.state !== "healthy")
-          ) {
-            if (!selectedRuntime?.state.startsWith("harness_"))
-              throw new Error("Selected worker runtime unavailable; no dispatch intent created");
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify({ data: { status: "blocked", reasons: [selectedRuntime.state] } }),
-                },
-              ],
-              details: {},
-            };
-          }
-        }
-        if (
-          tool.name === "swarm_assign" &&
-          (args as { routing?: unknown }).routing !== undefined &&
-          !selected.connectionId &&
-          this.options.canDispatch?.() === false
-        )
-          throw new Error(
-            "Worker provisioning unavailable; Swarm communication remains available. Reconcile existing assignments under their original intent.",
-          );
         const arguments_ =
           tool.name === "swarm_assign" && this.instructions
             ? await this.assignmentInstructions(selected, active, forwarded)
             : forwarded;
         const result = await active.client.use((client) =>
-          client.callTool(
-            {
-              name: tool.name,
-              arguments: arguments_,
-            },
-            undefined,
-            tool.name === "swarm_assign" && forwarded.routing !== undefined ? { timeout: 75000 } : undefined,
-          ),
+          client.callTool({
+            name: tool.name,
+            arguments: arguments_,
+          }),
         );
         if (result.isError) throw new Error(JSON.stringify(result.content));
         return {
@@ -1326,7 +1240,8 @@ async function prepareOwner(cwd: string, options: Options) {
           peers: [],
           herdr: {
             id: "herdr-claude",
-            enabled: await interactiveWorkersSupported(),
+            // Retained for its receipts only: Clankie starts workers with hire_agent (ADR 0213).
+            enabled: false,
             ...((await interactiveWorkersSupported())
               ? { workerMode: "interactive", channelPlugin: INTERACTIVE_WORKER_CHANNEL_PLUGIN }
               : {}),
@@ -1387,7 +1302,8 @@ async function prepareOwner(cwd: string, options: Options) {
       .filter((entry) => entry.socketPath)
       .map((entry) => ({
         id: `clankie-runtime-${entry.id}-${hash(entry.socketPath!).slice(0, 12)}${entry.workerHarness && entry.workerHarness !== "claude" ? `-${entry.workerHarness}` : ""}`,
-        enabled: entry.enabled && entry.state === "healthy",
+        // Retained for receipts and stop authority only: Clankie starts workers with hire_agent (ADR 0213).
+        enabled: false,
         stateDirectory,
         profile: "clankie",
         socketPath: entry.socketPath!,

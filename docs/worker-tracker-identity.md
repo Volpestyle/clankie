@@ -2,7 +2,7 @@
 
 The tracker account the owner connects to Clankie is the identity of Clankie and
 his entire swarm. This applies to every lane, operator seat and hired worker,
-across `hire_agent`, `swarm_assign`, Claude, Codex and pi. It selects no fixed
+across `hire_agent`, Claude, Codex and pi. It selects no fixed
 email, display name, workspace or provider. Linear is the current implementation.
 
 Workers write through Clankie's connected tools or an explicitly granted
@@ -18,16 +18,25 @@ publishing, explicit grants and the native-hire limitations below.
 
 ## Current enforcement
 
-The seat and notification changes ship first. Automatic worker isolation below
-is a proposal, not an implemented guarantee.
+Every launch Clankie makes switches off the Linear MCP servers the harness would
+inherit from the owner's own configuration, for that session only: any server on
+Linear's host or named for Linear, plus the claude.ai Linear connector. Claude
+sessions get a permission deny rule per server, read from the default and the
+configured `.claude.json` (user and local scope) and `.mcp.json` (project scope).
+Codex sessions get an `mcp_servers.<name>.enabled=false` override per server,
+read from Codex's own effective listing (`codex mcp list --json`); a launch whose
+listing cannot be read does not start. The owner's configuration files are not
+edited. A worker that needs a tracker write hands it to the lead, who makes it
+through the connected account, or uses an explicit grant.
 
-| Path                       | Current behavior                                                                                                                         | Remaining gap                                                                                                                                 |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clankie's own Linear tools | Use the connected broker account.                                                                                                        | No inherited harness connector on this path.                                                                                                  |
-| `clankie seat`             | Denies Claude's inherited `mcp__linear-server`; instructions select Clankie's tools.                                                     | The deny addresses that server name, not arbitrary aliases or other tracker integrations.                                                     |
-| Explicit worker grant      | `WorkerMcp` verifies account binding, principal, task attempt, tool and arguments on every call. Account replacement invalidates access. | A grant protects the bridge; it does not remove credentials already available to the worker.                                                  |
-| Managed `swarm_assign`     | Clankie's managed routes add `clankie_worker` using `clankie mcp --swarm`; tools require explicit grants.                                | Claude and Codex launch configuration adds MCP servers while inheriting other configuration. pi also inherits extensions.                     |
-| Native `hire_agent`        | Local Claude gets the mailbox-only seat bridge; local Codex gets native runtime flags; pi gets its Herdr extension.                      | None automatically installs the granted tracker bridge or isolates inherited tracker access. Remote launches also need explicit provisioning. |
+| Path                       | Current behavior                                                                                                                                | Remaining gap                                                                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clankie's own Linear tools | Use the connected broker account.                                                                                                               | No inherited harness connector on this path.                                                                                                |
+| `clankie seat` (Claude)    | Denies every inherited Linear connector; instructions select Clankie's tools.                                                                   | A tracker integration that is neither on Linear's host nor named for it is not recognized.                                                  |
+| `clankie seat` (Codex)     | Disables every enabled inherited Linear server in the seat's app-server.                                                                        | Same recognition limit.                                                                                                                     |
+| Native `hire_agent`        | Local Claude and Codex hires get the same deny rules and overrides. Local Claude gets the mailbox-only seat bridge; pi its Herdr extension.     | No automatic tracker grant, so writes go through the lead. pi inherits extensions unfiltered. Remote launches read no remote configuration. |
+| Explicit worker grant      | `WorkerMcp` verifies account binding, principal, task attempt, tool and arguments on every call. Account replacement invalidates access.        | A grant protects the bridge; it does not remove credentials already available to the worker.                                                |
+| Managed `swarm_assign`     | Retired ([ADR 0213](adr/0213-clankie-retires-swarm.md)): Swarm no longer starts workers for Clankie, so every launch goes through `hire_agent`. | None for new work; old routes stay disabled for their receipts.                                                                             |
 
 Following reads the verified connected account's actual Linear notification
 inbox. New notifications reach `global-default`; workspace webhook activity is

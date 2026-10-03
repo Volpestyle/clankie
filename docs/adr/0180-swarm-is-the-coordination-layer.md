@@ -4,6 +4,8 @@ Status: accepted. Extended by [ADR 0181](0181-clankie-is-independent-of-his-conn
 for independent runtimes, portals and optional trackers.
 Amended by [ADR 0207](0207-work-records-and-native-agent-delivery.md): Swarm is
 optional for independent peers; local hires use native harness delivery.
+Amended by [ADR 0213](0213-clankie-retires-swarm.md): Swarm no longer starts workers
+for Clankie, and the embedded Swarm is being retired.
 
 Clankie needs durable peer messages and task ownership across independent coding
 hosts. Terminal input and pane status describe a running process but cannot

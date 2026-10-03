@@ -8,6 +8,16 @@ Connections menu exposes the same setting. Status distinguishes configured
 stop the running fleet or delete coordinator records, credentials, or connections.
 The package remains bundled when the runtime connection is disabled.
 
+**Swarm no longer starts workers for Clankie**
+([ADR 0213](../../docs/adr/0213-clankie-retires-swarm.md)). Every worker Clankie
+starts goes through `hire_agent`, so tracker isolation and native delivery apply to
+all of them. Clankie writes its Herdr launch routes disabled. They stay registered
+only so existing receipts can be reconciled and stopped. `swarm_assign` with
+`routing` is refused before it reaches the coordinator, and its `harness` and
+`runtime` parameters are gone. Messages, tasks and peers among agents that are
+already running are unchanged. The sections below on managed dispatch describe
+retained receipts, not new launches.
+
 Local hires use [native harness adapters](../agent-hosts/README.md#seat-adapters)
 without Swarm. Project work stays in its [tracker or repo files](../work-items/README.md).
 Skills guide tool use; the adapter code enforces that automated messages never
@@ -80,13 +90,8 @@ separate worker extension. These adapters have their own per-session enrollment,
 not the operator conversation's actor or global host configuration. The installed
 runtime advertises its support; older packages reject Codex/pi selection.
 
-`swarm_assign` accepts `harness` as an explicit constraint, translated to
-`routing.host` (`claude` maps to `claude-code`). Default/named runtime settings
-supply the host when the call does not. The resolved harness is stored in the
-immutable intent and physical launch receipt. Each non-Claude runtime route has
-a distinct ID, so changing a setting retains disabled prior routes for recovery.
-Missing executables return `harness_unavailable`; unsupported combinations return
-`harness_mode_unsupported`. No selection silently substitutes Claude.
+Before ADR 0213, `swarm_assign` accepted `harness` and `runtime` to select a
+managed route. Those routes are now disabled and kept only for their receipts.
 
 Assignments retain the existing instruction snapshots. The shared wrapper owns
 leased inbox delivery and explicit ack, progress monitoring, renewal, cancellation
@@ -219,8 +224,8 @@ Clankie Linear project; this technical sequence is not a second issue queue.
 Slices 1 and 2 cover launch environments, missing/disabled execution, runtime
 loss, conversation access and Swarm communication without provisioning. Slice 3
 includes named external coordinators and named Herdr execution connections.
-`clankie runtime` pins execution IDs to sockets; `swarm_assign runtime` selects a
-route independently of the coordinator's `connection` field. The owner reloads
+`clankie runtime` pins execution IDs to sockets. Since ADR 0213 those routes are
+written disabled and keep only their receipts. The owner reloads
 route configuration per dispatch and retains original provisioning receipts.
 Older owners require a deliberate upgrade before managed route changes.
 
