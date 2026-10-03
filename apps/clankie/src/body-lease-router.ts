@@ -114,10 +114,11 @@ export class BodyLeaseRouter {
             request.requesterRoute,
             targetRoute,
           )) ||
-          !source.current() ||
           target === undefined ||
-          !target.current() ||
           (await this.authorize(target, destination, request.resource, "effect")) !== undefined ||
+          !source.current() ||
+          !target.current() ||
+          !originalTarget.current() ||
           !this.store.requestCurrent(request.requestId)
         )
           throw new Error("Lease request authority or deadline changed");

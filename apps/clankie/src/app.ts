@@ -684,6 +684,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return true;
   };
   const bodyRequestCaptain = {
+    routeCurrent: conversationBodyRouteAuthorized,
     designatedConversationHead: dependencies.captain.designatedConversationHead,
     validateConversationOwner: async (
       owner: import("./captain/conversation-owner.ts").ConversationOwner,

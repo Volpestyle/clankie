@@ -183,3 +183,30 @@ it.each(["accepted", "uncertain"])("never falls back after %s owner dispatch", a
   });
   expect(wakes).toEqual(["owner"]);
 });
+
+it("fences source disconnection during the final destination grant await", async () => {
+  const f = setup();
+  await f.router.request(f.requester, { resource: "browser", kind: "ask", text: "question", ttlMs: 10000 });
+  let sourcePresent = true;
+  let inDispatch = false;
+  let effects = 0;
+  let targetChecks = 0;
+  const result = await pumpBodyRequests(f.router, {
+    routeCurrent: (owner) => owner.conversationId !== "requester" || sourcePresent,
+    validateConversationOwner: async (owner) => {
+      if (inDispatch && owner.conversationId === "owner" && ++targetChecks === 2) {
+        await Promise.resolve();
+        sourcePresent = false;
+      }
+      return true;
+    },
+    wakeConversation: async (_owner, _text, guard) => {
+      inDispatch = true;
+      await guard?.();
+      effects++;
+      return true;
+    },
+  });
+  expect(effects).toBe(0);
+  expect(result[0]).toMatchObject({ deliveryStage: "uncertain" });
+});

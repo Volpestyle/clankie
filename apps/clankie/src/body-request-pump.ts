@@ -6,7 +6,9 @@ import type { CaptainPort } from "./captain/port.ts";
 export async function pumpBodyRequests(
   router: BodyLeaseRouter,
   captain: Pick<CaptainPort, "validateConversationOwner" | "wakeConversation"> &
-    Partial<Pick<CaptainPort, "designatedConversationHead">>,
+    Partial<Pick<CaptainPort, "designatedConversationHead">> & {
+      routeCurrent?: (owner: BodyOwnerRoute["owner"]) => boolean;
+    },
   current: () => boolean = () => true,
 ) {
   const valid = (id: string, route?: BodyOwnerRoute) =>
@@ -18,7 +20,7 @@ export async function pumpBodyRequests(
         : {
             conversationId: id,
             route: route!,
-            current,
+            current: () => current() && captain.routeCurrent?.(route!.owner) !== false,
             authorize: async () => captain.validateConversationOwner(route!.owner, route!.mode),
           },
     designatedHead: (owner) => captain.designatedConversationHead?.(owner)?.conversationId,
