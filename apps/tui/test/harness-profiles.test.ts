@@ -1,3 +1,4 @@
+import { inspectHarnessBridges } from "../src/harness-doctor.ts";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,20 +96,33 @@ it.each(["current", "disabled", "missing-bridge", "missing-forwarding"])(
             },
           }),
         );
-      const report = await inspectHarnessProfiles({
-        env: { HOME: home },
-        expectedVersion: "0.3.0",
-        execute: async (command, args) => {
-          if (command === "codex" && args[0] === "plugin")
-            return JSON.stringify({
-              installed: [
-                { pluginId: "clankie-worker@clankie-fleet", version: "0.3.0", enabled: kind !== "disabled" },
-              ],
-            });
-          if (args[0] === "mcp") throw new Error("No direct registration");
-          return "version";
-        },
-      });
+      const execute = async (command: string, args: readonly string[]) => {
+        if (command === "codex" && args[0] === "plugin")
+          return JSON.stringify({
+            installed: [
+              { pluginId: "clankie-worker@clankie-fleet", version: "0.3.0", enabled: kind !== "disabled" },
+            ],
+          });
+        if (args[0] === "mcp")
+          return JSON.stringify({
+            enabled: kind !== "disabled",
+            transport: {
+              command: "node",
+              args: ["bin/fleet-mcp.mjs"],
+              cwd: join(root, "."),
+              env_vars: kind === "missing-forwarding" ? [] : ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"],
+            },
+          });
+        return "version";
+      };
+      const report = await inspectHarnessProfiles({ env: { HOME: home }, expectedVersion: "0.3.0", execute });
+      const summary = await inspectHarnessBridges(
+        { HOME: home },
+        async (command, args) => ({ stdout: await execute(command, args), stderr: "" }),
+        async () => new Response(null, { status: 403 }),
+      );
+      expect(summary.codex.registered).toBe(kind === "current");
+      expect(report.codex.registration).toBe(kind === "missing-bridge" ? "unrecognized" : "plugin");
       expect(report.codex).toMatchObject({
         pluginInstalled: true,
         versionMatches: true,

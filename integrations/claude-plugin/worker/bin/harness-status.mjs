@@ -102,12 +102,14 @@ export async function inspectHarnessProfiles({
     ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"].every(
       (name) => Array.isArray(spec?.env_vars) && spec.env_vars.includes(name),
     );
+  let observedTransport;
   let registered = false;
   let registration = "absent";
   let registrationIdentityForwarding = false;
   try {
     const result = JSON.parse(await execute("codex", ["mcp", "get", "clankie", "--json"]));
     const transport = result.transport ?? result;
+    observedTransport = transport;
     registrationIdentityForwarding = forwardsIdentity(transport);
     const cli =
       transport.command === "clankie" &&
@@ -147,6 +149,16 @@ export async function inspectHarnessProfiles({
     JSON.stringify(bridgeSpec.args) === JSON.stringify(["bin/fleet-mcp.mjs"]) &&
     bridgeSpec.cwd === "." &&
     Boolean(root && (await exists(join(root, "bin", "fleet-mcp.mjs"))));
+  if (
+    root &&
+    bridge &&
+    observedTransport?.command === "node" &&
+    JSON.stringify(observedTransport.args) === JSON.stringify(["bin/fleet-mcp.mjs"]) &&
+    typeof observedTransport.cwd === "string" &&
+    (await realpath(observedTransport.cwd).catch(() => undefined)) ===
+      (await realpath(root).catch(() => null))
+  )
+    registration = "plugin";
   return {
     machine: { platform: process.platform, home },
     claude,
