@@ -137,8 +137,7 @@ export class NativeClaudeObservation {
           break;
         case "SubagentStart":
           if (!this.#started || !this.#active) this.#issues.add("child-outside-observed-root-turn");
-          if (!id(event.agent_id) || typeof event.agent_type !== "string" || !event.agent_type)
-            this.#issues.add("child-identity-missing");
+          if (!id(event.agent_id) || !id(event.agent_type)) this.#issues.add("child-identity-missing");
           else if (this.#children.has(event.agent_id)) this.#issues.add("duplicate-child-start");
           else
             this.#children.set(event.agent_id, {
@@ -169,10 +168,29 @@ export class NativeClaudeObservation {
         default:
           this.#issues.add("unsupported-lifecycle-event");
       }
+    const lifecycle = {
+      session_id: id(event?.session_id) ? event.session_id : null,
+      hook_event_name: [
+        "SessionStart",
+        "UserPromptSubmit",
+        "SubagentStart",
+        "SubagentStop",
+        "Stop",
+        "StopFailure",
+        "SessionEnd",
+      ].includes(event?.hook_event_name)
+        ? event.hook_event_name
+        : "unsupported",
+      ...(id(event?.agent_id) ? { agent_id: event.agent_id } : {}),
+      ...(id(event?.agent_type) ? { agent_type: event.agent_type } : {}),
+      ...(["startup", "resume", "clear", "compact"].includes(event?.source) ? { source: event.source } : {}),
+    };
     const record = {
       sequence: this.#events.length + 1,
       previous: this.#lastHash,
-      event: structuredClone(event),
+      event: lifecycle,
+      encodedPayloadSha256: digest(encoded),
+      encodedPayloadBytes: eventBytes,
     };
     this.#lastHash = digest(JSON.stringify(record));
     this.#events.push({ ...record, sha256: this.#lastHash });

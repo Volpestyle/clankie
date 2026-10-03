@@ -321,3 +321,34 @@ it("makes repeated provider message identity across root and child copies unknow
     complete: false,
   });
 });
+
+it("exports only lifecycle fields and payload hashes, never prompt or arbitrary hook contents", () => {
+  const secret = "fixture-credential-DO-NOT-EXPORT";
+  const first = hook("SessionStart", {
+    source: "startup",
+    prompt: secret,
+    extra: { credential: secret },
+    transcript_path: "/private/fixture-transcript",
+  });
+  const second = { ...first, prompt: secret + "-different" };
+  const observe = (event: unknown) => {
+    const observation = new NativeClaudeObservation({ sessionId });
+    observation.observe(event);
+    return observation.seal();
+  };
+  const left = observe(first),
+    right = observe(second);
+  expect(left.events[0].event).toEqual({
+    session_id: sessionId,
+    hook_event_name: "SessionStart",
+    source: "startup",
+  });
+  expect(JSON.stringify(left)).not.toContain(secret);
+  expect(JSON.stringify(left)).not.toContain("/private/fixture-transcript");
+  expect(left.events[0].encodedPayloadSha256).toBe(
+    createHash("sha256").update(JSON.stringify(first)).digest("hex"),
+  );
+  expect(left.events[0].encodedPayloadBytes).toBe(Buffer.byteLength(JSON.stringify(first)));
+  expect(left.events[0].encodedPayloadSha256).not.toBe(right.events[0].encodedPayloadSha256);
+  expect(left.lastHash).not.toBe(right.lastHash);
+});

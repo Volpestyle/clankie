@@ -33,7 +33,9 @@ A root hook acknowledgement is never a stop receipt. This is deterministic fake
 transport coverage only; actual descendant termination remains unrun.
 
 `lead-native-claude-observation.mjs` bounds supplied transcript bytes and hook events,
-retains hashes, caps aggregate encoded hook bytes at 1 MiB, rejects mismatched
+retains only bounded lifecycle identity fields plus original payload hashes/byte
+counts (never hook prompts, paths, responses or arbitrary extras), caps aggregate
+encoded hook bytes at 1 MiB, rejects mismatched
 roots/children and conflicting message counters,
 and avoids counting repeated provider message IDs twice within a transcript.
 Repeated provider message IDs across root/child transcripts make the aggregate
