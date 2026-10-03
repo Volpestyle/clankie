@@ -414,7 +414,7 @@ trial was run to validate this implementation; tests use deterministic callbacks
 
 **Partial implementation; native execution blocked; no lead trials have run.**
 [`lead.mjs`](../scripts/evals/lead.mjs) provides manual planning, isolated source
-preparation, held-out reference grading trees and imported evidence reduction.
+preparation, candidate-diff preparation and sandboxed held-out grading, plus imported evidence reduction.
 It does not yet launch the native interactive comparison. `run` fails before any
 process, credential read, usage probe or model turn. James's run decision is
 necessary but cannot replace the missing execution integration. No lead-eval
@@ -435,6 +435,11 @@ node scripts/evals/lead.mjs plan --dry-run
 node scripts/evals/lead.mjs prepare owner-attachments /tmp/lead-attachment-replay 3
 # Separate trusted grader tree; does not execute tests or launch agents.
 node scripts/evals/lead.mjs reference owner-attachments /tmp/lead-attachment-before before
+# Apply an explicitly retained binary diff; no code executes.
+node scripts/evals/lead.mjs candidate owner-attachments /tmp/candidate.patch /tmp/lead-candidate
+# After staging independent dependencies inside /tmp/lead-candidate/worktree:
+# manual grading only, no model dispatch (macOS sandbox-exec required).
+node scripts/evals/lead.mjs grade /tmp/lead-candidate
 # Reduce explicitly supplied normalized evidence; never claims live attestation.
 node scripts/evals/lead.mjs collect /tmp/lead-evidence.json
 ```
@@ -449,8 +454,27 @@ Grader files are extracted from verified git objects into separate reference
 trees. `lead-grader.json` contains the exact narrow Vitest command. Install with
 `pnpm install --frozen-lockfile --prefer-offline --ignore-scripts` there, then run
 that command. The before/after checks validate the historical grader; they are
-not agent trials. Candidate-diff application and sandboxed grading after a live
-attempt remain unimplemented.
+not agent trials.
+
+`candidate` applies a retained binary diff to the verified pre-fix grading tree,
+retains its SHA-256, indexed candidate tree and changed paths, and rejects changes
+to held-out tests, package manifests, TypeScript/Vitest configuration, and grader
+state. Changes requiring different grading dependencies need separately reviewed
+support. The submitted patch must include the integrated candidate's added files
+and committed changes as well as its uncommitted edits; the runner does not infer
+or capture them from a live agent checkout.
+
+`grade` requires independent dependencies staged inside the disposable worktree.
+It performs no install. It rejects dependency links escaping that tree, hashes
+all staged dependency content, verifies candidate/test provenance, and calls the
+existing macOS `sandbox-exec` helper with networking disabled and a fixed narrow
+Vitest invocation. Source and fixture state remain disposable; owner credentials
+and the active fleet are not imported. It retains stdout/stderr, timeout/overflow,
+source/patch/test/dependency hashes and the result in `grading-result.json`.
+Changed graders/dependencies cannot yield a passing result. A nonzero exit is
+`failed-or-infrastructure`, requiring log review, not automatically a task failure.
+Deterministic tests fake the verifier process; no live candidate or model trial
+has been graded during this continuation.
 
 The two neutral sources, `html-js-filter` and `photonic-waveguide-routing`, are
 pinned to the official [Terminal-Bench v4.0.0 release](https://github.com/harbor-framework/terminal-bench/releases/tag/v4.0.0)
@@ -497,3 +521,13 @@ control, unknown usage, budget stops, tests and infrastructure. It labels even
 complete supplied records `imported-unverified`; it cannot prove that the
 inventory is complete or that a native hire actually happened. Missing costs are
 never reported as zero. See [deterministic evidence and gaps](testing/2026-10-03-lead-eval/README.md).
+
+The native run refusal also emits machine-readable engineering gaps. Current
+`ClaudeWorkerSeatControl.interrupt()` returns false and `close()` is a no-op;
+`readClaudeSubagents` is a bounded UI summary, not an exhaustive ledger;
+`SeatControl` supplies neither account-bound subscription windows nor complete
+per-call descendant usage. The actual `hireSeat` → `HerdrWatch.spawnSeat` path
+exists, but a disposable service/fleet containment adapter is not wired into this
+runner. Those are engineering prerequisites separate from James's run decision.
+The candidate grader does not close those gaps or establish native Terminal-Bench
+execution. No production service/control contracts changed in this continuation.

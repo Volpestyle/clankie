@@ -2,9 +2,20 @@
 /** Manual lead-eval preparation and evidence tools. No model/provider calls. */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { executeSandbox } from "./isolation.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const manifestPath = join(repo, "scripts/evals/lead-tasks.json");
@@ -27,7 +38,19 @@ const failures = [
 function command(binary, args, cwd = repo, input) {
   const result = spawnSync(
     binary,
-    binary === "/usr/bin/git" ? ["-c", "gc.auto=0", "-c", "maintenance.auto=false", ...args] : args,
+    binary === "/usr/bin/git"
+      ? [
+          "-c",
+          "gc.auto=0",
+          "-c",
+          "maintenance.auto=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "-c",
+          "core.fsmonitor=false",
+          ...args,
+        ]
+      : args,
     {
       cwd,
       input,
@@ -142,11 +165,8 @@ export function plan(args = []) {
       authorization:
         "Explicit James run decision for concrete task/arms/time/account budget; preparation is not authorization",
     },
-    blockers: [
-      "No complete native descendant/account usage adapter is wired into this runner",
-      "No sandboxed real Herdr/service execution adapter is wired into this runner",
-      "Terminal-Bench native interactive fleet/container integration is unsupported",
-    ],
+    nativeReadiness: nativeReadiness(),
+    blockers: nativeReadiness().engineeringGaps.map((gap) => gap.detail),
     results: [],
   };
 }
@@ -259,6 +279,190 @@ export function prepareReference(task, output, revision) {
   return result;
 }
 
+/** Apply a retained candidate diff in a fresh trusted grading tree, never execute it.
+ * The patch is untrusted code. This is preparation, not sandboxed grading.
+ */
+export function prepareCandidate(task, patchPath, output) {
+  verifyTask(task);
+  const patch = readFileSync(patchPath);
+  if (!patch.length || patch.length > 32 * 1024 * 1024)
+    throw Error("Candidate patch must be 1..33554432 bytes");
+  const sandbox = freshDirectory(output);
+  const root = join(sandbox, "worktree");
+  const result = prepareReference(task, root, "before");
+  for (const name of ["home", "tmp", "seed"]) mkdirSync(join(sandbox, name));
+  const local = (...args) => command("/usr/bin/git", args, root);
+  // An owned index is essential: inherited GIT_INDEX_FILE/GIT_DIR never reach git.
+  local("init", "-q");
+  local("add", "--force", ".");
+  local(
+    "-c",
+    "user.name=Lead eval grader",
+    "-c",
+    "user.email=eval@invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-qm",
+    "Trusted pre-fix grading tree",
+  );
+  command("/usr/bin/git", ["apply", "--check", "--binary", "-"], root, patch);
+  command("/usr/bin/git", ["apply", "--binary", "-"], root, patch);
+  // Include newly created files, without trusting the candidate's ignore rules.
+  local("add", "--all", "--force", ".");
+  const changed = local("diff", "--cached", "--name-only", "-z").toString().split("\0").filter(Boolean);
+  const protectedPaths = new Set([
+    ...task.graders.map((g) => g.path),
+    "lead-grader.json",
+    "candidate.patch",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "vitest.config.ts",
+  ]);
+  if (
+    changed.some(
+      (path) =>
+        protectedPaths.has(path) ||
+        /(^|\/)(package\.json|tsconfig[^/]*\.json)$/.test(path) ||
+        /^(fixture-(home|tmp|state)|scripts\/evals)(\/|$)/.test(path),
+    )
+  )
+    throw Error(
+      "Candidate changes trusted grader/tooling paths; separate reviewed grading support is required",
+    );
+  // Retain the exact submitted diff separately; neither imported green events nor
+  // successful application are a test pass.
+  writeFileSync(join(root, "candidate.patch"), patch, { mode: 0o600 });
+  const receipt = {
+    ...result,
+    env: undefined,
+    revision: "candidate",
+    result: "not-run",
+    status: "prepared-requires-sandboxed-grader",
+    candidatePatchSha256: sha(patch),
+    changedPaths: changed,
+    candidateTree: local("write-tree").toString().trim(),
+    baseCommit: task.baseCommit,
+    sourceTree: task.baseTree,
+    warning:
+      "Candidate code has not run. A sandboxed verifier is required; do not execute on the owner host.",
+  };
+  json(join(sandbox, "lead-grader.json"), receipt);
+  return receipt;
+}
+
+/** Content-address staged dependencies; symlinks may only resolve within this sandbox. */
+export function dependencySnapshot(directory) {
+  const root = realpathSync(directory);
+  const entries = [];
+  const visit = (path) => {
+    const stat = lstatSync(path);
+    const name = path.slice(root.length + 1);
+    if (stat.isSymbolicLink()) {
+      const target = realpathSync(path);
+      if (!target.startsWith(`${root}/`)) throw Error(`External dependency symlink: ${name}`);
+      entries.push([name, "link", readlinkSync(path)]);
+    } else if (stat.isDirectory()) {
+      for (const child of readdirSync(path).sort()) visit(join(path, child));
+    } else if (stat.isFile()) entries.push([name, stat.mode & 0o777, sha(readFileSync(path))]);
+    else throw Error(`Unsupported dependency file: ${name}`);
+  };
+  // Root and per-package node_modules are independent snapshots, not live links.
+  for (const relative of [
+    "node_modules",
+    ...["apps", "packages", "integrations"].flatMap((category) =>
+      existsSync(join(root, category))
+        ? readdirSync(join(root, category)).map((name) => `${category}/${name}/node_modules`)
+        : [],
+    ),
+  ]) {
+    const path = join(root, relative);
+    if (existsSync(path)) {
+      if (lstatSync(path).isSymbolicLink()) throw Error("Dependency directories must be owned copies");
+      visit(path);
+    }
+  }
+  return { sha256: sha(JSON.stringify(entries)), files: entries.length };
+}
+
+/** Grade only an explicitly prepared candidate with separately staged dependencies.
+ * This command never starts agents. It uses the existing network-off OS sandbox.
+ */
+export async function gradeCandidate(directory) {
+  const root = realpathSync(resolve(directory));
+  const workspace = join(root, "worktree");
+  if (realpathSync(workspace) !== workspace || readdirSync(join(root, "home")).length)
+    throw Error("Grading requires an owned worktree and fresh empty credential-free home");
+  const receipt = JSON.parse(readFileSync(join(root, "lead-grader.json"), "utf8"));
+  const task = loadTasks().historical.find((t) => t.id === receipt.task);
+  if (!task || receipt.status !== "prepared-requires-sandboxed-grader")
+    throw Error("Not a prepared candidate");
+  verifyTask(task);
+  const local = (...args) => command("/usr/bin/git", args, workspace);
+  if (
+    receipt.baseCommit !== task.baseCommit ||
+    receipt.sourceTree !== task.baseTree ||
+    sha(readFileSync(join(workspace, "candidate.patch"))) !== receipt.candidatePatchSha256 ||
+    local("write-tree").toString().trim() !== receipt.candidateTree ||
+    local("diff", "--no-ext-diff", "--no-textconv", "--name-only").length
+  )
+    throw Error("Candidate provenance changed after preparation");
+  for (const grader of task.graders)
+    if (sha(readFileSync(join(workspace, grader.path))) !== grader.sha256)
+      throw Error("Held-out grader changed after preparation");
+  // No install, credential import, account discovery or arbitrary command flags.
+  const vitest = join(workspace, "node_modules/vitest/vitest.mjs");
+  if (!existsSync(vitest) || !realpathSync(vitest).startsWith(`${root}/`))
+    throw Error("Stage independent owned dependencies inside the grading sandbox before grading");
+  const dependencies = dependencySnapshot(workspace);
+  const started = Date.now();
+  const result = await executeSandbox({
+    root,
+    binary: process.execPath,
+    args: [vitest, "run", "--config", "vitest.config.ts", ...task.graders.map((g) => g.path)],
+    network: false,
+    timeoutMs: 120_000,
+    env: {
+      CLANKIE_SETTINGS_FILE: join(workspace, "fixture-home/settings.json"),
+      CLANKIE_STATE: join(workspace, "fixture-state"),
+      pnpm_config_verify_deps_before_run: "false",
+    },
+  });
+  let unchanged = false;
+  try {
+    unchanged =
+      dependencySnapshot(workspace).sha256 === dependencies.sha256 &&
+      local("write-tree").toString().trim() === receipt.candidateTree &&
+      local("diff", "--no-ext-diff", "--no-textconv", "--name-only").length === 0 &&
+      task.graders.every(
+        (g) => existsSync(join(workspace, g.path)) && sha(readFileSync(join(workspace, g.path))) === g.sha256,
+      );
+  } catch {
+    // Retain a failed result if the candidate removed files or replaced links.
+  }
+  const report = {
+    task: task.id,
+    candidatePatchSha256: receipt.candidatePatchSha256,
+    candidateTree: receipt.candidateTree,
+    testHashes: task.graders,
+    dependencies,
+    runtime: { nodeVersion: process.version, nodeSha256: sha(readFileSync(process.execPath)) },
+    runnerSha256: sha(readFileSync(fileURLToPath(import.meta.url))),
+    isolationSha256: sha(readFileSync(join(repo, "scripts/evals/isolation.mjs"))),
+    startedAt: new Date(started).toISOString(),
+    ...result,
+    status: !unchanged
+      ? "grader-tampered"
+      : result.exitCode === 0 && !result.timedOut && !result.overflow
+        ? "passed"
+        : "failed-or-infrastructure",
+    agentsLaunched: false,
+  };
+  json(join(root, "grading-result.json"), report);
+  return report;
+}
+
 /** Never synthesize a zero for absent usage. Data here is imported evidence, not attestation. */
 export function summarizeEvidence(evidence) {
   const issues = [];
@@ -356,10 +560,56 @@ export function windowGuard(accounts, snapshots, nowMs, stopAt = { five_hour: 0.
   return { allowed: true };
 }
 
+export function nativeReadiness() {
+  return {
+    status: "refused-engineering-incomplete",
+    ownerRunDecision: "separate-hold",
+    agentsLaunched: false,
+    engineeringGaps: [
+      {
+        code: "claude-stop-unavailable",
+        source: "apps/clankie/src/captain/claude-worker-seat.ts",
+        symbol: "ClaudeWorkerSeatControl.interrupt/close",
+        detail:
+          "Interactive Claude interrupt returns false and close is a no-op; no all-descendant quota stop is established",
+      },
+      {
+        code: "descendant-inventory-incomplete",
+        source: "packages/agent-transcript/src/subagents.ts",
+        symbol: "readClaudeSubagents",
+        detail:
+          "Local UI summary cold-reads 2 MiB and retains 64 calls/32 sessions; it is not a complete native descendant ledger",
+      },
+      {
+        code: "account-window-telemetry-unavailable",
+        source: "packages/agent-hosts/src/seat.ts",
+        symbol: "SeatEvent/SeatControl",
+        detail:
+          "Native control exposes no account-bound subscription windows or complete per-call descendant usage",
+      },
+      {
+        code: "isolated-real-hire-unwired",
+        source: "apps/clankie/src/captain/captain.ts",
+        symbol: "hireSeat",
+        detail:
+          "Real hire routes through HerdrWatch.spawnSeat, but an isolated service/fleet credential and descendant containment boundary is not wired into this runner",
+      },
+      {
+        code: "terminal-bench-native-bridge-unavailable",
+        source: "scripts/evals/lead-tasks.json",
+        detail:
+          "Official source pins are retained; native interactive fleet/container and separate official verifier integration is not established",
+      },
+    ],
+  };
+}
+
 export function refuseRun() {
-  throw Error(
+  const error = Error(
     "Native execution is not implemented: complete descendant/account usage and isolated real hire/control adapters are required. Owner run authorization is also required; it cannot substitute for those adapters. No process, account probe, timer or model turn was started.",
   );
+  error.readiness = nativeReadiness();
+  throw error;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -383,16 +633,26 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
           2,
         ),
       );
+    } else if (mode === "candidate") {
+      if (args.length !== 3) throw Error("candidate requires TASK PATCH NEW_DIRECTORY");
+      const task = loadTasks().historical.find((t) => t.id === args[0]);
+      if (!task) throw Error("Unknown task");
+      console.log(JSON.stringify(prepareCandidate(task, args[1], args[2]), null, 2));
+    } else if (mode === "grade") {
+      if (args.length !== 1) throw Error("grade requires PREPARED_CANDIDATE_DIRECTORY");
+      console.log(JSON.stringify(await gradeCandidate(args[0]), null, 2));
     } else if (mode === "collect") {
       if (args.length !== 1) throw Error("collect requires an evidence JSON file");
       console.log(JSON.stringify(summarizeEvidence(JSON.parse(readFileSync(args[0], "utf8"))), null, 2));
     } else if (mode === "run") refuseRun();
     else
       throw Error(
-        "Use plan [--dry-run], prepare TASK NEW_DIRECTORY [WORKERS], reference TASK NEW_DIRECTORY before|after, collect EVIDENCE.json, or run (blocked)",
+        "Use plan [--dry-run], prepare TASK NEW_DIRECTORY [WORKERS], reference TASK NEW_DIRECTORY before|after, candidate TASK PATCH NEW_DIRECTORY, collect EVIDENCE.json, or run (blocked)",
       );
   } catch (error) {
-    console.error(String(error));
+    console.error(
+      error.readiness ? JSON.stringify({ error: String(error), ...error.readiness }, null, 2) : String(error),
+    );
     process.exitCode = 1;
   }
 }

@@ -67,3 +67,34 @@ fleet is claimed as the real arm. ADRs 0207 and 0213 apply; Swarm is not restore
 No account probe, model trial, live fleet change, grant, owner approval, restart,
 production action, full round or recommendation was performed. The historical
 106/110 Codex seat-suite harvest remains inconclusive and unchanged.
+
+## Native-runner continuation
+
+The continuation adds candidate-diff preparation and a manual sandboxed grader.
+It remains **partial engineering**, not a built native runner awaiting approval.
+The grader applies retained binary diffs to trusted pre-fix trees, retains patch,
+tree, test and dependency hashes, rejects validation-tooling changes, and invokes
+only the fixed held-out Vitest command through the existing network-off macOS
+sandbox. Dependency directories must be independent copies inside the disposable
+workspace; external dependency links fail closed. No dependency install occurs.
+Deterministic tests use fake verifier process results and disposable repositories;
+they are not benchmark results or proof of a live native run.
+
+`run` still refuses before any launch/probe and now emits exact machine-readable
+gaps. Claude's native seat control cannot programmatically interrupt a turn or
+close its process; the subagent reader intentionally truncates history; native
+seat events expose no complete account-bound subscription window or descendant
+usage ledger. The real hire path exists but an isolated service/fleet containment
+adapter remains unwired. Official Terminal-Bench source pins remain unchanged;
+no native container/verifier integration is claimed.
+
+A follow-up needs an owned process boundary that can terminate every descendant,
+a provider-supported complete session/account usage source, and child-admission
+checks that cannot start unaccounted spend. Only then can an isolated service and
+Herdr adapter safely reuse the real hire path. These are separate from the owner
+run hold. No production contracts, live fleet, accounts, grants or owner state
+were touched. The issue remains In Progress and requires an authorized actual
+round before its acceptance criteria can be satisfied.
+
+Frozen-source full-check and focused logs for this continuation are retained
+outside the public repository under the session's VUH-1474-native evidence folder.

@@ -1,15 +1,29 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 // @ts-expect-error -- checkout-only eval tooling is plain ESM.
 import * as lead from "../../../scripts/evals/lead.mjs";
+const sandbox = vi.hoisted(() => vi.fn());
+vi.mock("../../../scripts/evals/isolation.mjs", () => ({ executeSandbox: sandbox }));
 const {
+  gradeCandidate,
+  dependencySnapshot,
   loadTasks,
   plan,
   prepareReplay,
   prepareReference,
+  prepareCandidate,
   refuseRun,
   summarizeEvidence,
   verifyTask,
@@ -23,6 +37,7 @@ const scratch = () => {
 };
 afterEach(() => {
   vi.unstubAllEnvs();
+  sandbox.mockReset();
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -53,6 +68,14 @@ it("plans equal tasks and budgets, rotates arms and never implies run approval",
   expect(() => plan(["--workers", "0"])).toThrow();
   expect(() => plan(["--tasks", "html-js-filter"])).toThrow("unsupported");
   expect(() => refuseRun()).toThrow("not implemented");
+  expect(lead.nativeReadiness()).toMatchObject({
+    status: "refused-engineering-incomplete",
+    ownerRunDecision: "separate-hold",
+    agentsLaunched: false,
+  });
+  expect(lead.nativeReadiness().engineeringGaps.map((gap: { code: string }) => gap.code)).toContain(
+    "claude-stop-unavailable",
+  );
 });
 
 it("exports a history-free replay and distinct worker indexes, with no held-out tests", () => {
@@ -182,4 +205,125 @@ it("deduplicates all-agent call usage, preserves costs as unknown when coverage 
     wallToGreenMs: null,
     recommendation: null,
   });
+});
+
+it("applies a retained candidate diff to the trusted base without executing candidate code", () => {
+  const task = loadTasks().historical[2];
+  const root = scratch();
+  const patchPath = join(root, "candidate.diff");
+  writeFileSync(
+    patchPath,
+    "diff --git a/candidate.txt b/candidate.txt\nnew file mode 100644\n--- /dev/null\n+++ b/candidate.txt\n@@ -0,0 +1 @@\n+candidate implementation\n",
+  );
+  const output = join(root, "grader");
+  vi.stubEnv("GIT_INDEX_FILE", join(root, "poison-index"));
+  const receipt = prepareCandidate(task, patchPath, output);
+  expect(receipt).toMatchObject({
+    revision: "candidate",
+    result: "not-run",
+    status: "prepared-requires-sandboxed-grader",
+    changedPaths: ["candidate.txt"],
+  });
+  expect(receipt.candidatePatchSha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(receipt.candidateTree).toMatch(/^[a-f0-9]{40}$/);
+  expect(readFileSync(join(output, "worktree/candidate.txt"), "utf8")).toBe("candidate implementation\n");
+  expect(readFileSync(join(output, "worktree/candidate.patch"))).toEqual(readFileSync(patchPath));
+  expect(existsSync(join(root, "poison-index"))).toBe(false);
+  for (const grader of task.graders) {
+    const expected = spawnSync("git", ["show", `${task.sourceCommit}:${grader.path}`]).stdout;
+    expect(readFileSync(join(output, "worktree", grader.path))).toEqual(expected);
+  }
+}, 30_000);
+
+it("refuses grader changes, traversal and malformed candidate patches", () => {
+  const task = loadTasks().historical[2];
+  const root = scratch();
+  for (const [index, path] of ["candidate.patch", "../escape", "vitest.config.ts"].entries()) {
+    const patchPath = join(root, `patch-${index}`);
+    writeFileSync(
+      patchPath,
+      `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1 @@\n+untrusted\n`,
+    );
+    expect(() => prepareCandidate(task, patchPath, join(root, `grader-${index}`))).toThrow();
+  }
+  expect(existsSync(join(root, "escape"))).toBe(false);
+  const empty = join(root, "empty");
+  writeFileSync(empty, "");
+  expect(() => prepareCandidate(task, empty, join(root, "empty-grader"))).toThrow("Candidate patch");
+}, 30_000);
+
+it("grades through the network-off sandbox with fixed argv and retained provenance", async () => {
+  const task = loadTasks().historical[2];
+  const root = scratch();
+  const patch = join(root, "patch");
+  writeFileSync(
+    patch,
+    "diff --git a/candidate.txt b/candidate.txt\nnew file mode 100644\n--- /dev/null\n+++ b/candidate.txt\n@@ -0,0 +1 @@\n+implementation\n",
+  );
+  const output = join(root, "grading");
+  const receipt = prepareCandidate(task, patch, output);
+  const vitestDir = join(output, "worktree/node_modules/vitest");
+  mkdirSync(vitestDir, { recursive: true });
+  writeFileSync(join(vitestDir, "vitest.mjs"), "// deterministic fake process fixture\n");
+  sandbox.mockResolvedValue({
+    exitCode: 0,
+    timedOut: false,
+    overflow: false,
+    stdout: "fixture",
+    stderr: "",
+    wallMs: 1,
+  });
+  writeFileSync(join(output, "home/owner-secret"), "fixture");
+  await expect(gradeCandidate(output)).rejects.toThrow("credential-free home");
+  expect(sandbox).not.toHaveBeenCalled();
+  rmSync(join(output, "home/owner-secret"));
+  const result = await gradeCandidate(output);
+  expect(result).toMatchObject({
+    status: "passed",
+    agentsLaunched: false,
+    candidatePatchSha256: receipt.candidatePatchSha256,
+  });
+  expect(result.dependencies.files).toBe(1);
+  expect(sandbox).toHaveBeenCalledWith(
+    expect.objectContaining({
+      root: output,
+      network: false,
+      timeoutMs: 120000,
+      args: [
+        join(vitestDir, "vitest.mjs"),
+        "run",
+        "--config",
+        "vitest.config.ts",
+        ...task.graders.map((g: { path: string }) => g.path),
+      ],
+    }),
+  );
+  expect(sandbox.mock.calls[0][0].env).not.toHaveProperty("PATH");
+  expect(JSON.parse(readFileSync(join(output, "grading-result.json"), "utf8"))).toMatchObject({
+    status: "passed",
+  });
+  sandbox.mockResolvedValueOnce({
+    exitCode: 1,
+    timedOut: false,
+    overflow: false,
+    stderr: "fixture infrastructure failure",
+  });
+  expect(await gradeCandidate(output)).toMatchObject({ status: "failed-or-infrastructure" });
+  sandbox.mockResolvedValueOnce({ exitCode: 0, timedOut: true, overflow: false });
+  expect(await gradeCandidate(output)).toMatchObject({ status: "failed-or-infrastructure" });
+  sandbox.mockImplementationOnce(async () => {
+    writeFileSync(join(output, "worktree", task.graders[0].path), "tampered");
+    return { exitCode: 0, timedOut: false, overflow: false };
+  });
+  expect(await gradeCandidate(output)).toMatchObject({ status: "grader-tampered" });
+  sandbox.mockClear();
+  await expect(gradeCandidate(output)).rejects.toThrow("provenance changed");
+  expect(sandbox).not.toHaveBeenCalled();
+}, 30_000);
+
+it("refuses dependency links outside the disposable workspace", () => {
+  const root = scratch();
+  mkdirSync(join(root, "node_modules"));
+  symlinkSync("/usr/bin", join(root, "node_modules/external"));
+  expect(() => dependencySnapshot(root)).toThrow("External dependency symlink");
 });
