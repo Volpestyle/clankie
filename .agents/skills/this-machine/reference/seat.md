@@ -81,3 +81,14 @@ OpenCode seats use the same isolation contract: a fresh `clankie seat --harness
 opencode` creates a separate workspace chat; `--conversation ID` reuses one,
 `--resume` keeps the exact native session and chat, and `--dry-run` creates none.
 See [the OpenCode seat guide](../../../../integrations/opencode-plugin/README.md).
+
+### Progress and interrupted replies
+
+Claude and Codex seats upload redacted mid-turn progress after tool calls, at
+most once per two seconds, and flush retained entries at Stop. A service restart
+can interrupt the conversation link while the native seat continues working.
+The app run reports `service_restarted`, not successful completion. Reply targets
+are process-local: if `reply` reports that its target is gone, that answer was
+not sent. Check the conversation and seat before sending again; never infer
+that restart, transport acknowledgment, or queue consumption means the model
+finished, and never automatically replay an uncertain request.

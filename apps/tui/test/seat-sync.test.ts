@@ -321,3 +321,57 @@ test("tool-call progress syncs mid-turn, at most once per burst", async () => {
     await rm(join(tmpdir(), `clankie-seat-sync-${sessionId}`), { force: true });
   }
 });
+
+test("Codex PostToolUse uploads commentary before Stop and Stop flushes throttled progress", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-midturn-"));
+  const sessionId = randomUUID();
+  const path = join(root, `rollout-progress-${sessionId}.jsonl`);
+  const bodies: Array<{ entries: Array<{ text?: string }>; activity: string }> = [];
+  const record = (text: string, id: string) =>
+    JSON.stringify({
+      type: "response_item",
+      payload: {
+        id,
+        type: "message",
+        role: "assistant",
+        channel: "commentary",
+        content: [{ type: "output_text", text }],
+      },
+    }) + "\n";
+  const sync = (event: string) =>
+    runSeatSyncCommand([], {
+      env: {
+        CLANKIE_SEAT_SESSION_ID: sessionId,
+        CLANKIE_SEAT_HARNESS: "codex",
+        CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
+      },
+      stdin: Readable.from([
+        JSON.stringify({ session_id: sessionId, transcript_path: path, hook_event_name: event }),
+      ]),
+      fetchImpl: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ ok: true });
+      },
+    });
+  try {
+    await writeFile(path, record("I found the cause and am fixing it", "a1"));
+    await sync("PostToolUse");
+    expect(bodies).toMatchObject([
+      { entries: [{ text: "I found the cause and am fixing it" }], activity: "responding" },
+    ]);
+    await writeFile(
+      path,
+      record("I found the cause and am fixing it", "a1") + record("The fix passed", "a2"),
+    );
+    await sync("PostToolUse");
+    expect(bodies).toHaveLength(1);
+    await sync("Stop");
+    expect(bodies[1]).toMatchObject({
+      entries: [{ text: "I found the cause and am fixing it" }, { text: "The fix passed" }],
+      activity: "waiting",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(join(tmpdir(), `clankie-seat-sync-${sessionId}`), { force: true });
+  }
+});

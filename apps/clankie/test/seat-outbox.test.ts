@@ -116,7 +116,7 @@ describe("seat outbox", () => {
     const delivery = wake(outbox);
     await taken;
     outbox.close();
-    await expect(delivery).resolves.toMatchObject({ outcome: "unconfirmed" });
+    await expect(delivery).rejects.toThrow("may still be working");
 
     const parkedOutbox = new SeatOutbox({ boundGraceMs: 1_000 });
     const parked = parkedOutbox.poll(5_000);

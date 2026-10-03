@@ -171,6 +171,7 @@ describe("clankie mcp", () => {
     expect(sent.content).toEqual([{ type: "text", text: "sent" }]);
     const stale = await client.callTool({ name: "reply", arguments: { event_id: "seat-old", text: "late" } });
     expect(stale.isError).toBe(true);
+    expect(stale.content).toEqual([{ type: "text", text: expect.stringContaining("reply target is gone") }]);
     expect(replies).toEqual([
       { eventId: "seat-esc", text: "on it" },
       { eventId: "seat-old", text: "late" },

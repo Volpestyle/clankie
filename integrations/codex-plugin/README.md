@@ -43,7 +43,10 @@ separate resume records; resume cannot rebind a thread to another conversation.
 - `hooks/hooks.json` declares native command hooks. `SessionStart` re-arms
   `clankie memory-card --hook`; `UserPromptSubmit` emits the first card and
   changed cards only. Sync hooks upload redacted native transcript entries to
-  the selected conversation for the app. Child session hooks are excluded.
+  the selected conversation for the app. Async `PostToolUse` uploads mid-turn
+  commentary and tool progress, throttled to one attempt per two seconds;
+  `Stop` flushes retained entries. This is hook-paced progress, not token streaming.
+  Child session hooks are excluded.
 - `.mcp.json` starts `clankie mcp --lane operator`, forwarding the selected
   conversation and service URL by environment name. Credentials stay in the
   broker; no bearer is embedded in this plugin.

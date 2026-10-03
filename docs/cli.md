@@ -2305,20 +2305,31 @@ that pane; anywhere else the command does nothing.
 `clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The `clankie seat` launcher
 sets `CLANKIE_SEAT_SESSION_ID` and its selected `CLANKIE_CONVERSATION_ID`; unlaunched
 plugin use and hooks for another session are ignored. The plugin invokes sync at
-session start/end, prompt submission, stop/failure and before compaction.
+session start/end, prompt submission, stop/failure and before compaction. Claude
+and Codex also upload on asynchronous `PostToolUse` hooks, throttled to one
+attempt per two seconds. Progress appears as tools finish; a long tool or a
+text-only stretch waits for the next hook. Codex requires native hook review
+again when its hook definitions change.
 
 The CLI reads the matching native transcript locally, redacts display records,
 and posts bounded message/tool batches to `/v1/seat/transcript` with the operator
 credential. No host file path is read by the service. The session is pinned to its
 conversation; retries and resume retain the same native entry identities. The
 next hook retries retained records after a transport failure. The final page carries
-`responding` at prompt submission and `waiting` at session start/end or stop/failure;
+`responding` at prompt submission or tool progress and `waiting` at session start/end or stop/failure;
 compaction leaves activity unchanged. Empty transcripts still carry lifecycle
 activity. These are display signals, not service-run completion or ownership. Reset retires that
 conversation's native sessions; launch a new seat afterward so old history cannot
 repopulate the cleared conversation. Sync failures never
 instruct the harness to continue or block a stop. The current 9,000-entry display tail
 is the replay bound. Image files use `clankie file publish` separately.
+
+A service restart interrupts an unanswered seat run with `failed` and
+`reasonCode: service_restarted`; it does not prove that the independent native
+seat stopped. Escalation reply waiters do not survive restart. A later `reply`
+returns an explicit target-gone error instead of claiming the answer was sent.
+An uncertain delivery remains fenced until its exact receipt is reconciled;
+restarting or reconnecting never replays the request.
 
 ## Services
 

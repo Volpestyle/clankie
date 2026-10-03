@@ -1,3 +1,4 @@
+import { SeatLinkInterruptedError } from "./seat-outbox.ts";
 import { fleetDeliveryStage, type DeliveryStage } from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
@@ -682,7 +683,14 @@ export class ConversationStore {
     }
     const orphans = accepted.filter((id) => !terminal.has(id));
     for (const runId of orphans) {
-      this.append(meta, { type: "turn", runId, phase: "failed", reasonCode: "service_restarted" });
+      this.append(meta, {
+        type: "turn",
+        runId,
+        phase: "failed",
+        reasonCode: "service_restarted",
+        summary:
+          "The service restarted and interrupted this run's link. A native seat may still be working; its reply target is gone. Check the seat before sending the request again.",
+      });
     }
     return orphans.length;
   }
@@ -2698,7 +2706,12 @@ export class ConversationStore {
           type: "turn",
           runId,
           phase: "failed",
-          reasonCode: error instanceof Error ? error.constructor.name : "run_failed",
+          reasonCode:
+            error instanceof SeatLinkInterruptedError
+              ? "service_restarted"
+              : error instanceof Error
+                ? error.constructor.name
+                : "run_failed",
           summary: turnFailureSummary(error),
         });
         if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "failed";

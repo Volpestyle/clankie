@@ -102,7 +102,7 @@ import {
   type FleetSeatMessageContext,
   type FleetSeatDelivery,
 } from "./fleet-seat.ts";
-import { SeatOutbox } from "./seat-outbox.ts";
+import { SeatLinkInterruptedError, SeatOutbox } from "./seat-outbox.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { createStanceStore } from "./stances.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
@@ -1242,8 +1242,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let modelRuntime: Promise<CaptainModelRuntime> | undefined;
   // The seat (ADR 0152): the herdr pane holding his name, and the outbox its
   // bridge polls. The head conversation is always the default global one.
+  const shutdown = new AbortController();
   const seatOutboxes = new Map<string, SeatOutbox>();
   function seatOutbox(conversationId: string): SeatOutbox {
+    shutdown.signal.throwIfAborted();
     let outbox = seatOutboxes.get(conversationId);
     if (outbox === undefined) {
       outbox = new SeatOutbox({
@@ -1540,6 +1542,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const conversations = new ConversationStore(
     join(options.stateDir, "conversations"),
     trackHostedConversationRunner(async (conversationId, incoming, publish, context) => {
+      // A queued turn may start after close releases the preceding seat waiter.
+      // It must not see an empty outbox and fall through into a fresh Pi turn.
+      shutdown.signal.throwIfAborted();
       // Turning follow off also drops activity still queued behind a live turn.
       if (
         context.origin === "hook" &&
@@ -1551,6 +1556,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const message =
         context.origin === "hook" ? conversations.linearWakePrompt(conversationId, context.runId) : incoming;
       if (message === undefined) return;
+      shutdown.signal.throwIfAborted();
       const kind = seatEventKind(conversationId, context);
       if (kind !== undefined) {
         // The harness in his seat opens files by path, the way any worker does.
@@ -1562,6 +1568,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 messageId: context.runId,
                 attachments: context.attachments,
               });
+        shutdown.signal.throwIfAborted();
         const delivery = await seatOutbox(conversationId).deliver({
           kind,
           conversationId,
@@ -1585,6 +1592,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // (VUH-1382). It publishes there like any turn, and its own tree stays
       // on disk as the record of what it ran.
       // ponytail: one tree per wake, unbounded; prune by mtime if it grows.
+      shutdown.signal.throwIfAborted();
       const oneShot = context.origin === "hook";
       const cwd = context.workspace ?? workingDirectory;
       const lane = oneShot
@@ -1607,6 +1615,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             cwd,
             context.side === true,
           );
+      if (shutdown.signal.aborted) {
+        if (oneShot) lane.session.dispose();
+        shutdown.signal.throwIfAborted();
+      }
       // Operator interrupt: stop the live model turn. Aborting mid-stream makes
       // pi settle the message as aborted; partial text still publishes below so
       // the transcript shows what he had said before the interrupt.
@@ -1751,6 +1763,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           });
       let settled: TurnSettledOutcome | undefined;
       try {
+        shutdown.signal.throwIfAborted();
         if (!live) await syncModel(lane);
         // After the sync, so a `/model` or `/effort` change made under a live
         // conversation is attributed to this turn — the first one to execute it.
@@ -1805,6 +1818,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // exact, loaded operator skills are the only input allowed to reach Pi expansion.
         const role = await runDurableTurn(lane, prompt.prompt, attached?.images ?? [], {
           expandPromptTemplates: prompt.skillName !== undefined,
+          // runDurableTurn rechecks immediately before prompt/steer, including
+          // after waiting for another invocation or its startup reservation.
+          signal: AbortSignal.any([context.signal, shutdown.signal]),
         });
         if (role === "absorbed") return;
         const text = lane.lastAssistantText.trim();
@@ -3633,6 +3649,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     receiveLinearActivity: (activity, following) => conversations.receiveLinearActivity(activity, following),
 
     async close(): Promise<void> {
+      shutdown.abort(new SeatLinkInterruptedError());
       unsubscribeFleets?.();
       evaluator.close();
       for (const mailbox of fleetMailboxes.values()) mailbox.close();

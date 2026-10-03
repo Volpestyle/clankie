@@ -298,7 +298,10 @@ export function createSeatBridge(
       ? { content: [{ type: "text", text: "sent" }] }
       : {
           content: [
-            { type: "text", text: "nothing is waiting on that event_id; the room may have moved on" },
+            {
+              type: "text",
+              text: "The reply target is gone (the service may have restarted or the reply window expired). This answer was not sent; check the conversation before sending it again.",
+            },
           ],
           isError: true,
         };

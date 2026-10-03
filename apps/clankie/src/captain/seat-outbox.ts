@@ -24,6 +24,15 @@ const BOUND_GRACE_MS = 2_000;
 /** How long an escalation waits for the seat's `reply` before the run settles unanswered. */
 const REPLY_TIMEOUT_MS = 10 * 60_000;
 
+/** The service lost its reply waiter; this says nothing about the native turn. */
+export class SeatLinkInterruptedError extends Error {
+  public constructor() {
+    super(
+      "The service link was interrupted. The seat may still be working, but its reply target is gone. Check the seat before sending the request again.",
+    );
+  }
+}
+
 export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
   | { readonly outcome: "delivered" }
   | { readonly outcome: "replied"; readonly text: string }
@@ -55,7 +64,7 @@ interface Pending {
   acknowledged: boolean;
   settled: boolean;
   timer?: ReturnType<typeof setTimeout>;
-  settle(outcome: SeatDelivery): void;
+  settle(outcome: SeatDelivery | { readonly outcome: "interrupted" }): void;
 }
 
 export class SeatOutbox {
@@ -69,6 +78,7 @@ export class SeatOutbox {
   private readonly fence: DeliveryFence;
   private readonly active = new Set<string>();
   private lastPollAt: number | undefined;
+  private closed = false;
 
   public constructor(
     options: {
@@ -90,7 +100,7 @@ export class SeatOutbox {
 
   /** A seat is bound while a poller is parked, or a parked poll resolved within the grace. */
   public bound(): boolean {
-    return this.pollers.size > 0 || this.remainingGraceMs() > 0;
+    return !this.closed && (this.pollers.size > 0 || this.remainingGraceMs() > 0);
   }
 
   /**
@@ -98,9 +108,11 @@ export class SeatOutbox {
    * polling and the grace has lapsed, so the caller runs the pi lane instead;
    * `delivered` when the bridge takes the turn and comes back for more (or,
    * for an escalation, when the reply window lapses); `replied` with the
-   * seat's answer; `aborted` when the operator cancels the run.
+   * seat's answer; `aborted` when the operator cancels the run. Closing the
+   * mailbox rejects with SeatLinkInterruptedError, never successful completion.
    */
   public deliver(input: SeatDeliveryInput): Promise<SeatDelivery> {
+    if (this.closed) return Promise.reject(new SeatLinkInterruptedError());
     const unresolved = this.fence.entries().find(([id]) => !this.active.has(id));
     if (unresolved !== undefined)
       return Promise.resolve({
@@ -112,7 +124,7 @@ export class SeatOutbox {
     if (!this.bound()) return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
     if (input.signal?.aborted === true)
       return Promise.resolve({ outcome: "aborted", deliveryStage: "expired" });
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const event: OperatorSeatEvent = {
         schemaVersion: 1,
         id: `seat-${randomUUID()}`,
@@ -146,15 +158,21 @@ export class SeatOutbox {
           if (pending.settled) return;
           pending.settled = true;
           this.active.delete(event.id);
-          if (outcome.outcome !== "unconfirmed") {
+          if (
+            outcome.outcome !== "unconfirmed" &&
+            !(outcome.outcome === "interrupted" && pending.taken && !pending.acknowledged)
+          ) {
             try {
               this.fence.reconcile(event.id, event.id);
             } catch (error) {
-              outcome = {
-                outcome: "unconfirmed",
-                messageId: event.id,
-                detail: `Receipt persistence failed: ${String(error)}`,
-              };
+              // A failed receipt write must not convert shutdown into successful
+              // run completion. The fence retains its original unresolved record.
+              if (outcome.outcome !== "interrupted")
+                outcome = {
+                  outcome: "unconfirmed",
+                  messageId: event.id,
+                  detail: `Receipt persistence failed: ${String(error)}`,
+                };
             }
           }
           if (pending.timer !== undefined) clearTimeout(pending.timer);
@@ -164,7 +182,8 @@ export class SeatOutbox {
           const flightIndex = this.inFlight.indexOf(pending);
           if (flightIndex >= 0) this.inFlight.splice(flightIndex, 1);
           this.awaitingReply.delete(event.id);
-          resolve({ ...outcome, deliveryStage: headSeatDeliveryStage(outcome.outcome) });
+          if (outcome.outcome === "interrupted") reject(new SeatLinkInterruptedError());
+          else resolve({ ...outcome, deliveryStage: headSeatDeliveryStage(outcome.outcome) });
         },
       };
       input.signal?.addEventListener("abort", onAbort, { once: true });
@@ -180,6 +199,7 @@ export class SeatOutbox {
 
   /** The bridge's long poll: ack in-flight turns, then everything queued, or park. */
   public poll(waitMs: number, signal?: AbortSignal): Promise<OperatorSeatEvent[]> {
+    if (this.closed) return Promise.resolve([]);
     this.ackInFlight();
     const ready = this.take();
     if (ready.length > 0 || waitMs <= 0 || signal?.aborted === true) return Promise.resolve(ready);
@@ -210,7 +230,12 @@ export class SeatOutbox {
   public reply(eventId: string, text: string): boolean {
     const pending =
       this.awaitingReply.get(eventId) ?? this.inFlight.find((candidate) => candidate.event.id === eventId);
-    if (pending === undefined) return this.fence.reconcile(eventId, eventId);
+    if (pending === undefined) {
+      // A late reply proves receipt of the original event, but no live waiter
+      // remains to publish its text. Never report that this answer was sent.
+      this.fence.reconcile(eventId, eventId);
+      return false;
+    }
     pending.settle({ outcome: "replied", text });
     return true;
   }
@@ -224,18 +249,11 @@ export class SeatOutbox {
   }
 
   public close(): void {
+    this.closed = true;
     for (const pending of [...this.queued, ...this.inFlight, ...this.awaitingReply.values()]) {
-      pending.settle(
-        pending.acknowledged
-          ? { outcome: "delivered" }
-          : pending.taken
-            ? {
-                outcome: "unconfirmed",
-                messageId: pending.event.id,
-                detail: "The bridge took the event before the mailbox closed; delivery may still land.",
-              }
-            : { outcome: "aborted" },
-      );
+      // Closing the service's waiter cannot finish an independent native turn.
+      // Preserve the fence when take happened without an exact receipt.
+      pending.settle({ outcome: "interrupted" });
     }
     // Each poller removes itself as it settles; a set never revisits a yielded entry.
     for (const poller of this.pollers) poller.finish([], "close");

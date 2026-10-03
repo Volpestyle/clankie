@@ -17,10 +17,14 @@ test("Codex identity is generated from the shared identity and native hooks reta
   expect(Object.keys(hooks.hooks)).toEqual([
     "SessionStart",
     "UserPromptSubmit",
+    "PostToolUse",
     "Stop",
     "SessionEnd",
     "PreCompact",
     "Interrupt",
+  ]);
+  expect(hooks.hooks.PostToolUse).toEqual([
+    { hooks: [{ type: "command", command: 'node "$PLUGIN_ROOT/hooks/run.mjs"', timeout: 60, async: true }] },
   ]);
   expect(JSON.stringify(hooks)).not.toContain("dangerously-bypass-hook-trust");
 });
@@ -148,6 +152,7 @@ test("the root hook binds once, rearms memory, and ignores child session hooks",
     expect(start.stdout).toContain("# This seat");
     expect(JSON.parse(await readFile(binding, "utf8")).sessionId).toBe(sessionId);
     expect(invoke("UserPromptSubmit").stdout).toContain("MEMORY CARD");
+    expect(invoke("PostToolUse").stdout).toBe("");
     const before = await readFile(calls, "utf8");
     expect(invoke("Stop", "11111111-2222-3333-4444-555555555555").status).toBe(0);
     expect(invoke("UserPromptSubmit", sessionId, { agent_id: "child" }).status).toBe(0);
@@ -162,6 +167,7 @@ test("the root hook binds once, rearms memory, and ignores child session hooks",
       "memory-card",
       "seat-sync",
       "memory-card",
+      "seat-sync",
       "seat-sync",
     ]);
     const failedStart = invoke("SessionStart", sessionId, {}, true);
