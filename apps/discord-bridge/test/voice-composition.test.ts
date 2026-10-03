@@ -253,8 +253,8 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
       "Joined with DAVE protocol 1. Only you are opted in — audio from anyone who has not " +
         "explicitly consented is never streamed anywhere. Consented audio feeds a live OpenAI " +
         "realtime session that keeps this call's conversation on OpenAI's servers for as long as " +
-        "the call lasts. I listen continuously but speak only when addressed, or briefly on my " +
-        "own initiative. My spoken replies use an AI-generated voice. Nothing said in voice " +
+        "the call lasts. I listen continuously and decide for myself when to speak. My spoken " +
+        "replies use an AI-generated voice. Nothing said in voice " +
         "can ever approve privileged actions. Use **/clankie voice-consent opt-in** to let me " +
         "hear you and **/clankie voice-consent opt-out** to revoke immediately.",
     );

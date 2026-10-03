@@ -48,14 +48,14 @@ export function renderVoiceJoinDisclosure(
     return (
       `Joined with DAVE protocol ${String(daveProtocolVersion)}. Anyone in this voice channel can talk to me — ` +
       `being here is consent. **/clankie voice-consent opt-out** refuses for the rest of this call. ` +
-      `${processing}${retention} I listen continuously but speak only when addressed, or briefly on my own initiative. ` +
+      `${processing}${retention} I listen continuously and decide for myself when to speak. ` +
       `${describeSpokenReplies(ttsProvider)} Nothing said in voice can ever approve privileged actions.`
     );
   }
   return (
     `Joined with DAVE protocol ${String(daveProtocolVersion)}. Only you are opted in — ` +
     `audio from anyone who has not explicitly consented is never streamed anywhere. ` +
-    `${processing}${retention} I listen continuously but speak only when addressed, or briefly on my own initiative. ` +
+    `${processing}${retention} I listen continuously and decide for myself when to speak. ` +
     `${describeSpokenReplies(ttsProvider)} Nothing said in voice can ever approve privileged actions. ` +
     `Use **/clankie voice-consent opt-in** to let me hear you and ` +
     `**/clankie voice-consent opt-out** to revoke immediately.`
