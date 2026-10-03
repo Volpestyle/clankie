@@ -48,6 +48,9 @@
   },
   "ignoreIssues": {
     "docs/testing/2026-09-20-delivered-files-live/flows/build-presentation.mjs": ["unlisted"],
-    "docs/testing/2026-09-20-delivered-files-live/flows/build-workbook.mjs": ["unlisted"]
+    "docs/testing/2026-09-20-delivered-files-live/flows/build-workbook.mjs": ["unlisted"],
+    "scripts/evals/lead-coding-tools.mjs": ["unlisted"],
+    "scripts/evals/lead-controller.mjs": ["unlisted"],
+    "scripts/evals/lead-model-runtime.mjs": ["unlisted"]
   }
 }
