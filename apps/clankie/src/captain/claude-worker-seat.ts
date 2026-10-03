@@ -64,7 +64,16 @@ export interface ClaudeWorkerSeatDeps {
   };
   readonly timing?: { readonly readyMs?: number; readonly receiptMs?: number; readonly pollMs?: number };
   /** Deny rules for the tracker connectors a session in `cwd` would inherit. */
-  readonly trackerDeny?: (cwd: string, env?: Readonly<Record<string, string>>) => readonly string[];
+  readonly trackerDeny?: (
+    cwd: string,
+    env?: Readonly<Record<string, string>>,
+  ) => readonly string[] | Promise<readonly string[]>;
+  /**
+   * Where the launch's settings JSON is handed to Claude. Absent, inline; a
+   * remote Windows launch writes it to a file there, because Herdr's launcher
+   * would not carry its quotes intact (VUH-1527).
+   */
+  readonly settingsArg?: (json: string) => Promise<string>;
 }
 
 const READY_MS = 30_000;
@@ -78,13 +87,22 @@ const CLAUDE_MANAGED_SETTINGS = "/Library/Application Support/ClaudeCode/managed
  * its approved channel, and deny rules for inherited tracker connectors so its
  * Linear writes go through Clankie's connected account.
  */
-export function claudeWorkerLaunchArgs(launch: SeatLaunch, trackerDeny: readonly string[] = []): string[] {
+function claudeWorkerSettings(trackerDeny: readonly string[] = []): string {
+  return JSON.stringify({
+    enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
+    ...(trackerDeny.length === 0 ? {} : { permissions: { deny: [...trackerDeny] } }),
+  });
+}
+
+export function claudeWorkerLaunchArgs(
+  launch: SeatLaunch,
+  trackerDeny: readonly string[] = [],
+  /** The settings JSON itself, or a path to a file holding it. */
+  settings = claudeWorkerSettings(trackerDeny),
+): string[] {
   return [
     "--settings",
-    JSON.stringify({
-      enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
-      ...(trackerDeny.length === 0 ? {} : { permissions: { deny: [...trackerDeny] } }),
-    }),
+    settings,
     "--channels",
     `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
     ...(launch.resumeSessionId === undefined ? [] : ["--resume", launch.resumeSessionId]),
@@ -220,15 +238,29 @@ export function managedPolicyApprovesWorker(path = CLAUDE_MANAGED_SETTINGS): boo
           .map((name) => join(drop, name))
       : []),
   ];
+  return policiesApproveWorker(
+    files.map((file) => {
+      try {
+        return readFileSync(file, "utf8");
+      } catch {
+        return "";
+      }
+    }),
+  );
+}
+
+/** The same answer from the policy files' contents, wherever they were read (VUH-1527). */
+export function policiesApproveWorker(contents: readonly string[]): boolean {
   let enabled = false;
   let allowed = false;
-  for (const file of files) {
+  for (const content of contents) {
     let value: { channelsEnabled?: unknown; allowedChannelPlugins?: unknown };
     try {
-      value = JSON.parse(readFileSync(file, "utf8")) as typeof value;
+      value = JSON.parse(content) as typeof value;
     } catch {
       continue;
     }
+    if (typeof value !== "object" || value === null) continue;
     if (value.channelsEnabled === true) enabled = true;
     if (
       Array.isArray(value.allowedChannelPlugins) &&
@@ -495,8 +527,16 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
       if (!consent.approved)
         return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
       try {
-        const trackerDeny = (deps.trackerDeny ?? defaultTrackerDeny)(launch.cwd, launch.env);
-        await view.start("claude", claudeWorkerLaunchArgs(launch, trackerDeny));
+        const trackerDeny = await (deps.trackerDeny ?? defaultTrackerDeny)(launch.cwd, launch.env);
+        const settings = claudeWorkerSettings(trackerDeny);
+        await view.start(
+          "claude",
+          claudeWorkerLaunchArgs(
+            launch,
+            trackerDeny,
+            deps.settingsArg ? await deps.settingsArg(settings) : settings,
+          ),
+        );
       } catch (error) {
         return {
           outcome: "failed",

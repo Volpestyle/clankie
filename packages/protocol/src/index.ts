@@ -2488,6 +2488,36 @@ export const FLEET_SEAT_HOOK_PATH = "/v1/fleet/seats/:paneId/hook";
 export function fleetSeatHookPath(paneId: string): string {
   return `/v1/fleet/seats/${encodeURIComponent(paneId)}/hook`;
 }
+/**
+ * An agent in a fleet pane writing to Clankie (ADR 0213 phase 2): hired or not,
+ * local or on a linked machine. It reaches him as untrusted agent output, the
+ * way a completion watch does, and grants the sender nothing; he answers, if
+ * he chooses, with `message_seat`.
+ */
+export const FleetSeatMessageSchema = z
+  .object({ schemaVersion: z.literal(1), text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX) })
+  .strict();
+export type FleetSeatMessage = z.infer<typeof FleetSeatMessageSchema>;
+export const FLEET_SEAT_MESSAGES_PATH = "/v1/fleet/seats/:paneId/messages";
+export function fleetSeatMessagesPath(paneId: string): string {
+  return `/v1/fleet/seats/${encodeURIComponent(paneId)}/messages`;
+}
+/**
+ * The link a machine on an ssh fleet uses to reach Clankie (VUH-1527): his
+ * service through a reverse ssh forward on that machine's loopback, and a
+ * token that authorizes only the seat routes above, only for panes on that
+ * fleet. Clankie writes it to the machine as `~/.clankie/link.json`, readable
+ * by its owner only, and replaces it whenever the link reconnects.
+ */
+export const FleetLinkFileSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    fleet: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+    url: z.string().regex(/^http:\/\/127\.0\.0\.1:\d{1,5}$/u),
+    token: z.string().min(32).max(200),
+  })
+  .strict();
+export type FleetLinkFile = z.infer<typeof FleetLinkFileSchema>;
 
 /** The seat's answer to one escalation; it lands in the conversation as his reply. */
 export const OperatorSeatReplySchema = z

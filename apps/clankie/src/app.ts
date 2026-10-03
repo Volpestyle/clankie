@@ -76,6 +76,8 @@ import {
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   FLEET_SEAT_EVENTS_PATH,
   FLEET_SEAT_HOOK_PATH,
+  FLEET_SEAT_MESSAGES_PATH,
+  FleetSeatMessageSchema,
   FleetSeatHookSchema,
   OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
   OPERATOR_SEAT_EVENTS_PATH,
@@ -409,6 +411,13 @@ export interface ClankieAppDependencies {
   hostPower?: () => HostPowerReport;
   /** The pi captain seam. Tests pass `createStubCaptain()`. */
   captain: CaptainPort;
+  /**
+   * Linked ssh fleets (VUH-1527): a link token's fleet. That token may use the
+   * fleet seat routes for that fleet's panes and nothing else.
+   */
+  fleetLinks?: { authenticate(token: string): string | undefined };
+  /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
+  prepareFleet?: (id: string) => Promise<unknown>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
   deliveredFiles?: Pick<DeliveredFileStore, "read">;
   memory?: MemoryStores;
@@ -935,6 +944,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     }
   });
+  // The owner's one step for Claude workers on an ssh fleet (VUH-1527).
+  app.post("/v1/runtime-connections/:id/prepare", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!dependencies.prepareFleet) return context.json({ error: "runtimes_unavailable" }, 503);
+    try {
+      return context.json({ ok: true, prepared: await dependencies.prepareFleet(context.req.param("id")) });
+    } catch (error) {
+      return context.json(
+        { error: "fleet_prepare_failed", detail: error instanceof Error ? error.message : "Prepare failed" },
+        409,
+      );
+    }
+  });
   app.delete("/v1/runtime-connections/:id", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
@@ -1267,19 +1292,41 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       : context.json({ error: "unknown_event" }, 404);
   });
 
-  // A fleet seat's mailbox (ADR 0161). Same door as the head outbox — operator
-  // lane only — keyed by the pane the bridge sits in. 404 is the pane before
-  // herdr has classified the harness; the bridge retries.
-  app.get(FLEET_SEAT_EVENTS_PATH, async (context) => {
+  /**
+   * The pane a fleet seat route names. The operator lane names any pane; a
+   * linked fleet's token (VUH-1527) names a pane on that fleet by the bare id
+   * its bridge sees, which is qualified here, so it can reach no other pane.
+   */
+  const fleetSeatPane = async (
+    context: Context,
+  ): Promise<{ readonly paneId: string } | { readonly denial: Response }> => {
+    const raw = context.req.param("paneId") ?? "";
+    const header = context.req.header("authorization");
+    const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
+    const fleet = token === undefined ? undefined : dependencies.fleetLinks?.authenticate(token);
+    if (fleet !== undefined)
+      return raw.includes("/")
+        ? { denial: context.json({ error: "fleet_forbidden" }, 403) }
+        : { paneId: `${fleet}/${raw}` };
     const auth = await authenticateLane(context);
-    if ("denial" in auth) return auth.denial;
-    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    if ("denial" in auth) return { denial: auth.denial };
+    if (auth.lane !== "operator") return { denial: context.json({ error: "lane_forbidden" }, 403) };
+    return { paneId: raw };
+  };
+
+  // A fleet seat's mailbox (ADR 0161). Same door as the head outbox — operator
+  // lane only, or a linked fleet for its own panes — keyed by the pane the
+  // bridge sits in. 404 is the pane before herdr has classified the harness;
+  // the bridge retries.
+  app.get(FLEET_SEAT_EVENTS_PATH, async (context) => {
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
     const wait = Number(context.req.query("wait") ?? 0);
     const waitMs = Number.isFinite(wait)
       ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
       : 0;
     const events = await dependencies.captain.pollFleetSeatEvents(
-      context.req.param("paneId"),
+      pane.paneId,
       waitMs,
       context.req.raw.signal,
     );
@@ -1288,15 +1335,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json(page);
   });
 
+  // An agent in a fleet pane writing to Clankie (ADR 0213 phase 2). It reaches
+  // him as untrusted agent output and grants the sender nothing.
+  app.post(FLEET_SEAT_MESSAGES_PATH, bodyLimit({ maxSize: 128 * 1024 }), async (context) => {
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    const parsed = FleetSeatMessageSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const received = await dependencies.captain.receiveFleetSeatMessage(pane.paneId, parsed.data.text);
+    return received
+      ? context.json({ schemaVersion: 1 as const, received: true as const })
+      : context.json({ error: "unknown_seat" }, 404);
+  });
+
   // A hired seat's worker plugin reports each settled turn (VUH-1458), from
-  // inside the pane it names. Same door as its mailbox: operator lane only.
+  // inside the pane it names. Same door as its mailbox.
   app.post(FLEET_SEAT_HOOK_PATH, bodyLimit({ maxSize: 128 * 1024 }), async (context) => {
-    const auth = await authenticateLane(context);
-    if ("denial" in auth) return auth.denial;
-    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
     const parsed = FleetSeatHookSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
-    const recorded = await dependencies.captain.recordSeatHook(context.req.param("paneId"), parsed.data);
+    const recorded = await dependencies.captain.recordSeatHook(pane.paneId, parsed.data);
     return recorded
       ? context.json({ schemaVersion: 1 as const, recorded: true as const })
       : context.json({ error: "unknown_seat" }, 404);

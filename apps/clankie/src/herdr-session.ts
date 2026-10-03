@@ -322,6 +322,8 @@ export class ExecutionConnections {
   private readonly fleetRuns = new Map<string, { key: string; run: HerdrFleetRun }>();
   /** Each ssh fleet's coordinator relay, reported beside its reachability (VUH-1381). */
   relayStatus: ((fleet: string) => unknown) | undefined;
+  /** Each ssh fleet's link back to this service (VUH-1527), reported beside its reachability. */
+  linkStatus: ((fleet: string) => unknown) | undefined;
   /** When each ssh fleet last answered; an unreachable fleet reports it (ADR 0184). */
   private readonly lastSeen = new Map<string, string>();
   constructor(options: ExecutionConnections["options"]) {
@@ -766,6 +768,9 @@ export class ExecutionConnections {
           : {}),
         ...(connection.ssh !== undefined && this.relayStatus?.(connection.id) !== undefined
           ? { relayState: this.relayStatus(connection.id) }
+          : {}),
+        ...(connection.ssh !== undefined && this.linkStatus?.(connection.id) !== undefined
+          ? { linkState: this.linkStatus(connection.id) }
           : {}),
       })),
     );

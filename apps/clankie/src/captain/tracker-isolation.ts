@@ -94,9 +94,18 @@ export function claudeTrackerDenyRules(cwd: string, env: NodeJS.ProcessEnv = pro
     const projectFile = join(path, ".mcp.json");
     if (existsSync(projectFile)) sources.push(serversOf(readJson(projectFile)?.mcpServers));
   }
+  return claudeTrackerRulesFor(sources);
+}
+
+/**
+ * Deny rules for the tracker connectors among these MCP server maps, plus the
+ * claude.ai account connector; shared with a remote seat, whose configuration
+ * is read on its own machine (VUH-1527).
+ */
+export function claudeTrackerRulesFor(sources: readonly unknown[]): string[] {
   const rules = new Set([CLAUDE_AI_TRACKER_RULE]);
   for (const servers of sources)
-    for (const [name, entry] of Object.entries(servers))
+    for (const [name, entry] of Object.entries(serversOf(servers)))
       if (isTrackerServer(name, entry ?? {})) rules.add(claudeServerRule(name));
   return [...rules].sort();
 }

@@ -138,9 +138,18 @@ export function powershellLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+/**
+ * Windows PowerShell 5.1 writes stdout in the console's code page, which turns
+ * UTF-8 text such as an em dash into bytes that can include a `"` and break
+ * JSON; it also emits progress records as CLIXML. Every script starts by
+ * writing UTF-8 and staying quiet.
+ */
+const POWERSHELL_PREAMBLE =
+  "$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false; $OutputEncoding = [Console]::OutputEncoding";
+
 /** A whole PowerShell script as one remote command, never re-parsed by an outer shell. */
 export function powershellScriptCommand(script: string): string {
-  return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
+  return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(`${POWERSHELL_PREAMBLE}; ${script}`, "utf16le").toString("base64")}`;
 }
 
 /** A POSIX shell script as one remote command, whatever the login shell is. */

@@ -129,6 +129,21 @@ MCP. Its one MCP server, `swarm`, has two launches:
   separately registered `clankie-seat` bridge cannot consume its mailbox just
   because Claude loaded the plugin; it needs its own selected channel.
 
+- **A machine in one of his ssh fleets** (VUH-1527): when
+  `~/.clankie/link.json` exists, the same channel and hooks run in plain Node
+  over that machine's link to Clankie, with no `clankie` CLI or operator
+  credential there (`bin/seat-channel.mjs`, `bin/link.mjs`). The link's token
+  only reaches the seat routes of that fleet's panes. Windows reads the
+  launching session's command line from the process table instead of `ps`.
+  `clankie herdr prepare NAME` ships this plugin there as a `clankie`
+  marketplace holding only the worker, installs it disabled, and approves its
+  channel in that machine's managed policy.
+
+In a herdr pane the server also offers one tool, `message_clankie`: any agent
+there, hired or not, can write to Clankie first. He receives it as that agent's
+output, never as the owner's instruction, and answers with `message_seat`;
+receiving that answer needs the channel loaded.
+
 Either launch enables the plugin for that session only (`enabledPlugins`) and
 starts Claude Code with `--channels plugin:clankie-worker@clankie`. Outside
 both it refuses to start. Its hooks (`SessionStart`, `UserPromptSubmit`,

@@ -41,9 +41,11 @@ import {
   CaptainSessionLaneV2Schema,
   CLAUDE_WORKER_PLUGIN_ID,
   FLEET_SEAT_MCP_SERVER,
+  OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorSeatEventsPageSchema,
   fleetSeatEventsPath,
+  fleetSeatMessagesPath,
   type CaptainSessionLaneV2,
   type OperatorSeatEvent,
 } from "@clankie/protocol";
@@ -485,15 +487,51 @@ export async function connectLaneUpstream(input: {
  * A fleet pane's channel: no tools, no reply, no lane bank. Events tagged
  * `kind="message"` are answered in the normal reply.
  */
-export function createFleetSeatBridge(): Server<Request, ChannelNotification, Result> {
+/** The one tool a fleet seat has (ADR 0213 phase 2): writing to Clankie first. */
+const MESSAGE_CLANKIE_TOOL = {
+  name: "message_clankie",
+  description:
+    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. He answers in this session if he chooses to.",
+  inputSchema: {
+    type: "object" as const,
+    properties: { text: { type: "string", description: "What to tell him." } },
+    required: ["text"],
+    additionalProperties: false,
+  },
+};
+
+/**
+ * A fleet pane's MCP server: its mailbox as a channel, and `message_clankie`
+ * when `send` can reach his service. He reads that message as this agent's
+ * output, never as the owner's instruction.
+ */
+export function createFleetSeatBridge(
+  send?: (text: string) => Promise<boolean>,
+): Server<Request, ChannelNotification, Result> {
   const server = new Server<Request, ChannelNotification, Result>(
-    { name: FLEET_SEAT_MCP_SERVER, version: "0.2.0" },
+    { name: FLEET_SEAT_MCP_SERVER, version: "0.3.0" },
     {
       capabilities: { tools: {}, experimental: { "claude/channel": {} } },
-      instructions: FLEET_CHANNEL_INSTRUCTIONS,
+      instructions:
+        send === undefined
+          ? FLEET_CHANNEL_INSTRUCTIONS
+          : `${FLEET_CHANNEL_INSTRUCTIONS} To write to Clankie yourself, use the ${MESSAGE_CLANKIE_TOOL.name} tool.`,
     },
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: send === undefined ? [] : [MESSAGE_CLANKIE_TOOL],
+  }));
+  if (send !== undefined)
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      if (request.params.name !== MESSAGE_CLANKIE_TOOL.name)
+        return { content: [{ type: "text", text: `Unknown tool ${request.params.name}` }], isError: true };
+      const text = String((request.params.arguments as { text?: unknown } | undefined)?.text ?? "").trim();
+      if (text === "") return { content: [{ type: "text", text: "Say what to tell him." }], isError: true };
+      const sent = await send(text.slice(0, OPERATOR_CONVERSATION_TEXT_MAX)).catch(() => false);
+      return sent
+        ? { content: [{ type: "text", text: "Sent to Clankie." }] }
+        : { content: [{ type: "text", text: "Could not reach Clankie; not sent." }], isError: true };
+    });
   return server;
 }
 
@@ -546,7 +584,29 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   const env = options.env ?? process.env;
   const stderr = options.stderr ?? process.stderr;
   const paneId = env.HERDR_PANE_ID?.trim() ?? "";
-  const server = createFleetSeatBridge();
+  const server = createFleetSeatBridge(
+    paneId.length === 0
+      ? undefined
+      : async (text) => {
+          const credential = await resolveOperatorCredential({
+            env,
+            ...(options.operatorCredentialStore === undefined
+              ? {}
+              : { store: options.operatorCredentialStore }),
+          });
+          if (credential === undefined) return false;
+          const response = await fetch(
+            new URL(fleetSeatMessagesPath(paneId), commandHost({ ...options, env })),
+            {
+              method: "POST",
+              headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+              body: JSON.stringify({ schemaVersion: 1, text }),
+              signal: AbortSignal.timeout(20_000),
+            },
+          );
+          return response.ok;
+        },
+  );
   const transport = options.transport ?? new StdioServerTransport();
   const closing = new AbortController();
   const closed = new Promise<void>((resolve) => {

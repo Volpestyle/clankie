@@ -1454,7 +1454,7 @@ selected runtime. Pane-scoped messages and `clankie stance` carry the source
 socket in `x-clankie-herdr-socket`: unrelated pane IDs cannot attach to or
 change a worker with the same ID in another session.
 
-### `herdr fleets` / `herdr add NAME --ssh HOST` / `herdr remove NAME`
+### `herdr fleets` / `herdr add NAME --ssh HOST` / `herdr remove NAME` / `herdr prepare NAME`
 
 A Herdr session on another machine is a **fleet** ([ADR 0184](adr/0184-clankie-leads-more-than-one-fleet.md)):
 a named runtime connection whose transport is the owner's own ssh.
@@ -1475,6 +1475,17 @@ default shell is PowerShell. The session must already be running there: adding
 checks `herdr --session SESSION api snapshot` over ssh and refuses otherwise.
 `remove` disables the connection and keeps its identity, like `runtime disconnect`.
 Changes reach the captain on `clankie restart captain`.
+
+`prepare NAME` readies that machine for Claude workers (VUH-1527), once per
+machine; running it is the owner's approval. It ships this Clankie's own
+`clankie-worker` plugin there as a `clankie` marketplace holding only the
+worker (`~/.clankie/claude-plugin`), installs it disabled (each hire enables it
+for its own session), and adds the worker channel to that machine's managed
+policy (`C:\Program Files\ClaudeCode\managed-settings.json` on Windows),
+keeping every entry already there. Policy is machine-wide, so the ssh account
+must be that machine's administrator. Rerun it after an update to ship the
+matching plugin. Its API is the operator-only
+`POST /v1/runtime-connections/NAME/prepare`.
 
 What crosses the link, and what cannot:
 
@@ -1505,9 +1516,22 @@ What crosses the link, and what cannot:
   typed into the pane. Its inherited Linear connectors are switched off from
   that machine's own Codex configuration. On Windows, launch arguments that
   `cmd.exe` would reinterpret are refused rather than altered.
-- A briefed remote Claude hire still fails typed (`remote_fleet`) until its
-  channel is wired. Other remote seats' replies are read with `herdr agent
-read`. Terminal observe/control is not wired for ssh fleets yet.
+- A remote Claude hire uses the `clankie-worker` plugin there, as a local one
+  does: its brief and messages arrive on the plugin's channel and its hooks
+  report each settled turn. Both travel over the fleet's **link**, which the
+  service keeps up for every ssh fleet: an `ssh -R` forward from that machine's
+  loopback to a listener here that answers only the fleet seat routes, and a
+  token in `~/.clankie/link.json` there (owner-only) that reaches only that
+  fleet's panes. The operator credential never leaves this Mac. Tracker
+  isolation reads that machine's own `~/.claude.json`, and the launch settings
+  are written there as a file. Until `herdr prepare` has run, a briefed remote
+  Claude hire fails typed with the fix.
+- Any agent in a pane on a linked machine (or on this Mac) can write to Clankie
+  with the plugin's `message_clankie` tool, hired or not. It wakes him as that
+  agent's output, not the owner's instruction; he answers with `message_seat`,
+  which reaches a session that loaded `--channels plugin:clankie-worker@clankie`.
+- Other remote seats' replies are read with `herdr agent read`. Terminal
+  observe/control is not wired for ssh fleets yet.
 - An unreachable fleet is a state. `herdr fleets` (and `runtime list`) report
   `state: "unreachable"` with `lastSeenAt`; other fleets answer normally.
 

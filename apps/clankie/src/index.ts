@@ -70,6 +70,8 @@ import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
+import { FleetLinks, fleetLinkFetch } from "./fleet-link.ts";
+import { prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { LinearNotifications } from "./linear-notifications.ts";
@@ -843,6 +845,12 @@ const linearNotifications = new LinearNotifications({
   receive: (activity, following) => captain.receiveLinearActivity(activity, following),
   onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
 });
+// VUH-1527: each ssh fleet reaches the seat routes, and only those, through its link.
+const fleetLinks = new FleetLinks({
+  shell: (fleet) => runtimes.fleetShell(fleet),
+  log: (message) => logger.info({ event: "fleet.link" }, message),
+});
+runtimes.linkStatus = (fleet) => fleetLinks.status(fleet);
 const clankie = await createClankieApp({
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   accounts: createAccounts({
@@ -874,6 +882,16 @@ const clankie = await createClankieApp({
     ...(swarm === undefined ? {} : { swarm }),
   }),
   captain,
+  fleetLinks,
+  prepareFleet: async (id: string) => {
+    const fleet = herdrFleets.find((entry) => entry.id === id);
+    if (fleet === undefined)
+      throw new Error(`No ssh fleet ${id} is connected; add it with clankie herdr add first`);
+    return prepareFleet(fleet, {
+      shell: runtimes.fleetShell(fleet),
+      workerPluginDir: workerPluginDir(repoRoot),
+    });
+  },
   ...(swarm === undefined ? {} : { swarm, fleetPeers }),
   deliveredFiles,
   herdrRuntime: herdr.status,
@@ -999,6 +1017,14 @@ if (publicGatewayConnector !== undefined) {
   if (server.listening) publicGatewayConnector.start();
   else server.once("listening", () => publicGatewayConnector?.start());
 }
+const fleetLinkServer =
+  herdrFleets.length === 0
+    ? undefined
+    : serve({ fetch: fleetLinkFetch(clankie.app.fetch), port: 0, hostname: "127.0.0.1" });
+fleetLinkServer?.once("listening", () => {
+  const address = fleetLinkServer.address();
+  if (typeof address === "object" && address !== null) fleetLinks.start(herdrFleets, address.port);
+});
 logger.info(
   {
     hostname: listenHost,
@@ -1026,6 +1052,8 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
   deviceDoorway?.close();
+  fleetLinks.close();
+  fleetLinkServer?.close();
   server.close();
   hostedDiscord?.close();
   void (async () => {

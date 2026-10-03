@@ -161,6 +161,12 @@ export interface CaptainPort {
    * when the pane holds no seat with that session.
    */
   recordSeatHook(paneId: string, hook: FleetSeatHook): Promise<boolean>;
+  /**
+   * An agent in that pane writing to him (ADR 0213 phase 2). It wakes his
+   * operator conversation as untrusted agent output; false when the pane
+   * holds no messageable agent.
+   */
+  receiveFleetSeatMessage(paneId: string, text: string): Promise<boolean>;
   /** The seat's answer to an escalation; false when nothing waits on that id. */
   replySeatEvent(eventId: string, text: string, conversationId?: string): Promise<boolean>;
   /**
@@ -236,6 +242,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     pollSeatEvents: async () => [],
     pollFleetSeatEvents: async () => undefined,
     recordSeatHook: async () => false,
+    receiveFleetSeatMessage: async () => false,
     replySeatEvent: async () => false,
     laneToolBank: async (lane) => ({ lane, tools: [] }),
     // A stub writes no transcripts, so it has nothing to announce. A test that
