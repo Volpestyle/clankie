@@ -15,6 +15,7 @@ import type { HerdrBinding } from "@clankie/protocol";
 import { startHerdrRuntime, watchHerdrSocket } from "./herdr-runtime.ts";
 import {
   createFleetShellRun,
+  createFleetShellStream,
   createHerdrFleetRun,
   type FleetShellRun,
   type HerdrFleet,
@@ -323,6 +324,13 @@ export class ExecutionConnections {
   /** Non-Herdr commands on a fleet's machine, over the same multiplexed connection (VUH-1527). */
   fleetShell(fleet: HerdrFleet): FleetShellRun {
     return createFleetShellRun(fleet, {
+      controlDirectory: this.options.sshControlDirectory ?? join(homedir(), ".clankie", "ssh"),
+    });
+  }
+
+  /** Trusted framed relay; uses the existing fleet control connection and credentials. */
+  fleetStream(fleet: HerdrFleet) {
+    return createFleetShellStream(fleet, {
       controlDirectory: this.options.sshControlDirectory ?? join(homedir(), ".clankie", "ssh"),
     });
   }

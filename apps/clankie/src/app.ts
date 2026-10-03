@@ -435,7 +435,10 @@ export interface ClankieAppDependencies {
    * Linked ssh fleets (VUH-1527): a link token's fleet. That token may use the
    * fleet seat routes for that fleet's panes and nothing else.
    */
-  fleetLinks?: { authenticate(token: string): string | undefined };
+  fleetLinks?: {
+    authenticate(token: string): string | undefined;
+    identity?(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined;
+  };
   localFleet?: { identity(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined };
   projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
   /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
@@ -1325,11 +1328,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? dependencies.workerMcp.handle(context.req.raw)
       : context.json({ error: "worker_mcp_unavailable" }, 503),
   );
-  // The local listener proves an agent; a remote fleet link alone cannot prove a project.
+  // Only an observed local socket or authenticated SSH relay stream proves an agent.
   app.all("/v1/fleet/mcp", async (context) => {
-    const local = dependencies.localFleet?.identity(context.req.raw);
-    if (local && dependencies.workerMcp)
-      return dependencies.workerMcp.handleLocalFleet(context.req.raw, local);
+    const identity =
+      dependencies.localFleet?.identity(context.req.raw) ??
+      dependencies.fleetLinks?.identity?.(context.req.raw);
+    if (identity && dependencies.workerMcp)
+      return dependencies.workerMcp.handleLocalFleet(context.req.raw, identity);
     const header = context.req.header("authorization");
     const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
     const fleet = token === undefined ? undefined : dependencies.fleetLinks?.authenticate(token);
@@ -1595,8 +1600,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   /**
    * The pane a fleet seat route names. The operator lane names any pane; a
-   * linked fleet's token (VUH-1527) names a pane on that fleet by the bare id
-   * its bridge sees, which is qualified here, so it can reach no other pane.
+   * remote linked seat must prove its native process on that exact relay stream.
+   * A machine link token cannot name or drain another pane's mailbox.
    */
   const fleetSeatPane = async (
     context: Context,
@@ -1610,10 +1615,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const header = context.req.header("authorization");
     const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
     const fleet = token === undefined ? undefined : dependencies.fleetLinks?.authenticate(token);
+    const remote = dependencies.fleetLinks?.identity?.(context.req.raw);
+    if (remote) {
+      const proof =
+        remote.pane === raw && (await remote.validate()) ? await remote.projectProof?.() : undefined;
+      return proof && proof.pane === raw && proof.fleet !== "default" && (await remote.validate())
+        ? { paneId: `${proof.fleet}/${raw}` }
+        : { denial: context.json({ error: "remote_pane_required" }, 403) };
+    }
     if (fleet !== undefined)
-      return raw.includes("/")
-        ? { denial: context.json({ error: "fleet_forbidden" }, 403) }
-        : { paneId: `${fleet}/${raw}` };
+      return { denial: context.json({ error: "remote_process_membership_required" }, 403) };
     const auth = await authenticateLane(context);
     if ("denial" in auth) return { denial: auth.denial };
     if (auth.lane !== "operator") return { denial: context.json({ error: "lane_forbidden" }, 403) };

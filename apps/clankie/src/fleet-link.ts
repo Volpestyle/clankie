@@ -1,4 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import type { Socket } from "node:net";
+import type { HttpBindings, Http2Bindings } from "@hono/node-server";
+import type { LocalFleetIdentity } from "./local-fleet-link.ts";
+import type { ProjectProcessProof } from "./project-process-proof.ts";
+import type { RemoteStream } from "./remote-project-proof.ts";
+import { RemoteFleetRelay } from "./remote-fleet-relay.ts";
+import { windowsFleetRelayCommand } from "./windows-fleet-relay.ts";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { FleetLinkFile } from "@clankie/protocol";
 import {
@@ -73,7 +80,11 @@ export function linkSshArgs(fleet: HerdrFleet, localPort: number): string[] {
 }
 
 /** The command that writes the link file on the fleet's machine, owner-readable only. */
-export function writeLinkFileCommand(fleet: HerdrFleet, file: FleetLinkFile): string {
+type ProcessLinkFile = Omit<FleetLinkFile, "schemaVersion" | "token"> & {
+  schemaVersion: 2;
+  authentication: "local-process";
+};
+export function writeLinkFileCommand(fleet: HerdrFleet, file: FleetLinkFile | ProcessLinkFile): string {
   const json = JSON.stringify(file);
   if (fleet.ssh.shell === "powershell")
     return powershellScriptCommand(
@@ -103,6 +114,7 @@ export function writeLinkFileCommand(fleet: HerdrFleet, file: FleetLinkFile): st
 /** One fleet's supervised link: the reverse forward, then the link file naming it. */
 class FleetLink {
   private child: ChildProcess | undefined;
+  private relay: RemoteFleetRelay | undefined;
   private current: FleetLinkState = { state: "starting", since: new Date().toISOString() };
   private closed = false;
   private backoff = RESTART_MIN_MS;
@@ -112,6 +124,7 @@ class FleetLink {
   private readonly options: {
     readonly localPort: number;
     readonly shell: FleetShellRun;
+    readonly stream?: (command: string) => ChildProcess;
     readonly spawn?: typeof spawn;
     readonly log?: (message: string) => void;
   };
@@ -128,27 +141,24 @@ class FleetLink {
   start(): void {
     if (this.closed || this.child !== undefined) return;
     this.current = { state: "starting", since: new Date().toISOString() };
-    const child = (this.options.spawn ?? spawn)("ssh", linkSshArgs(this.fleet, this.options.localPort), {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
+    const trustedRelay = this.fleet.ssh.shell === "powershell" && this.options.stream !== undefined;
+    const child = trustedRelay
+      ? this.options.stream!(windowsFleetRelayCommand())
+      : (this.options.spawn ?? spawn)("ssh", linkSshArgs(this.fleet, this.options.localPort), {
+          stdio: ["ignore", "ignore", "pipe"],
+        });
     this.child = child;
     let stderr = "";
     let port: number | undefined;
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderr = `${stderr}${chunk}`.slice(-4096);
-      const allocated = /Allocated port (\d+) for remote forward/u.exec(stderr);
-      if (port !== undefined || allocated === null) return;
-      port = Number(allocated[1]);
+    const publish = (allocatedPort: number) => {
+      if (port !== undefined) return;
+      port = allocatedPort;
       void this.socket()
         .then((socket) => {
-          const file: FleetLinkFile = {
-            schemaVersion: 1,
-            fleet: this.fleet.id,
-            socket,
-            url: `http://127.0.0.1:${String(port)}`,
-            token: this.token,
-          };
+          const discovery = { fleet: this.fleet.id, socket, url: `http://127.0.0.1:${String(port)}` };
+          const file: FleetLinkFile | ProcessLinkFile = trustedRelay
+            ? { ...discovery, schemaVersion: 2, authentication: "local-process" }
+            : { ...discovery, schemaVersion: 1, token: this.token };
           return this.options.shell(writeLinkFileCommand(this.fleet, file));
         })
         .then(() => {
@@ -158,10 +168,18 @@ class FleetLink {
           this.options.log?.(`fleet ${this.fleet.id}: link ready on its port ${String(port)}`);
         })
         .catch((error: unknown) => {
-          // A link nobody there can find is not a link; drop it and retry.
           stderr = `could not write the link file: ${error instanceof Error ? error.message : String(error)}`;
           child.kill();
         });
+    };
+    if (trustedRelay)
+      this.relay = new RemoteFleetRelay({ child, localPort: this.options.localPort, ready: publish });
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      stderr = `${stderr}${chunk}`.slice(-4096);
+      if (trustedRelay) return;
+      const allocated = /Allocated port (\d+) for remote forward/u.exec(stderr);
+      if (allocated) publish(Number(allocated[1]));
     });
     child.on("error", (error) => this.lost(child, error.message));
     child.on("exit", (code, signal) =>
@@ -182,8 +200,14 @@ class FleetLink {
     return socket;
   }
 
+  stream(socket: Socket): RemoteStream | undefined {
+    return this.current.state === "ready" ? this.relay?.stream(socket) : undefined;
+  }
+
   close(): void {
     this.closed = true;
+    this.relay?.close();
+    this.relay = undefined;
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.child?.kill();
     this.child = undefined;
@@ -192,6 +216,8 @@ class FleetLink {
   private lost(child: ChildProcess, error: string): void {
     if (this.child !== child) return;
     this.child = undefined;
+    this.relay?.close();
+    this.relay = undefined;
     this.current = { state: "unreachable", since: new Date().toISOString(), error: error.slice(0, 500) };
     this.options.log?.(`fleet ${this.fleet.id}: link down: ${error}`);
     if (this.closed) return;
@@ -210,6 +236,12 @@ export class FleetLinks {
   private readonly links = new Map<string, FleetLink>();
   private readonly options: {
     readonly shell: (fleet: HerdrFleet) => FleetShellRun;
+    readonly stream?: (fleet: HerdrFleet) => (command: string) => ChildProcess;
+    readonly projectProof?: (
+      fleet: string,
+      pane: string,
+      stream: RemoteStream,
+    ) => Promise<ProjectProcessProof | undefined>;
     readonly spawn?: typeof spawn;
     readonly log?: (message: string) => void;
   };
@@ -232,12 +264,54 @@ export class FleetLinks {
       const link = new FleetLink(fleet, {
         localPort,
         shell: this.options.shell(fleet),
+        ...(this.options.stream ? { stream: this.options.stream(fleet) } : {}),
         ...(this.options.spawn === undefined ? {} : { spawn: this.options.spawn }),
         ...(this.options.log === undefined ? {} : { log: this.options.log }),
       });
       this.links.set(fleet.id, link);
       link.start();
     }
+  }
+
+  private readonly admitted = new WeakMap<Request, LocalFleetIdentity>();
+
+  identity(request: Request): LocalFleetIdentity | undefined {
+    return this.admitted.get(request);
+  }
+
+  /** Only the trusted relay's exact accepted stream admits a remote identity. */
+  fetch(forward: (request: Request) => Response | Promise<Response>) {
+    return fleetLinkFetch(async (request: Request, env: HttpBindings | Http2Bindings) => {
+      const pane = request.headers.get("x-clankie-pane") ?? "";
+      if (!/^w[\w]+:p[\w]+$/u.test(pane))
+        return Response.json({ error: "remote_pane_required" }, { status: 403 });
+      for (const [fleet, link] of this.links) {
+        const stream = link.stream(env.incoming.socket);
+        if (!stream) continue;
+        // Share only simultaneous reads; every later tool/membership check observes afresh.
+        let pending: Promise<ProjectProcessProof | undefined> | undefined;
+        const identity: LocalFleetIdentity = {
+          pane,
+          validate: async () =>
+            stream.alive() && this.links.get(fleet) === link && link.status().state === "ready",
+          projectProof: () => {
+            if (!stream.alive() || this.links.get(fleet) !== link) return Promise.resolve(undefined);
+            return (pending ??= Promise.resolve(this.options.projectProof?.(fleet, pane, stream)).finally(
+              () => {
+                pending = undefined;
+              },
+            ));
+          },
+        };
+        this.admitted.set(request, identity);
+        try {
+          return await forward(request);
+        } finally {
+          this.admitted.delete(request);
+        }
+      }
+      return Response.json({ error: "remote_process_membership_required" }, { status: 403 });
+    });
   }
 
   /** The fleet a link token belongs to, compared in constant time. */

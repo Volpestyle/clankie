@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { HerdrSshTransport } from "@clankie/settings";
@@ -313,6 +313,19 @@ export function createHerdrFleetRun(
           resolve(out);
         },
       );
+    });
+  };
+}
+
+/** A service-authored streaming command over the same fleet SSH multiplexer. */
+export function createFleetShellStream(
+  fleet: HerdrFleet,
+  options: { readonly controlDirectory: string; readonly spawn?: typeof spawn },
+): (remoteCommand: string) => ChildProcess {
+  return (remoteCommand) => {
+    mkdirSync(options.controlDirectory, { recursive: true, mode: 0o700 });
+    return (options.spawn ?? spawn)("ssh", sshArgs(fleet, options.controlDirectory, remoteCommand), {
+      stdio: ["pipe", "pipe", "pipe"],
     });
   };
 }

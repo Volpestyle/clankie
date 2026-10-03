@@ -84,8 +84,9 @@ import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
 import { createProjectMembershipResolver, createProjectWorkspaceResolver } from "./project-membership.ts";
+import { createRemoteProjectObserver, createRemoteWorkspaceCanonical } from "./remote-project-proof.ts";
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
-import { FleetLinks, fleetLinkFetch } from "./fleet-link.ts";
+import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
@@ -561,10 +562,18 @@ const localFleetBinding = async () => {
     ? herdr.binding()
     : undefined;
 };
-const projectProcessObserver = createProjectProcessObserver({
+const localProjectProcessObserver = createProjectProcessObserver({
   binding: localFleetBinding,
   herdrBinary: "herdr",
 });
+const remoteProofOptions = {
+  fleet: async (id: string) => (await runtimes.fleets()).find((fleet) => fleet.id === id),
+  shell: (fleet: Parameters<typeof runtimes.fleetShell>[0]) => runtimes.fleetShell(fleet),
+};
+const remoteProjectObserver = createRemoteProjectObserver(remoteProofOptions);
+const remoteCanonical = createRemoteWorkspaceCanonical(remoteProofOptions);
+const projectProcessObserver = (fleet: string, pane: string) =>
+  fleet === "default" ? localProjectProcessObserver(fleet, pane) : remoteProjectObserver(fleet, pane);
 const localCodexSeats = new LocalCodexSeats(herdr.binding);
 const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-room-observations.json"));
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
@@ -776,6 +785,7 @@ const captain = createCaptain(
     projectHireWorkspace: createProjectWorkspaceResolver({
       settings: async () => (await settingsStore.load()).projects,
       observe: projectProcessObserver,
+      remoteCanonical,
     }),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
@@ -827,6 +837,8 @@ const linearNotifications = new LinearNotifications({
 // VUH-1527: each ssh fleet reaches the seat routes, and only those, through its link.
 const fleetLinks = new FleetLinks({
   shell: (fleet) => runtimes.fleetShell(fleet),
+  stream: (fleet) => runtimes.fleetStream(fleet),
+  projectProof: remoteProjectObserver,
   log: (message) => logger.info({ event: "fleet.link" }, message),
 });
 runtimes.linkStatus = (fleet) => fleetLinks.status(fleet);
@@ -914,6 +926,7 @@ const clankie = await createClankieApp({
     membership: createProjectMembershipResolver({
       settings: async () => (await settingsStore.load()).projects,
       hire: (proof) => captain.lookupProjectHire(proof),
+      remoteCanonical,
     }),
   }),
   captain,
@@ -1073,7 +1086,7 @@ localFleetServer?.once("listening", () => {
   if (address && typeof address === "object")
     void localFleet.publish(address.port).catch(() => logger.warn("Local fleet discovery unavailable"));
 });
-const fleetLinkServer = serve({ fetch: fleetLinkFetch(clankie.app.fetch), port: 0, hostname: "127.0.0.1" });
+const fleetLinkServer = serve({ fetch: fleetLinks.fetch(clankie.app.fetch), port: 0, hostname: "127.0.0.1" });
 async function reconcileFleetLinks() {
   const address = fleetLinkServer.address();
   if (address && typeof address === "object") fleetLinks.start(await runtimes.fleets(), address.port);

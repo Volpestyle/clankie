@@ -17,7 +17,10 @@ function decoded(command: string): string {
   return Buffer.from(encoded, "base64").toString("utf16le");
 }
 
-async function app(links: { authenticate(token: string): string | undefined }) {
+async function app(links: {
+  authenticate(token: string): string | undefined;
+  identity?(request: Request): import("../src/local-fleet-link.ts").LocalFleetIdentity | undefined;
+}) {
   const seen: { route: string; paneId: string; text?: string }[] = [];
   const clankie = await createClankieApp({
     captain: createStubCaptain({
@@ -48,8 +51,22 @@ async function app(links: { authenticate(token: string): string | undefined }) {
 describe("a fleet link (VUH-1527)", () => {
   const links = { authenticate: (token: string) => (token === "pc-link-token" ? "pc" : undefined) };
 
-  it("lets a link token reach only its own fleet's panes, by the bare id its bridge sees", async () => {
-    const { clankie, seen } = await app(links);
+  it("lets a proven relay stream reach only its own native pane", async () => {
+    const { clankie, seen } = await app({
+      ...links,
+      identity: () => ({
+        pane: "w8:p3",
+        validate: async () => true,
+        projectProof: async () => ({
+          fleet: "pc",
+          pane: "w8:p3",
+          nativeOccupantId: "native-session",
+          binding: { socketPath: "C:\\herdr.sock" },
+          shell: { pid: 10, startTime: "time" },
+          processes: [{ pid: 20, startTime: "time" }],
+        }),
+      }),
+    });
     const auth = { authorization: "Bearer pc-link-token" };
     expect((await clankie.app.request(fleetSeatEventsPath("w8:p3"), { headers: auth })).status).toBe(200);
     expect(
@@ -79,9 +96,22 @@ describe("a fleet link (VUH-1527)", () => {
       { route: "messages", paneId: "pc/w8:p3", text: "Blocked on X" },
       { route: "hook", paneId: "pc/w8:p3" },
     ]);
+    expect((await clankie.app.request(fleetSeatEventsPath("w8:p4"), { headers: auth })).status).toBe(403);
     // It cannot name a pane on another fleet, or a local one.
     expect((await clankie.app.request(fleetSeatEventsPath("box/w1:p1"), { headers: auth })).status).toBe(403);
     expect(seen).toHaveLength(3);
+  });
+
+  it("does not let a fleet bearer borrow any pane's mailbox", async () => {
+    const { clankie, seen } = await app(links);
+    expect(
+      (
+        await clankie.app.request(fleetSeatEventsPath("w8:p3"), {
+          headers: { authorization: "Bearer pc-link-token" },
+        })
+      ).status,
+    ).toBe(403);
+    expect(seen).toEqual([]);
   });
 
   it("gives a link token nothing outside the seat routes, and an unknown token nothing at all", async () => {
@@ -186,7 +216,7 @@ describe("a fleet link (VUH-1527)", () => {
     expect(links.status("pc")).toMatchObject({ state: "starting" });
     stderr.write("Allocated port 50123 for remote forward to 127.0.0.1:4567\n");
     await vi.waitFor(() => expect(links.status("pc")).toMatchObject({ state: "ready", port: 50123 }));
-    const written = JSON.parse(/\{"schemaVersion".*?\}/u.exec(decoded(shell.mock.calls[1]![0]))![0]) as {
+    const written = JSON.parse(/\{.*?\}/u.exec(decoded(shell.mock.calls[1]![0]))![0]) as {
       url: string;
       token: string;
       socket: string;
