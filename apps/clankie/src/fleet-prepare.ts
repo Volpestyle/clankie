@@ -241,7 +241,16 @@ export async function prepareFleet(
   };
   if (harnesses.claude.some((profile) => profile.executable && (!profile.enabled || !profile.versionMatches)))
     throw new Error(
-      `A Claude profile on ${fleet.id} has a disabled or stale worker plugin; inspect clankie doctor and native plugin sources`,
+      `A Claude profile on ${fleet.id} has a disabled or stale worker plugin; inspect clankie doctor and native plugin sources. ` +
+        (Array.isArray(installations)
+          ? installations
+              .filter((entry: { harness?: string }) => entry.harness === "claude")
+              .map(
+                (entry: { profile?: string; status?: string; detail?: string }) =>
+                  `${entry.profile ?? "profile"}: ${entry.status ?? "unknown"} (${(entry.detail ?? "").slice(0, 400)})`,
+              )
+              .join("; ")
+          : "Native installer returned no profile results"),
     );
   const read = await options.shell(readPolicyCommand(fleet), 30_000);
   const marked = read.indexOf(POLICY_MARK);

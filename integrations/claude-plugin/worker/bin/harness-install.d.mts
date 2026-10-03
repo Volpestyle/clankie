@@ -4,6 +4,7 @@ export interface HarnessInstallResult {
   profile?: string;
   status:
     | "installed"
+    | "updated"
     | "source-setup-completed"
     | "declined"
     | "absent"

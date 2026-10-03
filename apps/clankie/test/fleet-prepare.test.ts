@@ -98,7 +98,14 @@ it.each([true, false])(
       const text = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
       commands.push(text);
       if (text.includes("harness-setup.mjs"))
-        return JSON.stringify([{ harness: "codex", status: "source-manager-required" }]);
+        return JSON.stringify([
+          {
+            harness: current ? "codex" : "claude",
+            profile: ".claude-james",
+            status: "source-manager-required",
+            detail: "Use the owning source setup",
+          },
+        ]);
       if (text.includes("harness-inspect.mjs"))
         return JSON.stringify({
           claude: [{ executable: true, enabled: true, versionMatches: current }],
@@ -120,7 +127,10 @@ it.each([true, false])(
         codex: { registered: false, changed: false },
         installations: [{ status: "source-manager-required" }],
       });
-    else await expect(result).rejects.toThrow("stale");
+    else
+      await expect(result).rejects.toThrow(
+        ".claude-james: source-manager-required (Use the owning source setup)",
+      );
     expect(copied).toContain(".clankie/claude-plugin.new/.agents");
     expect(commands.join("\n")).not.toMatch(/AppendAllText|mcp_servers\.clankie|plugin disable/u);
   },

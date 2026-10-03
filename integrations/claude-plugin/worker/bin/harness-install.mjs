@@ -1,10 +1,48 @@
 import { claudeProfileDirectories } from "./harness-status.mjs";
 import { execFile } from "node:child_process";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, readFile, readlink, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 const exec = promisify(execFile);
+const managedText = (text) =>
+  /(?:generated|do not edit|managed by)/iu.test(text.split("\n").slice(0, 20).join("\n"));
+/** An alias may refresh its own existing cache, never install/enable or edit shared settings. */
+async function updatableClaudeAlias(profile, profiles, source, marketplace) {
+  try {
+    if (!(await lstat(join(profile, "settings.json"))).isSymbolicLink()) return false;
+    if (/[\\/]\.local[\\/]/u.test(source) || !(await lstat(source)).isFile()) return false;
+    let owner = false;
+    for (const entry of profiles) {
+      const config = join(entry, "settings.json");
+      if (
+        entry !== profile &&
+        (await lstat(config).catch(() => undefined))?.isFile() &&
+        (await realpath(config)) === source
+      )
+        owner = true;
+    }
+    if (!owner) return false;
+    const bytes = await readFile(source, "utf8");
+    if (managedText(bytes) || JSON.parse(bytes).enabledPlugins?.["clankie-worker@clankie"] !== true)
+      return false;
+    const installed = JSON.parse(await readFile(join(profile, "plugins", "installed_plugins.json"), "utf8"));
+    if (
+      !installed.plugins?.["clankie-worker@clankie"]?.some(
+        (entry) => entry.scope === "user" && typeof entry.installPath === "string",
+      )
+    )
+      return false;
+    const registered = JSON.parse(await readFile(join(profile, "plugins", "known_marketplaces.json"), "utf8"))
+      .clankie?.source;
+    return (
+      registered?.source === "directory" &&
+      (await realpath(registered.path)) === (await realpath(marketplace))
+    );
+  } catch {
+    return false;
+  }
+}
 async function installHarnessBridges(options) {
   const env = options.env ?? process.env;
   const run =
@@ -13,8 +51,9 @@ async function installHarnessBridges(options) {
   const home = env.HOME || env.USERPROFILE || homedir();
   const marketplace = options.marketplaceRoot ?? join(options.repoRoot, "integrations", "claude-plugin");
   const results = [];
+  const profiles = await claudeProfileDirectories(env);
   const targets = [
-    ...(await claudeProfileDirectories(env)).map((profile) => ({ harness: "claude", profile })),
+    ...profiles.map((profile) => ({ harness: "claude", profile })),
     { harness: "codex", profile: void 0 },
   ];
   for (const { harness, profile } of targets) {
@@ -39,14 +78,18 @@ async function installHarnessBridges(options) {
     const source = await realpath(config).catch(() => config);
     const configBefore = await readFile(config, "utf8").catch(() => undefined);
     const wasSymlink = (await lstat(config).catch(() => void 0))?.isSymbolicLink() ?? false;
+    const linkBefore = wasSymlink ? await readlink(config) : undefined;
     const managed =
       wasSymlink ||
       /(?:generated|do not edit|managed by)/iu.test(
         (await readFile(config, "utf8").catch(() => "")).split("\n").slice(0, 20).join("\n"),
       );
+    const aliasUpdate =
+      harness === "claude" && managed && (await updatableClaudeAlias(profile, profiles, source, marketplace));
     const pluginId = harness === "claude" ? "clankie-worker@clankie" : "clankie-worker@clankie-fleet";
-    const detail =
-      harness === "claude" && !managed
+    const detail = aliasUpdate
+      ? `Update the existing clankie-worker cache for alias profile ${profile}; shared settings at ${source} stay unchanged.`
+      : harness === "claude" && !managed
         ? `Install and enable clankie-worker@clankie from ${marketplace} for profile ${profile} (bridge, native hooks and packaged skills).`
         : managed
           ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install ${pluginId}.` : `Use its source setup to install ${pluginId}; no config file will be modified here.`}`
@@ -55,17 +98,38 @@ async function installHarnessBridges(options) {
       results.push({ harness, profile, status: "declined", detail });
       continue;
     }
-    if (managed && !sourceSetup) {
+    if (managed && !sourceSetup && !aliasUpdate) {
       results.push({ harness, profile, status: "source-manager-required", detail });
       continue;
     }
     try {
       if (
         (await realpath(config).catch(() => config)) !== source ||
-        (await readFile(config, "utf8").catch(() => undefined)) !== configBefore
+        (await readFile(config, "utf8").catch(() => undefined)) !== configBefore ||
+        (wasSymlink && (await readlink(config).catch(() => undefined)) !== linkBefore)
       )
         throw new Error("Harness configuration changed during consent; inspect its source and retry");
-      if (managed) {
+      if (aliasUpdate) {
+        if (!(await updatableClaudeAlias(profile, profiles, source, marketplace)))
+          throw new Error("Claude profile alias or marketplace changed during consent; inspect and retry");
+        const checkAlias = async () => {
+          if (
+            (await realpath(config)) !== source ||
+            !(await lstat(config)).isSymbolicLink() ||
+            (await readlink(config)) !== linkBefore ||
+            (await readFile(source, "utf8")) !== configBefore ||
+            !(await lstat(source)).isFile()
+          )
+            throw new Error(
+              "Native update changed shared Claude configuration; inspect its source before continuing",
+            );
+        };
+        await checkAlias();
+        await execute(harness, ["plugin", "marketplace", "update", "clankie"]);
+        await checkAlias();
+        await execute(harness, ["plugin", "update", "clankie-worker@clankie", "--scope", "user"]);
+        await checkAlias();
+      } else if (managed) {
         await execute(sourceSetup.command, sourceSetup.args);
         if ((await realpath(config)) !== source || (await lstat(config)).isSymbolicLink() !== wasSymlink)
           throw new Error(
@@ -97,7 +161,7 @@ async function installHarnessBridges(options) {
       results.push({
         harness,
         profile,
-        status: managed ? "source-setup-completed" : "installed",
+        status: aliasUpdate ? "updated" : managed ? "source-setup-completed" : "installed",
         detail:
           "Setup completed. Restart this harness and use doctor to inspect activation, skill presence and live membership; installation alone grants no tools.",
       });

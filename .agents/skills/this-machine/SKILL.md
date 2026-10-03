@@ -240,3 +240,10 @@ mailbox reads. The same project grants and revocation checks apply remotely.
 See [the trust contract](../../../docs/remote-process-proof.md). Missing native
 catalog access still needs a real owner-run pane acceptance check after deployment;
 a host observer or isolated relay smoke test does not establish that acceptance.
+
+A stale Claude alias profile may use `herdr prepare NAME` to update only its
+existing plugin cache when its settings point to another discovered unmanaged
+profile and already enable the shipped plugin. Preparation preserves the shared
+settings link and bytes; generated sources or disabled/missing alias plugins
+still require the owner's source setup. Read the per-profile refusal before
+retrying; never replace a settings symlink to work around it.
