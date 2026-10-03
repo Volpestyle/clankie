@@ -166,9 +166,12 @@ export class Machines {
     const removed: string[] = [];
     await this.options.settings.update((current) => {
       const reference = current.execution.connections.find((entry) => entry.id === id)?.machine;
-      const machine = current.machines.find(
-        (entry) => entry.id === id || entry.aliases.includes(id) || entry.id === reference,
-      );
+      const named = current.machines.find((entry) => entry.id === id || entry.aliases.includes(id));
+      if (named && reference && named.id !== reference)
+        throw new Error(
+          `Ambiguous machine name ${id}: it also names a connection on ${reference}; use an unambiguous machine alias`,
+        );
+      const machine = named ?? current.machines.find((entry) => entry.id === reference);
       if (!machine) throw new Error("Unknown machine");
       for (const connection of current.execution.connections)
         if (connection.machine === machine.id) removed.push(connection.id);
@@ -313,7 +316,7 @@ export class Machines {
                 if (session.state !== "disabled")
                   session.state = session.connectionId ? "connected" : "available";
               } catch {
-                session.state = "unreachable";
+                if (session.state !== "disabled") session.state = "unreachable";
               }
             }),
           );

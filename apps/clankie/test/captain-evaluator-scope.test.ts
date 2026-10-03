@@ -44,7 +44,7 @@ it("evaluates only Clankie's native head replies while enabled, never other flee
       },
     });
   try {
-    await Promise.resolve(); // Let the initial census bind the native head.
+    await vi.waitFor(() => expect(census.readFleet).toHaveBeenCalled()); // Live connections load before the initial census.
     reply("clankie-head", "disabled");
     expect(captain.evaluatorStatus().jobs).toHaveLength(0);
     await captain.evaluatorCommand({ action: "enable" });

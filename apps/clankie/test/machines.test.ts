@@ -1,3 +1,5 @@
+import { createAgentSessions } from "../src/agent-sessions.ts";
+import { createAgentSessionRoutes } from "../src/agent-session-routes.ts";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
@@ -174,6 +176,102 @@ test("SSH discovery expands owner Includes without duplicating recursive files",
       "Host pc laptop\nInclude config\nHost *.private !excluded\n",
     );
     expect(sshConfigHosts(await readSshConfig(join(dir, "config")))).toEqual(["desktop", "pc", "laptop"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failed count probe preserves an explicitly disabled connection", async () => {
+  const dir = await mkdtemp("/tmp/clankie-machine-disabled-");
+  try {
+    const settings = new SettingsStore(join(dir, "settings.json"));
+    await settings.update((current) => ({
+      ...current,
+      execution: {
+        connections: [
+          {
+            id: "work",
+            kind: "herdr",
+            session: "work",
+            socketPath: "/tmp/offline.sock",
+            enabled: false,
+            capabilities: [],
+          },
+        ],
+      },
+    }));
+    const machines = new Machines({
+      settings,
+      primary: () => undefined,
+      changed: () => {},
+      sshConfig: async () => "",
+      run: async (_cmd, args) => {
+        if (args[0] === "session") return { stdout: JSON.stringify({ sessions: [] }) };
+        throw new Error("offline");
+      },
+    });
+    expect((await machines.list()).machines[0]!.sessions).toMatchObject([
+      { connectionId: "work", state: "disabled", workerCount: null },
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("legacy host aliases refuse retargeting and ambiguous removal, preserving distinct fleet grants", async () => {
+  const dir = await mkdtemp("/tmp/clankie-machine-alias-boundary-");
+  try {
+    const settings = new SettingsStore(join(dir, "settings.json"));
+    await settings.update((current) => ({
+      ...current,
+      agentHosts: { connections: [{ id: "pc", ssh: "transcripts", shell: "posix" }] },
+      execution: {
+        connections: [
+          {
+            id: "pc",
+            kind: "herdr",
+            session: "work",
+            ssh: { host: "workers", shell: "posix" },
+            workspaces: [{ kind: "directory", path: "/granted" }],
+            enabled: true,
+            capabilities: ["review"],
+          },
+        ],
+      },
+    }));
+    const machines = new Machines({ settings, primary: () => undefined, changed: () => {} });
+    const routes = createAgentSessionRoutes(
+      createAgentSessions(settings),
+      async () => true,
+      undefined,
+      machines,
+    );
+    const before = await settings.load();
+    const added = await routes.request("/v1/agent-hosts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "pc", ssh: "workers", shell: "posix" }),
+    });
+    expect(added.status).toBe(409);
+    const removed = await routes.request("/v1/agent-hosts/pc", { method: "DELETE" });
+    expect(removed.status).toBe(409);
+    expect(await removed.json()).toMatchObject({ detail: expect.stringContaining("Ambiguous") });
+    expect(await settings.load()).toEqual(before);
+    // An explicit alias for the transcript machine can remove only that machine.
+    expect(
+      (
+        await routes.request("/v1/agent-hosts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: "desktop", ssh: "transcripts", shell: "posix" }),
+        })
+      ).status,
+    ).toBe(200);
+    expect((await routes.request("/v1/agent-hosts/desktop", { method: "DELETE" })).status).toBe(200);
+    expect((await settings.load()).execution).toEqual(before.execution);
+    expect((await settings.load()).machines).toEqual([
+      { id: "pc-2", ssh: "workers", shell: "posix", aliases: [] },
+    ]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

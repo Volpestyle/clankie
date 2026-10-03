@@ -972,13 +972,13 @@ localFleetServer?.once("listening", () => {
     void localFleet.publish(address.port).catch(() => logger.warn("Local fleet discovery unavailable"));
 });
 const fleetLinkServer = serve({ fetch: fleetLinkFetch(clankie.app.fetch), port: 0, hostname: "127.0.0.1" });
-runtimes.onChange(async () => {
+async function reconcileFleetLinks() {
   const address = fleetLinkServer.address();
   if (address && typeof address === "object") fleetLinks.start(await runtimes.fleets(), address.port);
-});
-fleetLinkServer?.once("listening", () => {
-  const address = fleetLinkServer.address();
-  if (typeof address === "object" && address !== null) fleetLinks.start(herdrFleets, address.port);
+}
+runtimes.onChange(reconcileFleetLinks);
+fleetLinkServer.once("listening", () => {
+  void reconcileFleetLinks().catch(() => logger.warn("Machine fleet links unavailable"));
 });
 logger.info(
   {

@@ -732,6 +732,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
        */
       readonly remoteSeatAdapters?: (fleet: string) => readonly HarnessSeatAdapter[];
       readonly fleetAvailable?: (fleet: string) => boolean;
+      readonly fleetRevision?: (fleet: string) => number;
       /** `codex queue` on a remote fleet's machine, for its Codex sessions he did not start. */
       readonly remoteCodexControl?: (fleet: string, paneId: string) => ExternalCodexControl | undefined;
       readonly remoteCodexQueue?: (fleet: string, sessionId: string, text: string) => Promise<boolean>;
@@ -751,7 +752,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.seatAdapters = new Map((options.seatAdapters ?? []).map((adapter) => [adapter.harness, adapter]));
     const remoteSeatAdapters = options.remoteSeatAdapters;
     // One adapter set per fleet, made once: an adapter holds its seats' live control.
-    const remote = new Map<string, ReadonlyMap<string, HarnessSeatAdapter>>();
+    const remote = new Map<string, { revision: number; adapters: ReadonlyMap<string, HarnessSeatAdapter> }>();
     this.remoteSeatAdapters =
       remoteSeatAdapters === undefined
         ? undefined
@@ -760,12 +761,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
               remote.delete(fleet);
               return undefined;
             }
-            let adapters = remote.get(fleet);
-            if (adapters === undefined) {
-              adapters = new Map(remoteSeatAdapters(fleet).map((adapter) => [adapter.harness, adapter]));
-              remote.set(fleet, adapters);
+            const revision = options.fleetRevision?.(fleet) ?? 0;
+            let cached = remote.get(fleet);
+            if (cached === undefined || cached.revision !== revision) {
+              cached = {
+                revision,
+                adapters: new Map(remoteSeatAdapters(fleet).map((adapter) => [adapter.harness, adapter])),
+              };
+              remote.set(fleet, cached);
             }
-            return adapters;
+            return cached.adapters;
           };
     this.seatControl = createFleetSeatControl(
       this.runner,

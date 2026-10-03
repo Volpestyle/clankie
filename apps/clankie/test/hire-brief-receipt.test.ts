@@ -187,3 +187,54 @@ test("a granted remote workspace does not authorize terminal brief injection", a
     store.close();
   }
 });
+
+test("a removed/re-added fleet ID cannot reuse an adapter bound to its old target", async () => {
+  const root = await mkdtemp(join(tmpdir(), "fleet-adapter-revision-"));
+  roots.push(root);
+  let revision = 1;
+  let target = "old-host";
+  const delivered: string[] = [];
+  const close = vi.fn(async () => {});
+  const remoteSeatAdapters = vi.fn((): HarnessSeatAdapter[] => {
+    const bound = target;
+    const control: SeatControl = {
+      ref: { harness: "codex", sessionId: "thread", paneId: "pc/w1:p1" },
+      send: async () => {
+        delivered.push(bound);
+        return { outcome: "accepted", state: "started", messageId: bound };
+      },
+      status: async () => "idle",
+      settled: async () => ({ type: "turn_completed", at: "now", ok: true }),
+      interrupt: async () => false,
+      close,
+    };
+    return [
+      { harness: "codex", start: async () => ({ outcome: "started", control }), attach: async () => control },
+    ];
+  });
+  const agent: HerdrAgentSnapshot = {
+    paneId: "pc/w1:p1",
+    terminalId: "pc/term",
+    agent: "codex",
+    status: "idle",
+    title: "worker",
+    session: { source: "herdr:codex", kind: "id", value: "thread" },
+  };
+  const store = new HerdrWatchStore(join(root, "watches.json"), {
+    remoteSeatAdapters,
+    fleetRevision: () => revision,
+    runner: { get: async () => agent, resolveTerminal: async () => agent, wait: async () => agent },
+  });
+  try {
+    expect(await store.deliverToSeat("pc/term", "first")).toMatchObject({ outcome: "delivered" });
+    // No message/access occurs in the disconnected gap; the revision still invalidates the cache.
+    revision += 2;
+    target = "new-host";
+    expect(await store.deliverToSeat("pc/term", "second")).toMatchObject({ outcome: "delivered" });
+    expect(delivered).toEqual(["old-host", "new-host"]);
+    expect(remoteSeatAdapters).toHaveBeenCalledTimes(2);
+    expect(close).not.toHaveBeenCalled();
+  } finally {
+    store.close();
+  }
+});

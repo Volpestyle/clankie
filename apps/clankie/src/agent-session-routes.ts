@@ -81,11 +81,15 @@ export function createAgentSessionRoutes(
     if (refused) return refused;
     const input = AgentHostConnectionSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!input.success) return context.json({ error: "invalid_agent_host" }, 400);
-    if (machines) {
-      await machines.add(input.data);
-      return context.json({ hosts: await sessions!.hosts() });
+    try {
+      if (machines) {
+        await machines.add(input.data);
+        return context.json({ hosts: await sessions!.hosts() });
+      }
+      return context.json({ hosts: await sessions!.addHost(input.data) });
+    } catch (error) {
+      return context.json({ error: "agent_host_conflict", detail: errorDetail(error) }, 409);
     }
-    return context.json({ hosts: await sessions!.addHost(input.data) });
   });
 
   app.delete("/v1/agent-hosts/:id", async (context) => {

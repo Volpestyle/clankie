@@ -826,6 +826,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // One runner over the local fleet and every registered remote one (ADR 0184).
   let remoteFleets = deps.fleets?.list ?? [];
   let namedLocal: Array<{ id: string; session: string; socketPath?: string | undefined }> = [];
+  let fleetIdentities = new Map(remoteFleets.map((fleet) => [fleet.id, JSON.stringify(fleet)]));
+  const fleetRevisions = new Map<string, number>();
   const censusFleets = async (): Promise<readonly HerdrCensusFleet[]> => [
     ...(await refreshFleets()).map((fleet) => ({
       id: fleet.id,
@@ -844,31 +846,47 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     createHerdrWatchRunner(deps.herdrAvailable),
     async () =>
       new Map([
-        ...(await refreshFleets()).map(
-          (fleet) =>
-            [
-              fleet.id,
-              createRemoteHerdrRunner(fleet, async (args, signal, timeout) => {
-                const active = (await refreshFleets()).find((entry) => entry.id === fleet.id);
-                if (!active) throw new Error(`Machine connection ${fleet.id} is disconnected`);
-                return deps.fleets!.run(active)(args, signal, timeout);
-              }),
-            ] as const,
-        ),
-        ...namedLocal.map(
-          (entry) =>
-            [
-              entry.id,
-              createHerdrWatchRunner(undefined, (args, signal, timeout) =>
-                deps.runtimes!.runNamed!(entry.id, args, signal, timeout),
-              ),
-            ] as const,
-        ),
+        ...(await refreshFleets()).map((fleet) => {
+          const revision = fleetRevisions.get(fleet.id) ?? 0;
+          return [
+            fleet.id,
+            createRemoteHerdrRunner(fleet, async (args, signal, timeout) => {
+              const active = (await refreshFleets()).find((entry) => entry.id === fleet.id);
+              if (!active || (fleetRevisions.get(fleet.id) ?? 0) !== revision)
+                throw new Error(`Machine connection ${fleet.id} changed or disconnected`);
+              return deps.fleets!.run(active)(args, signal, timeout);
+            }),
+          ] as const;
+        }),
+        ...namedLocal.map((entry) => {
+          const revision = fleetRevisions.get(entry.id) ?? 0;
+          return [
+            entry.id,
+            createHerdrWatchRunner(undefined, async (args, signal, timeout) => {
+              await refreshFleets();
+              if ((fleetRevisions.get(entry.id) ?? 0) !== revision)
+                throw new Error(`Machine connection ${entry.id} changed or disconnected`);
+              return deps.runtimes!.runNamed!(entry.id, args, signal, timeout);
+            }),
+          ] as const;
+        }),
       ]),
   );
   async function refreshFleets() {
     namedLocal = await (deps.runtimes?.namedLocal?.() ?? Promise.resolve([]));
     remoteFleets = await (deps.fleets?.current?.() ?? Promise.resolve(deps.fleets?.list ?? []));
+    const identities = new Map([
+      ...remoteFleets.map((fleet) => [fleet.id, JSON.stringify(fleet)] as const),
+      ...namedLocal.map(
+        (entry) =>
+          [entry.id, JSON.stringify({ session: entry.session, socketPath: entry.socketPath })] as const,
+      ),
+    ]);
+    for (const id of new Set([...fleetIdentities.keys(), ...identities.keys()])) {
+      if (fleetIdentities.get(id) !== identities.get(id))
+        fleetRevisions.set(id, (fleetRevisions.get(id) ?? 0) + 1);
+    }
+    fleetIdentities = identities;
     return remoteFleets;
   }
   const unsubscribeFleets = deps.runtimes?.onChange(async () => {
@@ -920,6 +938,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       settings: async () => (await settings()).skills,
     },
     runner: herdrRunner,
+    fleetRevision: (id) => fleetRevisions.get(id) ?? 0,
     fleetAvailable: (id) =>
       remoteFleets.some((entry) => entry.id === id) || namedLocal.some((entry) => entry.id === id),
     resumeInventory: async (fleetId) => {
@@ -967,17 +986,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               : remoteCodexControl(fleet, deps.fleets!.shell!(fleet), deps.fleets!.run(fleet), paneId);
           },
           remoteCodexQueue: (() => {
-            const queues = new Map<string, ReturnType<typeof remoteCodexQueue>>();
+            const queues = new Map<
+              string,
+              { revision: number; queue: ReturnType<typeof remoteCodexQueue> }
+            >();
             return async (fleetId: string, sessionId: string, text: string) => {
               await refreshFleets();
               const fleet = remoteFleets.find((entry) => entry.id === fleetId);
               if (fleet === undefined) return false;
-              let queue = queues.get(fleetId);
-              if (queue === undefined) {
-                queue = remoteCodexQueue(fleet, deps.fleets!.shell!(fleet));
-                queues.set(fleetId, queue);
+              const revision = fleetRevisions.get(fleetId) ?? 0;
+              let cached = queues.get(fleetId);
+              if (cached === undefined || cached.revision !== revision) {
+                cached = { revision, queue: remoteCodexQueue(fleet, deps.fleets!.shell!(fleet)) };
+                queues.set(fleetId, cached);
               }
-              return queue(sessionId, text);
+              return cached.queue(sessionId, text);
             };
           })(),
           remoteSeatAdapters: (fleetId: string) => {
