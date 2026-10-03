@@ -2546,3 +2546,5 @@ Explicit asks and asynchronous results try the owner first and may use its head
 only after a definite refusal before acceptance. Revoked source authority or
 presence, a changed designation, and uncertain dispatch cannot trigger fallback.
 This forwards the explicit request/result only and grants no room privileges.
+
+Discord room inspection, private next-turn guidance, delivery health and exact-stay voice controls are documented in [Discord rooms](discord-rooms.md). Use `clankie discord rooms`, `clankie discord guide CONVERSATION_ID TEXT`, and `clankie discord call`.

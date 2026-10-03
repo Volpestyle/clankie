@@ -54,6 +54,9 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   }
   const routes: Record<string, readonly string[]> = {
     GET: [
+      "/v1/discord/rooms",
+      "/v1/discord/room-voice",
+      "/v1/discord/settings",
       "/v1/body-leases",
       "/health",
       "/v1/operator/persona",
@@ -66,6 +69,9 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/agent-sessions",
     ],
     POST: [
+      "/v1/discord/room-guidance",
+      "/v1/discord/room-voice",
+      "/v1/discord/settings",
       "/v1/conversation-heads",
       "/v1/operator/persona",
       "/v1/model-keys/set",

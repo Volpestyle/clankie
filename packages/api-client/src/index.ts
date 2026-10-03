@@ -1,4 +1,23 @@
 import {
+  DISCORD_VOICE_OUTPUT_GUARD_PATH,
+  DISCORD_ROOM_VOICE_PATH,
+  DiscordRoomVoiceCommandSchema,
+  DiscordRoomVoiceStatusSchema,
+} from "@clankie/protocol";
+import {
+  DISCORD_ROOM_EVIDENCE_PATH,
+  DISCORD_ROOMS_PATH,
+  DISCORD_ROOM_GUIDANCE_PATH,
+  DISCORD_SETTINGS_PATH,
+  DiscordRoomEvidenceSchema,
+  DiscordRoomsSnapshotSchema,
+  DiscordRoomGuidanceRequestSchema,
+  DiscordRoomGuidanceSchema,
+  DiscordSettingsSnapshotSchema,
+  DiscordSettingsUpdateSchema,
+  type DiscordRoomEvidence,
+} from "@clankie/protocol";
+import {
   CONVERSATION_HEAD_PATH,
   ConversationHeadRequestSchema,
   OperatorConversationSchema,
@@ -301,6 +320,71 @@ export class ClankieApiClient {
   }
 
   /** Publishes a bridge-owned gateway/voice phase transition to the service. */
+  public async voiceOutputGuard(input: {
+    nonce: string;
+    stayId: string;
+    action: "mute_output" | "unmute_output" | "leave";
+  }): Promise<void> {
+    await this.request(DISCORD_VOICE_OUTPUT_GUARD_PATH, {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(input),
+    });
+  }
+  public async discordRoomVoice() {
+    return DiscordRoomVoiceStatusSchema.parse(
+      await this.request(DISCORD_ROOM_VOICE_PATH, { headers: this.operatorHeaders() }),
+    );
+  }
+  public async controlDiscordRoomVoice(input: unknown) {
+    return DiscordRoomVoiceStatusSchema.parse(
+      await this.request(DISCORD_ROOM_VOICE_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        body: JSON.stringify(DiscordRoomVoiceCommandSchema.parse(input)),
+      }),
+    );
+  }
+  public async recordDiscordRoomEvidence(input: DiscordRoomEvidence): Promise<void> {
+    await this.request(DISCORD_ROOM_EVIDENCE_PATH, {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(DiscordRoomEvidenceSchema.parse(input)),
+    });
+  }
+  public async discordRooms() {
+    return DiscordRoomsSnapshotSchema.parse(
+      await this.request(DISCORD_ROOMS_PATH, { headers: this.operatorHeaders() }),
+    );
+  }
+  public async discordRoomGuidance(input: {
+    conversationId: string;
+    text?: string;
+    expectedRevision: number;
+  }) {
+    return DiscordRoomGuidanceSchema.parse(
+      await this.request(DISCORD_ROOM_GUIDANCE_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        body: JSON.stringify(DiscordRoomGuidanceRequestSchema.parse(input)),
+      }),
+    );
+  }
+  public async discordSettings() {
+    return DiscordSettingsSnapshotSchema.parse(
+      await this.request(DISCORD_SETTINGS_PATH, { headers: this.operatorHeaders() }),
+    );
+  }
+  public async updateDiscordSettings(input: unknown) {
+    return DiscordSettingsSnapshotSchema.parse(
+      await this.request(DISCORD_SETTINGS_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        body: JSON.stringify(DiscordSettingsUpdateSchema.parse(input)),
+      }),
+    );
+  }
+
   public async recordDiscordPresencePhase(
     input: DiscordPresencePhaseEvent,
   ): Promise<{ accepted: boolean; session: DiscordPresenceSessionRecord }> {

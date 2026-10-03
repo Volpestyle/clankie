@@ -446,6 +446,9 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
     const active = renderVoiceStatusReply(
       {
         active: true,
+        outputMuted: false,
+        activity: "idle",
+        handoffCount: 0,
         guildId: "1",
         channelId: "2",
         daveProtocolVersion: 1,
@@ -467,6 +470,9 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
       renderVoiceStatusReply(
         {
           active: true,
+          outputMuted: false,
+          activity: "idle",
+          handoffCount: 0,
           daveProtocolVersion: 1,
           consentedParticipantCount: 1,
           activeCaptureCount: 0,
@@ -497,6 +503,9 @@ describe("voice disclosure and status wording (ADR 0057 audio residency)", () =>
     const status = renderVoiceStatusReply(
       {
         active: true,
+        outputMuted: false,
+        activity: "idle",
+        handoffCount: 0,
         guildId: "1",
         channelId: "2",
         daveProtocolVersion: 1,

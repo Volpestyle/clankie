@@ -1,3 +1,5 @@
+import { DiscordRoomVoice } from "./discord-room-voice.ts";
+import { DiscordRoomObservations } from "./discord-room-observations.ts";
 import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import { BodyVoiceStays } from "./body-voice-stays.ts";
 import { BodyPlaySessions } from "./body-play-sessions.ts";
@@ -557,6 +559,7 @@ const localFleetBinding = async () => {
     : undefined;
 };
 const localCodexSeats = new LocalCodexSeats(herdr.binding);
+const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-room-observations.json"));
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
@@ -564,6 +567,7 @@ const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body"
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
 const captain = createCaptain(
   {
+    roomObservations,
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,
     ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses: computerUseHarnesses.current }),
@@ -819,6 +823,8 @@ const localFleet = new LocalFleetLink({
   }),
 });
 const clankie = await createClankieApp({
+  roomObservations,
+  roomVoice: new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore),
   discordTurnReceipts,
   bodyVoiceStays,
   resolveBodyVoiceTarget: resolveDiscordVoiceTarget,

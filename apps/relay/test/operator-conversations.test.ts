@@ -1359,3 +1359,46 @@ it("requires observe grant for lease status without granting mutation authority"
     ).status,
   ).toBe(405);
 });
+
+it("dedicated room guidance forwards original steer bearer without captain dispatch or settings authority", async () => {
+  const dispatch = vi.fn();
+  const roomRequest = vi.fn(async () => Response.json({ revision: 1, state: "pending", text: "private" }));
+  const relay = await startRelay({ dispatch, roomRequest });
+  expect(
+    (
+      await post(relay.url, "/v1/discord/room-guidance", {
+        conversationId: "room",
+        expectedRevision: 0,
+        text: "private",
+      })
+    ).status,
+  ).toBe(200);
+  expect(roomRequest).toHaveBeenCalledWith(
+    "/v1/discord/room-guidance",
+    "POST",
+    TOKEN,
+    JSON.stringify({ conversationId: "room", text: "private", expectedRevision: 0 }),
+  );
+  expect(dispatch).not.toHaveBeenCalled();
+  expect((await post(relay.url, "/v1/discord/settings", {})).status).toBe(405);
+});
+it("withholds room output after await if the original observe grant is revoked", async () => {
+  let allowed = true;
+  const relay = await startRelay({
+    dispatch: vi.fn(),
+    authorizeDevice: {
+      authorize: async () => ({
+        authorized: true,
+        device: { ...activeDevice, grants: { ...activeDevice.grants, terminalObserve: allowed } },
+      }),
+    },
+    roomRequest: async () => {
+      allowed = false;
+      return Response.json({ rooms: [] });
+    },
+  });
+  const response = await fetch(new URL("/v1/discord/rooms", relay.url), {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  expect(response.status).toBe(403);
+});

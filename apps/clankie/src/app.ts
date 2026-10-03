@@ -1,3 +1,14 @@
+import { resolveDiscordSettings } from "@clankie/settings";
+import {
+  DISCORD_ROOM_VOICE_PATH,
+  DISCORD_VOICE_OUTPUT_GUARD_PATH,
+  DiscordRoomVoiceCommandSchema,
+  DiscordVoiceOutputControlSchema,
+} from "@clankie/protocol";
+import type { DiscordRoomVoice } from "./discord-room-voice.ts";
+import { createDiscordRoomRoutes, type RoomAccess, type RoomAuthorization } from "./discord-room-routes.ts";
+import type { DiscordRoomObservations } from "./discord-room-observations.ts";
+import { DISCORD_ROOM_EVIDENCE_PATH, DiscordRoomEvidenceSchema } from "@clankie/protocol";
 import { CONVERSATION_HEAD_PATH, ConversationHeadRequestSchema } from "@clankie/protocol";
 import { pumpBodyRequests } from "./body-request-pump.ts";
 import { discordTurnSessionKey } from "./captain/discord-turn.ts";
@@ -430,9 +441,15 @@ export interface ClankieAppDependencies {
   memory?: MemoryStores;
   personaImages?: PersonaImageSource;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
+  discordEnvironment?: NodeJS.ProcessEnv;
+  roomObservations?: DiscordRoomObservations;
+  roomVoice?: DiscordRoomVoice;
   settings?: {
     load(): Promise<ClankieSettings>;
-    update?(mutate: (current: ClankieSettings) => ClankieSettings): Promise<ClankieSettings>;
+    update?(
+      mutate: (current: ClankieSettings) => ClankieSettings,
+      guard?: () => Promise<void>,
+    ): Promise<ClankieSettings>;
   };
   discordPresenceRuntime?: DiscordPresenceRuntimePort;
   discordUserPresenceRuntime?: DiscordPresenceRuntimePort;
@@ -799,6 +816,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Only requests created inside the authenticated device bridge acquire operator
   // authority. No header, client platform, or ordinary pairing link can assert it.
   const hostedRequests = new WeakMap<Request, string>();
+  const hostedOriginalRequests = new WeakMap<Request, Request>();
   const localOperator = dependencies.authenticateOperator;
   const localCaptain = dependencies.authenticateCaptain;
   if (dependencies.hostedPairing !== undefined)
@@ -852,6 +870,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ...(parsed.data.method === "POST" && parsed.data.body !== undefined ? { body: parsed.data.body } : {}),
     });
     hostedRequests.set(inner, identity.deviceId);
+    hostedOriginalRequests.set(inner, context.req.raw);
     try {
       const response = await app.fetch(inner);
       // A parked tail can outlive revocation or expiry. Recheck before releasing
@@ -862,6 +881,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return response;
     } finally {
       hostedRequests.delete(inner);
+      hostedOriginalRequests.delete(inner);
     }
   });
 
@@ -897,6 +917,150 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (denial.denied === "expired") return context.json({ error: "expired" }, 401);
     return context.json({ error: "device_authentication_required" }, 401);
   };
+
+  // Dedicated paired-device guidance does not enter the hosted operator bridge.
+  // Captains, platform hints, and caller-supplied source lanes are never owner proof.
+  const authorizeRoom = async (
+    request: Request,
+    access: RoomAccess,
+  ): Promise<RoomAuthorization | undefined> => {
+    const hostedOriginal = hostedOriginalRequests.get(request);
+    const original = hostedOriginal ?? request;
+    if (hostedOriginal === undefined) {
+      const operator = await localOperator?.(request);
+      if (operator)
+        return {
+          current: () => !request.signal.aborted,
+          guard: async () => {
+            if (!(await localOperator?.(request))) throw new Error("operator_revoked");
+          },
+        };
+    }
+    const device = await authenticateDevice(original);
+    if (device === "unavailable" || "denied" in device) return undefined;
+    const current = (): boolean => {
+      const record = devices.get(device.deviceId);
+      if (
+        original.signal.aborted ||
+        record?.status !== "active" ||
+        clock().getTime() >= Date.parse(device.sessionExpiresAt)
+      )
+        return false;
+      if (hostedOriginal !== undefined)
+        return record.mintedBy === "hosted-account-operator" && record.grants.terminalControl;
+      return access === "observe"
+        ? record.grants.terminalObserve
+        : access === "guidance"
+          ? record.grants.steer
+          : false;
+    };
+    if (!current()) return undefined;
+    return {
+      current,
+      guard: async () => {
+        const fresh = await authenticateDevice(original);
+        if (fresh === "unavailable" || "denied" in fresh || fresh.deviceId !== device.deviceId || !current())
+          throw new Error("room_authority_revoked");
+      },
+    };
+  };
+  if (dependencies.roomObservations !== undefined)
+    app.route(
+      "/",
+      createDiscordRoomRoutes({
+        authorize: authorizeRoom,
+        captain: dependencies.captain,
+        observations: dependencies.roomObservations,
+        settings: settingsSource,
+      }),
+    );
+
+  app.get(DISCORD_ROOM_VOICE_PATH, async (context) => {
+    const authority = await authorizeRoom(context.req.raw, "observe");
+    if (!authority) return context.json({ error: "room_observe_required" }, 403);
+    if (!dependencies.roomVoice) return context.json({ error: "voice_unavailable" }, 503);
+    try {
+      const status = await dependencies.roomVoice.status();
+      await authority.guard();
+      if (!authority.current()) return context.json({ error: "room_observe_required" }, 403);
+      context.header("cache-control", "no-store");
+      return context.json(status);
+    } catch {
+      return context.json({ error: "voice_unavailable" }, 503);
+    }
+  });
+  app.post(DISCORD_ROOM_VOICE_PATH, async (context) => {
+    const authority = await authorizeRoom(context.req.raw, "settings");
+    if (!authority) return context.json({ error: "operator_required" }, 403);
+    const parsed = DiscordRoomVoiceCommandSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_voice_control" }, 400);
+    if (!dependencies.roomVoice) return context.json({ error: "voice_unavailable" }, 503);
+    const command = parsed.data;
+    if (command.action === "join") {
+      const room = await dependencies.captain.serveOperatorConversation({
+        op: "get",
+        schemaVersion: 1,
+        conversationId: command.conversationId,
+      });
+      const settings = await settingsSource.load();
+      if (
+        room.op !== "get" ||
+        room.conversation?.scope.kind !== "room" ||
+        room.conversation.scope.lane !== "discord_voice" ||
+        !settings.discord.ownerUserId
+      )
+        return context.json({ error: "exact_voice_room_required" }, 409);
+      try {
+        return context.json(
+          await dependencies.roomVoice.join(
+            command.conversationId,
+            room.conversation.scope.targetId,
+            settings.discord.ownerUserId,
+            authority,
+          ),
+        );
+      } catch {
+        return context.json({ error: "voice_control_refused" }, 409);
+      }
+    }
+    if (
+      (command.action !== "mute_output" &&
+        command.action !== "unmute_output" &&
+        command.action !== "leave") ||
+      command.stayId === undefined
+    )
+      return context.json({ error: "voice_control_unsupported" }, 409);
+    try {
+      return context.json(
+        await dependencies.roomVoice.control(
+          command.conversationId,
+          command.stayId,
+          command.action,
+          authority,
+        ),
+      );
+    } catch {
+      return context.json({ error: "voice_control_refused" }, 409);
+    }
+  });
+  app.post(DISCORD_VOICE_OUTPUT_GUARD_PATH, async (context) => {
+    const parsed = DiscordVoiceOutputControlSchema.safeParse(await readJson(context.req.raw));
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (
+      !captain ||
+      captain === "unavailable" ||
+      (captain.steerSourceLane !== "discord_voice" && captain.steerSourceLane !== "discord_text")
+    )
+      return context.json({ error: "discord_body_required" }, 403);
+    if (!parsed.success || !dependencies.roomVoice)
+      return context.json({ error: "voice_control_unknown" }, 403);
+    try {
+      await dependencies.roomVoice.authorize(parsed.data);
+      return context.json({ authorized: true });
+    } catch {
+      return context.json({ error: "voice_control_unknown" }, 403);
+    }
+  });
 
   app.route("/", createDiscordIngressRoutes(dependencies.discordIngress));
   /** Owner operator or a current Take Control device: model keys and account connections. */
@@ -1607,6 +1771,74 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   });
 
+  app.post(DISCORD_ROOM_EVIDENCE_PATH, async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (!captain || captain === "unavailable" || captain.steerSourceLane !== "discord_text")
+      return context.json({ error: "discord_body_required" }, 403);
+    const parsed = DiscordRoomEvidenceSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_room_evidence" }, 400);
+    if (!dependencies.roomObservations) return context.json({ error: "room_observations_unavailable" }, 503);
+    const evidence = parsed.data;
+    if (captainTransportKind(captain) !== evidence.transportKind)
+      return context.json({ error: "discord_body_mismatch" }, 403);
+    const capturedSource = [...discordPresenceLiveSessions.values()].find(
+      (session) =>
+        session.sessionId === evidence.presenceSessionId && session.transportKind === evidence.transportKind,
+    );
+    const settings = resolveDiscordSettings(
+      (await settingsSource.load()).discord,
+      dependencies.discordEnvironment ?? process.env,
+    ).settings;
+    const freshCaptain = await authenticateCaptain(context.req.raw, dependencies);
+    if (
+      !freshCaptain ||
+      freshCaptain === "unavailable" ||
+      freshCaptain.captainId !== captain.captainId ||
+      captainTransportKind(freshCaptain) !== evidence.transportKind
+    )
+      return context.json({ error: "discord_body_revoked" }, 403);
+    const finalSettings = resolveDiscordSettings(
+      (await settingsSource.load()).discord,
+      dependencies.discordEnvironment ?? process.env,
+    ).settings;
+    if (JSON.stringify(finalSettings) !== JSON.stringify(settings))
+      return context.json({ error: "room_evidence_settings_changed" }, 409);
+    const user = evidence.transportKind === "user_session";
+    const guilds = user ? settings.userSessionGuildIds : settings.ingressGuildIds;
+    const channels = user ? settings.userSessionChannelIds : settings.ingressChannelIds;
+    const dmPolicy = user ? settings.userSessionDmPolicy : settings.ingressDmPolicy;
+    const dmUsers = user ? settings.userSessionDmUserIds : settings.ingressDmUserIds;
+    const admitted =
+      evidence.guildId === undefined
+        ? dmPolicy === "owner_only"
+          ? evidence.actorId === settings.ownerUserId
+          : dmPolicy === "allowlist" && dmUsers.includes(evidence.actorId)
+        : guilds.includes(evidence.guildId) &&
+          (channels.length === 0 || channels.includes(evidence.channelId));
+    // A channel address is observation context only. The body credential and
+    // exact registered live generation establish who may report its outcome.
+    const live = [...discordPresenceLiveSessions.values()].find(
+      (session) =>
+        session.sessionId === evidence.presenceSessionId && session.transportKind === evidence.transportKind,
+    );
+    if (
+      !admitted ||
+      settings.activeBody !== (user ? "user_session" : "bot") ||
+      !(user ? settings.userSessionEnabled : settings.textIngressEnabled) ||
+      !live?.gatewayConnected ||
+      live !== capturedSource ||
+      (user &&
+        (!settings.userSessionEnabled || discordUserSessionOptIns.resolveActive(PROFILE_HASH) === undefined))
+    )
+      return context.json({ error: "room_evidence_source_stale" }, 403);
+    const id = dependencies.captain.bodyRoomConversation(
+      "discord_presence",
+      `${evidence.guildId ?? "dm"}:${evidence.channelId}`,
+    );
+    dependencies.roomObservations.record(id, evidence);
+    return context.json({ accepted: true });
+  });
+
   app.post("/v1/discord/presence-session-events", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
@@ -1672,7 +1904,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   /** Exact retained speech is private, bounded, and unreadable while retention is disabled. */
   app.get(DISCORD_VOICE_TRANSCRIPTS_PATH, async (context) => {
-    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    const roomAuthority = await authorizeRoom(context.req.raw, "observe");
+    const captain =
+      roomAuthority === undefined
+        ? await authenticateCaptain(context.req.raw, dependencies)
+        : { captainId: "owner" };
     if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
     const rawLimit = context.req.query("limit");
@@ -1692,6 +1928,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     } catch {
       return context.json({ error: "voice_transcript_settings_unavailable" }, 503);
     }
+    if (roomAuthority !== undefined) {
+      try {
+        await roomAuthority.guard();
+        if (!roomAuthority.current()) throw Error("revoked");
+      } catch {
+        return context.json({ error: "room_observe_required" }, 403);
+      }
+    }
+    context.header("cache-control", "no-store");
     if (!enabled) {
       return context.json({
         schemaVersion: 1 as const,
@@ -1703,6 +1948,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     try {
       const page = await voiceTranscriptStore.read(rawCursor, limit);
+      if (roomAuthority !== undefined) {
+        await roomAuthority.guard();
+        if (!roomAuthority.current()) return context.json({ error: "room_observe_required" }, 403);
+      }
+      if (!(await settingsSource.load()).discord.voiceTranscriptLoggingEnabled)
+        return context.json({ error: "voice_transcripts_disabled" }, 403);
+      if (roomAuthority !== undefined) {
+        await roomAuthority.guard();
+        if (!roomAuthority.current()) return context.json({ error: "room_observe_required" }, 403);
+      }
       return context.json({ schemaVersion: 1 as const, enabled: true, ...page });
     } catch {
       return context.json({ error: "voice_transcript_read_failed" }, 500);
@@ -4146,6 +4401,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         });
   // Subscribed through this captain, not a process-wide bus: a second service
   // instance in one process must never be woken by another's transcripts.
+  const stopObservingRoomFailures =
+    pushDispatcher === undefined
+      ? undefined
+      : dependencies.roomObservations?.observeFailures((id) => pushDispatcher.notify(id));
   const stopObservingMessages =
     pushDispatcher === undefined
       ? undefined
@@ -4179,6 +4438,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (securityRetryTimer !== undefined) clearInterval(securityRetryTimer);
       if (wakeRevocationTimer !== undefined) clearInterval(wakeRevocationTimer);
       stopObservingMessages?.();
+      stopObservingRoomFailures?.();
       pushDispatcher?.close();
       captainPresence.close();
       void laneMcp.close();

@@ -1,3 +1,5 @@
+export * from "./discord-settings.ts";
+export * from "./discord-rooms.ts";
 import { BodyLeaseResultSchema } from "./body-leases.ts";
 import { DeliveryStageSchema } from "./delivery.ts";
 export * from "./delivery.ts";

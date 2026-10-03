@@ -44,6 +44,7 @@ import type { WorkItemsService } from "../work-items.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  readonly roomObservations?: import("../discord-room-observations.ts").DiscordRoomObservations;
   /** Host-proven original body account, presence, source receipt and opt-in. */
   readonly conversationRouteAuthorized?: (
     owner: import("./conversation-owner.ts").ConversationOwner,

@@ -300,3 +300,4 @@ export {
   tryHandleBodyVoiceReconcile,
   type BodyVoiceReconcilePorts,
 } from "./body-voice-reconcile.ts";
+export { tryHandleVoiceOutputControl, type VoiceOutputControlPort } from "./voice-output-control.ts";

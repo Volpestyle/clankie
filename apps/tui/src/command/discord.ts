@@ -1,3 +1,6 @@
+import { ClankieApiClient } from "@clankie/api-client";
+import { resolveOperatorCredential } from "@clankie/credential-broker";
+import type { DiscordRoomStatus, DiscordRoomGuidance, DiscordRoomVoiceStatus } from "@clankie/protocol";
 import { parseArgs } from "node:util";
 import { resolveCaptainCredential, type CredentialStore } from "@clankie/credential-broker";
 import { DiscordVoiceTranscriptCursorSchema, type DiscordVoiceTranscriptPage } from "@clankie/protocol";
@@ -15,6 +18,8 @@ import {
 
 const DISCORD_USAGE = [
   "Usage: clankie discord [status]",
+  "       clankie discord rooms",
+  "       clankie discord guide CONVERSATION_ID TEXT|--clear",
   "       clankie discord transcripts [--cursor CURSOR] [--limit N]",
   "       clankie discord set --field value [--field value ...]",
   "       clankie discord clear --field [--field ...]",
@@ -25,6 +30,7 @@ export interface DiscordCommandOptions {
   readonly host?: string;
   readonly fetchImpl?: typeof fetch;
   readonly captainCredentialStore?: CredentialStore;
+  readonly operatorCredentialStore?: CredentialStore;
   readonly env?: NodeJS.ProcessEnv;
   readonly settings?: SettingsStore;
 }
@@ -107,6 +113,11 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     `  full transcript log: ${settings.voiceTranscriptLoggingEnabled ? "enabled" : "disabled"}`,
     "",
     show("activity application id (gba)", settings.activityApplicationIdGba),
+    show("activity tunnel name", settings.activityTunnelName),
+    show("activity tunnel hostname", settings.activityTunnelHostname),
+    showList("ingress DM users", settings.ingressDmUserIds),
+    showList("lab DM users", settings.userSessionDmUserIds),
+    show("default voice channel", settings.voiceChannelId),
   ];
 }
 
@@ -146,7 +157,11 @@ function fieldForFlag(flag: string): DiscordField {
   return field;
 }
 
-function parseValue(field: DiscordField, raw: string, current: DiscordSettings): unknown {
+export function parseDiscordSettingValue(
+  field: DiscordField,
+  raw: string,
+  current: DiscordSettings,
+): unknown {
   const example = current[field] ?? emptySettings().discord[field];
   if (Array.isArray(example)) {
     return raw.toLowerCase() === "none"
@@ -181,7 +196,7 @@ async function discordSetArgs(
     const raw = args[index + 1];
     if (flag === undefined || raw === undefined) throw new Error(DISCORD_USAGE);
     const field = fieldForFlag(flag);
-    patch[field] = parseValue(field, raw, current);
+    patch[field] = parseDiscordSettingValue(field, raw, current);
   }
   return await discordUpdate(patch as Partial<DiscordSettings>, options);
 }
@@ -208,8 +223,55 @@ async function discordClearArgs(
 export async function runDiscordCommand(
   args: readonly string[],
   options: DiscordCommandOptions = {},
-): Promise<DiscordCommandResult | DiscordVoiceTranscriptPage> {
+): Promise<
+  | DiscordCommandResult
+  | DiscordVoiceTranscriptPage
+  | { rooms: DiscordRoomStatus[] }
+  | DiscordRoomGuidance
+  | DiscordRoomVoiceStatus
+> {
   const verb = args[0];
+  if (verb === "rooms" || verb === "guide" || verb === "call") {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    if (!credential) throw new Error("Operator authentication is unavailable");
+    const client = new ClankieApiClient({
+      baseUrl: commandHost(options),
+      operatorToken: credential.token,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    });
+    if (verb === "call") {
+      if (args.length === 1) return client.discordRoomVoice();
+      const action = args[1];
+      const conversationId = args[2];
+      if (!conversationId || !["join", "leave", "mute_output", "unmute_output"].includes(action ?? ""))
+        throw new Error(
+          "Usage: clankie discord call [join|leave|mute_output|unmute_output CONVERSATION_ID [STAY_ID]]",
+        );
+      return client.controlDiscordRoomVoice({
+        action,
+        conversationId,
+        ...(args[3] === undefined ? {} : { stayId: args[3] }),
+      });
+    }
+    if (verb === "rooms") {
+      if (args.length !== 1) throw new Error(DISCORD_USAGE);
+      return client.discordRooms();
+    }
+    const id = args[1];
+    const text = args.slice(2).join(" ");
+    if (!id || !text) throw new Error("Usage: clankie discord guide CONVERSATION_ID TEXT (or --clear)");
+    const room = (await client.discordRooms()).rooms.find((value) => value.conversationId === id);
+    if (!room) throw new Error("Room not found; inspect clankie discord rooms first");
+    return client.discordRoomGuidance({
+      conversationId: id,
+      expectedRevision: room.guidance.revision,
+      ...(text === "--clear" ? {} : { text }),
+    });
+  }
+
   if (verb === "transcripts") {
     const { values, positionals } = parseArgs({
       args: args.slice(1),

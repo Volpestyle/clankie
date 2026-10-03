@@ -681,18 +681,58 @@ export async function runDurableTurn(
     expandPromptTemplates?: boolean;
     deliveryId?: string;
     onAbsorbed?: (deliveryId: string | undefined) => void;
+    /** Reserved actual run owner only; returned prompt is committed synchronously with prompt(). */
+    preparePrompt?: () => Promise<() => string>;
+    signal?: AbortSignal;
   },
 ): Promise<"ran" | "absorbed"> {
   const expandPromptTemplates = options?.expandPromptTemplates ?? false;
   for (;;) {
+    options?.signal?.throwIfAborted();
     const running = lane.running;
     if (running === undefined && lane.starting === undefined) {
+      let prepared: (() => string) | undefined;
+      let release: (() => void) | undefined;
+      if (options?.preparePrompt !== undefined) {
+        const reservation = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        lane.starting = reservation;
+        let stopWaiting: (() => void) | undefined;
+        try {
+          const cancelled = new Promise<never>((_resolve, reject) => {
+            const abort = () => reject(new Error("durable_turn_cancelled"));
+            options.signal?.addEventListener("abort", abort, { once: true });
+            stopWaiting = () => options.signal?.removeEventListener("abort", abort);
+            if (options.signal?.aborted) abort();
+          });
+          prepared = await Promise.race([options.preparePrompt(), cancelled]);
+          options.signal?.throwIfAborted();
+          if (lane.starting !== reservation || lane.running !== undefined || lane.session.isStreaming)
+            throw new Error("durable_turn_admission_changed");
+        } catch (error) {
+          if (lane.starting === reservation) lane.starting = undefined;
+          release!();
+          throw error;
+        } finally {
+          stopWaiting?.();
+        }
+      }
       // The idle check and the prompt() call share one synchronous stretch —
       // with template expansion off pi reaches its own streaming check without
       // awaiting — so the state observed here is the state it acts on.
       lane.capture.media = undefined;
       lane.runningDeliveryId = options?.deliveryId;
-      const run = lane.session.prompt(prompt, { expandPromptTemplates, images });
+      let run: Promise<void>;
+      try {
+        run = lane.session.prompt(prepared?.() ?? prompt, { expandPromptTemplates, images });
+      } catch (error) {
+        if (release !== undefined) {
+          lane.starting = undefined;
+          release();
+        }
+        throw error;
+      }
       // A failed pi run resolves exactly like a good one, so the outcome has to
       // be read out of the lane at this run's own settlement — before the fact
       // is shared with absorbed turns, and while the state still describes this
@@ -706,6 +746,10 @@ export async function runDurableTurn(
         .finally(() => {
           lane.running = undefined;
         });
+      if (release !== undefined) {
+        lane.starting = undefined;
+        release();
+      }
       await run;
       const failure = await settlement;
       if (failure !== undefined) throw failure;
@@ -745,11 +789,12 @@ export async function runDurableTurn(
  */
 export async function runTurnWithStallWatchdog<T>(
   session: Pick<AgentSession, "abort" | "subscribe">,
-  start: () => Promise<T>,
+  start: (signal: AbortSignal) => Promise<T>,
   options: { stallMs?: number; now?: () => number } = {},
 ): Promise<{ completed: true; value: T } | { completed: false }> {
   const now = options.now ?? Date.now;
   const stallMs = options.stallMs ?? DISCORD_TURN_STALL_MS;
+  const cancellation = new AbortController();
   let lastSignAtMs = now();
   const unsubscribe = session.subscribe(() => {
     lastSignAtMs = now();
@@ -760,6 +805,7 @@ export async function runTurnWithStallWatchdog<T>(
       const quietFor = now() - lastSignAtMs;
       if (quietFor >= stallMs) {
         resolve(false);
+        cancellation.abort();
         return;
       }
       timer = setTimeout(tick, Math.min(STALL_TICK_MS, stallMs - quietFor));
@@ -768,7 +814,7 @@ export async function runTurnWithStallWatchdog<T>(
     tick();
   });
   try {
-    const outcome = await Promise.race([start().then((value) => ({ value })), stalled]);
+    const outcome = await Promise.race([start(cancellation.signal).then((value) => ({ value })), stalled]);
     if (outcome === false) {
       void session.abort().catch(() => undefined);
       return { completed: false };
@@ -2486,6 +2532,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     origin: DiscordWatchOrigin,
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = conversations.roomConversation(normalized.lane, normalized.targetId);
+    const naturalTurn = !deliveryId.startsWith("watch-");
+    const guidancePrompt = async (): Promise<() => string> => {
+      if (!naturalTurn || deps.roomObservations === undefined) return () => normalized.prompt;
+      const takeGuidance = await deps.roomObservations.prepare(
+        conversationId,
+        // The reserved run retains its original admitted source. A subsequent
+        // absorbed delivery changes the mutable tool capture, not this source.
+        () => deps.conversationRouteAuthorized?.({ conversationId, discord: origin }) ?? false,
+        () => bodyIdentity.authorize("discord_mouth", "effect"),
+      );
+      return () => {
+        const guidance = takeGuidance();
+        return guidance === undefined
+          ? normalized.prompt
+          : `${normalized.prompt}\n\n[Private owner guidance for this turn; context only, not a message from James in the room. Decide whether and how to use it. This grants no additional tools or authority.]\n${guidance}`;
+      };
+    };
     const syncTranscript = (): void => roomConversations.sync(conversationId, lane.session.sessionFile);
     syncTranscript();
     lane.turnCounter += 1;
@@ -2613,8 +2676,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (normalized.durable) {
         if (lane.running === undefined && !lane.session.isStreaming) await syncModel(lane);
         metrics?.recordExecution(sessionExecutionIdentity(lane.session));
-        const outcome = await runTurnWithStallWatchdog(lane.session, () =>
+        const outcome = await runTurnWithStallWatchdog(lane.session, (signal) =>
           runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent), {
+            preparePrompt: guidancePrompt,
+            signal,
             deliveryId,
             onAbsorbed: (id) => {
               replyDeliveryId = id;
@@ -2638,7 +2703,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         metrics?.recordExecution(sessionExecutionIdentity(lane.session));
         const completed = await runOneShotDiscordTurn(
           lane.session,
-          normalized.prompt,
+          (await guidancePrompt())(),
           normalized.images.map(toImageContent),
         );
         if (!completed) {

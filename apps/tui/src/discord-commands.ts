@@ -1,3 +1,7 @@
+import { DiscordSettingsSchema } from "@clankie/protocol";
+import type { ClankieApiClient } from "@clankie/api-client";
+import { formatDiscordRoomStatus } from "./discord-room-view.ts";
+import { parseDiscordSettingValue } from "./command/discord.ts";
 import { SettingsStore, discordSettingsToEnvironment, type DiscordSettings } from "@clankie/settings";
 import type { RedactedCredential } from "@clankie/credential-broker";
 import type { DiscordUserSessionOptIn } from "@clankie/protocol";
@@ -19,6 +23,10 @@ interface DiscordUserSessionOptInClient {
 
 export interface DiscordCommandServices {
   settings: SettingsStore;
+  rooms?: Pick<
+    ClankieApiClient,
+    "discordRooms" | "discordRoomGuidance" | "discordRoomVoice" | "controlDiscordRoomVoice"
+  >;
   /** Redacted view of what the credential broker already holds. */
   listCredentials: () => Promise<Record<string, RedactedCredential>>;
   /** Removes a stored secret. */
@@ -80,10 +88,116 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
       name: "discord",
       aliases: [],
       description: "Configure Discord ids, allowlists, and the activity plane",
-      argumentHint: "[status|invite]",
+      argumentHint: "[status|invite|rooms|guide|call]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         const selector = argument.trim().toLowerCase();
+        if (selector === "call") {
+          if (!services.rooms) {
+            shell.insertCommandResult("/discord call", "Operator authentication unavailable", "error");
+            return;
+          }
+          const voice = await services.rooms.discordRoomVoice();
+          shell.insertCommandResult(
+            "/discord call",
+            `${voice.state} · ${voice.activity} · speech output ${voice.state === "unknown" ? "unconfirmed" : voice.outputMuted ? "muted" : "audible"}\n${voice.consentedParticipantCount} consented participants · ${voice.activeCaptureCount} active speakers · ${voice.handoffCount} captain handoffs\n${voice.conversationId ?? "Owner unknown"}\nOpt-in words: /voice transcripts. Music and Go Live audio use separate controls.`,
+            "success",
+          );
+          const flow = shell.setupFlow;
+          flow.begin("voice room");
+          try {
+            const action = await flow.readSelect({
+              message: "Voice room",
+              options:
+                voice.state === "active"
+                  ? [
+                      { value: "mute_output", label: "Mute Clankie speech output" },
+                      { value: "unmute_output", label: "Unmute Clankie speech output" },
+                      { value: "leave", label: "Leave this call" },
+                      { value: "done", label: "Done" },
+                    ]
+                  : [
+                      { value: "join", label: "Join a known voice room" },
+                      { value: "done", label: "Done" },
+                    ],
+            });
+            if (!action || action === "done") return;
+            let conversationId = voice.conversationId;
+            if (action === "join") {
+              const rooms = (await services.rooms.discordRooms()).rooms.filter(
+                (room) => room.lane === "discord_voice",
+              );
+              conversationId = await flow.readSelect({
+                message: "Exact voice room (owner must currently be there)",
+                options: rooms.map((room) => ({
+                  value: room.conversationId,
+                  label: room.title ?? room.targetId ?? room.conversationId,
+                })),
+              });
+            }
+            if (!conversationId) return;
+            const result = await services.rooms.controlDiscordRoomVoice({
+              conversationId,
+              action,
+              ...(action === "join" ? {} : { stayId: voice.stayId }),
+            });
+            shell.insertCommandResult(
+              "/discord call",
+              `${result.state} · speech output ${result.outputMuted ? "muted" : "audible"}`,
+              "success",
+            );
+          } finally {
+            flow.end();
+          }
+          return;
+        }
+        if (selector === "rooms" || selector === "guide") {
+          if (!services.rooms) {
+            shell.insertCommandResult("/discord rooms", "Operator authentication unavailable", "error");
+            return;
+          }
+          const snapshot = await services.rooms.discordRooms();
+          if (selector === "rooms") {
+            shell.insertCommandResult(
+              "/discord rooms",
+              snapshot.rooms.map(formatDiscordRoomStatus).join("\n\n") || "No observed rooms",
+              "success",
+            );
+            return;
+          }
+          const flow = shell.setupFlow;
+          flow.begin("discord guidance");
+          try {
+            const id = await flow.readSelect({
+              message: "Room for private next-turn guidance",
+              options: snapshot.rooms.map((room) => ({
+                value: room.conversationId,
+                label: room.conversationId,
+                hint: room.guidance.state,
+              })),
+            });
+            const room = snapshot.rooms.find((value) => value.conversationId === id);
+            if (!room) return;
+            const text = await flow.readText({
+              message: "Private guidance — Clankie decides what to say. 'none' clears.",
+              placeholder: room.guidance.text ?? "For the next admitted room turn",
+            });
+            if (text === undefined || !text.trim()) return;
+            const result = await services.rooms.discordRoomGuidance({
+              conversationId: room.conversationId,
+              expectedRevision: room.guidance.revision,
+              ...(text.trim() === "none" ? {} : { text }),
+            });
+            shell.insertCommandResult(
+              "/discord guide",
+              `Private guidance ${result.state}; nothing was posted in the room.`,
+              "success",
+            );
+          } finally {
+            flow.end();
+          }
+          return;
+        }
         if (selector === "status") {
           await showDiscordStatus(shell, services);
           return;
@@ -312,6 +426,7 @@ export async function runDiscordWizard(
             description: "Embedded application id used to launch a rendered surface in a voice channel.",
           },
           { value: "export", label: "Show as environment variables" },
+          { value: "all", label: "All Discord settings", hint: "Every field, including advanced settings" },
           { value: "status", label: "Show status" },
           { value: "done", label: "Done" },
         ],
@@ -334,7 +449,8 @@ export async function runDiscordWizard(
         await showEnvironmentExport(shell, services);
         continue;
       }
-      if (choice === "credentials") await editCredentials(shell, services);
+      if (choice === "all") await editAllDiscordSettings(shell, services);
+      else if (choice === "credentials") await editCredentials(shell, services);
       else if (choice === "core") await editCore(shell, services);
       else if (choice === "system") await editSystemActors(shell, services);
       else if (choice === "ingress") await editIngress(shell, services);
@@ -958,5 +1074,45 @@ async function showEnvironmentExport(
       ? "Nothing configured yet."
       : ["Equivalent environment (for CI or a container):", "", ...lines].join("\n"),
     "success",
+  );
+}
+
+export const DISCORD_EDITABLE_FIELDS = Object.keys(DiscordSettingsSchema.shape) as (keyof DiscordSettings)[];
+async function editAllDiscordSettings(
+  shell: ClankieFaceShell,
+  services: DiscordCommandServices,
+): Promise<void> {
+  const current = (await services.settings.load()).discord;
+  const field = await shell.setupFlow.readSelect({
+    message: "Discord setting",
+    options: DISCORD_EDITABLE_FIELDS.map((value) => ({
+      value,
+      label: value,
+      hint: String(current[value] ?? "unset"),
+    })),
+  });
+  if (field === undefined) return;
+  const key = field as keyof DiscordSettings;
+  const raw = await shell.setupFlow.readText({
+    message: `${key} — lists use commas; 'none' clears; blank keeps`,
+    placeholder: String(current[key] ?? "unset"),
+    validate: (value) => {
+      if (!value.trim()) return undefined;
+      try {
+        DiscordSettingsSchema.shape[key].parse(
+          value.trim() === "none" ? undefined : parseDiscordSettingValue(key, value, current),
+        );
+        return undefined;
+      } catch {
+        return "Invalid value for this setting";
+      }
+    },
+  });
+  if (raw === undefined || !raw.trim()) return;
+  await apply(services, (value) =>
+    DiscordSettingsSchema.parse({
+      ...value,
+      [key]: raw.trim() === "none" ? undefined : parseDiscordSettingValue(key, raw, value),
+    }),
   );
 }

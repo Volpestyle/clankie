@@ -1,3 +1,4 @@
+import { tryHandleVoiceOutputControl } from "@clankie/discord-presence-core";
 import { tryHandleBodyVoiceReconcile } from "@clankie/discord-presence-core";
 import { VoiceBodyLease, type VoiceBodyAdmission } from "@clankie/discord-presence-core";
 import { monitorEventLoopDelay } from "node:perf_hooks";
@@ -228,6 +229,7 @@ const textIngress = textIngressEnabled
   ? new DiscordTextIngress(
       textInbox!.port(presencePort),
       {
+        observationSessionId: () => presenceSession.record.sessionId,
         characterId,
         credentialRef: "discord_bot",
         transportKind: "bot",
@@ -248,6 +250,21 @@ const textIngress = textIngressEnabled
       },
       (event) => {
         console.info(event, "Discord text ingress event");
+        if (event.observationSessionId !== undefined)
+          void api
+            .recordDiscordRoomEvidence({
+              id: `${event.deliveryId}:${event.outcome}`,
+              presenceSessionId: event.observationSessionId,
+              transportKind: "bot",
+              deliveryId: event.deliveryId,
+              channelId: event.channelId,
+              actorId: event.actorId,
+              ...(event.guildId === undefined ? {} : { guildId: event.guildId }),
+              outcome: event.outcome,
+              ...(event.reason === undefined ? {} : { reason: event.reason }),
+              ...(event.replyDeliveryId === undefined ? {} : { replyDeliveryId: event.replyDeliveryId }),
+            })
+            .catch(() => console.warn("Room observation unavailable; delivery behavior is unchanged"));
         void recordReceipt("discord.text.ingress", {
           deliveryId: event.deliveryId,
           correlationId: event.correlationId,
@@ -1887,6 +1904,21 @@ const musicServer = createServer((request, response) => {
       voiceSession?.music,
       voiceSession?.status().active === true,
     )
+  )
+    return;
+  if (
+    tryHandleVoiceOutputControl(request, response, {
+      status: () => voiceSession?.status(),
+      setOutputMuted: async (stayId, muted, guard) => {
+        if (!voiceSession) throw new Error("voice_unavailable");
+        await voiceSession.setOutputMuted(stayId, muted, guard);
+      },
+      leave: async (stayId, guard) => {
+        if (!voiceSession) throw new Error("voice_unavailable");
+        await voiceSession.leaveControlled(stayId, guard);
+      },
+      authorize: (input) => api.voiceOutputGuard(input),
+    })
   )
     return;
   if (

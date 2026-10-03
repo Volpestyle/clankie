@@ -4272,3 +4272,56 @@ it("fences voice join before effects and again after awaited cleanup", async () 
   expect(vox.joins).toEqual([]);
   await session.dispose();
 });
+
+describe("owner speech output control", () => {
+  it("interrupts current speech, suppresses queued/new deltas, keeps consent, and never replays after unmute", async () => {
+    const harness = await engagedHarness();
+    harness.vox.autoDrain = false;
+    const conversation = harness.conversation();
+    conversation.input.onAudioDelta(pcmDelta(480), "mute-item");
+    await flush();
+    const before = harness.vox.audio.length;
+    expect(before).toBeGreaterThan(0);
+    const stay = harness.session.status().stayId!;
+    await harness.session.setOutputMuted(stay, true, async () => {});
+    expect(harness.vox.stops.length).toBeGreaterThan(0);
+    expect(harness.session.canHear(ALICE)).toBe(true);
+    const suppressed = pcmDelta(480);
+    conversation.input.onAudioDelta(suppressed, "mute-item");
+    await flush();
+    expect(suppressed.equals(Buffer.alloc(480))).toBe(true);
+    await harness.session.setOutputMuted(stay, false, async () => {});
+    conversation.input.onAudioDelta(pcmDelta(480), "mute-item");
+    await flush();
+    expect(harness.vox.audio.length).toBe(before);
+    await harness.session.dispose();
+  });
+  it("refuses a stale stay, revoked final guard, or a replacement while guard awaits", async () => {
+    const harness = await joinedHarness();
+    const stay = harness.session.status().stayId!;
+    await expect(harness.session.setOutputMuted("other", true, async () => {})).rejects.toThrow("stale");
+    await expect(
+      harness.session.setOutputMuted(stay, true, async () => {
+        throw Error("revoked");
+      }),
+    ).rejects.toThrow("revoked");
+    expect(harness.session.status().outputMuted).toBe(false);
+    let release!: () => void;
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const pending = harness.session.setOutputMuted(stay, true, async () => {
+      entered();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await ready;
+    await harness.join();
+    release();
+    await expect(pending).rejects.toThrow("stale");
+    expect(harness.session.status().outputMuted).toBe(false);
+    await harness.session.dispose();
+  });
+});

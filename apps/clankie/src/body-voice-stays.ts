@@ -219,6 +219,54 @@ export class BodyVoiceStays {
     return { outcome: "acquired", lease: this.store.status("voice")!, incarnation: acquired.lease.token };
   }
 
+  /** Read-only exact current audio binding; never projects the private incarnation. */
+  public observesActiveAudio(
+    conversationId: string,
+    input: { stayId?: string | undefined; guildId?: string | undefined; channelId?: string | undefined },
+  ): boolean {
+    if (this.unavailable || input.stayId === undefined) return false;
+    const record = this.state.stays[input.stayId];
+    return (
+      record !== undefined &&
+      this.stayAuthority.has(input.stayId) &&
+      !record.finished &&
+      record.stay.kind !== "publish" &&
+      record.reference.conversationId === conversationId &&
+      record.stay.target.guildId === input.guildId &&
+      record.stay.target.channelId === input.channelId &&
+      this.store.validate(record.reference, record.operationId).outcome === "valid"
+    );
+  }
+
+  /** Owner portal control, separate from recovery. No incarnation or credentials leave the host. */
+  public async controlGuard(
+    conversationId: string,
+    stayId: string,
+    guard: () => Promise<void>,
+    current: () => boolean = () => true,
+  ): Promise<void> {
+    const record = this.state.stays[stayId];
+    const authority = this.stayAuthority.get(stayId);
+    if (
+      this.unavailable ||
+      record === undefined ||
+      record.finished ||
+      record.stay.kind === "publish" ||
+      record.reference.conversationId !== conversationId ||
+      authority === undefined
+    )
+      throw new Error("voice_control_stale");
+    if (!(await authority("voice", "effect"))) throw new Error("voice_control_revoked");
+    await guard();
+    if (!(await authority("voice", "effect")) || !current()) throw new Error("voice_control_revoked");
+    if (
+      this.state.stays[stayId] !== record ||
+      record.finished ||
+      this.store.validate(record.reference, record.operationId).outcome !== "valid"
+    )
+      throw new Error("voice_control_stale");
+  }
+
   public async heartbeat(
     stay: BodyVoiceStay,
     incarnation: string,

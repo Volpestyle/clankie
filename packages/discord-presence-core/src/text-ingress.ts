@@ -19,6 +19,7 @@ import {
 export type DiscordDmPolicy = "deny" | "owner_only" | "allowlist";
 
 export interface DiscordTextIngressConfig {
+  readonly observationSessionId?: () => string;
   readonly characterId: string;
   readonly credentialRef: string;
   /** Which body observed the message. Never widens what the turn may do. */
@@ -260,6 +261,7 @@ function isSupportedMediaType(value: string): value is DiscordPresenceAttachment
 }
 
 export interface DiscordInboundMessage {
+  readonly observationSessionId?: string;
   readonly id: string;
   readonly guildId?: string;
   readonly channelId: string;
@@ -290,8 +292,11 @@ export type DiscordTextIngressOutcome =
   | { state: "failed"; code: string };
 
 export interface DiscordTextIngressEvidence {
+  readonly observationSessionId?: string;
   readonly service: "discord-text-ingress";
   readonly outcome:
+    | "missed"
+    | "escalated"
     | "dropped"
     | "accepted"
     | "buffered"
@@ -308,6 +313,7 @@ export interface DiscordTextIngressEvidence {
   readonly actorId: string;
   readonly reason?: string;
   readonly turnId?: string;
+  readonly replyDeliveryId?: string;
 }
 
 export interface DiscordTextIngressPort {
@@ -407,6 +413,8 @@ export class DiscordTextIngress {
   }
 
   public async handle(message: DiscordInboundMessage): Promise<DiscordTextIngressOutcome> {
+    const observationSessionId = message.observationSessionId ?? this.config.observationSessionId?.();
+    message = { ...message, ...(observationSessionId === undefined ? {} : { observationSessionId }) };
     const presenceSessionId = presenceSessionIdFor(message);
     const correlationId = `discord-message:${message.id}`;
     const event = (
@@ -415,6 +423,7 @@ export class DiscordTextIngress {
     ) =>
       this.evidence({
         service: "discord-text-ingress",
+        ...(observationSessionId === undefined ? {} : { observationSessionId }),
         outcome,
         deliveryId: message.id,
         correlationId,
@@ -584,7 +593,10 @@ export class DiscordTextIngress {
       // exactly as a settled turn does. Recording it as a decline would age
       // him out of the one conversation he is most actively in.
       this.rememberReply(message);
-      event("absorbed", { turnId: result.turnId });
+      event("absorbed", {
+        turnId: result.turnId,
+        ...(result.replyDeliveryId === undefined ? {} : { replyDeliveryId: result.replyDeliveryId }),
+      });
       return { state: "absorbed", turnId: result.turnId };
     }
 
@@ -628,6 +640,8 @@ export class DiscordTextIngress {
     if (!reply.messageId) throw new Error("discord_presence_reply_message_missing");
     this.rememberReply(message);
     event("settled", { turnId: result.turnId });
+    if (result.state === "waiting_user")
+      event("escalated", { reason: "waiting_for_owner", turnId: result.turnId });
     return {
       state: result.state,
       turnId: result.turnId,
@@ -836,7 +850,23 @@ export class DiscordTextIngress {
     // A backlog is what he missed, not an archive: past the cap the oldest go,
     // so checking in on a busy channel reads the recent room rather than
     // replaying an hour of it.
-    while (activity.pending.length > cap) activity.pending.shift();
+    while (activity.pending.length > cap) {
+      const missed = activity.pending.shift()!;
+      this.evidence({
+        service: "discord-text-ingress",
+        outcome: "missed",
+        deliveryId: missed.id,
+        correlationId: `discord-message:${missed.id}`,
+        presenceSessionId: presenceSessionIdFor(missed),
+        ...(missed.observationSessionId === undefined
+          ? {}
+          : { observationSessionId: missed.observationSessionId }),
+        ...(missed.guildId === undefined ? {} : { guildId: missed.guildId }),
+        channelId: missed.channelId,
+        actorId: missed.authorId,
+        reason: "backlog_capacity_evicted",
+      });
+    }
   }
 
   /**

@@ -20,6 +20,13 @@ const conversationHandler = createOperatorConversationRelayHandler({
   authorizeDevice: new ControlPlaneDeviceAuthorizer({
     baseUrl: process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310",
   }),
+  roomRequest: (path, method, token, body) =>
+    fetch(new URL(path, process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310"), {
+      method,
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body }),
+      signal: AbortSignal.timeout(5000),
+    }),
   readBodyLeases: (deviceToken) =>
     fetch(new URL("/v1/body-leases", process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310"), {
       headers: { authorization: `Bearer ${deviceToken}` },

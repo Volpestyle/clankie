@@ -245,3 +245,23 @@ it.each(["duplicate", "foreign", "revoked"])(
     expect(store.status("voice")).toBeDefined();
   },
 );
+
+it("ordinary voice control requires exact audio owner and original authority without recovering or releasing", async () => {
+  const { voice, stay, store } = fixture();
+  let allowed = true;
+  const owner = { ...identity("room"), authorize: async () => allowed };
+  const claimed = await voice.claim(stay, owner);
+  expect(claimed.outcome).toBe("acquired");
+  await expect(voice.controlGuard("other", stay.stayId, async () => {})).rejects.toThrow("stale");
+  await expect(voice.controlGuard("room", stay.stayId, async () => {})).resolves.toBeUndefined();
+  await expect(
+    voice.controlGuard("room", stay.stayId, async () => {
+      allowed = false;
+    }),
+  ).rejects.toThrow("revoked");
+  allowed = false;
+  await expect(voice.controlGuard("room", stay.stayId, async () => {})).rejects.toThrow("revoked");
+  expect(store.status("voice")).toMatchObject({ state: "active", conversationId: "room" });
+  if (claimed.outcome === "acquired" && claimed.incarnation) voice.finish(stay, claimed.incarnation);
+  store.close();
+});

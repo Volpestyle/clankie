@@ -400,7 +400,7 @@ const brokeredCommands = {
   storeProviderCredential: (providerId: string, credential: ProviderCredential) =>
     services.store.set(providerId, credential),
   removeCredential: (providerId: string) => services.store.delete(providerId),
-  ...(operatorClient === undefined ? {} : { userSessionOptIn: operatorClient }),
+  ...(operatorClient === undefined ? {} : { userSessionOptIn: operatorClient, rooms: operatorClient }),
 };
 async function restartCaptain(): Promise<void> {
   const outcomes = await restartTarget(

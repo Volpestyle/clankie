@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -61,12 +61,15 @@ export class SettingsStore {
   }
 
   /** Apply a transform atomically under a serialized queue. */
-  public update(mutate: (current: ClankieSettings) => ClankieSettings): Promise<ClankieSettings> {
+  public update(
+    mutate: (current: ClankieSettings) => ClankieSettings,
+    guard?: () => Promise<void>,
+  ): Promise<ClankieSettings> {
     const run = async (): Promise<ClankieSettings> => {
       const current = await this.load();
       const next = machineSettings(mutate(current), current);
       assertNoSecretShapedValue(next);
-      await this.persist(next);
+      await this.persist(next, guard);
       return next;
     };
     const result = this.queue.then(run, run);
@@ -74,7 +77,7 @@ export class SettingsStore {
     return result;
   }
 
-  private async persist(settings: ClankieSettings): Promise<void> {
+  private async persist(settings: ClankieSettings, guard?: () => Promise<void>): Promise<void> {
     const parentDirectory = dirname(this.filePath);
     await mkdir(parentDirectory, { recursive: true, mode: 0o700 });
     await chmod(parentDirectory, 0o700);
@@ -83,7 +86,13 @@ export class SettingsStore {
       encoding: "utf8",
       mode: 0o600,
     });
-    await rename(temporaryPath, this.filePath);
+    try {
+      await guard?.();
+      await rename(temporaryPath, this.filePath);
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
     await chmod(this.filePath, 0o600);
   }
 }

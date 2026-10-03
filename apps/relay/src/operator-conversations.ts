@@ -1,3 +1,18 @@
+import {
+  DISCORD_VOICE_TRANSCRIPTS_PATH,
+  DiscordVoiceTranscriptPageSchema,
+} from "../../../packages/protocol/src/index.ts";
+import {
+  DISCORD_ROOMS_PATH,
+  DISCORD_ROOM_GUIDANCE_PATH,
+  DISCORD_SETTINGS_PATH,
+  DISCORD_ROOM_VOICE_PATH,
+  DiscordRoomVoiceStatusSchema,
+  DiscordRoomsSnapshotSchema,
+  DiscordRoomGuidanceRequestSchema,
+  DiscordRoomGuidanceSchema,
+  DiscordSettingsSnapshotSchema,
+} from "../../../packages/protocol/src/discord-rooms.ts";
 import { BODY_LEASE_STATUS_PATH, BodyLeaseStatusSchema } from "../../../packages/protocol/src/body-leases.ts";
 import { hostedOperatorAllows } from "../../../packages/protocol/src/hosted-operator.ts";
 import { createHash } from "node:crypto";
@@ -36,6 +51,12 @@ export interface OperatorConversationRelayOptions {
   readonly authorizeDevice: RelayDeviceAuthorizer;
   readonly dispatch: OperatorConversationServiceDispatch;
   /** Forwards the original paired-device token; never substitutes captain authority. */
+  readonly roomRequest?: (
+    path: string,
+    method: "GET" | "POST",
+    deviceToken: string,
+    body?: string,
+  ) => Promise<Response>;
   readonly readBodyLeases?: (deviceToken: string) => Promise<Response>;
   readonly downloadFile?: (request: OperatorDeliveredFileDownloadRequest) => Promise<Response>;
   readonly logger?: RelayConversationLogger;
@@ -54,6 +75,65 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
   const idempotency = new TurnIdempotencyStore(options.clock ?? Date.now);
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const path = requestUrl(request).pathname;
+    const roomRoute =
+      path === DISCORD_ROOMS_PATH ||
+      path === DISCORD_ROOM_GUIDANCE_PATH ||
+      path === DISCORD_SETTINGS_PATH ||
+      path === DISCORD_ROOM_VOICE_PATH ||
+      path === DISCORD_VOICE_TRANSCRIPTS_PATH;
+    if (roomRoute) {
+      const method = path === DISCORD_ROOM_GUIDANCE_PATH ? "POST" : "GET";
+      if (request.method !== method) {
+        writeJson(response, 405, { error: "method_not_allowed" });
+        return true;
+      }
+      const token = bearerToken(request);
+      if (token === undefined) {
+        writeAuthDenial(response, "invalid");
+        return true;
+      }
+      const grant = path === DISCORD_ROOM_GUIDANCE_PATH ? "steer" : "terminalObserve";
+      if (!(await authorizeGrant(options, token, response, grant))) return true;
+      if (!options.roomRequest) {
+        writeJson(response, 503, { error: "room_route_unavailable" });
+        return true;
+      }
+      let body: string | undefined;
+      if (method === "POST") {
+        const parsed = DiscordRoomGuidanceRequestSchema.safeParse(await readJson(request));
+        if (!parsed.success) {
+          writeJson(response, 400, { error: "invalid_room_guidance" });
+          return true;
+        }
+        body = JSON.stringify(parsed.data);
+      }
+      if (!(await authorizeGrant(options, token, response, grant))) return true;
+      const upstream = await options.roomRequest(`${path}${requestUrl(request).search}`, method, token, body);
+      const data: unknown = await upstream.json();
+      if (!(await authorizeGrant(options, token, response, grant))) return true;
+      response.setHeader("cache-control", "no-store");
+      if (!upstream.ok) {
+        writeJson(response, upstream.status, { error: "room_route_unavailable" });
+        return true;
+      }
+      const schema =
+        path === DISCORD_ROOMS_PATH
+          ? DiscordRoomsSnapshotSchema
+          : path === DISCORD_ROOM_GUIDANCE_PATH
+            ? DiscordRoomGuidanceSchema
+            : path === DISCORD_ROOM_VOICE_PATH
+              ? DiscordRoomVoiceStatusSchema
+              : path === DISCORD_VOICE_TRANSCRIPTS_PATH
+                ? DiscordVoiceTranscriptPageSchema
+                : DiscordSettingsSnapshotSchema;
+      const parsed = schema.safeParse(data);
+      writeJson(
+        response,
+        parsed.success ? 200 : 502,
+        parsed.success ? parsed.data : { error: "invalid_room_response" },
+      );
+      return true;
+    }
     if (
       path !== BODY_LEASE_STATUS_PATH &&
       path !== OPERATOR_CONVERSATION_DISPATCH_PATH &&

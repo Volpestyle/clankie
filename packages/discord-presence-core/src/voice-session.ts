@@ -254,6 +254,10 @@ export interface JoinDiscordVoiceInput {
 }
 
 export interface DiscordVoiceSessionStatus {
+  readonly outputMuted: boolean;
+  readonly handoffCount: number;
+  readonly activity: "speaking" | "listening" | "thinking" | "idle" | "unknown";
+  readonly outputControlUncertain?: boolean;
   readonly active: boolean;
   readonly guildId?: string;
   readonly channelId?: string;
@@ -973,6 +977,8 @@ export class DiscordVoiceSession {
     // local session inactive first so no failing cleanup command can preserve
     // stale authority, content, or media correlation.
     this.voiceReady = false;
+    this.outputMuted = false;
+    this.outputControlUncertain = false;
     this.connectionId = undefined;
     this.guildId = undefined;
     this.channelId = undefined;
@@ -1286,9 +1292,56 @@ export class DiscordVoiceSession {
     );
   }
 
+  public async leaveControlled(stayId: string, guard: () => Promise<void>): Promise<void> {
+    if (this.stayId !== stayId || !this.voiceReady) throw new Error("voice_stay_stale");
+    await this.bodyLease?.guard();
+    await guard();
+    if (this.stayId !== stayId || !this.voiceReady || this.bodyLease?.current() === false)
+      throw new Error("voice_stay_stale");
+    await this.leave("owner_voice_leave");
+  }
+  private outputMuted = false;
+  private outputControlUncertain = false;
+  /** Stops Clankie's speech only. It does not mute room input or change consent. */
+  public async setOutputMuted(stayId: string, muted: boolean, guard: () => Promise<void>): Promise<void> {
+    if (this.stayId !== stayId || !this.voiceReady) throw new Error("voice_stay_stale");
+    await this.bodyLease?.guard();
+    await guard();
+    if (this.stayId !== stayId || !this.voiceReady || this.bodyLease?.current() === false)
+      throw new Error("voice_stay_stale");
+    if (this.outputControlUncertain) throw new Error("voice_output_uncertain");
+    this.outputMuted = muted;
+    if (!muted) return;
+    for (const pending of this.pendingResponses) pending.superseded = true;
+    for (const job of new Set([this.openPlayback, this.playingJob])) {
+      if (job === undefined) continue;
+      job.encodedChunks.length = 0;
+      job.stopping = true;
+      try {
+        this.options.vox.stopTtsPlayback(job.playbackId);
+      } catch {
+        this.outputControlUncertain = true;
+      }
+      this.settlePlayback(job, "stopped");
+    }
+    if (this.outputControlUncertain) throw new Error("voice_output_uncertain");
+  }
+
   public status(): DiscordVoiceSessionStatus {
     return {
       active: this.voiceReady,
+      outputMuted: this.outputMuted,
+      outputControlUncertain: this.outputControlUncertain,
+      handoffCount: this.handoffs.size,
+      activity: this.outputControlUncertain
+        ? "unknown"
+        : this.playingJob !== undefined && !this.playingJob.stopping
+          ? "speaking"
+          : this.captures.size > 0
+            ? "listening"
+            : this.pendingResponses.some((response) => !response.done)
+              ? "thinking"
+              : "idle",
       ...(this.guildId === undefined ? {} : { guildId: this.guildId }),
       ...(this.channelId === undefined ? {} : { channelId: this.channelId }),
       ...(this.daveProtocolVersion === undefined ? {} : { daveProtocolVersion: this.daveProtocolVersion }),
@@ -2969,6 +3022,12 @@ export class DiscordVoiceSession {
   // ------------------------------------------------------------------
 
   private handleAudioDelta(pcm: Buffer, itemId: string): void {
+    if (this.outputMuted) {
+      const pending = this.pendingResponses.find((candidate) => !candidate.done);
+      if (pending !== undefined) pending.superseded = true;
+      pcm.fill(0);
+      return;
+    }
     if (this.bodyLease?.current() === false) {
       pcm.fill(0);
       this.leaveSafely("body_lease_lost");
@@ -3109,7 +3168,7 @@ export class DiscordVoiceSession {
       this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== job.pending);
       return;
     }
-    if (job.pending.superseded || job.pending.isCurrent?.() === false) {
+    if (this.outputMuted || job.pending.superseded || job.pending.isCurrent?.() === false) {
       job.encodedChunks.length = 0;
       job.stopping = true;
       this.settlePlayback(job, "stopped");
@@ -3122,7 +3181,8 @@ export class DiscordVoiceSession {
       return;
     }
     await this.bodyLease?.guard();
-    if (job.generation !== this.sessionGeneration || this.bodyLease?.current() === false) return;
+    if (this.outputMuted || job.generation !== this.sessionGeneration || this.bodyLease?.current() === false)
+      return;
     this.playingJob = job;
     this.music.duck();
     const result = await new Promise<"drained" | "stopped" | "failed" | "timeout">((resolve) => {
@@ -3265,7 +3325,13 @@ export class DiscordVoiceSession {
   }
 
   private sendPlaybackAudio(job: PlaybackJob, pcmBase64: string): void {
-    if (job.stopping || job.outcome !== undefined || job.generation !== this.sessionGeneration) return;
+    if (
+      this.outputMuted ||
+      job.stopping ||
+      job.outcome !== undefined ||
+      job.generation !== this.sessionGeneration
+    )
+      return;
     try {
       this.options.vox.sendAudio({
         playbackId: job.playbackId,

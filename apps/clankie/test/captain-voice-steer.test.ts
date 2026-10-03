@@ -542,3 +542,81 @@ it("keeps overlapping voice asks from different people out of each other's durab
   await expect(carol).resolves.toMatchObject({ state: "settled", response: "3333" });
   expect(session.calls.slice(2).every((call) => call.behavior === undefined)).toBe(true);
 });
+
+it("reserves actual lane start while guidance authorizes and never prepares guidance for absorbed input", async () => {
+  const session = new StubSession();
+  const lane = makeLane(session);
+  let release!: () => void;
+  const commit = vi.fn(() => "first with private context");
+  const secondPrepare = vi.fn(async () => () => "must not be used");
+  const first = runDurableTurn(lane, "first", [], {
+    preparePrompt: async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return commit;
+    },
+  });
+  const second = runDurableTurn(lane, "second", [], { preparePrompt: secondPrepare });
+  expect(session.calls).toHaveLength(0);
+  expect(commit).not.toHaveBeenCalled();
+  release();
+  await drain();
+  session.startStreaming();
+  await drain();
+  // A waiting turn re-decides on the reservation transition and enters only the active run.
+  const third = runDurableTurn(lane, "third", [], { preparePrompt: secondPrepare });
+  await drain();
+  expect(commit).toHaveBeenCalledTimes(1);
+  expect(secondPrepare).not.toHaveBeenCalled();
+  session.settleRun();
+  expect(await first).toBe("ran");
+  expect(await third).toBe("absorbed");
+  // The second waiter may have seen accepted-before-streaming and waits for that run to settle.
+  await drain();
+  if (session.calls.some((call) => call.text === "must not be used")) {
+    session.settleRun();
+  }
+  await second;
+});
+it("a turn already absorbed never evaluates or consumes its guidance preparation", async () => {
+  const session = new StubSession();
+  const lane = makeLane(session);
+  const first = runDurableTurn(lane, "first", []);
+  session.startStreaming();
+  const prepare = vi.fn(async () => () => "private");
+  const absorbed = runDurableTurn(lane, "second", [], { preparePrompt: prepare });
+  await drain();
+  expect(prepare).not.toHaveBeenCalled();
+  session.settleRun();
+  expect(await first).toBe("ran");
+  expect(await absorbed).toBe("absorbed");
+});
+
+it("a stalled reserved preparation cannot consume guidance or prompt after late authorization", async () => {
+  const session = new StubSession();
+  const lane = makeLane(session);
+  let release!: () => void;
+  const consume = vi.fn(() => "private");
+  const watchdogSession = { abort: vi.fn(async () => {}), subscribe: () => () => {} };
+  const result = await runTurnWithStallWatchdog(
+    watchdogSession,
+    (signal) =>
+      runDurableTurn(lane, "natural", [], {
+        signal,
+        preparePrompt: () =>
+          new Promise<() => string>((resolve) => {
+            release = () => resolve(consume);
+          }),
+      }),
+    { stallMs: 5 },
+  );
+  expect(result).toEqual({ completed: false });
+  await drain();
+  expect(lane.starting).toBeUndefined();
+  release();
+  await drain();
+  expect(consume).not.toHaveBeenCalled();
+  expect(session.calls).toEqual([]);
+  expect(watchdogSession.abort).toHaveBeenCalledOnce();
+});
