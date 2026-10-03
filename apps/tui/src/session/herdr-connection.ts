@@ -1,13 +1,26 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { HerdrSshTransportSchema } from "@clankie/settings";
-import { createHerdrFleetRun } from "../../../clankie/src/herdr-fleet.ts";
+import { HerdrSshTransportSchema, type HerdrSshTransport } from "@clankie/settings";
+import {
+  createHerdrFleetRun,
+  remoteProgramCommand,
+  splitFleetQualified,
+  powershellLiteral,
+  powershellScriptCommand,
+} from "../../../clankie/src/herdr-fleet.ts";
 import { runRuntimeCommand } from "../command/runtime.ts";
+import { readTerminalCatalog } from "../../../clankie/src/captain/herdr-census.ts";
 import { ClankieApiClient } from "@clankie/api-client";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
-import { HerdrBindingSchema, type HerdrBinding } from "@clankie/protocol";
+import {
+  HerdrBindingSchema,
+  type HerdrBinding,
+  type OperatorTerminalSession,
+  type OperatorFleetSeat,
+} from "@clankie/protocol";
 
 export interface HerdrConnectionOptions {
   readonly repoRoot: string;
@@ -129,4 +142,180 @@ export async function openHerdr(options: HerdrConnectionOptions): Promise<number
   } finally {
     process.off("SIGINT", interrupted);
   }
+}
+
+/** Pin the endpoint that supplied this pane, including when an ID/session is reused. */
+interface AgentHerdrTerminal extends OperatorTerminalSession {
+  readonly connection:
+    | { readonly kind: "local"; readonly binding: HerdrBinding }
+    | { readonly kind: "ssh"; readonly ssh: HerdrSshTransport };
+}
+
+/** Owner-triggered native viewer. Resolve the selected runtime, never fall back to default. */
+export async function openAgentHerdr(
+  terminal: AgentHerdrTerminal,
+  options: HerdrConnectionOptions,
+  run: (
+    command: string,
+    args: readonly string[],
+    env: NodeJS.ProcessEnv,
+    interactive: boolean,
+  ) => Promise<void> = runAgentViewerCommand,
+): Promise<void> {
+  const connectionId = terminal.runtime?.id;
+  const target = { ...options, ...(connectionId ? { connectionId } : {}) };
+  if (connectionId && connectionId !== "default") {
+    const inventory = await runRuntimeCommand(["list"], options);
+    const connections = inventory.connections as Array<{
+      id: string;
+      enabled: boolean;
+      session?: string;
+      ssh?: unknown;
+    }>;
+    const remote = connections.find((entry) => entry.id === connectionId && entry.enabled);
+    if (!remote) throw new Error("That agent's connection is no longer enabled");
+    if (remote.ssh !== undefined) {
+      if (!remote.session || remote.session !== terminal.runtime?.session)
+        throw new Error("That agent's Herdr session changed; reopen it from the strip");
+      const ssh = HerdrSshTransportSchema.parse(remote.ssh);
+      if (
+        terminal.connection.kind !== "ssh" ||
+        terminal.connection.ssh.host !== ssh.host ||
+        terminal.connection.ssh.shell !== ssh.shell
+      )
+        throw new Error("That agent's connection changed; reopen it from the strip");
+      const env = options.env ?? process.env;
+      const prefix = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"];
+      await run(
+        "ssh",
+        [
+          ...prefix,
+          "--",
+          ssh.host,
+          remoteProgramCommand(ssh.shell, "herdr", [
+            "--session",
+            remote.session,
+            "agent",
+            "focus",
+            terminal.pane.id,
+          ]),
+        ],
+        env,
+        false,
+      );
+      // A native TTY is essential on Windows too: don't redirect the viewer through the JSON command runner.
+      const viewer =
+        ssh.shell === "posix"
+          ? remoteProgramCommand(ssh.shell, "herdr", ["--session", remote.session, "client"])
+          : powershellScriptCommand(
+              `& herdr '--session' ${powershellLiteral(remote.session)} 'client'; exit $LASTEXITCODE`,
+            );
+      await run("ssh", [...prefix, "-tt", "--", ssh.host, viewer], env, true);
+      return;
+    }
+  }
+  if (terminal.connection.kind !== "local")
+    throw new Error("That agent's connection changed; reopen it from the strip");
+  const binding = await readHerdrBinding(target);
+  const pinned = terminal.connection.binding;
+  if (
+    binding.socketPath !== pinned.socketPath ||
+    binding.runtime !== pinned.runtime ||
+    binding.session !== pinned.session
+  )
+    throw new Error("That agent's connection changed; reopen it from the strip");
+  if (terminal.runtime && terminal.runtime.session !== binding.session)
+    throw new Error("That agent's Herdr session changed; reopen it from the strip");
+  const { command, env } = herdrConnection(binding, target);
+  await run(command, ["agent", "focus", terminal.pane.id], env, false);
+  // Already in the exact workspace: focus its pane instead of nesting another viewer.
+  if (env.HERDR_ENV === "1") return;
+  for (const name of ["HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID"]) delete env[name];
+  await run(command, ["client"], env, true);
+}
+
+async function runAgentViewerCommand(
+  command: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  interactive: boolean,
+): Promise<void> {
+  if (!interactive) {
+    await promisify(execFile)(command, [...args], { env, timeout: 10_000, maxBuffer: 1024 * 1024 });
+    return;
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("The Herdr viewer requires a TTY");
+  const interrupted = () => {};
+  process.on("SIGINT", interrupted);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(command, [...args], { env, stdio: "inherit" });
+      child.once("error", reject);
+      child.once("exit", (code) =>
+        code === 0 ? resolve() : reject(new Error(`Herdr viewer exited (${code ?? "signal"})`)),
+      );
+    });
+  } finally {
+    process.off("SIGINT", interrupted);
+  }
+}
+
+/** Remote terminal observation has no local socket; read the selected fleet's native catalog. */
+export async function readAgentHerdrTerminal(
+  seat: OperatorFleetSeat,
+  options: HerdrConnectionOptions,
+): Promise<AgentHerdrTerminal> {
+  const qualified = splitFleetQualified(seat.seatId);
+  const connectionId = qualified?.fleet ?? seat.fleet ?? "default";
+  if (qualified && seat.fleet && qualified.fleet !== seat.fleet)
+    throw new Error("Agent fleet identity is inconsistent");
+  const target = { ...options, connectionId };
+  let catalog: OperatorTerminalSession[];
+  let session: string;
+  let pinned: AgentHerdrTerminal["connection"];
+  if (connectionId !== "default") {
+    const inventory = await runRuntimeCommand(["list"], options);
+    const connections = inventory.connections as Array<{
+      id: string;
+      enabled: boolean;
+      session?: string;
+      ssh?: unknown;
+    }>;
+    const connection = connections.find((entry) => entry.id === connectionId && entry.enabled);
+    if (!connection) throw new Error("That agent's connection is no longer enabled");
+    if (connection.ssh !== undefined) {
+      if (!connection.session || (seat.herdrSession && connection.session !== seat.herdrSession))
+        throw new Error("That agent's Herdr session changed");
+      const ssh = HerdrSshTransportSchema.parse(connection.ssh);
+      pinned = { kind: "ssh", ssh };
+      const run = createHerdrFleetRun(
+        { id: connectionId, session: connection.session, ssh },
+        { controlDirectory: join(options.env?.HOME ?? homedir(), ".clankie", "ssh") },
+      );
+      catalog = await readTerminalCatalog({
+        runCommand: async (_command, args) => ({ stdout: await run(args), stderr: "" }),
+      });
+      session = connection.session;
+    } else {
+      const binding = await readHerdrBinding(target);
+      const { command, env } = herdrConnection(binding, target);
+      catalog = await readTerminalCatalog({
+        runCommand: async (_command, args) =>
+          promisify(execFile)(command, [...args], { env, timeout: 5_000 }),
+      });
+      session = binding.session;
+      pinned = { kind: "local", binding };
+    }
+  } else {
+    const binding = await readHerdrBinding(target);
+    const { command, env } = herdrConnection(binding, target);
+    catalog = await readTerminalCatalog({
+      runCommand: async (_command, args) => promisify(execFile)(command, [...args], { env, timeout: 5_000 }),
+    });
+    session = binding.session;
+    pinned = { kind: "local", binding };
+  }
+  const terminal = catalog.find((item) => item.terminalId === (qualified?.id ?? seat.seatId));
+  if (!terminal) throw new Error("That agent's terminal is no longer available");
+  return { ...terminal, terminalId: seat.seatId, runtime: { id: connectionId, session }, connection: pinned };
 }

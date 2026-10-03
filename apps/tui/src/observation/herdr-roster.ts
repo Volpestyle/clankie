@@ -1,4 +1,8 @@
-import type { OperatorConversationServiceClient, OperatorFleetSeat } from "@clankie/protocol";
+import type {
+  OperatorConversationServiceClient,
+  OperatorFleetSeat,
+  OperatorAgentPersona,
+} from "@clankie/protocol";
 
 export interface HerdrRosterAgent {
   readonly paneId: string;
@@ -7,7 +11,13 @@ export interface HerdrRosterAgent {
   readonly title: string;
 }
 
+export interface LiveAgent {
+  readonly seat: OperatorFleetSeat;
+  readonly name: string;
+}
+
 export interface HerdrRosterSnapshot {
+  readonly liveAgents?: readonly LiveAgent[];
   readonly agents: readonly HerdrRosterAgent[];
   readonly error?: string;
 }
@@ -19,6 +29,8 @@ const FALLBACK_POLL_MS = 5_000;
 export class HerdrRoster {
   private agents: readonly HerdrRosterAgent[] = [];
   private error: string | undefined;
+  private liveAgents: readonly LiveAgent[] = [];
+  private personas: readonly OperatorAgentPersona[] = [];
   private following: AbortController | undefined;
   private polling = false;
 
@@ -28,7 +40,11 @@ export class HerdrRoster {
   }
 
   public snapshot(): HerdrRosterSnapshot {
-    return { agents: this.agents, ...(this.error === undefined ? {} : { error: this.error }) };
+    return {
+      agents: this.agents,
+      liveAgents: this.liveAgents,
+      ...(this.error === undefined ? {} : { error: this.error }),
+    };
   }
 
   /** Follow the fleet cursor; a change in Herdr repaints at once instead of on the next tick. */
@@ -52,7 +68,7 @@ export class HerdrRoster {
           const fleet = await this.client.fleet(cursor, signal);
           if (signal.aborted) return;
           cursor = fleet.cursor;
-          if (await this.apply(() => Promise.resolve(fleet.seats))) onChange();
+          if (await this.apply(() => Promise.resolve(fleet.seats), fleet.personas)) onChange();
           continue;
         } catch {
           if (signal.aborted) return;
@@ -76,13 +92,26 @@ export class HerdrRoster {
     return this.apply(() => this.client.roster());
   }
 
-  private async apply(readSeats: () => Promise<readonly OperatorFleetSeat[]>): Promise<boolean> {
+  private async apply(
+    readSeats: () => Promise<readonly OperatorFleetSeat[]>,
+    personas?: readonly OperatorAgentPersona[],
+  ): Promise<boolean> {
     if (this.polling) return false;
     this.polling = true;
-    const before = JSON.stringify([this.agents, this.error]);
+    const before = JSON.stringify([this.agents, this.liveAgents, this.error]);
     try {
-      const [seats, terminals] = await Promise.all([readSeats(), this.client.terminalCatalog?.() ?? []]);
+      const [seats, terminals] = await Promise.all([
+        readSeats(),
+        this.client.terminalCatalog?.().catch(() => []) ?? [],
+      ]);
       const panes = new Map(terminals.map((terminal) => [terminal.terminalId, terminal.pane.id]));
+      if (personas) this.personas = personas;
+      this.liveAgents = seats
+        .map((seat) => ({
+          seat,
+          name: this.personas.find((persona) => persona.personaId === seat.personaId)?.name ?? seat.personaId,
+        }))
+        .sort((a, b) => a.seat.seatId.localeCompare(b.seat.seatId));
       this.agents = seats
         .filter((seat) => seat.status !== "done")
         .map(
@@ -100,10 +129,11 @@ export class HerdrRoster {
       this.error = undefined;
     } catch (caught) {
       this.agents = [];
+      this.liveAgents = [];
       this.error = caught instanceof Error ? caught.message : String(caught);
     } finally {
       this.polling = false;
     }
-    return JSON.stringify([this.agents, this.error]) !== before;
+    return JSON.stringify([this.agents, this.liveAgents, this.error]) !== before;
   }
 }

@@ -35,14 +35,14 @@ it("shows the service fleet in every console and reports a failed read", async (
   const consoles = [new HerdrRoster(client), new HerdrRoster(client)];
   for (const console of consoles) {
     expect(await console.poll()).toBe(true);
-    expect(console.snapshot()).toEqual({
+    expect(console.snapshot()).toMatchObject({
       agents: [{ paneId: "w1:p1", agent: "codex", status: "working", title: "fixing tests" }],
     });
     expect(await console.poll()).toBe(false);
   }
   failed = true;
   await consoles[0]!.poll();
-  expect(consoles[0]!.snapshot()).toEqual({ agents: [], error: "service unavailable" });
+  expect(consoles[0]!.snapshot()).toMatchObject({ agents: [], error: "service unavailable" });
 });
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -148,4 +148,48 @@ it("falls back to a roster read while the fleet cursor is unavailable", async ()
   expect(roster.snapshot().agents).toEqual([
     { paneId: "terminal-1", agent: "codex", status: "working", title: "older host" },
   ]);
+});
+
+it("keeps names, qualified seats, remote machines and steps when terminal observation is unavailable", async () => {
+  const snapshot = fleetSnapshot("qualified", "working");
+  const local = snapshot.seats[0]!;
+  const remote = {
+    ...local,
+    seatId: "pc/terminal-1",
+    personaId: "remote-worker",
+    machine: "Office PC",
+    fleet: "pc",
+    title: "Checking PC delivery",
+  };
+  const roster = new HerdrRoster({
+    roster: async () => [{ ...remote, status: "done" }],
+    terminalCatalog: async () => {
+      throw new Error("No remote terminal observation");
+    },
+    fleet: async (_cursor, signal) => {
+      if (_cursor) await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()));
+      return {
+        ...snapshot,
+        seats: [local, remote],
+        personas: [
+          {
+            schemaVersion: 1,
+            personaId: "remote-worker",
+            name: "Morgan",
+            harness: "claude",
+            createdAt: "2026-10-03T00:00:00.000Z",
+            updatedAt: "2026-10-03T00:00:00.000Z",
+            appearance: { variant: "green", accessory: "none", shape: "circle" },
+          },
+        ],
+      } as OperatorFleetSnapshot;
+    },
+  });
+  roster.start(() => {});
+  await vi.waitFor(() => expect(roster.snapshot().liveAgents).toHaveLength(2));
+  roster.stop();
+  expect(roster.snapshot().liveAgents).toContainEqual({ name: "Morgan", seat: remote });
+  expect(roster.snapshot().error).toBeUndefined();
+  await roster.poll();
+  expect(roster.snapshot().liveAgents).toEqual([{ name: "Morgan", seat: { ...remote, status: "done" } }]);
 });

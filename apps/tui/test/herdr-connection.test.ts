@@ -137,3 +137,166 @@ it("routes an ssh connection through the remote allow-list instead of requiring 
   ).rejects.toThrow("not available on a remote fleet");
   expect(urls).toEqual(["http://127.0.0.1:4310/v1/runtime-connections"]);
 });
+
+it.each(["bundled", "external"] as const)(
+  "opens the exact %s pane, and only focuses when already in that session",
+  async (runtime) => {
+    const { openAgentHerdr } = await import("../src/session/herdr-connection.ts");
+    const terminal = {
+      terminalId: "terminal-1",
+      label: "worker",
+      workspace: { id: "w1", number: 1, label: "work" },
+      tab: { id: "w1:t1", number: 1, label: "work" },
+      pane: { id: "w1:p2" },
+    };
+    const binding = { runtime, session: "default", socketPath: "/tmp/exact.sock" };
+    for (const inSession of [false, true]) {
+      const calls: { args: readonly string[]; interactive: boolean }[] = [];
+      await openAgentHerdr(
+        { ...terminal, connection: { kind: "local", binding } },
+        {
+          repoRoot: "/checkout",
+          env: {
+            CLANKIE_OPERATOR_TOKEN: "owner",
+            ...(inSession ? { HERDR_ENV: "1", HERDR_SOCKET_PATH: binding.socketPath } : {}),
+          },
+          fetchImpl: (async () => Response.json(binding)) as typeof fetch,
+        },
+        async (_command, args, env, interactive) => {
+          expect(env.HERDR_SOCKET_PATH).toBe(binding.socketPath);
+          calls.push({ args, interactive });
+        },
+      );
+      expect(calls).toEqual([
+        { args: ["agent", "focus", "w1:p2"], interactive: false },
+        ...(inSession ? [] : [{ args: ["client"], interactive: true }]),
+      ]);
+    }
+  },
+);
+
+it.each(["posix", "powershell"] as const)(
+  "keeps a remote %s pane and session qualified, with no local fallback on failure",
+  async (shell) => {
+    const { openAgentHerdr } = await import("../src/session/herdr-connection.ts");
+    const terminal = {
+      runtime: { id: "pc", session: "owned" },
+      terminalId: "pc/terminal-1",
+      label: "worker",
+      workspace: { id: "w1", number: 1, label: "work" },
+      tab: { id: "w1:t1", number: 1, label: "work" },
+      pane: { id: "w1:p2" },
+    };
+    const options = {
+      repoRoot: "/checkout",
+      env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+      fetchImpl: (async (url) => {
+        expect(String(url)).toContain("/v1/runtime-connections");
+        return Response.json({
+          connections: [{ id: "pc", enabled: true, session: "owned", ssh: { host: "pc-owner", shell } }],
+        });
+      }) as typeof fetch,
+    };
+    const calls: { command: string; args: readonly string[]; interactive: boolean }[] = [];
+    await openAgentHerdr(
+      { ...terminal, connection: { kind: "ssh", ssh: { host: "pc-owner", shell } } },
+      options,
+      async (command, args, _env, interactive) => {
+        calls.push({ command, args, interactive });
+      },
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => call.command === "ssh" && call.args.includes("pc-owner"))).toBe(true);
+    expect(calls[0]?.interactive).toBe(false);
+    expect(calls[1]?.args).toContain("-tt");
+    expect(calls[1]?.interactive).toBe(true);
+    if (shell === "posix") {
+      expect(calls[0]?.args.at(-1)).toContain("'owned' 'agent' 'focus' 'w1:p2'");
+      expect(calls[1]?.args.at(-1)).toContain("'owned' 'client'");
+    } else {
+      const script = Buffer.from(calls[1]!.args.at(-1)!.split(" ").at(-1)!, "base64").toString("utf16le");
+      expect(script).toContain("& herdr '--session' 'owned' 'client'");
+      expect(script).not.toContain("RedirectStandardOutput");
+    }
+    let attempts = 0;
+    await expect(
+      openAgentHerdr(
+        { ...terminal, connection: { kind: "ssh", ssh: { host: "pc-owner", shell } } },
+        options,
+        async () => {
+          attempts++;
+          throw new Error("unreachable");
+        },
+      ),
+    ).rejects.toThrow("unreachable");
+    expect(attempts).toBe(1);
+    await expect(
+      openAgentHerdr(
+        {
+          ...terminal,
+          runtime: { id: "pc", session: "other" },
+          connection: { kind: "ssh", ssh: { host: "pc-owner", shell } },
+        },
+        options,
+        async () => {
+          throw new Error("must not run");
+        },
+      ),
+    ).rejects.toThrow("session changed");
+  },
+);
+
+it("refuses a same-ID, same-session connection replaced with another host or socket", async () => {
+  const { openAgentHerdr } = await import("../src/session/herdr-connection.ts");
+  const terminal = {
+    runtime: { id: "pc", session: "owned" },
+    terminalId: "pc/stable",
+    label: "worker",
+    workspace: { id: "w1", number: 1, label: "work" },
+    tab: { id: "w1:t1", number: 1, label: "work" },
+    pane: { id: "w1:p2" },
+  };
+  let calls = 0;
+  const run = async () => {
+    calls++;
+  };
+  const options = { repoRoot: "/checkout", env: { CLANKIE_OPERATOR_TOKEN: "owner" } };
+  await expect(
+    openAgentHerdr(
+      { ...terminal, connection: { kind: "ssh", ssh: { host: "host-a", shell: "posix" } } },
+      {
+        ...options,
+        fetchImpl: (async () =>
+          Response.json({
+            connections: [
+              { id: "pc", enabled: true, session: "owned", ssh: { host: "host-b", shell: "posix" } },
+            ],
+          })) as typeof fetch,
+      },
+      run,
+    ),
+  ).rejects.toThrow("connection changed");
+  await expect(
+    openAgentHerdr(
+      {
+        ...terminal,
+        runtime: { id: "default", session: "owned" },
+        connection: {
+          kind: "local",
+          binding: { runtime: "external", session: "owned", socketPath: "/tmp/socket-a" },
+        },
+      },
+      {
+        ...options,
+        fetchImpl: (async () =>
+          Response.json({
+            runtime: "external",
+            session: "owned",
+            socketPath: "/tmp/socket-b",
+          })) as typeof fetch,
+      },
+      run,
+    ),
+  ).rejects.toThrow("connection changed");
+  expect(calls).toBe(0);
+});

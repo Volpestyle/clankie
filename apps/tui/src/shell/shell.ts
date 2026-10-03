@@ -13,6 +13,8 @@
  * onPrompt, footerData) so the clankie service stays behind
  * `@clankie/api-client`.
  */
+import { LiveAgentStrip } from "./live-agents.ts";
+import type { LiveAgent } from "../observation/herdr-roster.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   Container,
@@ -102,6 +104,11 @@ export interface FaceShellCommand {
 }
 
 export interface FaceShellOptions {
+  readonly liveAgents?: () => readonly LiveAgent[];
+  readonly onOpenLiveAgent?: (agent: LiveAgent) => Promise<void>;
+  readonly onLeaveLiveAgent?: () => Promise<void>;
+  readonly onOpenAgentWorkspace?: () => Promise<void>;
+  readonly expandedAgent?: () => string | undefined;
   readonly allowLocalShell?: boolean;
   readonly onHerdrJump?: (target: string) => Promise<HerdrJumpResult>;
   readonly commands: readonly FaceShellCommand[];
@@ -257,6 +264,8 @@ export class ClankieFaceShell {
   private readonly toolGroups = new WeakMap<ToolExecutionComponent, ClankieToolGroup>();
   private readonly commandTypeaheadPanel: ClankieCommandTypeaheadPanel;
   private readonly footer: ClankieFooterComponent;
+  private readonly liveAgents: LiveAgentStrip;
+  private agentNavigationBusy = false;
 
   private headerVisibleState: boolean;
 
@@ -363,6 +372,7 @@ export class ClankieFaceShell {
         maxVisibleRows: () => this.maxCommandTypeaheadRows(),
       },
     );
+    this.liveAgents = new LiveAgentStrip(() => this.options.liveAgents?.() ?? []);
     this.footer = new ClankieFooterComponent(this.theme.ansi, () => ({
       cwd: this.cwdValue,
       extras: this.footerExtras(),
@@ -416,6 +426,7 @@ export class ClankieFaceShell {
       this.document,
       this.statusContainer,
       this.pendingPrompts,
+      this.liveAgents,
       this.editor,
       this.commandTypeaheadPanel,
       this.footer,
@@ -425,6 +436,7 @@ export class ClankieFaceShell {
     const dock = new VStack([
       { component: this.statusContainer, shrink: 1, minSize: 0 },
       { component: this.pendingPrompts, shrink: 1, minSize: 0 },
+      { component: this.liveAgents, shrink: 1, minSize: 0 },
       { component: this.editor, shrink: 1, minSize: 3 },
       { component: this.commandTypeaheadPanel, shrink: 1, minSize: 0 },
       { component: this.footer, shrink: 1, minSize: 1 },
@@ -674,6 +686,10 @@ export class ClankieFaceShell {
   }
 
   /** Places text in the composer for the owner to edit or send; nothing is sent. */
+  getDraft(): string {
+    return this.editor.getExpandedText();
+  }
+
   setDraft(text: string): void {
     this.editor.setText(text);
     this.refreshCommandSurface(text);
@@ -940,12 +956,44 @@ export class ClankieFaceShell {
   }
 
   private loaderText(message: string): string {
-    return `${message} (enter to steer · alt+enter to queue · esc to interrupt)`;
+    return `${message} (enter to steer · alt+enter to queue · ${this.options.expandedAgent?.() ? "esc conversation" : "esc to interrupt"})`;
   }
 
   // --- input routing ---
 
   private routeInput(data: string): { consume?: boolean; data?: string } | undefined {
+    if (!this.setupFlow.isWaitingForInput() && !this.tui.hasOverlay()) {
+      if (this.agentNavigationBusy) return { consume: true };
+      if (matchesKey(data, Key.ctrl("g")) && this.liveAgents.selected()) {
+        this.liveAgents.focused = !this.liveAgents.focused;
+        this.tui.requestRender();
+        return { consume: true };
+      }
+      if (this.liveAgents.focused) {
+        if (!this.liveAgents.selected() || matchesKey(data, Key.escape)) this.liveAgents.focused = false;
+        else if (matchesKey(data, Key.up)) this.liveAgents.move(-1);
+        else if (matchesKey(data, Key.down)) this.liveAgents.move(1);
+        else if (matchesKey(data, Key.enter)) {
+          const agent = this.liveAgents.selected();
+          if (agent && this.options.onOpenLiveAgent) {
+            this.liveAgents.focused = false;
+            this.navigateAgent(() => this.options.onOpenLiveAgent!(agent));
+          }
+        }
+        this.tui.requestRender();
+        return { consume: true };
+      }
+      if (this.options.expandedAgent?.()) {
+        if (matchesKey(data, Key.escape) && this.options.onLeaveLiveAgent) {
+          this.navigateAgent(this.options.onLeaveLiveAgent);
+          return { consume: true };
+        }
+        if (matchesKey(data, Key.ctrl("y")) && this.options.onOpenAgentWorkspace) {
+          this.navigateAgent(this.options.onOpenAgentWorkspace);
+          return { consume: true };
+        }
+      }
+    }
     if (
       matchesKey(data, Key.alt("enter")) &&
       !this.setupFlow.isWaitingForInput() &&
@@ -1037,6 +1085,18 @@ export class ClankieFaceShell {
     const commandInput = this.handleCommandTypeaheadInput(data);
     if (commandInput !== undefined) return commandInput;
     return undefined;
+  }
+
+  private navigateAgent(run: () => Promise<void>): void {
+    this.agentNavigationBusy = true;
+    void run()
+      .catch((error: unknown) => {
+        this.insertCommandResult("Agents", formatError(error), "error");
+      })
+      .finally(() => {
+        this.agentNavigationBusy = false;
+        this.tui.requestRender();
+      });
   }
 
   // --- command typeahead + palette ---

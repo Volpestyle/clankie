@@ -1,6 +1,11 @@
 import { buildHostedConnectionCommands } from "./hosted-console.ts";
 import { gatewayStatus } from "./command/gateway.ts";
-import { readHerdrBinding, herdrConnection } from "./session/herdr-connection.ts";
+import {
+  readHerdrBinding,
+  herdrConnection,
+  openAgentHerdr,
+  readAgentHerdrTerminal,
+} from "./session/herdr-connection.ts";
 import {
   ensureHerdLeadCompanion,
   focusHerdLeadCompanion,
@@ -159,6 +164,10 @@ const conversationSelection = new OperatorConversationSelection(conversationClie
 let currentContextUsage: OperatorConversationContextUsage | undefined;
 /** Footer badge while the developer evaluator is on; see refreshEvaluatorStatus. */
 let evaluatorStatus: readonly string[] = [];
+const conversationDrafts = new Map<string, string>();
+let expandedAgent:
+  | { readonly parent: string; readonly seatId: string; readonly personaId: string; readonly name: string }
+  | undefined;
 let sideConversation: { readonly parentConversationId: string; readonly conversationId: string } | undefined;
 // The console is a seat only inside the fleet the service leads (ADR 0164):
 // `herdrConnection` keeps this pane's identity only when the terminal it sits
@@ -259,6 +268,8 @@ const conversationsContext = {
     return await conversationClient.autonomy(conversationId, command);
   },
   select: async (conversationId: string) => {
+    const leavingId = conversationSelection.conversationId;
+    if (leavingId) conversationDrafts.set(leavingId, shell.getDraft());
     // Navigating anywhere else ends an open `/btw` fork: it has no console to
     // resume its UI lifecycle once its parent leaves the screen.
     if (conversationId !== conversationSelection.conversationId) await discardOpenSideConversation();
@@ -266,6 +277,8 @@ const conversationsContext = {
     await stopConversationObservation();
     try {
       const conversation = await selectConversation(conversationId);
+      expandedAgent = undefined;
+      shell.setDraft(conversationDrafts.get(conversationId) ?? "");
       shell.clearTranscript();
       if (!(await conversationPrompt.restoreHistory(conversationShellSink()))) {
         throw new Error("The selected conversation history is no longer available");
@@ -473,6 +486,39 @@ const commands = [
 const shell = new ClankieFaceShell({
   commands,
   onHerdrJump: jumpToFleetAgent,
+  liveAgents: () => herdrRoster.snapshot().liveAgents ?? [],
+  expandedAgent: () => expandedAgent?.name,
+  onOpenLiveAgent: async ({ seat, name }) => {
+    const parent = expandedAgent?.parent ?? conversationSelection.conversationId;
+    if (!parent) throw new Error("No conversation is selected");
+    const current = (await conversationClient.roster()).find(
+      (item) => item.seatId === seat.seatId && item.personaId === seat.personaId,
+    );
+    if (!current) throw new Error("That agent is no longer seated");
+    const conversationId =
+      current.conversationId ??
+      (
+        await conversationClient.create({
+          scope: { kind: "persona", personaId: current.personaId },
+          title: name,
+        })
+      ).conversationId;
+    await conversationsContext.select(conversationId);
+    expandedAgent = { parent, seatId: current.seatId, personaId: current.personaId, name };
+  },
+  onLeaveLiveAgent: async () => {
+    if (expandedAgent) await conversationsContext.select(expandedAgent.parent);
+  },
+  onOpenAgentWorkspace: async () => {
+    const agent = expandedAgent;
+    if (!agent) return;
+    const current = (await conversationClient.roster()).find(
+      (seat) => seat.seatId === agent.seatId && seat.personaId === agent.personaId,
+    );
+    if (!current) throw new Error("That agent is no longer seated; its saved conversation remains available");
+    const terminal = await readAgentHerdrTerminal(current, herdrOptions);
+    await shell.withTerminal(() => openAgentHerdr(terminal, herdrOptions));
+  },
   cwd: currentWorkspace,
   autocomplete: { listSkills: () => skillCatalog },
   skills: skillCatalog,
@@ -485,7 +531,12 @@ const shell = new ClankieFaceShell({
     model: currentModelDisplay,
     title: currentConversationTitle,
   }),
-  statusExtras: () => ["This Mac", ...evaluatorStatus, ...sideConversationStatus()],
+  statusExtras: () => [
+    "This Mac",
+    ...evaluatorStatus,
+    ...sideConversationStatus(),
+    ...(expandedAgent ? [`${expandedAgent.name} · esc conversation · ctrl+y workspace`] : []),
+  ],
   // The selected server-owned conversation is the only production prompt path.
   onPrompt: async (prompt, activeShell, signal, delivery) => {
     let ready!: () => void;

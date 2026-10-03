@@ -18,6 +18,18 @@ you are helping. Portals, runtime connections and work trackers are
 independent choices. Read `packages/agent-hosts/README.md` under `repoRoot` for current
 connection support; do not infer support from the architecture alone.
 
+## Watching workers
+
+The local console stays in the current terminal. Its live-agent strip uses the
+service fleet feed across connected machines: `Ctrl+G`, Up/Down, Enter opens a
+worker's existing conversation; Escape returns and leaves its work running.
+`Ctrl+Y` from that conversation opens the exact pane in the selected machine's
+Herdr workspace. It attaches to an existing server, never starts one. `/agents`
+also retains past agents with saved threads. Do not treat a visible working
+state or a successful workspace focus as a delivery receipt or model-seen proof;
+messages still use native delivery and unconfirmed sends must not be retried
+blindly.
+
 ## Three cards
 
 | Question                          | Card             |
