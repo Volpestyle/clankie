@@ -23,6 +23,7 @@ export interface DiscordVoxSession {
 interface AdapterRegistration {
   readonly guildId: string;
   readonly channelId: string;
+  readonly bodyLease?: JoinDiscordVoiceInput["bodyLease"];
   adapter: InternalDiscordGatewayAdapterImplementerMethods;
   gatewayLeaveConfirmed: boolean;
   externalLeaveFinalization?: Promise<void>;
@@ -103,7 +104,7 @@ export class DiscordVoxGatewayBridge {
       await this.leave("voice_rejoin", input.bodyLease?.guard);
       if (input.bodyLease !== undefined) await input.bodyLease.guard();
       input.bodyLease?.start?.();
-      this.register(guild, input.channelId);
+      this.register(guild, input.channelId, input.bodyLease);
       let rejectJoin: ((error: Error) => void) | undefined;
       const adapterFailure = new Promise<never>((_resolve, reject) => {
         rejectJoin = reject;
@@ -187,7 +188,11 @@ export class DiscordVoxGatewayBridge {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
   }
 
-  private register(guild: DiscordVoxGuild, channelId: string): void {
+  private register(
+    guild: DiscordVoxGuild,
+    channelId: string,
+    bodyLease?: JoinDiscordVoiceInput["bodyLease"],
+  ): void {
     if (this.registration !== undefined) this.removeAdapter(this.registration);
     let registration: AdapterRegistration;
     const callbacks: InternalDiscordGatewayAdapterLibraryMethods = {
@@ -212,11 +217,17 @@ export class DiscordVoxGatewayBridge {
       },
     };
     const adapter = guild.voiceAdapterCreator(callbacks);
-    registration = { guildId: guild.id, channelId, adapter, gatewayLeaveConfirmed: false };
+    registration = {
+      guildId: guild.id,
+      channelId,
+      adapter,
+      gatewayLeaveConfirmed: false,
+      ...(bodyLease === undefined ? {} : { bodyLease }),
+    };
     this.registration = registration;
   }
 
-  private handleVoxEvent(event: VoxControlEvent): void {
+  private async handleVoxEvent(event: VoxControlEvent): Promise<void> {
     if (event.type !== "adapter_send") return;
     const registration = this.registration;
     const payload = parseVoiceStatePayload(event.payload, registration);
@@ -232,6 +243,16 @@ export class DiscordVoxGatewayBridge {
     }
     let sent = false;
     try {
+      if (payload.d.channel_id !== null && registration.bodyLease !== undefined) {
+        await registration.bodyLease.guard();
+        if (
+          this.disposed ||
+          this.registration !== registration ||
+          registration.gatewayLeaveConfirmed ||
+          !registration.bodyLease.current()
+        )
+          return;
+      }
       sent = registration.adapter.sendPayload(payload);
     } catch (error) {
       this.failAdapter(error instanceof Error ? error : new Error(String(error)));

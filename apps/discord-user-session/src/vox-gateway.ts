@@ -191,6 +191,7 @@ export class VoxGatewayBridge {
   private pendingVoiceTarget: VoiceTarget | undefined;
   private transition: PendingVoiceTransition | undefined;
   private disposed = false;
+  private readonly voiceGuard: ((target: VoiceTarget) => Promise<void>) | undefined;
 
   public constructor(options: {
     readonly gateway: DiscordUserGateway;
@@ -199,13 +200,15 @@ export class VoxGatewayBridge {
     readonly allowlisted: (guildId: string, channelId: string) => boolean;
     readonly onRejected?: (reason: string) => void;
     readonly voiceStateTimeoutMs?: number;
+    readonly voiceGuard?: (target: VoiceTarget) => Promise<void>;
   }) {
     const reject = options.onRejected ?? (() => undefined);
+    this.voiceGuard = options.voiceGuard;
     this.allowlisted = options.allowlisted;
     this.membership = options.membership;
     this.voiceStateTimeoutMs = options.voiceStateTimeoutMs ?? VOICE_STATE_CONFIRM_TIMEOUT_MS;
     this.unsubscribes = [
-      options.vox.onEvent((event) => {
+      options.vox.onEvent(async (event) => {
         if (this.disposed) return;
         if (event.type !== "adapter_send") return;
         const raw = record(event.payload);
@@ -234,6 +237,16 @@ export class VoxGatewayBridge {
           }
           this.noteTransitionAttempt("leave", payload.d.guild_id);
           return;
+        }
+        if (options.voiceGuard !== undefined) {
+          try {
+            await options.voiceGuard(expected);
+          } catch {
+            reject("body_lease_denied");
+            return;
+          }
+          if (this.disposed || (this.pendingVoiceTarget !== expected && this.activeVoiceTarget !== expected))
+            return;
         }
         if (!options.membership.acquire("voice", payload.d.guild_id, payload.d.channel_id, payload)) {
           reject("membership_conflict");
@@ -390,6 +403,8 @@ export class VoxGatewayBridge {
     this.transition = transition;
     try {
       await operation();
+      if (kind === "join" && channelId !== undefined && this.voiceGuard !== undefined)
+        await this.voiceGuard({ guildId, channelId });
     } catch {
       this.settleTransition(false);
       return false;

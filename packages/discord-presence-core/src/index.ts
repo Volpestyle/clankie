@@ -295,3 +295,8 @@ export {
   type BodyEffectGuard,
   type VoiceBodyAdmission,
 } from "./body-voice-lease.ts";
+export {
+  reconcileBodyVoice,
+  tryHandleBodyVoiceReconcile,
+  type BodyVoiceReconcilePorts,
+} from "./body-voice-reconcile.ts";

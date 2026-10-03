@@ -113,3 +113,30 @@ export type BodyVoiceLeaseRequest = z.infer<typeof BodyVoiceLeaseRequestSchema>;
 export const BODY_LEASE_STATUS_PATH = "/v1/body-leases";
 export const BodyLeaseStatusSchema = z.strictObject({ leases: z.array(BodyLeaseViewSchema).max(4) });
 export type BodyLeaseStatus = z.infer<typeof BodyLeaseStatusSchema>;
+
+export const BodyVoiceSubjectSchema = z.strictObject({
+  characterId: z.string().min(1).max(128),
+  credentialRef: z.string().min(1).max(128),
+  transportKind: z.enum(["bot", "user_session"]),
+});
+export type BodyVoiceSubject = z.infer<typeof BodyVoiceSubjectSchema>;
+
+/** Internal authenticated host-to-body reconciliation, never a tool argument. */
+export const BodyVoiceReconcileRequestSchema = z.strictObject({
+  subject: BodyVoiceSubjectSchema,
+  nonce: z.uuid(),
+  stays: z.array(BodyVoiceStaySchema).min(1).max(128),
+});
+export type BodyVoiceReconcileRequest = z.infer<typeof BodyVoiceReconcileRequestSchema>;
+export const BodyVoiceReconcileResultSchema = z.strictObject({
+  subject: BodyVoiceSubjectSchema,
+  nonce: z.uuid(),
+  presenceSessionId: z.string().min(1).max(128),
+  confirmedStayIds: z.array(z.uuid()).max(128),
+});
+export type BodyVoiceReconcileResult = z.infer<typeof BodyVoiceReconcileResultSchema>;
+
+export const BodyVoiceReconcileGuardSchema = BodyVoiceReconcileRequestSchema.extend({
+  presenceSessionId: z.string().min(1).max(128),
+});
+export type BodyVoiceReconcileGuard = z.infer<typeof BodyVoiceReconcileGuardSchema>;

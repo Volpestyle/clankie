@@ -1,5 +1,9 @@
 import { BodyVoiceTargetSchema } from "@clankie/protocol";
-import { VoiceBodyLease, VoiceBodyLeaseDenied } from "@clankie/discord-presence-core";
+import {
+  VoiceBodyLease,
+  VoiceBodyLeaseDenied,
+  tryHandleBodyVoiceReconcile,
+} from "@clankie/discord-presence-core";
 import { ClankieApiClient } from "@clankie/api-client";
 import {
   createDefaultCredentialStore,
@@ -281,6 +285,18 @@ const voxGateway = new VoxGatewayBridge({
   vox,
   membership,
   allowlisted: (guildId, channelId) => guildIds.has(guildId) && voiceChannelIds.has(channelId),
+  voiceGuard: async (target) => {
+    const stayId = voiceSession?.status().stayId;
+    const admission = stayId === undefined ? undefined : voiceBodyLease.admission(stayId);
+    if (
+      admission === undefined ||
+      admission.stay.target.guildId !== target.guildId ||
+      admission.stay.target.channelId !== target.channelId
+    )
+      throw new Error("Voice generation unavailable");
+    await admission.guard();
+    if (voiceSession?.status().stayId !== stayId) throw new Error("Voice generation changed");
+  },
   onRejected: (reason) => console.warn({ reason }, "Rejected Vox gateway event"),
 });
 
@@ -1080,6 +1096,50 @@ const server = createServer((request, response) => {
     });
     return;
   }
+  if (
+    tryHandleBodyVoiceReconcile(request, response, () => {
+      const sessionId = presenceSession.record.sessionId;
+      const self = gateway.userId;
+      if (self === undefined) return undefined;
+      return {
+        subject: {
+          characterId,
+          credentialRef: DISCORD_USER_SESSION_PROVIDER_ID,
+          transportKind: "user_session" as const,
+        },
+        presenceSessionId: sessionId,
+        userId: self,
+        current: () =>
+          !shuttingDown &&
+          presenceSession.record.sessionId === sessionId &&
+          presenceSession.record.gatewayConnected &&
+          gateway.userId === self,
+        authorize: (input) => api.voiceReconcileGuard({ ...input, presenceSessionId: sessionId }),
+        subscribe: (listener) => gateway.on("raw", listener),
+        send: (payload) => gateway.sendPayload(payload),
+        stopLocal: async (input) => {
+          if (
+            !voiceBodyLease.reconciliationAllowed(input.stays) ||
+            !publishBodyLease.reconciliationAllowed(input.stays)
+          )
+            return false;
+          const actual = membership.actualTarget;
+          if (
+            actual !== undefined &&
+            !input.stays.some(
+              (stay) => stay.target.guildId === actual.guildId && stay.target.channelId === actual.channelId,
+            )
+          )
+            return false;
+          if (input.stays.some((stay) => stay.kind === "publish")) streamWatch.stopPublish();
+          if (input.stays.some((stay) => (stay.kind ?? "audio") === "audio"))
+            await voiceSession?.leave("authorized_body_reconciliation");
+          return true;
+        },
+      };
+    })
+  )
+    return;
   if (
     tryHandleMusicControlRequest(
       request,

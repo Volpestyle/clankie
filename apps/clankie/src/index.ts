@@ -70,7 +70,11 @@ import { linearFollowStatus } from "@clankie/settings";
 import { createRivalsClient } from "./rivals.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
-import { createDiscordVoicePresenceClient, resolveDiscordVoiceTarget } from "./discord-voice-presence.ts";
+import {
+  createDiscordVoicePresenceClient,
+  resolveDiscordVoiceTarget,
+  reconcileDiscordVoice,
+} from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
@@ -827,8 +831,7 @@ const clankie = await createClankieApp({
         return result.outcome === "ok" && !result.isError;
       }
       if (resource === "voice") {
-        const result = await createDiscordVoicePresenceClient().leave({});
-        return result.action === "left" && bodyVoiceStays.stopped();
+        return bodyVoiceStays.reconcile(reconcileDiscordVoice, guard);
       }
       if (resource === "play") {
         const result = await playHost.stopAndWait({ deadlineMs: 12_000, reason: "operator_body_recovery" });

@@ -794,3 +794,50 @@ it("retains publishing until exact gateway deletion, media disconnect and member
     controller.close();
   }
 });
+
+it("rejects a stale publish generation at a delayed automatic OP18 send", async () => {
+  const vox = fakeVox();
+  const gateway = fakeGateway();
+  gateway.setVoiceSessionId(undefined);
+  let allowed = true;
+  const controller = startStreamWatch({
+    gateway,
+    vox,
+    membership: new VoiceMembershipCoordinator(gateway),
+    allowlisted: () => true,
+    api: { reportDiscordStreamWatch: async () => undefined } as never,
+  });
+  try {
+    const started = controller.requestPublish({
+      guildId: GUILD,
+      channelId: CHANNEL,
+      bodyLease: {
+        stay: {
+          stayId: "old",
+          generation: 1,
+          kind: "publish",
+          target: {
+            guildId: GUILD,
+            channelId: CHANNEL,
+            actorId: SELF,
+            presenceSessionId: "body",
+            transportKind: "user_session",
+          },
+        },
+        current: () => true,
+        guard: async () => {
+          if (!allowed) throw new Error("rotated claim");
+        },
+      },
+    });
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    allowed = false;
+    gateway.setVoiceSessionId("new-session");
+    controller.publish();
+    await expect(started).resolves.toBe(false);
+    expect(gateway.payloads.filter((payload) => (payload as { op: number }).op === 18)).toEqual([]);
+    expect(vox.commands.filter((command) => command.type === "stream_publish_connect")).toEqual([]);
+  } finally {
+    controller.close();
+  }
+});

@@ -1,4 +1,8 @@
-import { BodyVoiceLeaseRequestSchema } from "@clankie/protocol";
+import {
+  BodyVoiceLeaseRequestSchema,
+  BodyVoiceReconcileGuardSchema,
+  BodyVoiceReconcileRequestSchema,
+} from "@clankie/protocol";
 import type { BodyVoiceStays } from "./body-voice-stays.ts";
 import { BodyLeaseRequestSchema, BodyResourceSchema } from "@clankie/protocol";
 import type { BodyLeaseRouter, BodyConversationIdentity } from "./body-lease-router.ts";
@@ -2711,6 +2715,38 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Which harnesses here can drive the owner's apps and Chrome (ADR 0199). It
   // describes the owner's machine and sessions, so only the operator reads it;
   // an explicit read re-probes rather than trusting the prompt's cache.
+  app.post("/v1/discord/voice-reconcile-guard", async (context) => {
+    const input = BodyVoiceReconcileGuardSchema.safeParse(await readJson(context.req.raw));
+    if (!input.success) return context.json({ authorized: false }, 400);
+    const principal = await authenticateCaptain(context.req.raw, dependencies);
+    const body = input.data;
+    const registered = () =>
+      [...discordPresenceLiveSessions.values()].find(
+        (session) =>
+          session.sessionId === body.presenceSessionId &&
+          session.characterId === body.subject.characterId &&
+          session.credentialRef === body.subject.credentialRef &&
+          session.transportKind === body.subject.transportKind &&
+          session.gatewayConnected,
+      );
+    if (
+      principal === undefined ||
+      principal === "unavailable" ||
+      captainTransportKind(principal) !== body.subject.transportKind ||
+      registered() === undefined ||
+      (body.subject.transportKind === "user_session" &&
+        discordUserSessionOptIns.resolveActive(PROFILE_HASH) === undefined)
+    )
+      return context.json({ authorized: false }, 403);
+    const allowed = await dependencies.bodyVoiceStays?.authorizeReconciliation(
+      BodyVoiceReconcileRequestSchema.parse({ nonce: body.nonce, subject: body.subject, stays: body.stays }),
+      body.presenceSessionId,
+    );
+    return context.json({
+      authorized: allowed === true && !context.req.raw.signal.aborted && registered() !== undefined,
+    });
+  });
+
   app.post("/v1/discord/voice-lease", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === undefined || captain === "unavailable")
@@ -2756,7 +2792,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         return context.json({ outcome: "rejected", reason: "not_authorized" }, 409);
       const result =
         input.action === "claim"
-          ? await voice.claim(input.stay, identity, input.ticket)
+          ? await voice.claim(input.stay, identity, input.ticket, {
+              characterId: registered()!.characterId,
+              credentialRef: registered()!.credentialRef,
+              transportKind: target.transportKind,
+            })
           : input.action === "heartbeat"
             ? await voice.heartbeat(input.stay, input.incarnation, identity)
             : voice.finish(input.stay, input.incarnation);

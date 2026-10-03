@@ -176,3 +176,72 @@ it("requires every persisted audio and publish termination after restart", async
   expect(restarted.status("voice")).toBeUndefined();
   restarted.close();
 });
+
+it("reconciles captured stays only with a live nonce guard, exact account and all receipts", async () => {
+  const { voice, store, stay } = fixture();
+  const subject = { characterId: "clankie", credentialRef: "bot", transportKind: "bot" as const };
+  await voice.claim(stay, identity("room"), undefined, subject);
+  const reference = store.recoveryReference("voice")!;
+  const recovery = store.beginRecovery(reference);
+  if (recovery.outcome !== "admitted") throw new Error("recovery");
+  let captured: Parameters<typeof voice.authorizeReconciliation>[0] | undefined;
+  const reconciled = await voice.reconcile(
+    async (request) => {
+      captured = request;
+      expect(
+        await voice.authorizeReconciliation(
+          { ...request, stays: [{ ...stay, generation: 2 }] },
+          "replacement",
+        ),
+      ).toBe(false);
+      expect(await voice.authorizeReconciliation(request, "replacement")).toBe(true);
+      expect(await voice.authorizeReconciliation(request, "foreign-physical-session")).toBe(false);
+      return {
+        nonce: request.nonce,
+        subject,
+        presenceSessionId: "replacement",
+        confirmedStayIds: [stay.stayId],
+      };
+    },
+    async () => undefined,
+  );
+  expect(reconciled).toBe(true);
+  expect(await voice.authorizeReconciliation(captured!, "replacement")).toBe(false);
+  expect(store.status("voice")?.state).toBe("recovery_required");
+  store.finish(reference, recovery.operationId, "settled");
+  expect(store.reconcileStopped(reference)).toEqual({ outcome: "released" });
+});
+
+it.each(["duplicate", "foreign", "revoked"])(
+  "retains a recovery claim for %s termination evidence",
+  async (failure) => {
+    const { voice, stay, store } = fixture();
+    const subject = { characterId: "clankie", credentialRef: "bot", transportKind: "bot" as const };
+    await voice.claim(stay, identity("room"), undefined, subject);
+    let authorized = true;
+    const result = voice.reconcile(
+      async (request) => {
+        expect(await voice.authorizeReconciliation(request, "replacement")).toBe(true);
+        if (failure === "revoked") authorized = false;
+        return {
+          nonce: request.nonce,
+          subject,
+          presenceSessionId: "replacement",
+          confirmedStayIds:
+            failure === "duplicate"
+              ? [stay.stayId, stay.stayId]
+              : failure === "foreign"
+                ? [randomUUID()]
+                : [stay.stayId],
+        };
+      },
+      async () => {
+        if (!authorized) throw new Error("revoked");
+      },
+    );
+    if (failure === "revoked") await expect(result).rejects.toThrow("revoked");
+    else expect(await result).toBe(false);
+    expect(voice.stopped()).toBe(false);
+    expect(store.status("voice")).toBeDefined();
+  },
+);

@@ -1,3 +1,4 @@
+import { tryHandleBodyVoiceReconcile } from "@clankie/discord-presence-core";
 import { VoiceBodyLease, type VoiceBodyAdmission } from "@clankie/discord-presence-core";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { gatewayDiagnostic } from "./gateway-diagnostics.ts";
@@ -1827,6 +1828,58 @@ const musicServer = createServer((request, response) => {
     response.end(JSON.stringify(health));
     return;
   }
+  if (
+    tryHandleBodyVoiceReconcile(request, response, () => {
+      const sessionId = presenceSession.record.sessionId;
+      const self = client.user?.id;
+      if (self === undefined) return undefined;
+      return {
+        subject: { characterId, credentialRef: "discord_bot", transportKind: "bot" as const },
+        presenceSessionId: sessionId,
+        userId: self,
+        current: () =>
+          !shuttingDown &&
+          client.isReady() &&
+          presenceSession.record.sessionId === sessionId &&
+          presenceSession.record.gatewayConnected,
+        authorize: (input) => api.voiceReconcileGuard({ ...input, presenceSessionId: sessionId }),
+        subscribe: (listener) => {
+          client.on("raw", listener);
+          return () => {
+            client.off("raw", listener);
+          };
+        },
+        send: (payload) => {
+          const guild = client.guilds.cache.get(String(payload.d.guild_id));
+          if (guild === undefined || payload.op !== 4) return false;
+          try {
+            guild.shard.send(payload as never);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        stopLocal: async (input) => {
+          if (
+            input.stays.some((stay) => stay.kind === "publish") ||
+            !voiceBodyLease.reconciliationAllowed(input.stays)
+          )
+            return false;
+          const active = voiceSession?.status();
+          if (
+            active?.active &&
+            !input.stays.some(
+              (stay) => stay.target.guildId === active.guildId && stay.target.channelId === active.channelId,
+            )
+          )
+            return false;
+          await voiceSession?.leave("authorized_body_reconciliation");
+          return true;
+        },
+      };
+    })
+  )
+    return;
   if (
     tryHandleMusicControlRequest(
       request,

@@ -3,6 +3,7 @@ import type { BodyConversationIdentity, BodyLeaseRouter } from "./body-lease-rou
 import type { VoicePresenceControlInput } from "@clankie/discord-presence-core";
 import {
   BodyVoiceTargetSchema,
+  type BodyVoiceReconcileRequest,
   DiscordVoicePresenceResultSchema,
   type DiscordVoicePresenceResult,
 } from "@clankie/protocol";
@@ -39,8 +40,12 @@ export function createDiscordVoicePresenceClient(
       let result: DiscordVoicePresenceResult = { action: "leave_refused", reason: "failed" };
       const lease = await leases.router.recover(identity, "voice", async (guard) => {
         await guard();
-        result = await postVoicePresence("leave", body, env, fetchImpl);
-        return result.action === "left" && leases.voice.stopped();
+        const stopped = await leases.voice.reconcile(
+          (request) => reconcileDiscordVoice(request, env, fetchImpl),
+          guard,
+        );
+        if (stopped) result = { action: "left" };
+        return stopped;
       });
       return lease.outcome === "released" ? result : { action: refused, reason: "failed", bodyLease: lease };
     }
@@ -82,4 +87,13 @@ async function postVoicePresence(
 export async function resolveDiscordVoiceTarget(input: VoicePresenceControlInput) {
   const response = await postToDiscordActiveBody("/voice/resolve", input, process.env, fetch);
   return response.ok ? BodyVoiceTargetSchema.parse(await response.json()) : undefined;
+}
+
+export async function reconcileDiscordVoice(
+  request: BodyVoiceReconcileRequest,
+  env: NodeJS.ProcessEnv = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<unknown> {
+  const response = await postToDiscordActiveBody("/voice/reconcile", request, env, fetchImpl);
+  return response.ok ? response.json() : undefined;
 }

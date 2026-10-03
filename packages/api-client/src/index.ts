@@ -1,4 +1,6 @@
 import {
+  BodyVoiceReconcileGuardSchema,
+  type BodyVoiceReconcileGuard,
   BodyVoiceLeaseRequestSchema,
   type BodyVoiceLeaseRequest,
   type BodyLeaseResult,
@@ -231,6 +233,15 @@ export class ClankieApiClient {
    * Requests a policy-evaluated action gated by the bridge-owned Discord presence session.
    * Bot credentials stay behind the credential broker used by the trusted presence runtime module.
    */
+  public async voiceReconcileGuard(input: BodyVoiceReconcileGuard): Promise<boolean> {
+    const result = await this.request<{ authorized?: unknown }>("/v1/discord/voice-reconcile-guard", {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(BodyVoiceReconcileGuardSchema.parse(input)),
+    });
+    return result.authorized === true;
+  }
+
   public async voiceLease(input: BodyVoiceLeaseRequest): Promise<BodyLeaseResult> {
     try {
       const result = await this.request<unknown>("/v1/discord/voice-lease", {

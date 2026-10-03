@@ -63,6 +63,7 @@ interface PendingPublish {
   readonly sourceUrl?: string;
   readonly snapshotUrl?: string;
   opcodeSent: boolean;
+  opcodeAuthorizing?: boolean;
   pauseAccepted: boolean;
   settled: boolean;
 }
@@ -391,8 +392,31 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
     if (pendingPublish === undefined || pendingPublish.opcodeSent) return pendingPublish !== undefined;
     if (options.gateway.voiceSessionId === undefined) return true;
     if (pendingPublish.bodyLease?.current() === false) return false;
-    const sent = discovery.requestPublish(pendingPublish);
-    if (sent) pendingPublish.opcodeSent = true;
+    const pending = pendingPublish;
+    if (pending.bodyLease !== undefined) {
+      if (pending.opcodeAuthorizing) return true;
+      pending.opcodeAuthorizing = true;
+      void pending.bodyLease.guard().then(
+        () => {
+          if (
+            closed ||
+            pendingPublish !== pending ||
+            pendingStop !== undefined ||
+            !pending.bodyLease!.current()
+          )
+            return;
+          const sent = discovery.requestPublish(pending);
+          if (sent) pending.opcodeSent = true;
+          else failPublish(pending.guildId);
+        },
+        () => {
+          if (pendingPublish === pending) failPublish(pending.guildId);
+        },
+      );
+      return true;
+    }
+    const sent = discovery.requestPublish(pending);
+    if (sent) pending.opcodeSent = true;
     return sent;
   };
 

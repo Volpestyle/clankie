@@ -48,6 +48,17 @@ export class VoiceBodyLease {
     this.kind = options.kind ?? "audio";
   }
 
+  public reconciliationAllowed(stays: readonly BodyVoiceStay[]): boolean {
+    return [...this.active.values()].every(({ admission }) =>
+      stays.some(
+        (stay) =>
+          stay.stayId === admission.stay.stayId &&
+          stay.generation === admission.stay.generation &&
+          JSON.stringify(stay.target) === JSON.stringify(admission.stay.target),
+      ),
+    );
+  }
+
   public async admit(
     target: BodyVoiceTarget,
     ticket?: string,

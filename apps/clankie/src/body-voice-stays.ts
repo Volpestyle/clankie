@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
+  BodyVoiceReconcileResultSchema,
+  BodyVoiceSubjectSchema,
+  type BodyVoiceSubject,
+  type BodyVoiceReconcileRequest,
   BodyVoiceStaySchema,
   BodyVoiceTargetSchema,
   type BodyLeaseResult,
@@ -26,6 +30,7 @@ const TicketSchema = z.strictObject({
   consumed: z.boolean(),
 });
 const StaySchema = z.strictObject({
+  subject: BodyVoiceSubjectSchema.optional(),
   stay: BodyVoiceStaySchema,
   reference: RefSchema,
   operationId: z.uuid(),
@@ -56,6 +61,15 @@ const sameStay = (left: BodyVoiceStay, right: BodyVoiceStay): boolean =>
 export class BodyVoiceStays {
   private state: State = { tickets: {}, stays: {} };
   private unavailable = false;
+  private readonly reconciliationGuards = new Map<
+    string,
+    {
+      request: BodyVoiceReconcileRequest;
+      guard: () => Promise<void>;
+      reference: Ref;
+      presenceSessionId?: string;
+    }
+  >();
   private readonly ticketIdentities = new Map<string, BodyConversationIdentity>();
   private readonly restartClaims = new Map<string, Ref>();
   private readonly stayAuthority = new Map<string, BodyConversationIdentity["authorize"]>();
@@ -120,6 +134,7 @@ export class BodyVoiceStays {
     stay: BodyVoiceStay,
     routeIdentity: BodyConversationIdentity,
     ticketId?: string,
+    subject?: BodyVoiceSubject,
   ): Promise<BodyLeaseResult> {
     if (this.unavailable) return refused("store_unavailable");
     if (
@@ -192,6 +207,7 @@ export class BodyVoiceStays {
     const begun = this.store.begin(acquired.lease);
     if (begun.outcome !== "admitted") return begun;
     this.state.stays[stay.stayId] = {
+      ...(subject === undefined ? {} : { subject: BodyVoiceSubjectSchema.parse(subject) }),
       stay: BodyVoiceStaySchema.parse(stay),
       reference: acquired.lease as Ref & { resource: "voice" },
       operationId: begun.operationId,
@@ -297,6 +313,90 @@ export class BodyVoiceStays {
         record.reference.conversationId === conversationId &&
         record.reference.token === current?.token,
     )?.stay;
+  }
+
+  /** Called only inside an authorized router recovery, with a trusted body observation port. */
+  public async reconcile(
+    observe: (request: BodyVoiceReconcileRequest) => Promise<unknown>,
+    guard: () => Promise<void>,
+  ): Promise<boolean> {
+    if (this.unavailable) return false;
+    await guard();
+    const reference = this.store.recoveryReference("voice");
+    if (reference === undefined) return this.stopped();
+    const records = Object.values(this.state.stays).filter((record) => !record.finished);
+    if (records.length === 0) return this.stopped();
+    if (records.some((record) => record.reference.conversationId !== reference.conversationId)) return false;
+    const subject = records[0]?.subject;
+    if (
+      subject === undefined ||
+      records.some((record) => JSON.stringify(record.subject) !== JSON.stringify(subject))
+    )
+      return false;
+    const request = { subject, nonce: randomUUID(), stays: records.map((record) => record.stay) };
+    const captured: {
+      request: BodyVoiceReconcileRequest;
+      guard: () => Promise<void>;
+      reference: Ref;
+      presenceSessionId?: string;
+    } = { request, guard, reference };
+    this.reconciliationGuards.set(request.nonce, captured);
+    let result: unknown;
+    try {
+      result = await observe(request);
+    } finally {
+      this.reconciliationGuards.delete(request.nonce);
+    }
+    const observed = BodyVoiceReconcileResultSchema.safeParse(result);
+    await guard();
+    const current = this.store.recoveryReference("voice");
+    if (
+      current?.token !== reference.token ||
+      current.conversationId !== reference.conversationId ||
+      !observed.success ||
+      observed.data.nonce !== request.nonce ||
+      observed.data.presenceSessionId !== captured.presenceSessionId ||
+      JSON.stringify(observed.data.subject) !== JSON.stringify(subject) ||
+      observed.data.confirmedStayIds.length !== records.length ||
+      new Set(observed.data.confirmedStayIds).size !== records.length ||
+      records.some((record) => !observed.data.confirmedStayIds.includes(record.stay.stayId))
+    )
+      return false;
+    // Persist actual body observations first. A failed write retains the host claim.
+    for (const record of records) record.finished = true;
+    this.save();
+    for (const record of records) {
+      if (record.reference.token === reference.token)
+        this.store.finish(reference, record.operationId, "settled");
+      this.stayAuthority.delete(record.stay.stayId);
+    }
+    return this.stopped();
+  }
+
+  public async authorizeReconciliation(
+    request: BodyVoiceReconcileRequest,
+    presenceSessionId: string,
+  ): Promise<boolean> {
+    const captured = this.reconciliationGuards.get(request.nonce);
+    if (
+      this.unavailable ||
+      captured === undefined ||
+      JSON.stringify(captured.request) !== JSON.stringify(request)
+    )
+      return false;
+    try {
+      await captured.guard();
+    } catch {
+      return false;
+    }
+    const current = this.store.recoveryReference("voice");
+    const allowed =
+      this.reconciliationGuards.get(request.nonce) === captured &&
+      current?.token === captured.reference.token &&
+      current.conversationId === captured.reference.conversationId &&
+      (captured.presenceSessionId === undefined || captured.presenceSessionId === presenceSessionId);
+    if (allowed) captured.presenceSessionId = presenceSessionId;
+    return allowed;
   }
 
   public stopped(): boolean {

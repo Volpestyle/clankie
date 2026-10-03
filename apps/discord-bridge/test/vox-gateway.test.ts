@@ -430,3 +430,44 @@ it("revocation while confirmed leave awaits prevents new adapter registration", 
   expect(next.sent).toEqual([]);
   bridge.dispose();
 });
+
+it("denies an old Vox generation's automatic rejoin after its lease is fenced", async () => {
+  const vox = new FakeVox();
+  const session = new FakeSession(vox);
+  const guild = new FakeGuild(GUILD_A);
+  let allowed = true;
+  const bridge = new DiscordVoxGatewayBridge(vox, session);
+  await bridge.join(guild, {
+    guildId: GUILD_A,
+    channelId: CHANNEL_A,
+    bodyLease: {
+      stay: {
+        stayId: "00000000-0000-4000-8000-000000000001",
+        generation: 1,
+        target: {
+          guildId: GUILD_A,
+          channelId: CHANNEL_A,
+          actorId: "actor",
+          presenceSessionId: "old-body",
+          transportKind: "bot",
+        },
+      },
+      current: () => allowed,
+      guard: async () => {
+        if (!allowed) throw new Error("stale lease generation");
+      },
+    },
+  });
+  const joins = () =>
+    guild.sent.filter((payload) => (payload as { d: { channel_id: string | null } }).d.channel_id !== null)
+      .length;
+  const before = joins();
+  allowed = false;
+  vox.emit({
+    type: "adapter_send",
+    payload: { op: 4, d: { guild_id: GUILD_A, channel_id: CHANNEL_A, self_mute: false, self_deaf: false } },
+  });
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+  expect(joins()).toBe(before);
+  bridge.dispose();
+});

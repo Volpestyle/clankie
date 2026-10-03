@@ -358,3 +358,28 @@ function fakeVox() {
     },
   };
 }
+
+it("fences automatic user-body OP4 rejoin after original stay authority is revoked", async () => {
+  const gateway = fakeGateway();
+  const vox = fakeVox();
+  let allowed = true;
+  const bridge = new VoxGatewayBridge({
+    gateway: gateway.value,
+    vox: vox.value,
+    membership: new VoiceMembershipCoordinator(gateway.value),
+    allowlisted: () => true,
+    voiceGuard: async () => {
+      if (!allowed) throw new Error("stale generation");
+    },
+  });
+  bridge.prepareVoiceTarget(GUILD_A, CHANNEL_A);
+  vox.emit({ type: "adapter_send", payload: voicePayload(GUILD_A, CHANNEL_A, false, false) });
+  await Promise.resolve();
+  gateway.emit("voiceStateUpdate", voiceState(GUILD_A, SELF, CHANNEL_A));
+  const before = gateway.payloads.length;
+  allowed = false;
+  vox.emit({ type: "adapter_send", payload: voicePayload(GUILD_A, CHANNEL_A, false, false) });
+  await Promise.resolve();
+  expect(gateway.payloads).toHaveLength(before);
+  bridge.dispose();
+});
