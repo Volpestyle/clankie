@@ -1101,9 +1101,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route(
     "/",
-    createProjectRoutes(authorizeOwnerSecrets, settingsSource, {
-      ...(dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {}),
-    }),
+    createProjectRoutes(
+      authorizeOwnerSecrets,
+      settingsSource,
+      dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {},
+    ),
   );
   /**
    * Owner operator or any active paired device: account data that is not a

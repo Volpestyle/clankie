@@ -39,7 +39,9 @@ export function canonicalProjectPath(path: string, platform: "posix" | "windows"
   return (
     paths.isAbsolute(path) &&
     paths.normalize(path) === path &&
-    !/[\0\r\n]/u.test(path) &&
+    !path.includes("\0") &&
+    !path.includes("\r") &&
+    !path.includes("\n") &&
     (platform !== "windows" || /^[A-Z]:\\/u.test(path))
   );
 }
