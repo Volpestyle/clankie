@@ -13,6 +13,7 @@ it.each([
   "undiscovered",
   "retarget",
   "changed-by-native",
+  "changed-during-skill-build",
   "marketplace-retarget",
   "registry-removed",
   "case-variant-local",
@@ -50,6 +51,10 @@ it.each([
     );
     let currentProfile: string | undefined;
     const result = await installHarnessBridges({
+      prepareSkills: async (workerRoot) => {
+        expect(workerRoot).toBe(join(market, "worker"));
+        if (kind === "changed-during-skill-build") await writeFile(source, "{}");
+      },
       repoRoot: home,
       marketplaceRoot: market,
       env: { HOME: home, ...(kind === "case-variant-local" ? { CLAUDE_CONFIG_DIR: primary } : {}) },
@@ -90,7 +95,9 @@ it.each([
       expect(row.status).toBe(kind === "update" ? "updated" : "failed");
     } else {
       expect(commands).toEqual([]);
-      expect(row.status).toBe(kind === "retarget" ? "failed" : "source-manager-required");
+      expect(row.status).toBe(
+        ["retarget", "changed-during-skill-build"].includes(kind) ? "failed" : "source-manager-required",
+      );
     }
     if (kind === "update") {
       expect(await realpath(target)).toBe(await realpath(source));
