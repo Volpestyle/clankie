@@ -24,7 +24,7 @@ import { runConversationsCommand } from "../src/command/conversations.ts";
 import { openHerdr, runFleetHerdr } from "../src/session/herdr-connection.ts";
 import { type CredentialStore } from "@clankie/credential-broker";
 import { type ServiceRegistryOptions } from "./services.ts";
-import { doctorCommand, type ExecFileImpl } from "../src/command/doctor.ts";
+import { doctorCommand, machineDoctorCommand, type ExecFileImpl } from "../src/command/doctor.ts";
 import { statusCommand } from "../src/command/status.ts";
 import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
@@ -155,7 +155,7 @@ export async function runHeadlessCaptainCommand(
       if (rest.length) {
         if (rest.length !== 2 || rest[0] !== "--machine")
           throw new Error("Usage: clankie doctor [--machine FLEET_ID]");
-        outputJson(stdout, await runRuntimeCommand(["harnesses", rest[1]!], options));
+        outputJson(stdout, await machineDoctorCommand(rest[1]!, options));
         return 0;
       }
       const result = await doctorCommand({

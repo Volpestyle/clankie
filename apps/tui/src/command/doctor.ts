@@ -38,3 +38,19 @@ export async function doctorCommand(options: InspectInstallOptions): Promise<Ins
   }
   return { ...report, remoteHarnesses };
 }
+
+/** Inspect only the selected registered machine; no local executable/config probes. */
+export async function machineDoctorCommand(
+  machine: string,
+  options: Parameters<typeof runRuntimeCommand>[1] = {},
+): Promise<Record<string, unknown>> {
+  const results = await Promise.allSettled([
+    runRuntimeCommand(["harnesses", machine], options),
+    runRuntimeCommand(["membership", machine], options),
+  ]);
+  const value = (result: PromiseSettledResult<Record<string, unknown>>) =>
+    result.status === "fulfilled"
+      ? result.value
+      : { status: "unavailable", detail: result.reason instanceof Error ? result.reason.message : String(result.reason) };
+  return { machine, harnesses: value(results[0]!), membership: value(results[1]!) };
+}

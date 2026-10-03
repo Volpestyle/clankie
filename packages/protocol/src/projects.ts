@@ -221,3 +221,25 @@ export const RemoveProjectWorktreeRootSchema = z
     expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict();
+
+/** Read-only owner diagnostic. Host eligibility never proves a bridge socket or tool catalog. */
+export interface FleetPaneMembership {
+  pane: string;
+  harness: string;
+  harnessSource: "herdr-inventory";
+  cwd?: string;
+  nativeSession: "observed" | "pending" | "unavailable";
+  hire: "none" | "assigned" | "invalid" | "unobserved";
+  eligibility: "eligible" | "unsupported" | "unproven" | "stale" | "private-unbound" | "ineligible";
+  reason: string;
+  projectId?: string;
+}
+export interface FleetMembershipReport {
+  machine: string;
+  observedAt: string;
+  evidence: "host-process";
+  nativeTools: "not-verified";
+  totalPanes: number;
+  truncated: boolean;
+  panes: FleetPaneMembership[];
+}
