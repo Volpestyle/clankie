@@ -296,3 +296,60 @@ test("discovery IDs remain unique across case-folded aliases and configured cand
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("named execution refuses a replacement socket installed after its caller's revision guard", async () => {
+  const dir = await mkdtemp("/tmp/clankie-machine-binding-race-");
+  try {
+    const settings = new SettingsStore(join(dir, "settings.json"));
+    const replace = (socketPath: string) =>
+      settings.update((current) => ({
+        ...current,
+        execution: {
+          ...current.execution,
+          connections: [
+            { id: "work", kind: "herdr", session: "work", socketPath, enabled: true, capabilities: [] },
+          ],
+        },
+      }));
+    await replace("/tmp/original.sock");
+    const run = vi.fn(async () => ({ stdout: "{}" }));
+    const runtimes = new ExecutionConnections({
+      settings,
+      run,
+      primary: { binding: () => undefined, status: () => "disabled" },
+    });
+    const expected = (await runtimes.configuredBinding("work"))!;
+    const originalLookup = runtimes.configuredBinding.bind(runtimes);
+    let release!: () => void;
+    const pendingLookup = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lookup = vi.spyOn(runtimes, "configuredBinding").mockImplementation(async (id) => {
+      await pendingLookup;
+      return originalLookup(id);
+    });
+    // The caller has accepted the old generation. Rebind while runNamed awaits
+    // its own final lookup; that lookup must compare the captured socket.
+    const pending = runtimes.runNamed("work", ["agent", "list"], undefined, undefined, expected);
+    const rejected = expect(pending).rejects.toThrow("changed or disconnected");
+    await replace("/tmp/replacement.sock");
+    release();
+    await rejected;
+    expect(run).not.toHaveBeenCalled();
+    lookup.mockRestore();
+    await runtimes.runNamed(
+      "work",
+      ["agent", "list"],
+      undefined,
+      undefined,
+      (await runtimes.configuredBinding("work"))!,
+    );
+    expect(run).toHaveBeenCalledWith(
+      "herdr",
+      ["agent", "list"],
+      expect.objectContaining({ HERDR_SOCKET_PATH: "/tmp/replacement.sock" }),
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

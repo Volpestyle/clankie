@@ -840,7 +840,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       id: entry.id,
       session: entry.session,
       host: "local",
-      run: (args: readonly string[]) => deps.runtimes!.runNamed!(entry.id, args),
+      run: (args: readonly string[]) => deps.runtimes!.runNamed!(entry.id, args, undefined, undefined, entry),
     })),
   ];
   const herdrRunner = routeHerdrFleets(
@@ -867,7 +867,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               await refreshFleets();
               if ((fleetRevisions.get(entry.id) ?? 0) !== revision)
                 throw new Error(`Machine connection ${entry.id} changed or disconnected`);
-              return deps.runtimes!.runNamed!(entry.id, args, signal, timeout);
+              return deps.runtimes!.runNamed!(entry.id, args, signal, timeout, entry);
             }),
           ] as const;
         }),
@@ -1049,6 +1049,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                       args.map((arg) =>
                         arg.startsWith(`${fleetId}/`) ? arg.slice(fleetId.length + 1) : arg,
                       ),
+                      undefined,
+                      undefined,
+                      local,
                     );
                   },
                   viewEnv: async (view) => ({
