@@ -97,3 +97,17 @@ it("SettingsStore final guard rejects revocation after the write was queued, bef
   expect((await response).status).toBe(403);
   expect((await f.settings.load()).discord.voiceEnabled).toBe(false);
 });
+it("leaves unrelated routes alone when mounted at the service root", async () => {
+  const { Hono } = await import("hono");
+  const parent = new Hono();
+  parent.route("/", fixture().app);
+  parent.post("/v1/seat/transcript", async (context) =>
+    context.json({ size: (await context.req.text()).length }),
+  );
+  const body = "x".repeat(200 * 1024);
+  const response = await parent.request("/v1/seat/transcript", { method: "POST", body });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBeNull();
+  expect(await response.json()).toEqual({ size: body.length });
+  expect((await parent.request("/v1/discord/settings", { method: "POST", body })).status).toBe(403);
+});

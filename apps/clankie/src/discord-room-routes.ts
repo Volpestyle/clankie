@@ -34,8 +34,10 @@ export function discordSettingsRevision(settings: ClankieSettings["discord"]): s
 }
 export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono {
   const app = new Hono();
-  app.use("*", bodyLimit({ maxSize: 32 * 1024 }));
-  app.use("*", async (context, next) => {
+  // Mounted at the service root: scope middleware to this module's own paths so
+  // its body limit never reaches unrelated routes (seat transcripts, uploads).
+  app.use("/v1/discord/*", bodyLimit({ maxSize: 32 * 1024 }));
+  app.use("/v1/discord/*", async (context, next) => {
     context.header("cache-control", "no-store");
     await next();
   });
