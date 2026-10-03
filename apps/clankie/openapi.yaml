@@ -992,6 +992,58 @@ paths:
         "400": { description: Invalid inner request or forbidden route }
         "401": { description: Missing, expired or revoked device session }
         "403": { description: Not an account-paired operator device }
+  /v1/operator/projects:
+    get:
+      tags: [Operator]
+      operationId: getOperatorProjects
+      summary: Read owner project settings and their current revision
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Project settings and SHA-256 revision }
+        "401": { description: Owner authentication required }
+        "403": { description: Caller is not the owner }
+  /v1/operator/projects/remove-workspace:
+    post:
+      tags: [Operator]
+      operationId: removeProjectWorkspace
+      summary: Remove one exact owner-approved workspace registration
+      description: Preserves roles, grants and assignments. Refuses tracker-bound workspaces, stale revisions, changed owner authority and concurrent settings changes. Does not delete a directory.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, workspaceId, expectedRevision]
+              properties:
+                projectId: { type: string }
+                workspaceId: { type: string }
+                expectedRevision: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200": { description: Updated project settings and revision }
+        "400": { description: Malformed request }
+        "401": { description: Owner authentication required }
+        "403": { description: Caller is not the owner }
+        "409": { description: Removal conflicts with current settings or authority }
+  /v1/runtime-connections/{id}/harnesses:
+    get:
+      tags: [Operator]
+      operationId: inspectFleetHarnesses
+      summary: Inspect native harness registration on one registered remote fleet
+      description: Reports profile activation, service versus installed version, bridge, hooks and skill presence. Static registration never establishes live process membership or receiver proof.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Per-machine and per-profile harness diagnostics }
+        "401": { description: Owner authentication required }
+        "403": { description: Caller is not the owner }
+        "503": { description: Fleet unavailable or inspector not yet prepared }
   /v1/operator/persona:
     get:
       tags: [Operator]

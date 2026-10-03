@@ -1,6 +1,10 @@
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["harness"],
+    lines: ["  harness install [--codex-source-setup SCRIPT]  Review native harness plugin installation"],
+  },
+  {
     nouns: ["project"],
     lines: [
       "  project add|remove-workspace NAME --workspace PATH [--machine ID --platform windows|posix]  Manage approved project workspaces (JSON)",
@@ -115,7 +119,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["doctor"],
     lines: [
-      "  doctor                   This install: checkout vs release, models, credentials, herdr",
+      "  doctor [--machine ID]    Install, per-profile harness registration and connected fleet diagnostics",
       "                           (JSON; exit 0 — ok means the card was produced)",
     ],
   },

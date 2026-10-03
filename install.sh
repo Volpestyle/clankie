@@ -95,3 +95,10 @@ case ":${PATH:-}:" in
   *":$bin_dir:"*) ;;
   *) echo "Add $bin_dir to PATH, then run: clankie" ;;
 esac
+
+# Review each optional harness installation only in an interactive owner terminal.
+if [ -t 0 ] && [ -t 1 ]; then
+  "$bin_link" harness install
+else
+  echo "Run clankie harness install in a terminal to review optional harness linking."
+fi

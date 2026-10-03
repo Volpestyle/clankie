@@ -1,8 +1,8 @@
 {
   "name": "clankie-worker",
   "displayName": "Clankie worker channel",
-  "version": "0.2.0",
-  "description": "Serves a Swarm-dispatched worker's own Swarm MCP as a Claude Code channel, so an interactive worker receives leased Swarm mail. Separate from the operator seat; carries no operator credential.",
+  "version": "0.3.0",
+  "description": "Project-scoped tools, native replies and skills for Clankie fleet agents; carries no operator credential.",
   "author": {
     "name": "James Volpe",
     "url": "https://github.com/Volpestyle"

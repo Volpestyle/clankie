@@ -23,9 +23,9 @@ Acceptance remains the owner's. What landed differs from the text below in these
   instead of a long `agent wait` per pane. The census, watches, messages and
   hires carry the `<fleet>/` prefix.
 - **Allow-listed verbs.** Only read and pane verbs cross the link.
+- **Reverse-forward mailbox.** VUH-1527 shipped the authenticated fleet mailbox over the registered SSH link. Native delivery and project-tool eligibility are checked separately.
 - **Not built yet:**
   - terminal observe/control over ssh;
-  - the reverse-forward mailbox;
   - ssh-config discovery;
   - the app's fleet dropdown.
 
@@ -141,5 +141,5 @@ flowchart LR
   harness is the same typed hire failure as locally.
 - Clankie's own bash stays local. Arbitrary shell on the PC remains the
   owner's `windows-pc` skill, not a fleet power.
-- A remote seat without its mailbox is exposed to the draft-mixing race of
-  ADR 0161 until the reverse-forward bridge ships.
+- A remote seat with an unavailable mailbox is exposed to the draft-mixing race
+  of ADR 0161; use the shipped reverse-forward bridge and inspect its live delivery status.

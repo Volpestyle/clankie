@@ -2645,3 +2645,32 @@ replace live native process/canonical filesystem proof or grant any tools.
 The owner API exposes `GET /v1/operator/projects` and revision-guarded
 `POST /v1/operator/projects/remove-workspace` (`projectId`, `workspaceId`,
 `expectedRevision`).
+
+### Linking native fleet harnesses
+
+`clankie harness install` reviews each installed Claude/Codex harness in an
+interactive terminal. Each Claude profile (default, `CLAUDE_CONFIG_DIR`, and
+named `~/.claude-*` directories) has its own consent and native install/enable.
+Declining or running without a terminal changes no registration. Both checkout
+and release installers offer this step interactively.
+
+Codex uses the native `clankie-worker@clankie-fleet` plugin for project-scoped
+bridge tools and packaged skills. It does not load the operator-seat plugin.
+Symlinked or marked generated Codex configuration is not rewritten. Use the
+owning source/setup; `--codex-source-setup /absolute/script` runs an explicitly
+selected source setup after consent and checks that the link is preserved.
+Setup completion still needs doctor verification; no hook trust record is written.
+
+`clankie herdr prepare NAME` is the explicit owner-approved remote installation.
+It enables Claude in each discovered profile, uses native plugin installation for
+Codex, preserves managed Codex configuration, and compares installed Claude
+versions with the service bundle. `clankie doctor` reports local profiles and
+connected remote fleets; `clankie doctor --machine NAME` inspects one registered
+fleet through `GET /v1/runtime-connections/NAME/harnesses`.
+
+Reports separate executable presence, version, activation, bridge, hooks, and the
+`clankie` skill. Static files never prove a live receiver or project membership.
+OpenCode and Pi automatic plugin installation remains unsupported and appears
+explicitly in doctor; use their native setup. Restart native harnesses after
+installation. No launcher flags, project approvals, grants or owner credentials
+are changed by linking a plugin.

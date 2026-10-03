@@ -99,6 +99,7 @@ export interface InstallDoctorReport {
   readonly commands: { readonly [name: string]: CommandPresence };
   readonly ownerHerdrSessions?: readonly string[];
   readonly herdrPlugin: HerdrPluginReport;
+  readonly remoteHarnesses?: readonly unknown[];
   readonly harnessBridges: Awaited<ReturnType<typeof inspectHarnessBridges>>;
   /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
   readonly laneTools: { readonly url: string; readonly reachable: boolean };
@@ -272,7 +273,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
       .filter((session) => session.running)
       .map((session) => session.name),
     herdrPlugin,
-    harnessBridges: await inspectHarnessBridges(env, execute, options.fetchImpl ?? fetch),
+    harnessBridges: await inspectHarnessBridges(env, execute, options.fetchImpl ?? fetch, options.repoRoot),
     laneTools,
     doorway,
     power,

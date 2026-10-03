@@ -1,3 +1,4 @@
+import { runHarnessCommand } from "../src/command/harness.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
 import { runBodyCommand } from "../src/command/body.ts";
 import { MachineInventorySchema } from "@clankie/protocol";
@@ -151,6 +152,12 @@ export async function runHeadlessCaptainCommand(
       return result.ok ? 0 : 1;
     }
     if (command === "doctor") {
+      if (rest.length) {
+        if (rest.length !== 2 || rest[0] !== "--machine")
+          throw new Error("Usage: clankie doctor [--machine FLEET_ID]");
+        outputJson(stdout, await runRuntimeCommand(["harnesses", rest[1]!], options));
+        return 0;
+      }
       const result = await doctorCommand({
         repoRoot: options.repoRoot,
         env: options.env ?? process.env,
@@ -273,6 +280,10 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "agents" || command === "sessions") {
       outputJson(stdout, await runAgentsCommand(rest, options));
+      return 0;
+    }
+    if (command === "harness") {
+      outputJson(stdout, await runHarnessCommand(rest, options));
       return 0;
     }
     if (command === "project") {

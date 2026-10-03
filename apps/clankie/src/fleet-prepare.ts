@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { CLAUDE_WORKER_PLUGIN, CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
@@ -15,8 +16,7 @@ import {
  * The owner's one step for Claude workers on another machine (VUH-1527):
  * `clankie herdr prepare NAME`. Running it is the owner's approval. It ships
  * this Clankie's own worker plugin to that machine as a local `clankie`
- * marketplace (so its version always matches this service), installs it off
- * by default (each hire enables it for its own session), and approves its
+ * marketplace (so its version always matches this service), enables it for every discovered Claude profile (including CLAUDE_CONFIG_DIR), and approves its
  * channel in that machine's managed policy, keeping any entries already there.
  * Policy is machine-wide, so the ssh account must be that machine's
  * administrator; otherwise the step fails and says so.
@@ -29,6 +29,8 @@ export interface FleetPrepareResult {
   readonly policy: { readonly path: string; readonly changed: boolean };
   /** Codex agents there reach the same bridge as an MCP server; false when Codex is absent. */
   readonly codex: { readonly registered: boolean; readonly changed: boolean };
+  readonly installations: unknown;
+  readonly harnesses: unknown;
 }
 
 const MARKETPLACE_DIR = ".clankie/claude-plugin";
@@ -146,10 +148,8 @@ function stageCommand(fleet: HerdrFleet): string {
       );
 }
 
-/** Swap the staged marketplace in, then add or refresh it and install the plugin off by default. */
+/** Native installers receive the explicit owner approval from `herdr prepare`; no config append. */
 function installCommand(fleet: HerdrFleet): string {
-  const id = CLAUDE_WORKER_PLUGIN_ID;
-  const name = CLAUDE_WORKER_PLUGIN.marketplace;
   return fleet.ssh.shell === "powershell"
     ? powershellScriptCommand(
         [
@@ -158,13 +158,8 @@ function installCommand(fleet: HerdrFleet): string {
           `$target = Join-Path $env:USERPROFILE ${powershellLiteral(MARKETPLACE_DIR.replaceAll("/", "\\"))}`,
           "if (Test-Path -LiteralPath $target) { Remove-Item -Recurse -Force -LiteralPath $target }",
           "Move-Item -LiteralPath $stage -Destination $target",
-          "$ErrorActionPreference = 'Continue'",
-          `$known = (& claude plugin marketplace list 2>&1 | Out-String) -match ${powershellLiteral(`(?m)^\\s*\\S*\\s*${name}\\s*$`)}`,
-          `if ($known) { & claude plugin marketplace update ${name} 2>&1 | Out-Null } else { & claude plugin marketplace add $target 2>&1 | Out-Null }`,
-          `& claude plugin install ${id} 2>&1 | Out-Null`,
-          `& claude plugin update ${id} 2>&1 | Out-Null`,
-          `& claude plugin disable ${id} 2>&1 | Out-Null`,
-          "Write-Output $target",
+          "& node (Join-Path $target 'worker\\bin\\harness-install.mjs') --approved $target",
+          "if ($LASTEXITCODE -ne 0) { throw 'Native harness setup failed' }",
         ].join("; "),
       )
     : posixScriptCommand(
@@ -174,57 +169,28 @@ function installCommand(fleet: HerdrFleet): string {
           `target="$HOME/${MARKETPLACE_DIR}"`,
           'rm -rf "$target"',
           'mv "$stage" "$target"',
-          "set +e",
-          `if claude plugin marketplace list 2>/dev/null | grep -Eq '^[[:space:]]*[^[:space:]]*[[:space:]]*${name}[[:space:]]*$'; then claude plugin marketplace update ${name} >/dev/null 2>&1; else claude plugin marketplace add "$target" >/dev/null 2>&1; fi`,
-          `claude plugin install ${id} >/dev/null 2>&1`,
-          `claude plugin update ${id} >/dev/null 2>&1`,
-          `claude plugin disable ${id} >/dev/null 2>&1`,
-          "printf '%s\\n' \"$target\"",
+          'node "$target/worker/bin/harness-install.mjs" --approved "$target"',
         ].join("\n"),
       );
 }
 
-/**
- * The same bridge for Codex agents on that machine, which load no Claude
- * plugins: an MCP server named `clankie` in its Codex config, inheriting the
- * pane's Herdr identity so it finds its session's link. Added once; Codex's
- * own entry is left alone if the owner already has one.
- */
-function registerCodexCommand(fleet: HerdrFleet): string {
-  const env = '["HERDR_PANE_ID", "HERDR_SOCKET_PATH"]';
-  return fleet.ssh.shell === "powershell"
-    ? powershellScriptCommand(
-        [
-          "$ErrorActionPreference = 'Stop'",
-          "if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { Write-Output 'absent'; exit 0 }",
-          "$home_ = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }",
-          "New-Item -ItemType Directory -Force $home_ | Out-Null",
-          "$config = Join-Path $home_ 'config.toml'",
-          "$current = if (Test-Path -LiteralPath $config) { [IO.File]::ReadAllText($config) } else { '' }",
-          `if ($current -match '(?m)^\\[\\s*(mcp_servers\\.clankie|"mcp_servers"\\."clankie")\\s*\\]') { Write-Output 'present'; exit 0 }`,
-          `$bridge = Join-Path $env:USERPROFILE ${powershellLiteral(`${MARKETPLACE_DIR.replaceAll("/", "\\")}\\worker\\bin\\swarm-mcp.mjs`)}`,
-          `$table = [Environment]::NewLine + '[mcp_servers.clankie]' + [Environment]::NewLine + 'command = "node"' + [Environment]::NewLine + "args = ['" + $bridge + "']" + [Environment]::NewLine + 'env_vars = ${env}' + [Environment]::NewLine`,
-          "[IO.File]::AppendAllText($config, $table, (New-Object Text.UTF8Encoding $false))",
-          "Write-Output 'added'",
-        ].join("; "),
-      )
-    : posixScriptCommand(
-        [
-          "set -e",
-          "command -v codex >/dev/null 2>&1 || { echo absent; exit 0; }",
-          'config="${CODEX_HOME:-$HOME/.codex}/config.toml"',
-          'mkdir -p "$(dirname "$config")"',
-          `if [ -f "$config" ] && grep -Eq '^\\[[[:space:]]*(mcp_servers\\.clankie|"mcp_servers"\\."clankie")[[:space:]]*\\]' "$config"; then echo present; exit 0; fi`,
-          `printf '\\n[mcp_servers.clankie]\\ncommand = "node"\\nargs = ["%s"]\\nenv_vars = ${env}\\n' "$HOME/${MARKETPLACE_DIR}/worker/bin/swarm-mcp.mjs" >> "$config"`,
-          "echo added",
-        ].join("\n"),
-      );
+export async function inspectFleetHarnesses(
+  fleet: HerdrFleet,
+  options: { shell: FleetShellRun; workerPluginDir: string },
+): Promise<unknown> {
+  const expected = JSON.parse(
+    await readFile(join(options.workerPluginDir, ".claude-plugin", "plugin.json"), "utf8"),
+  ).version as string;
+  const command =
+    fleet.ssh.shell === "powershell"
+      ? powershellScriptCommand(
+          `& node (Join-Path $env:USERPROFILE ${powershellLiteral(`${MARKETPLACE_DIR.replaceAll("/", "\\")}\\worker\\bin\\harness-status.mjs`)}) ${powershellLiteral(expected)}; if ($LASTEXITCODE -ne 0) { throw 'Harness inspection failed; run owner preparation' }`,
+        )
+      : posixScriptCommand(
+          `node "$HOME/${MARKETPLACE_DIR}/worker/bin/harness-status.mjs" ${posixQuote(expected)}`,
+        );
+  return JSON.parse(await options.shell(command, 60_000));
 }
-
-const LIST_COMMAND = (fleet: HerdrFleet) =>
-  fleet.ssh.shell === "powershell"
-    ? powershellScriptCommand("& claude plugin list --json 2>$null")
-    : posixScriptCommand("claude plugin list --json 2>/dev/null || true");
 
 export async function prepareFleet(
   fleet: HerdrFleet,
@@ -260,21 +226,15 @@ export async function prepareFleet(
       ));
   await options.shell(stageCommand(fleet), 60_000);
   await copy(options.workerPluginDir, `${STAGING_DIR}/worker`);
-  const marketplace =
-    (await options.shell(installCommand(fleet), 180_000)).trim().split(/\r?\n/u).at(-1) ?? "";
-  const listed = await options.shell(LIST_COMMAND(fleet), 60_000);
-  let installed = false;
-  try {
-    const plugins = JSON.parse(listed.slice(listed.indexOf("["))) as unknown;
-    installed =
-      Array.isArray(plugins) &&
-      plugins.some((entry) => (entry as { id?: unknown })?.id === CLAUDE_WORKER_PLUGIN_ID);
-  } catch {
-    installed = false;
-  }
-  if (!installed)
+  await copy(join(options.workerPluginDir, "..", ".agents"), `${STAGING_DIR}/.agents`);
+  const installations = JSON.parse(await options.shell(installCommand(fleet), 180_000));
+  const harnesses = (await inspectFleetHarnesses(fleet, options)) as {
+    claude: Array<{ executable: boolean; enabled: boolean; versionMatches: boolean }>;
+    codex: { registered: boolean; pluginInstalled: boolean; versionMatches: boolean };
+  };
+  if (harnesses.claude.some((profile) => profile.executable && (!profile.enabled || !profile.versionMatches)))
     throw new Error(
-      `${CLAUDE_WORKER_PLUGIN_ID} did not install on ${fleet.id}; run claude plugin list there`,
+      `A Claude profile on ${fleet.id} has a disabled or stale worker plugin; inspect clankie doctor and native plugin sources`,
     );
   const read = await options.shell(readPolicyCommand(fleet), 30_000);
   const marked = read.indexOf(POLICY_MARK);
@@ -289,13 +249,24 @@ export async function prepareFleet(
         `Could not write ${path} on ${fleet.id}; the ssh account must be that machine's administrator (${error instanceof Error ? error.message : String(error)})`,
       );
     });
-  const codex = (await options.shell(registerCodexCommand(fleet), 60_000)).trim().split(/\r?\n/u).at(-1);
+
   return {
     fleet: fleet.id,
     plugin: CLAUDE_WORKER_PLUGIN_ID,
-    marketplace,
+    marketplace: MARKETPLACE_DIR,
+    installations,
+    harnesses,
     policy: { path, changed: approved.changed },
-    codex: { registered: codex === "added" || codex === "present", changed: codex === "added" },
+    codex: {
+      registered:
+        harnesses.codex.registered || (harnesses.codex.pluginInstalled && harnesses.codex.versionMatches),
+      changed:
+        Array.isArray(installations) &&
+        installations.some(
+          (result: { harness?: string; status?: string }) =>
+            result.harness === "codex" && result.status === "installed",
+        ),
+    },
   };
 }
 

@@ -202,3 +202,11 @@ binding moved or removed. Missing/noncanonical local registrations match nobody
 without denying unrelated valid workspaces. For remote approval/removal append
 `--machine FLEET_ID --platform windows|posix` and use that machine's exact absolute
 path. An approval is never remote process proof or a tool grant.
+
+For missing native fleet tools, inspect `clankie doctor` or `clankie doctor
+--machine FLEET_ID`: profile version, enabled state, bridge, hooks and `clankie`
+skill are independent facts. Static installation is not live native membership.
+The owner's `clankie harness install` asks per local Claude/Codex profile;
+`clankie herdr prepare FLEET_ID` explicitly ships/enables remote profiles.
+Generated/symlinked Codex configuration requires its source-owned setup, never
+TOML appends. OpenCode/Pi setup gaps are reported, not silently called ready.

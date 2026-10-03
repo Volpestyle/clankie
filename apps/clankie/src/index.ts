@@ -86,7 +86,7 @@ import { createProjectProcessObserver } from "./project-process-proof.ts";
 import { createProjectMembershipResolver, createProjectWorkspaceResolver } from "./project-membership.ts";
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
 import { FleetLinks, fleetLinkFetch } from "./fleet-link.ts";
-import { prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
+import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { LinearNotifications } from "./linear-notifications.ts";
@@ -918,6 +918,14 @@ const clankie = await createClankieApp({
   }),
   captain,
   fleetLinks,
+  inspectFleetHarnesses: async (id: string) => {
+    const fleet = (await runtimes.fleets()).find((entry) => entry.id === id);
+    if (!fleet) throw new Error(`No ssh fleet ${id} is connected`);
+    return inspectFleetHarnesses(fleet, {
+      shell: runtimes.fleetShell(fleet),
+      workerPluginDir: workerPluginDir(repoRoot),
+    });
+  },
   prepareFleet: async (id: string) => {
     const fleet = (await runtimes.fleets()).find((entry) => entry.id === id);
     if (fleet === undefined)

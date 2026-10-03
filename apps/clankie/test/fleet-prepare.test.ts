@@ -86,3 +86,42 @@ describe("preparing a machine for Claude workers (VUH-1527)", () => {
     );
   });
 });
+
+it.each([true, false])(
+  "preparation uses native per-profile installers and checks deployed versions (current=%s)",
+  async (current) => {
+    const { prepareFleet } = await import("../src/fleet-prepare.ts");
+    const commands: string[] = [];
+    const copied: string[] = [];
+    const shell = async (command: string) => {
+      const encoded = command.match(/-EncodedCommand\s+['"]?([A-Za-z0-9+/=]+)/u)?.[1];
+      const text = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
+      commands.push(text);
+      if (text.includes("harness-install.mjs"))
+        return JSON.stringify([{ harness: "codex", status: "source-manager-required" }]);
+      if (text.includes("harness-status.mjs"))
+        return JSON.stringify({
+          claude: [{ executable: true, enabled: true, versionMatches: current }],
+          codex: { registered: false, pluginInstalled: false, versionMatches: false },
+        });
+      if (text.includes("CLANKIE-POLICY-PATH"))
+        return `---CLANKIE-POLICY-PATH---C:\\policy.json\n${JSON.stringify({ channelsEnabled: true, allowedChannelPlugins: [worker] })}`;
+      return "";
+    };
+    const result = prepareFleet(pc, {
+      shell,
+      workerPluginDir: new URL("../../../integrations/claude-plugin/worker", import.meta.url).pathname,
+      copy: async (_source, destination) => {
+        copied.push(destination);
+      },
+    });
+    if (current)
+      expect(await result).toMatchObject({
+        codex: { registered: false, changed: false },
+        installations: [{ status: "source-manager-required" }],
+      });
+    else await expect(result).rejects.toThrow("stale");
+    expect(copied).toContain(".clankie/claude-plugin.new/.agents");
+    expect(commands.join("\n")).not.toMatch(/AppendAllText|mcp_servers\.clankie|plugin disable/u);
+  },
+);

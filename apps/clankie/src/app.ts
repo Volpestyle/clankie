@@ -439,6 +439,7 @@ export interface ClankieAppDependencies {
   localFleet?: { identity(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined };
   /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
   prepareFleet?: (id: string) => Promise<unknown>;
+  inspectFleetHarnesses?: (id: string) => Promise<unknown>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
   deliveredFiles?: Pick<DeliveredFileStore, "read">;
   memory?: MemoryStores;
@@ -1229,6 +1230,26 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           detail: error instanceof Error ? error.message : "Connection refused",
         },
         409,
+      );
+    }
+  });
+  app.get("/v1/runtime-connections/:id/harnesses", async (context) => {
+    const authority = await authorizeOwnerSecrets(context.req.raw);
+    if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
+    if (!dependencies.inspectFleetHarnesses) return context.json({ error: "runtimes_unavailable" }, 503);
+    try {
+      return context.json({
+        machine: context.req.param("id"),
+        harnesses: await dependencies.inspectFleetHarnesses(context.req.param("id")),
+      });
+    } catch {
+      return context.json(
+        {
+          error: "harness_inspection_unavailable",
+          detail:
+            "Remote inspection requires a reachable fleet and the shipped harness inspector; run explicit owner preparation if missing.",
+        },
+        503,
       );
     }
   });

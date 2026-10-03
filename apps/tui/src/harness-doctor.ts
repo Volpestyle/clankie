@@ -1,3 +1,4 @@
+import { inspectHarnessProfiles } from "../../../integrations/claude-plugin/worker/bin/harness-status.mjs";
 import { readFile, realpath, access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,7 @@ export async function inspectHarnessBridges(
   env: NodeJS.ProcessEnv,
   execute: ExecFileImpl,
   fetchImpl: typeof fetch,
+  repoRoot?: string,
 ) {
   const home = env.HOME?.trim() || homedir();
   const codexRoot = env.CODEX_HOME?.trim() || join(home, ".codex");
@@ -96,7 +98,20 @@ export async function inspectHarnessBridges(
     } catch {
       /* Stale discovery or offline service confers no membership. */
     }
+  const expectedVersion = repoRoot
+    ? (
+        await json(
+          join(repoRoot, "integrations", "claude-plugin", "worker", ".claude-plugin", "plugin.json"),
+        ).catch(() => ({}))
+      ).version
+    : undefined;
+  const profiles = await inspectHarnessProfiles({
+    env,
+    expectedVersion,
+    execute: async (command, args) => (await execute(command, args)).stdout,
+  });
   return {
+    profiles,
     codex: {
       registered: codexRegistered,
       configPath,

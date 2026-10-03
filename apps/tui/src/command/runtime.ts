@@ -82,6 +82,8 @@ export async function runRuntimeCommand(
     }
     method = "POST";
     body = JSON.stringify({ action: "workspaces", id: args[1], workspaces });
+  } else if (args[0] === "harnesses" && args.length === 2) {
+    path = `/v1/runtime-connections/${encodeURIComponent(args[1]!)}/harnesses`;
   } else if (args[0] === "prepare" && args.length === 2) {
     path = `/v1/runtime-connections/${encodeURIComponent(args[1]!)}/prepare`;
     method = "POST";

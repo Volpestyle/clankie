@@ -1,3 +1,5 @@
+import { createInterface } from "node:readline/promises";
+import { installHarnessBridges } from "../apps/tui/src/harness-install.ts";
 import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -56,13 +58,22 @@ if (!onPath) {
   console.log(`Note: ${binDirectory} is not on your PATH; add it in your shell profile.`);
 }
 
-// Registration remains an explicit owner step; never append to a generated harness config.
-console.log("Optional: expose owner-granted fleet tools to your own harnesses:");
-console.log(`  claude plugin marketplace add ${root}/integrations/claude-plugin`);
-console.log("  claude plugin install clankie-worker@clankie --scope user");
-console.log(
-  "  Codex: register command clankie, args [mcp, --fleet], forwarding HERDR_PANE_ID and HERDR_SOCKET_PATH through your configuration's source manager.",
-);
-console.log(
-  "Run clankie doctor to inspect harnessBridges and the actual Codex configSource before changing registration.",
-);
+// Consent is per harness. Noninteractive installation leaves harness registrations untouched.
+if (process.stdin.isTTY && process.stdout.isTTY) {
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const result = await installHarnessBridges({
+      repoRoot: root,
+      consent: async (_harness, detail) => {
+        const answer = await terminal.question(`${detail}\nProceed? [y/N] `);
+        return /^y(?:es)?$/iu.test(answer.trim());
+      },
+    });
+    for (const entry of result) console.log(`${entry.harness}: ${entry.status}. ${entry.detail}`);
+  } finally {
+    terminal.close();
+  }
+} else
+  console.log(
+    "Harness registration unchanged. Run clankie harness install interactively to review each installation.",
+  );

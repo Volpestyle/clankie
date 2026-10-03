@@ -259,3 +259,20 @@ available in Pi sessions, not in this Claude Code seat. The seat's `generate_ima
 MCP tool still accepts `personaReference: true` to use only the owner's `appearance/` references for
 self-depiction. Top-level images and sampled video frames supply vibe, never
 physical appearance; the caption preserves that distinction. A restart of Clankie applies changes to the board.
+
+### Owner installation across profiles
+
+`clankie harness install` offers consent for each discovered local Claude profile
+and native Codex worker plugin. `clankie herdr prepare NAME` explicitly installs
+and enables the worker for hand-started and hired agents across remote Claude
+profiles, including `CLAUDE_CONFIG_DIR` and named `~/.claude-*` directories.
+The worker MCP server is `clankie`. Bump both worker manifests on every shipment
+so native caches cannot retain an older protocol at the same version.
+
+`clankie doctor [--machine NAME]` compares deployed versions with the service and
+reports bridge, hook and `clankie` skill presence separately. Native Codex worker
+packaging lives beside the Claude packaging in `.agents/plugins/marketplace.json`
+and `worker/.codex-plugin`; it reuses the fleet bridge, has no operator bearer and
+does not advertise Claude hooks as Codex receivers. Managed Codex configuration
+must go through its real source/setup. Live membership and reply delivery require
+native session proof; installation alone supplies neither.

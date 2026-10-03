@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "swarm": {
+    "clankie": {
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/bin/swarm-mcp.mjs"]
     }
