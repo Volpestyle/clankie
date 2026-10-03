@@ -43,6 +43,7 @@ describe("clankie claude plugin", () => {
     for (const event of [
       "SessionStart",
       "UserPromptSubmit",
+      "PostToolUse",
       "Stop",
       "StopFailure",
       "SessionEnd",
@@ -53,7 +54,7 @@ describe("clankie claude plugin", () => {
       );
     }
     // Projection injects nothing, so turn-end and pre-compact syncs never block the seat.
-    for (const event of ["Stop", "StopFailure", "PreCompact"]) {
+    for (const event of ["PostToolUse", "Stop", "StopFailure", "PreCompact"]) {
       expect(hooks.hooks[event]?.[0]?.hooks).toContainEqual(
         expect.objectContaining({ args: ["seat-sync"], async: true }),
       );

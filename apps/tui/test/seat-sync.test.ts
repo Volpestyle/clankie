@@ -292,3 +292,32 @@ test("seat sync stops paging when the shared upload deadline expires", async () 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("tool-call progress syncs mid-turn, at most once per burst", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-progress-"));
+  const sessionId = randomUUID();
+  const bodies: unknown[] = [];
+  try {
+    const call = () =>
+      runSeatSyncCommand([], {
+        env: { CLANKIE_SEAT_SESSION_ID: sessionId, CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43) },
+        stdin: Readable.from([
+          JSON.stringify({
+            session_id: sessionId,
+            transcript_path: join(root, `${sessionId}.jsonl`),
+            hook_event_name: "PostToolUse",
+          }),
+        ]),
+        fetchImpl: async (_url, options) => {
+          bodies.push(JSON.parse(String(options?.body)));
+          return Response.json({ ok: true });
+        },
+      });
+    await call();
+    await call();
+    expect(bodies).toEqual([{ sessionId, entries: [], activity: "responding" }]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(join(tmpdir(), `clankie-seat-sync-${sessionId}`), { force: true });
+  }
+});

@@ -1,4 +1,6 @@
-import { basename, isAbsolute } from "node:path";
+import { statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, isAbsolute, join } from "node:path";
 import {
   readHerdrSeatTranscript,
   SeatTranscriptUploadSchema,
@@ -8,6 +10,8 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { commandHost } from "./io.ts";
 
 /** Plugin hook: read on the native host, send redacted display records only. */
+const POST_TOOL_SYNC_INTERVAL_MS = 2_000;
+
 export async function runSeatSyncCommand(
   args: readonly string[],
   options: {
@@ -39,6 +43,7 @@ export async function runSeatSyncCommand(
     ![
       "SessionStart",
       "UserPromptSubmit",
+      "PostToolUse",
       "Stop",
       "StopFailure",
       "SessionEnd",
@@ -47,6 +52,17 @@ export async function runSeatSyncCommand(
     ].includes(String(hook.hook_event_name))
   )
     throw new Error("Unsupported seat transcript hook");
+  // Mid-turn progress (VUH-1564): at most one upload per burst of tool calls.
+  // Stop and the next prompt still carry anything a skipped call left behind.
+  if (hook.hook_event_name === "PostToolUse") {
+    const marker = join(tmpdir(), `clankie-seat-sync-${sessionId}`);
+    try {
+      if (Date.now() - statSync(marker).mtimeMs < POST_TOOL_SYNC_INTERVAL_MS) return 0;
+    } catch {
+      /* first progress sync of this session */
+    }
+    writeFileSync(marker, "");
+  }
   if (
     typeof hook.transcript_path !== "string" ||
     !isAbsolute(hook.transcript_path) ||
@@ -64,7 +80,7 @@ export async function runSeatSyncCommand(
   const activity: SeatTranscriptUpload["activity"] =
     hook.hook_event_name === "PreCompact"
       ? undefined
-      : hook.hook_event_name === "UserPromptSubmit"
+      : hook.hook_event_name === "UserPromptSubmit" || hook.hook_event_name === "PostToolUse"
         ? "responding"
         : "waiting";
   if (!transcript?.entries.length && activity === undefined) return 0;
