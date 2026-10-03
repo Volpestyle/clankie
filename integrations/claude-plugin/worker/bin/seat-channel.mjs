@@ -22,7 +22,16 @@ const INSTRUCTIONS =
   'Events tagged <channel source="clankie" kind="message" conversation="…" event_id="…"> ' +
   "are a message from the operator or Clankie addressed to this agent. " +
   "Answer it in the normal reply as if it had been typed into the pane. " +
-  "To write to Clankie yourself, use the message_clankie tool.";
+  "To write to Clankie yourself, use the message_clankie tool. " +
+  "When work he gave you finishes or is blocked, report it there in a few lines " +
+  "(outcome; branch and commit; checks and their result; evidence path; open gaps or a decision needed), " +
+  "rather than typing into his pane.";
+/** Clankie admits a local agent by its pane's process tree; a shared Codex daemon is outside it. */
+const SHARED_DAEMON_NOTE =
+  "This Codex session runs its tools on the shared app-server daemon, which belongs to no pane, " +
+  "so Clankie cannot verify which agent is calling and grants it none of his tools. " +
+  "If you need them, tell the owner: exit and start Codex again with `codex --no-daemon` " +
+  "(to keep this conversation, `codex resume <id> --no-daemon`; if Codex says the conversation is open in another app, choose fork).";
 const MESSAGE_TOOL = {
   name: "message_clankie",
   description:
@@ -118,6 +127,9 @@ function fleetTools(current, refresh) {
 
 export function runSeatChannel({ paneId, parentArgv }) {
   let link = readLink();
+  const sharedDaemon = /--managed-daemon\b/u.test(parentArgv ?? "");
+  if (sharedDaemon)
+    log("running under the shared Codex daemon; Clankie's local tools need `codex --no-daemon`");
   /** Adopt this pane's current link when the service republished it; true if it changed. */
   const refresh = () => {
     const next = readLink();
@@ -243,7 +255,7 @@ export function runSeatChannel({ paneId, parentArgv }) {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
           capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
           serverInfo: { name: "clankie-worker", version: "0.3.0" },
-          instructions: INSTRUCTIONS,
+          instructions: sharedDaemon ? `${INSTRUCTIONS} ${SHARED_DAEMON_NOTE}` : INSTRUCTIONS,
         },
       });
     if (method === "notifications/initialized") {

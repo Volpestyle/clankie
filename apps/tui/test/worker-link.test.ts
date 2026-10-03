@@ -618,3 +618,27 @@ it.each([false, true])(
         .toBeGreaterThan(1);
   },
 );
+
+describe("a Codex session on the shared daemon", () => {
+  it("tells the agent why Clankie's tools are missing and how to get them", async () => {
+    const home = await linkedHome("http://127.0.0.1:1", true);
+    const bridge = spawn(process.execPath, [join(bin, "fleet-mcp.mjs")], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        HERDR_PANE_ID: "w8:p3",
+        HERDR_SOCKET_PATH: SOCKET,
+        CLANKIE_SEAT_PARENT_ARGV: "codex app-server --listen unix:// --managed-daemon",
+      },
+    });
+    cleanups.push(() => bridge.kill());
+    let stdout = "";
+    bridge.stdout.on("data", (chunk: Buffer) => (stdout += String(chunk)));
+    bridge.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
+    for (let attempt = 0; attempt < 200 && !stdout.includes("\n"); attempt += 1)
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    const reply = JSON.parse(stdout.split("\n")[0]!) as { result: { instructions: string } };
+    expect(reply.result.instructions).toContain("codex --no-daemon");
+    expect(reply.result.instructions).toContain("message_clankie");
+  });
+});
