@@ -102,6 +102,15 @@ cancel work already running.
    The last permission lets it create a post when a forum is selected. Servers he merely
    inhabits belong on the ingress, presence, and voice allowlists and nowhere
    else.
+   Set the swarm home in `/discord` → **Server, application, and roles**
+   (`none` clears it) or with `clankie discord set --swarm-guild-id ID`, then
+   restart. Agent channels then reach Discord from the app's channel page or the
+   CLI: `clankie conversations rooms` lists the swarm home's rooms, and
+   `clankie conversations channel [ID] --title T --member PERSONA_ID ...
+--discord provision [--room ROOM_ID]` creates or projects a room
+   (`--discord off` removes the projection; `--webhook-stdin` takes a
+   hand-made webhook URL on stdin). Both use the operator dispatch API's
+   `channel`, `channels`, and `discord_rooms` operations.
 3. Generate/install the invite from `/discord` or `/discord invite`.
 4. Select the **Official bot** active body and run `clankie restart discord`.
 5. Verify with `/discord status`, `pnpm discord:readiness` — which reports

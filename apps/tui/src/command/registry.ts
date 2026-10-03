@@ -76,6 +76,9 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
       "                           Inspect every conversation, including Discord tools (JSON)",
+      "  conversations channels | rooms | channel [ID] [--title T] [--member PERSONA_ID]...",
+      "                [--discord provision [--room ROOM_ID] | --discord off | --webhook-stdin] | --json-stdin",
+      "                           Agent channels and their swarm-home Discord rooms (JSON)",
     ],
   },
   {
@@ -256,6 +259,14 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  workdir [status] | set PATH | clear",
       "                           The captain's working directory (default: the home directory)",
+    ],
+  },
+  {
+    nouns: ["work-on"],
+    lines: [
+      "  work-on TITLE [--repo REPO_ID --issue ISSUE_ID] | clear",
+      "                           For agents: state your current assignment and optional issue link.",
+      "                           Persists for this native session; HERDR_PANE_ID identifies your seat.",
     ],
   },
   {

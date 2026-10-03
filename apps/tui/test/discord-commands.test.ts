@@ -1,4 +1,10 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SettingsStore } from "@clankie/settings";
+import type { SetupFlow } from "../src/shell/setup-flow.ts";
+import type { ClankieFaceShell } from "../src/shell/shell.ts";
 import {
   DISCORD_BOT_INVITE_PERMISSIONS,
   describeEmptyAllowlist,
@@ -6,6 +12,7 @@ import {
   discordBotInviteUrl,
   resolveGuildList,
   resolveIdList,
+  runDiscordWizard,
 } from "../src/discord-commands.ts";
 
 describe("stored credential display", () => {
@@ -91,5 +98,40 @@ describe("Discord server allowlist resolution", () => {
       "111111111111111111",
       "222222222222222222",
     ]);
+  });
+});
+
+describe("swarm home in /discord", () => {
+  /** One pass through "Server, application, and roles" with the swarm-home answer given. */
+  async function editSwarmHome(settings: SettingsStore, answer: string): Promise<void> {
+    const picks = ["core", "done"];
+    const texts = ["", "", answer, "", ""];
+    const flow = {
+      begin: () => undefined,
+      end: () => undefined,
+      readSelect: async () => picks.shift(),
+      readText: async () => texts.shift(),
+      renderLine: () => undefined,
+    } as unknown as SetupFlow;
+    await runDiscordWizard(
+      { setupFlow: flow, insertCommandResult: () => undefined } as unknown as ClankieFaceShell,
+      {
+        settings,
+        listCredentials: async () => ({}),
+        removeCredential: async () => undefined,
+        setCredential: async () => undefined,
+      },
+    );
+  }
+
+  it("sets the server agent channels may be projected into, keeps it on blank, and clears it on none", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-discord-swarm-"));
+    const settings = new SettingsStore(join(root, "settings.json"));
+    await editSwarmHome(settings, "123456789012345678");
+    expect((await settings.load()).discord.swarmGuildId).toBe("123456789012345678");
+    await editSwarmHome(settings, "");
+    expect((await settings.load()).discord.swarmGuildId).toBe("123456789012345678");
+    await editSwarmHome(settings, "none");
+    expect((await settings.load()).discord.swarmGuildId).toBeUndefined();
   });
 });

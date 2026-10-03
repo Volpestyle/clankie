@@ -4,10 +4,22 @@ import {
   createCaptainOperatorConversationClient,
   createCaptainRouteClient,
 } from "../session/operator-conversations.ts";
+import {
+  UpsertOperatorChannelSchema,
+  type OperatorConversationServiceClient,
+  type UpsertOperatorChannel,
+} from "@clankie/protocol";
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
-const USAGE =
-  "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]";
+const USAGE = [
+  "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
+  "       clankie conversations channels | rooms",
+  "       clankie conversations channel [CHANNEL_ID] [--title TITLE] [--member PERSONA_ID]...",
+  "                                     [--discord provision [--room ROOM_ID] | --discord off | --webhook-stdin]",
+  "       clankie conversations channel --json-stdin",
+].join("\n");
+
+const CHANNEL_ACTIONS = new Set(["channels", "rooms", "channel"]);
 
 /** The same discovery, replay, and live tail used by the visual conversation picker. */
 export async function runConversationsCommand(
@@ -19,8 +31,10 @@ export async function runConversationsCommand(
     readonly captainCredentialStore?: CredentialStore;
     readonly stdout?: Writable;
     readonly signal?: AbortSignal;
+    readonly stdin?: AsyncIterable<unknown> & { readonly isTTY?: boolean };
   },
 ): Promise<number> {
+  if (CHANNEL_ACTIONS.has(args[0] ?? "")) return runChannelAction(args, options);
   const { values, positionals } = parseArgs({
     args: [...args],
     allowPositionals: true,
@@ -37,20 +51,7 @@ export async function runConversationsCommand(
     limit > 100
   )
     throw new Error(USAGE);
-  const env = options.env ?? process.env;
-  const credential = await resolveCaptainCredential({
-    env,
-    ...(options.captainCredentialStore === undefined ? {} : { store: options.captainCredentialStore }),
-  });
-  if (credential === undefined)
-    throw new Error("No captain credential is available; start the clankie service once first.");
-  const client = createCaptainOperatorConversationClient(
-    createCaptainRouteClient({
-      host: commandHost({ ...options, env }),
-      captainToken: credential.token,
-      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-    }),
-  );
+  const client = await serviceClient(options);
   const stdout = options.stdout ?? process.stdout;
   const conversations = await client.list();
   if (action === "list") {
@@ -81,5 +82,135 @@ export async function runConversationsCommand(
   } else {
     for await (const event of client.tail(request, options.signal)) outputJson(stdout, event);
   }
+  return 0;
+}
+
+type ConversationsCommandOptions = Parameters<typeof runConversationsCommand>[1];
+
+async function serviceClient(
+  options: ConversationsCommandOptions,
+): Promise<OperatorConversationServiceClient> {
+  const env = options.env ?? process.env;
+  const credential = await resolveCaptainCredential({
+    env,
+    ...(options.captainCredentialStore === undefined ? {} : { store: options.captainCredentialStore }),
+  });
+  if (credential === undefined)
+    throw new Error("No captain credential is available; start the clankie service once first.");
+  return createCaptainOperatorConversationClient(
+    createCaptainRouteClient({
+      host: commandHost({ ...options, env }),
+      captainToken: credential.token,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    }),
+  );
+}
+
+async function readStdin(options: ConversationsCommandOptions, what: string): Promise<string> {
+  const stdin = options.stdin ?? process.stdin;
+  if (options.stdin === undefined && process.stdin.isTTY) throw new Error(`Pipe ${what} on stdin.`);
+  let text = "";
+  for await (const chunk of stdin) {
+    text += Buffer.isBuffer(chunk)
+      ? chunk.toString("utf8")
+      : typeof chunk === "string"
+        ? chunk
+        : new TextDecoder().decode(chunk as Uint8Array);
+    if (text.length > 64_000) throw new Error(`${what} is too long`);
+  }
+  return text.trim();
+}
+
+/**
+ * Agent channels and their Discord projection (ADR 0146), on the same
+ * operator dispatch the app uses. A roster arrives whole, so an update that
+ * names no title or members keeps the channel's current ones.
+ */
+async function runChannelAction(
+  args: readonly string[],
+  options: ConversationsCommandOptions,
+): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: {
+      title: { type: "string" },
+      member: { type: "string", multiple: true },
+      discord: { type: "string" },
+      room: { type: "string" },
+      "webhook-stdin": { type: "boolean", default: false },
+      "json-stdin": { type: "boolean", default: false },
+    },
+  });
+  const [action, channelId, ...extra] = positionals;
+  const stdout = options.stdout ?? process.stdout;
+  const flagged =
+    values.title !== undefined ||
+    values.member !== undefined ||
+    values.discord !== undefined ||
+    values.room !== undefined ||
+    values["webhook-stdin"] ||
+    values["json-stdin"];
+  if (action !== "channel" && (channelId !== undefined || flagged)) throw new Error(USAGE);
+  if (extra.length > 0) throw new Error(USAGE);
+  const client = await serviceClient(options);
+  if (action === "channels") {
+    if (client.channels === undefined) throw new Error("This Clankie service does not serve channels.");
+    outputJson(stdout, await client.channels());
+    return 0;
+  }
+  if (action === "rooms") {
+    if (client.discordRooms === undefined)
+      throw new Error("This Clankie service does not list Discord rooms.");
+    outputJson(stdout, await client.discordRooms());
+    return 0;
+  }
+  if (client.channel === undefined) throw new Error("This Clankie service does not serve channels.");
+  let request: UpsertOperatorChannel;
+  if (values["json-stdin"]) {
+    if (channelId !== undefined || flagged !== values["json-stdin"]) throw new Error(USAGE);
+    request = UpsertOperatorChannelSchema.parse(JSON.parse(await readStdin(options, "the channel request")));
+  } else {
+    const projections = [values.discord !== undefined, values["webhook-stdin"]].filter(Boolean).length;
+    if (projections > 1) throw new Error("Choose one of --discord or --webhook-stdin.");
+    if (values.room !== undefined && values.discord !== "provision")
+      throw new Error("--room picks where --discord provision puts the room.");
+    if (values.discord !== undefined && values.discord !== "provision" && values.discord !== "off")
+      throw new Error("--discord takes provision or off.");
+    const existing =
+      channelId === undefined
+        ? undefined
+        : (await client.channels?.())?.find((item) => item.channelId === channelId);
+    if (channelId !== undefined && existing === undefined)
+      throw new Error("No channel has that id; see clankie conversations channels.");
+    const title = values.title ?? existing?.title;
+    if (title === undefined) throw new Error("A new channel needs --title.");
+    const members =
+      values.member ??
+      [...(existing?.members ?? [])].sort((a, b) => a.position - b.position).map((m) => m.personaId);
+    let discord: UpsertOperatorChannel["discord"];
+    if (values["webhook-stdin"]) {
+      discord = { kind: "webhook", webhookUrl: await readStdin(options, "the webhook URL") };
+    } else if (values.discord === "off") {
+      discord = { kind: "off" };
+    } else if (values.discord === "provision") {
+      let room: { kind: "channel" | "forum"; channelId: string } | undefined;
+      if (values.room !== undefined) {
+        const found = (await client.discordRooms?.())?.find((item) => item.channelId === values.room);
+        if (found === undefined)
+          throw new Error("That room is not in the swarm home; see clankie conversations rooms.");
+        room = { kind: found.kind, channelId: found.channelId };
+      }
+      discord = { kind: "provision", ...(room === undefined ? {} : { room }) };
+    }
+    request = UpsertOperatorChannelSchema.parse({
+      schemaVersion: 1,
+      ...(channelId === undefined ? {} : { channelId }),
+      title,
+      members,
+      ...(discord === undefined ? {} : { discord }),
+    });
+  }
+  outputJson(stdout, await client.channel(request));
   return 0;
 }
