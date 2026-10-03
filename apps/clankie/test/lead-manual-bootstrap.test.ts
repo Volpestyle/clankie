@@ -451,9 +451,14 @@ it("refuses config mutation and dirty source before any bootstrap effects", asyn
 it("keeps the native Claude arm explicitly unsupported without creating any native lifecycle", async () => {
   const f = fixture();
   f.config.arm = "native-subagents";
+  delete f.config.accounts;
+  delete f.config.docker;
+  delete f.config.nativeBuild;
   f.write();
   expect(await bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path))).toMatchObject({
     status: "unsupported",
+    reason: "native-claude-capabilities-unavailable",
+    launchAllowed: false,
     approvalEstablished: false,
   });
   expect(fake.events).toEqual([]);

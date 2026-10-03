@@ -34,6 +34,7 @@ import {
 import { loadTasks } from "./lead.mjs";
 import { dockerTransport, LeadContainer } from "./lead-containment.mjs";
 import { buildNativeImage } from "./lead-native-image.mjs";
+import { nativeClaudeArmReadiness } from "./lead-native-claude.mjs";
 import { probeNativeRuntime, nativeRuntimeEvidence } from "./lead-native-capability.mjs";
 import { NativeOwnerAttachment } from "./lead-native-attachment.mjs";
 import { createNativeFleet } from "./lead-native-runtime.mjs";
@@ -221,6 +222,12 @@ export function readManualInvocation(path) {
     config.timeBudgetSeconds > task.timeBudgetSeconds
   )
     throw Error("Pinned single task/time selection required");
+  // Unsupported Claude capability is resolved before any credential, Docker socket,
+  // image or dependency artifact read. Imported configuration cannot supply authority.
+  if (config.arm === "native-subagents") {
+    cleanSource(config);
+    return registerInvocation(path, bytes, config, task);
+  }
   if (!Array.isArray(config.accounts) || config.accounts.length < 2 || config.accounts.length > 7)
     throw Error("Lead and one to six preallocated worker accounts required");
   const labels = new Set();
@@ -281,6 +288,10 @@ export function readManualInvocation(path) {
       throw Error("Historical pnpm artifact changed");
   }
   cleanSource(config);
+  return registerInvocation(path, bytes, config, task);
+}
+
+function registerInvocation(path, bytes, config, task) {
   const invocation = Object.freeze({
     schemaVersion: 1,
     configSha256: hash(bytes),
@@ -355,12 +366,7 @@ export async function runManualBootstrap(invocation) {
   if (record.used) throw Error("Manual invocation cannot resume or replay");
   record.used = true;
   const { config, task } = record;
-  if (config.arm !== "clankie-hires")
-    return {
-      status: "unsupported",
-      reason: "native-claude-subagents-arm-unimplemented",
-      approvalEstablished: false,
-    };
+  if (config.arm === "native-subagents") return nativeClaudeArmReadiness();
   if (config.task.kind === "neutral" && !["html-js-filter", "photonic-waveguide-routing"].includes(task.id))
     return {
       status: "unsupported",

@@ -219,3 +219,7 @@ are graded. Owner interruption precludes new grading. The fake fixture checks
 exercise these paths without Docker, builds, installs or real grading. Actual
 Linux before/after calibration and every historical/native run remain **unrun**.
 The native Claude arm remains separately unsupported.
+
+See [the native Claude partial engineering checkpoint](native-claude-continuation.md)
+for its prepared interactive launch specification, bounded observational accounting
+and exact remaining capability blockers. No Claude runtime is launch-enabled.
