@@ -1,3 +1,4 @@
+import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { DiscordRoomVoice } from "./discord-room-voice.ts";
 import { DiscordRoomObservations } from "./discord-room-observations.ts";
@@ -579,7 +580,11 @@ const localProjectProcessObserver = createProjectProcessObserver({
   herdrBinary: "herdr",
 });
 let proofFleetLinks: FleetLinks | undefined;
+const remoteCodexSeats = new RemoteCodexSeats(async (id) =>
+  (await runtimes.fleets()).find((fleet) => fleet.id === id),
+);
 const remoteProofOptions = {
+  privateSeats: remoteCodexSeats,
   fleet: async (id: string) => (await runtimes.fleets()).find((fleet) => fleet.id === id),
   shell: (fleet: Parameters<typeof runtimes.fleetShell>[0]) =>
     proofFleetLinks?.observer(fleet) ?? runtimes.fleetShell(fleet),
@@ -810,6 +815,8 @@ const captain = createCaptain(
       worktreeRoot: projectWorktreeRoot,
       gitWorktree: projectGitWorktree,
     }),
+    remoteCodexProcess: (launch) =>
+      remoteCodexSeats.register(launch, proofFleetLinks?.lifetime(launch.fleet) ?? (() => false)),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
     repoRoot,

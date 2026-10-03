@@ -245,6 +245,11 @@ class FleetLink {
     return this.current.state === "ready" ? this.relay?.stream(socket) : undefined;
   }
 
+  lifetime(): () => boolean {
+    const relay = this.relay;
+    return () => !!relay && this.relay === relay && this.current.state === "ready" && relay.alive();
+  }
+
   observe(command: string, timeoutMs?: number): Promise<string> {
     return this.current.state === "ready" && this.relay
       ? this.relay.execute(command, timeoutMs)
@@ -385,6 +390,16 @@ export class FleetLinks {
     return link && JSON.stringify(link.fleet) === JSON.stringify(fleet) && link.status().state === "ready"
       ? (command, timeoutMs) => link.observe(command, timeoutMs)
       : undefined;
+  }
+
+  lifetime(fleet: HerdrFleet): () => boolean {
+    const link = this.links.get(fleet.id);
+    const alive = link?.lifetime();
+    return () =>
+      !!link &&
+      this.links.get(fleet.id) === link &&
+      JSON.stringify(link.fleet) === JSON.stringify(fleet) &&
+      !!alive?.();
   }
 
   status(fleet: string): FleetLinkState | undefined {

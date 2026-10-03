@@ -1,3 +1,5 @@
+import { RemoteCodexSeats } from "../src/remote-codex-seats.ts";
+
 import { describe, expect, it, vi } from "vitest";
 import {
   createRemoteProjectObserver,
@@ -245,5 +247,79 @@ describe("remote project process proof", () => {
     expect(await canonical("other", "C:\\repos")).toBeUndefined();
     shell.mockRejectedValue(new Error("SSH gone"));
     expect(await canonical("pc", "C:\\repos")).toBeUndefined();
+  });
+});
+
+describe("registered private remote Codex proof", () => {
+  function privateFixture() {
+    const x = fixture();
+    x.agent.agent = "codex";
+    x.agent.agent_session = { agent: "codex", kind: "id", source: "herdr:codex", value: "private-thread" };
+    const executable = "C:\\installed\\codex.exe";
+    x.installed = [executable];
+    x.nativeProcesses[0]!.executable = executable;
+    x.processes[2]!.executable = executable;
+    x.processes[3]!.parent = 60;
+    const server = { pid: 60, startTime: "2026-10-03T10:00:01.0000001Z", executable, port: 45000 };
+    x.processes.push({ ...server, parent: 999 });
+    return { ...x, privateServer: { ...server, cwd: x.nativeProcesses[0]!.cwd, listeners: [60] } };
+  }
+  async function privateSetup(first = privateFixture(), last = structuredClone(first)) {
+    const seats = new RemoteCodexSeats(async () => fleet);
+    const server = first.privateServer;
+    const registration = seats.register(
+      {
+        fleet,
+        pane: "w3:p8",
+        binding: first.binding,
+        shell: { pid: 10, startTime: first.processes[0]!.startTime },
+        server: {
+          pid: server.pid,
+          startTime: server.startTime,
+          executable: server.executable,
+          port: server.port,
+        },
+      },
+      () => true,
+    );
+    registration.bindThread("private-thread", async () => true);
+    const observer = createRemoteProjectObserver({
+      fleet: async () => fleet,
+      shell: () => async () => JSON.stringify({ first, last }),
+      privateSeats: seats,
+    });
+    return { observer, registration };
+  }
+  it("binds the real socket to registered native server ancestry and independently proves the live view", async () => {
+    const { observer } = await privateSetup();
+    const proof = await observer("pc", "w3:p8", stream);
+    expect(proof).toMatchObject({
+      privateSeat: true,
+      processes: [{ pid: 30 }],
+      workspace: { canonicalPath: "C:\\repos\\rivals-agent" },
+    });
+  });
+  it.each([
+    "server-reuse",
+    "cwd",
+    "listener",
+    "socket-owner",
+    "thread",
+    "shell-reuse",
+    "executable",
+    "unbound",
+  ] as const)("denies changed %s private evidence", async (kind) => {
+    const first = privateFixture();
+    const last = structuredClone(first);
+    if (kind === "server-reuse") last.privateServer.startTime = "2026-10-03T10:00:01.0000002Z";
+    if (kind === "cwd") last.privateServer.cwd = "C:\\outside";
+    if (kind === "listener") last.privateServer.listeners = [61];
+    if (kind === "socket-owner") last.owners = [61];
+    if (kind === "thread") last.agent.agent_session.value = "other-thread";
+    if (kind === "shell-reuse") last.processes[0]!.startTime = "2026-10-03T10:00:00.0000002Z";
+    if (kind === "executable") last.privateServer.executable = "C:\\fake.exe";
+    const { observer, registration } = await privateSetup(first, last);
+    if (kind === "unbound") registration.release();
+    expect(await observer("pc", "w3:p8", stream)).toBeUndefined();
   });
 });

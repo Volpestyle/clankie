@@ -1,4 +1,5 @@
 import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
+import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
 import { hireDisplayName } from "./hire-name.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
@@ -559,6 +560,7 @@ export interface CaptainOptions {
   readonly nativeSummariesPath?: string;
   readonly localCodexProcess?: (pid: number, pane: string) => LocalCodexRegistration;
   readonly localCodexSocket?: () => string | undefined;
+  readonly remoteCodexProcess?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration;
   readonly personaImages?: PersonaImageSource;
   /** Repo root: instructions.md lives here, skills are discovered here. */
   readonly repoRoot: string;
@@ -1191,10 +1193,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               return deps.fleets!.shell!(fleet)(...args);
             };
             return [
-              createRemoteCodexSeatAdapter(fleet, shell, async (...args) => {
-                await guard();
-                return deps.fleets!.run(fleet)(...args);
-              }),
+              createRemoteCodexSeatAdapter(
+                fleet,
+                shell,
+                async (...args) => {
+                  await guard();
+                  return deps.fleets!.run(fleet)(...args);
+                },
+                options.remoteCodexProcess,
+              ),
               createRemoteClaudeWorkerSeatAdapter(fleet, shell, claudeWorkerDeps),
             ].map((adapter) => fenceFleetSeatAdapter(adapter, current));
           },

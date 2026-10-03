@@ -93,6 +93,10 @@ export class RemoteFleetRelay {
   }
 
   /** A bounded fresh observation executed inside the service-owned relay PowerShell process. */
+  alive(): boolean {
+    return this.open && this.readyNotified;
+  }
+
   execute(command: string, timeoutMs = 10_000): Promise<string> {
     const encoded = /^powershell\.exe -NoProfile -NonInteractive -EncodedCommand ([A-Za-z0-9+/=]+)$/u.exec(
       command,

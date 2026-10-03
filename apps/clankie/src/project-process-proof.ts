@@ -60,7 +60,7 @@ export interface ProjectProcessProof {
   readonly nativeOccupantId: string;
   /** Kernel-proven startup process, before native session reporting. Never a hired/private seat. */
   readonly nativeSessionPending?: true;
-  /** Only the local listener may set this after checking the private native-process registry. */
+  /** Only a trusted listener may set this after checking the private native-process registry. */
   readonly privateSeat?: true;
   readonly binding: { readonly socketPath: string; readonly session?: string };
   readonly processes: readonly { readonly pid: number; readonly startTime: string }[];

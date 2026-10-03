@@ -1,3 +1,4 @@
+import type { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import type { ProjectGitWorktreeObservation, ProjectWorktreeRootObservation } from "@clankie/settings";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -27,6 +28,14 @@ interface Observation {
   nativeProcesses: { pid: number; cwd: string; executable: string }[];
   owners: number[];
   installed: string[];
+  privateServer?: {
+    pid: number;
+    startTime: string;
+    executable: string;
+    cwd: string;
+    port: number;
+    listeners: number[];
+  } | null;
 }
 export interface RemoteStream {
   /** Ports are captured by trusted relay accept(), never copied from HTTP data. */
@@ -37,6 +46,7 @@ export interface RemoteStream {
 interface Options {
   fleet(id: string): Promise<HerdrFleet | undefined>;
   shell(fleet: HerdrFleet): FleetShellRun;
+  privateSeats?: RemoteCodexSeats;
 }
 
 /** Preserve Windows FILETIME's 100 ns precision; Date.parse alone truncates it. */
@@ -165,20 +175,61 @@ export function createRemoteProjectObserver(options: Options) {
     try {
       const fleet = await options.fleet(fleetId);
       if (!fleet || fleet.id !== fleetId || fleet.ssh.shell !== "powershell") return undefined;
+      const privateServer = stream ? options.privateSeats?.server(fleet, pane) : undefined;
       const command = windowsProcessCommand({
         session: fleet.session,
         pane,
+        ...(privateServer ? { privateServer } : {}),
         ...(stream ? { clientPort: stream.clientPort, serverPort: stream.serverPort } : {}),
       });
       const shell = options.shell(fleet);
       const snapshots = JSON.parse(await shell(command, 10_000)) as { first: Observation; last: Observation };
-      const first = select(snapshots.first, fleet, pane, stream);
+      const choose = async (snapshot: Observation) => {
+        const direct = select(snapshot, fleet, pane, stream);
+        if (direct || !stream || !privateServer || !options.privateSeats) return direct;
+        const view = select(snapshot, fleet, pane);
+        const server = snapshot.privateServer;
+        if (
+          !view ||
+          !server ||
+          !snapshot.installed.includes(server.executable) ||
+          view.proof.nativeSessionPending ||
+          snapshot.owners.length !== 1 ||
+          server.listeners.length !== 1 ||
+          server.listeners[0] !== server.pid ||
+          server.cwd !== view.proof.workspace?.canonicalPath
+        )
+          return undefined;
+        const socketChain = ancestry(snapshot.processes, snapshot.owners[0]!, server.pid);
+        const lifetime = {
+          pid: server.pid,
+          startTime: server.startTime,
+          executable: server.executable,
+          port: server.port,
+        };
+        if (
+          !socketChain ||
+          socketChain[0] === undefined ||
+          !isDeepStrictEqual(lifetime, privateServer) ||
+          !(await options.privateSeats.allows(fleet, view.proof, lifetime))
+        )
+          return undefined;
+        return {
+          ...view,
+          proof: { ...view.proof, privateSeat: true as const },
+          socketChain,
+          privateServer: server,
+        };
+      };
+      const first = await choose(snapshots.first);
       if (!first || (stream && !stream.alive())) return undefined;
-      const last = select(snapshots.last, fleet, pane, stream);
+      const last = await choose(snapshots.last);
       if (
         !isDeepStrictEqual(first, last) ||
         !isDeepStrictEqual(await options.fleet(fleetId), fleet) ||
-        (stream && !stream.alive())
+        (stream && !stream.alive()) ||
+        (first.proof.privateSeat &&
+          !isDeepStrictEqual(options.privateSeats?.server(fleet, pane), privateServer))
       )
         return undefined;
       return first.proof;

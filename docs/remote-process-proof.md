@@ -75,9 +75,42 @@ The same reader supplies fresh Git facts for enrolled repository worktree roots.
 
 Before Herdr reports a native session ID, an independently started process may
 receive workspace access under a disjoint process-lifetime identity. A pending
-native session cannot establish a hired/private seat assignment. Detached hired
-Codex app-servers do not have pane-shell ancestry and remain denied until a
-service-owned launch-lifetime and thread registry can independently bind them.
+native session cannot establish a hired/private seat assignment.
+
+## Dedicated hired Codex servers
+
+A Windows hire may use one service-created native Codex app-server with a visible
+native TUI in the allocated Herdr pane. The service launches the uniquely resolved
+installed executable with `CreateProcessW`, suspended and outside the SSH job. It
+captures the original process handle's full creation timestamp before resuming.
+Inherited machine environment is preserved; the pane and socket discovery fields
+come from the service allocation and live Herdr binding. No request can register
+or adopt an existing process, port or shared daemon.
+
+The private registry pins that server lifetime, executable, fleet configuration,
+relay lifetime, pane binding and shell lifetime. It binds exactly one thread from
+the held native protocol connection after `thread/loaded/list` and `thread/read`.
+Each proof checks that the same sole thread is still loaded. A foreign thread
+notification invalidates the registration regardless of notification method.
+There is no private authority while startup is unbound.
+
+The HTTP socket must independently descend from that exact server process. The
+observer also proves the pane's installed native foreground view, shell, native
+session and cwd; the server's cwd must agree. Listener ownership is checked before
+and after the controller connects and again in each process snapshot. It does
+not replace caller socket ancestry. Initial and final snapshots, the registry,
+allocation and fleet must still agree before project grants apply.
+
+Closing the server or its controller link releases registration. Cleanup opens
+the original PID and checks its full creation timestamp on the held handle before
+termination, so a reused PID is not killed. An unavailable SSH cleanup cannot
+restore authority. A service restart does not adopt detached survivors.
+
+The atomic launch mechanism has an OS-only bounded sleeper check; native hired
+Codex end-to-end acceptance still requires an owner-authorized native run. The
+deterministic protocol fixture holds the bridge's first catalog through denied
+startup, binds the sole native thread and returns granted tools without another
+SessionStart. This is not evidence of a live native tool invocation.
 
 ## Failure and operational limits
 

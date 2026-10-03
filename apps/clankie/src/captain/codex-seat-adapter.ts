@@ -38,6 +38,7 @@ export function createCodexSeatAdapter(
     herdr?: (args: readonly string[]) => Promise<unknown>;
     trackerOverrides?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<string[]>;
     server?: CodexServerLauncher;
+    serverForView?: (view: SeatView) => CodexServerLauncher;
     listenTimeoutMs?: number;
     /** Trusted controller policy, instantiated separately for every native seat. */
     nativePolicy?: (input: SeatLaunch, view: SeatView) => CodexNativePolicy;
@@ -197,7 +198,11 @@ export function createCodexSeatAdapter(
             ...(launch.env || options.viewEnv
               ? { env: { ...launch.env, ...(await options.viewEnv?.(view)) } }
               : {}),
-            ...(options.server === undefined ? {} : { server: options.server }),
+            ...(options.serverForView
+              ? { server: options.serverForView(view) }
+              : options.server === undefined
+                ? {}
+                : { server: options.server }),
             ...(options.nativePolicy === undefined ? {} : { policy: options.nativePolicy(launch, view) }),
             ...(options.listenTimeoutMs === undefined ? {} : { listenTimeoutMs: options.listenTimeoutMs }),
             startView: async (args) => {

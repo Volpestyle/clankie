@@ -1,4 +1,5 @@
 import * as externalCodex from "../src/captain/external-codex-control.ts";
+
 import { EventEmitter, once } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, spawn } from "node:child_process";
@@ -296,4 +297,66 @@ it("passes the exact remote Unix endpoint into the selected fleet's proxy", asyn
   } finally {
     proxy.mockRestore();
   }
+});
+
+it("registers only atomic Windows launch evidence, fences the protocol listener and cleans up by lifetime", async () => {
+  const localPort = await listeningServer();
+  const forward = fakeForward();
+  const commands: string[] = [];
+  const registration = { release: vi.fn(), bindThread: vi.fn(), observeThread: vi.fn() };
+  const register = vi.fn(() => registration);
+  const serverLife = {
+    pid: 4321,
+    startTime: "2026-10-03T00:00:00.1234567Z",
+    executable: "C:\\installed\\codex.exe",
+  };
+  const shell = vi.fn(async (command: string) => {
+    commands.push(command);
+    const script = decoded(command);
+    if (script.includes("$created=[ClankieCodexLaunch]::Start"))
+      return JSON.stringify({
+        pid: 4321,
+        log: "",
+        server: serverLife,
+        binding: { session: "default", socketPath: "C:\\herdr.sock" },
+        shell: { pid: 42, startTime: "2026-10-03T00:00:00.0000001Z" },
+      });
+    if (script.includes("Get-NetTCPConnection")) return "true";
+    return "";
+  });
+  const server = await remoteCodexServer({
+    fleet: windows,
+    shell,
+    spawn: forward.spawn,
+    freeLocalPort: async () => localPort,
+    remotePort: () => 47123,
+    privateSeat: { pane: "w1:p1", register },
+  })({
+    cwd: "C:\\repo",
+    configArgs: [],
+    env: { HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "C:\\herdr.sock" },
+    onExit: () => {},
+  });
+  expect(register).toHaveBeenCalledWith(
+    expect.objectContaining({ pane: "w1:p1", server: { ...serverLife, port: 47123 } }),
+  );
+  const script = decoded(commands[0]!);
+  expect(script).toContain("GetProcessTimes(created.process");
+  expect(script).toContain("ResumeThread(created.thread)");
+  expect(script.indexOf("GetProcessTimes(created.process")).toBeLessThan(
+    script.indexOf("ResumeThread(created.thread)"),
+  );
+  expect(script).toContain("[Environment]::GetEnvironmentVariables()");
+  expect(script).not.toContain("Invoke-CimMethod");
+  expect(script).not.toContain("Get-Process -Id $created");
+  const socket = await server.connect();
+  expect(socket).toBeDefined();
+  expect(commands.filter((c) => decoded(c).includes("Get-NetTCPConnection"))).toHaveLength(2);
+  socket?.close();
+  await server.close();
+  expect(registration.release).toHaveBeenCalledOnce();
+  expect(decoded(commands.at(-1)!)).toContain(
+    "[ClankieCodexLaunch]::Stop(4321,'2026-10-03T00:00:00.1234567Z')",
+  );
+  expect(decoded(commands.at(-1)!)).not.toContain("taskkill");
 });

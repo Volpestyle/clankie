@@ -1,3 +1,4 @@
+import type { RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync } from "node:fs";
 import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
@@ -92,7 +93,7 @@ export class CodexAppServerClient {
     this.socket.send(JSON.stringify({ method: "initialized", params: {} }));
   }
 
-  request(method: string, params: RecordValue): Promise<unknown> {
+  request(method: string, params: RecordValue, timeoutMs = this.timeoutMs): Promise<unknown> {
     if (this.failure) return Promise.reject(this.failure);
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
@@ -100,7 +101,7 @@ export class CodexAppServerClient {
         this.pending.delete(id);
         // Delivery is uncertain: callers must never retry through a terminal.
         reject(new Error(`Codex app-server ${method} timed out; delivery is uncertain`));
-      }, this.timeoutMs);
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.socket.send(JSON.stringify({ id, method, params }), (error) => {
         if (error) this.fail(error);
@@ -146,6 +147,7 @@ export interface CodexAppServerSeat {
 interface CodexServerConnection {
   /** Local child identity; remote launchers must not expose a remote PID here. */
   readonly pid?: number;
+  readonly remoteRegistration?: RemoteCodexRegistration;
   readonly endpoint: string;
   connect(): Promise<WebSocket | undefined>;
   /** Why the server is gone, once it is. */
@@ -391,6 +393,13 @@ export async function startCodexAppServerSeat(options: {
         if (event.method === "turn/started" && typeof turn.id === "string") activeTurn = turn.id;
         if (event.method === "turn/completed" && turn.id === activeTurn) activeTurn = undefined;
       }
+      const eventThread =
+        typeof event.params.threadId === "string"
+          ? event.params.threadId
+          : typeof record(event.params.thread).id === "string"
+            ? String(record(event.params.thread).id)
+            : undefined;
+      if (eventThread) server.remoteRegistration?.observeThread(eventThread);
       options.onEvent?.(event);
     };
     client = new CodexAppServerClient(socket, observe);
@@ -446,7 +455,8 @@ export async function startCodexAppServerSeat(options: {
       options.signal?.throwIfAborted();
       const loaded = record(await client.request("thread/loaded/list", {}));
       const ids = Array.isArray(loaded.data) ? loaded.data : [];
-      if (ids.length > 1) throw new Error("Codex seat has more than one initial native thread");
+      if (ids.length > 1 || loaded.nextCursor != null)
+        throw new Error("Codex seat has more than one initial native thread");
       if (typeof ids[0] === "string") {
         if (options.resumeThreadId && ids[0] !== options.resumeThreadId)
           throw new Error("Codex TUI resumed a different thread");
@@ -465,6 +475,16 @@ export async function startCodexAppServerSeat(options: {
     const thread = record(result.thread);
     if (typeof thread.id !== "string") throw new Error("Codex app-server returned no thread identity");
     if (thread.id !== threadId) throw new Error("Native thread/read identity changed");
+    server.remoteRegistration?.bindThread(threadId, async () => {
+      if (closed || stopped || server.failure()) return false;
+      const loaded = record(await client!.request("thread/loaded/list", {}, 2_000));
+      return (
+        Array.isArray(loaded.data) &&
+        loaded.data.length === 1 &&
+        loaded.data[0] === threadId &&
+        loaded.nextCursor == null
+      );
+    });
     if (options.policy?.bound) {
       try {
         await options.policy.bound({ threadId, read });

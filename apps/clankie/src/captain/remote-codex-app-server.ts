@@ -1,3 +1,5 @@
+import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
+import { windowsCodexLaunchCommand, windowsCodexStopCommand } from "../windows-codex-launch.ts";
 import { codexControlEndpoint, codexProcess, parseHerdrForegroundProcesses } from "./codex-seat.ts";
 import { codexProxyControl } from "./external-codex-control.ts";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -52,11 +54,15 @@ export interface RemoteCodexServerOptions {
   readonly spawn?: typeof spawn;
   readonly freeLocalPort?: () => Promise<number>;
   readonly remotePort?: () => number;
+  readonly privateSeat?: { pane: string; register(launch: RemoteCodexLaunch): RemoteCodexRegistration };
 }
 
 interface Started {
   readonly pid: number;
   readonly log: string;
+  readonly binding?: RemoteCodexLaunch["binding"];
+  readonly shell?: RemoteCodexLaunch["shell"];
+  readonly server?: RemoteCodexLaunch["server"];
 }
 
 function startScript(
@@ -127,10 +133,10 @@ function parseStarted(stdout: string): Started {
     .map((entry) => entry.trim())
     .reverse()
     .find((entry) => entry.startsWith("{"));
-  const parsed = line === undefined ? undefined : (JSON.parse(line) as { pid?: unknown; log?: unknown });
+  const parsed = line === undefined ? undefined : (JSON.parse(line) as Partial<Started>);
   if (typeof parsed?.pid !== "number" || typeof parsed.log !== "string")
     throw new Error(`The fleet did not report its Codex server: ${stdout.trim().slice(-500)}`);
-  return { pid: parsed.pid, log: parsed.log };
+  return { ...parsed, pid: parsed.pid, log: parsed.log };
 }
 
 function freeLocalPort(): Promise<number> {
@@ -182,11 +188,41 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
     const started = parseStarted(
       await shell(
         fleet.ssh.shell === "powershell"
-          ? powershellScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id }))
+          ? options.privateSeat
+            ? windowsCodexLaunchCommand({
+                session: fleet.session,
+                pane: options.privateSeat.pane,
+                cwd: input.cwd,
+                args: [...input.configArgs, "app-server", "--listen", `ws://127.0.0.1:${remotePort}`],
+                id,
+              })
+            : powershellScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id }))
           : posixScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id })),
         START_TIMEOUT_MS,
       ),
     );
+    const stopServer = () =>
+      options.privateSeat && !started.server
+        ? Promise.resolve(undefined)
+        : shell(
+            options.privateSeat && started.server
+              ? windowsCodexStopCommand(started.server)
+              : stopCommand(fleet, started.pid),
+          ).catch(() => undefined);
+    const registration =
+      options.privateSeat && started.binding && started.shell && started.server
+        ? options.privateSeat.register({
+            fleet,
+            pane: options.privateSeat.pane,
+            binding: started.binding,
+            shell: started.shell,
+            server: { ...started.server, port: remotePort },
+          })
+        : undefined;
+    if (options.privateSeat && !registration) {
+      await stopServer();
+      throw new Error("Private remote process launch returned no atomic lifetime");
+    }
     let failure: Error | undefined;
     let closed = false;
     let output = `remote log ${started.log} on ${fleet.id}`;
@@ -199,7 +235,8 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
         stdio: ["ignore", "ignore", "pipe"],
       });
     } catch (error) {
-      await shell(stopCommand(fleet, started.pid)).catch(() => undefined);
+      registration?.release();
+      await stopServer();
       throw error;
     }
     forward.stderr?.setEncoding("utf8");
@@ -209,16 +246,46 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
     const dropped = (detail: string) => {
       if (closed || failure !== undefined) return;
       failure = new Error(`The ssh link to fleet ${fleet.id} dropped: ${detail}`);
+      registration?.release();
+      if (registration) void stopServer();
       input.onExit(null);
     };
     forward.on("error", (error) => dropped(error.message));
     forward.on("exit", (code) => dropped(forwardErrors.trim() || `ssh exited (${String(code)})`));
+    const ownsListener = async (): Promise<boolean> => {
+      if (!registration || !started.server) return true;
+      const raw = await shell(
+        powershellScriptCommand(
+          [
+            "$ErrorActionPreference='Stop'",
+            `$rows=@(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort ${remotePort} -State Listen -ErrorAction SilentlyContinue)`,
+            `if($rows.Count -ne 1 -or $rows[0].OwningProcess -ne ${started.server.pid}) { 'false'; exit }`,
+            `$p=Get-Process -Id ${started.server.pid} -ErrorAction Stop`,
+            `($p.StartTime.ToUniversalTime().ToString('O') -ceq ${powershellLiteral(started.server.startTime)} -and $p.Path -ceq ${powershellLiteral(started.server.executable)}) | ConvertTo-Json -Compress`,
+          ].join("; "),
+        ),
+        5_000,
+      ).catch(() => "false");
+      return raw.trim() === "true";
+    };
     return {
+      ...(registration ? { remoteRegistration: registration } : {}),
       endpoint: `ws://127.0.0.1:${String(remotePort)}`,
       async connect() {
+        if (!(await ownsListener())) return undefined;
         const socket = await openCodexSocket(`ws://127.0.0.1:${String(localPort)}/`);
+        if (socket && !(await ownsListener())) {
+          socket.close();
+          registration?.release();
+          return undefined;
+        }
         // Keep the server's own words for a startup error, without an ssh call per poll.
-        if (socket === undefined && failure === undefined && Date.now() - tailedAt >= TAIL_INTERVAL_MS) {
+        if (
+          socket === undefined &&
+          started.log &&
+          failure === undefined &&
+          Date.now() - tailedAt >= TAIL_INTERVAL_MS
+        ) {
           tailedAt = Date.now();
           output = (await shell(tailCommand(fleet, started.log)).catch(() => output)).trim() || output;
         }
@@ -229,8 +296,9 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
       async close() {
         if (closed) return;
         closed = true;
+        registration?.release();
         forward.kill("SIGTERM");
-        await shell(stopCommand(fleet, started.pid)).catch(() => undefined);
+        await stopServer();
       },
     };
   };
@@ -244,6 +312,7 @@ export function createRemoteCodexSeatAdapter(
   fleet: HerdrFleet,
   shell: FleetShellRun,
   herdr: HerdrFleetRun,
+  register?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration,
 ): HarnessSeatAdapter {
   const bare = (arg: string) => {
     const qualified = splitFleetQualified(arg);
@@ -268,7 +337,12 @@ export function createRemoteCodexSeatAdapter(
   return createCodexSeatAdapter({
     herdr: (args) => herdr(args.map(bare)),
     trackerOverrides: remoteCodexTrackerOverrides(fleet, shell),
-    server: remoteCodexServer({ fleet, shell }),
+    ...(register && fleet.ssh.shell === "powershell"
+      ? {
+          serverForView: (view: import("@clankie/agent-hosts").SeatView) =>
+            remoteCodexServer({ fleet, shell, privateSeat: { pane: bare(view.paneId), register } }),
+        }
+      : { server: remoteCodexServer({ fleet, shell }) }),
     listenTimeoutMs: REMOTE_CODEX_LISTEN_TIMEOUT_MS,
     viewEnv: async (view) => ({ HERDR_PANE_ID: bare(view.paneId), HERDR_SOCKET_PATH: await sessionSocket() }),
   });

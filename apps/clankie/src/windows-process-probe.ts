@@ -63,7 +63,7 @@ public static class ClankieProcess {
       if(4+24L*count>length) throw new Exception("Invalid TCP table");
       var owners=new System.Collections.Generic.List<int>();
       for(int n=0;n<count;n++) {int at=4+n*24;
-        if(BitConverter.ToUInt32(bytes,at)==5 && BitConverter.ToUInt32(bytes,at+4)==0x0100007f && BitConverter.ToUInt32(bytes,at+12)==0x0100007f && (bytes[at+8]*256+bytes[at+9])==clientPort && (bytes[at+16]*256+bytes[at+17])==serverPort) owners.Add((int)BitConverter.ToUInt32(bytes,at+20));
+        if(BitConverter.ToUInt32(bytes,at)==(serverPort==0?2:5) && BitConverter.ToUInt32(bytes,at+4)==0x0100007f && (bytes[at+8]*256+bytes[at+9])==clientPort && (serverPort==0 || (BitConverter.ToUInt32(bytes,at+12)==0x0100007f && (bytes[at+16]*256+bytes[at+17])==serverPort))) owners.Add((int)BitConverter.ToUInt32(bytes,at+20));
       }
       return owners.ToArray();
     } finally {Marshal.FreeHGlobal(memory);}
@@ -139,6 +139,7 @@ export function windowsProcessCommand(input: {
   pane: string;
   clientPort?: number;
   serverPort?: number;
+  privateServer?: { pid: number; port: number };
 }): string {
   return powershellScriptCommand(`${native}
 $session = ${powershellLiteral(input.session)}
@@ -189,9 +190,16 @@ $nativeProcesses = @(foreach ($row in $all) {
   } catch { }
 })
 $owners = @(${input.clientPort === undefined || input.serverPort === undefined ? "" : `[ClankieProcess]::Owners(${input.clientPort}, ${input.serverPort})`})
+$privateServer=$null
+${
+  input.privateServer
+    ? `$detail=[ClankieProcess]::Details(${input.privateServer.pid})
+$privateServer=[ordered]@{pid=$detail.pid;startTime=$detail.startTime;executable=[ClankieProcess]::Canonical($detail.executable);cwd=[ClankieProcess]::Cwd($detail.pid);port=${input.privateServer.port};listeners=@([ClankieProcess]::Owners(${input.privateServer.port},0))}`
+    : ""
+}
 # Return only relevant ancestry; unrelated machine process paths never cross the link.
 $needed = New-Object 'System.Collections.Generic.HashSet[int]'
-foreach ($start in @($nativeProcesses | ForEach-Object { $_.pid }) + @($owners) + @([int]$info.shell_pid, [int]$info.foreground_process_group_id)) {
+foreach ($start in @($nativeProcesses | ForEach-Object { $_.pid }) + @($owners) + @(${input.privateServer?.pid ?? 0}) + @([int]$info.shell_pid, [int]$info.foreground_process_group_id)) {
   $current = [int]$start
   for ($depth=0; $depth -lt 64 -and $current -gt 4; $depth++) {
     if (!$needed.Add($current)) { break }
@@ -201,7 +209,7 @@ foreach ($start in @($nativeProcesses | ForEach-Object { $_.pid }) + @($owners) 
   }
 }
 $relevant = @(foreach ($processId in $needed) { try { [ClankieProcess]::Details($processId) } catch { } })
-[ordered]@{binding=[ordered]@{socketPath=$binding[0].socket_path;session=$session};info=[ordered]@{pane_id=$info.pane_id;shell_pid=$info.shell_pid;foreground_process_group_id=$info.foreground_process_group_id};agent=[ordered]@{pane_id=$agent.pane_id;terminal_id=$agent.terminal_id;agent=$agent.agent;agent_session=$agent.agent_session;agent_status=$agent.agent_status};processes=$relevant;nativeProcesses=$nativeProcesses;owners=$owners;installed=$installed}
+[ordered]@{binding=[ordered]@{socketPath=$binding[0].socket_path;session=$session};info=[ordered]@{pane_id=$info.pane_id;shell_pid=$info.shell_pid;foreground_process_group_id=$info.foreground_process_group_id};agent=[ordered]@{pane_id=$agent.pane_id;terminal_id=$agent.terminal_id;agent=$agent.agent;agent_session=$agent.agent_session;agent_status=$agent.agent_status};processes=$relevant;nativeProcesses=$nativeProcesses;owners=$owners;installed=$installed;privateServer=$privateServer}
 }
 $first = Observe-ClankieProcess
 $last = Observe-ClankieProcess
