@@ -1,7 +1,7 @@
 {
   "name": "clankie-worker",
   "displayName": "Clankie worker channel",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Project-scoped tools, native replies and skills for Clankie fleet agents; carries no operator credential.",
   "author": {
     "name": "James Volpe",

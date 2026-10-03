@@ -1,5 +1,5 @@
 import { inspectHarnessBridges } from "../src/harness-doctor.ts";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -36,7 +36,7 @@ it("reports installed, enabled, version, bridge, hook and skill gaps independent
     );
     const report = await inspectHarnessProfiles({
       env: { HOME: home, CLAUDE_CONFIG_DIR: active },
-      expectedVersion: "0.3.0",
+      expectedVersion: "0.4.0",
       execute: async (_command, args) => (args[0] === "--version" ? "version" : "{}"),
     });
     expect(report.claude).toHaveLength(3);
@@ -69,17 +69,21 @@ it("reports installed, enabled, version, bridge, hook and skill gaps independent
   }
 });
 
-it.each(["current", "disabled", "missing-bridge", "missing-forwarding"])(
+it.each(["current", "stale", "disabled", "missing-bridge", "missing-forwarding"])(
   "checks Codex plugin activation, bridge and forwarding separately: %s",
   async (kind) => {
     const home = await mkdtemp(join(tmpdir(), "clankie-codex-profile-"));
-    const root = join(home, ".codex/plugins/cache/clankie-fleet/clankie-worker/0.3.0");
+    const root = join(
+      home,
+      ".codex/plugins/cache/clankie-fleet/clankie-worker",
+      kind === "stale" ? "0.3.0" : "0.4.0",
+    );
     try {
       await mkdir(join(root, ".codex-plugin"), { recursive: true });
       await mkdir(join(root, "bin"));
       await writeFile(
         join(root, ".codex-plugin/plugin.json"),
-        JSON.stringify({ version: "0.3.0", mcpServers: "./codex-mcp.json" }),
+        JSON.stringify({ version: kind === "stale" ? "0.3.0" : "0.4.0", mcpServers: "./codex-mcp.json" }),
       );
       await writeFile(join(root, "bin/fleet-mcp.mjs"), "// fixture\n");
       if (kind !== "missing-bridge")
@@ -100,7 +104,11 @@ it.each(["current", "disabled", "missing-bridge", "missing-forwarding"])(
         if (command === "codex" && args[0] === "plugin")
           return JSON.stringify({
             installed: [
-              { pluginId: "clankie-worker@clankie-fleet", version: "0.3.0", enabled: kind !== "disabled" },
+              {
+                pluginId: "clankie-worker@clankie-fleet",
+                version: kind === "stale" ? "0.3.0" : "0.4.0",
+                enabled: kind !== "disabled",
+              },
             ],
           });
         if (args[0] === "mcp")
@@ -115,17 +123,18 @@ it.each(["current", "disabled", "missing-bridge", "missing-forwarding"])(
           });
         return "version";
       };
-      const report = await inspectHarnessProfiles({ env: { HOME: home }, expectedVersion: "0.3.0", execute });
+      const report = await inspectHarnessProfiles({ env: { HOME: home }, expectedVersion: "0.4.0", execute });
       const summary = await inspectHarnessBridges(
         { HOME: home },
         async (command, args) => ({ stdout: await execute(command, args), stderr: "" }),
         async () => new Response(null, { status: 403 }),
+        join(import.meta.dirname, "../../.."),
       );
       expect(summary.codex.registered).toBe(kind === "current");
       expect(report.codex.registration).toBe(kind === "missing-bridge" ? "unrecognized" : "plugin");
       expect(report.codex).toMatchObject({
         pluginInstalled: true,
-        versionMatches: true,
+        versionMatches: kind !== "stale",
         enabled: kind !== "disabled",
         bridge: kind !== "missing-bridge",
         identityForwarding: !["missing-bridge", "missing-forwarding"].includes(kind),
@@ -169,3 +178,10 @@ it.each([true, false])(
     }
   },
 );
+
+it("ships matching Claude and Codex worker versions for doctor comparisons", async () => {
+  const root = join(import.meta.dirname, "../../../integrations/claude-plugin/worker");
+  for (const manifest of [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
+    expect(JSON.parse(await readFile(join(root, manifest), "utf8")).version).toBe("0.4.0");
+  }
+});

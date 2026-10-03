@@ -91,7 +91,7 @@ function fleetTools(current, refresh) {
         params: {
           protocolVersion: "2025-06-18",
           capabilities: {},
-          clientInfo: { name: "clankie-worker", version: "0.3.0" },
+          clientInfo: { name: "clankie-worker", version: "0.4.0" },
         },
       },
       signal,
@@ -290,7 +290,7 @@ export function runSeatChannel({ paneId, parentArgv }) {
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
           capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
-          serverInfo: { name: "clankie-worker", version: "0.3.0" },
+          serverInfo: { name: "clankie-worker", version: "0.4.0" },
           instructions: sharedDaemon ? `${INSTRUCTIONS} ${SHARED_DAEMON_NOTE}` : INSTRUCTIONS,
         },
       });

@@ -121,7 +121,7 @@ loads his install skill, and `clankie model status` runs without a prompt.
 
 [`worker/`](worker/) is a second plugin in the same marketplace,
 `clankie-worker@clankie` serves native hired seats and linked fleet agents.
-Its MCP server key stays `swarm` for installed permission/configuration compatibility;
+Its MCP server key is `clankie`; older `swarm` registrations require updating.
 it runs the native seat mailbox or fleet link, with no coordinator runtime.
 
 - **Clankie hire** (VUH-1458): inside the hire's herdr pane it runs
@@ -153,9 +153,12 @@ to the hook once. A replacement occupant cannot take the old mail. An uncertain
 HTTP or output-pipe handoff is retained as a receipt, never replayed. A successful
 hook output acknowledgment means `delivered`, not model consumption.
 
-Either launch enables the plugin for that session only (`enabledPlugins`) and
-starts Claude Code with `--channels plugin:clankie-worker@clankie`. Outside
-both it refuses to start. Its hooks (`SessionStart`, `UserPromptSubmit`,
+Clankie’s Claude hire enables the plugin for that session (`enabledPlugins`) and
+starts Claude Code with `--channels plugin:clankie-worker@clankie` for immediate
+delivery. An owner-enabled worker plugin also serves a hand-started session in
+a linked Herdr pane without that flag; its observed synchronous prompt hook
+receives held replies on the next turn. A session without an observed compatible
+hook or live channel has no reply receiver. Its hooks (`SessionStart`, `UserPromptSubmit`,
 `Stop`, `StopFailure`) report through the matching local or remote fleet link, so
 Clankie learns each settled turn and its final text.
 
@@ -182,7 +185,7 @@ or delivery must be inspected before retrying. See
 [native delivery](../../docs/adr/0207-work-records-and-native-agent-delivery.md).
 
 Workers use their harness's native interactive TUI. Local Claude hires and linked
-fleet agents use the worker channel.
+fleet agents use a live worker channel or the observed Claude next-turn hook.
 
 ## Codex
 
