@@ -161,9 +161,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         return undefined;
       const direct = proof.processes.some((process) => chain.includes(process.pid));
       const privateSeat =
-        !direct &&
-        !proof.nativeSessionPending &&
-        (await options.privateProjectSeat?.(chain, pane, binding, proof)) === true;
+        !direct && (await options.privateProjectSeat?.(chain, pane, binding, proof)) === true;
       if (!direct && !privateSeat) return undefined;
       const [finalPid, finalTree, finalProof] = await Promise.all([
         owner(),
