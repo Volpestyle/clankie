@@ -71,9 +71,9 @@ import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
+import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { LinearNotifications } from "./linear-notifications.ts";
 import { createMcpHost } from "./mcp-host.ts";
-import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -833,15 +833,15 @@ async function linearFollowing(): Promise<boolean> {
   ).active;
 }
 
+const linearAttribution = new LinearAttributionJournal(join(stateRoot, "linear-attribution.json"));
 const linearNotifications = new LinearNotifications({
   path: join(stateRoot, "linear-notifications.json"),
-const linearAttribution = new LinearAttributionJournal(join(stateRoot, "linear-attribution.json"));
   host: mcpHost,
   following: linearFollowing,
-  receive: (activity, following) => captain.receiveLinearActivity(activity, following),
-  onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
   wakeRules: async () => (await settingsStore.load()).linearWebhook.wake,
   attribute: (notification, organizationId) => linearAttribution.attribute(notification, organizationId),
+  receive: (activity, following) => captain.receiveLinearActivity(activity, following),
+  onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
 });
 const clankie = await createClankieApp({
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
@@ -935,6 +935,7 @@ const clankie = await createClankieApp({
       return credential?.type === "api" ? credential.key : undefined;
     },
     writes: linearWrites,
+    recordActivity: (activity) => linearAttribution.record(activity),
     requestNotificationPoll: () => linearNotifications.requestPoll(),
     // Unverified identity leaves webhook history passive.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
@@ -948,7 +949,6 @@ const stopHostedWork =
         available: herdr.available,
       });
 hostedHeartbeat?.start();
-    recordActivity: (activity) => linearAttribution.record(activity),
 if (await linearFollowing()) captain.resumeLinearActivity();
 linearNotifications.start();
 

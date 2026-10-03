@@ -455,6 +455,7 @@ export interface ClankieAppDependencies {
   linearWebhook?: {
     secret(): Promise<string | undefined>;
     writes?: LinearWriteReceipts;
+    recordActivity?(activity: LinearActivityEvent): void;
     /** Refresh the recipient inbox after a verified event is persisted. */
     requestNotificationPoll?(): void;
     /** His own verified Linear identity; activity it authors is kept without a wake. */
@@ -464,7 +465,6 @@ export interface ClankieAppDependencies {
   publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;
   captainLeaseDurationMs?: number;
-    recordActivity?(activity: LinearActivityEvent): void;
   captainHeartbeatRecordIntervalMs?: number;
   clock?: () => Date;
   idFactory?: () => string;
@@ -2695,6 +2695,24 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({ error: "linear_work_bindings_retired" }, 410);
   });
 
+  app.on(["GET", "PUT"], "/v1/linear/wake", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
+    let current;
+    if (context.req.method === "PUT") {
+      const parsed = LinearWakeSettingsSchema.safeParse(await readJson(context.req.raw));
+      if (!parsed.success) return context.json({ error: "malformed" }, 400);
+      if (!settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
+      current = await settingsSource.update((value) => ({
+        ...value,
+        linearWebhook: { ...value.linearWebhook, wake: parsed.data },
+      }));
+    } else current = await settingsSource.load();
+    return context.json({ schemaVersion: 1, wake: current.linearWebhook.wake });
+  });
+
   // Local operator control, independent of the publicly reachable signed webhook.
   app.on(["GET", "PUT"], "/v1/linear/follow", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
@@ -2754,24 +2772,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (secret === undefined || secret.length === 0) {
       return context.json({ error: "linear_webhook_unavailable" }, 503);
     }
-  app.on(["GET", "PUT"], "/v1/linear/wake", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
-    let current;
-    if (context.req.method === "PUT") {
-      const parsed = LinearWakeSettingsSchema.safeParse(await readJson(context.req.raw));
-      if (!parsed.success) return context.json({ error: "malformed" }, 400);
-      if (!settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
-      current = await settingsSource.update((value) => ({
-        ...value,
-        linearWebhook: { ...value.linearWebhook, wake: parsed.data },
-      }));
-    } else current = await settingsSource.load();
-    return context.json({ schemaVersion: 1, wake: current.linearWebhook.wake });
-  });
-
     // The raw bytes, before any parse: the signature covers what Linear sent,
     // and `readJson` would throw exactly those bytes away.
     const rawBody = new Uint8Array(await context.req.raw.arrayBuffer());
@@ -2785,6 +2785,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       secret,
       now: clock(),
       ...(hook.writes === undefined ? {} : { writes: hook.writes }),
+      recordActivity: hook.recordActivity,
     });
 
     if (outcome.kind === "rejected") {
@@ -2795,6 +2796,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     }
     if (outcome.kind === "ignored") {
+      if (outcome.reason === "self_echo") hook.requestNotificationPoll?.();
       return context.json({ schemaVersion: 1 as const, ingested: false as const });
     }
 
@@ -2844,7 +2846,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       const offer = mintPairingOffer({
         now,
         mintedBy: purpose === "operator" ? "hosted-account-operator" : "hosted-account",
-      recordActivity: hook.recordActivity,
         idFactory,
       });
       await publisher.publishPairingOffer(offer);
@@ -2855,7 +2856,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         operatorId: offer.mintedBy,
         expiresAt: offer.expiresAt,
       });
-      if (outcome.reason === "self_echo") hook.requestNotificationPoll?.();
       dependencies.onHostedPairing?.();
       return { link: protectedOffer.deepLink, expiresAtMs: Date.parse(offer.expiresAt) };
     });
