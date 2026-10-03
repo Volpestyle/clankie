@@ -1,3 +1,4 @@
+import type { ConversationOwner, ConversationAuthority } from "./conversation-owner.ts";
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import type {
@@ -54,7 +55,11 @@ export interface LaneTool {
  * brief is submitted after startup readiness and verified against the native
  * transcript before the hire succeeds; an unverifiable receipt fails typed.
  */
-export type HireSeat = (seat: SpawnOperatorSeat, brief?: string) => Promise<OperatorSeatSpawnResult>;
+export type HireSeat = (
+  seat: SpawnOperatorSeat,
+  brief?: string,
+  authority?: ConversationAuthority,
+) => Promise<OperatorSeatSpawnResult>;
 
 /**
  * The captain's own message into a hired seat, down the same lane an operator
@@ -94,6 +99,9 @@ export interface LaneToolBank {
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  /** Host-only persisted ownership. Inspection and caller-supplied IDs grant no route authority. */
+  validateConversationOwner(owner: ConversationOwner): Promise<boolean>;
+  wakeConversation(owner: ConversationOwner, text: string, guard?: () => Promise<void>): Promise<boolean>;
   bodyRoomConversation(lane: "discord_presence" | "discord_voice", targetId: string): string;
   evaluatorStatus(): EvaluatorStatus;
   evaluatorCommand(command: EvaluatorCommand): Promise<EvaluatorStatus>;
@@ -255,6 +263,8 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     syncSeatTranscript: () => true,
     seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,
+    validateConversationOwner: async () => false,
+    wakeConversation: async () => false,
     laneMemoryCard: async () => "",
     acknowledgeSeatEvent: async () => false,
     acknowledgeFleetSeatEvent: async () => false,

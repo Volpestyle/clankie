@@ -138,7 +138,13 @@ export interface CaptainDeps {
   /** Voice membership on the active Discord body; the body resolves and authorizes the target. */
   readonly discordVoicePresence?: ReturnType<typeof createDiscordVoicePresenceClient>;
   /** Grounded social actions on the message and body belonging to the active turn. */
-  readonly discordActions?: ReturnType<typeof createDiscordCaptainActionClient>;
+  readonly discordActions?: Omit<ReturnType<typeof createDiscordCaptainActionClient>, "execute"> & {
+    /** Producer retains this host guard through its final authenticated body effect. */
+    execute(
+      input: Parameters<ReturnType<typeof createDiscordCaptainActionClient>["execute"]>[0],
+      guard?: () => Promise<void>,
+    ): ReturnType<ReturnType<typeof createDiscordCaptainActionClient>["execute"]>;
+  };
   readonly presence: {
     listSessions(): Promise<DiscordPresenceSessionRecord[]>;
     listVoiceHistory(limit?: number): Promise<DiscordVoiceStay[]>;
@@ -146,6 +152,7 @@ export interface CaptainDeps {
   };
   readonly memory: {
     appendEpisode(input: {
+      readonly sourceConversationId: string;
       readonly lane: CaptainSessionLaneV2;
       readonly targetId: string;
       readonly summary: string;

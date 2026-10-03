@@ -8,6 +8,8 @@ const ReceiptSchema = z
     messageId: z.string().min(1),
     fingerprint: z.string(),
     sessionId: z.string().optional(),
+    /** Original native occupant observed by the host, never inferred from pane/name. */
+    occupantId: z.string().optional(),
     paneId: z.string().optional(),
     agentName: z.string().optional(),
     beforeIds: z.array(z.string()).optional(),

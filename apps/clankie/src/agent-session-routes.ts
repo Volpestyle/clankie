@@ -10,6 +10,7 @@ import { z } from "zod";
 const ResumeSchema = z
   .object({
     ref: z.string().trim().min(1).max(128),
+    conversationId: z.string().trim().min(1).max(256),
     fleet: z
       .string()
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)
@@ -30,7 +31,11 @@ function errorDetail(error: unknown): string {
 export function createAgentSessionRoutes(
   sessions: AgentSessions | undefined,
   authenticate: (request: Request) => Promise<boolean | "unavailable">,
-  hire?: HireSeat,
+  hire?: (
+    seat: Parameters<HireSeat>[0],
+    brief: string | undefined,
+    conversationId: string,
+  ) => ReturnType<HireSeat>,
   machines?: Machines,
 ): Hono {
   const app = new Hono();
@@ -61,6 +66,7 @@ export function createAgentSessionRoutes(
             ...(input.data.fleet === undefined ? {} : { fleet: input.data.fleet }),
           },
           input.data.brief,
+          input.data.conversationId,
         ),
       );
     } catch (error) {

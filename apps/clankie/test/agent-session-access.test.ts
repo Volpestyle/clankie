@@ -169,7 +169,7 @@ test("native resume uses the existing hire service after fresh transcript resolu
     const response = await app.app.request("/v1/agent-sessions/resume", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ref: "local:1000", brief: "continue" }),
+      body: JSON.stringify({ ref: "local:1000", brief: "continue", conversationId: "selected-conversation" }),
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ outcome: "failed", reason: "delivery_unconfirmed" });
@@ -178,6 +178,7 @@ test("native resume uses the existing hire service after fresh transcript resolu
     expect(serve).toHaveBeenCalledWith({
       schemaVersion: 1,
       op: "spawn_seat",
+      conversationId: "selected-conversation",
       seat: {
         schemaVersion: 1,
         harness: "claude",
@@ -188,8 +189,8 @@ test("native resume uses the existing hire service after fresh transcript resolu
       brief: "continue",
     });
     for (const body of [
-      { ref, brief: "\0" },
-      { ref, brief: "🙂".repeat(9000) },
+      { ref, conversationId: "selected-conversation", brief: "\0" },
+      { ref, conversationId: "selected-conversation", brief: "🙂".repeat(9000) },
       { ref, message: "legacy runner" },
     ]) {
       expect(

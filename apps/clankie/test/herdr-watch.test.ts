@@ -1,3 +1,4 @@
+import { HireOwners } from "../src/captain/hire-owners.ts";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +27,7 @@ const working: HerdrAgentSnapshot = {
   agent: "claude",
   status: "working",
   title: "PStack analysis",
+  session: { source: "herdr:claude", kind: "id", value: "session-potato" },
 };
 const done = { ...working, status: "done" };
 
@@ -1355,7 +1357,16 @@ describe("hiring a seat", () => {
       createTab,
       startAgent,
     };
-    const store = new HerdrWatchStore(await storePath(), { runner });
+    const path = await storePath();
+    const original = (await runner.resolveTerminal("term-hired"))!;
+    new HireOwners(`${path}.owners.json`).bind(
+      original.paneId,
+      { conversationId: "hirer-one" },
+      original.terminalId,
+      undefined,
+      occupantIdForHerdrSession(original.session!),
+    );
+    const store = new HerdrWatchStore(path, { runner, validateOwner: async () => true });
 
     createTab.mockImplementation((_options) => {
       agent = moved;
@@ -1694,9 +1705,25 @@ describe("hiring a seat", () => {
 
     it("never refuses a move for capacity: it re-hires a seat it just closed", async () => {
       const { runner, hireCapacity } = capacityStore(async () => ({ live: 4, limit: 4 }));
-      const store = new HerdrWatchStore(await storePath(), { runner, hireCapacity });
+      const path = await storePath();
+      const original = (await runner.resolveTerminal("term-hired"))!;
+      new HireOwners(`${path}.owners.json`).bind(
+        original.paneId,
+        { conversationId: "hirer-one" },
+        original.terminalId,
+        undefined,
+        occupantIdForHerdrSession(original.session!),
+      );
+      let active = original;
+      vi.mocked(runner.createTab!).mockImplementation(async () => {
+        active = { ...original, paneId: "w1:p-new", terminalId: "term-moved" };
+        return active.paneId;
+      });
+      vi.mocked(runner.get).mockImplementation(async () => active);
+      vi.mocked(runner.resolveTerminal).mockImplementation(async () => active);
+      const store = new HerdrWatchStore(path, { runner, validateOwner: async () => true, hireCapacity });
       const moved = await store.moveSeat({
-        seatId: "term_1",
+        seatId: "term-hired",
         subject: "worker-1a2b",
         harness: "pi",
         title: "Worker",

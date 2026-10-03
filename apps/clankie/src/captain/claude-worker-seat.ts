@@ -599,6 +599,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         };
       if (launch.brief.length > 0) {
         const before = await transcriptIds(deps, agent);
+        await view.guard?.();
         const taken = await deps.mailbox.deliver(agent.terminalId, launch.brief);
         if (typeof taken !== "boolean")
           return {

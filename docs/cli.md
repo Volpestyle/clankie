@@ -1375,9 +1375,19 @@ resuming. A transcript's age is never used as proof of absence.
 
 The operator API for saved sessions is
 GET `/v1/agent-sessions?host=&limit=`, GET `/v1/agent-sessions/read?ref=&tail=|after=`,
-POST `/v1/agent-sessions/resume` `{ ref, fleet?, brief? }`, GET/POST `/v1/agent-hosts`,
+POST `/v1/agent-sessions/resume` `{ ref, conversationId, fleet?, brief? }`, GET/POST `/v1/agent-hosts`,
 and DELETE `/v1/agent-hosts/ID`. The resume route delegates to the existing
-`spawn_seat` service operation; it has no separate runner or run store. Clankie's own tools
+`spawn_seat` service operation. Both require an explicitly selected existing
+operator conversation; inspection of a room is insufficient. Use
+`clankie agents resume HOST:SESSION --conversation ID [--fleet ID] [--brief TEXT]`.
+A missing `spawn_seat.conversationId` returns `not_ready` without launching.
+Hired workers retain their original host-persisted owner through restart and
+movement. Saved sessions without exact persisted ownership cannot be reclaimed
+by inferring a persona or default conversation. Completion and escalation wake
+only their owner, with current route grants checked again; there is no default
+room or persona fallback.
+
+It has no separate runner or run store. Clankie's own tools
 are `agent_sessions` and `agent_session_read`, available where he has machine
 access. `hire_agent` accepts `resume: "host:sessionId"` with the recorded harness
 and workingDirectory; follow-ups use `message_seat`. Reading never starts or

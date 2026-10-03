@@ -107,7 +107,14 @@ describe("captain memory", () => {
     } as unknown as CaptainDeps;
     const tool = captainTools(
       deps,
-      { targetId: "guild-1:channel-1" },
+      {
+        targetId: "guild-1:channel-1",
+        conversationAuthority: {
+          owner: { conversationId: "room-one" },
+          current: () => true,
+          authorize: async () => true,
+        },
+      },
       {} as LaneLog,
       "discord_presence",
     ).find((candidate) => candidate.name === "remember_episode");
@@ -124,6 +131,7 @@ describe("captain memory", () => {
     expect(writes).toEqual([
       {
         lane: "discord_presence",
+        sourceConversationId: "room-one",
         targetId: "guild-1:channel-1",
         summary: "Beat Roxanne",
         visibility: "shareable",
@@ -157,7 +165,19 @@ describe("captain memory", () => {
         },
       },
     } as unknown as CaptainDeps;
-    const tools = captainTools(deps, { targetId: "global-default" }, {} as LaneLog, "operator");
+    const tools = captainTools(
+      deps,
+      {
+        targetId: "global-default",
+        conversationAuthority: {
+          owner: { conversationId: "global-default" },
+          current: () => true,
+          authorize: async () => true,
+        },
+      },
+      {} as LaneLog,
+      "operator",
+    );
     const remember = tools.find((candidate) => candidate.name === "remember_episode");
     const recall = tools.find((candidate) => candidate.name === "recall_episodes");
     if (remember === undefined || recall === undefined) throw new Error("memory tools are missing");

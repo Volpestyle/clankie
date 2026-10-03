@@ -1,3 +1,10 @@
+import type { SavedAgentSession } from "../agent-sessions.ts";
+import {
+  ConversationOwnerSchema,
+  captureConversationAuthority,
+  assertConversationAuthority,
+  type ConversationOwner,
+} from "./conversation-owner.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
 import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
 import { deliveryFingerprint } from "./delivery-fence.ts";
@@ -932,6 +939,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...claudeWorkerDeps,
   });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+    validateOwner: validateConversationOwner,
     codexAccounts: async () => codexAccounts(await settings()),
     skillBundle: {
       repoRoot: options.repoRoot,
@@ -1544,6 +1552,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         authorize: async () => conversations.runsCaptainTurns(conversationId),
       };
       lane.capture.bodyIdentity = bodyIdentity;
+      lane.capture.conversationAuthority = {
+        owner: { conversationId },
+        current: bodyIdentity.current,
+        authorize: bodyIdentity.authorize,
+      };
       lane.capture.room = roomKey("operator", conversationId);
       lane.capture.targetId = conversationId;
       lane.capture.publishFile = (input) => conversations.publishFile({ conversationId, ...input });
@@ -1870,7 +1883,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // tool (ADR 0187): a hired agent is watched the moment it exists, the way a
   // persona thread created through `create` is — otherwise its first reply
   // lands in a thread nothing is listening to.
-  const hireSeat: HireSeat = async (request, brief) => {
+  const hireSeat: HireSeat = async (request, brief, source) => {
+    const authority = captureConversationAuthority(source);
+    await assertConversationAuthority(authority);
     await refreshFleets();
     if (brief?.trim()) {
       brief += `\n\n${WORKER_RESULT_BRIEF}`;
@@ -1884,7 +1899,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         reason: "not_ready",
         detail: "brief must be 1 to 32768 UTF-8 bytes with no NUL",
       };
-    let resume;
+    let resume: SavedAgentSession | undefined;
     if (request.resume !== undefined) {
       try {
         if (deps.agentSessions?.resolve === undefined)
@@ -1913,17 +1928,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           detail: "Claude worker channel requires an exact workspace binding",
         },
       };
-    const result = await herdrWatches.spawnSeat(request, undefined, brief, resume);
+    let adopted: ReturnType<typeof personas.adoptSpawn> | undefined;
+    const result = await herdrWatches.spawnSeat(request, undefined, brief, resume, authority, (spawned) => {
+      // Runs synchronously behind the final authority check, before the native
+      // receipt is cleared. A revoked/replaced origin keeps its uncertain claim.
+      if (!authority.current()) throw new Error("Hiring conversation was replaced before adoption");
+      const title = resume === undefined ? request.title : spawned.seat.title;
+      const seat = personas.adoptSpawn(spawned.seat, title, request.role);
+      conversations.bindPersona(seat.personaId, seat.seatId, title);
+      liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
+      seatByPersona.set(seat.personaId, seat.seatId);
+      herdrWatches.trackSeat(seat.seatId);
+      seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
+      fleetChanges.touch();
+      adopted = seat;
+    });
     if (result.outcome !== "spawned") return result;
-    const title = resume === undefined ? request.title : result.seat.title;
-    const seat = personas.adoptSpawn(result.seat, title, request.role);
-    conversations.bindPersona(seat.personaId, seat.seatId, title);
-    liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
-    seatByPersona.set(seat.personaId, seat.seatId);
-    herdrWatches.trackSeat(seat.seatId);
-    seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
-    fleetChanges.touch();
-    return { ...result, seat };
+    if (adopted === undefined) throw new Error("Hired seat was not finalized under its admitted authority");
+    return { ...result, seat: adopted };
   };
 
   /**
@@ -2169,22 +2191,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   evaluator.start();
   herdrWatches.start(
-    (conversationId, prompt, discord) => {
-      if (discord !== undefined) {
-        // Accepted once started: the room turn owns its own failures, and a
-        // retry would harvest the same pane twice.
-        void runDiscordWatchTurn(discord, prompt).catch((error) =>
-          console.error("Herdr watch Discord turn failed:", error),
-        );
-        return Promise.resolve();
-      }
-      if (!conversations.runsCaptainTurns(conversationId)) {
-        herdrWatches.cancelConversation(conversationId);
-        return Promise.resolve();
-      }
-      const result = conversations.submitInternal(conversationId, prompt, "watch");
-      if (result.status !== "accepted") throw new Error("Internal Herdr watcher turn was not accepted");
-      return Promise.resolve();
+    async (conversationId, prompt, discord) => {
+      await wakeConversation({ conversationId, ...(discord === undefined ? {} : { discord }) }, prompt);
     },
     (seatId, projection) => {
       if (seatId === headSeat?.seatId && projection.kind === "transcript") {
@@ -2299,7 +2307,61 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * armed runs nothing — and no body holds this delivery, so the reply posts
    * through the Discord action port.
    */
-  async function runDiscordWatchTurn(origin: DiscordWatchOrigin, notification: string): Promise<void> {
+  async function validateConversationOwner(input: ConversationOwner): Promise<boolean> {
+    const parsed = ConversationOwnerSchema.safeParse(input);
+    if (!parsed.success) return false;
+    const owner = parsed.data;
+    if (owner.discord === undefined) return conversations.runsCaptainTurns(owner.conversationId);
+    const scope = conversations.conversation(owner.conversationId)?.scope;
+    const origin = owner.discord;
+    if (
+      scope?.kind !== "room" ||
+      scope.targetId !== origin.targetId ||
+      owner.conversationId !==
+        `room-${createHash("sha256").update(`${scope.lane}:${scope.targetId}`).digest("hex").slice(0, 24)}` ||
+      origin.targetId !== `${origin.guildId ?? "dm"}:${origin.channelId}`
+    )
+      return false;
+    const { settings: discord } = resolveDiscordSettings(
+      (await settings()).discord,
+      options.discordEnvironment,
+    );
+    return planDiscordTurnSession({
+      baseSessionKey: origin.baseSessionKey,
+      durable: true,
+      actorId: origin.actorId,
+      ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
+      channelId: origin.channelId,
+      transportKind: origin.transportKind,
+      settings: discord,
+    }).systemTools;
+  }
+
+  async function wakeConversation(
+    input: ConversationOwner,
+    notification: string,
+    guard?: () => Promise<void>,
+  ): Promise<boolean> {
+    const owner = ConversationOwnerSchema.parse(input);
+    if (!(await validateConversationOwner(owner))) return false;
+    if (owner.discord !== undefined) {
+      // Once the exact room accepts the turn, never replay a failed harvest.
+      return runDiscordWatchTurn(owner, notification, guard);
+    }
+    await guard?.();
+    if (!conversations.runsCaptainTurns(owner.conversationId)) return false;
+    const result = conversations.submitInternal(owner.conversationId, notification, "watch");
+    return result.status === "accepted";
+  }
+
+  async function runDiscordWatchTurn(
+    owner: ConversationOwner,
+    notification: string,
+    guard?: () => Promise<void>,
+  ): Promise<boolean> {
+    const origin = owner.discord!;
+    const scope = conversations.conversation(owner.conversationId)?.scope;
+    if (scope?.kind !== "room") return false;
     const { settings: discord } = resolveDiscordSettings(
       (await settings()).discord,
       options.discordEnvironment,
@@ -2315,7 +2377,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     });
     if (!plan.systemTools) {
       console.warn("Herdr watch dropped: its Discord actor no longer holds machine access");
-      return;
+      return false;
     }
     const prompt = [
       "A Herdr watch you armed from this Discord channel fired. Your reply posts in the channel, answering the message you armed it from.",
@@ -2325,7 +2387,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const normalized: NormalizedDiscordTurn = {
       sessionKey: plan.sessionKey,
       durable: plan.durable,
-      lane: "discord_presence",
+      lane: scope.lane,
       targetId: origin.targetId,
       prompt,
       images: [],
@@ -2336,17 +2398,42 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       messageId: origin.messageId,
     };
     const lane = await discordLane(normalized, true);
+    if (!(await validateConversationOwner(owner))) return false;
+    await guard?.();
+    void finishDiscordWatchTurn(lane, normalized, owner).catch((error) =>
+      console.error("Conversation wake failed:", error),
+    );
+    return true;
+  }
+
+  async function finishDiscordWatchTurn(
+    lane: LaneSession,
+    normalized: NormalizedDiscordTurn,
+    owner: ConversationOwner,
+  ): Promise<void> {
+    const origin = owner.discord!;
     const result = await runDiscordTurn(lane, normalized, `watch-${randomUUID()}`, false, origin);
-    if (result.state !== "settled" || deps.discordActions === undefined) return;
-    const posted = await deps.discordActions.execute({
-      action: "send_reply",
-      callId: result.turnId,
-      actorId: origin.actorId,
-      ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
-      channelId: origin.channelId,
-      messageId: origin.messageId,
-      text: boundedDiscordReply(result.response),
-    });
+    if (
+      result.state !== "settled" ||
+      deps.discordActions === undefined ||
+      !(await validateConversationOwner(owner))
+    )
+      return;
+    const posted = await deps.discordActions.execute(
+      {
+        action: "send_reply",
+        callId: result.turnId,
+        actorId: origin.actorId,
+        ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
+        channelId: origin.channelId,
+        messageId: origin.messageId,
+        text: boundedDiscordReply(result.response),
+      },
+      async () => {
+        if (!(await validateConversationOwner(owner)))
+          throw new Error("Conversation wake route authority was revoked");
+      },
+    );
     if (!posted.ok) console.error("Herdr watch reply was not posted:", posted.message);
   }
 
@@ -2383,6 +2470,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
     };
     lane.capture.bodyIdentity = bodyIdentity;
+    lane.capture.conversationAuthority = {
+      owner: { conversationId, discord: { ...origin } },
+      current: bodyIdentity.current,
+      authorize: bodyIdentity.authorize,
+    };
     lane.capture.room = roomKey(normalized.lane, normalized.targetId);
     lane.capture.targetId = normalized.targetId;
     lane.capture.actorId = normalized.actorId;
@@ -2948,7 +3040,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
       if (request.op === "spawn_seat") {
-        const hired = await hireSeat(request.seat, request.brief);
+        const conversationId = request.conversationId;
+        if (conversationId === undefined || !conversations.runsCaptainTurns(conversationId))
+          return {
+            op: "spawn_seat",
+            schemaVersion: 1,
+            result: {
+              outcome: "failed",
+              reason: "not_ready",
+              detail: "An exact authorized hiring conversationId is required",
+            },
+          };
+        const hired = await hireSeat(request.seat, request.brief, {
+          owner: { conversationId },
+          current: () => conversations.runsCaptainTurns(conversationId),
+          authorize: async () => conversations.runsCaptainTurns(conversationId),
+        });
         const result = { ...hired, deliveryStage: hireDeliveryStage(hired, request.brief !== undefined) };
         return { op: "spawn_seat", schemaVersion: 1, result };
       }
@@ -3193,6 +3300,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     bodyRoomConversation: (lane, targetId) => conversations.roomConversation(lane, targetId),
 
+    validateConversationOwner,
+    wakeConversation,
+
     async laneMemoryCard(lane) {
       return renderEpisodeCard(await deps.memory.recallEpisodeCard(lane));
     },
@@ -3211,6 +3321,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const targetId = binding.conversationId;
         capture.bodyIdentity = {
           conversationId: targetId,
+          current: () => conversations.runsCaptainTurns(targetId),
+          authorize: async () => conversations.runsCaptainTurns(targetId),
+        };
+        capture.conversationAuthority = {
+          owner: { conversationId: targetId },
           current: () => conversations.runsCaptainTurns(targetId),
           authorize: async () => conversations.runsCaptainTurns(targetId),
         };

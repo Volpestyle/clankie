@@ -15,7 +15,11 @@ it("returns an actionable conflict when either memory write exceeds retained cap
   const clankie = await createClankieApp({
     captain: createStubCaptain(),
     memory: { ...createFileMemory({ dataDir: root }), recordEpisode: refuse, updateEpisode: refuse },
-    authenticateCaptain: async () => ({ captainId: "test", steerSourceLane: "api" }),
+    authenticateCaptain: async () => ({
+      captainId: "test",
+      steerSourceLane: "api",
+      episodeSource: { conversationId: "test", lane: "operator", targetId: "test", sessionId: "test" },
+    }),
     authenticateOperator: async () => ({ operatorId: "test" }),
   });
   try {

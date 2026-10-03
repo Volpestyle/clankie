@@ -2206,6 +2206,9 @@ paths:
         an update; a byte-identical retry returns the original. Editing an existing
         note goes through PATCH. A Discord bearer may only write the lane it serves
         (`discord_text` writes `discord_presence`, `discord_voice` writes its own).
+        The trusted authenticator must also supply an exact admitted episodeSource.
+        A generic bearer alone is refused. The host stamps sourceConversationId
+        and provenance; request-supplied source identifiers confer no authority.
       security: [{ captainBearer: [] }]
       requestBody:
         required: true
@@ -2229,7 +2232,7 @@ paths:
         "200":
           description: Recorded id
         "403":
-          description: The bearer's lane may not author an episode in that lane
+          description: Missing exact host source binding, or lane/target does not match that source
         "409":
           description: >-
             Retained memory is full, or the episode id already exists. Nothing was

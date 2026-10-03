@@ -13,7 +13,21 @@ const captain =
   (request: Request): Promise<TrustedCaptainIdentity | undefined> =>
     Promise.resolve(
       request.headers.get("authorization") === "Bearer captain"
-        ? { captainId: "captain-clankie", ...(steerSourceLane ? { steerSourceLane } : {}) }
+        ? {
+            captainId: "captain-clankie",
+            ...(steerSourceLane ? { steerSourceLane } : {}),
+            episodeSource: {
+              conversationId: "source-one",
+              lane:
+                steerSourceLane === "discord_text"
+                  ? "discord_presence"
+                  : steerSourceLane === "discord_voice"
+                    ? "discord_voice"
+                    : "operator",
+              targetId: steerSourceLane === "discord_text" ? "guild-1:channel-9" : "global-default",
+              sessionId: "session-1",
+            },
+          }
         : undefined,
     );
 
@@ -21,6 +35,7 @@ function episodeBody(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     schemaVersion: 1,
     episodeId: "episode-1",
+    sourceConversationId: "source-one",
     lane: "operator",
     targetId: "global-default",
     summary: "Reviewed the credential rotation plan.",
@@ -232,7 +247,7 @@ describe("durable retention", () => {
     // Recall on demand reaches it; the automatic card still shows only the newest few.
     const found = restarted.searchEpisodeCard({ lane: "operator", query: "gateway state" });
     expect(found.split("\n").filter((line) => line.startsWith("- "))).toEqual([
-      "- operator · global-default · 2026-07-01T10:00:00.000Z · kept-1 [kept]: " +
+      "- operator · global-default · source source-one · 2026-07-01T10:00:00.000Z · kept-1 [kept]: " +
         "Decided the gateway holds no state and routes back over the socket.",
     ]);
     expect(restarted.episodeRecallCard({ lane: "operator" })).not.toContain("kept-1");
@@ -258,7 +273,9 @@ describe("durable retention", () => {
     );
 
     const card = memory.searchEpisodeCard({ lane: "gameplay", query: "relay port" });
-    expect(card).toContain("discord_presence · guild-1:channel-9 · 2026-08-29T09:00:00.000Z");
+    expect(card).toContain(
+      "discord_presence · guild-1:channel-9 · source source-one · 2026-08-29T09:00:00.000Z",
+    );
     expect(card).toContain("port 4000");
 
     // Reading it from another room is fine; rewriting it from there is not.
@@ -272,6 +289,7 @@ describe("durable retention", () => {
 
     const corrected = memory.correctEpisode({
       lane: "discord_presence",
+      sourceConversationId: "source-one",
       episodeId: "decision-1",
       summary: "We decided to ship the relay on port 4321, not 4000.",
     });
@@ -308,6 +326,7 @@ describe("durable retention", () => {
       expect(
         memory.correctEpisode({
           lane,
+          sourceConversationId: "source-one",
           episodeId: "console-1",
           summary: "Actually we never bundled anything.",
         }),
@@ -323,6 +342,7 @@ describe("durable retention", () => {
 
     const owned = memory.correctEpisode({
       lane: "operator",
+      sourceConversationId: "source-one",
       episodeId: "console-1",
       summary: "We bundled the runtime, and it ships in the release.",
     });

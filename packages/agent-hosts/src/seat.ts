@@ -44,6 +44,8 @@ export interface SeatView {
   readonly paneId: string;
   /** The herdr agent name the seat runs under; it is also the persona's binding key. */
   readonly name?: string;
+  /** Host authority is rechecked after readiness/lookup awaits and immediately before native launch or initial brief dispatch. */
+  readonly guard?: () => Promise<void>;
   /** Run one command in the pane's shell. The argv is quoted for the shell. */
   run(argv: readonly string[]): Promise<void>;
   /**

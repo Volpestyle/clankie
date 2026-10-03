@@ -224,7 +224,16 @@ describe("clankie app smoke", () => {
       authenticateCaptain: (request) =>
         Promise.resolve(
           request.headers.get("authorization") === "Bearer captain"
-            ? { captainId: "captain-clankie", steerSourceLane: "discord_text" as const }
+            ? {
+                captainId: "captain-clankie",
+                steerSourceLane: "discord_text" as const,
+                episodeSource: {
+                  conversationId: "room-smoke",
+                  lane: "discord_presence" as const,
+                  targetId: "dm:dm-1",
+                  sessionId: "smoke-session",
+                },
+              }
             : undefined,
         ),
     });

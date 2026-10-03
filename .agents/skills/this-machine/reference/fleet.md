@@ -126,7 +126,7 @@ still work. Headless: `clankie agents contacts` lists identities and availabilit
 `clankie sessions` browses harness records; `clankie conversations list|show|tail`
 reads retained threads. Never infer reachability or completion from a saved thread.
 
-`clankie agents resume HOST:SESSION [--fleet ID] [--brief TEXT]` reopens a saved
+`clankie agents resume HOST:SESSION --conversation ID [--fleet ID] [--brief TEXT]` reopens a saved
 history as an ordinary native Herdr seat, or reuses its existing seat. The same
 operation is `hire_agent` with `resume: "host:sessionId"`, the saved harness and
 workingDirectory. Remote resumes require the exact matching SSH destination,
@@ -144,3 +144,10 @@ operator Claude seat retains the full Clankie plugin. No global skill installati
 is needed for these local launches after the service reloads the change.
 Remote hires have their own coverage limits documented there;
 do not infer full-bundle delivery from a successful local canary.
+
+Hires and watches belong to the exact conversation that admitted them. The host
+persists that source before launch and routes completion there with current
+grants. A worker persona, an inspected room, and a default conversation confer
+no ownership. API `spawn_seat` requires the selected `conversationId`; ordinary
+`hire_agent` gets it from the admitted host turn. Legacy saved sessions without
+persisted owner proof cannot be claimed by choosing a conversation.

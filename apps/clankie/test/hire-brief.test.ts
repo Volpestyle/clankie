@@ -90,20 +90,26 @@ test.each([
   "message_seat preserves the structured $outcome receipt for every returned seat address",
   async (delivery) => {
     const { root, captain } = await fixture();
-    vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockResolvedValue({
-      outcome: "spawned",
-      control: { mode: "adapter" },
-      seat: {
-        seatId: "term_one",
-        paneId: "w1:p1",
-        subject: "worker",
-        occupantId: "native-session",
-        harness: "codex",
-        status: "working",
-        title: "worker",
-        workingDirectory: root,
+    vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(
+      async (_seat, _subject, _brief, _resume, _authority, adopt) => {
+        const result = {
+          outcome: "spawned",
+          control: { mode: "adapter" },
+          seat: {
+            seatId: "term_one",
+            paneId: "w1:p1",
+            subject: "worker",
+            occupantId: "native-session",
+            harness: "codex",
+            status: "working",
+            title: "worker",
+            workingDirectory: root,
+          },
+        } as const;
+        adopt?.(result);
+        return result;
       },
-    });
+    );
     vi.spyOn(HerdrWatchStore.prototype, "awaitPickup").mockResolvedValue("working");
     const send = vi.spyOn(HerdrWatchStore.prototype, "deliverToSeat").mockResolvedValue(delivery);
     try {

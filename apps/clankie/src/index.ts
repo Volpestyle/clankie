@@ -693,6 +693,7 @@ const captain = createCaptain(
           const corrected = capacityAware(() =>
             memory.correctEpisode({
               lane: input.lane,
+              sourceConversationId: input.sourceConversationId,
               episodeId: corrects,
               summary: input.summary,
               ...(input.retained === undefined ? {} : { retained: input.retained }),
@@ -713,6 +714,7 @@ const captain = createCaptain(
           memory.recordEpisode({
             schemaVersion: 1,
             episodeId: `ep-${crypto.randomUUID()}`,
+            sourceConversationId: input.sourceConversationId,
             lane: input.lane,
             targetId: input.targetId,
             summary: input.summary,

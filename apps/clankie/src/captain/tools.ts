@@ -1,3 +1,8 @@
+import {
+  captureConversationAuthority,
+  assertConversationAuthority,
+  type ConversationAuthority,
+} from "./conversation-owner.ts";
 import type { BodyConversationIdentity } from "../body-lease-router.ts";
 import { VOICE_JOIN_REQUEST_MAX_CHARS } from "@clankie/discord-presence-core";
 import {
@@ -50,6 +55,8 @@ import { WorkRequestSchema } from "../work-items.ts";
  * (which scopes every room-keyed read and write a tool makes).
  */
 export interface TurnContext {
+  /** Host-only immutable conversation ownership and current admission authority. */
+  conversationAuthority?: ConversationAuthority | undefined;
   /** Immutable host binding for this turn; never populated from tool arguments. */
   bodyIdentity?: BodyConversationIdentity | undefined;
   media?: CaptainTurnMedia | undefined;
@@ -571,10 +578,14 @@ export function captainTools(
         corrects: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
       }),
       execute: async (_id, params) => {
-        if (turn.targetId === undefined) throw new Error("Turn room attribution is unavailable");
+        const identity = captureConversationAuthority(turn.conversationAuthority);
+        const targetId = turn.targetId;
+        if (targetId === undefined) throw new Error("Turn room attribution is unavailable");
+        await assertConversationAuthority(identity);
         const outcome = await deps.memory.appendEpisode({
           lane,
-          targetId: turn.targetId,
+          targetId,
+          sourceConversationId: identity.owner.conversationId,
           summary: params.summary,
           ...(params.visibility === undefined
             ? {}
@@ -706,8 +717,14 @@ function hireAgentTool(
       if (turn.autonomous === true) throw new Error("Autonomous turns may propose a hire, not execute one");
       if (available?.() === false)
         return json({ outcome: "failed", reason: "herdr_unreachable", deliveryStage: "unavailable" });
+      const authority = captureConversationAuthority(turn.conversationAuthority);
+      await assertConversationAuthority(authority);
       const { brief, ...seat } = params as typeof params & { brief?: string };
-      const result = await hire(SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }), brief);
+      const result = await hire(
+        SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }),
+        brief,
+        authority,
+      );
       if (result.outcome !== "spawned" || brief === undefined || message === undefined)
         return json({ ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) });
       // spawnSeat submits once after readiness and verifies the complete receipt.
@@ -952,13 +969,12 @@ function herdrWatchTools(
   turn: TurnContext,
   available?: () => boolean,
 ): ToolDefinition[] {
-  const arm = (agent: string, reason: string) => {
-    if (turn.discordOrigin !== undefined) {
-      if (turn.room === undefined) throw new Error("Discord room attribution is unavailable");
-      return watches.watch(turn.room, agent, reason, turn.discordOrigin);
-    }
-    if (turn.targetId === undefined) throw new Error("Operator conversation attribution is unavailable");
-    return watches.watch(turn.targetId, agent, reason);
+  const arm = async (agent: string, reason: string) => {
+    const authority = captureConversationAuthority(turn.conversationAuthority);
+    await assertConversationAuthority(authority);
+    return watches.watch(authority.owner.conversationId, agent, reason, authority.owner.discord, () =>
+      assertConversationAuthority(authority),
+    );
   };
   return [
     defineTool({

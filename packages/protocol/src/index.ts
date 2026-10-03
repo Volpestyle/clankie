@@ -2739,6 +2739,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("spawn_seat"),
       schemaVersion: z.literal(1),
+      /** Selected hiring conversation; the host must independently authorize its exact route. */
+      conversationId: z.string().trim().min(1).max(256).optional(),
       seat: SpawnOperatorSeatSchema,
       brief: z.string().min(1).max(32_768).optional(),
     })
@@ -5999,6 +6001,8 @@ export const CaptainEpisodeSchema = z
   .object({
     schemaVersion: z.literal(1),
     episodeId: z.string().trim().min(1).max(256),
+    /** Host-stamped stable origin. Missing on legacy records; never inferred from a persona. */
+    sourceConversationId: z.string().trim().min(1).max(256).optional(),
     /** The room it happened in, so recall can say where without holding its transcript. */
     lane: CaptainSessionLaneV2Schema,
     targetId: z.string().trim().min(1).max(512),

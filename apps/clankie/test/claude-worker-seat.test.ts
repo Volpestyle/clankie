@@ -497,3 +497,16 @@ it("messages are acknowledged by the transcript, and completion is the Stop hook
   });
   expect(await control.settled()).toMatchObject({ type: "released" });
 });
+
+it("rechecks the hiring source after readiness before delivering its initial brief", async () => {
+  const { adapter, view, start, deliver } = await fixture();
+  const guard = vi.fn(async () => {
+    throw new Error("hiring actor revoked");
+  });
+  await expect(
+    adapter.start({ harness: "claude", cwd: tmpdir(), brief: "must remain unsent" }, { ...view, guard }),
+  ).rejects.toThrow("hiring actor revoked");
+  expect(start).toHaveBeenCalledOnce();
+  expect(guard).toHaveBeenCalledOnce();
+  expect(deliver).not.toHaveBeenCalled();
+});

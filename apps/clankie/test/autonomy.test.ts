@@ -41,7 +41,14 @@ describe("captain autonomy", () => {
     };
     const operator = captainTools(
       deps,
-      { targetId: "global-default" },
+      {
+        targetId: "global-default",
+        conversationAuthority: {
+          owner: { conversationId: "global-default" },
+          current: () => true,
+          authorize: async () => true,
+        },
+      },
       {} as LaneLog,
       "operator",
       undefined,
@@ -69,6 +76,8 @@ describe("captain autonomy", () => {
       "global-default",
       "w18:p1",
       "Harvest the finished analysis",
+      undefined,
+      expect.any(Function),
     );
 
     const create = operator.find((tool) => tool.name === "create_goal");
@@ -133,7 +142,16 @@ describe("captain autonomy", () => {
     const room = (shell: boolean) =>
       captainTools(
         deps,
-        { room: "discord_presence:guild:channel", shell, discordOrigin },
+        {
+          room: "discord_presence:guild:channel",
+          shell,
+          discordOrigin,
+          conversationAuthority: {
+            owner: { conversationId: "room-stable", discord: discordOrigin },
+            current: () => true,
+            authorize: async () => true,
+          },
+        },
         {} as LaneLog,
         "discord_presence",
         undefined,
@@ -151,10 +169,11 @@ describe("captain autonomy", () => {
       {} as never,
     );
     expect(herdrWatches.watch).toHaveBeenCalledWith(
-      "discord_presence:guild:channel",
+      "room-stable",
       "w2H:pQ",
       "Report the publish result",
       discordOrigin,
+      expect.any(Function),
     );
   });
 

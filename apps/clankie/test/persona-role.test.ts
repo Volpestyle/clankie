@@ -13,19 +13,25 @@ it("a hire names the persona's role, and set_persona_role reassigns or clears it
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
   vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
-  vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockResolvedValue({
-    outcome: "spawned",
-    seat: {
-      seatId: "term_1",
-      paneId: "w1:p1",
-      subject: "smith",
-      occupantId: `session-${"c".repeat(64)}`,
-      harness: "claude",
-      status: "idle",
-      title: "Smith",
-      workingDirectory: root,
+  vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(
+    async (_seat, _subject, _brief, _resume, _authority, adopt) => {
+      const result = {
+        outcome: "spawned",
+        seat: {
+          seatId: "term_1",
+          paneId: "w1:p1",
+          subject: "smith",
+          occupantId: `session-${"c".repeat(64)}`,
+          harness: "claude",
+          status: "idle",
+          title: "Smith",
+          workingDirectory: root,
+        },
+      } as const;
+      adopt?.(result);
+      return result;
     },
-  });
+  );
   const captain = createCaptain(
     { ...({} as CaptainDeps) },
     {
@@ -38,6 +44,7 @@ it("a hire names the persona's role, and set_persona_role reassigns or clears it
     const hired = await captain.serveOperatorConversation({
       schemaVersion: 1,
       op: "spawn_seat",
+      conversationId: "global-default",
       seat: { schemaVersion: 1, harness: "claude", title: "Smith", workingDirectory: root, role: "designer" },
     });
     if (hired.op !== "spawn_seat" || hired.result.outcome !== "spawned") throw new Error("hire failed");

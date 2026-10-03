@@ -106,3 +106,20 @@ expiry during an operation, async identity changes, restart recovery, denied
 authority, scoped queue/ask and preserved watch/memory provenance. A real two-seat
 lease conflict, Discord/voice/play lifetime, and private app presentation remain
 separate acceptance evidence; deterministic tests do not claim a live model run.
+
+## Conversation provenance implementation
+
+New memory writes and worker ownership capture a stable host-admitted source
+before asynchronous work. Episode POST requires an authenticator-provided exact
+source; a lane bearer alone is refused. Legacy memory retains visibility but
+cannot invent an owner for conversation-level corrections. Explicit operator
+management remains separate.
+
+Hire intents are persisted before discovery/launch, then bound to the exact
+pane, seat and native session proof. Uncertain starts keep their original owner.
+Completion watches preserve that owner across restart and movement, and refresh
+its route grants before a wake and final reply. Legacy raw room-key watches and
+saved workers without exact persisted proof fail closed. No default room,
+current worker persona or implicit head replaces a missing owner. Operator API
+hires and saved-session resumes require an explicit runnable conversation ID;
+private consumers must supply their selected thread.

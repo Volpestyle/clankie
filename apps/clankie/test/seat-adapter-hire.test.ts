@@ -386,7 +386,7 @@ it("a completion watch wakes on the harness's own settlement and quotes its fina
   store.close();
 });
 
-it("a restarted hire cannot create another pane, then recovers the original exact native brief", async () => {
+it("a restarted hire without original native proof stays uncertain despite a matching late brief", async () => {
   const f = await fixture(async () => ({
     outcome: "failed",
     reason: "not_ready",
@@ -417,9 +417,9 @@ it("a restarted hire cannot create another pane, then recovers the original exac
     entries: [{ type: "message", id: "late", role: "operator", text: "the brief" }],
   });
   await expect(restarted.spawnSeat(input, undefined, "the brief")).resolves.toMatchObject({
-    outcome: "spawned",
-    deliveryStage: "consumed",
-    seat: { paneId: f.agent.paneId },
+    outcome: "failed",
+    deliveryStage: "uncertain",
+    reason: "delivery_unconfirmed",
   });
   expect(f.adapter.start).toHaveBeenCalledTimes(1);
   expect(f.runner.createTab).toHaveBeenCalledTimes(1);

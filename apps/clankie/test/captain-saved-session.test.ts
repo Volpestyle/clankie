@@ -21,19 +21,25 @@ it("native continuation goes through one hire/adoption path and preserves the ex
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   const track = vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
   vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
-  const spawn = vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockResolvedValue({
-    outcome: "spawned",
-    seat: {
-      seatId: "term_existing",
-      paneId: "w1:p1",
-      subject: "original-worker",
-      occupantId: session.sessionId,
-      harness: "claude",
-      status: "idle",
-      title: "Original worker",
-      workingDirectory: root,
-    },
-  });
+  const spawn = vi
+    .spyOn(HerdrWatchStore.prototype, "spawnSeat")
+    .mockImplementation(async (_seat, _subject, _brief, _resume, _authority, adopt) => {
+      const result = {
+        outcome: "spawned",
+        seat: {
+          seatId: "term_existing",
+          paneId: "w1:p1",
+          subject: "original-worker",
+          occupantId: session.sessionId,
+          harness: "claude",
+          status: "idle",
+          title: "Original worker",
+          workingDirectory: root,
+        },
+      } as const;
+      adopt?.(result);
+      return result;
+    });
   const resolve = vi.fn(async () => session);
   const captain = createCaptain(
     {
@@ -63,6 +69,7 @@ it("native continuation goes through one hire/adoption path and preserves the ex
     const result = await captain.serveOperatorConversation({
       schemaVersion: 1,
       op: "spawn_seat",
+      conversationId: "global-default",
       seat,
       brief: "continue",
     });
@@ -79,6 +86,8 @@ it("native continuation goes through one hire/adoption path and preserves the ex
       undefined,
       expect.stringContaining("continue\n\nEnd each finished turn with a short report"),
       session,
+      expect.objectContaining({ owner: { conversationId: "global-default" } }),
+      expect.any(Function),
     );
     expect(track).toHaveBeenCalledWith("term_existing");
     for (const bad of [
@@ -87,7 +96,12 @@ it("native continuation goes through one hire/adoption path and preserves the ex
       { ...seat, fleet: "remote" },
     ]) {
       expect(
-        await captain.serveOperatorConversation({ schemaVersion: 1, op: "spawn_seat", seat: bad }),
+        await captain.serveOperatorConversation({
+          schemaVersion: 1,
+          op: "spawn_seat",
+          conversationId: "global-default",
+          seat: bad,
+        }),
       ).toMatchObject({ result: { outcome: "failed", reason: "not_ready" } });
     }
     expect(spawn).toHaveBeenCalledOnce();

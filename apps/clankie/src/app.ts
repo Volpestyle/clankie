@@ -343,6 +343,13 @@ interface BrowserToolPort {
 
 export interface TrustedCaptainIdentity {
   captainId: string;
+  /** Exact host-admitted source; a bearer or request body alone cannot establish it. */
+  episodeSource?: {
+    readonly conversationId: string;
+    readonly lane: CaptainSessionLaneV2;
+    readonly targetId: string;
+    readonly sessionId: string;
+  };
   /** Server-authenticated origin; request bodies cannot elevate it. */
   steerSourceLane?: "discord_text" | "discord_voice" | "api";
   /** Which Discord body this bearer speaks for. Defaults to `bot`. */
@@ -1016,10 +1023,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         const operator = await authenticateOperator(request, dependencies);
         return operator === "unavailable" ? operator : Boolean(operator);
       },
-      async (seat, brief) => {
+      async (seat, brief, conversationId) => {
         const result = await dependencies.captain.serveOperatorConversation({
           schemaVersion: 1,
           op: "spawn_seat",
+          conversationId,
           seat,
           ...(brief === undefined ? {} : { brief }),
         });
@@ -2381,9 +2389,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (bearerLane !== undefined && episode.data.lane !== bearerLane) {
       return context.json({ error: "captain_episode_lane_forbidden" }, 403);
     }
+    const source = captain.episodeSource;
+    if (source === undefined) return context.json({ error: "captain_episode_source_required" }, 403);
+    if (episode.data.lane !== source.lane || episode.data.targetId !== source.targetId)
+      return context.json({ error: "captain_episode_source_forbidden" }, 403);
     let recorded;
     try {
-      recorded = dependencies.memory.recordEpisode(episode.data);
+      recorded = dependencies.memory.recordEpisode({
+        ...episode.data,
+        sourceConversationId: source.conversationId,
+        provenance: {
+          characterId: "clankie",
+          sessionId: source.sessionId,
+          selfAuthored: true,
+          rawTranscript: false,
+        },
+      });
     } catch (error) {
       if (error instanceof MemoryCapacityError) {
         return context.json({ error: error.code, message: error.message, capacity: error.capacity }, 409);

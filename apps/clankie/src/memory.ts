@@ -89,13 +89,14 @@ export interface MemoryStores {
   searchEpisodeCard(options: EpisodeSearchOptions): string;
   /**
    * Supersede a stale note in place. `lane` is the lane doing the correcting,
-   * and it must both be able to see the episode and own it: the operator lane
-   * may correct anything, every other lane only what it wrote itself. Being
+   * and it must both be able to see the episode and own its exact source
+   * conversation. Explicit operator management uses updateEpisode. Being
    * able to read a note is not authority to rewrite it, so a room that talks
    * him into "you misremembered that" cannot reach the console's own record.
    */
   correctEpisode(options: {
     lane: CaptainSessionLaneV2;
+    sourceConversationId?: string;
     episodeId: string;
     summary: string;
     retained?: boolean;
@@ -148,7 +149,7 @@ function episodeLine(episode: CaptainEpisode): string {
     ...(episode.correctedAt === undefined ? [] : [`corrected ${episode.correctedAt}`]),
   ];
   const suffix = marks.length === 0 ? "" : ` [${marks.join(", ")}]`;
-  return `${episode.lane} · ${episode.targetId} · ${episode.occurredAt} · ${episode.episodeId}${suffix}: ${episode.summary}`;
+  return `${episode.lane} · ${episode.targetId}${episode.sourceConversationId === undefined ? "" : ` · source ${episode.sourceConversationId}`} · ${episode.occurredAt} · ${episode.episodeId}${suffix}: ${episode.summary}`;
 }
 
 export function defaultMemoryDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -458,14 +459,16 @@ export function createFileMemory(options: { dataDir: string; clock?: () => Date 
       return lines.join("\n");
     },
 
-    correctEpisode({ lane, episodeId, summary, retained }) {
+    correctEpisode({ lane, sourceConversationId, episodeId, summary, retained }) {
       const episode = readEpisodes().find(
         (candidate) =>
           candidate.episodeId === episodeId &&
           visibleToLane(candidate, lane) &&
           // Shareable is the ordinary case, so read visibility alone would let
           // any room rewrite a console-authored note. Authorship is the fence.
-          (lane === "operator" || candidate.lane === lane),
+          candidate.lane === lane &&
+          sourceConversationId !== undefined &&
+          candidate.sourceConversationId === sourceConversationId,
       );
       if (episode === undefined) return undefined;
       // The correction replaces the note, never its room, date, or provenance —

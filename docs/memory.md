@@ -128,7 +128,7 @@ embedding would be a dependency bought before the requirement.
 
 Search obeys the same lane filter as the card, so an operator-private memory can
 never surface in a Discord or gameplay search. Each line carries the lane, the
-room, the date it happened, and its episode id — the source and date of the
+room, the stable source conversation when known, the date it happened, and its episode id — the source and date of the
 recollection, and the handle a correction needs.
 
 Both branches of `GET /v1/memory/captain-episodes` answer with a rendered card
@@ -212,8 +212,10 @@ command's own wording about reviewed and approved facts is left over from it.
 
 The same filter applies to the automatic card and to search — recall on demand
 is not a second door into another lane's memory. Writing is narrower still: a
-lane authors its own room and corrects only what it wrote, and only the operator
-crosses those lines.
+turn authors its host-admitted conversation and corrects only notes stamped with
+that exact source conversation, including within the same lane. Explicit operator
+management through PATCH remains available across conversations. Reading or
+sharing a note never grants correction authority.
 
 | Lane / surface     | Episodes it sees, carded or searched | Person facts it sees                     |
 | ------------------ | ------------------------------------ | ---------------------------------------- |
@@ -259,7 +261,23 @@ forget), specified in
 | Facts in a recall card    | 8     | Newest matching the query                |
 | Episode summary           | 512   | Rejected at the schema, not truncated    |
 
-## Migration
+## Source provenance and migration
+
+New internal notes carry host-stamped `sourceConversationId`. The host captures
+the admitted conversation before asynchronous authority checks; a replaced or
+revoked turn cannot write. Corrections preserve that source. Legacy notes remain
+readable under their existing visibility but have no invented owner and cannot
+be corrected through an ordinary conversation. Operator management can still
+edit or delete them.
+
+POST `/v1/memory/captain-episodes` requires an exact `episodeSource` supplied by
+the trusted authenticator. A generic captain or Discord bearer proves only its
+lane and receives `403 captain_episode_source_required`; a request cannot supply
+this authority. The host stamps conversation, character and session provenance,
+and rejects a mismatched lane or target. No in-repository production client uses
+this POST: `remember_episode` uses the internal host-bound dependency, and the
+operator client uses PATCH/DELETE for management. External producers must
+provide an independently authenticated source binding before using POST.
 
 `retained` and `correctedAt` are optional on the schema with a default, so every
 episode written before retention existed loads unchanged and unretained. Nothing

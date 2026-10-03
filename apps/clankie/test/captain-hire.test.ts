@@ -22,15 +22,32 @@ function hireTool(tools: readonly ToolDefinition[]): ToolDefinition {
 describe("captain hire_agent", () => {
   it("is exposed where a shell could start a process, and nowhere else", () => {
     const hireSeat = vi.fn();
-    const operator = captainTools(deps, { targetId: "global-default" }, {} as LaneLog, "operator").map(
-      (tool) => tool.name,
-    );
+    const operator = captainTools(
+      deps,
+      {
+        targetId: "global-default",
+        conversationAuthority: {
+          owner: { conversationId: "global-default" },
+          current: () => true,
+          authorize: async () => true,
+        },
+      },
+      {} as LaneLog,
+      "operator",
+    ).map((tool) => tool.name);
     // No hire port, no tool: a lane without the wiring never advertises it.
     expect(operator).not.toContain("hire_agent");
 
     const withPort = captainTools(
       deps,
-      { targetId: "global-default" },
+      {
+        targetId: "global-default",
+        conversationAuthority: {
+          owner: { conversationId: "global-default" },
+          current: () => true,
+          authorize: async () => true,
+        },
+      },
       {} as LaneLog,
       "operator",
       undefined,
@@ -74,7 +91,14 @@ describe("captain hire_agent", () => {
     const tool = hireTool(
       captainTools(
         deps,
-        { targetId: "global-default" },
+        {
+          targetId: "global-default",
+          conversationAuthority: {
+            owner: { conversationId: "global-default" },
+            current: () => true,
+            authorize: async () => true,
+          },
+        },
         {} as LaneLog,
         "operator",
         undefined,
@@ -108,6 +132,7 @@ describe("captain hire_agent", () => {
         skills: "plain",
       },
       undefined,
+      expect.objectContaining({ owner: { conversationId: "global-default" } }),
     );
     // The mechanism outcome stays intact beside its shared receipt stage.
     expect(result.details).toEqual({ outcome: "failed", reason: "not_ready", deliveryStage: "unavailable" });
@@ -118,7 +143,14 @@ describe("captain hire_agent", () => {
     const tool = hireTool(
       captainTools(
         { ...deps, herdrAvailable: () => false } as CaptainDeps,
-        { targetId: "global-default" },
+        {
+          targetId: "global-default",
+          conversationAuthority: {
+            owner: { conversationId: "global-default" },
+            current: () => true,
+            authorize: async () => true,
+          },
+        },
         {} as LaneLog,
         "operator",
         undefined,
@@ -147,7 +179,14 @@ describe("captain hire_agent", () => {
     const tool = hireTool(
       captainTools(
         deps,
-        { targetId: "global-default" },
+        {
+          targetId: "global-default",
+          conversationAuthority: {
+            owner: { conversationId: "global-default" },
+            current: () => true,
+            authorize: async () => true,
+          },
+        },
         {} as LaneLog,
         "operator",
         undefined,

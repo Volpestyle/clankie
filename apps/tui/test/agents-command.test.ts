@@ -20,7 +20,10 @@ it("maps agents verbs onto the operator session and host routes", async () => {
   await runAgentsCommand(["--host", "pc", "--limit", "5"], options);
   await runAgentsCommand(["read", "pc:01a0", "--tail", "10"], options);
   await runAgentsCommand(["read", "pc:01a0", "--after", "abc"], options);
-  await runAgentsCommand(["resume", "pc:01a0", "--fleet", "pc", "--brief", "carry on"], options);
+  await runAgentsCommand(
+    ["resume", "pc:01a0", "--conversation", "selected-conversation", "--fleet", "pc", "--brief", "carry on"],
+    options,
+  );
   await runAgentsCommand(
     ["hosts", "add", "pc", "--ssh", "volpe@supedupsilly", "--shell", "powershell"],
     options,
@@ -34,7 +37,7 @@ it("maps agents verbs onto the operator session and host routes", async () => {
     {
       path: "/v1/agent-sessions/resume",
       method: "POST",
-      body: { ref: "pc:01a0", fleet: "pc", brief: "carry on" },
+      body: { ref: "pc:01a0", conversationId: "selected-conversation", fleet: "pc", brief: "carry on" },
     },
     {
       path: "/v1/agent-hosts",
