@@ -15,6 +15,7 @@ type WorkspaceOptions = {
   settings(): Promise<ProjectsSettings>;
   canonical?(path: string): Promise<string>;
   cwd?(pid: number): Promise<string | undefined>;
+  remoteCanonical?(machineId: string, path: string): Promise<string | undefined>;
 };
 const processCwd = async (pid: number) => {
   const { stdout } = await exec("/usr/sbin/lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
@@ -35,15 +36,22 @@ async function workspaceProject(
   proof: ProjectProcessProof,
   settings: ProjectsSettings,
 ): Promise<string | undefined> {
-  const canonical = options.canonical ?? realpath;
-  const cwd = options.cwd ?? processCwd;
+  const remote = proof.fleet !== "default";
+  if (remote && (!proof.workspace || proof.workspace.machineId !== proof.fleet || !options.remoteCanonical))
+    return undefined;
+  const machineId = remote ? proof.workspace!.machineId : "local";
+  const platform = remote ? proof.workspace!.platform : "posix";
+  const canonical = remote
+    ? (path: string) => options.remoteCanonical!(machineId, path)
+    : (options.canonical ?? realpath);
+  const cwd = remote ? async (_pid: number) => proof.workspace?.canonicalPath : (options.cwd ?? processCwd);
   const current = await cwd(proof.processes[0]!.pid);
   if (!current || (await canonical(current)) !== current) return undefined;
   const eligible: ProjectsSettings = { ...settings, projects: [] };
   for (const project of settings.projects) {
     const workspaces = [];
     for (const workspace of project.workspaces) {
-      if (workspace.machineId !== "local" || workspace.platform !== "posix") continue;
+      if (workspace.machineId !== machineId || workspace.platform !== platform) continue;
       try {
         if ((await canonical(workspace.path)) === workspace.path) workspaces.push(workspace);
       } catch {
@@ -54,7 +62,7 @@ async function workspaceProject(
   }
   const membership = resolveProjectMembership(eligible, {
     occupantId: JSON.stringify(proof),
-    workspace: { machineId: "local", platform: "posix", canonicalPath: current },
+    workspace: { machineId, platform, canonicalPath: current },
   });
   if (membership.outcome !== "member" || (await cwd(proof.processes[0]!.pid)) !== current) return undefined;
   return membership.projectId;
@@ -70,7 +78,7 @@ export function createProjectWorkspaceResolver(
     try {
       if (
         proof.privateSeat ||
-        proof.fleet !== "default" ||
+        (proof.fleet !== "default" && (!proof.workspace || proof.workspace.machineId !== proof.fleet)) ||
         proof.processes.length !== 1 ||
         !isDeepStrictEqual(await options.observe(proof.fleet, proof.pane), proof)
       )
@@ -106,7 +114,7 @@ export function createProjectMembershipResolver(
       if (
         !valid ||
         !proof ||
-        proof.fleet !== "default" ||
+        (proof.fleet !== "default" && (!proof.workspace || proof.workspace.machineId !== proof.fleet)) ||
         proof.pane !== identity.pane ||
         proof.processes.length !== 1
       )
