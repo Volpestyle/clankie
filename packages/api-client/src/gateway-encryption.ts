@@ -24,6 +24,19 @@ export interface GatewayEncryptedFetchOptions {
   fetchImpl?: typeof fetch;
   credential: () => GatewayEncryptionCredential | undefined;
 }
+/** Transport refusal before an authenticated application response is available.
+ * Consumers may retry reads after an outage, but must stop on authority failures.
+ * This wrapper never retries an application request (its delivery may be uncertain).
+ */
+export class GatewayRequestError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "GatewayRequestError";
+  }
+}
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -82,7 +95,7 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
     const base = `${url.origin}/h/${credential.hostId}`;
     const transportOptions = { signal: request.signal, redirect: "error" as const };
     const challengeResponse = await fetcher(`${base}${GATEWAY_CHALLENGE_PATH}`, transportOptions);
-    if (!challengeResponse.ok) throw new Error("Gateway challenge unavailable");
+    if (!challengeResponse.ok) throw new GatewayRequestError(challengeResponse.status, "Gateway challenge unavailable");
     const challengeBody = (await challengeResponse.json()) as { version?: unknown; challenge?: unknown };
     if (
       challengeBody.version !== 1 ||
@@ -134,7 +147,7 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
       body: JSON.stringify(envelope),
     });
     if (!outer.ok)
-      throw new Error(`Encrypted gateway request refused (${outer.status}); re-pair if the host key changed`);
+      throw new GatewayRequestError(outer.status, `Encrypted gateway request refused (${outer.status}); re-pair if the host key changed`);
     const encoded = await outer.text();
     if (encoder.encode(encoded).length > 32 * 1024 * 1024 || !encoded.endsWith("\n"))
       throw new Error("Truncated or oversized encrypted response");
