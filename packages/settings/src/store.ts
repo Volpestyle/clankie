@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -82,13 +82,22 @@ export class SettingsStore {
     await mkdir(parentDirectory, { recursive: true, mode: 0o700 });
     await chmod(parentDirectory, 0o700);
     const temporaryPath = `${this.filePath}.${String(process.pid)}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify(storedMachineSettings(settings), null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
+    const file = await open(temporaryPath, "wx", 0o600);
+    try {
+      await file.writeFile(`${JSON.stringify(storedMachineSettings(settings), null, 2)}\n`, "utf8");
+      await file.sync();
+    } finally {
+      await file.close();
+    }
     try {
       await guard?.();
       await rename(temporaryPath, this.filePath);
+      const directory = await open(parentDirectory, "r");
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
     } catch (error) {
       await unlink(temporaryPath).catch(() => undefined);
       throw error;

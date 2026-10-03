@@ -17,7 +17,8 @@
     "./discord-ingress-crypto": "./src/discord-ingress-crypto.ts",
     "./hosted-pairing": "./src/hosted-pairing.ts",
     "./hosted-operator": "./src/hosted-operator.ts",
-    "./discord-settings": "./src/discord-settings.ts"
+    "./discord-settings": "./src/discord-settings.ts",
+    "./projects": "./src/projects.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

@@ -131,3 +131,20 @@ supply the registry and saved rollout status. `readCodexAccountStatus` and
 Selection uses the minimum remaining fraction across reported windows, including
 weekly-only plans. Hires and evals share that selector; session discovery uses
 the registry. Unknown telemetry is not zero use.
+
+## Projects
+
+`projects` holds owner-authored project definitions and character role associations.
+Roles, worker limits, workspace approvals and tool-policy references are never read
+from repo-controlled configuration. A tracker reference points to an approved
+workspace’s `.clankie/tracking.json`; it does not copy credentials or confer tool
+authority. See [ADR 0216](../../docs/adr/0216-projects-own-agent-roles-and-tool-policy.md)
+for canonical workspace matching, fail-closed ambiguity, durable legacy persona
+migration and the default-project compatibility projection.
+
+`projectsRevision` hashes the parsed project section. Future owner-authorized
+editors compare `expectedRevision` inside `SettingsStore.update` and retain its
+final authority guard. `resolveProjectMembership` only calculates policy from
+host-established inputs; it cannot prove a pane, grant or caller’s identity.
+Session-wide fleet grants remain unchanged here; VUH-1558 owns explicit retirement
+and per-agent enforcement. No live migration runs as part of tests or build.

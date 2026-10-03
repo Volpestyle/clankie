@@ -134,7 +134,7 @@ import {
 } from "./fleet-edges.ts";
 import { operatorPromptWithHerdrSeat } from "./herdr-seat.ts";
 import { createChannelProjection } from "./channel-projection.ts";
-import { PersonaStore } from "./personas.ts";
+import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
 import { withSeatSubagents } from "./seat-subagents.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
@@ -1987,13 +1987,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           detail: "Claude worker channel requires an exact workspace binding",
         },
       };
+    await personas.ready(settingsStore);
+    await personas.prepareRoleAdoption(request.role);
     let adopted: ReturnType<typeof personas.adoptSpawn> | undefined;
+    let adoptedRoleWrite: PersonaRoleWrite | undefined;
     const result = await herdrWatches.spawnSeat(request, undefined, brief, resume, authority, (spawned) => {
       // Runs synchronously behind the final authority check, before the native
       // receipt is cleared. A revoked/replaced origin keeps its uncertain claim.
       if (!authority.current()) throw new Error("Hiring conversation was replaced before adoption");
       const title = resume === undefined ? request.title : spawned.seat.title;
-      const seat = personas.adoptSpawn(spawned.seat, title, request.role);
+      const seat = personas.adoptSpawn(spawned.seat, title, request.role, (status) => {
+        adoptedRoleWrite = status;
+      });
       conversations.bindPersona(seat.personaId, seat.seatId, title);
       liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
       seatByPersona.set(seat.personaId, seat.seatId);
@@ -2003,8 +2008,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       adopted = seat;
     });
     if (result.outcome !== "spawned") return result;
+    try {
+      await personas.flushProjectRoles();
+    } catch {
+      // The native seat already exists. Retain the exact pending role operation,
+      // never turn an association failure into a retryable native hire failure.
+    }
     if (adopted === undefined) throw new Error("Hired seat was not finalized under its admitted authority");
-    return { ...result, seat: adopted };
+    const roleAssignment =
+      adoptedRoleWrite?.outcome === "pending"
+        ? personas.roleWritePending(adoptedRoleWrite.operationId)
+          ? adoptedRoleWrite
+          : undefined
+        : adoptedRoleWrite;
+    return { ...result, seat: adopted, ...(roleAssignment ? { roleAssignment } : {}) };
   };
 
   /**
@@ -2101,6 +2118,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let seatWork = "";
   let captainGoals = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
+    await personas.ready(settingsStore);
     const binding = await deps.runtimes?.configuredBinding("default");
     const fleet = await readFleet({
       fleets: await censusFleets(),
@@ -2896,6 +2914,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     async serveOperatorConversation(
       request: OperatorConversationServiceRequest,
     ): Promise<OperatorConversationServiceResult> {
+      await personas.ready(settingsStore);
       if (
         deps.herdrAvailable?.() === false &&
         ["spawn_seat", "move_seat", "close_seat", "state_stance", "state_work"].includes(request.op)
@@ -3101,7 +3120,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return { op: "roles", schemaVersion: 1, roles: [...personas.roles()] };
       }
       if (request.op === "set_persona_role") {
-        const updated = personas.setRole({
+        const updated = await personas.setProjectRole({
           schemaVersion: 1,
           personaId: request.personaId,
           role: request.role,
@@ -3592,6 +3611,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }
       }
       sessions.clear();
+      await personas.close();
     },
   };
 }

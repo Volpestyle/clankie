@@ -47,3 +47,7 @@ render without its source.
 
 [ADR 0215](0215-conversations-lease-one-body.md) proposes exclusive body-resource
 leases for parallel conversations belonging to one Clankie.
+
+[ADR 0216](0216-projects-own-agent-roles-and-tool-policy.md) moves agent roles and
+project policy into owner settings, with lossless persona migration and per-agent
+membership rules.

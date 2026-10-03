@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 
 /**
  * Operator settings: **non-secret** configuration only.
@@ -694,6 +695,7 @@ export const ClankieSettingsSchema = z
     herdr: HerdrSettingsSchema.default(() => HerdrSettingsSchema.parse({})),
     skills: SkillsSettingsSchema.default(() => SkillsSettingsSchema.parse({})),
     fleet: FleetSettingsSchema.default(() => FleetSettingsSchema.parse({})),
+    projects: ProjectsSettingsSchema.default(() => ProjectsSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
     browser: BrowserSettingsSchema.default(() => BrowserSettingsSchema.parse({})),

@@ -96,3 +96,6 @@ export {
   codexRateLimit,
   type CodexAccount,
 } from "./codex-accounts.ts";
+
+export * from "./projects.ts";
+export { ProjectsSettingsSchema, type ProjectsSettings } from "@clankie/protocol/projects";

@@ -1,6 +1,26 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+  openSync,
+  closeSync,
+  fsyncSync,
+  statSync,
+  lstatSync,
+  rmSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import {
+  SettingsStore,
+  migratePersonaRoles,
+  setDefaultProjectRole,
+  projectRoleForPersona,
+  projectsRevision,
+} from "@clankie/settings";
+import { OperatorAgentRoleSchema } from "@clankie/protocol";
 import {
   defaultOperatorAgentAppearance,
   OPERATOR_AGENT_ROLES,
@@ -55,6 +75,17 @@ const PersonaFileSchema = z.discriminatedUnion("schemaVersion", [
     .strict(),
 ]);
 
+const PendingRoleSchema = z
+  .object({
+    id: z.string().uuid(),
+    personaId: OperatorAgentPersonaIdSchema,
+    role: OperatorAgentRoleSchema.nullable(),
+  })
+  .strict();
+const PendingRolesSchema = z.array(PendingRoleSchema).max(10_000);
+type PendingRole = z.infer<typeof PendingRoleSchema>;
+export type PersonaRoleWrite = { outcome: "pending"; operationId: string } | { outcome: "unsaved" };
+
 type PersonaBinding = z.infer<typeof PersonaBindingSchema>;
 
 /** Host-owned fleet characters. Herdr seats are only their current locations. */
@@ -64,16 +95,27 @@ export class PersonaStore {
   private readonly records = new Map<string, OperatorAgentPersona>();
   private readonly bindings = new Map<string, PersonaBinding>();
   private unreadable = false;
+  private loadedSource: string | undefined;
+  private projectStore?: SettingsStore;
+  private initializing = false;
+  private migration?: Promise<void>;
+  private flushQueue: Promise<void> = Promise.resolve();
+  private pending: PendingRole[] = [];
+  private pendingPath = "";
+  private journalLock: { path: string; nonce: string } | undefined;
+  private closed = false;
 
   public constructor(stateDir: string) {
     this.path = join(stateDir, "personas.json");
     this.avatarDir = join(stateDir, "persona-avatars");
     mkdirSync(stateDir, { recursive: true });
     mkdirSync(this.avatarDir, { recursive: true });
-    if (!existsSync(this.path)) return;
     try {
-      const state = PersonaFileSchema.parse(JSON.parse(readFileSync(this.path, "utf8")));
+      if (!existsSync(this.path)) return;
+      this.loadedSource = readFileSync(this.path, "utf8");
+      const state = PersonaFileSchema.parse(JSON.parse(this.loadedSource));
       for (const persona of state.personas) {
+        if (this.records.has(persona.personaId)) throw new Error("Duplicate agent identity");
         // A seat is live state and is always rebuilt from Herdr after launch.
         const { activeSeatId: _activeSeatId, conversationId: _conversationId, ...persisted } = persona;
         this.records.set(persona.personaId, {
@@ -90,6 +132,161 @@ export class PersonaStore {
       }
     } catch {
       this.unreadable = true;
+    }
+  }
+
+  /** Run against the real owner settings store before exposing any persona operations. */
+  public async ready(settings: SettingsStore): Promise<void> {
+    if (this.closed) throw new Error("Persona store is closed");
+    if (this.projectStore && this.projectStore !== settings)
+      throw new Error("Persona project settings store changed");
+    this.migration ??= this.migrate(settings);
+    await this.migration;
+    await this.flushProjectRoles();
+    this.projectRoles((await settings.load()).projects);
+  }
+
+  private async migrate(settings: SettingsStore): Promise<void> {
+    if (this.unreadable) throw new Error("Agent identity state is unreadable; legacy roles retained");
+    this.initializing = true;
+    const journalId = createHash("sha256").update(this.path).digest("hex");
+    this.pendingPath = join(dirname(settings.path), `persona-project-roles-${journalId}.pending.json`);
+    this.journalLock = acquireJournalWriter(this.pendingPath);
+    if (existsSync(this.pendingPath)) {
+      const info = lstatSync(this.pendingPath);
+      if (
+        !info.isFile() ||
+        info.nlink !== 1 ||
+        (info.mode & 0o077) !== 0 ||
+        info.uid !== process.getuid?.() ||
+        info.size > 4 * 1024 * 1024
+      )
+        throw new Error("Project role journal must be a bounded private owner file");
+      this.pending = PendingRolesSchema.parse(JSON.parse(readFileSync(this.pendingPath, "utf8")));
+    }
+    const source = existsSync(this.path) ? readFileSync(this.path, "utf8") : undefined;
+    if (source !== this.loadedSource) throw new Error("Agent identity source changed before migration");
+    const legacy = [...this.records.values()].flatMap((p) =>
+      p.role === undefined ? [] : [{ personaId: p.personaId, role: p.role }],
+    );
+    const sourceId = createHash("sha256").update(this.path).digest("hex");
+    try {
+      let projects;
+      if (legacy.length > 0) {
+        const saved = await settings.update((current) => ({
+          ...current,
+          projects: migratePersonaRoles(current.projects, sourceId, legacy),
+        }));
+        const verified = await settings.load();
+        if (projectsRevision(saved.projects) !== projectsRevision(verified.projects))
+          throw new Error("Project settings changed before legacy migration verification");
+        projects = verified.projects;
+      } else projects = (await settings.load()).projects;
+      if ((existsSync(this.path) ? readFileSync(this.path, "utf8") : undefined) !== source)
+        throw new Error("Agent identity source changed during migration");
+      this.projectStore = settings;
+      this.initializing = false;
+      this.projectRoles(projects);
+      // Project commit and readback precede removal of every legacy identity role.
+      if (source !== undefined) this.save();
+    } catch (error) {
+      this.initializing = false;
+      throw error;
+    }
+  }
+
+  private projectRoles(projects: Parameters<typeof projectRoleForPersona>[0]): void {
+    for (const [id, persona] of this.records) {
+      const { role: _legacy, ...identity } = persona;
+      const role = projectRoleForPersona(projects, id);
+      this.records.set(id, { ...identity, ...(role === undefined ? {} : { role }) });
+    }
+  }
+
+  private queueProjectRole(personaId: string, role: string | null): string {
+    if (this.closed || !this.journalLock) throw new Error("Project role journal is not owned");
+    const id = randomUUID();
+    const next = PendingRolesSchema.parse([...this.pending, { id, personaId, role }]);
+    durableJson(this.pendingPath, next);
+    this.pending = next;
+    return id;
+  }
+
+  /** The synchronous adoption receipt writes a separate durable intent; settings remain its final owner. */
+  public flushProjectRoles(): Promise<void> {
+    const run = async () => {
+      if (!this.projectStore || this.pending.length === 0) return;
+      const pending = [...this.pending];
+      if (pending.some((entry) => !this.records.has(entry.personaId)))
+        throw new Error("Pending role has no persisted agent identity; retained for reconciliation");
+      const sourceId = createHash("sha256").update(this.pendingPath).digest("hex");
+      const saved = await this.projectStore.update((current) => {
+        const completed = new Set(
+          current.projects.roleWriteReceipts.find((receipt) => receipt.sourceId === sourceId)?.operationIds ??
+            [],
+        );
+        const projects = pending
+          .filter((entry) => !completed.has(entry.id))
+          .reduce(
+            (value, entry) => setDefaultProjectRole(value, entry.personaId, entry.role),
+            current.projects,
+          );
+        return {
+          ...current,
+          projects: {
+            ...projects,
+            roleWriteReceipts: [
+              ...projects.roleWriteReceipts.filter((receipt) => receipt.sourceId !== sourceId),
+              { sourceId, operationIds: pending.map((entry) => entry.id) },
+            ],
+          },
+        };
+      });
+      const verified = await this.projectStore.load();
+      if (projectsRevision(saved.projects) !== projectsRevision(verified.projects))
+        throw new Error("Project role write could not be verified");
+      const remaining = this.pending.filter((entry) => !pending.some((done) => done.id === entry.id));
+      durableJson(this.pendingPath, remaining);
+      this.pending = remaining;
+      this.projectRoles(verified.projects);
+    };
+    const result = this.flushQueue.then(run, run);
+    this.flushQueue = result.catch(() => undefined);
+    return result;
+  }
+
+  public async prepareRoleAdoption(role: OperatorAgentRole | undefined): Promise<void> {
+    if (role === undefined) return;
+    if (!this.projectStore || this.closed || !this.journalLock)
+      throw new Error("Project role journal is not ready");
+    if (this.pending.length >= 10_000) throw new Error("Project role journal is full");
+    // Check current schema/role limits before a native side effect, without writing a phantom identity.
+    setDefaultProjectRole((await this.projectStore.load()).projects, `prospective-${randomUUID()}`, role);
+  }
+
+  public roleWritePending(operationId: string): boolean {
+    return this.pending.some((entry) => entry.id === operationId);
+  }
+
+  public async setProjectRole(input: SetOperatorAgentPersonaRole): Promise<OperatorAgentPersona> {
+    if (!this.projectStore) throw new Error("Project role migration has not completed");
+    const parsed = SetOperatorAgentPersonaRoleSchema.parse(input);
+    if (!this.records.has(parsed.personaId)) throw new Error(`Unknown agent ${parsed.personaId}`);
+    this.queueProjectRole(parsed.personaId, parsed.role);
+    await this.flushProjectRoles();
+    return this.records.get(parsed.personaId)!;
+  }
+
+  public async close(): Promise<void> {
+    this.closed = true;
+    await this.migration?.catch(() => undefined);
+    await this.flushQueue;
+    if (this.journalLock) {
+      const owner = JSON.parse(readFileSync(join(this.journalLock.path, "owner.json"), "utf8")) as {
+        nonce?: string;
+      };
+      if (owner.nonce === this.journalLock.nonce) rmSync(this.journalLock.path, { recursive: true });
+      this.journalLock = undefined;
     }
   }
 
@@ -118,7 +315,12 @@ export class PersonaStore {
   }
 
   /** Preserve the operator's chosen hire name before a terminal title can change. */
-  public adoptSpawn(observed: ObservedFleetSeat, name: string, role?: OperatorAgentRole): OperatorFleetSeat {
+  public adoptSpawn(
+    observed: ObservedFleetSeat,
+    name: string,
+    role?: OperatorAgentRole,
+    onRoleWrite?: (status: PersonaRoleWrite) => void,
+  ): OperatorFleetSeat {
     const previousRecords = new Map(this.records);
     const previousBindings = new Map(this.bindings);
     const { seat } = this.bindSeat(observed);
@@ -131,13 +333,24 @@ export class PersonaStore {
       name,
       appearance: current.appearance,
       // A move re-adopts the same character; it keeps the role it had.
-      ...((role ?? current.role) === undefined ? {} : { role: role ?? current.role }),
+      ...((this.projectStore ? current.role : (role ?? current.role)) === undefined
+        ? {}
+        : { role: this.projectStore ? current.role : (role ?? current.role) }),
       harness: seat.harness,
       ...(current.avatarRevision === undefined ? {} : { avatarRevision: current.avatarRevision }),
       createdAt: current.createdAt,
       updatedAt: now,
     });
     try {
+      if (this.projectStore && role !== undefined) {
+        let status: PersonaRoleWrite;
+        try {
+          status = { outcome: "pending", operationId: this.queueProjectRole(seat.personaId, role) };
+        } catch {
+          status = { outcome: "unsaved" };
+        }
+        onRoleWrite?.(status);
+      }
       this.save();
     } catch (error) {
       this.records.clear();
@@ -245,6 +458,7 @@ export class PersonaStore {
 
   /** Assign or clear a character's team role (ADR 0208). */
   public setRole(input: SetOperatorAgentPersonaRole): OperatorAgentPersona {
+    if (this.projectStore) throw new Error("Use the project role setter after migration");
     const parsed = SetOperatorAgentPersonaRoleSchema.parse(input);
     const current = this.records.get(parsed.personaId);
     if (current === undefined) throw new Error(`Unknown agent ${parsed.personaId}`);
@@ -388,21 +602,16 @@ export class PersonaStore {
 
   private save(): void {
     if (this.unreadable) throw new Error("Agent identity state is unreadable; refusing to overwrite it");
-    const temporary = `${this.path}.tmp`;
-    writeFileSync(
-      temporary,
-      `${JSON.stringify(
-        {
-          schemaVersion: 2,
-          personas: [...this.records.values()],
-          bindings: [...this.bindings.values()],
-        },
-        null,
-        2,
-      )}\n`,
-      { mode: 0o600 },
-    );
-    renameSync(temporary, this.path);
+    if (this.initializing) throw new Error("Agent identity migration is still in progress");
+    durableJson(this.path, {
+      schemaVersion: 2,
+      personas: [...this.records.values()].map((persona) => {
+        if (!this.projectStore) return persona;
+        const { role: _role, ...identity } = persona;
+        return identity;
+      }),
+      bindings: [...this.bindings.values()],
+    });
   }
 }
 
@@ -460,4 +669,63 @@ function publicAvatarUrl(
   } catch {
     return undefined;
   }
+}
+
+function durableJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  const file = openSync(temporary, "wx", 0o600);
+  try {
+    writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    fsyncSync(file);
+  } finally {
+    closeSync(file);
+  }
+  renameSync(temporary, path);
+  const directory = openSync(dirname(path), "r");
+  try {
+    fsyncSync(directory);
+  } finally {
+    closeSync(directory);
+  }
+}
+
+/** Same conservative dead-process recovery as the body store: PID reuse denies takeover. */
+function acquireJournalWriter(journal: string): { path: string; nonce: string } {
+  const path = `${journal}.lock`;
+  const recovery = `${path}.recovery`;
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  if (existsSync(recovery)) throw new Error("Project role journal recovery requires inspection");
+  const schema = z.object({ pid: z.number().int().positive(), nonce: z.string().uuid() }).strict();
+  const readOwner = () => schema.parse(JSON.parse(readFileSync(join(path, "owner.json"), "utf8")));
+  const dead = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ESRCH";
+    }
+  };
+  try {
+    mkdirSync(path, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const original = readOwner();
+    const inode = statSync(path).ino;
+    if (!dead(original.pid))
+      throw new Error("Project role journal already has a live or unverifiable writer");
+    mkdirSync(recovery, { mode: 0o700 });
+    try {
+      const current = readOwner();
+      if (statSync(path).ino !== inode || current.nonce !== original.nonce || !dead(current.pid))
+        throw new Error("Project role journal writer changed during recovery");
+      rmSync(path, { recursive: true });
+      mkdirSync(path, { mode: 0o700 });
+    } finally {
+      rmSync(recovery, { recursive: true });
+    }
+  }
+  const nonce = randomUUID();
+  durableJson(join(path, "owner.json"), { pid: process.pid, nonce });
+  return { path, nonce };
 }
