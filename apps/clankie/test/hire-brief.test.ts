@@ -58,7 +58,8 @@ test.each(["pi", "claude", "codex"])(
       expect(
         await call(bank, "hire_agent", {
           harness,
-          title: "worker",
+          title: "Noor",
+          role: "builder",
           workingDirectory: root,
           brief: "Implement SPEC.md and report the tests.",
         }),
@@ -102,7 +103,8 @@ test.each([
             occupantId: "native-session",
             harness: "codex",
             status: "working",
-            title: "worker",
+            title: "Noor",
+            role: "builder",
             workingDirectory: root,
           },
         } as const;
@@ -116,7 +118,8 @@ test.each([
       const bank = await captain.laneToolBank("operator", "global-default");
       const hired = await call(bank, "hire_agent", {
         harness: "codex",
-        title: "worker",
+        title: "Noor",
+        role: "builder",
         workingDirectory: root,
         brief: "Implement SPEC.md.",
       });
