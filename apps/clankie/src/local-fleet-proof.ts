@@ -116,55 +116,74 @@ export function localFleetProof(options: LocalFleetProofOptions) {
 /** Project access additionally needs the live native foreground agent, not just its pane shell. */
 export function localProjectProof(options: LocalFleetProofOptions) {
   const execute = options.run ?? run;
-  const prove = localFleetProof(options);
   const observe = createProjectProcessObserver(options);
   return async (socket: Socket, pane: string): Promise<ProjectProcessProof | undefined> => {
+    if ((options.platform ?? process.platform) !== "darwin" || !/^w[\w]+:p[\w]+$/u.test(pane))
+      return undefined;
+    const clientPort = socket.remotePort;
+    const serverPort = socket.localPort;
+    const alive = () =>
+      !socket.destroyed &&
+      socket.readable &&
+      socket.writable &&
+      socket.remoteAddress === "127.0.0.1" &&
+      socket.localAddress === "127.0.0.1" &&
+      socket.remotePort === clientPort &&
+      socket.localPort === serverPort;
+    if (!alive() || !clientPort || !serverPort) return undefined;
     try {
-      if (!(await prove(socket, pane))) return undefined;
-      const proof = await observe("default", pane);
-      if (!proof || !socket.remotePort || !socket.localPort) return undefined;
-      const pid = clientPid(
-        await execute("/usr/sbin/lsof", [
-          "-nP",
-          "-a",
-          `-iTCP:${socket.localPort}`,
-          "-sTCP:ESTABLISHED",
-          "-Fpn",
-        ]),
-        socket.remotePort,
-        socket.localPort,
-      );
-      if (!pid) return undefined;
-      const chain = ancestors(await execute("/bin/ps", ["-axo", "pid=,ppid="]), pid);
       const binding = await options.binding();
+      if (!binding) return undefined;
+      const owner = async () =>
+        clientPid(
+          await execute("/usr/sbin/lsof", ["-nP", "-a", `-iTCP:${serverPort}`, "-sTCP:ESTABLISHED", "-Fpn"]),
+          clientPort,
+          serverPort,
+        );
+      const pid = await owner();
+      if (!pid) return undefined;
+      const [proof, tree] = await Promise.all([
+        observe("default", pane),
+        execute("/bin/ps", ["-axo", "pid=,ppid="]),
+      ]);
+      const chain = ancestors(tree, pid);
       if (
-        !binding ||
+        !proof ||
+        chain.length === 0 ||
+        !alive() ||
         binding.socketPath !== proof.binding.socketPath ||
         binding.session !== proof.binding.session
       )
+        return undefined;
+      // Native proof already brackets executable/session/foreground/lifetime reads.
+      // Bind its shell to the socket ancestry without repeating the entire fleet proof.
+      if (!chain.includes(proof.shell.pid) && (await options.privateSeat?.(chain, pane, binding)) !== true)
         return undefined;
       const direct = proof.processes.some((process) => chain.includes(process.pid));
       const privateSeat =
         !direct && (await options.privateProjectSeat?.(chain, pane, binding, proof)) === true;
       if (!direct && !privateSeat) return undefined;
+      const [finalPid, finalTree, finalProof] = await Promise.all([
+        owner(),
+        execute("/bin/ps", ["-axo", "pid=,ppid="]),
+        observe("default", pane),
+      ]);
+      const finalChain = ancestors(finalTree, pid);
+      const current = await options.binding();
       if (
-        !(await prove(socket, pane)) ||
-        JSON.stringify(await observe("default", pane)) !== JSON.stringify(proof)
+        finalPid !== pid ||
+        JSON.stringify(finalChain) !== JSON.stringify(chain) ||
+        JSON.stringify(finalProof) !== JSON.stringify(proof) ||
+        !alive() ||
+        current?.socketPath !== binding.socketPath ||
+        current?.session !== binding.session
       )
         return undefined;
-      const finalPid = clientPid(
-        await execute("/usr/sbin/lsof", [
-          "-nP",
-          "-a",
-          `-iTCP:${socket.localPort}`,
-          "-sTCP:ESTABLISHED",
-          "-Fpn",
-        ]),
-        socket.remotePort,
-        socket.localPort,
-      );
-      const finalChain = ancestors(await execute("/bin/ps", ["-axo", "pid=,ppid="]), pid);
-      if (finalPid !== pid || JSON.stringify(finalChain) !== JSON.stringify(chain)) return undefined;
+      if (
+        !finalChain.includes(proof.shell.pid) &&
+        (await options.privateSeat?.(finalChain, pane, binding)) !== true
+      )
+        return undefined;
       if (privateSeat && (await options.privateProjectSeat?.(finalChain, pane, binding, proof)) !== true)
         return undefined;
       return privateSeat ? { ...proof, privateSeat: true } : proof;

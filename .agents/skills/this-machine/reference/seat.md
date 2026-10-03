@@ -88,6 +88,9 @@ access. Codex currently keeps its initial catalog despite
 `notifications/tools/list_changed`; after an access change, an owner may need to
 reconnect MCP or restart that native pane. A displayed stale tool never bypasses
 revocation. Missing tools do not authorize another connector or an operator lane.
+Project membership proves initial and final socket/native-process checkpoints
+afresh for each request. Independent observations run together; no proof is
+cached across calls. Slow or unavailable process observations still deny access.
 
 OpenCode seats use the same isolation contract: a fresh `clankie seat --harness
 opencode` creates a separate workspace chat; `--conversation ID` reuses one,

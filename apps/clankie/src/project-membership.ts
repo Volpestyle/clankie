@@ -29,14 +29,38 @@ const processCwd = async (pid: number) => {
   return paths.length === 1 ? paths[0] : undefined;
 };
 
+/** Called only inside a caller's initial/final native-process proof checks. */
+async function workspaceProject(
+  options: WorkspaceOptions,
+  proof: ProjectProcessProof,
+  settings: ProjectsSettings,
+): Promise<string | undefined> {
+  const canonical = options.canonical ?? realpath;
+  const cwd = options.cwd ?? processCwd;
+  const current = await cwd(proof.processes[0]!.pid);
+  if (!current || (await canonical(current)) !== current) return undefined;
+  for (const project of settings.projects)
+    for (const workspace of project.workspaces)
+      if (
+        workspace.machineId === "local" &&
+        workspace.platform === "posix" &&
+        (await canonical(workspace.path)) !== workspace.path
+      )
+        return undefined;
+  const membership = resolveProjectMembership(settings, {
+    occupantId: JSON.stringify(proof),
+    workspace: { machineId: "local", platform: "posix", canonicalPath: current },
+  });
+  if (membership.outcome !== "member" || (await cwd(proof.processes[0]!.pid)) !== current) return undefined;
+  return membership.projectId;
+}
+
 /** Shared actual-cwd policy for hire source selection and worker tool eligibility. */
 export function createProjectWorkspaceResolver(
   options: WorkspaceOptions & {
     observe(fleet: string, pane: string): Promise<ProjectProcessProof | undefined>;
   },
 ) {
-  const canonical = options.canonical ?? realpath;
-  const cwd = options.cwd ?? processCwd;
   return async (proof: ProjectProcessProof): Promise<string | undefined> => {
     try {
       if (
@@ -48,28 +72,14 @@ export function createProjectWorkspaceResolver(
         return undefined;
       const settings = await options.settings();
       const revision = projectsRevision(settings);
-      const current = await cwd(proof.processes[0]!.pid);
-      if (!current || (await canonical(current)) !== current) return undefined;
-      for (const project of settings.projects)
-        for (const workspace of project.workspaces)
-          if (
-            workspace.machineId === "local" &&
-            workspace.platform === "posix" &&
-            (await canonical(workspace.path)) !== workspace.path
-          )
-            return undefined;
-      const membership = resolveProjectMembership(settings, {
-        occupantId: JSON.stringify(proof),
-        workspace: { machineId: "local", platform: "posix", canonicalPath: current },
-      });
+      const projectId = await workspaceProject(options, proof, settings);
       if (
-        membership.outcome !== "member" ||
-        (await cwd(proof.processes[0]!.pid)) !== current ||
+        !projectId ||
         !isDeepStrictEqual(await options.observe(proof.fleet, proof.pane), proof) ||
         projectsRevision(await options.settings()) !== revision
       )
         return undefined;
-      return membership.projectId;
+      return projectId;
     } catch {
       return undefined;
     }
@@ -86,9 +96,15 @@ export function createProjectMembershipResolver(
     identity: LocalFleetIdentity,
   ): Promise<{ projectId: string; occupantId: string } | undefined> => {
     try {
-      if (!(await identity.validate())) return undefined;
-      const proof = await identity.projectProof?.();
-      if (!proof || proof.fleet !== "default" || proof.pane !== identity.pane || proof.processes.length !== 1)
+      // These independent observations share a checkpoint, not an authority cache.
+      const [valid, proof] = await Promise.all([identity.validate(), identity.projectProof?.()]);
+      if (
+        !valid ||
+        !proof ||
+        proof.fleet !== "default" ||
+        proof.pane !== identity.pane ||
+        proof.processes.length !== 1
+      )
         return undefined;
       const occupantId = JSON.stringify(proof);
       const settings = await options.settings();
@@ -108,15 +124,13 @@ export function createProjectMembershipResolver(
         });
         if (membership.outcome === "member") projectId = membership.projectId;
       } else {
-        projectId = await createProjectWorkspaceResolver({
-          ...options,
-          observe: async () => identity.projectProof?.(),
-        })(proof);
+        projectId = await workspaceProject(options, proof, settings);
       }
+      if (!projectId) return undefined;
+      const [stillValid, currentProof] = await Promise.all([identity.validate(), identity.projectProof?.()]);
       if (
-        !projectId ||
-        !(await identity.validate()) ||
-        !isDeepStrictEqual(await identity.projectProof?.(), proof) ||
+        !stillValid ||
+        !isDeepStrictEqual(currentProof, proof) ||
         !isDeepStrictEqual(await options.hire(assignmentProof), hire) ||
         projectsRevision(await options.settings()) !== revision
       )

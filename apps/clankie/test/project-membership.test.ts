@@ -133,3 +133,31 @@ it("requires an actual hire for a registered private app-server and never falls 
   f.state.hire = { state: "invalid" };
   expect(await f.resolve()).toBeUndefined();
 });
+
+it("rechecks settings and hire state after a slow final process proof, never before it settles", async () => {
+  for (const changed of ["settings", "hire"] as const) {
+    const f = fixture();
+    let reads = 0;
+    let finish!: () => void;
+    let started!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const observed = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    f.identity.projectProof = async () => {
+      if (++reads === 2) {
+        started();
+        await pending;
+      }
+      return structuredClone(f.state.proof);
+    };
+    const result = f.resolve();
+    await observed;
+    if (changed === "settings") f.state.settings.projects = [];
+    else f.state.hire = { state: "invalid" };
+    finish();
+    expect(await result).toBeUndefined();
+  }
+});

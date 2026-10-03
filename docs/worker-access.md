@@ -216,6 +216,15 @@ Codex currently retains its startup catalog and does not refresh it on
 or restart the pane after access changes. Revocation remains enforced on every
 call even when a client still displays an old catalog.
 
+Membership uses fresh initial and final checkpoints within each resolution.
+Socket ownership, ancestry and the complete native-process observation are
+checked at both; independent reads at a checkpoint run concurrently. Workspace
+resolution keeps its two cwd reads and canonical-path checks inside those
+checkpoints, followed by fresh hire and settings checks after the final process
+proof. This removes nested duplicate scans without caching authority between
+requests. A slow or unavailable observation still denies access; a completed
+proof never grants access beyond the live account and revocation checks.
+
 SSH/PC fleet links still carry native messages, but they do not yet provide the
 OS process proof needed for project tools (VUH-1563). Remote project calls deny
 access. Shared daemons, unregistered detached processes, foreground shell

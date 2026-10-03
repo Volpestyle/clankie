@@ -219,3 +219,71 @@ it("admits only a live registered private server matching the foreground native 
   registration();
   expect(await prove(socket(), "w1:p1")).toBeUndefined();
 });
+
+it.each([
+  "owner",
+  "duplicate",
+  "ancestry",
+  "foreground",
+  "lifetime",
+  "session",
+  "executable",
+  "binding",
+  "closed",
+  "unavailable",
+])("rejects %s changing at the final parallel project-proof checkpoint", async (changed) => {
+  const { localProjectProof } = await import("../src/local-fleet-proof.ts");
+  const connected = socket();
+  let final = false;
+  let owners = 0;
+  const prove = localProjectProof({
+    platform: "darwin",
+    herdrBinary: "herdr",
+    binding: async () => (final && changed === "binding" ? undefined : binding),
+    launcher: async () => ({ executable: "/trusted/codex" }),
+    canonical: async (path) => path,
+    run: async (command, args) => {
+      if (command === "/usr/sbin/lsof") {
+        if (args.includes("txt")) {
+          if (final && changed === "unavailable") throw new Error("Process observation timed out");
+          return `p44\nftxt\nn${final && changed === "executable" ? "/untrusted/codex" : "/trusted/codex"}\n`;
+        }
+        if (++owners === 2) final = true;
+        if (final && changed === "closed") Object.assign(connected, { destroyed: true });
+        if (final && changed === "owner") return owner.replace("p55", "p56");
+        if (final && changed === "duplicate") return `${owner}p56\nn127.0.0.1:51000->127.0.0.1:42000\n`;
+        return owner;
+      }
+      if (command === "/bin/ps") {
+        if (args[0] === "-axo")
+          return final && changed === "ancestry" ? "55 99\n99 33\n33 1\n44 33\n" : "55 44\n44 33\n33 1\n";
+        return `Sat Oct  3 10:00:0${final && changed === "lifetime" ? "1" : "0"} 2026 ${Number(args[1]) === 33 ? "/bin/zsh" : "/trusted/codex"}\n`;
+      }
+      if (args[0] === "agent")
+        return JSON.stringify({
+          result: {
+            agent: {
+              pane_id: "w1:p1",
+              terminal_id: "terminal",
+              agent: "codex",
+              agent_session: {
+                source: "codex",
+                kind: "id",
+                value: final && changed === "session" ? "replacement" : "session",
+              },
+            },
+          },
+        });
+      return JSON.stringify({
+        result: {
+          process_info: {
+            pane_id: "w1:p1",
+            shell_pid: 33,
+            foreground_process_group_id: final && changed === "foreground" ? 99 : 44,
+          },
+        },
+      });
+    },
+  });
+  expect(await prove(connected, "w1:p1")).toBeUndefined();
+});
