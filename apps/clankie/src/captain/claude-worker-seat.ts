@@ -32,6 +32,10 @@ import type {
 } from "@clankie/agent-hosts";
 import { CLAUDE_WORKER_PLUGIN, CLAUDE_WORKER_PLUGIN_ID, type FleetSeatHook } from "@clankie/protocol";
 import { resolveHerdrSeatTranscriptPath, type HerdrSeatTranscript } from "./herdr-transcript.ts";
+import { claudeTrackerDenyRules } from "./tracker-isolation.ts";
+
+const defaultTrackerDeny = (cwd: string, env?: Readonly<Record<string, string>>) =>
+  claudeTrackerDenyRules(cwd, { ...process.env, ...env });
 
 /** What the adapter reads of a herdr agent. */
 export interface WorkerSeatAgent {
@@ -59,6 +63,8 @@ export interface ClaudeWorkerSeatDeps {
     ): Promise<boolean | Extract<SeatDelivery, { readonly outcome: "unconfirmed" }>>;
   };
   readonly timing?: { readonly readyMs?: number; readonly receiptMs?: number; readonly pollMs?: number };
+  /** Deny rules for the tracker connectors a session in `cwd` would inherit. */
+  readonly trackerDeny?: (cwd: string, env?: Readonly<Record<string, string>>) => readonly string[];
 }
 
 const READY_MS = 30_000;
@@ -67,11 +73,18 @@ const POLL_MS = 250;
 const SESSION_LIMIT = 256;
 const CLAUDE_MANAGED_SETTINGS = "/Library/Application Support/ClaudeCode/managed-settings.json";
 
-/** The argv a worker launch adds to `claude`: its plugin for this session only, and its approved channel. */
-export function claudeWorkerLaunchArgs(launch: SeatLaunch): string[] {
+/**
+ * The argv a worker launch adds to `claude`: its plugin for this session only,
+ * its approved channel, and deny rules for inherited tracker connectors so its
+ * Linear writes go through Clankie's connected account.
+ */
+export function claudeWorkerLaunchArgs(launch: SeatLaunch, trackerDeny: readonly string[] = []): string[] {
   return [
     "--settings",
-    JSON.stringify({ enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true } }),
+    JSON.stringify({
+      enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
+      ...(trackerDeny.length === 0 ? {} : { permissions: { deny: [...trackerDeny] } }),
+    }),
     "--channels",
     `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
     ...(launch.resumeSessionId === undefined ? [] : ["--resume", launch.resumeSessionId]),
@@ -482,7 +495,8 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
       if (!consent.approved)
         return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
       try {
-        await view.start("claude", claudeWorkerLaunchArgs(launch));
+        const trackerDeny = (deps.trackerDeny ?? defaultTrackerDeny)(launch.cwd, launch.env);
+        await view.start("claude", claudeWorkerLaunchArgs(launch, trackerDeny));
       } catch (error) {
         return {
           outcome: "failed",

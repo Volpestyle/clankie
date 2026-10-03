@@ -24,6 +24,7 @@ async function fixture() {
     return { turnId: "turn", state: "started" as const };
   });
   const adapter = createCodexSeatAdapter({
+    trackerOverrides: async () => [],
     start: async (options) => {
       event = options.onEvent!;
       await options.startView(["--remote", "unix:///owned"]);

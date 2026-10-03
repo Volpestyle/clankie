@@ -29,7 +29,14 @@ function outputBuffer(): { readonly stream: { write(chunk: string): void }; read
 async function stateEnv(extra: NodeJS.ProcessEnv = {}): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-seat-test-"));
   tempDirs.push(root);
-  return { XDG_STATE_HOME: root, CLANKIE_SETTINGS_FILE: join(root, "settings.json"), ...extra };
+  return {
+    XDG_STATE_HOME: root,
+    CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+    // An empty Claude config: no inherited connectors beyond the account one.
+    CLAUDE_CONFIG_DIR: root,
+    HOME: root,
+    ...extra,
+  };
 }
 
 /** A fake `claude` and `herdr`: which plugins are listed, and what herdr says about the pane. */
@@ -100,7 +107,7 @@ describe("clankie seat", () => {
     expect(settings.enabledPlugins).toEqual({ [SEAT_PLUGIN_ID]: false, "clankie@inline": true });
     expect(settings.permissions).toEqual({
       allow: ["Bash(clankie)", "Bash(clankie *)"],
-      deny: ["mcp__linear-server"],
+      deny: ["mcp__linear-server", "mcp__claude_ai_Linear"],
     });
   });
 

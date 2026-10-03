@@ -228,8 +228,9 @@ An already-running bridge must be reloaded once to pick up this implementation:
 reconnect the plugin's **operator** MCP server (`clankie mcp --lane operator`),
 not only the separate fleet mailbox (`clankie mcp --seat`).
 
-The seat denies the inherited `linear-server` MCP connector, whose identity may
-differ from the owner-connected account. That connected tracker identity is
+The seat denies every inherited Linear MCP connector (any server on Linear's
+host or named for it, in user, local or project scope, plus the claude.ai Linear
+connector), whose identity may differ from the owner-connected account. That connected tracker identity is
 Clankie’s and his whole swarm’s identity. Tracker writes use Clankie’s connected
 tools or a granted worker bridge; a worker lacking access asks the lead to write. Follow Linear wakes the operator conversation
 from that account's actual notifications; stored issue bindings do not route wakes.

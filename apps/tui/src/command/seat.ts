@@ -18,6 +18,7 @@ import { readHerdrBinding } from "../session/herdr-connection.ts";
 import { clankieStateHome } from "../state-home.ts";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import { commandHost, outputJson, type Writable } from "./io.ts";
+import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const SEAT_USAGE =
@@ -40,6 +41,12 @@ const SEAT_SETTINGS = {
   ...SEAT_PERMISSIONS,
   enabledPlugins: { [SEAT_PLUGIN_ID]: false, "clankie@inline": true },
 };
+
+/** The seat's settings, also denying every other tracker connector this session would inherit. */
+function seatSettings(cwd: string, env: NodeJS.ProcessEnv) {
+  const deny = [...new Set([...SEAT_PERMISSIONS.permissions.deny, ...claudeTrackerDenyRules(cwd, env)])];
+  return { ...SEAT_SETTINGS, permissions: { ...SEAT_PERMISSIONS.permissions, deny } };
+}
 const HERDR_DETECT_TIMEOUT_MS = 30_000;
 const HERDR_DETECT_POLL_MS = 500;
 
@@ -70,6 +77,8 @@ export interface SeatCommandOptions {
   readonly fetchImpl?: typeof fetch;
   readonly operatorCredentialStore?: CredentialStore;
   readonly env?: NodeJS.ProcessEnv;
+  /** Codex `-c` overrides that switch off inherited tracker connectors (tests inject these). */
+  readonly trackerOverrides?: (cwd: string, env: NodeJS.ProcessEnv) => Promise<string[]>;
   readonly execFileImpl?: (
     command: string,
     args: readonly string[],
@@ -257,7 +266,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     "--name",
     "Clankie",
     "--settings",
-    JSON.stringify(SEAT_SETTINGS),
+    JSON.stringify(seatSettings(cwd, env)),
     "--plugin-dir",
     plugin.path,
     "--dangerously-load-development-channels",

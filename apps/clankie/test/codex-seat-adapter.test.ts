@@ -23,9 +23,10 @@ function fixture() {
       interrupt: vi.fn(async () => true),
     };
   });
-  const adapter = createCodexSeatAdapter({ start, herdr });
+  const trackerOverrides = vi.fn(async () => ["mcp_servers.linear.enabled=false"]);
+  const adapter = createCodexSeatAdapter({ start, herdr, trackerOverrides });
   const view = { paneId: "w1:p1", run: vi.fn(async () => undefined) };
-  return { adapter, emit, start, send, close, herdr, view };
+  return { adapter, emit, start, send, close, herdr, view, trackerOverrides };
 }
 
 describe("Codex harness seat adapter", () => {
@@ -39,6 +40,34 @@ describe("Codex harness seat adapter", () => {
     expect(f.start).toHaveBeenCalledWith(expect.objectContaining({ resumeThreadId: "thread-1" }));
     expect(f.send).not.toHaveBeenCalled();
     if (started.outcome === "started") await started.control.close();
+  });
+
+  it("switches off inherited Linear connectors so writes go through Clankie's account", async () => {
+    const f = fixture();
+    const started = await f.adapter.start(
+      {
+        harness: "codex",
+        cwd: "/scratch",
+        brief: "",
+        resumeSessionId: "thread-1",
+        env: { CODEX_HOME: "/h" },
+      },
+      f.view,
+    );
+    expect(started.outcome).toBe("started");
+    expect(f.trackerOverrides).toHaveBeenCalledWith("/scratch", { CODEX_HOME: "/h" });
+    expect(f.start).toHaveBeenCalledWith(
+      expect.objectContaining({ config: ["mcp_servers.linear.enabled=false"] }),
+    );
+    if (started.outcome === "started") await started.control.close();
+  });
+
+  it("does not start a hire whose inherited connectors cannot be read", async () => {
+    const f = fixture();
+    f.trackerOverrides.mockRejectedValueOnce(new Error("Could not read Codex's MCP servers"));
+    const started = await f.adapter.start({ harness: "codex", cwd: "/scratch", brief: "go" }, f.view);
+    expect(started).toMatchObject({ outcome: "failed", detail: expect.stringContaining("MCP servers") });
+    expect(f.start).not.toHaveBeenCalled();
   });
 
   it("refuses a different native thread before sending the brief", async () => {

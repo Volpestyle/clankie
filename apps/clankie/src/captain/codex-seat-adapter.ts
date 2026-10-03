@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { startCodexAppServerSeat, type CodexAppServerSeat, type CodexSeatEvent } from "./codex-app-server.ts";
+import { codexTrackerOverrides } from "./tracker-isolation.ts";
 
 const exec = promisify(execFile);
 const object = (value: unknown): Record<string, unknown> =>
@@ -13,6 +14,7 @@ export function createCodexSeatAdapter(
   options: {
     start?: typeof startCodexAppServerSeat;
     herdr?: (args: readonly string[]) => Promise<unknown>;
+    trackerOverrides?: typeof codexTrackerOverrides;
   } = {},
 ): HarnessSeatAdapter {
   const controls = new Map<string, SeatControl>();
@@ -118,8 +120,14 @@ export function createCodexSeatAdapter(
       };
       try {
         signal?.throwIfAborted();
+        // Its Linear writes go through Clankie's connected account, not an inherited connector.
+        const trackerOverrides = await (options.trackerOverrides ?? codexTrackerOverrides)(
+          launch.cwd,
+          launch.env,
+        );
         seat = await (options.start ?? startCodexAppServerSeat)({
           cwd: launch.cwd,
+          ...(trackerOverrides.length === 0 ? {} : { config: trackerOverrides }),
           ...(launch.resumeSessionId ? { resumeThreadId: launch.resumeSessionId } : {}),
           ...(launch.model ? { model: launch.model } : {}),
           ...(launch.effort ? { effort: launch.effort } : {}),

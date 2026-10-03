@@ -87,9 +87,12 @@ test("closing native hook review aborts startup and preserves the previous resum
           stderr: "",
         }),
         stderr: { write: () => {} },
+        trackerOverrides: async () => ["mcp_servers.linear.enabled=false"],
         spawnImpl: async () => 7,
         startImpl: async (options) => {
           expect(options.threadStartTimeoutMs).toBe(600_000);
+          // His Linear writes go through the connected account, not the inherited connector.
+          expect(options.config).toContain("mcp_servers.linear.enabled=false");
           await options.startView(["--remote", "unix:///owned.sock"]);
           canceled = options.signal!.aborted;
           throw options.signal!.reason;
@@ -196,6 +199,7 @@ test("the launcher waits for trusted hooks then routes the selected outbox throu
         SWARM_SESSION: "worker-private",
         CLANKIE_CONVERSATION_ID: "global-default",
       },
+      trackerOverrides: async () => [],
       execFileImpl: async (_command, args) => ({
         stdout: args.includes("list")
           ? JSON.stringify({ installed: [{ pluginId: "clankie@clankie-seat" }] })

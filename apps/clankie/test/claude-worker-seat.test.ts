@@ -109,6 +109,14 @@ it("a worker launch enables its plugin for this session only and asks for the ap
     "--plugin-dir",
     "/skills",
   ]);
+  expect(
+    claudeWorkerLaunchArgs({ harness: "claude", cwd: "/w", brief: "b" }, [
+      "mcp__claude_ai_Linear",
+      "mcp__linear-server",
+    ])[1],
+  ).toBe(
+    '{"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"deny":["mcp__claude_ai_Linear","mcp__linear-server"]}}',
+  );
   expect(channelBody(channel("line one\nline two"))).toBe("line one\nline two");
   expect(channelBody("plain prompt")).toBeUndefined();
 });
@@ -132,12 +140,18 @@ it.each([true, false])(
       transcript: async () => undefined,
       mailbox: { bound: () => true, deliver },
       timing: { readyMs: 10, pollMs: 1 },
+      trackerDeny: (cwd) => [`mcp__tracker_for_${cwd.length > 0 ? "cwd" : "none"}`],
     });
     const result = await adapter.start(
       { harness: "claude", cwd: root, brief: matching ? "" : "do not send", resumeSessionId: SESSION },
       { paneId: "w1:p1", start, run: async () => undefined },
     );
     expect(start).toHaveBeenCalledWith("claude", expect.arrayContaining(["--resume", SESSION]));
+    // Its Linear writes go through Clankie's account: inherited connectors are denied for the session.
+    expect(start).toHaveBeenCalledWith(
+      "claude",
+      expect.arrayContaining([expect.stringContaining('"deny":["mcp__tracker_for_cwd"]')]),
+    );
     expect(result.outcome).toBe(matching ? "started" : "failed");
     expect(deliver).not.toHaveBeenCalled();
   },
@@ -198,6 +212,7 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
     transcript: async () => ({ sessionKey: "k", entries: [...entries] }),
     mailbox: { bound: () => bound, deliver },
     timing: { readyMs: 200, receiptMs: 200, pollMs: 10 },
+    trackerDeny: () => [],
   });
   const start = vi.fn(async () => {
     if (options.binds !== false) bound = true;
@@ -325,6 +340,7 @@ it.each(["string", "blocks"])(
       transcript: () => runner.transcript!(agent),
       mailbox: { bound: () => true, deliver },
       timing: { readyMs: 20, receiptMs: 20, pollMs: 1 },
+      trackerDeny: () => [],
     });
     const start = vi.fn(async () => undefined);
     const view: SeatView = { paneId: agent.paneId, run: vi.fn(async () => undefined), start };

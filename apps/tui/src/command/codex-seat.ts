@@ -10,6 +10,7 @@ import { commandHost, outputJson } from "./io.ts";
 import type { SeatCommandOptions, SeatPlan } from "./seat.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import { startCodexAppServerSeat } from "../../../clankie/src/captain/codex-app-server.ts";
+import { codexTrackerOverrides } from "../../../clankie/src/captain/tracker-isolation.ts";
 
 const PLUGIN = "clankie@clankie-seat";
 const exec = promisify(execFileCallback);
@@ -67,9 +68,12 @@ export async function planCodexSeat(flags: Flags, options: SeatCommandOptions): 
   const excluded = skills
     .filter((skill) => !skill.included)
     .flatMap((skill) => [skill.name, `clankie:${skill.name}`]);
+  // His Linear writes go through the connected account, not an inherited connector.
+  const trackerOverrides = await (options.trackerOverrides ?? codexTrackerOverrides)(cwd, env);
   return {
     command: "codex",
     args: [
+      ...trackerOverrides.flatMap((override) => ["-c", override]),
       "-c",
       `marketplaces.clankie-seat={source_type="local",source=${JSON.stringify(source)}}`,
       "-c",
