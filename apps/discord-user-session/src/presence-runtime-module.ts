@@ -1,3 +1,4 @@
+import type { BodyEffectGuard } from "@clankie/discord-presence-core";
 import {
   createDefaultCredentialStore,
   DiscordUserSessionCredentialProvider,
@@ -30,7 +31,7 @@ export function createDiscordUserPresenceRuntime(
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
-    guard?: () => Promise<void>,
+    guard?: BodyEffectGuard,
   ): Promise<DiscordPresenceWriteResult>;
 } {
   if (process.env.DISCORD_USER_TOKEN) {

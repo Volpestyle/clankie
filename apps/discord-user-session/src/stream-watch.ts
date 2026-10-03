@@ -1,3 +1,4 @@
+import type { VoiceBodyAdmission } from "@clankie/discord-presence-core";
 import type { ClankieApiClient } from "@clankie/api-client";
 import type { DiscordActiveStream, DiscordStreamWatchReport } from "@clankie/protocol";
 import type { VoxStreamClient } from "@clankie/vox-client";
@@ -25,6 +26,7 @@ export interface StreamWatchControllerOptions {
     type: "watch_connected" | "frame",
     data: Record<string, string | number | boolean>,
   ) => void;
+  readonly onPublishStopped?: (stayId: string) => Promise<void>;
   readonly onPublishEvent?: (
     type: "publish_started" | "publish_stopped",
     data: Record<string, string | number | boolean>,
@@ -35,6 +37,7 @@ export interface StreamWatchController {
   handleRaw(packet: { t: string; d: Record<string, unknown> }): void;
   publish(): void;
   requestPublish(input: {
+    bodyLease?: VoiceBodyAdmission;
     guildId: string;
     channelId: string;
     sourceUrl?: string;
@@ -52,6 +55,7 @@ const WATCH_RECONNECT_MAX_ATTEMPTS = 5;
 const PUBLISH_START_TIMEOUT_MS = 10_000;
 
 interface PendingPublish {
+  readonly bodyLease?: VoiceBodyAdmission;
   readonly guildId: string;
   readonly channelId: string;
   readonly resolve: (started: boolean) => void;
@@ -84,6 +88,60 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
   let watchRetryAttempts = 0;
   let pendingPublish: PendingPublish | undefined;
   let publishing = false;
+  let publishLease: VoiceBodyAdmission | undefined;
+  let pendingStop:
+    | {
+        lease: VoiceBodyAdmission;
+        key?: string;
+        gatewayDeleted: boolean;
+        mediaDisconnected: boolean;
+        disconnectSent: boolean;
+        finishing: boolean;
+      }
+    | undefined;
+  const confirmPublishStopped = (): void => {
+    const stop = pendingStop;
+    if (stop === undefined || stop.finishing || !stop.gatewayDeleted || !stop.mediaDisconnected) return;
+    const actual = options.membership.actualTarget;
+    const audio = options.membership.targetFor("voice");
+    const target = stop.lease.stay.target;
+    if (
+      actual?.guildId === target.guildId &&
+      actual.channelId === target.channelId &&
+      !(audio?.guildId === target.guildId && audio.channelId === target.channelId)
+    )
+      return;
+    stop.finishing = true;
+    void (options.onPublishStopped?.(stop.lease.stay.stayId) ?? Promise.resolve()).then(
+      () => {
+        if (pendingStop === stop) pendingStop = undefined;
+        if (publishLease === stop.lease) publishLease = undefined;
+      },
+      () => {
+        stop.finishing = false;
+      },
+    );
+  };
+  const beginPublishStop = (): void => {
+    if (publishLease === undefined || pendingStop !== undefined) return;
+    const key =
+      publishingStream?.streamKey ??
+      (pendingPublish !== undefined && options.gateway.userId !== undefined
+        ? buildDiscordStreamKey({
+            guildId: pendingPublish.guildId,
+            channelId: pendingPublish.channelId,
+            userId: options.gateway.userId,
+          })
+        : undefined);
+    pendingStop = {
+      lease: publishLease,
+      ...(key === undefined ? {} : { key }),
+      gatewayDeleted: pendingPublish?.opcodeSent !== true && publishingStream === undefined,
+      mediaDisconnected: false,
+      disconnectSent: false,
+      finishing: false,
+    };
+  };
   let publishingStream: DiscoveredDiscordStream | undefined;
   let publishPaused = false;
   let publishTransportReady = false;
@@ -272,7 +330,9 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
     report();
   };
 
-  const connectPublish = (stream: DiscoveredDiscordStream): void => {
+  let publishConnecting = false;
+  const connectPublish = async (stream: DiscoveredDiscordStream): Promise<void> => {
+    if (publishConnecting) return;
     if (closed || publishing) return;
     if (
       pendingPublish === undefined ||
@@ -286,7 +346,11 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
     const userId = options.gateway.userId;
     const daveChannelId = deriveDiscordStreamWatchDaveChannelId(stream.rtcServerId);
     if (sessionId === undefined || userId === undefined || daveChannelId === undefined) return;
+    const captured = pendingPublish;
+    publishConnecting = true;
     try {
+      if (captured.bodyLease !== undefined) await captured.bodyLease.guard();
+      if (pendingPublish !== captured || closed || pendingStop !== undefined) return;
       if (!discovery.setPublishPaused(stream.streamKey, false)) {
         failPublish(stream.guildId);
         return;
@@ -317,6 +381,8 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
       settlePublishStart(true);
     } catch {
       failPublish(stream.guildId);
+    } finally {
+      publishConnecting = false;
     }
   };
 
@@ -324,6 +390,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
     if (closed) return false;
     if (pendingPublish === undefined || pendingPublish.opcodeSent) return pendingPublish !== undefined;
     if (options.gateway.voiceSessionId === undefined) return true;
+    if (pendingPublish.bodyLease?.current() === false) return false;
     const sent = discovery.requestPublish(pendingPublish);
     if (sent) pendingPublish.opcodeSent = true;
     return sent;
@@ -342,7 +409,8 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
       if (pulling) return;
       pulling = true;
       void pull()
-        .then((frame) => {
+        .then(async (frame) => {
+          await publishLease?.guard();
           if (generation !== pumpGeneration) return;
           if (snapshotUrl !== undefined && frame === undefined) {
             failPublish();
@@ -377,12 +445,14 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
   };
 
   const failPublish = (guildId?: string): void => {
+    beginPublishStop();
     settlePublishStart(false);
     const pendingGuildId = guildId ?? pendingPublish?.guildId ?? publishingStream?.guildId;
     if (publishingStream !== undefined) discovery.requestPublishStop(publishingStream.streamKey);
     pendingPublish = undefined;
     stopPublishMedia();
     options.membership.release("stream_publish", pendingGuildId);
+    confirmPublishStopped();
   };
 
   const stopPublishMedia = (): void => {
@@ -402,8 +472,17 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
       publishReceiptSent = false;
       lastPublishDigest = undefined;
       runVox(() => vox.streamPublishStop());
-      runVox(() => vox.streamPublishDisconnect("operator_stop"));
+      runVox(() =>
+        vox.streamPublishDisconnect(
+          pendingStop === undefined ? "operator_stop" : `body_stay_stop:${pendingStop.lease.stay.stayId}`,
+        ),
+      );
+      if (pendingStop !== undefined) pendingStop.disconnectSent = true;
       if (shouldNotify) onPublishEvent?.("publish_stopped", {});
+    }
+    if (pendingStop !== undefined && !pendingStop.disconnectSent) {
+      pendingStop.disconnectSent = true;
+      runVox(() => vox.streamPublishDisconnect(`body_stay_stop:${pendingStop!.lease.stay.stayId}`));
     }
   };
 
@@ -456,7 +535,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
       onStreamCredentials(stream) {
         if (closed) return;
         if (stream.userId === options.gateway.userId) {
-          connectPublish(stream);
+          void connectPublish(stream);
           return;
         }
         if (!options.allowlisted(stream.guildId, stream.channelId)) return;
@@ -466,6 +545,8 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
       onStreamDeleted(stream) {
         if (closed) return;
         if (stream.userId === options.gateway.userId) {
+          beginPublishStop();
+          if (pendingStop?.key === stream.streamKey) pendingStop.gatewayDeleted = true;
           failPublish(stream.guildId);
         }
         if (watchRetryKey === stream.streamKey) abandonWatchRetry(stream);
@@ -524,6 +605,16 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
   }
 
   const eventRegistration = vox.onEvent((event) => {
+    if (
+      event.type === "transport_state" &&
+      event.role === "stream_publish" &&
+      event.status === "disconnected" &&
+      pendingStop !== undefined &&
+      event.reason === `body_stay_stop:${pendingStop.lease.stay.stayId}`
+    ) {
+      pendingStop.mediaDisconnected = true;
+      confirmPublishStopped();
+    }
     if (closed) return;
     if (event.type === "dave_state" && event.role === "stream_watch") {
       watchDaveProtocolVersion =
@@ -644,6 +735,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
     handleRaw(packet) {
       if (closed) return;
       discovery.handle(packet);
+      confirmPublishStopped();
     },
     publish() {
       if (closed) return;
@@ -653,14 +745,18 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
       const own = discovery
         .listStreams()
         .find((stream) => stream.userId === options.gateway.userId && stream.endpoint !== null);
-      if (own !== undefined) connectPublish(own);
+      if (own !== undefined) void connectPublish(own);
       watchFirstAvailable();
       report();
     },
     async requestPublish(input) {
       if (closed) return false;
       if (!options.allowlisted(input.guildId, input.channelId)) return false;
-      if (pendingPublish !== undefined || publishing) return false;
+      if (pendingPublish !== undefined || publishing || pendingStop !== undefined) return false;
+      if (input.bodyLease !== undefined) await input.bodyLease.guard();
+      if (closed || pendingPublish !== undefined || publishing || pendingStop !== undefined) return false;
+      input.bodyLease?.start?.();
+      publishLease = input.bodyLease;
       if (!options.membership.acquire("stream_publish", input.guildId, input.channelId)) return false;
       let resolve!: (started: boolean) => void;
       const promise = new Promise<boolean>((settle) => {
@@ -683,7 +779,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
       return promise;
     },
     playSource(url) {
-      if (closed) return false;
+      if (closed || publishLease?.current() === false) return false;
       const trimmed = url.trim();
       if (trimmed.length === 0) return false;
       if (publishing) {
@@ -700,7 +796,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
       return false;
     },
     setPublishPaused(paused) {
-      if (closed) return;
+      if (closed || publishLease?.current() === false) return;
       const own = discovery.listStreams().find((stream) => stream.userId === options.gateway.userId);
       if (own === undefined) return;
       discovery.setPublishPaused(own.streamKey, paused);
@@ -710,6 +806,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
     },
     stopPublish() {
       if (closed) return false;
+      beginPublishStop();
       const own = discovery.listStreams().find((stream) => stream.userId === options.gateway.userId);
       const fallbackKey =
         pendingPublish !== undefined && options.gateway.userId !== undefined
@@ -727,6 +824,7 @@ export function startStreamWatch(options: StreamWatchControllerOptions): StreamW
       pendingPublish = undefined;
       stopPublishMedia();
       const released = options.membership.release("stream_publish", guildId);
+      confirmPublishStopped();
       return opcodeStopped && released;
     },
     close() {

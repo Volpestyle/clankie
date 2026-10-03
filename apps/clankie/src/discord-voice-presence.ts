@@ -77,3 +77,9 @@ async function postVoicePresence(
     return { action: refused, reason: "failed" };
   }
 }
+
+/** Authenticated read-only body resolution; callers compare any intended target before ticket issuance. */
+export async function resolveDiscordVoiceTarget(input: VoicePresenceControlInput) {
+  const response = await postToDiscordActiveBody("/voice/resolve", input, process.env, fetch);
+  return response.ok ? BodyVoiceTargetSchema.parse(await response.json()) : undefined;
+}

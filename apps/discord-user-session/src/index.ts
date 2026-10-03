@@ -1,3 +1,4 @@
+import { BodyVoiceTargetSchema } from "@clankie/protocol";
 import { VoiceBodyLease, VoiceBodyLeaseDenied } from "@clankie/discord-presence-core";
 import { ClankieApiClient } from "@clankie/api-client";
 import {
@@ -322,6 +323,13 @@ const voiceSession =
       });
 let voiceOperationQueue: Promise<unknown> = Promise.resolve();
 let pendingLeftEvidence: Extract<DiscordVoiceEvidence, { type: "left" }> | undefined;
+const publishBodyLease = new VoiceBodyLease({
+  kind: "publish",
+  rpc: (request) => api.voiceLease(request),
+  onLost: async () => {
+    streamWatch.stopPublish();
+  },
+});
 const streamWatch = startStreamWatch({
   gateway,
   api,
@@ -333,6 +341,7 @@ const streamWatch = startStreamWatch({
     const readyId = activeReadyId;
     if (readyId !== undefined) void recordReceipt(`discord.stream.${type}`, { ...data, readyId });
   },
+  onPublishStopped: (stayId) => publishBodyLease.confirmedLeave(stayId),
   onPublishEvent: (type, data) => {
     const readyId = activeReadyId;
     if (readyId !== undefined) void recordReceipt(`discord.stream.${type}`, { ...data, readyId });
@@ -992,18 +1001,47 @@ const server = createServer((request, response) => {
             channelId?: string;
             sourceUrl?: string;
             snapshotUrl?: string;
+            bodyLease?: { ticket?: string; target?: unknown };
           };
           if (typeof body.guildId !== "string" || typeof body.channelId !== "string") {
             response.writeHead(400);
             response.end(JSON.stringify({ error: "guildId_and_channelId_required" }));
             return;
           }
+          const target = BodyVoiceTargetSchema.parse(
+            body.bodyLease?.target ?? {
+              guildId: body.guildId,
+              channelId: body.channelId,
+              actorId: ownerUserId,
+              presenceSessionId: presenceSession.record.sessionId,
+              transportKind: "user_session",
+            },
+          );
+          if (
+            target.guildId !== body.guildId ||
+            target.channelId !== body.channelId ||
+            target.actorId !== ownerUserId ||
+            target.presenceSessionId !== presenceSession.record.sessionId ||
+            target.transportKind !== "user_session"
+          )
+            throw new Error("Publish target mismatch");
+          const admission = await publishBodyLease.admit(
+            target,
+            body.bodyLease?.ticket,
+            () =>
+              presenceSession.record.gatewayConnected &&
+              target.actorId === ownerUserId &&
+              guildIds.has(target.guildId) &&
+              (channelIds.has(target.channelId) || voiceChannelIds.has(target.channelId)),
+          );
           const started = await streamWatch.requestPublish({
+            bodyLease: admission,
             guildId: body.guildId,
             channelId: body.channelId,
             ...(typeof body.sourceUrl === "string" ? { sourceUrl: body.sourceUrl } : {}),
             ...(typeof body.snapshotUrl === "string" ? { snapshotUrl: body.snapshotUrl } : {}),
           });
+          if (!started) await publishBodyLease.settleUnstarted(admission.stay.stayId);
           response.writeHead(started ? 202 : 503);
           response.end(JSON.stringify({ ok: started }));
         } catch {
@@ -1015,9 +1053,31 @@ const server = createServer((request, response) => {
     return;
   }
   if (request.method === "POST" && url === "/go-live/stop") {
-    const stopped = streamWatch.stopPublish();
-    response.writeHead(stopped ? 202 : 503);
-    response.end(JSON.stringify({ ok: stopped }));
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      void (async () => {
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+            guildId?: string;
+            bodyLease?: { stayId?: string; target?: unknown };
+          };
+          const admission =
+            body.bodyLease?.stayId === undefined
+              ? undefined
+              : publishBodyLease.admission(body.bodyLease.stayId);
+          if (admission === undefined || admission.stay.target.guildId !== body.guildId)
+            throw new Error("Exact publish stay required");
+          await admission.guard();
+          const stopped = streamWatch.stopPublish();
+          response.writeHead(stopped ? 202 : 503);
+          response.end(JSON.stringify({ ok: stopped }));
+        } catch {
+          response.writeHead(409);
+          response.end(JSON.stringify({ error: "publish_stay_mismatch" }));
+        }
+      })();
+    });
     return;
   }
   if (
@@ -1031,6 +1091,23 @@ const server = createServer((request, response) => {
     return;
   if (
     tryHandleVoicePresenceControlRequest(request, response, executeCaptainVoicePresence, async (input) => {
+      if (input.publishChannelId !== undefined) {
+        if (
+          input.guildId === undefined ||
+          input.actorId === undefined ||
+          input.actorId !== ownerUserId ||
+          !guildIds.has(input.guildId) ||
+          !(channelIds.has(input.publishChannelId) || voiceChannelIds.has(input.publishChannelId))
+        )
+          return undefined;
+        return {
+          guildId: input.guildId,
+          channelId: input.publishChannelId,
+          actorId: input.actorId,
+          presenceSessionId: presenceSession.record.sessionId,
+          transportKind: "user_session",
+        };
+      }
       const target = resolveUserSessionVoiceTarget("join", input);
       if ("reason" in target) return undefined;
       return {

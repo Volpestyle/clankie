@@ -17,12 +17,14 @@ export interface VoiceBodyAdmission {
   readonly stay: BodyVoiceStay;
   readonly guard: () => Promise<void>;
   readonly current: () => boolean;
+  readonly start?: () => void;
 }
 interface Active {
   readonly admission: VoiceBodyAdmission;
   readonly incarnation: string;
   expiresAt: number;
   lost: boolean;
+  started: boolean;
   readonly authorized: () => boolean;
   timer?: ReturnType<typeof setTimeout>;
 }
@@ -32,15 +34,18 @@ export class VoiceBodyLease {
   private readonly onLost: (stay: BodyVoiceStay) => Promise<void>;
   private readonly clock: () => number;
   private generation = 0;
+  private readonly kind: "audio" | "publish";
   private readonly active = new Map<string, Active>();
   public constructor(options: {
     rpc(request: BodyVoiceLeaseRequest): Promise<BodyLeaseResult>;
     onLost(stay: BodyVoiceStay): Promise<void>;
     clock?: () => number;
+    kind?: "audio" | "publish";
   }) {
     this.rpc = options.rpc;
     this.onLost = options.onLost;
     this.clock = options.clock ?? Date.now;
+    this.kind = options.kind ?? "audio";
   }
 
   public async admit(
@@ -49,7 +54,12 @@ export class VoiceBodyLease {
     authorized: () => boolean = () => true,
   ): Promise<VoiceBodyAdmission> {
     if (!authorized()) throw new VoiceBodyLeaseDenied({ outcome: "rejected", reason: "not_authorized" });
-    const stay: BodyVoiceStay = { stayId: randomUUID(), generation: ++this.generation, target };
+    const stay: BodyVoiceStay = {
+      stayId: randomUUID(),
+      generation: ++this.generation,
+      target,
+      kind: this.kind,
+    };
     const result = await this.rpc({ action: "claim", stay, ...(ticket === undefined ? {} : { ticket }) });
     if (result.outcome !== "acquired") throw new VoiceBodyLeaseDenied(result);
     const admission: VoiceBodyAdmission = {
@@ -59,12 +69,19 @@ export class VoiceBodyLease {
         return active !== undefined && !active.lost && active.authorized() && active.expiresAt > this.clock();
       },
       guard: () => this.heartbeat(stay.stayId),
+      start: () => {
+        const active = this.active.get(stay.stayId);
+        if (active === undefined || !admission.current())
+          throw new VoiceBodyLeaseDenied({ outcome: "rejected", reason: "stale_lease" });
+        active.started = true;
+      },
     };
     this.active.set(stay.stayId, {
       admission,
       incarnation: result.incarnation,
       expiresAt: result.lease.expiresAt,
       lost: false,
+      started: false,
       authorized,
     });
     this.schedule(stay.stayId);
@@ -106,8 +123,19 @@ export class VoiceBodyLease {
     if (active.lost) return;
     active.lost = true;
     clearTimeout(active.timer);
-    void this.onLost(active.admission.stay).catch(() => undefined);
+    if (active.started) void this.onLost(active.admission.stay).catch(() => undefined);
+    else void this.confirmedLeave(active.admission.stay.stayId).catch(() => undefined);
   }
+  public admission(stayId: string): VoiceBodyAdmission | undefined {
+    return this.active.get(stayId)?.admission;
+  }
+
+  /** Host proves the admitted operation never reached its first effect. */
+  public async settleUnstarted(stayId: string): Promise<void> {
+    const active = this.active.get(stayId);
+    if (active !== undefined && !active.started) await this.confirmedLeave(stayId);
+  }
+
   /** Called with the exact core stay ID captured by the gateway's confirmed-leave path. */
   public async confirmedLeave(stayId: string): Promise<void> {
     const active = this.active.get(stayId);
@@ -123,3 +151,8 @@ export class VoiceBodyLease {
     this.active.delete(stayId);
   }
 }
+
+/** Service-stamped transport context; never parsed from a model tool argument. */
+export type BodyEffectGuard = (() => Promise<void>) & {
+  readonly publish?: { readonly ticket?: string; readonly stayId?: string; readonly target: BodyVoiceTarget };
+};

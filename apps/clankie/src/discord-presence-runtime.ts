@@ -1,3 +1,4 @@
+import type { BodyEffectGuard } from "@clankie/discord-presence-core";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import type {
   DiscordGuildRoom,
@@ -14,7 +15,7 @@ export interface DiscordPresenceRuntimePort {
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
-    guard?: () => Promise<void>,
+    guard?: BodyEffectGuard,
   ): Promise<DiscordPresenceWriteResult>;
   /**
    * Make the webhook for a Clankie channel, plus either its guild channel when

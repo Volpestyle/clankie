@@ -1,3 +1,4 @@
+import type { BodyEffectGuard } from "@clankie/discord-presence-core";
 import {
   discordToolProgressText,
   planDiscordRestAction,
@@ -52,7 +53,7 @@ export class DiscordUserPresenceRuntime {
   public async execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
-    guard?: () => Promise<void>,
+    guard?: BodyEffectGuard,
   ): Promise<DiscordPresenceWriteResult> {
     if (write.identity.transportKind !== "user_session") {
       throw new Error("discord_presence_transport_unsupported");
@@ -149,6 +150,7 @@ export class DiscordUserPresenceRuntime {
           {
             guildId: payload.guildId,
             channelId: payload.channelId,
+            ...(guard?.publish === undefined ? {} : { bodyLease: guard.publish }),
             ...("sourceUrl" in payload && typeof payload.sourceUrl === "string"
               ? { sourceUrl: payload.sourceUrl }
               : {}),
@@ -159,7 +161,11 @@ export class DiscordUserPresenceRuntime {
       }
       case "go_live_stop": {
         await guard?.();
-        await postUserSessionControl("/go-live/stop", { guildId: payload.guildId }, this.controlFetch);
+        await postUserSessionControl(
+          "/go-live/stop",
+          { guildId: payload.guildId, ...(guard?.publish === undefined ? {} : { bodyLease: guard.publish }) },
+          this.controlFetch,
+        );
         return this.result(write);
       }
       case "activity_start":
@@ -232,7 +238,7 @@ function messageId(value: unknown): string | undefined {
 
 async function postUserSessionControl(
   path: string,
-  body: Record<string, string>,
+  body: Record<string, unknown>,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   const port = process.env.CLANKIE_USER_SESSION_CONTROL_PORT?.trim() || "4312";

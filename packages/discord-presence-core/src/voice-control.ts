@@ -18,6 +18,8 @@ export interface VoicePresenceControlInput {
   readonly requestText?: string;
   /** Host-issued one-use ticket; never a model argument. */
   readonly bodyLeaseTicket?: string;
+  /** Host-only read-only publish target resolution. */
+  readonly publishChannelId?: string;
 }
 
 export interface OwnerVoiceCandidate {
@@ -100,12 +102,14 @@ function voicePresenceControlInput(value: unknown): VoicePresenceControlInput {
   const actorId = optionalControlId(body.actorId);
   const requestText = body.requestText;
   const bodyLeaseTicket = optionalControlId(body.bodyLeaseTicket);
+  const publishChannelId = optionalControlId(body.publishChannelId);
   if (
     requestText !== undefined &&
     (typeof requestText !== "string" || requestText.length > VOICE_JOIN_REQUEST_MAX_CHARS)
   )
     throw new Error("invalid_voice_presence_request");
   return {
+    ...(publishChannelId === undefined ? {} : { publishChannelId }),
     ...(bodyLeaseTicket === undefined ? {} : { bodyLeaseTicket }),
     ...(requestText === undefined ? {} : { requestText }),
     ...(guildId === undefined ? {} : { guildId }),

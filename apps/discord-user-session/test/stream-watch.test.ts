@@ -1,3 +1,4 @@
+import type { VoiceBodyAdmission } from "@clankie/discord-presence-core";
 import { VOX_IPC_PROTOCOL_VERSION, type VoxControlEvent, type VoxStreamClient } from "@clankie/vox-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startStreamWatch } from "../src/stream-watch.ts";
@@ -683,4 +684,113 @@ describe("stream watch / publish controller", () => {
     expect(membership.target).toBeUndefined();
     await expect(controller.requestPublish({ guildId: GUILD, channelId: CHANNEL })).resolves.toBe(false);
   });
+});
+
+it("fences publishing before gateway membership when final lease authority is revoked", async () => {
+  const vox = fakeVox();
+  const gateway = fakeGateway();
+  const admission: VoiceBodyAdmission = {
+    stay: {
+      stayId: "exact-stay",
+      generation: 1,
+      kind: "publish",
+      target: {
+        guildId: GUILD,
+        channelId: CHANNEL,
+        actorId: SELF,
+        presenceSessionId: "body",
+        transportKind: "user_session",
+      },
+    },
+    current: () => false,
+    guard: async () => {
+      throw new Error("revoked");
+    },
+  };
+  const controller = startStreamWatch({
+    gateway,
+    vox,
+    membership: new VoiceMembershipCoordinator(gateway),
+    allowlisted: () => true,
+    api: { reportDiscordStreamWatch: async () => undefined } as never,
+  });
+  try {
+    await expect(
+      controller.requestPublish({ guildId: GUILD, channelId: CHANNEL, bodyLease: admission }),
+    ).rejects.toThrow("revoked");
+    expect(gateway.payloads).toEqual([]);
+    expect(vox.commands).toEqual([]);
+  } finally {
+    controller.close();
+  }
+});
+
+it("retains publishing until exact gateway deletion, media disconnect and membership departure", async () => {
+  const vox = fakeVox();
+  const gateway = fakeGateway();
+  const membership = new VoiceMembershipCoordinator(gateway);
+  const stopped: string[] = [];
+  const admission: VoiceBodyAdmission = {
+    stay: {
+      stayId: "exact-stay",
+      generation: 1,
+      kind: "publish",
+      target: {
+        guildId: GUILD,
+        channelId: CHANNEL,
+        actorId: SELF,
+        presenceSessionId: "body",
+        transportKind: "user_session",
+      },
+    },
+    current: () => true,
+    guard: async () => undefined,
+  };
+  const controller = startStreamWatch({
+    gateway,
+    vox,
+    membership,
+    allowlisted: () => true,
+    api: { reportDiscordStreamWatch: async () => undefined } as never,
+    onPublishStopped: async (id) => {
+      stopped.push(id);
+    },
+  });
+  try {
+    const started = controller.requestPublish({ guildId: GUILD, channelId: CHANNEL, bodyLease: admission });
+    await Promise.resolve();
+    membership.reconcileSelfVoiceState(GUILD, CHANNEL);
+    const key = buildDiscordStreamKey({ guildId: GUILD, channelId: CHANNEL, userId: SELF });
+    controller.handleRaw({
+      t: "STREAM_CREATE",
+      d: { stream_key: key, endpoint: "stream.discord.gg", token: "tok", rtc_server_id: "10" },
+    });
+    await expect(started).resolves.toBe(true);
+    controller.stopPublish();
+    expect(stopped).toEqual([]);
+    vox.emitEvent({
+      type: "transport_state",
+      role: "stream_publish",
+      status: "disconnected",
+      reason: "body_stay_stop:other",
+    });
+    controller.handleRaw({ t: "STREAM_DELETE", d: { stream_key: key } });
+    expect(stopped).toEqual([]);
+    vox.emitEvent({
+      type: "transport_state",
+      role: "stream_publish",
+      status: "disconnected",
+      reason: "body_stay_stop:exact-stay",
+    });
+    expect(stopped).toEqual([]);
+    membership.reconcileSelfVoiceState(GUILD, null);
+    controller.handleRaw({
+      t: "VOICE_STATE_UPDATE",
+      d: { guild_id: GUILD, channel_id: null, user_id: SELF },
+    });
+    await Promise.resolve();
+    expect(stopped).toEqual(["exact-stay"]);
+  } finally {
+    controller.close();
+  }
 });

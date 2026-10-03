@@ -289,4 +289,9 @@ export {
   type VoiceTtsProvider,
   type XaiVoiceReasoningEffort,
 } from "./voice-composition.ts";
-export { VoiceBodyLease, VoiceBodyLeaseDenied, type VoiceBodyAdmission } from "./body-voice-lease.ts";
+export {
+  VoiceBodyLease,
+  VoiceBodyLeaseDenied,
+  type BodyEffectGuard,
+  type VoiceBodyAdmission,
+} from "./body-voice-lease.ts";

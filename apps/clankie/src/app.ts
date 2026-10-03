@@ -376,6 +376,7 @@ export interface ClankieAppDependencies {
   discordIngress?: DiscordIngress;
   /** Durable exact Discord turn receipts; production supplies its state directory. */
   discordTurnReceiptPath?: string;
+  discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;
@@ -426,6 +427,11 @@ export interface ClankieAppDependencies {
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
+  resolveBodyVoiceTarget?: (input: {
+    guildId: string;
+    actorId: string;
+    publishChannelId?: string;
+  }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
   bodyVoiceStays?: BodyVoiceStays;
   bodyLeases?: {
     router: BodyLeaseRouter;
@@ -626,7 +632,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     string,
     { fingerprint: string; result: DiscordPresenceWriteResult; expiresAtMs: number }
   >();
-  const discordTurnReceipts = new DiscordTurnReceipts(dependencies.discordTurnReceiptPath);
+  const discordTurnReceipts =
+    dependencies.discordTurnReceipts ?? new DiscordTurnReceipts(dependencies.discordTurnReceiptPath);
   const captainTurnResults = new Map<
     string,
     {
@@ -1839,7 +1846,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       try {
         let result: DiscordPresenceWriteResult;
         if (dependencies.bodyLeases === undefined || write.payload.kind === "typing_start") {
-          result = await discordPresenceRuntime.execute(write, session);
+          result = await discordPresenceRuntime.execute(write, session, () =>
+            discordTurnReceipts.enforceGuard(write.idempotencyKey),
+          );
         } else {
           const sourceId =
             write.sourceDeliveryId ??
@@ -1853,7 +1862,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           if (
             origin === undefined ||
             origin.messageId !== sourceId ||
-            ("channelId" in write.payload && origin.channelId !== write.payload.channelId) ||
+            ("channelId" in write.payload &&
+              write.payload.kind !== "go_live_start" &&
+              origin.channelId !== write.payload.channelId) ||
             ("guildId" in write.payload && origin.guildId !== write.payload.guildId) ||
             origin.presenceSessionId !== write.identity.presenceSessionId ||
             origin.transportKind !== captainTransportKind(captain) ||
@@ -1890,9 +1901,45 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
               );
             },
           };
+          let publish: import("@clankie/discord-presence-core").BodyEffectGuard["publish"];
+          if (write.payload.kind === "go_live_start") {
+            const target = await dependencies.resolveBodyVoiceTarget?.({
+              guildId: write.payload.guildId,
+              actorId: origin.actorId,
+              publishChannelId: write.payload.channelId,
+            });
+            if (
+              target === undefined ||
+              target.guildId !== write.payload.guildId ||
+              target.channelId !== write.payload.channelId ||
+              target.actorId !== origin.actorId ||
+              target.presenceSessionId !== liveClaim.data.sessionId ||
+              target.transportKind !== origin.transportKind
+            )
+              return context.json({ outcome: "rejected", reason: "identity_required" }, 409);
+            if (dependencies.bodyVoiceStays?.compatibleTarget(conversationId, target) === false) {
+              const lease = dependencies.bodyLeases.store.status("voice");
+              if (lease !== undefined)
+                return context.json({ outcome: "busy", lease, actions: ["queue", "ask"] }, 409);
+            }
+            const issued = await dependencies.bodyVoiceStays?.ticket(identity, target, "publish");
+            if (issued === undefined)
+              return context.json({ outcome: "rejected", reason: "unavailable" }, 409);
+            if (!("ticket" in issued)) return context.json(issued, 409);
+            publish = { ticket: issued.ticket, target };
+          } else if (write.payload.kind === "go_live_stop") {
+            const stay = dependencies.bodyVoiceStays?.publishing(conversationId);
+            if (
+              stay === undefined ||
+              stay.target.guildId !== write.payload.guildId ||
+              stay.target.presenceSessionId !== liveClaim.data.sessionId
+            )
+              return context.json({ outcome: "rejected", reason: "identity_required" }, 409);
+            publish = { stayId: stay.stayId, target: stay.target };
+          }
           const leased = await dependencies.bodyLeases.router.run(
             identity,
-            "discord_mouth",
+            publish === undefined ? "discord_mouth" : "voice",
             async (guard) => {
               await guard();
               discordTurnReceipts.begin(`write:${write.idempotencyKey}`, {
@@ -1901,11 +1948,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
                 origin,
                 bodyConversationId: conversationId,
               });
-              const result = await discordPresenceRuntime.execute(write, session, guard);
+              const effectGuard = Object.assign(
+                async () => {
+                  await guard();
+                  await discordTurnReceipts.enforceGuard(write.idempotencyKey);
+                  if (
+                    publish?.stayId !== undefined &&
+                    dependencies.bodyVoiceStays?.publishing(conversationId)?.stayId !== publish.stayId
+                  )
+                    throw new Error("Publish stay changed");
+                },
+                publish === undefined ? {} : { publish },
+              );
+              const result = await discordPresenceRuntime.execute(write, session, effectGuard);
               discordTurnReceipts.settleWrite(`write:${write.idempotencyKey}`, fingerprint, result);
               return result;
             },
-            { lifetime: "operation" },
+            { lifetime: publish === undefined ? "operation" : "session" },
           );
           if (leased.outcome !== "completed") return context.json(leased, 409);
           result = leased.value;

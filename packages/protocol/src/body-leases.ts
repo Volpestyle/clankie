@@ -98,6 +98,7 @@ export const BodyVoiceTargetSchema = z.strictObject({
 export type BodyVoiceTarget = z.infer<typeof BodyVoiceTargetSchema>;
 export const BodyVoiceStaySchema = z.strictObject({
   target: BodyVoiceTargetSchema,
+  kind: z.enum(["audio", "publish"]).optional(),
   stayId: z.uuid(),
   generation: z.number().int().nonnegative(),
 });

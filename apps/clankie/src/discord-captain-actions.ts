@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import {
   DiscordCaptainActionInputSchema,
   DiscordCaptainActionResultSchema,
@@ -9,12 +11,22 @@ import { postToDiscordActiveBody } from "./discord-active-body.ts";
 export function createDiscordCaptainActionClient(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
+  receipts?: DiscordTurnReceipts,
 ): {
-  execute(input: DiscordCaptainActionInput): Promise<DiscordCaptainActionResult>;
+  execute(input: DiscordCaptainActionInput, guard?: () => Promise<void>): Promise<DiscordCaptainActionResult>;
 } {
   return {
-    execute: async (input) => {
+    execute: async (input, guard) => {
       try {
+        if (guard !== undefined) {
+          if (receipts === undefined) throw new Error("Discord guarded delivery unavailable");
+          await guard();
+          receipts.requireGuard(
+            `captain:${input.callId}:${input.action}`,
+            createHash("sha256").update(JSON.stringify(input)).digest("hex"),
+            guard,
+          );
+        }
         const response = await postToDiscordActiveBody(
           "/captain-action",
           DiscordCaptainActionInputSchema.parse(input),

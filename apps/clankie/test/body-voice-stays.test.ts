@@ -133,3 +133,46 @@ it("after restart only the captured rotated claim can be reconciled by the origi
   expect(restarted.status("voice")?.conversationId).toBe("room");
   restarted.close();
 });
+
+it("shares compatible audio and publish pins without freeing the remaining stay", async () => {
+  const { voice, stay, store } = fixture();
+  const audio = await voice.claim(stay, identity("room"));
+  if (audio.outcome !== "acquired") throw new Error("audio");
+  const publish = { ...stay, stayId: randomUUID(), kind: "publish" as const };
+  const claimed = await voice.claim(publish, identity("room"));
+  expect(claimed).toMatchObject({ outcome: "acquired", incarnation: audio.incarnation });
+  expect(
+    await voice.claim(
+      { ...publish, stayId: randomUUID(), target: { ...stay.target, channelId: "elsewhere" } },
+      identity("room"),
+    ),
+  ).toMatchObject({ outcome: "busy" });
+  expect(voice.finish(publish, audio.incarnation)).toEqual({ outcome: "released" });
+  expect(store.status("voice")?.conversationId).toBe("room");
+  expect(await voice.heartbeat(stay, audio.incarnation, identity("room"))).toMatchObject({
+    outcome: "renewed",
+  });
+  expect(voice.finish(stay, audio.incarnation)).toEqual({ outcome: "released" });
+  expect(store.status("voice")).toBeUndefined();
+});
+
+it("requires every persisted audio and publish termination after restart", async () => {
+  const { voice, store, stay, root, path } = fixture();
+  const claim = await voice.claim(stay, identity("room"));
+  if (claim.outcome !== "acquired") throw new Error("claim");
+  const publish = { ...stay, stayId: randomUUID(), kind: "publish" as const };
+  expect(await voice.claim(publish, identity("room"))).toMatchObject({ outcome: "acquired" });
+  const persisted = JSON.parse(readFileSync(path, "utf8"));
+  for (const record of Object.values(persisted.stays) as { operationId: string }[]) {
+    store.finish(store.recoveryReference("voice")!, record.operationId, "uncertain");
+  }
+  store.close();
+  const restarted = new BodyLeaseStore(root);
+  const restored = new BodyVoiceStays(restarted, path);
+  expect(restored.finish(stay, claim.incarnation)).toEqual({ outcome: "released" });
+  expect(restarted.status("voice")?.state).toBe("recovery_required");
+  expect(restored.stopped()).toBe(false);
+  expect(restored.finish(publish, claim.incarnation)).toEqual({ outcome: "released" });
+  expect(restarted.status("voice")).toBeUndefined();
+  restarted.close();
+});

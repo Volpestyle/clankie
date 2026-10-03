@@ -12,6 +12,7 @@ import { z } from "zod";
 const ReceiptSchema = z
   .object({
     fingerprint: z.string().min(1),
+    requiredGuard: z.boolean().optional(),
     lane: z.enum(["discord_text", "discord_voice"]),
     settled: CaptainChannelTurnResultSchema.optional(),
     bodyConversationId: z.string().optional(),
@@ -37,6 +38,7 @@ export class DiscordTurnReceipts {
   private readonly records = new Map<string, Receipt>();
   private readonly path: string | undefined;
   private unreadable = false;
+  private readonly guards = new Map<string, () => Promise<void>>();
 
   public constructor(path?: string) {
     this.path = path;
@@ -78,6 +80,22 @@ export class DiscordTurnReceipts {
       throw new Error("Discord write receipt mismatch");
     this.records.set(id, { ...receipt, writeResult: DiscordPresenceWriteResultSchema.parse(result) });
     this.save();
+  }
+
+  public requireGuard(key: string, fingerprint: string, guard: () => Promise<void>): void {
+    const id = `guard:${key}`;
+    const existing = this.get(id);
+    if (existing !== undefined && existing.fingerprint !== fingerprint)
+      throw new Error("Discord guard binding conflict");
+    if (existing === undefined) this.begin(id, { fingerprint, lane: "discord_text", requiredGuard: true });
+    this.guards.set(key, guard);
+  }
+
+  public async enforceGuard(key: string): Promise<void> {
+    if (this.get(`guard:${key}`)?.requiredGuard !== true) return;
+    const guard = this.guards.get(key);
+    if (guard === undefined) throw new Error("Original Discord delivery authority unavailable");
+    await guard();
   }
 
   public writesSettled(conversationId: string): boolean {

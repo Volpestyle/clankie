@@ -102,6 +102,7 @@ export class DiscordVoxGatewayBridge {
       if (input.bodyLease !== undefined) await input.bodyLease.guard();
       await this.leave("voice_rejoin", input.bodyLease?.guard);
       if (input.bodyLease !== undefined) await input.bodyLease.guard();
+      input.bodyLease?.start?.();
       this.register(guild, input.channelId);
       let rejectJoin: ((error: Error) => void) | undefined;
       const adapterFailure = new Promise<never>((_resolve, reject) => {

@@ -686,6 +686,7 @@ export class DiscordVoiceSession {
   public async join(input: JoinDiscordVoiceInput): Promise<DiscordVoiceSessionStatus> {
     if (this.disposed) throw new Error("Discord voice session is disposed");
     await input.bodyLease?.guard();
+    input.bodyLease?.start?.();
     await this.leave();
     await input.bodyLease?.guard();
     this.bodyLease = input.bodyLease;

@@ -20,6 +20,7 @@ const RefSchema = z.strictObject({
 });
 const TicketSchema = z.strictObject({
   target: BodyVoiceTargetSchema,
+  kind: z.enum(["audio", "publish"]).default("audio"),
   conversationId: z.string(),
   expiresAt: z.number(),
   consumed: z.boolean(),
@@ -46,7 +47,10 @@ const matches = (left: BodyVoiceTarget, right: BodyVoiceTarget): boolean =>
   left.presenceSessionId === right.presenceSessionId &&
   left.transportKind === right.transportKind;
 const sameStay = (left: BodyVoiceStay, right: BodyVoiceStay): boolean =>
-  left.stayId === right.stayId && left.generation === right.generation && matches(left.target, right.target);
+  (left.kind ?? "audio") === (right.kind ?? "audio") &&
+  left.stayId === right.stayId &&
+  left.generation === right.generation &&
+  matches(left.target, right.target);
 
 /** Host-only lifecycle. The surrounding BodyLeaseStore owns process exclusion for this directory. */
 export class BodyVoiceStays {
@@ -71,11 +75,10 @@ export class BodyVoiceStays {
       if (
         current !== undefined &&
         this.store.status("voice")?.state === "recovery_required" &&
-        unfinished.length === 1
+        unfinished.length > 0 &&
+        unfinished.every((record) => record.reference.conversationId === current.conversationId)
       ) {
-        const previous = unfinished[0]!;
-        if (previous.reference.conversationId === current.conversationId)
-          this.restartClaims.set(previous.stay.stayId, current);
+        for (const previous of unfinished) this.restartClaims.set(previous.stay.stayId, current);
       }
       this.save();
     } catch (error) {
@@ -86,6 +89,7 @@ export class BodyVoiceStays {
   public async ticket(
     identity: BodyConversationIdentity,
     target: BodyVoiceTarget,
+    kind: "audio" | "publish" = "audio",
   ): Promise<{ ticket: string } | BodyLeaseResult> {
     if (this.unavailable) return refused("store_unavailable");
     if (!identity.current() || !(await identity.authorize("voice", "effect")) || !identity.current())
@@ -101,6 +105,7 @@ export class BodyVoiceStays {
     const id = randomUUID();
     this.state.tickets[id] = {
       target: BodyVoiceTargetSchema.parse(target),
+      kind,
       conversationId: identity.conversationId,
       expiresAt: this.clock() + 30_000,
       consumed: false,
@@ -144,6 +149,7 @@ export class BodyVoiceStays {
         ticket.consumed ||
         ticket.expiresAt <= this.clock() ||
         !matches(ticket.target, stay.target) ||
+        ticket.kind !== (stay.kind ?? "audio") ||
         identity === undefined
       )
         return refused("stale_lease");
@@ -161,9 +167,28 @@ export class BodyVoiceStays {
       this.ticketIdentities.delete(ticketId);
       owner = identity;
     }
-    const acquired = this.store.acquire("voice", owner.conversationId, 30_000);
+    const held = this.store.status("voice");
+    const existing = this.store.recoveryReference("voice");
+    const compatible = Object.values(this.state.stays)
+      .filter((record) => !record.finished)
+      .every(
+        (record) =>
+          record.stay.target.guildId === stay.target.guildId &&
+          record.stay.target.channelId === stay.target.channelId &&
+          record.stay.target.presenceSessionId === stay.target.presenceSessionId &&
+          record.stay.target.transportKind === stay.target.transportKind,
+      );
+    const acquired =
+      held?.conversationId === owner.conversationId &&
+      held.state === "active" &&
+      existing !== undefined &&
+      compatible
+        ? { outcome: "acquired" as const, lease: existing }
+        : this.store.acquire("voice", owner.conversationId, 30_000);
     if (acquired.outcome === "busy") return { ...acquired, actions: ["queue", "ask"] };
     if (acquired.outcome !== "acquired") return acquired;
+    const renewed = this.store.renew(acquired.lease, 30_000);
+    if (renewed.outcome !== "renewed") return renewed;
     const begun = this.store.begin(acquired.lease);
     if (begun.outcome !== "admitted") return begun;
     this.state.stays[stay.stayId] = {
@@ -229,6 +254,15 @@ export class BodyVoiceStays {
     this.save();
     // On restart only this exact persisted stay's gateway termination can reconcile the rotated claim.
     if (current.token === record.reference.token) this.store.finish(current, record.operationId, "settled");
+    // Every persisted stay must terminate, including all pins lost from process memory on restart.
+    if (
+      Object.values(this.state.stays).some(
+        (candidate) => !candidate.finished && candidate.reference.conversationId === current.conversationId,
+      )
+    ) {
+      this.stayAuthority.delete(stay.stayId);
+      return { outcome: "released" };
+    }
     const result = this.store.reconcileStopped(current);
     if (
       result.outcome !== "released" &&
@@ -237,6 +271,32 @@ export class BodyVoiceStays {
       return result;
     this.stayAuthority.delete(stay.stayId);
     return { outcome: "released" }; // Actual termination recorded; an enclosing recovery pin may still hold the registry.
+  }
+
+  public compatibleTarget(conversationId: string, target: BodyVoiceTarget): boolean {
+    const held = this.store.status("voice");
+    if (held !== undefined && held.conversationId !== conversationId) return false;
+    return Object.values(this.state.stays)
+      .filter((record) => !record.finished)
+      .every(
+        (record) =>
+          record.stay.target.guildId === target.guildId &&
+          record.stay.target.channelId === target.channelId &&
+          record.stay.target.presenceSessionId === target.presenceSessionId &&
+          record.stay.target.transportKind === target.transportKind,
+      );
+  }
+
+  public publishing(conversationId: string): BodyVoiceStay | undefined {
+    if (this.unavailable || this.store.status("voice")?.state !== "active") return undefined;
+    const current = this.store.recoveryReference("voice");
+    return Object.values(this.state.stays).find(
+      (record) =>
+        !record.finished &&
+        record.stay.kind === "publish" &&
+        record.reference.conversationId === conversationId &&
+        record.reference.token === current?.token,
+    )?.stay;
   }
 
   public stopped(): boolean {

@@ -1,3 +1,4 @@
+import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import { BodyVoiceStays } from "./body-voice-stays.ts";
 import { BodyLeaseStore } from "./body-leases.ts";
 import { BodyLeaseRouter } from "./body-lease-router.ts";
@@ -69,7 +70,7 @@ import { linearFollowStatus } from "@clankie/settings";
 import { createRivalsClient } from "./rivals.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
-import { createDiscordVoicePresenceClient } from "./discord-voice-presence.ts";
+import { createDiscordVoicePresenceClient, resolveDiscordVoiceTarget } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
@@ -551,6 +552,7 @@ const localFleetBinding = async () => {
     : undefined;
 };
 const localCodexSeats = new LocalCodexSeats(herdr.binding);
+const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
@@ -671,7 +673,7 @@ const captain = createCaptain(
           }),
         }
       : {}),
-    discordActions: createDiscordCaptainActionClient(),
+    discordActions: createDiscordCaptainActionClient(process.env, fetch, discordTurnReceipts),
     presence: {
       listSessions: () => Promise.resolve(boundApp().presenceSessions()),
       listVoiceHistory: (limit = 5) => Promise.resolve(boundApp().voiceHistory(limit)),
@@ -807,7 +809,9 @@ const localFleet = new LocalFleetLink({
   }),
 });
 const clankie = await createClankieApp({
+  discordTurnReceipts,
   bodyVoiceStays,
+  resolveBodyVoiceTarget: resolveDiscordVoiceTarget,
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,

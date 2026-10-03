@@ -33,6 +33,7 @@ it("lost heartbeat stops the body but only confirmed termination sends finish", 
     },
   });
   const admission = await body.admit(target);
+  admission.start?.();
   await vi.advanceTimersByTimeAsync(5_000);
   expect(admission.current()).toBe(false);
   expect(lost).toHaveBeenCalledWith(admission.stay);
