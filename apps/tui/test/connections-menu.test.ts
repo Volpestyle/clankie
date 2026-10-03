@@ -5,7 +5,7 @@ import {
   projectLabel,
   relativeAge,
   runConnectionsMenu,
-  runConnectionsSection,
+  runMachineConnectionsMenu,
   type ConnectionsMenuServices,
 } from "../src/connections-menu.ts";
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
@@ -85,7 +85,20 @@ function services(overrides: Partial<ConnectionsMenuServices> = {}) {
   return {
     agentsCalls,
     services: {
-      machines: async () => ({ observedAt: new Date().toISOString(), machines: [] }),
+      machines: async () => ({
+        observedAt: new Date().toISOString(),
+        machines: [
+          {
+            id: "pc",
+            transport: "ssh",
+            configured: true,
+            ssh: "box",
+            state: "available",
+            workerCount: 0,
+            sessions: [],
+          },
+        ],
+      }),
       runtime: async (args: readonly string[]) =>
         args[0] === "inventory"
           ? {
@@ -104,34 +117,20 @@ it("links the hub to machines without separate session sections", async () => {
   const { shell, readSelect } = fakeShell(["machines", undefined, "done"]);
   await runConnectionsMenu(shell, services().services);
   expect(values(readSelect.mock.calls[0]!)).toEqual(["machines", "accounts", "json", "done"]);
-  expect(values(readSelect.mock.calls[1]!)).toEqual(["add"]);
-});
-
-it("adds an SSH host from three answers", async () => {
-  const { shell } = fakeShell(["add", "powershell", undefined], ["pc", "volpe@supedupsilly"]);
-  const { services: deps, agentsCalls } = services();
-  await runConnectionsSection("agents", shell, deps);
-  expect(agentsCalls).toContainEqual([
-    "hosts",
-    "add",
-    "pc",
-    "--ssh",
-    "volpe@supedupsilly",
-    "--shell",
-    "powershell",
-  ]);
+  expect(values(readSelect.mock.calls[1]!)).toEqual(["machine:pc", "add"]);
 });
 
 it("resumes a saved session through the ordinary native hire endpoint", async () => {
   const { shell, results } = fakeShell([
-    "host:pc",
+    "machine:pc",
+    "transcripts",
     "pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
     "resume",
     undefined,
     undefined,
   ]);
   const { services: deps, agentsCalls } = services();
-  await runConnectionsSection("agents", shell, deps);
+  await runMachineConnectionsMenu(shell, deps);
   expect(agentsCalls).toContainEqual(["resume", "pc:79b4e8ec-a455-444c-b285-d01660a1c52d"]);
   expect(results).toEqual([
     {
@@ -143,7 +142,8 @@ it("resumes a saved session through the ordinary native hire endpoint", async ()
 
 it("reports a refused read in place instead of leaving the modal", async () => {
   const { shell, lines } = fakeShell([
-    "host:pc",
+    "machine:pc",
+    "transcripts",
     "pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
     "read",
     undefined,
@@ -156,7 +156,7 @@ it("reports a refused read in place instead of leaving the modal", async () => {
     if (args[0] === "read") throw new Error("Transcript path outside allowed roots");
     return agents(args);
   });
-  await runConnectionsSection("agents", shell, deps);
+  await runMachineConnectionsMenu(shell, deps);
   expect(lines).toContain("Transcript path outside allowed roots");
 });
 

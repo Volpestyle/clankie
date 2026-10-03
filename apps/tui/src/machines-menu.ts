@@ -155,7 +155,7 @@ async function machineDetail(
     const session = machine.sessions[Number(choice.replace("session:", ""))];
     if (choice === "connect") await connectSession(flow, services, machine);
     else if (session?.connectionId)
-      await connectionDetail(flow, services, session.connectionId, session.name);
+      await connectionDetail(flow, services, session.connectionId, session.name, session.state);
     else if (session) await connectSession(flow, services, machine, session.name);
   }
 }
@@ -192,6 +192,7 @@ async function connectionDetail(
   services: MachinesMenuServices,
   id: string,
   session: string,
+  state: string,
 ): Promise<void> {
   for (;;) {
     const result = (await services.runtime(["list"])) as {
@@ -211,6 +212,15 @@ async function connectionDetail(
           label: "Worker capacity…",
           hint: connection?.capacity === null ? "unlimited" : String(connection?.capacity ?? "default"),
         },
+        ...(id !== "default" && ["disabled", "unreachable"].includes(state)
+          ? [
+              {
+                value: "reconnect",
+                label: state === "disabled" ? "Reconnect" : "Retry connection",
+                hint: "Keep this session and its grants",
+              },
+            ]
+          : []),
         ...(id === "default"
           ? []
           : [{ value: "disconnect", label: "Disconnect…", hint: "workers keep running" }]),
@@ -218,7 +228,9 @@ async function connectionDetail(
       allowBack: true,
     });
     if (action === undefined) return;
-    if (action === "disconnect") {
+    if (action === "reconnect") {
+      if (await attempt(flow, () => services.runtime(["reconnect", id]), `Reconnected ${id}.`)) return;
+    } else if (action === "disconnect") {
       const yes = await flow.readSelect({
         message: `Disconnect ${id}?`,
         options: [

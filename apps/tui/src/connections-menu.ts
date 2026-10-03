@@ -1,9 +1,9 @@
-import { machinesSection } from "./machines-menu.ts";
+import { machinesSection, runMachinesMenu } from "./machines-menu.ts";
 /**
  * `/connections` as a modal: machines and accounts,
  * with saved agent sessions available from each machine — as
- * menus you drill into instead of one JSON blob. `/sessions` and
- * `/agents` open their own section. Every read goes through the same command
+ * menus you drill into instead of one JSON blob. `/runtime` and
+ * `/sessions` open the same machines menu. Every read goes through the same command
  * clients the CLI uses, so the modal and `clankie connections` never disagree.
  */
 import type { ClankieFaceShell } from "./shell/shell.ts";
@@ -16,8 +16,6 @@ export interface ConnectionsMenuServices {
   readonly machines: Run;
   readonly runtime: Run;
   readonly agents: Run;
-  /** The existing `/herdr` menu, for the runtime Clankie runs his own workers in. */
-  readonly openHerdrSettings?: () => Promise<void>;
   /** Injected for tests; how often a reply wait re-checks its run. */
   readonly now?: () => number;
 }
@@ -32,8 +30,6 @@ interface AgentSession {
 }
 interface AgentHost {
   readonly id: string;
-  readonly ssh?: string;
-  readonly shell?: string;
 }
 interface TranscriptEntry {
   readonly type: string;
@@ -161,22 +157,12 @@ export async function runConnectionsMenu(
   }
 }
 
-/** One section on its own, for `/runtime` and `/agents` with no argument. */
-export async function runConnectionsSection(
-  section: "agents",
+/** All no-argument machine aliases share the same menu and saved-session drilldown. */
+export async function runMachineConnectionsMenu(
   shell: ClankieFaceShell,
   services: ConnectionsMenuServices,
 ): Promise<void> {
-  const flow = shell.setupFlow;
-  flow.begin(section);
-  try {
-    await agentsSection(shell, services);
-  } catch (error) {
-    // Closing the flow resets the status line, so a fatal error goes to the chat.
-    shell.insertCommandResult("/connections", message(error), "error");
-  } finally {
-    flow.end();
-  }
+  await runMachinesMenu(shell, { ...services, openSessions: (id) => hostSessions(shell, services, { id }) });
 }
 
 async function accountsSection(flow: SetupFlow, accounts: Json): Promise<void> {
@@ -204,89 +190,6 @@ async function accountsSection(flow: SetupFlow, accounts: Json): Promise<void> {
   });
 }
 
-async function confirm(flow: SetupFlow, question: string, yes: string): Promise<boolean> {
-  const answer = await flow.readSelect({
-    message: question,
-    options: [
-      { value: "yes", label: yes },
-      { value: "no", label: "Cancel" },
-    ],
-    allowBack: true,
-  });
-  return answer === "yes";
-}
-
-async function attempt(flow: SetupFlow, work: () => Promise<unknown>, done: string): Promise<boolean> {
-  try {
-    await work();
-    flow.renderLine(done, "success");
-    return true;
-  } catch (error) {
-    flow.renderLine(message(error), "error");
-    return false;
-  }
-}
-
-async function agentsSection(shell: ClankieFaceShell, services: ConnectionsMenuServices): Promise<void> {
-  const flow = shell.setupFlow;
-  for (;;) {
-    const hosts = array<AgentHost>(record(await services.agents(["hosts"])).hosts);
-    const choice = await flow.readSelect({
-      message: "Agent hosts",
-      options: [
-        ...hosts.map((host) => ({
-          value: `host:${host.id}`,
-          label: host.id,
-          hint: host.id === "local" ? "this machine" : `${host.ssh} · ${host.shell}`,
-        })),
-        { value: "add", label: "Add an SSH host…", hint: "a PC or server with sshd" },
-      ],
-      allowBack: true,
-    });
-    if (choice === undefined) return;
-    if (choice === "add") {
-      await addHost(flow, services);
-      continue;
-    }
-    const host = hosts.find((entry) => `host:${entry.id}` === choice);
-    if (host !== undefined) await hostSessions(shell, services, host);
-  }
-}
-
-async function addHost(flow: SetupFlow, services: ConnectionsMenuServices): Promise<void> {
-  const id = await flow.readText({
-    message: "Short name for the host",
-    placeholder: "e.g. pc",
-    allowBack: true,
-    validate: (value) =>
-      /^[a-z][a-z0-9-]{0,63}$/u.test(value.trim()) && value.trim() !== "local"
-        ? undefined
-        : "Lowercase letters, digits and dashes; not 'local'.",
-  });
-  if (id === undefined) return;
-  const ssh = await flow.readText({
-    message: "SSH target (user@host or an ~/.ssh/config alias)",
-    placeholder: "e.g. volpe@supedupsilly",
-    allowBack: true,
-    validate: (value) => (value.trim() ? undefined : "Enter an SSH target."),
-  });
-  if (ssh === undefined) return;
-  const shellKind = await flow.readSelect({
-    message: "Its default shell",
-    options: [
-      { value: "posix", label: "macOS / Linux", hint: "sh" },
-      { value: "powershell", label: "Windows", hint: "PowerShell" },
-    ],
-    allowBack: true,
-  });
-  if (shellKind === undefined) return;
-  await attempt(
-    flow,
-    () => services.agents(["hosts", "add", id.trim(), "--ssh", ssh.trim(), "--shell", shellKind]),
-    `Added ${id.trim()}. Nothing is installed there; reads use SSH.`,
-  );
-}
-
 async function hostSessions(
   shell: ClankieFaceShell,
   services: ConnectionsMenuServices,
@@ -309,20 +212,10 @@ async function hostSessions(
     }
     const choice = await flow.readSelect({
       message: `Sessions on ${host.id}`,
-      options: [
-        ...sessions.map((session) => sessionOption(session, now())),
-        ...(host.id === "local" ? [] : [{ value: "remove", label: `Remove ${host.id}…` }]),
-      ],
+      options: [...sessions.map((session) => sessionOption(session, now()))],
       allowBack: true,
     });
     if (choice === undefined) return;
-    if (choice === "remove") {
-      if (await confirm(flow, `Stop reading sessions on ${host.id}?`, "Remove host")) {
-        if (await attempt(flow, () => services.agents(["hosts", "remove", host.id]), `Removed ${host.id}.`))
-          return;
-      }
-      continue;
-    }
     const session = sessions.find((entry) => entry.ref === choice);
     if (session !== undefined) await sessionActions(shell, services, session);
   }

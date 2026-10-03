@@ -10,11 +10,27 @@ export async function runRuntimeCommand(
     fetchImpl?: typeof fetch;
     operatorCredentialStore?: CredentialStore;
   } = {},
-) {
+): Promise<Record<string, unknown>> {
   let path = "/v1/runtime-connections",
     method = "GET",
     body: string | undefined;
-  if (args[0] === "connect-machine" && args.length === 4) {
+  if (args[0] === "reconnect" && args.length === 2) {
+    if (args[1] === "default") throw new Error("Use /herdr to change his default workspace");
+    const inventory = await runRuntimeCommand(["list"], options);
+    const connections = inventory.connections as Record<string, unknown>[] | undefined;
+    const connection = connections?.find((entry) => entry.id === args[1]);
+    if (!connection) throw new Error("Unknown named connection");
+    const fields = Object.fromEntries(
+      ["id", "machine", "kind", "session", "socketPath", "ssh", "capabilities", "workspaces", "capacity"]
+        .filter(
+          (key) =>
+            connection[key] !== undefined && !(key === "capacity" && connection.capacitySource === "default"),
+        )
+        .map((key) => [key, connection[key]]),
+    );
+    method = "POST";
+    body = JSON.stringify(fields);
+  } else if (args[0] === "connect-machine" && args.length === 4) {
     method = "POST";
     body = JSON.stringify({ id: args[1], machine: args[2], session: args[3] });
   } else if (args[0] === "inventory" && args.length === 1) {
@@ -74,7 +90,7 @@ export async function runRuntimeCommand(
     path += `/${encodeURIComponent(args[1]!)}`;
   } else if (args.length > 1 || (args[0] && !["list", "status"].includes(args[0]))) {
     throw new Error(
-      "Usage: clankie runtime [list|status] | connect ID (--session NAME | --socket PATH) | connect ID --ssh HOST --session NAME [--shell posix|powershell] | disconnect ID | workspaces ID (--repo PATH | --dir PATH)... | workspaces ID --clear | capacity ID N|--clear (limits count per coordinator scope)",
+      "Usage: clankie runtime [list|status] | connect ID (--session NAME | --socket PATH) | connect ID --ssh HOST --session NAME [--shell posix|powershell] | reconnect ID | disconnect ID | workspaces ID (--repo PATH | --dir PATH)... | workspaces ID --clear | capacity ID N|--clear (limits count per coordinator scope)",
     );
   }
   const credential = await resolveOperatorCredential({

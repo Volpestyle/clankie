@@ -1,5 +1,4 @@
 import { runMachinesCommand } from "./command/machines.ts";
-import { runMachinesMenu } from "./machines-menu.ts";
 import { planSeat, parseSeatArgs } from "./command/seat.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
@@ -7,7 +6,7 @@ import { runLinearCommand } from "./command/linear.ts";
 import { runAgentsCommand, splitQuotedArguments } from "./command/agents.ts";
 import {
   runConnectionsMenu,
-  runConnectionsSection,
+  runMachineConnectionsMenu,
   type ConnectionsMenuServices,
 } from "./connections-menu.ts";
 import { runAccessCommand } from "./command/access.ts";
@@ -145,11 +144,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   const focusBoard = herdLead?.focus ?? (() => focusHerdLeadCompanion());
   const closeBoard = herdLead?.close ?? (() => closeHerdLeadCompanion());
   const commands: FaceShellCommand[] = [];
-  const connectionServices = (shell: ClankieFaceShell): ConnectionsMenuServices => ({
+  const connectionServices = (): ConnectionsMenuServices => ({
     machines: (args) => runMachinesCommand(args),
     runtime: (args) => runRuntimeCommand(args),
     agents: (args) => runAgentsCommand(args),
-    openHerdrSettings: () => showHerdrMenu(shell, context),
   });
 
   const statusHelpers = (shell: ClankieFaceShell) => {
@@ -261,7 +259,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         if (argument.trim() === "") {
-          await runConnectionsMenu(shell, connectionServices(shell));
+          await runConnectionsMenu(shell, connectionServices());
           return;
         }
         const result = await runRuntimeCommand(["inventory"]);
@@ -276,7 +274,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint: "[discover | add NAME --ssh HOST | sessions NAME | remove NAME]",
       async run(argument, shell): Promise<void> {
         if (!argument.trim()) {
-          await runMachinesMenu(shell, connectionServices(shell));
+          await runMachineConnectionsMenu(shell, connectionServices());
           return;
         }
         try {
@@ -299,7 +297,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         if (argument.trim() === "") {
-          await runMachinesMenu(shell, connectionServices(shell));
+          await runMachineConnectionsMenu(shell, connectionServices());
           return;
         }
         try {
@@ -392,7 +390,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         "[list [--host ID]|read HOST:SESSION [--tail N]|send HOST:SESSION MESSAGE|runs [RUN]|cancel RUN|release RUN|hosts|hosts add ID --ssh TARGET [--shell powershell]|hosts remove ID]",
       async run(argument, shell): Promise<void> {
         if (argument.trim() === "") {
-          await runConnectionsSection("agents", shell, connectionServices(shell));
+          await runMachineConnectionsMenu(shell, connectionServices());
           return;
         }
         try {

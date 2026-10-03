@@ -1212,9 +1212,10 @@ Settings, where it can also connect a local Herdr session by name.
 In the TUI, `/connections` links to `/machines` and accounts. `/machines`
 shows machine state and agent counts, discovered candidates before the typed-name
 fallback, and each machine's connected and discoverable Herdr sessions. Connect
-or disconnect named sessions live; manage their workspace grants and capacity.
+or disconnect named sessions live; retry disabled or unreachable connections while
+keeping their saved session, transport, workspace grants and capacity.
 Native worker harnesses are chosen per hire. `/runtime` with no argument opens
-Machines; `/sessions` still browses saved transcripts. Both retain their arguments,
+Machines, as does `/sessions`; saved transcripts open inside each machine. Both retain their arguments,
 and `/connections json` prints the raw inventory.
 
 Onboarding asks only how he thinks. Once ready, `/setup` offers the workspace

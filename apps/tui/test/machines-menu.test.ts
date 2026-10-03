@@ -93,3 +93,15 @@ it("shows errors without attempting subsequent mutations", async () => {
   expect(f.renderLine).toHaveBeenCalledWith("Not authorized", "error");
   expect(f.machines).not.toHaveBeenCalledWith(["sessions", "pc"]);
 });
+
+it.each(["disabled", "unreachable"])("offers reconnect for a %s named session", async (state) => {
+  const f = fixture(["machine:local", "session:2", "reconnect", undefined, undefined]);
+  const read = f.machines.getMockImplementation()!;
+  f.machines.mockImplementation(async (args) => {
+    const result = await read(args);
+    result.machines[0]!.sessions[2]!.state = state;
+    return result;
+  });
+  await runMachinesMenu(f.shell, f);
+  expect(f.runtime).toHaveBeenCalledWith(["reconnect", "review"]);
+});
