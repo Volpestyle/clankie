@@ -54,6 +54,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   }
   const routes: Record<string, readonly string[]> = {
     GET: [
+      "/v1/body-leases",
       "/health",
       "/v1/operator/persona",
       "/v1/model-keys",

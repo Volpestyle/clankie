@@ -1303,3 +1303,59 @@ function post(url: string, path: string, body: unknown): Promise<Response> {
     body: JSON.stringify(body),
   });
 }
+
+it("projects token-free lease attribution to an observe device and fences late revocation", async () => {
+  let revoked = false;
+  const readBodyLeases = vi.fn(async (token: string) => {
+    expect(token).toBe(TOKEN);
+    return Response.json({
+      leases: [{ resource: "voice", conversationId: "owner-thread", state: "active", expiresAt: 1000 }],
+    });
+  });
+  const relay = await startRelay({
+    dispatch: vi.fn(),
+    readBodyLeases,
+    authorizeDevice: {
+      authorize: async () =>
+        revoked ? { authorized: false, denial: "revoked" } : { authorized: true, device: activeDevice },
+    },
+  });
+  const request = () =>
+    fetch(`${relay.url}/v1/body-leases`, { headers: { authorization: `Bearer ${TOKEN}` } });
+  expect(await (await request()).json()).toEqual({
+    leases: [{ resource: "voice", conversationId: "owner-thread", state: "active", expiresAt: 1000 }],
+  });
+  readBodyLeases.mockImplementationOnce(async () => {
+    revoked = true;
+    return Response.json({ leases: [] });
+  });
+  expect((await request()).status).toBe(401);
+});
+
+it("requires observe grant for lease status without granting mutation authority", async () => {
+  const readBodyLeases = vi.fn();
+  const relay = await startRelay({
+    dispatch: vi.fn(),
+    readBodyLeases,
+    authorizeDevice: {
+      authorize: async () => ({
+        authorized: true,
+        device: { ...activeDevice, grants: { ...activeDevice.grants, terminalObserve: false } },
+      }),
+    },
+  });
+  const response = await fetch(`${relay.url}/v1/body-leases`, {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  expect(response.status).toBe(403);
+  expect(readBodyLeases).not.toHaveBeenCalled();
+  expect(
+    (
+      await post(relay.url, "/v1/body-leases", {
+        action: "recover",
+        resource: "voice",
+        conversationId: "owner-thread",
+      })
+    ).status,
+  ).toBe(405);
+});

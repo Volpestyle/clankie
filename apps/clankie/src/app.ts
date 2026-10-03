@@ -2709,8 +2709,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   app.get("/v1/body-leases", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (!operator || operator === "unavailable")
-      return context.json({ error: "operator_authentication_required" }, 401);
+    if (!operator || operator === "unavailable") {
+      const device = await authenticateDevice(context.req.raw);
+      if (device === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+      if ("denied" in device) return deviceDenialResponse(context, device);
+      if (!device.grants.terminalObserve)
+        return context.json({ error: "terminal_observe_grant_required" }, 403);
+    }
+    context.header("cache-control", "no-store");
     if (dependencies.bodyLeases === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
     try {
       return context.json({

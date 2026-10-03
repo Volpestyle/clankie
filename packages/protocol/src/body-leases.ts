@@ -108,3 +108,7 @@ export const BodyVoiceLeaseRequestSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("finish"), stay: BodyVoiceStaySchema, incarnation }),
 ]);
 export type BodyVoiceLeaseRequest = z.infer<typeof BodyVoiceLeaseRequestSchema>;
+
+export const BODY_LEASE_STATUS_PATH = "/v1/body-leases";
+export const BodyLeaseStatusSchema = z.strictObject({ leases: z.array(BodyLeaseViewSchema).max(4) });
+export type BodyLeaseStatus = z.infer<typeof BodyLeaseStatusSchema>;

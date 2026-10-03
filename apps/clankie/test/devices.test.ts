@@ -412,3 +412,14 @@ describe("control-plane device pairing surface", () => {
     expect(lastRefreshAt).toBeLessThan(revokedAt);
   });
 });
+
+it("allows observe devices to read body attribution but never mutate leases", async () => {
+  const store = await makeStore();
+  const { app } = await makeApp(store);
+  const device = await pairDevice(app);
+  // No body host in this fixture: authorization passed and availability is reported.
+  expect((await deviceGet(app, "/v1/body-leases", device.token)).status).toBe(503);
+  expect((await devicePost(app, "/v1/body-leases", device.token)).status).toBe(401);
+  await app.request(`/v1/devices/${device.deviceId}/revoke`, { method: "POST", headers: OPERATOR });
+  expect((await deviceGet(app, "/v1/body-leases", device.token)).status).toBe(401);
+});

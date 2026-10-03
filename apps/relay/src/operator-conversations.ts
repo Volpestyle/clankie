@@ -1,3 +1,4 @@
+import { BODY_LEASE_STATUS_PATH, BodyLeaseStatusSchema } from "../../../packages/protocol/src/body-leases.ts";
 import { hostedOperatorAllows } from "../../../packages/protocol/src/hosted-operator.ts";
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -34,6 +35,8 @@ export interface RelayConversationLogger {
 export interface OperatorConversationRelayOptions {
   readonly authorizeDevice: RelayDeviceAuthorizer;
   readonly dispatch: OperatorConversationServiceDispatch;
+  /** Forwards the original paired-device token; never substitutes captain authority. */
+  readonly readBodyLeases?: (deviceToken: string) => Promise<Response>;
   readonly downloadFile?: (request: OperatorDeliveredFileDownloadRequest) => Promise<Response>;
   readonly logger?: RelayConversationLogger;
   readonly clock?: () => number;
@@ -52,6 +55,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const path = requestUrl(request).pathname;
     if (
+      path !== BODY_LEASE_STATUS_PATH &&
       path !== OPERATOR_CONVERSATION_DISPATCH_PATH &&
       path !== OPERATOR_CONVERSATION_TAIL_PATH &&
       path !== OPERATOR_TERMINAL_TAIL_PATH &&
@@ -59,7 +63,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     ) {
       return false;
     }
-    if (request.method !== "POST") {
+    if (request.method !== (path === BODY_LEASE_STATUS_PATH ? "GET" : "POST")) {
       writeJson(response, 405, { error: "method_not_allowed" });
       return true;
     }
@@ -72,6 +76,38 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     const authorization = await options.authorizeDevice.authorize(token);
     if (!authorization.authorized) {
       writeAuthDenial(response, authorization.denial);
+      return true;
+    }
+    if (path === BODY_LEASE_STATUS_PATH) {
+      if (!authorization.device.grants.terminalObserve) {
+        writeGrantDenial(response, "terminalObserve");
+        return true;
+      }
+      if (options.readBodyLeases === undefined) {
+        writeJson(response, 503, { error: "body_leases_unavailable" });
+        return true;
+      }
+      const upstream = await options.readBodyLeases(token);
+      const parsed = upstream.ok ? BodyLeaseStatusSchema.safeParse(await upstream.json()) : undefined;
+      const fresh = await options.authorizeDevice.authorize(token);
+      if (!fresh.authorized) {
+        writeAuthDenial(response, fresh.denial);
+        return true;
+      }
+      if (!fresh.device.grants.terminalObserve) {
+        writeGrantDenial(response, "terminalObserve");
+        return true;
+      }
+      if (!upstream.ok) {
+        writeJson(response, upstream.status, { error: "body_leases_unavailable" });
+        return true;
+      }
+      response.setHeader("cache-control", "no-store");
+      writeJson(
+        response,
+        parsed?.success ? 200 : 502,
+        parsed?.success ? parsed.data : { error: "invalid_body_lease_status" },
+      );
       return true;
     }
     if (path === OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH) {
