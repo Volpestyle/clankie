@@ -113,7 +113,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
       ...plan,
       ownerSteps: [
         "Native permissions remain owner decisions.",
-        "Create the first native session with an owner prompt; wake delivery starts after context loads.",
+        "Native session creation or exact resume triggers read-only identity/context preflight; no bootstrap model turn.",
       ],
       configuration:
         "Per-launch plugin and autoupdate:false; inherited Linear MCP connections disabled in memory, broker-backed clankie MCP enabled. No config file edits.",
@@ -138,6 +138,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
   const directory = join(clankieStateHome(env), "clankie", "opencode-seat-launches", randomUUID());
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   let sessionId = plan.resumed ? plan.sessionId : undefined;
+  let contextLoaded = false;
   let ready = false,
     failure: string | undefined;
   let queue: Event[] = [];
@@ -249,22 +250,32 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
           persist();
         } else if (failure) throw new Error(failure);
         else if (action === "/context") {
+          contextLoaded = false;
           const query = {
             lane: "operator",
             ...(plan.conversationId ? { conversationId: plan.conversationId } : {}),
           };
           const text = await fetchLaneText("/v1/captain/prompt", query, options);
           const memory = await fetchLaneText("/v1/captain/memory-card", query, options);
+          if (!text.trim()) throw new Error("Operator context unavailable");
+          contextLoaded = true;
           reply(200, { text: `${text}\n\n${memory}` });
           return;
         } else if (action === "/ready") {
-          ready = true;
+          if (!contextLoaded) throw new Error("Native context preflight required");
           await begin();
+          ready = true;
         } else if (action === "/poll") {
-          reply(200, { event: ready ? queue[0] : undefined });
+          reply(200, { event: ready && contextLoaded ? queue[0] : undefined });
           return;
         } else if (action === "/claim") {
-          if (!ready || !body.eventId || queue[0]?.id !== body.eventId || receipts[body.eventId])
+          if (
+            !ready ||
+            !contextLoaded ||
+            !body.eventId ||
+            queue[0]?.id !== body.eventId ||
+            receipts[body.eventId]
+          )
             throw new Error("Duplicate or unbound dispatch");
           receipts[body.eventId] = "uncertain";
           queue = queue.slice(1);

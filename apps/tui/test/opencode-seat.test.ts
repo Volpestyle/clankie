@@ -122,6 +122,7 @@ test("launcher bridge authenticates and binds one session without copying operat
         repoRoot,
         env,
         execFileImpl,
+        fetchImpl: async () => new Response("context unavailable", { status: 503 }),
         stderr: {
           write: (text) => {
             output.push(text);
@@ -139,6 +140,9 @@ test("launcher bridge authenticates and binds one session without copying operat
             });
           expect((await post("/bind", { sessionId: id }, "forged")).status).toBe(403);
           expect((await post("/bind", { sessionId: id })).status).toBe(200);
+          expect((await post("/ready", { sessionId: id })).status).toBe(409);
+          expect((await post("/context", { sessionId: id })).status).toBe(409);
+          expect((await post("/ready", { sessionId: id })).status).toBe(409);
           expect((await post("/bind", { sessionId: "ses_other12345" })).status).toBe(409);
           expect((await post("/claim", { sessionId: id, eventId: "missing" })).status).toBe(409);
           return 0;

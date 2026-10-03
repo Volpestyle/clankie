@@ -44,8 +44,12 @@ and `opencode-seat-launches/`. Preserve uncertain receipts until reconciled.
 ## Delivery and failures
 
 Delivery starts only after the bound session has loaded its operator context.
-Both new seats and idle resumed seats need a native turn before the system
-context hook activates the outbox; merely opening the TUI does not bind wakes.
+An exact resumed session is verified with the injected SDK and preflights the
+service context during plugin startup. A newly created root session performs
+the same read-only preflight on its native creation/binding event. Neither
+requires an owner prompt or bootstrap model turn. An uncreated session cannot
+bind wakes; the plugin never creates or guesses one. Every real model request,
+including a native wake, still loads fresh identity and memory in the system hook.
 Resuming uses the exact `--session`
 ID; it never uses `--continue`. The plugin calls its injected native SDK client,
 not a guessed server URL or a separately started server. Idle dispatch uses
@@ -59,14 +63,21 @@ server plugin; delivery remains pinned to the original ID and never follows UI
 focus. Do not use session switching as a way to transfer the seat. Exit and
 launch the selected exact session instead.
 
-Before dispatch the launcher writes an `uncertain` receipt atomically. A native
+Before dispatch the launcher writes an `uncertain` receipt atomically to its
+per-launch journal. This fences duplicate claims within that launcher, including
+plugin reconnects; a new random launch directory does not load earlier receipts
+and is not a cross-launch deduplication fence. A native
 acknowledgment changes it to `delivered`, which means accepted, not completed.
 A failed or lost acknowledgment stops delivery without retry, fallback typing,
 or another process launch. Inspect the native session and retained receipt
 before deciding whether a manual resend is appropriate. Pending queue entries
 are retained for inspection, not automatically replayed on restart. A new
 launcher always requires a fresh native binding; no restart reattachment is
-claimed from a saved ID alone.
+claimed from a saved ID alone. The current service pump acknowledges an event
+on its next poll after the launcher persisted it, potentially before native
+dispatch. That bridge acknowledgment is not evidence of native consumption, and
+a crash can strand a journaled event. No exactly-once guarantee across launcher
+or service restarts is claimed; persistent receipts are separate VUH-1521 work.
 
 Missing binary/capability, absent broker credential, changed resume workspace,
 wrong conversation, plugin context failure, disconnected bridge, duplicate
@@ -81,7 +92,8 @@ to complete an acceptance probe.
 
 Deterministic tests cover native busy/idle behavior, identity mismatch,
 claim-before-dispatch and uncertain delivery, role boundaries, bridge auth,
-config preservation, and exact resume. Scoped native evidence and remaining
+config preservation, exact resume, preflight-before-ready ordering, context
+failure and identity mismatch without extra turns. Scoped native evidence and remaining
 acceptance gaps are recorded in
 [the verification notes](../../docs/testing/2026-10-03-opencode-seat/README.md).
 Native draft preservation and pending approval behavior were checked in an

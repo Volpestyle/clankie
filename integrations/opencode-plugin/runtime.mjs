@@ -1,3 +1,17 @@
+// Verify only the injected native client and the exact known session. Context
+// preflight is read-only; it neither creates a session nor starts a model turn.
+export async function loadNativeContext(client, sessionId, bridge, signal) {
+  if (typeof sessionId !== "string" || !/^ses_[A-Za-z0-9]{8,128}$/u.test(sessionId))
+    throw new Error("Invalid native session identity");
+  const session = await client.session.get({ path: { id: sessionId }, throwOnError: true, signal });
+  if (session.data?.id !== sessionId) throw new Error("Native session identity mismatch");
+  await bridge("bind", { sessionId });
+  const context = await bridge("context", { sessionId });
+  if (typeof context.text !== "string" || !context.text.trim())
+    throw new Error("Clankie operator context unavailable");
+  return context.text;
+}
+
 // Native server API only. The injected client belongs to this TUI's server;
 // never discover a port or replace it with `opencode serve`.
 export async function deliverNativeEvent(client, sessionId, event, bridge, signal) {
@@ -6,8 +20,8 @@ export async function deliverNativeEvent(client, sessionId, event, bridge, signa
     return { status: "busy", detail: "Waiting for the bound session to become idle; no steering." };
   const session = await client.session.get({ path: { id: sessionId }, throwOnError: true, signal });
   if (session.data?.id !== sessionId) throw new Error("Native session identity mismatch");
-  // This durable claim precedes dispatch. A lost response must never trigger a
-  // new turn, even after launcher/plugin restart.
+  // This per-launch journal claim precedes dispatch. A lost response stops
+  // this launcher from resending; journals are not a cross-launch dedupe fence.
   await bridge("claim", { sessionId, eventId: event.id });
   try {
     await client.session.promptAsync({

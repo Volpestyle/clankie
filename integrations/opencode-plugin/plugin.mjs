@@ -1,4 +1,4 @@
-import { deliverNativeEvent, projectMessages } from "./runtime.mjs";
+import { deliverNativeEvent, loadNativeContext, projectMessages } from "./runtime.mjs";
 
 export default async function ClankieSeat({ client }) {
   const address = process.env.CLANKIE_OPENCODE_BRIDGE;
@@ -11,6 +11,8 @@ export default async function ClankieSeat({ client }) {
   let sessionId = process.env.CLANKIE_OPENCODE_SESSION;
   let ready = false;
   let switched = false;
+  let failed = false;
+  let preparation;
   let permission = false;
   const notices = new Set();
   const notify = async (message) => {
@@ -30,19 +32,43 @@ export default async function ClankieSeat({ client }) {
     if (!response.ok) throw new Error(`Clankie ${action} failed (${response.status}); no terminal fallback`);
     return response.json();
   };
+  const fail = async (error) => {
+    failed = true;
+    ready = false;
+    await bridge("failure", { sessionId, detail: String(error) }).catch(() => {});
+  };
+  const assertActive = () => {
+    if (failed || switched || stop.signal.aborted) throw new Error("Clankie seat delivery stopped");
+  };
   const bind = async (id) => {
+    assertActive();
     if (sessionId && id !== sessionId) {
       switched = true;
-      ready = false;
-      await bridge("failure", {
-        sessionId,
-        detail: "session_switched: restart the seat to resume its exact session",
-      });
-      throw new Error("Clankie seat session changed; delivery stopped");
+      const error = new Error("session_switched: restart the seat to resume its exact session");
+      await fail(error);
+      throw error;
     }
     if (!sessionId) sessionId = id;
-    await bridge("bind", { sessionId });
+    if (ready) return;
+    preparation ??= (async () => {
+      await loadNativeContext(client, sessionId, bridge, stop.signal);
+      assertActive();
+      await bridge("ready", { sessionId });
+      assertActive();
+      ready = true;
+    })().catch(async (error) => {
+      await fail(error);
+      throw error;
+    });
+    await preparation;
   };
+  // A resumed session is known before any owner prompt. Defer until plugin
+  // initialization returns, then arm it without issuing a bootstrap turn.
+  const startup = sessionId
+    ? setTimeout(() => {
+        void bind(sessionId).catch(() => notify("Native context preflight failed; delivery stopped."));
+      }, 0)
+    : undefined;
   let syncChain = Promise.resolve();
   let syncTimer;
   let latestActivity;
@@ -73,15 +99,15 @@ export default async function ClankieSeat({ client }) {
   const poll = async () => {
     while (!stop.signal.aborted) {
       await new Promise((resolve) => setTimeout(resolve, 500));
-      if (!sessionId || !ready || switched || permission) continue;
+      if (stop.signal.aborted) return;
+      if (!sessionId || !ready || switched || failed || permission) continue;
       try {
         const next = await bridge("poll", { sessionId });
-        if (!next.event) continue;
+        if (!next.event || !ready || switched || failed || permission) continue;
         const result = await deliverNativeEvent(client, sessionId, next.event, bridge, stop.signal);
         if (result.status === "busy") await bridge("status", { sessionId, ...result });
       } catch (error) {
-        ready = false;
-        await bridge("failure", { sessionId, detail: String(error) }).catch(() => {});
+        await fail(error);
         await notify("Delivery stopped; inspect the launch journal before retrying.");
       }
     }
@@ -91,6 +117,7 @@ export default async function ClankieSeat({ client }) {
     dispose: async () => {
       stop.abort();
       clearTimeout(syncTimer);
+      clearTimeout(startup);
     },
     config: async (config) => {
       // Runtime projection only: inherited connections cannot bypass the seat's
@@ -113,17 +140,23 @@ export default async function ClankieSeat({ client }) {
       await bind(input.sessionID);
     },
     "experimental.chat.system.transform": async (input, output) => {
-      if (!input.sessionID || switched) return;
+      if (!input.sessionID) return;
       await bind(input.sessionID);
-      const context = await bridge("context", { sessionId });
-      output.system.push(context.text);
-      ready = true;
-      await bridge("ready", { sessionId });
+      try {
+        // Every real turn, including a native wake, gets fresh identity/memory;
+        // the startup preflight is never cached as the model's system prompt.
+        const text = await loadNativeContext(client, sessionId, bridge, stop.signal);
+        assertActive();
+        output.system.push(text);
+      } catch (error) {
+        await fail(error);
+        throw error;
+      }
     },
     event: async ({ event }) => {
       const props = event.properties;
       const id = props?.sessionID ?? props?.info?.sessionID ?? props?.part?.sessionID;
-      if (event.type === "session.created" && !props.info.parentID) {
+      if (event.type === "session.created" && props?.info && !props.info.parentID) {
         await bind(props.info.id);
       }
       if (id !== sessionId || switched) return;
@@ -133,8 +166,7 @@ export default async function ClankieSeat({ client }) {
       if (event.type === "session.status") sync(props.status.type === "idle" ? "waiting" : "responding");
       if (["message.updated", "message.part.updated"].includes(event.type)) sync(undefined);
       if (["session.error", "session.deleted"].includes(event.type)) {
-        ready = false;
-        await bridge("failure", { sessionId, detail: event.type });
+        await fail(new Error(event.type));
       }
     },
   };

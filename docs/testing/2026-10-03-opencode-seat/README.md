@@ -51,7 +51,19 @@ delivery stays bound to the original ID, with switching detected at a new root
 session or another session's prompt. These limitations remain explicit, and the
 issue is not claimed Done.
 
-Readiness limitation: both a new seat and an idle resumed seat activate the
-outbox only after a native turn runs the system-context hook. Opening or resuming
-the TUI alone does not yet bind wakes. This is an implementation limit, not a
-successful startup-delivery proof.
+Readiness follow-up: exact resumed sessions now verify `client.session.get`,
+bind, read identity/memory, then arm the outbox during plugin initialization.
+New root-session creation follows the same preflight. No model call or session
+creation is used for readiness. Real native wake turns still invoke the system
+transform and fetch fresh context. Deterministic tests prove ordering, no extra
+turn, identity/context failure, and a session-switch race that cannot re-arm the
+old session. This startup change was not exercised with new live model calls;
+the earlier native transport/draft/approval evidence above is unchanged.
+
+The per-launch random receipt journal is not read by subsequent launches and
+cannot by itself fence uncertain delivery across launches. The current service
+pump's next poll acknowledges bridge receipt after local persistence, before
+native claim/dispatch may occur. An acknowledged event is removed from that
+in-memory outbox, but that neither proves native consumption nor makes restart
+recovery exactly once. Pending/uncertain journals remain inspection evidence;
+VUH-1521 owns persistent service receipts and explicit native acknowledgments.
