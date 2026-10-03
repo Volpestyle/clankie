@@ -144,3 +144,43 @@ session to reconcile a lost receipt. Bridge persistence and native consumption
 remain separate receipts. Pending launch journals do not become automatic
 restart replay queues. No new broker, harness transcript format, or Swarm path
 is introduced. Deterministic verification does not claim a live model trial.
+
+### Inbound fleet acceptance and restart
+
+Both `clankie mcp --seat` and the installed `--fleet` worker bridge use the
+same durable pending claim. Before a POST, an authenticated read resolves the
+pane's current native session binding. The bridge exclusively persists an ID,
+binding and original payload fingerprint under `~/.clankie/inbound-receipts/`.
+The stable socket/pane scope survives bridge replacement and port refresh.
+Concurrent bridges cannot claim two originals, and an old response can clear
+only its own exact ID. An abandoned mutation lock or corrupt claim blocks
+writes; neither age nor process replacement proves an original was unsent.
+
+The service checks the asserted binding against a fresh native inspection
+through the existing authenticated pane route. This assertion grants no
+membership or authority. A pane-scoped pending fence is persisted before
+acceptance; a different ID, binding or payload cannot replace it. The full
+original text, wrapped untrusted agent output, receipt and run ID are retained
+in the conversation's atomic metadata write **before** event publication and
+dispatch. That write is the `stored` boundary, not evidence of a started turn.
+On restart, metadata accepted before event publication produces the missing
+accepted event and a `service_restarted` failure. It never replays model work.
+
+`GET .../messages/:id?binding=...&fingerprint=...` reconciles only that original
+persisted acceptance without sending work. Unknown, revoked, corrupt or
+mismatched evidence remains `uncertain`. A late original acceptance can resolve
+the fence. A different follow-up presented during reconciliation stays unsent,
+even when the original resolves. Accepted payload receipts are retained with
+the conversation metadata independently of event-history trimming. Explicit
+conversation reset/removal may remove that proof; retained attempted-ID
+tombstones prevent dispatching the same ID again. A genuinely new, undispatched
+request can report an exact `unavailable` refusal; a denied lookup of an earlier
+unknown outcome cannot clear its pending claim.
+
+Legacy reads and optional `deliveryStage` decoding remain compatible. Inbound
+POSTs without an exact delivery ID and binding are rejected before dispatch:
+allowing an old bridge to generate uncorrelated replacement writes would defeat
+the fence. A legacy success response without the original exact receipt cannot
+resolve a new bridge's pending claim. The linked bridge still refreshes its
+link after a refused connection; safe reads may follow the refreshed port, but
+an uncertain POST is never blindly repeated. No local bearer was introduced.

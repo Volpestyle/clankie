@@ -98,3 +98,11 @@ this never means model-seen or completed work. `unavailable`, `expired`, and
 `rejected` say where delivery stopped. `uncertain` blocks every retry and every
 fallback until the original receipt is reconciled, including after restart.
 Keep the native queue/steer state and detail when reporting to James.
+
+For inbound `message_clankie`, `stored` is retained conversation acceptance,
+not proof Clankie read it or completed work. Both `mcp --seat` and `mcp --fleet`
+retain the original ID, native binding and payload through bridge replacement.
+After `uncertain`, another call only reads that original receipt. Do not change
+text, generate a new ID, switch bridges, or remove receipt files to retry.
+Different follow-ups remain unsent while resolving the original; missing,
+revoked or corrupt evidence stays blocked. No-ID legacy writes are rejected.

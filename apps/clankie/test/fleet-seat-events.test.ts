@@ -158,9 +158,11 @@ it("reports inbound conversation retention as stored, preserving its received bo
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-    const result = await request(paneId, { schemaVersion: 1, text: "progress" });
+    const delivery = { id: "00000000-0000-4000-8000-000000000001", binding: "a".repeat(64) };
+    expect((await request(paneId, { schemaVersion: 1, text: "legacy" })).status).toBe(400);
+    const result = await request(paneId, { schemaVersion: 1, text: "progress", delivery });
     expect(await result.json()).toEqual({ schemaVersion: 1, received: true, deliveryStage: "stored" });
-    expect((await request("missing", { schemaVersion: 1, text: "progress" })).status).toBe(404);
+    expect((await request("missing", { schemaVersion: 1, text: "progress", delivery })).status).toBe(404);
     expect(await (await request(paneId, {})).json()).toMatchObject({ deliveryStage: "rejected" });
   } finally {
     clankie.close();

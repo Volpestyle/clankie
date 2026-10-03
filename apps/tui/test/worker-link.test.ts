@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
+import { ConversationStore } from "../../clankie/src/captain/conversations.ts";
+import { InboundSeatReceipts } from "../../clankie/src/captain/inbound-seat-receipts.ts";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const bin = join(import.meta.dirname, "..", "..", "..", "integrations", "claude-plugin", "worker", "bin");
 const TOKEN = "t".repeat(43);
@@ -78,7 +81,25 @@ async function fakeService() {
         setTimeout(() => response.end(JSON.stringify({ schemaVersion: 1, events })), events.length ? 0 : 200);
         return;
       }
-      response.end(JSON.stringify({ schemaVersion: 1, received: true }));
+      if (request.method === "GET" && path.endsWith("/messages")) {
+        response.end(JSON.stringify({ schemaVersion: 1, binding: "a".repeat(64) }));
+        return;
+      }
+      if (!path.endsWith("/messages")) {
+        response.end(JSON.stringify({ schemaVersion: 1, received: true }));
+        return;
+      }
+      const input = JSON.parse(body);
+      response.end(
+        JSON.stringify({
+          schemaVersion: 1,
+          received: true,
+          deliveryStage: "stored",
+          deliveryId: input.delivery.id,
+          binding: input.delivery.binding,
+          fingerprint: createHash("sha256").update(input.text).digest("hex"),
+        }),
+      );
     });
   });
   server.listen(0, "127.0.0.1");
@@ -183,17 +204,26 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
       method: "tools/call",
       params: { name: "message_clankie", arguments: { text: "Blocked on X" } },
     });
-    expect(await waitFor((line) => line.id === 3)).toMatchObject({
-      result: { isError: false, content: [{ type: "text", text: "Sent to Clankie." }] },
+    const receipt = await waitFor((line) => line.id === 3);
+    expect(receipt).toMatchObject({ result: { isError: false } });
+    expect(JSON.parse((receipt.result as { content: { text: string }[] }).content[0]!.text)).toMatchObject({
+      received: true,
+      deliveryStage: "stored",
     });
 
-    const message = service.seen.find((request) => request.path.endsWith("/messages"));
+    const message = service.seen.find(
+      (request) => request.method === "POST" && request.path.endsWith("/messages"),
+    );
     expect(message).toMatchObject({
       method: "POST",
       path: "/v1/fleet/seats/w8%3Ap3/messages",
       authorization,
     });
-    expect(JSON.parse(message!.body)).toEqual({ schemaVersion: 1, text: "Blocked on X" });
+    expect(JSON.parse(message!.body)).toMatchObject({
+      schemaVersion: 1,
+      text: "Blocked on X",
+      delivery: { id: expect.any(String), binding: "a".repeat(64) },
+    });
     expect(service.seen.find((request) => request.path.endsWith("/events"))?.authorization).toBe(
       authorization,
     );
@@ -319,4 +349,215 @@ describe("the local link after a service restart", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.pane).toBe("w8:p3");
   });
+});
+
+/** Real durable conversation acceptance behind the raw bridge's HTTP boundary. */
+async function receiptService() {
+  const root = await mkdtemp(join(tmpdir(), "bridge-inbound-service-"));
+  const runner = vi.fn(async () => {});
+  let store = new ConversationStore(join(root, "conversations"), runner);
+  let receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  let drop = true;
+  let beforeAcceptance = false;
+  let denyLookup = false;
+  let legacyReply = false;
+  const seen: { method: string; path: string; body: string }[] = [];
+  const server = createServer((request, response) => {
+    let raw = "";
+    request.on("data", (chunk: Buffer) => {
+      raw += String(chunk);
+    });
+    request.on("end", () => {
+      const url = new URL(request.url ?? "/", "http://x");
+      seen.push({ method: request.method ?? "", path: url.pathname, body: raw });
+      response.setHeader("content-type", "application/json");
+      if (request.method === "GET" && url.pathname.endsWith("/messages")) {
+        response.end(JSON.stringify({ schemaVersion: 1, binding: "a".repeat(64) }));
+        return;
+      }
+      if (request.method === "GET") {
+        if (denyLookup) {
+          response.statusCode = 403;
+          response.end("{}");
+          return;
+        }
+        response.end(
+          JSON.stringify(
+            receipts.reconcile(
+              "w8:p3",
+              { id: url.pathname.split("/").at(-1)!, binding: url.searchParams.get("binding")! },
+              url.searchParams.get("fingerprint")!,
+            ),
+          ),
+        );
+        return;
+      }
+      const input = JSON.parse(raw);
+      if (beforeAcceptance)
+        vi.spyOn(store, "submitInbound").mockImplementationOnce(() => {
+          throw new Error("crash before acceptance");
+        });
+      const receipt = receipts.accept("w8:p3", input.delivery, input.text, `Agent output: ${input.text}`);
+      if (drop) {
+        response.destroy();
+        return;
+      }
+      response.end(JSON.stringify(legacyReply ? { received: true } : receipt));
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  cleanups.push(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("no address");
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    seen,
+    runner,
+    setDrop: (value: boolean) => {
+      drop = value;
+    },
+    setPending: () => {
+      beforeAcceptance = true;
+    },
+    setDenied: (value: boolean) => {
+      denyLookup = value;
+    },
+    setLegacyReply: () => {
+      legacyReply = true;
+    },
+    restart: async () => {
+      await store.close();
+      store = new ConversationStore(join(root, "conversations"), runner);
+      receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+    },
+  };
+}
+function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string) {
+  const code = `import { runMcpCommand } from ${JSON.stringify(new URL("../src/command/mcp.ts", import.meta.url).href)}; await runMcpCommand(["--seat"], { readParentArgv: async () => "test" });`;
+  const child = spawn(
+    process.execPath,
+    mode === "fleet" ? [join(bin, "fleet-mcp.mjs")] : ["--input-type=module", "-e", code],
+    {
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        HERDR_PANE_ID: "w8:p3",
+        HERDR_SOCKET_PATH: SOCKET,
+        CLANKIE_OPERATOR_TOKEN: "test-only",
+        CLANKIE_CONTROL_PLANE_URL: url,
+      },
+    },
+  );
+  cleanups.push(() => child.kill());
+  const replies = new Map<number, unknown>();
+  let buffer = "";
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += String(chunk);
+  });
+  child.stdout.on("data", (chunk: Buffer) => {
+    buffer += String(chunk);
+    while (buffer.includes("\n")) {
+      const at = buffer.indexOf("\n");
+      const line = JSON.parse(buffer.slice(0, at));
+      buffer = buffer.slice(at + 1);
+      if (line.id !== undefined) replies.set(line.id, line);
+    }
+  });
+  let sequence = 0;
+  const call = async (method: string, params: unknown) => {
+    const id = ++sequence;
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    for (let i = 0; i < 200; i++) {
+      if (replies.has(id)) return replies.get(id) as { result: { content: { text: string }[] } };
+      if (child.exitCode !== null) throw new Error(stderr);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`No response: ${stderr}`);
+  };
+  return {
+    child,
+    init: () =>
+      call("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1" },
+      }),
+    message: async (text = "original") =>
+      JSON.parse(
+        (await call("tools/call", { name: "message_clankie", arguments: { text } })).result.content[0]!.text,
+      ) as { received: boolean; deliveryStage: string; deliveryId: string },
+  };
+}
+it.each(["fleet", "seat"] as const)(
+  "%s reconciles lost acceptance after raw bridge and service replacement, without another POST",
+  async (mode) => {
+    const service = await receiptService();
+    const home = await linkedHome(service.url, true);
+    const first = rawReceiptBridge(mode, home, service.url);
+    await first.init();
+    const lost = await first.message();
+    expect(lost.deliveryStage).toBe("uncertain");
+    first.child.kill();
+    await once(first.child, "exit");
+    await service.restart();
+    const replacement = rawReceiptBridge(mode, home, service.url);
+    await replacement.init();
+    service.setDenied(true);
+    expect((await replacement.message()).deliveryStage).toBe("uncertain");
+    service.setDenied(false);
+    expect(await replacement.message()).toMatchObject({
+      received: true,
+      deliveryStage: "stored",
+      deliveryId: lost.deliveryId,
+    });
+    expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(1);
+    expect(service.runner).toHaveBeenCalledTimes(1);
+  },
+);
+it.each(["fleet", "seat"] as const)(
+  "%s keeps pre-acceptance uncertainty across replacement and refuses a different payload",
+  async (mode) => {
+    const service = await receiptService();
+    service.setPending();
+    const home = await linkedHome(service.url, true);
+    const first = rawReceiptBridge(mode, home, service.url);
+    await first.init();
+    expect((await first.message()).deliveryStage).toBe("uncertain");
+    first.child.kill();
+    await once(first.child, "exit");
+    await service.restart();
+    const replacement = rawReceiptBridge(mode, home, service.url);
+    await replacement.init();
+    expect((await replacement.message("replacement")).deliveryStage).toBe("uncertain");
+    expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(1);
+    expect(service.runner).not.toHaveBeenCalled();
+  },
+);
+it("a legacy response without an exact receipt never clears the raw bridge's pending claim", async () => {
+  const service = await receiptService();
+  service.setDrop(false);
+  service.setLegacyReply();
+  const home = await linkedHome(service.url, true);
+  const bridge = rawReceiptBridge("fleet", home, service.url);
+  await bridge.init();
+  expect((await bridge.message()).deliveryStage).toBe("uncertain");
+  expect((await bridge.message()).deliveryStage).toBe("stored");
+  expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(1);
+});
+it("two raw bridges sharing a pane claim at most one original POST", async () => {
+  const service = await receiptService();
+  service.setPending();
+  const home = await linkedHome(service.url, true);
+  const first = rawReceiptBridge("fleet", home, service.url);
+  const second = rawReceiptBridge("seat", home, service.url);
+  await Promise.all([first.init(), second.init()]);
+  const results = await Promise.all([first.message(), second.message()]);
+  expect(results.map((r) => r.deliveryStage)).toEqual(["uncertain", "uncertain"]);
+  expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(1);
+  expect(service.runner).not.toHaveBeenCalled();
 });

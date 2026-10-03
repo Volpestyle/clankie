@@ -13,6 +13,8 @@ import type {
   DiscordChannelProjectionMessageResult,
   DiscordPresenceChannelTurnRequest,
   FleetSeatHook,
+  FleetSeatMessageDelivery,
+  FleetSeatMessageReceipt,
   ObservableCaptainLane,
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
@@ -170,7 +172,17 @@ export interface CaptainPort {
    * operator conversation as untrusted agent output; false when the pane
    * holds no messageable agent.
    */
-  receiveFleetSeatMessage(paneId: string, text: string): Promise<boolean>;
+  fleetSeatMessageBinding(paneId: string): Promise<string | undefined>;
+  reconcileFleetSeatMessage(
+    paneId: string,
+    delivery: FleetSeatMessageDelivery,
+    fingerprint: string,
+  ): Promise<FleetSeatMessageReceipt>;
+  receiveFleetSeatMessage(
+    paneId: string,
+    text: string,
+    delivery?: FleetSeatMessageDelivery,
+  ): Promise<boolean | FleetSeatMessageReceipt>;
   /** The seat's answer to an escalation; false when nothing waits on that id. */
   replySeatEvent(eventId: string, text: string, conversationId?: string): Promise<boolean>;
   /**
@@ -248,6 +260,15 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     pollSeatEvents: async () => [],
     pollFleetSeatEvents: async () => undefined,
     recordSeatHook: async () => false,
+    fleetSeatMessageBinding: async () => undefined,
+    reconcileFleetSeatMessage: async (_pane, delivery, fingerprint) => ({
+      schemaVersion: 1,
+      received: false,
+      deliveryStage: "uncertain",
+      deliveryId: delivery.id,
+      binding: delivery.binding,
+      fingerprint,
+    }),
     receiveFleetSeatMessage: async () => false,
     replySeatEvent: async () => false,
     laneToolBank: async (lane) => ({ lane, tools: [] }),

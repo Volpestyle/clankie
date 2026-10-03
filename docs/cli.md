@@ -1494,6 +1494,13 @@ What crosses the link, and what cannot:
   with the plugin's `message_clankie` tool, hired or not. It wakes him as that
   agent's output, not the owner's instruction; he answers with `message_seat`,
   which reaches a session that loaded `--channels plugin:clankie-worker@clankie`.
+  Its receipt reports `stored` only after durable conversation acceptance.
+  Both `mcp --seat` and `mcp --fleet` preserve an uncertain original across
+  bridge/service replacement. Calling again reconciles that exact ID through
+  a read; it never resends it. A different follow-up during reconciliation
+  remains unsent. Missing or mismatched evidence stays blocked; do not delete
+  the receipt files or switch bridges to bypass it. Older inbound writers
+  without a delivery ID are rejected before dispatch.
 - Other remote seats' replies are read with `herdr agent read`. Terminal
   observe/control is not wired for ssh fleets yet.
 - An unreachable fleet is a state. `herdr fleets` (and `runtime list`) report

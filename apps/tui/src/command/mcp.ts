@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { createInboundSender } from "../../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
 /**
  * `clankie mcp --lane operator` and `clankie mcp --seat` — stdio MCP for a
  * seated harness ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)).
@@ -507,7 +509,7 @@ export async function connectLaneUpstream(input: {
 const MESSAGE_CLANKIE_TOOL = {
   name: "message_clankie",
   description:
-    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. He answers in this session if he chooses to.",
+    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
   inputSchema: {
     type: "object" as const,
     properties: { text: { type: "string", description: "What to tell him." } },
@@ -527,6 +529,7 @@ export function createFleetSeatBridge(
   ) => Promise<
     boolean | { received: boolean; deliveryStage: "stored" | "unavailable" | "rejected" | "uncertain" }
   >,
+  durable = false,
 ): Server<Request, ChannelNotification, Result> {
   const server = new Server<Request, ChannelNotification, Result>(
     { name: FLEET_SEAT_MCP_SERVER, version: "0.3.0" },
@@ -548,7 +551,7 @@ export function createFleetSeatBridge(
         return { content: [{ type: "text", text: `Unknown tool ${request.params.name}` }], isError: true };
       const text = String((request.params.arguments as { text?: unknown } | undefined)?.text ?? "").trim();
       if (text === "") return { content: [{ type: "text", text: "Say what to tell him." }], isError: true };
-      if (uncertain)
+      if (uncertain && !durable)
         return {
           content: [
             {
@@ -639,33 +642,23 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   const env = options.env ?? process.env;
   const stderr = options.stderr ?? process.stderr;
   const paneId = env.HERDR_PANE_ID?.trim() ?? "";
-  const server = createFleetSeatBridge(
-    paneId.length === 0
-      ? undefined
-      : async (text) => {
-          const credential = await resolveOperatorCredential({
-            env,
-            ...(options.operatorCredentialStore === undefined
-              ? {}
-              : { store: options.operatorCredentialStore }),
-          });
-          if (credential === undefined) return false;
-          const response = await fetch(
-            new URL(fleetSeatMessagesPath(paneId), commandHost({ ...options, env })),
-            {
-              method: "POST",
-              headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-              body: JSON.stringify({ schemaVersion: 1, text }),
-              signal: AbortSignal.timeout(20_000),
-            },
-          );
-          if (response.ok) return true;
-          if ([400, 401, 403, 413].includes(response.status))
-            return { received: false, deliveryStage: "rejected" as const };
-          if (response.status === 404) return { received: false, deliveryStage: "unavailable" as const };
-          throw new Error(`Message receipt is uncertain (${response.status})`);
-        },
-  );
+  const sendInbound = createInboundSender({
+    directory: join(env.HOME ?? homedir(), ".clankie", "inbound-receipts"),
+    scope: JSON.stringify([env.HERDR_SOCKET_PATH ?? "", paneId]),
+    request: async (suffix, init) => {
+      const credential = await resolveOperatorCredential({
+        env,
+        ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+      });
+      if (credential === undefined) throw new Error("No operator credential");
+      return fetch(new URL(`${fleetSeatMessagesPath(paneId)}${suffix}`, commandHost({ ...options, env })), {
+        ...init,
+        headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+        signal: AbortSignal.timeout(20_000),
+      });
+    },
+  });
+  const server = createFleetSeatBridge(paneId.length === 0 ? undefined : sendInbound, true);
   const transport = options.transport ?? new StdioServerTransport();
   const closing = new AbortController();
   const closed = new Promise<void>((resolve) => {

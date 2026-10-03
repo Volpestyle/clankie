@@ -57,7 +57,11 @@ describe("a fleet link (VUH-1527)", () => {
         await clankie.app.request(fleetSeatMessagesPath("w8:p3"), {
           method: "POST",
           headers: { ...auth, "content-type": "application/json" },
-          body: JSON.stringify({ schemaVersion: 1, text: "Blocked on X" }),
+          body: JSON.stringify({
+            schemaVersion: 1,
+            text: "Blocked on X",
+            delivery: { id: "00000000-0000-4000-8000-000000000001", binding: "a".repeat(64) },
+          }),
         })
       ).status,
     ).toBe(200);
@@ -97,7 +101,11 @@ describe("a fleet link (VUH-1527)", () => {
     const response = await clankie.app.request(fleetSeatMessagesPath("w1:p1"), {
       method: "POST",
       headers: { authorization: "Bearer operator", "content-type": "application/json" },
-      body: JSON.stringify({ schemaVersion: 1, text: "hi" }),
+      body: JSON.stringify({
+        schemaVersion: 1,
+        text: "hi",
+        delivery: { id: "00000000-0000-4000-8000-000000000002", binding: "a".repeat(64) },
+      }),
     });
     expect(response.status).toBe(200);
     expect(seen).toEqual([{ route: "messages", paneId: "w1:p1", text: "hi" }]);

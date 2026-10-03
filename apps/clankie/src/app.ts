@@ -78,6 +78,8 @@ import {
   FLEET_SEAT_HOOK_PATH,
   FLEET_SEAT_MESSAGES_PATH,
   FleetSeatMessageSchema,
+  FleetSeatMessageDeliverySchema,
+  FleetSeatMessageReceiptSchema,
   FleetSeatHookSchema,
   OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
   OPERATOR_SEAT_EVENTS_PATH,
@@ -1280,12 +1282,42 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   // An agent in a fleet pane writing to Clankie (ADR 0213 phase 2). It reaches
   // him as untrusted agent output and grants the sender nothing.
+  app.get(FLEET_SEAT_MESSAGES_PATH, async (context) => {
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    const binding = await dependencies.captain.fleetSeatMessageBinding(pane.paneId);
+    return binding
+      ? context.json({ schemaVersion: 1, binding })
+      : context.json({ error: "unknown_native_session", deliveryStage: "unavailable" }, 404);
+  });
+  app.get(`${FLEET_SEAT_MESSAGES_PATH}/:id`, async (context) => {
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    const delivery = FleetSeatMessageDeliverySchema.safeParse({
+      id: context.req.param("id"),
+      binding: context.req.query("binding"),
+    });
+    const fingerprint = context.req.query("fingerprint") ?? "";
+    if (!delivery.success || !/^[a-f0-9]{64}$/u.test(fingerprint))
+      return context.json({ error: "invalid_request" }, 400);
+    return context.json(
+      await dependencies.captain.reconcileFleetSeatMessage(pane.paneId, delivery.data, fingerprint),
+    );
+  });
+
   app.post(FLEET_SEAT_MESSAGES_PATH, bodyLimit({ maxSize: 128 * 1024 }), async (context) => {
     const pane = await fleetSeatPane(context);
     if ("denial" in pane) return pane.denial;
     const parsed = FleetSeatMessageSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!parsed.success) return context.json({ error: "invalid_request", deliveryStage: "rejected" }, 400);
-    const received = await dependencies.captain.receiveFleetSeatMessage(pane.paneId, parsed.data.text);
+    if (!parsed.data.delivery)
+      return context.json({ error: "delivery_id_required", received: false, deliveryStage: "rejected" }, 400);
+    const received = await dependencies.captain.receiveFleetSeatMessage(
+      pane.paneId,
+      parsed.data.text,
+      parsed.data.delivery,
+    );
+    if (typeof received !== "boolean") return context.json(FleetSeatMessageReceiptSchema.parse(received));
     return received
       ? context.json({ schemaVersion: 1 as const, received: true as const, deliveryStage: "stored" as const })
       : context.json({ error: "unknown_seat", deliveryStage: "unavailable" }, 404);

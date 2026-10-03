@@ -42,15 +42,24 @@ or `delivered`; clients must not promote that receipt to successful work.
 
 ## Remaining issue scope
 
-The inbound `message_clankie` boolean API now reports `stored` on actual durable
-conversation acceptance and explicit refusal stages. Lost transport/5xx receipts
-are `uncertain`, with further calls refused in the same bridge. This path has no
-cross-restart exact delivery ID or durable retry fence yet. Completing it needs
-an idempotent inbound message receipt tied to actual persisted conversation
-acceptance. Restarting the bridge does not reconcile a lost receipt.
+The inbound `message_clankie` path now covers both `--seat` and the installed
+`--fleet` bridge. Tests exercise real JSON-RPC subprocess replacement and actual
+ConversationStore persistence: response loss after acceptance, service restart,
+pending crashes, denied receipt reads, changed text, legacy responses, concurrent
+bridges, and exact-ID settlement. Persistence tests cover a crash after the
+metadata acceptance write but before event publication, deterministic accepted
+and interrupted run history on restart, no automatic dispatch, late acceptance,
+and corrupt records. Native-binding tests resolve the current session through
+the captain and refuse stale caller assertions before acceptance.
+
+A pending bridge record only authorizes an exact read, never a new POST. The
+service stores the original payload and receipt atomically in conversation
+metadata before dispatch. No-ID legacy POSTs are rejected before acceptance.
+The fixed startup fixture and rebased native OpenCode integration have separate
+focused evidence; a passing frozen checkpoint gate is not a whole-issue claim.
 
 The private app has not been edited or verified in this public worktree. It must
 visibly render the accepted/failure/spawn and turn-event `deliveryStage` fields,
 retain queue detail, and distinguish local completion from receipt progress.
-VUH-1521 remains in progress until that display and the durable inbound receipt
-contract are complete; this public harvest is partial issue scope.
+VUH-1521 remains in progress until that display and the parent trust/durability
+review are complete; this public harvest is partial issue scope.

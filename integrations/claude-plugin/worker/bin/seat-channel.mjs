@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { createInboundSender } from "./inbound-receipt.mjs";
 // The clankie-worker channel on a linked machine (VUH-1527): the same seat
 // mailbox `clankie mcp --seat` serves on Clankie's own Mac, reached through the
 // machine's link instead of the operator credential. One stdio MCP server:
@@ -23,7 +26,7 @@ const INSTRUCTIONS =
 const MESSAGE_TOOL = {
   name: "message_clankie",
   description:
-    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. He answers in this session if he chooses to.",
+    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
   inputSchema: {
     type: "object",
     properties: { text: { type: "string", description: "What to tell him." } },
@@ -178,27 +181,34 @@ export function runSeatChannel({ paneId, parentArgv }) {
     }
   }
 
+  const sendInbound = createInboundSender({
+    directory: join(homedir(), ".clankie", "inbound-receipts"),
+    scope: JSON.stringify([process.env.HERDR_SOCKET_PATH ?? "", paneId]),
+    request: async (suffix, init) => {
+      try {
+        return await fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
+          ...init,
+          headers: { ...authorization(link), "content-type": "application/json" },
+          signal: AbortSignal.timeout(20_000),
+        });
+      } catch (error) {
+        // Preserve the refused-connection link refresh. Reads can follow the
+        // new port immediately; POST uncertainty is never retried here.
+        if (refused(error) && refresh() && !init)
+          return fetch(`${seatRoute(link, paneId, "messages")}${suffix}`, {
+            headers: authorization(link),
+            signal: AbortSignal.timeout(20_000),
+          });
+        throw error;
+      }
+    },
+  });
   async function messageClankie(text) {
     if (!paneId) return { isError: true, text: "This session is not in a Herdr pane Clankie can answer." };
     const body = String(text ?? "").trim();
     if (!body) return { isError: true, text: "Say what to tell him." };
-    try {
-      const response = await fetch(seatRoute(link, paneId, "messages"), {
-        method: "POST",
-        headers: { ...authorization(link), "content-type": "application/json" },
-        body: JSON.stringify({ schemaVersion: 1, text: body.slice(0, TEXT_MAX) }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (response.ok) return { isError: false, text: "Sent to Clankie." };
-      return { isError: true, text: `Clankie's service answered ${String(response.status)}; not sent.` };
-    } catch (error) {
-      // Not resent here: the caller decides, against the link now on disk.
-      if (refused(error)) refresh();
-      return {
-        isError: true,
-        text: `Could not reach Clankie (${error instanceof Error ? error.message : String(error)}); not sent.`,
-      };
-    }
+    const receipt = await sendInbound(body.slice(0, TEXT_MAX));
+    return { isError: !receipt.received, text: JSON.stringify(receipt) };
   }
 
   async function handle(message) {

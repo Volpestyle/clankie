@@ -164,7 +164,23 @@ interface SeatTranscriptCheckpoint {
   readonly messageIds?: readonly string[];
 }
 
+const InboundAcceptanceSchema = z
+  .object({
+    deliveryId: z.string().uuid(),
+    binding: z.string(),
+    fingerprint: z.string(),
+    paneId: z.string(),
+    text: z.string(),
+    message: z.string(),
+    runId: z.string(),
+    acceptedCursor: z.string(),
+  })
+  .strict();
+type InboundAcceptance = z.infer<typeof InboundAcceptanceSchema>;
+
 interface ConversationMeta {
+  /** Retained accepted inbound payloads; independent of event-log trimming. */
+  inboundAcceptances?: Record<string, InboundAcceptance>;
   nativeSource?: HerdrAgentSnapshot;
   readonly conversationId: string;
   scope: OperatorConversationScope;
@@ -552,8 +568,8 @@ export class ConversationStore {
           readFileSync(join(root, entry.name, "meta.json"), "utf8"),
         ) as ConversationMeta;
         // A crash mid-run leaves "active"; on boot nothing is running.
-        if (meta.sessionState === "active") {
-          meta.sessionState = "waiting";
+        if (meta.sessionState === "active" || meta.inboundAcceptances !== undefined) {
+          if (meta.sessionState === "active") meta.sessionState = "waiting";
           // Settling the run stops a tailing client hanging forever, but the
           // room it was answering hears nothing at all — which is how an
           // operator came to type into a dead round five times. One line, once
@@ -638,6 +654,19 @@ export class ConversationStore {
       if (event.type !== "turn") continue;
       if (event.phase === "accepted") accepted.push(event.runId);
       else terminal.add(event.runId);
+    }
+    // Metadata is the durable acceptance boundary. If the process died before
+    // publishing that accepted turn, expose it and its interruption on boot;
+    // never replay the stored input or claim the model ran.
+    for (const receipt of Object.values(meta.inboundAcceptances ?? {})) {
+      const value = InboundAcceptanceSchema.parse(receipt);
+      if (
+        !accepted.includes(value.runId) &&
+        Number(value.acceptedCursor) > Number(meta.retainedFromCursor ?? 0)
+      ) {
+        this.append(meta, { type: "turn", runId: value.runId, phase: "accepted", deliveryStage: "stored" });
+        accepted.push(value.runId);
+      }
     }
     const orphans = accepted.filter((id) => !terminal.has(id));
     for (const runId of orphans) {
@@ -1622,6 +1651,27 @@ export class ConversationStore {
     return this.enqueue(meta, message, undefined, false, this.runner, { origin });
   }
 
+  /** Read actual on-disk acceptance, never an in-memory success guess. */
+  public inboundAcceptance(id: string): InboundAcceptance | undefined {
+    const raw = JSON.parse(readFileSync(join(this.root, "global-default", "meta.json"), "utf8"));
+    const entries = z.record(z.string(), InboundAcceptanceSchema).parse(raw.inboundAcceptances ?? {});
+    const receipt = entries[id];
+    if (receipt && receipt.deliveryId !== id) throw new Error("Mismatched acceptance ID");
+    return receipt;
+  }
+
+  public submitInbound(
+    message: string,
+    receipt: Omit<InboundAcceptance, "message" | "runId" | "acceptedCursor">,
+  ): SubmitOperatorConversationTurnResult {
+    const meta = this.metas.get("global-default");
+    if (!meta) throw new Error("Missing global conversation");
+    return this.enqueue(meta, message, undefined, false, this.runner, {
+      origin: "watch",
+      inboundReceipt: receipt,
+    });
+  }
+
   public async close(): Promise<void> {
     await Promise.allSettled([
       ...this.runs.values(),
@@ -2438,6 +2488,7 @@ export class ConversationStore {
     runner: ConversationRunner = this.runner,
     provenance: Pick<ConversationTurnContext, "origin" | "surfaceClientId" | "attachments"> & {
       delivery?: SubmitOperatorConversationTurn["delivery"];
+      inboundReceipt?: Omit<InboundAcceptance, "message" | "runId" | "acceptedCursor">;
     } = {},
   ): SubmitOperatorConversationTurnResult {
     const workspace = workspaceOf(meta.scope);
@@ -2445,8 +2496,28 @@ export class ConversationStore {
     meta.revision += 1;
     meta.sessionState = "active";
     meta.updatedAt = new Date().toISOString();
-    this.saveMeta(meta);
     const runId = `run-${randomUUID()}`;
+    const previousAcceptances = meta.inboundAcceptances;
+    if (provenance.inboundReceipt) {
+      // This atomic conversation write is the acceptance boundary. A crash after
+      // it may prevent execution, but the exact original input is retained.
+      meta.inboundAcceptances = {
+        ...meta.inboundAcceptances,
+        [provenance.inboundReceipt.deliveryId]: {
+          ...provenance.inboundReceipt,
+          message,
+          runId,
+          acceptedCursor: String(this.eventSequence(meta) + 1).padStart(CURSOR_WIDTH, "0"),
+        },
+      };
+    }
+    try {
+      this.saveMeta(meta);
+    } catch (error) {
+      if (previousAcceptances === undefined) delete meta.inboundAcceptances;
+      else meta.inboundAcceptances = previousAcceptances;
+      throw error;
+    }
     if (publishOperatorMessage) {
       this.append(meta, {
         type: "message",

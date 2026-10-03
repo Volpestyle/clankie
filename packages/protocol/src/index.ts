@@ -2424,8 +2424,32 @@ export function fleetSeatHookPath(paneId: string): string {
  * way a completion watch does, and grants the sender nothing; he answers, if
  * he chooses, with `message_seat`.
  */
+export const FleetSeatMessageDeliverySchema = z
+  .object({
+    id: z.string().uuid(),
+    binding: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
+export type FleetSeatMessageDelivery = z.infer<typeof FleetSeatMessageDeliverySchema>;
+export const FleetSeatMessageReceiptSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    received: z.boolean(),
+    deliveryStage: z.enum(["stored", "uncertain", "rejected", "unavailable"]),
+    deliveryId: z.string().uuid(),
+    binding: z.string().regex(/^[a-f0-9]{64}$/u),
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+    detail: z.string().optional(),
+  })
+  .strict();
+export type FleetSeatMessageReceipt = z.infer<typeof FleetSeatMessageReceiptSchema>;
 export const FleetSeatMessageSchema = z
-  .object({ schemaVersion: z.literal(1), text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX) })
+  .object({
+    schemaVersion: z.literal(1),
+    text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
+    /** Optional on decode for legacy clients; current HTTP writes require it. */
+    delivery: FleetSeatMessageDeliverySchema.optional(),
+  })
   .strict();
 export type FleetSeatMessage = z.infer<typeof FleetSeatMessageSchema>;
 export const FLEET_SEAT_MESSAGES_PATH = "/v1/fleet/seats/:paneId/messages";
