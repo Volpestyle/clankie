@@ -157,6 +157,18 @@ export function removeProjectWorkspace(
   if (!project) throw new Error("Unknown project");
   if (!project.workspaces.some((workspace) => workspace.id === input.workspaceId))
     throw new Error("Unknown workspace");
+  if (
+    project.worktreeRoots.some((root) =>
+      project.workspaces.some(
+        (workspace) =>
+          workspace.id === input.workspaceId &&
+          workspace.machineId === root.machineId &&
+          workspace.platform === root.platform &&
+          workspace.path === root.repoPath,
+      ),
+    )
+  )
+    throw new Error("Workspace is referenced by a worktree root; remove that root first");
   if (project.trackerRef?.workspaceId === input.workspaceId)
     throw new Error("Workspace is referenced by the project tracker; move or remove that binding first");
   return ProjectsSettingsSchema.parse({

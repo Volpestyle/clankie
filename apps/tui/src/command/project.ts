@@ -1,3 +1,4 @@
+import { runProjectWorktreeCommand } from "./project-worktree.ts";
 import { createHash } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { posix, win32 } from "node:path";
@@ -19,8 +20,12 @@ export async function runProjectCommand(
     env?: NodeJS.ProcessEnv;
     settings?: SettingsStore;
     operatorCredentialStore?: CredentialStore;
+    host?: string;
+    fetchImpl?: typeof fetch;
   } = {},
 ) {
+  if (args[2] === "--worktree-root" || args[0] === "remove-worktree-root")
+    return runProjectWorktreeCommand(args, options);
   if (
     ![4, 8].includes(args.length) ||
     !["add", "remove-workspace"].includes(args[0]!) ||

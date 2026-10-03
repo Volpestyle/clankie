@@ -437,6 +437,7 @@ export interface ClankieAppDependencies {
    */
   fleetLinks?: { authenticate(token: string): string | undefined };
   localFleet?: { identity(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined };
+  projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
   /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
   prepareFleet?: (id: string) => Promise<unknown>;
   inspectFleetHarnesses?: (id: string) => Promise<unknown>;
@@ -1098,7 +1099,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   };
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
-  app.route("/", createProjectRoutes(authorizeOwnerSecrets, settingsSource));
+  app.route(
+    "/",
+    createProjectRoutes(authorizeOwnerSecrets, settingsSource, {
+      ...(dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {}),
+    }),
+  );
   /**
    * Owner operator or any active paired device: account data that is not a
    * secret and needs no terminal grant, such as the hosted credit balance.

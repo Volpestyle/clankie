@@ -99,3 +99,6 @@ export {
 
 export * from "./projects.ts";
 export { ProjectsSettingsSchema, type ProjectsSettings } from "@clankie/protocol/projects";
+
+export * from "./project-worktrees.ts";
+export * from "./project-worktree-observer.ts";

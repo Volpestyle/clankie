@@ -8,6 +8,8 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["project"],
     lines: [
       "  project add|remove-workspace NAME --workspace PATH [--machine ID --platform windows|posix]  Manage approved project workspaces (JSON)",
+      "  project add NAME --worktree-root ROOT --repo APPROVED_REPO [--machine ID --platform windows|posix]  Enroll a linked-worktree root",
+      "  project remove-worktree-root NAME --worktree-root ROOT [--machine ID --platform windows|posix]  Remove a root enrollment",
     ],
   },
   {

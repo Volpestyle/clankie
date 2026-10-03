@@ -14,6 +14,12 @@ export const ProjectWorkspaceSchema = z
     platform: z.enum(["posix", "windows"]),
   })
   .strict();
+/** Dedicated namespace for linked worktrees; never ordinary path-containment authority. */
+export const ProjectWorktreeRootSchema = ProjectWorkspaceSchema.extend({
+  repoPath: z.string().min(1).max(4096),
+  commonDirectory: z.string().min(1).max(4096),
+}).strict();
+export type ProjectWorktreeRoot = z.infer<typeof ProjectWorktreeRootSchema>;
 export const ProjectRoleSchema = z
   .object({
     role: OperatorAgentRoleSchema,
@@ -49,6 +55,7 @@ export const ProjectSchema = z
     id: ProjectIdSchema,
     name: z.string().trim().min(1).max(100),
     workspaces: z.array(ProjectWorkspaceSchema).max(256).default([]),
+    worktreeRoots: z.array(ProjectWorktreeRootSchema).max(32).default([]),
     trackerRef: z
       .object({ workspaceId: ProjectIdSchema, path: z.literal(".clankie/tracking.json") })
       .strict()
@@ -76,6 +83,10 @@ export const ProjectSchema = z
     unique(
       project.workspaces.map((w) => w.id),
       "Workspace IDs must be unique",
+    );
+    unique(
+      project.worktreeRoots.map((root) => root.id),
+      "Worktree root IDs must be unique",
     );
     unique(
       project.roles.map((r) => operatorAgentRoleKey(r.role)),
@@ -187,6 +198,26 @@ export const RemoveProjectWorkspaceSchema = z
   .object({
     projectId: ProjectIdSchema,
     workspaceId: ProjectIdSchema,
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
+
+export const PROJECT_ADD_WORKTREE_ROOT_PATH = "/v1/operator/projects/add-worktree-root";
+export const PROJECT_REMOVE_WORKTREE_ROOT_PATH = "/v1/operator/projects/remove-worktree-root";
+export const AddProjectWorktreeRootSchema = z
+  .object({
+    projectId: ProjectIdSchema,
+    machineId: RefSchema,
+    platform: z.enum(["posix", "windows"]),
+    path: z.string().min(1).max(4096),
+    repoPath: z.string().min(1).max(4096),
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
+export const RemoveProjectWorktreeRootSchema = z
+  .object({
+    projectId: ProjectIdSchema,
+    rootId: ProjectIdSchema,
     expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict();

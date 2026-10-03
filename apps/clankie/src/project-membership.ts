@@ -1,7 +1,15 @@
 import { execFile } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { promisify, isDeepStrictEqual } from "node:util";
-import { resolveProjectMembership, projectsRevision } from "@clankie/settings";
+import {
+  resolveProjectMembership,
+  projectsRevision,
+  projectWorktreeMatches,
+  observeLocalProjectWorktreeRoot,
+  observeLocalProjectGitWorktree,
+  type ObserveProjectWorktreeRoot,
+  type ObserveProjectGitWorktree,
+} from "@clankie/settings";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
@@ -15,6 +23,8 @@ type WorkspaceOptions = {
   settings(): Promise<ProjectsSettings>;
   canonical?(path: string): Promise<string>;
   cwd?(pid: number): Promise<string | undefined>;
+  worktreeRoot?: ObserveProjectWorktreeRoot;
+  gitWorktree?: ObserveProjectGitWorktree;
 };
 const processCwd = async (pid: number) => {
   const { stdout } = await exec("/usr/sbin/lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
@@ -56,8 +66,18 @@ async function workspaceProject(
     occupantId: JSON.stringify(proof),
     workspace: { machineId: "local", platform: "posix", canonicalPath: current },
   });
-  if (membership.outcome !== "member" || (await cwd(proof.processes[0]!.pid)) !== current) return undefined;
-  return membership.projectId;
+  if (membership.outcome === "ambiguous") return undefined;
+  const matched = new Set(
+    await projectWorktreeMatches(
+      settings,
+      { machineId: "local", platform: "posix", cwd: current },
+      options.worktreeRoot ?? observeLocalProjectWorktreeRoot,
+      options.gitWorktree ?? observeLocalProjectGitWorktree,
+    ),
+  );
+  if (membership.outcome === "member") matched.add(membership.projectId);
+  if (matched.size !== 1 || (await cwd(proof.processes[0]!.pid)) !== current) return undefined;
+  return [...matched][0];
 }
 
 /** Shared actual-cwd policy for hire source selection and worker tool eligibility. */
