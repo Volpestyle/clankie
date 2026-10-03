@@ -1,4 +1,4 @@
-import { fsyncSync, mkdtempSync, rmSync } from "node:fs";
+import { fsyncSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +22,7 @@ function fixture() {
   const mailbox = new NextTurnMailbox(path, () => now);
   return {
     mailbox,
+    path,
     reload: () => new NextTurnMailbox(path, () => now),
     expire: () => {
       now += 86_400_001;
@@ -159,5 +160,23 @@ it.each(["file", "directory"])(
       expect(restarted.take("pane", "session")?.additionalContext).toContain("hello");
       expect(restarted.take("pane", "session")).toBeUndefined();
     }
+  },
+);
+
+it.each(["{", "[]", '{"pane":{"binding":"session"}}'])(
+  "unreadable journal %s is preserved and fences delivery",
+  (corrupt) => {
+    const { mailbox, path, reload } = fixture();
+    mailbox.observe("pane", "session");
+    mailbox.store("pane", "session", "old");
+    mailbox.take("pane", "session");
+    writeFileSync(path, corrupt);
+    const reopened = reload();
+    reopened.observe("pane", "session");
+    expect(reopened.receipt("pane", "session", "old")?.deliveryStage).toBe("uncertain");
+    expect(reopened.store("pane", "session", "old").deliveryStage).toBe("uncertain");
+    expect(reopened.take("pane", "session")).toBeUndefined();
+    reopened.acknowledge("pane", "session", []);
+    expect(readFileSync(path, "utf8")).toBe(corrupt);
   },
 );

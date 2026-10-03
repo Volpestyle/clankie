@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { randomUUID, createHash } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -20,6 +21,28 @@ interface Inbox {
   mail: Mail[];
 }
 
+const InboxSchema = z
+  .object({
+    binding: z.string().min(1),
+    receiver: z.string().min(1),
+    expiresAt: z.number().int().nonnegative(),
+    mail: z
+      .array(
+        z
+          .object({
+            id: z.string().uuid(),
+            fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+            text: z.string(),
+            expiresAt: z.number().int().nonnegative(),
+            taken: z.boolean(),
+            delivered: z.boolean().optional(),
+          })
+          .strict(),
+      )
+      .max(100),
+  })
+  .strict();
+
 /** The HTTP layer supplies this proof from socket ancestry, never the hook payload. */
 export function nextTurnReceiverProof(
   proof: (ProjectProcessProof & { readonly nativeSessionPending?: true }) | undefined,
@@ -37,19 +60,22 @@ export function nextTurnReceiverProof(
 /** A hook take is destructive before HTTP response: an uncertain response is never replayed. */
 export class NextTurnMailbox {
   private inboxes: Record<string, Inbox> = {};
+  private unreadable = false;
   private readonly path: string;
   private readonly now: () => number;
   constructor(path: string, now = Date.now) {
     this.path = path;
     this.now = now;
     try {
-      this.inboxes = JSON.parse(readFileSync(path, "utf8")) as Record<string, Inbox>;
-    } catch {
-      // Missing/corrupt state cannot manufacture a plugin observation or replay mail.
+      this.inboxes = z.record(z.string(), InboxSchema).parse(JSON.parse(readFileSync(path, "utf8")));
+    } catch (error) {
+      // Only first-use absence is empty. Lost tombstones must never enable replay.
+      this.unreadable = (error as NodeJS.ErrnoException).code !== "ENOENT";
     }
   }
 
   observe(seat: string, binding: string, receiver = binding): void {
+    if (this.unreadable) return;
     const old = this.inboxes[seat];
     this.inboxes[seat] = {
       binding,
@@ -65,6 +91,7 @@ export class NextTurnMailbox {
 
   /** Check before selecting another channel: an old handoff cannot be replayed live. */
   receipt(seat: string, binding: string | undefined, text: string): FleetSeatDelivery | undefined {
+    if (this.unreadable) return this.unreadableReceipt();
     const inbox = this.inboxes[seat];
     const fingerprint = createHash("sha256").update(text).digest("hex");
     if (
@@ -78,6 +105,7 @@ export class NextTurnMailbox {
   }
 
   store(seat: string, binding: string | undefined, text: string): FleetSeatDelivery {
+    if (this.unreadable) return this.unreadableReceipt();
     const inbox = this.inboxes[seat];
     if (!binding || inbox?.binding !== binding || inbox.expiresAt <= this.now())
       return {
@@ -129,6 +157,7 @@ export class NextTurnMailbox {
   }
 
   take(seat: string, binding: string): { additionalContext: string; messageIds: string[] } | undefined {
+    if (this.unreadable) return undefined;
     const inbox = this.inboxes[seat];
     if (inbox?.binding !== binding || inbox.expiresAt <= this.now()) return undefined;
     const pending = inbox.mail.filter((mail) => !mail.taken && mail.expiresAt > this.now());
@@ -144,12 +173,22 @@ export class NextTurnMailbox {
   }
 
   acknowledge(seat: string, binding: string, ids: readonly string[]): void {
+    if (this.unreadable) return undefined;
     const inbox = this.inboxes[seat];
     if (inbox?.binding !== binding || inbox.expiresAt <= this.now()) return;
     for (const mail of inbox.mail) {
       if (mail.taken && mail.expiresAt > this.now() && ids.includes(mail.id)) mail.delivered = true;
     }
     this.save();
+  }
+
+  private unreadableReceipt(): FleetSeatDelivery {
+    return {
+      outcome: "unconfirmed",
+      deliveryStage: "uncertain",
+      detail:
+        "Next-turn receipts are unreadable. No message was sent; recover the original journal before retrying.",
+    };
   }
 
   private save(): void {
