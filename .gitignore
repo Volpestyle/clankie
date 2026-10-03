@@ -3,7 +3,7 @@ dist/
 coverage/
 .turbo/
 *.tsbuildinfo
-.data/
+.data
 # artifacts directories are generated; nested ones stay fully untracked.
 **/artifacts/
 /evals/holdout
