@@ -53,6 +53,8 @@ const report: InstallDoctorReport = {
       otherHarnesses: [],
       codex: {
         executable: false,
+        executablePath: null,
+        executableDetail: "Native Codex unavailable",
         registered: false,
         pluginInstalled: false,
         registration: "absent",
