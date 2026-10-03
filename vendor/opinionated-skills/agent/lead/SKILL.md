@@ -237,7 +237,11 @@ for that responsibility. Remote hires select the registered `fleet` and an
 approved `workingDirectory`. Herdr contains every native interactive worker.
 
 Deliver follow-ups with `message_seat` through the harness's channel or session
-API. Independent linked agents can initiate messages with `message_clankie`.
+API. A hand-started Claude session with an observed worker hook can receive
+`deliveryStage: stored` replies on its next user turn without a live channel;
+held mail expires within 24 hours. `delivered` confirms the hook's output pipe,
+not model consumption. Never resend an uncertain handoff. Independent linked
+agents can initiate messages with `message_clankie`.
 Use `herdr_watch` for completion and inspect the final report and artifact before
 accepting. Work ownership, dependencies and evidence stay in the repo's tracker
 or files. Missing delivery is an actionable limitation; reconcile uncertainty

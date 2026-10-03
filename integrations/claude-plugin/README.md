@@ -145,12 +145,18 @@ it runs the native seat mailbox or fleet link, with no coordinator runtime.
 In a herdr pane the server also offers one tool, `message_clankie`: any agent
 there, hired or not, can write to Clankie first. He receives it as that agent's
 output, never as the owner's instruction, and answers with `message_seat`;
-receiving that answer needs the channel loaded.
+with a live channel the answer arrives immediately. A hand-started session with
+an observed worker hook can instead receive the answer as additional context on
+its next `UserPromptSubmit`, without `--channels`. Clankie binds held mail to
+that native session and terminal, keeps it for at most 24 hours, and hands it
+to the hook once. A replacement occupant cannot take the old mail. An uncertain
+HTTP or output-pipe handoff is retained as a receipt, never replayed. A successful
+hook output acknowledgment means `delivered`, not model consumption.
 
 Either launch enables the plugin for that session only (`enabledPlugins`) and
 starts Claude Code with `--channels plugin:clankie-worker@clankie`. Outside
 both it refuses to start. Its hooks (`SessionStart`, `UserPromptSubmit`,
-`Stop`, `StopFailure`) call `clankie seat-hook` only in a Clankie hire's pane, so
+`Stop`, `StopFailure`) report through the matching local or remote fleet link, so
 Clankie learns each settled turn and its final text.
 
 Claude Code only runs a non-official channel plugin unattended when the owner's

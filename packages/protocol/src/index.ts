@@ -2373,6 +2373,7 @@ export const FleetSeatHookSchema = z
     schemaVersion: z.literal(1),
     event: z.enum(["SessionStart", "UserPromptSubmit", "Stop", "StopFailure"]),
     sessionId: z.string().min(1).max(200),
+    deliveredMessageIds: z.array(z.string().uuid()).max(100).optional(),
     lastMessage: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX).optional(),
     error: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
   })

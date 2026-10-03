@@ -2064,7 +2064,13 @@ paths:
         from inside the seat's pane (VUH-1458). A Stop or StopFailure settles
         the seat's turn for its adapter and any completion watch, with the
         harness's own final text as `lastMessage`. The session must be the
-        Claude session herdr reports in that pane. Operator bearer only.
+        Claude session herdr reports in that pane. Lifecycle reports accept the
+        operator or bound fleet lane. Only native process proof from the request
+        transport can register or drain a next-turn receiver. UserPromptSubmit
+        may return additionalContext and messageIds, with deliveryStage uncertain
+        until the hook writes stdout and posts deliveredMessageIds on the same
+        session. That acknowledgment confirms bridge delivery, never model consumption.
+        Held mail expires within 24 hours; an uncertain take is never replayed.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       parameters:
         - in: path

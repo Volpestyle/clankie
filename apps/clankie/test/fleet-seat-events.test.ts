@@ -168,3 +168,41 @@ it("reports inbound conversation retention as stored, preserving its received bo
     clankie.close();
   }
 });
+
+it("passes only transport proof to the hook and reports an unresolved context handoff honestly", async () => {
+  const proof = {
+    fleet: "default",
+    pane: paneId,
+    nativeOccupantId: "session-s1",
+    binding: { socketPath: "socket" },
+    shell: { pid: 1, startTime: "now" },
+    processes: [{ pid: 2, startTime: "now" }],
+  };
+  const seen: unknown[] = [];
+  const clankie = await createClankieApp({
+    localFleet: {
+      identity: () => ({ pane: paneId, validate: async () => true, projectProof: async () => proof }),
+    },
+    captain: createStubCaptain({
+      recordSeatHook: async (_pane, _hook, actualProof) => {
+        seen.push(actualProof);
+        return {
+          recorded: true,
+          additionalContext: "reply",
+          messageIds: ["10000000-0000-4000-8000-000000000001"],
+        };
+      },
+    }),
+  });
+  try {
+    const response = await clankie.app.request(fleetSeatHookPath(paneId), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ schemaVersion: 1, event: "UserPromptSubmit", sessionId: "s1" }),
+    });
+    expect(seen).toEqual([proof]);
+    expect(await response.json()).toMatchObject({ additionalContext: "reply", deliveryStage: "uncertain" });
+  } finally {
+    clankie.close();
+  }
+});

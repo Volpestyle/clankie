@@ -1,3 +1,4 @@
+import type { ProjectProcessProof } from "../project-process-proof.ts";
 import type { ProjectHireAssignment, ProjectHireProcessProof } from "./project-hires.ts";
 import type { ConversationOwner, ConversationAuthority } from "./conversation-owner.ts";
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
@@ -189,7 +190,14 @@ export interface CaptainPort {
    * One lifecycle hook from a hired seat's worker plugin (VUH-1458). False
    * when the pane holds no seat with that session.
    */
-  recordSeatHook(paneId: string, hook: FleetSeatHook): Promise<boolean>;
+  recordSeatHook(
+    paneId: string,
+    hook: FleetSeatHook,
+    proof?: ProjectProcessProof,
+  ): Promise<
+    | boolean
+    | { readonly recorded: true; readonly additionalContext: string; readonly messageIds: readonly string[] }
+  >;
   /**
    * An agent in that pane writing to him (ADR 0213 phase 2). It wakes his
    * operator conversation as untrusted agent output; false when the pane

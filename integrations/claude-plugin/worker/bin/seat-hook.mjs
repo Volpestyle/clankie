@@ -56,6 +56,30 @@ async function reportOverLink(link, pane) {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(20_000),
     });
+    if (response.ok && event === "UserPromptSubmit") {
+      const result = await response.json();
+      if (typeof result.additionalContext === "string" && result.additionalContext) {
+        const output =
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: "UserPromptSubmit",
+              additionalContext: result.additionalContext,
+            },
+          }) + "\n";
+        await new Promise((resolve, reject) =>
+          process.stdout.write(output, (error) => (error ? reject(error) : resolve())),
+        );
+        if (Array.isArray(result.messageIds)) {
+          const ack = await fetch(seatRoute(link, pane, "hook"), {
+            method: "POST",
+            headers: { ...authorization(link), "content-type": "application/json" },
+            body: JSON.stringify({ ...body, deliveredMessageIds: result.messageIds }),
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (!ack.ok) process.stderr.write(`clankie-worker: hook receipt answered ${String(ack.status)}\n`);
+        }
+      }
+    }
     if (!response.ok) process.stderr.write(`clankie-worker: seat hook answered ${String(response.status)}\n`);
   } catch (error) {
     process.stderr.write(`clankie-worker: ${error instanceof Error ? error.message : String(error)}\n`);

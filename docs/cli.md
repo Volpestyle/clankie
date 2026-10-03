@@ -2337,6 +2337,16 @@ the hook's `last_assistant_message`, or the transcript's last reply when the hoo
 omits it. The service records it only when herdr reports that Claude session in
 that pane; anywhere else the command does nothing.
 
+The worker plugin uses the matching fleet link when available. Only transport
+proof of the current native pane/session can register or drain its next-turn
+mailbox; a bearer-only lifecycle report cannot. Without a live channel,
+`message_seat` reports `deliveryStage: stored` for an observed receiver and holds
+the reply up to 24 hours. The synchronous `UserPromptSubmit` hook writes it as
+additional context once and acknowledges its message IDs after stdout succeeds.
+That receipt means bridge delivery, not model consumption. A lost handoff remains
+`uncertain` and is never automatically replayed. Sessions without an observed
+receiver remain unavailable.
+
 ### Native seat transcript sync
 
 `clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The `clankie seat` launcher

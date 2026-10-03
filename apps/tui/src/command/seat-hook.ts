@@ -25,6 +25,7 @@ export async function runSeatHookCommand(
     fetchImpl?: typeof fetch;
     operatorCredentialStore?: CredentialStore;
     stdin?: AsyncIterable<string | Buffer>;
+    stdout?: { write(text: string): unknown };
   } = {},
 ): Promise<number> {
   if (args.length) throw new Error("Usage: clankie seat-hook (Claude hook JSON on stdin)");
@@ -93,5 +94,17 @@ export async function runSeatHookCommand(
   // An unknown seat is a pane Clankie is not driving; nothing to report.
   if (response.status === 404) return 0;
   if (!response.ok) throw new Error(`Seat hook was refused (${response.status})`);
+  if (event === "UserPromptSubmit") {
+    const result = (await response.json()) as { additionalContext?: unknown };
+    if (typeof result.additionalContext === "string" && result.additionalContext)
+      (options.stdout ?? process.stdout).write(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "UserPromptSubmit",
+            additionalContext: result.additionalContext,
+          },
+        }) + "\n",
+      );
+  }
   return 0;
 }

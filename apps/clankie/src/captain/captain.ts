@@ -1,3 +1,4 @@
+import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
 import { hireDisplayName } from "./hire-name.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
@@ -1316,6 +1317,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // that pane's bridge first polls. A bound mailbox takes a DM or room turn
   // as a channel event; an unbound one reports unavailable delivery.
   const fleetMailboxes = new Map<string, SeatOutbox>();
+  const nextTurnMailboxes = new NextTurnMailbox(join(options.stateDir, "next-turn-mailboxes.json"));
   let headSeat: ObservedHeadSeat | undefined;
 
   const settings = (): Promise<ClankieSettings> => settingsStore.load();
@@ -2123,13 +2125,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     message: string,
     context: FleetSeatMessageContext,
   ): Promise<FleetSeatDelivery> {
+    const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+    const prior = nextTurnMailboxes.receipt(seatId, inboundBinding(current), message);
+    if (prior) return prior;
     // An adapter-driven seat takes its message through the adapter, which
     // waits for the harness's own receipt; any other seat needs a structured lane.
     fleetSeatMailbox(fleetMailboxes, seatId, join(options.stateDir, "delivery-receipts", "fleet"));
     const deliver = () =>
-      herdrWatches.deliverToSeat(seatId, message, () =>
-        deliverFleetSeatMessage(fleetMailboxes, seatId, message, context),
-      );
+      herdrWatches.deliverToSeat(seatId, message, async () => {
+        const live = fleetMailboxes.get(seatId);
+        if (live?.bound() || live?.uncertain())
+          return deliverFleetSeatMessage(fleetMailboxes, seatId, message, context);
+        const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+        return nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
+      });
     let delivery: FleetSeatDelivery | undefined;
     if (context.source === "room") {
       await herdrWatches.sendAndWatchReply(seatId, message, async () => {
@@ -3584,7 +3593,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return events;
     },
 
-    async recordSeatHook(paneId, hook) {
+    async recordSeatHook(paneId, hook, proof) {
       if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return false;
       // Only the Claude session herdr says sits in that pane may report for it.
       const agent = await herdrRunner.get(paneId).catch(() => undefined);
@@ -3597,6 +3606,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             : basename(session.value, ".jsonl");
       if (agent?.agent !== "claude" || sessionId !== hook.sessionId) return false;
       seatHooks.record(paneId, hook);
+      const binding = inboundBinding(agent);
+      const qualified = splitFleetQualified(paneId);
+      const receiver =
+        session &&
+        nextTurnReceiverProof(proof, {
+          fleet: qualified?.fleet ?? "default",
+          pane: qualified?.id ?? paneId,
+          nativeOccupantId: occupantIdForHerdrSession(session),
+        });
+      if (binding && receiver) {
+        nextTurnMailboxes.observe(agent.terminalId, binding, receiver);
+        if (hook.deliveredMessageIds) {
+          nextTurnMailboxes.acknowledge(agent.terminalId, binding, hook.deliveredMessageIds);
+          return true;
+        }
+        const additionalContext =
+          hook.event === "UserPromptSubmit" ? nextTurnMailboxes.take(agent.terminalId, binding) : undefined;
+        if (additionalContext) return { recorded: true, ...additionalContext };
+      }
       return true;
     },
 

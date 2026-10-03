@@ -1714,9 +1714,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if ("denial" in pane) return pane.denial;
     const parsed = FleetSeatHookSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
-    const recorded = await dependencies.captain.recordSeatHook(pane.paneId, parsed.data);
+    const identity =
+      dependencies.localFleet?.identity(context.req.raw) ??
+      dependencies.fleetLinks?.identity?.(context.req.raw);
+    const proof = identity && (await identity.validate()) ? await identity.projectProof?.() : undefined;
+    const recorded = await dependencies.captain.recordSeatHook(pane.paneId, parsed.data, proof);
     return recorded
-      ? context.json({ schemaVersion: 1 as const, recorded: true as const })
+      ? context.json({
+          schemaVersion: 1 as const,
+          recorded: true as const,
+          ...(typeof recorded === "object"
+            ? {
+                additionalContext: recorded.additionalContext,
+                messageIds: recorded.messageIds,
+                deliveryStage: "uncertain" as const,
+              }
+            : {}),
+        })
       : context.json({ error: "unknown_seat" }, 404);
   });
 
