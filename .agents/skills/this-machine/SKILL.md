@@ -252,3 +252,10 @@ Repeated native Claude setup may report "already enabled at user scope" with an
 error exit. Preparation accepts only that exact result after confirming the same
 regular profile still enables the plugin; other errors or changed links remain
 failures. A setup result is never live tool or socket acceptance.
+
+Windows Codex can be installed even when Node cannot execute its `.cmd` shim.
+Doctor resolves only a unique installed native executable from PATH or fixed npm
+layouts and reads its native MCP configuration. A legacy Node Clankie bridge
+with both Herdr environment variables is a registration, not a missing-plugin
+repair instruction. Config inspection never proves the agent's live socket or
+tool acceptance; preserve dotfiles-generated config and use its owning setup.

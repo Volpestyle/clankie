@@ -2696,6 +2696,12 @@ discarded. `nativeTools: "not-verified"` means the card has not tested that pane
 bridge socket, catalog or reply delivery; use a native tool call to verify those.
 Unregistered or disconnected machines never supply an arbitrary SSH target.
 
+On Windows, Codex detection resolves a unique installed native executable from
+PATH or the fixed npm package layouts, including the per-user npm root when SSH
+omits it from PATH. It does not execute command shims or dotfiles launchers and
+refuses ambiguous installations. Existing legacy Node bridge registrations remain
+visible; no generated config rewrite is required merely to inspect them.
+
 Reports separate executable presence, version, activation, bridge, hooks, and the
 `clankie` skill. Static files never prove a live receiver or project membership.
 OpenCode and Pi automatic plugin installation remains unsupported and appears

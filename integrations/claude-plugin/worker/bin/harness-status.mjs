@@ -35,12 +35,10 @@ export async function claudeProfileDirectories(env = process.env) {
 
 export async function inspectHarnessProfiles({ env = process.env, expectedVersion, execute } = {}) {
   let codexExecutablePath = null;
-  const run =
-    execute ??
-    (async (command, args) => {
-      if (command === "codex") command = codexExecutablePath ??= await nativeCodexExecutable({ env });
-      return (await exec(command, args, { env, timeout: 10_000 })).stdout;
-    });
+  const run = async (command, args) => {
+    if (command === "codex") command = codexExecutablePath ??= await nativeCodexExecutable({ env });
+    return execute ? execute(command, args) : (await exec(command, args, { env, timeout: 10_000 })).stdout;
+  };
   const home = env.HOME || env.USERPROFILE || homedir();
   const profiles = await claudeProfileDirectories(env);
   const present = async (command) => {
