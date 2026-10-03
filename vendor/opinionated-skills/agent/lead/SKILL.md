@@ -20,6 +20,19 @@ optional tracker; do not require the user to create agents in a particular host.
 Discover actual access before assigning work: visible terminals alone establish
 neither peer communication nor process-control authority.
 
+## Decide by default
+
+An authorized push carries its decisions. Decide reversible, in-scope calls
+yourself, record the call where the work is tracked, and report it; the owner
+can reverse it. That includes product or design choices an issue leaves to the
+owner when the lead and producer agree on a recommendation, adopting uncommitted
+work whose session has ended after it passes the gate, restarting services or
+panes the delivery depends on, and dropping scope the evidence shows is obsolete.
+
+Ask only before spending money, writing to an external account or publishing
+(app stores, payments, cloud, DNS, mail, public posts), deleting data or
+history, or anything else hard to reverse. Batch those into one check-in.
+
 ## Ready work comes first
 
 **A ready handoff preempts fleet administration.** Start with the next deliverable
@@ -206,12 +219,13 @@ the recipient needs to act on that pane.
 - Give writers owned worktrees where the repo requires them. If a lane must
   commit in a shared checkout, tell it to load `shared-checkout`. Never remove,
   prune, rebase or force-update a worktree/branch the lane did not create.
-- Close only panes you created or the user identified for cleanup. Stop new
+- Close only panes you created, the user identified, or whose owner has ended
+  and whose results you kept. Stop new
   dispatch when a lane is retired, preserve ignored evidence, and check its
   actual producers before closure. A separate process group or missing TTY does
   not establish independent lifetime; descendants can still die with the pane.
-- Route only authorized one-way decisions and result judgment to the user.
-  Carry the artifact and exact question. Verify vendor facts against first-party
+- Route only irreversible or outward-facing decisions to the user, batched,
+  with the artifact and exact question. Verify vendor facts against first-party
   sources before using them to justify an architectural gate.
 - Open optional dashboards or rearrange terminals only when requested.
 

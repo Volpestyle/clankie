@@ -16,6 +16,7 @@
     "VUH-1528: bundled lead uses native hire/message channels; embedded Swarm dispatch instructions removed without changing owner-global skills.",
     "VUH-1457: merge leadership into agent/lead (including Herdr references); remove the vendored dashboard and update linear-grind leadership reference.",
     "lead: workers end with a compact final report; the lead harvests from it and reads transcripts only for gaps (also applied upstream in agent/lead).",
-    "Unbundled 12 process skills with near-zero loads (audit C22 plus robust-review, testing-archive and herdr-handoff, James 2026-10-02); the lead skill's Herdr fallback no longer names herdr-handoff."
+    "Unbundled 12 process skills with near-zero loads (audit C22 plus robust-review, testing-archive and herdr-handoff, James 2026-10-02); the lead skill's Herdr fallback no longer names herdr-handoff.",
+    "lead: decide reversible in-scope calls by default and record them; ask only before money, external accounts or publishing, deletion or other hard-to-reverse actions, batched (James 2026-10-03; also applied upstream in agent/lead)."
   ]
 }
