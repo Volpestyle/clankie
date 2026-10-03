@@ -98,14 +98,31 @@ export async function inspectHarnessProfiles({
   const plugin = codexPlugins.find((value) =>
     [value.id, value.pluginId].some((name) => name === "clankie-worker@clankie-fleet"),
   );
+  const forwardsIdentity = (spec) =>
+    ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"].every(
+      (name) => Array.isArray(spec?.env_vars) && spec.env_vars.includes(name),
+    );
   let registered = false;
+  let registration = "absent";
+  let registrationIdentityForwarding = false;
   try {
     const result = JSON.parse(await execute("codex", ["mcp", "get", "clankie", "--json"]));
     const transport = result.transport ?? result;
-    registered =
-      result.enabled !== false &&
+    registrationIdentityForwarding = forwardsIdentity(transport);
+    const cli =
       transport.command === "clankie" &&
       JSON.stringify(transport.args) === JSON.stringify(["mcp", "--fleet"]);
+    const legacyPaths = ["swarm-mcp.mjs", "fleet-mcp.mjs"].map((name) =>
+      join(home, ".clankie", "claude-plugin", "worker", "bin", name),
+    );
+    const legacy =
+      transport.command === "node" &&
+      Array.isArray(transport.args) &&
+      transport.args.length === 1 &&
+      legacyPaths.includes(transport.args[0]) &&
+      (await exists(transport.args[0]));
+    registration = cli ? "cli" : legacy ? "legacy-node" : "unrecognized";
+    registered = result.enabled !== false && registrationIdentityForwarding && (cli || legacy);
   } catch {
     /* Native plugin status may supply the bridge. */
   }
@@ -121,12 +138,24 @@ export async function inspectHarnessProfiles({
       )
     : undefined;
   const codexManifest = root ? await json(join(root, ".codex-plugin", "plugin.json")).catch(() => ({})) : {};
+  const codexMcp = root ? await json(join(root, "codex-mcp.json")).catch(() => ({})) : {};
+  const bridgeSpec = codexMcp.mcpServers?.clankie;
+  const identityForwarding = forwardsIdentity(bridgeSpec);
+  const bridge =
+    codexManifest.mcpServers === "./codex-mcp.json" &&
+    bridgeSpec?.command === "node" &&
+    JSON.stringify(bridgeSpec.args) === JSON.stringify(["${CODEX_PLUGIN_ROOT}/bin/fleet-mcp.mjs"]) &&
+    Boolean(root && (await exists(join(root, "bin", "fleet-mcp.mjs"))));
   return {
     machine: { platform: process.platform, home },
     claude,
     codex: {
       executable: installed.codex,
       registered,
+      registration,
+      registrationIdentityForwarding,
+      bridge,
+      identityForwarding,
       pluginInstalled: Boolean(codexManifest.version),
       enabled: plugin ? plugin.enabled !== false : false,
       version: codexManifest.version ?? null,

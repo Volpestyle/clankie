@@ -67,3 +67,90 @@ it("reports installed, enabled, version, bridge, hook and skill gaps independent
     await rm(home, { recursive: true, force: true });
   }
 });
+
+it.each(["current", "disabled", "missing-bridge", "missing-forwarding"])(
+  "checks Codex plugin activation, bridge and forwarding separately: %s",
+  async (kind) => {
+    const home = await mkdtemp(join(tmpdir(), "clankie-codex-profile-"));
+    const root = join(home, ".codex/plugins/cache/clankie-fleet/clankie-worker/0.3.0");
+    try {
+      await mkdir(join(root, ".codex-plugin"), { recursive: true });
+      await mkdir(join(root, "bin"));
+      await writeFile(
+        join(root, ".codex-plugin/plugin.json"),
+        JSON.stringify({ version: "0.3.0", mcpServers: "./codex-mcp.json" }),
+      );
+      await writeFile(join(root, "bin/fleet-mcp.mjs"), "// fixture\n");
+      if (kind !== "missing-bridge")
+        await writeFile(
+          join(root, "codex-mcp.json"),
+          JSON.stringify({
+            mcpServers: {
+              clankie: {
+                command: "node",
+                args: ["${CODEX_PLUGIN_ROOT}/bin/fleet-mcp.mjs"],
+                env_vars: kind === "missing-forwarding" ? [] : ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"],
+              },
+            },
+          }),
+        );
+      const report = await inspectHarnessProfiles({
+        env: { HOME: home },
+        expectedVersion: "0.3.0",
+        execute: async (command, args) => {
+          if (command === "codex" && args[0] === "plugin")
+            return JSON.stringify({
+              installed: [
+                { pluginId: "clankie-worker@clankie-fleet", version: "0.3.0", enabled: kind !== "disabled" },
+              ],
+            });
+          if (args[0] === "mcp") throw new Error("No direct registration");
+          return "version";
+        },
+      });
+      expect(report.codex).toMatchObject({
+        pluginInstalled: true,
+        versionMatches: true,
+        enabled: kind !== "disabled",
+        bridge: kind !== "missing-bridge",
+        identityForwarding: !["missing-bridge", "missing-forwarding"].includes(kind),
+        registered: false,
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each([true, false])(
+  "identifies the legacy shipped Node registration and checks identity forwarding (%s)",
+  async (forwarding) => {
+    const home = await mkdtemp(join(tmpdir(), "clankie-codex-legacy-"));
+    const bridge = join(home, ".clankie/claude-plugin/worker/bin/swarm-mcp.mjs");
+    try {
+      await mkdir(join(home, ".clankie/claude-plugin/worker/bin"), { recursive: true });
+      await writeFile(bridge, "// fixture\n");
+      const report = await inspectHarnessProfiles({
+        env: { HOME: home },
+        execute: async (_command, args) =>
+          args[0] === "mcp"
+            ? JSON.stringify({
+                enabled: true,
+                transport: {
+                  command: "node",
+                  args: [bridge],
+                  env_vars: forwarding ? ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"] : [],
+                },
+              })
+            : "{}",
+      });
+      expect(report.codex).toMatchObject({
+        registration: "legacy-node",
+        registrationIdentityForwarding: forwarding,
+        registered: forwarding,
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  },
+);

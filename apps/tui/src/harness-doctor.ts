@@ -110,6 +110,7 @@ export async function inspectHarnessBridges(
     expectedVersion,
     execute: async (command, args) => (await execute(command, args)).stdout,
   });
+  codexRegistered = profiles.codex.registered;
   return {
     profiles,
     codex: {

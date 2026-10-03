@@ -22,6 +22,10 @@ export function inspectHarnessProfiles(options?: {
   codex: {
     executable: boolean;
     registered: boolean;
+    registration: string;
+    registrationIdentityForwarding: boolean;
+    bridge: boolean;
+    identityForwarding: boolean;
     pluginInstalled: boolean;
     enabled: boolean;
     version: string | null;

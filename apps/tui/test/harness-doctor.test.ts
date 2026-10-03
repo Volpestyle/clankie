@@ -40,7 +40,12 @@ it("reports harness registration, generated config source, and live membership s
         command === "codex"
           ? JSON.stringify({
               enabled: true,
-              transport: { command: "clankie", args: ["mcp", "--fleet"], env: { SECRET: "never-report-me" } },
+              transport: {
+                command: "clankie",
+                args: ["mcp", "--fleet"],
+                env_vars: ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"],
+                env: { SECRET: "never-report-me" },
+              },
             })
           : `${process.pid} 1 /app-server-daemon/bin/codex`,
     });

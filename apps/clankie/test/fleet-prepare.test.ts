@@ -125,3 +125,36 @@ it.each([true, false])(
     expect(commands.join("\n")).not.toMatch(/AppendAllText|mcp_servers\.clankie|plugin disable/u);
   },
 );
+
+it.each(["ready", "disabled", "missing-bridge", "missing-forwarding"])(
+  "does not mark an unusable Codex plugin registered: %s",
+  async (kind) => {
+    const { prepareFleet } = await import("../src/fleet-prepare.ts");
+    const shell = async (command: string) => {
+      const encoded = command.match(/-EncodedCommand\s+['"]?([A-Za-z0-9+/=]+)/u)?.[1];
+      const text = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
+      if (text.includes("harness-setup.mjs")) return "[]";
+      if (text.includes("harness-inspect.mjs"))
+        return JSON.stringify({
+          claude: [],
+          codex: {
+            registered: false,
+            pluginInstalled: true,
+            versionMatches: true,
+            enabled: kind !== "disabled",
+            bridge: kind !== "missing-bridge",
+            identityForwarding: kind !== "missing-forwarding",
+          },
+        });
+      if (text.includes("CLANKIE-POLICY-PATH"))
+        return `---CLANKIE-POLICY-PATH---C:\\policy.json\n${JSON.stringify({ channelsEnabled: true, allowedChannelPlugins: [worker] })}`;
+      return "";
+    };
+    const result = await prepareFleet(pc, {
+      shell,
+      workerPluginDir: new URL("../../../integrations/claude-plugin/worker", import.meta.url).pathname,
+      copy: async () => {},
+    });
+    expect(result.codex.registered).toBe(kind === "ready");
+  },
+);

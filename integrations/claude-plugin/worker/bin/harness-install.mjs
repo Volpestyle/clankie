@@ -44,11 +44,12 @@ async function installHarnessBridges(options) {
       /(?:generated|do not edit|managed by)/iu.test(
         (await readFile(config, "utf8").catch(() => "")).split("\n").slice(0, 20).join("\n"),
       );
+    const pluginId = harness === "claude" ? "clankie-worker@clankie" : "clankie-worker@clankie-fleet";
     const detail =
       harness === "claude" && !managed
         ? `Install and enable clankie-worker@clankie from ${marketplace} for profile ${profile} (bridge, native hooks and packaged skills).`
         : managed
-          ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install clankie-worker@clankie-fleet.` : "Use its source setup to install clankie-worker@clankie-fleet; no config file will be modified here."}`
+          ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install ${pluginId}.` : `Use its source setup to install ${pluginId}; no config file will be modified here.`}`
           : `Install clankie-worker@clankie-fleet from ${marketplace} through Codex's native plugin manager (bridge and skills).`;
     if (!(await options.consent(harness, detail))) {
       results.push({ harness, profile, status: "declined", detail });
@@ -98,7 +99,7 @@ async function installHarnessBridges(options) {
         profile,
         status: managed ? "source-setup-completed" : "installed",
         detail:
-          "Native installation completed. Restart this harness and use doctor to inspect activation, skill presence and live membership; installation alone grants no tools.",
+          "Setup completed. Restart this harness and use doctor to inspect activation, skill presence and live membership; installation alone grants no tools.",
       });
     } catch (error) {
       results.push({

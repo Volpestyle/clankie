@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { installHarnessBridges } from "../harness-install.ts";
 
@@ -11,6 +12,8 @@ export async function runHarnessCommand(
     (args.length === 3 && args[1] !== "--codex-source-setup")
   )
     throw new Error("Usage: clankie harness install [--codex-source-setup /absolute/source-owned/script]");
+  if (args[2] && !isAbsolute(args[2]))
+    throw new Error("Source setup must be an absolute source-owned script path");
   if (!process.stdin.isTTY || !process.stdout.isTTY)
     throw new Error(
       "Harness install needs an interactive terminal to review consent for each harness. No changes made.",

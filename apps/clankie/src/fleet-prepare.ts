@@ -230,7 +230,14 @@ export async function prepareFleet(
   const installations = JSON.parse(await options.shell(installCommand(fleet), 180_000));
   const harnesses = (await inspectFleetHarnesses(fleet, options)) as {
     claude: Array<{ executable: boolean; enabled: boolean; versionMatches: boolean }>;
-    codex: { registered: boolean; pluginInstalled: boolean; versionMatches: boolean };
+    codex: {
+      registered: boolean;
+      pluginInstalled: boolean;
+      versionMatches: boolean;
+      enabled: boolean;
+      bridge: boolean;
+      identityForwarding: boolean;
+    };
   };
   if (harnesses.claude.some((profile) => profile.executable && (!profile.enabled || !profile.versionMatches)))
     throw new Error(
@@ -259,7 +266,12 @@ export async function prepareFleet(
     policy: { path, changed: approved.changed },
     codex: {
       registered:
-        harnesses.codex.registered || (harnesses.codex.pluginInstalled && harnesses.codex.versionMatches),
+        harnesses.codex.registered ||
+        (harnesses.codex.pluginInstalled &&
+          harnesses.codex.versionMatches &&
+          harnesses.codex.enabled &&
+          harnesses.codex.bridge &&
+          harnesses.codex.identityForwarding),
       changed:
         Array.isArray(installations) &&
         installations.some(
