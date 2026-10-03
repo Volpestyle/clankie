@@ -80,8 +80,11 @@ clankie access revoke GRANT_ID
 `NAME` is the saved project ID. Create it explicitly first with the local owner command
 `clankie project add kh2 --workspace /absolute/canonical/kh2-repository`. This
 saves one exact local workspace, rejecting duplicates, nested overlaps, missing
-directories and path aliases. It preserves all existing role/cap settings and
-creates no grant or assignment.
+directories and path aliases. For an existing project ID, it appends the workspace
+and preserves the project's roles, caps, tracker, grants and assignments. Reuse the
+same project ID for explicitly approved sibling worktrees or related repositories
+that should share those policies; do not create a new project merely for each
+worktree. It creates no grant or assignment.
 `access project` does not create a project, approve a directory, or copy a fleet grant.
 The owner API binds `project`, `principalId: "project:NAME"`, and
 `workId: "project:NAME"` to the same project and the currently verified connected
@@ -140,9 +143,26 @@ project grants. The owner may first register the exact workspace using the new
 checkout CLI, without restarting the service. From the new checkout's root:
 
 ```sh
-# Only if this project does not already exist:
+# Create the project, or append this exact workspace to the existing project:
 pnpm_config_verify_deps_before_run=false pnpm --filter @clankie/tui exec tsx bin/clankie.ts project add kh2 --workspace /absolute/canonical/kh2-repository
 ```
+
+For example, approving `/Users/james/dev/clankie` does not also approve the
+sibling `/Users/james/dev/clankie-app` or worktrees under `clankie-wt`. If those
+specific directories should share the `clankie` project, the owner can explicitly
+append each existing canonical directory using the same new checkout CLI.
+`clankie-app` does not need a separate project: approving it under `clankie`
+shares that project's roles, caps and grants across the two repositories:
+
+```sh
+pnpm_config_verify_deps_before_run=false pnpm --filter @clankie/tui exec tsx bin/clankie.ts project add clankie --workspace /Users/james/dev/clankie-app
+pnpm_config_verify_deps_before_run=false pnpm --filter @clankie/tui exec tsx bin/clankie.ts project add clankie --workspace /Users/james/dev/clankie-wt/VUH-1474-native-claude
+pnpm_config_verify_deps_before_run=false pnpm --filter @clankie/tui exec tsx bin/clankie.ts project add clankie --workspace /Users/james/dev/clankie-wt/VUH-1558
+```
+
+Approve only intended directories, individually; these examples are not automatic
+approvals. Each workspace shares the existing project's roles, caps and explicit
+grants. Do not approve `clankie-wt` or `~/dev` as a shortcut.
 
 This owner-authenticated command saves the workspace locally and issues no grant.
 Do not broaden an approval to a parent such as `~/dev` merely to keep an owner

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, normalize, relative, sep } from "node:path";
 import { inspectOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
@@ -37,7 +38,7 @@ export async function runProjectCommand(
     !(await stat(path)).isDirectory()
   )
     throw new Error("Use the directory's absolute canonical path with its exact spelling");
-  const project = ProjectSchema.parse({
+  let project = ProjectSchema.parse({
     id: args[1],
     name: args[1],
     workspaces: [
@@ -63,8 +64,6 @@ export async function runProjectCommand(
           )
           .map((workspace) => workspace.path),
       );
-      if (current.projects.projects.some((saved) => saved.id === project.id))
-        throw new Error("This project already exists");
       for (const saved of current.projects.projects)
         for (const workspace of saved.workspaces)
           if (
@@ -73,9 +72,26 @@ export async function runProjectCommand(
             (contains(workspace.path, path) || contains(path, workspace.path))
           )
             throw new Error(`This workspace overlaps project ${saved.id}; approve a separate directory`);
+      const existing = current.projects.projects.find((saved) => saved.id === project.id);
+      if (existing) {
+        const workspace = project.workspaces[0]!;
+        const id = `workspace-${createHash("sha256")
+          .update(JSON.stringify([workspace.machineId, workspace.platform, workspace.path]))
+          .digest("hex")
+          .slice(0, 48)}`;
+        project = ProjectSchema.parse({
+          ...existing,
+          workspaces: [...existing.workspaces, { ...workspace, id }],
+        });
+      }
       return {
         ...current,
-        projects: { ...current.projects, projects: [...current.projects.projects, project] },
+        projects: {
+          ...current.projects,
+          projects: existing
+            ? current.projects.projects.map((saved) => (saved.id === project.id ? project : saved))
+            : [...current.projects.projects, project],
+        },
       };
     },
     async () => {

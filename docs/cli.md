@@ -2146,10 +2146,13 @@ harness registration commands; it never enables a plugin or grants tools itself.
 
 The owner can approve one local project workspace with `clankie project add NAME
 --workspace /absolute/canonical/path`. This local settings command requires the
-canonical broker operator credential, an existing directory with exact canonical spelling, a new
-project ID and no overlap with another local project's workspace. It creates no
-roles, assignments or tool grants. Existing projects and their role/cap settings
-are preserved. Use `access project` separately to grant selected tools.
+canonical broker operator credential and an existing directory with exact canonical
+spelling. A new project ID creates a project; an existing ID appends one workspace
+while preserving its name, roles, caps, tracker, grants and assignments. Duplicate
+or nested-overlapping local workspaces are rejected across all projects, including
+the same project. Appended workspace IDs are derived deterministically from the
+machine, platform and canonical path. It creates no roles, assignments or tool
+grants. Use `access project` separately to grant selected tools.
 
 ### `access` and `mcp --grant FILE`
 

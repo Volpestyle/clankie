@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   FileCredentialStore,
   mintOperatorToken,
@@ -45,15 +45,124 @@ it("creates an owner-approved canonical local workspace without grants and rejec
       workspaces: [{ machineId: "local", path: repo }],
     });
     const saved = await settings.load();
-    await expect(runProjectCommand(["add", "kh2", "--workspace", repo], options)).rejects.toThrow(
-      "already exists",
-    );
+    await expect(runProjectCommand(["add", "kh2", "--workspace", repo], options)).rejects.toThrow("overlaps");
     for (const path of [repo, child, root])
       await expect(runProjectCommand(["add", "rivals", "--workspace", path], options)).rejects.toThrow(
         "overlaps",
       );
     expect(await settings.load()).toEqual(saved);
     expect(saved.projects.assignments).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("appends a sibling workspace while preserving the entire existing project and unrelated settings", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-project-append-")));
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  const token = mintOperatorToken();
+  await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+  const options = { settings, operatorCredentialStore: credentials, env: { CLANKIE_OPERATOR_TOKEN: token } };
+  const repo = join(root, "repo");
+  const worktree = join(root, "worktree");
+  await mkdir(repo);
+  await mkdir(worktree);
+  try {
+    await runProjectCommand(["add", "clankie", "--workspace", repo], options);
+    await settings.update((current) => ({
+      ...current,
+      projects: {
+        ...current.projects,
+        assignments: [{ projectId: "clankie", personaId: "builder-one", role: "builder" }],
+        projects: current.projects.projects.map((project) => ({
+          ...project,
+          name: "Clankie",
+          workerCap: 7,
+          roles: [
+            { role: "builder", harness: "codex", model: "gpt-6-astra", effort: "medium", concurrencyCap: 3 },
+          ],
+          trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+          labelRoleMap: [{ label: "implementation", role: "builder" }],
+          grants: [
+            {
+              id: "issues",
+              server: "linear",
+              accountId: "owner",
+              tools: [{ name: "get_issue", arguments: {}, forbiddenArguments: [] }],
+            },
+          ],
+        })),
+      },
+    }));
+    const before = await settings.load();
+    await expect(
+      runProjectCommand(["add", "clankie", "--workspace", worktree], {
+        ...options,
+        env: { CLANKIE_OPERATOR_TOKEN: "wrong" },
+      }),
+    ).rejects.toThrow("operator credential");
+    expect(await settings.load()).toEqual(before);
+    const result = await runProjectCommand(["add", "clankie", "--workspace", worktree], options);
+    expect(result.project.workspaces).toHaveLength(2);
+    expect(result.project.workspaces[1]).toMatchObject({
+      id: expect.stringMatching(/^workspace-[a-f0-9]{48}$/u),
+      path: worktree,
+    });
+    const expected = structuredClone(before);
+    expected.projects.projects[0]!.workspaces.push(result.project.workspaces[1]!);
+    expect(await settings.load()).toEqual(expected);
+    expect(result.project).toEqual(expected.projects.projects[0]);
+    await expect(runProjectCommand(["add", "clankie", "--workspace", worktree], options)).rejects.toThrow(
+      "overlaps",
+    );
+    await expect(runProjectCommand(["add", "clankie", "--workspace", root], options)).rejects.toThrow(
+      "overlaps",
+    );
+    expect(await settings.load()).toEqual(expected);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it.each(["settings", "credential"])("refuses an append when %s changes before commit", async (change) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-project-fence-")));
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  const token = mintOperatorToken();
+  await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+  const options = { settings, operatorCredentialStore: credentials, env: { CLANKIE_OPERATOR_TOKEN: token } };
+  const repo = join(root, "repo");
+  const sibling = join(root, "sibling");
+  await mkdir(repo);
+  await mkdir(sibling);
+  try {
+    await runProjectCommand(["add", "clankie", "--workspace", repo], options);
+    const before = await settings.load();
+    const update = settings.update.bind(settings);
+    vi.spyOn(settings, "update").mockImplementation((mutate, guard) =>
+      update(mutate, async () => {
+        if (change === "settings") {
+          await new SettingsStore(settings.path).update((current) => ({
+            ...current,
+            projects: {
+              ...current.projects,
+              projects: current.projects.projects.map((p) => ({ ...p, workerCap: 2 })),
+            },
+          }));
+        } else {
+          await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: mintOperatorToken() });
+        }
+        await guard?.();
+      }),
+    );
+    await expect(runProjectCommand(["add", "clankie", "--workspace", sibling], options)).rejects.toThrow(
+      change === "settings" ? "Settings changed" : "credential changed",
+    );
+    const saved = await settings.load();
+    expect(saved.projects.projects[0]!.workspaces).toEqual(before.projects.projects[0]!.workspaces);
+    if (change === "settings") expect(saved.projects.projects[0]!.workerCap).toBe(2);
+    else expect(saved).toEqual(before);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
