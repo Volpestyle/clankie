@@ -6,21 +6,6 @@ import { dirname } from "node:path";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 
 const TTL_MS = 24 * 60 * 60 * 1000;
-interface Mail {
-  id: string;
-  fingerprint: string;
-  text: string;
-  expiresAt: number;
-  taken: boolean;
-  delivered?: boolean;
-}
-interface Inbox {
-  binding: string;
-  receiver: string;
-  expiresAt: number;
-  mail: Mail[];
-}
-
 const InboxSchema = z
   .object({
     binding: z.string().min(1),
@@ -42,6 +27,8 @@ const InboxSchema = z
       .max(100),
   })
   .strict();
+
+type Inbox = z.infer<typeof InboxSchema>;
 
 /** The HTTP layer supplies this proof from socket ancestry, never the hook payload. */
 export function nextTurnReceiverProof(
