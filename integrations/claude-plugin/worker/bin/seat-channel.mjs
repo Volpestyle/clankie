@@ -35,6 +35,8 @@ const MESSAGE_TOOL = {
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
 const log = (line) => process.stderr.write(`clankie-worker: ${line}\n`);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Nothing was sent: the endpoint refused the connection, so one retry cannot duplicate an effect. */
+const refused = (error) => error?.cause?.code === "ECONNREFUSED";
 
 /**
  * The tools the owner granted this fleet (`clankie access fleet`), from
@@ -42,18 +44,17 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * because nothing beyond Node is installed here. Each call is still checked
  * there against the live grant and his connected account.
  */
-function fleetTools(link) {
-  const url = new URL("/v1/fleet/mcp", link.url);
+function fleetTools(current, refresh) {
   let session;
   let sequence = 0;
   const headers = () => ({
-    ...authorization(link),
+    ...authorization(current()),
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
     ...(session === undefined ? {} : { "mcp-session-id": session }),
   });
   const post = async (body) => {
-    const response = await fetch(url, {
+    const response = await fetch(new URL("/v1/fleet/mcp", current().url), {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ jsonrpc: "2.0", ...body }),
@@ -80,10 +81,20 @@ function fleetTools(link) {
     await post({ method: "notifications/initialized" });
   };
   const request = async (method, params) => {
-    if (session === undefined) await open();
+    if (session === undefined)
+      await open().catch(async (error) => {
+        if (!refused(error) || !refresh()) throw error;
+        await open();
+      });
     try {
       return await post({ id: ++sequence, method, params });
     } catch (error) {
+      // The service restarted on a new local port: follow its link file once.
+      if (refused(error) && refresh()) {
+        session = undefined;
+        await open();
+        return post({ id: ++sequence, method, params });
+      }
       if (session !== undefined) throw error;
       // The service forgot this session (it restarted): one fresh session, one retry.
       await open();
@@ -103,12 +114,19 @@ function fleetTools(link) {
 }
 
 export function runSeatChannel({ paneId, parentArgv }) {
-  const link = readLink();
+  let link = readLink();
+  /** Adopt this pane's current link when the service republished it; true if it changed. */
+  const refresh = () => {
+    const next = readLink();
+    if (!next || !link || next.url === link.url) return false;
+    link = next;
+    return true;
+  };
   // A session outside his linked fleets (a Codex config loads this server
   // everywhere) serves no tools rather than failing every launch.
   if (!link) log("no link to Clankie for this Herdr session (HERDR_SOCKET_PATH); serving no tools");
   const granted = link
-    ? fleetTools(link)
+    ? fleetTools(() => link, refresh)
     : {
         list: async () => [],
         call: async () => {
@@ -153,6 +171,7 @@ export function runSeatChannel({ paneId, parentArgv }) {
           });
       } catch (error) {
         if (closed) return;
+        if (refused(error) && refresh()) continue;
         log(`mailbox poll failed (${error instanceof Error ? error.message : String(error)}); retrying`);
         await delay(RETRY_MS);
       }
@@ -173,6 +192,8 @@ export function runSeatChannel({ paneId, parentArgv }) {
       if (response.ok) return { isError: false, text: "Sent to Clankie." };
       return { isError: true, text: `Clankie's service answered ${String(response.status)}; not sent.` };
     } catch (error) {
+      // Not resent here: the caller decides, against the link now on disk.
+      if (refused(error)) refresh();
       return {
         isError: true,
         text: `Could not reach Clankie (${error instanceof Error ? error.message : String(error)}); not sent.`,

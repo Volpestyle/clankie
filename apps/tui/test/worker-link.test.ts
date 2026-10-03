@@ -260,3 +260,63 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     });
   });
 });
+
+describe("the local link after a service restart", () => {
+  it("follows the republished link when the old port refuses, without resending accepted calls", async () => {
+    // A port that refuses connections: the service's listener before its restart.
+    const dead = createServer();
+    dead.listen(0, "127.0.0.1");
+    await once(dead, "listening");
+    const deadAddress = dead.address();
+    if (typeof deadAddress !== "object" || deadAddress === null) throw new Error("no address");
+    dead.close();
+    await once(dead, "close");
+    const home = await linkedHome(`http://127.0.0.1:${String(deadAddress.port)}`, true);
+    const bridge = spawn(process.execPath, [join(bin, "fleet-mcp.mjs")], {
+      env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w8:p3", HERDR_SOCKET_PATH: SOCKET },
+    });
+    cleanups.push(() => bridge.kill());
+    const lines: Record<string, unknown>[] = [];
+    let buffered = "";
+    bridge.stdout.on("data", (chunk: Buffer) => {
+      buffered += String(chunk);
+      for (let newline = buffered.indexOf("\n"); newline >= 0; newline = buffered.indexOf("\n")) {
+        lines.push(JSON.parse(buffered.slice(0, newline)) as Record<string, unknown>);
+        buffered = buffered.slice(newline + 1);
+      }
+    });
+    const write = (message: object) =>
+      bridge.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+    const waitFor = async (id: number) => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const found = lines.find((line) => line.id === id);
+        if (found) return found;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error(`no reply ${String(id)} in ${JSON.stringify(lines)}`);
+    };
+    write({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+    await waitFor(1);
+    // The restarted service republishes its link on a new port.
+    const service = await fakeService();
+    await writeFile(
+      join(home, ".clankie", "links", "pc.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        fleet: "default",
+        socket: SOCKET,
+        url: service.url,
+        authentication: "local-process",
+      }),
+    );
+    write({ id: 2, method: "tools/call", params: { name: "linear_get_issue", arguments: { id: "A-1" } } });
+    expect(await waitFor(2)).toMatchObject({
+      result: { isError: false, content: [{ text: "ran linear_get_issue" }] },
+    });
+    const calls = service.seen.filter(
+      (request) => request.path === "/v1/fleet/mcp" && request.body.includes("tools/call"),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.pane).toBe("w8:p3");
+  });
+});
