@@ -1,3 +1,6 @@
+import { occupantIdForHerdrSession } from "./herdr-census.ts";
+import { localWorkspaceProject, selectHireProject, nativeHireProject } from "./project-hire-context.ts";
+import type { ProjectHireProcessProof } from "./project-hires.ts";
 import { captureDiscordBodyIdentity, planConversationWakeSession } from "./body-identity.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import {
@@ -543,6 +546,11 @@ export interface CaptainOptions {
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
+  readonly projectHireIdentity?: (
+    fleet: string,
+    pane: string,
+  ) => Promise<ProjectHireProcessProof | undefined>;
+  readonly projectHireWorkspace?: (proof: ProjectHireProcessProof) => Promise<string | undefined>;
   readonly nativeHerdrRunner?: HerdrWatchRunner;
   readonly nativeCensusRunner?: HerdrCensusRunner;
   readonly nativeSummariesPath?: string;
@@ -996,8 +1004,41 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     consent: () => claudeWorkerChannelConsent(),
     ...claudeWorkerDeps,
   });
-  const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+  const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     validateOwner: validateConversationOwner,
+    projectHirePolicy: {
+      settings: async () => (await settings()).projects,
+      ...(options.projectHireIdentity === undefined ? {} : { proof: options.projectHireIdentity }),
+      project: async (input, projects, authority) => {
+        if (projects.projects.length === 0) return undefined;
+        let source: string | undefined;
+        const origin = authority?.owner.conversationId;
+        const native = origin === undefined ? undefined : conversations.nativeSource(origin);
+        if (native) {
+          const fleet = splitFleetQualified(native.terminalId)?.fleet ?? "default";
+          const proof = await options.projectHireIdentity?.(fleet, native.paneId);
+          source = await nativeHireProject(
+            native.session === undefined ? undefined : occupantIdForHerdrSession(native.session),
+            proof,
+            (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),
+            options.projectHireWorkspace,
+          );
+        } else if (origin !== undefined) {
+          const context = seatContext(origin);
+          if (context !== undefined) source = await localWorkspaceProject(projects, context.cwd);
+        }
+        // Remote paths cannot be canonicalized by this host. A proven source project remains pinned.
+        const destination =
+          input.fleet === undefined
+            ? await localWorkspaceProject(projects, input.workingDirectory)
+            : undefined;
+        if (input.fleet !== undefined && source === undefined && projects.projects.length > 0)
+          throw new Error(
+            "The remote agent's project could not be verified. Hire from a project conversation.",
+          );
+        return selectHireProject(source, destination, input.projectId);
+      },
+    },
     ...(options.nativeSummariesPath === undefined ? {} : { summariesPath: options.nativeSummariesPath }),
     ...(options.nativeLaunchPolicy === undefined ? {} : { nativeLaunchPolicy: options.nativeLaunchPolicy }),
     codexAccounts: async () => codexAccounts(await settings()),
@@ -3478,6 +3519,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     bodyRoomConversation: (lane, targetId) => conversations.roomConversation(lane, targetId),
 
+    lookupProjectHire: async (proof) => herdrWatches.projectHireAssignment(proof.fleet, proof.pane, proof),
     designatedConversationHead: (id) => {
       const head = conversations.designatedHead(id);
       return head === undefined ? undefined : { conversationId: head };

@@ -86,7 +86,7 @@ export function projectRoleForPersona(
 
 export interface HostProjectHireAssignment {
   readonly projectId: string;
-  readonly role: string;
+  readonly role?: string;
   /** Must match the current host-observed agent occupant, not merely a persona/session. */
   readonly occupantId: string;
 }
@@ -108,10 +108,16 @@ export function resolveProjectMembership(
     if (
       input.hire.occupantId !== input.occupantId ||
       !project ||
-      !project.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(input.hire!.role))
+      (input.hire.role !== undefined &&
+        !project.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(input.hire!.role!)))
     )
       return { outcome: "invalid_assignment" };
-    return { outcome: "member", projectId: project.id, source: "hire", role: input.hire.role };
+    return {
+      outcome: "member",
+      projectId: project.id,
+      source: "hire",
+      ...(input.hire.role === undefined ? {} : { role: input.hire.role }),
+    };
   }
   const workspace = input.workspace;
   if (!workspace) return { outcome: "unverified_workspace" };

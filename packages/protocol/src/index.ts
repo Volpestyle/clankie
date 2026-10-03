@@ -1133,6 +1133,11 @@ export const SpawnOperatorSeatSchema = z
       .string()
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)
       .optional(),
+    /** Requested project must match the host-proven hiring context; never grants authority. */
+    projectId: z
+      .string()
+      .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
+      .optional(),
     /** The hired persona's team role (ADR 0208); absent leaves it as it was. */
     role: OperatorAgentRoleSchema.optional(),
   })

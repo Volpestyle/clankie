@@ -1,3 +1,4 @@
+import type { ProjectHireAssignment, ProjectHireProcessProof } from "./project-hires.ts";
 import type { ConversationOwner, ConversationAuthority } from "./conversation-owner.ts";
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
@@ -100,6 +101,7 @@ export interface LaneToolBank {
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  lookupProjectHire(proof: ProjectHireProcessProof): Promise<ProjectHireAssignment>;
   /** Host-only persisted ownership. Inspection and caller-supplied IDs grant no route authority. */
   designatedConversationHead(conversationId: string): ConversationOwner | undefined;
   setDesignatedConversationHead(
@@ -243,6 +245,7 @@ export interface LaneObservation {
 /** Test stand-in so the app layer can be exercised without a model. */
 export function createStubCaptain(overrides: Partial<CaptainPort> = {}): CaptainPort {
   return {
+    lookupProjectHire: async () => ({ state: "none" }),
     evaluatorStatus: () => ({
       schemaVersion: 1,
       enabled: false,

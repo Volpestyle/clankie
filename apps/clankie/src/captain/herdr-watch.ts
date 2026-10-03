@@ -1,3 +1,6 @@
+import { realpath } from "node:fs/promises";
+import { ProjectHires, type ProjectHireProcessProof } from "./project-hires.ts";
+import type { ProjectsSettings } from "@clankie/protocol/projects";
 import { HireOwners } from "./hire-owners.ts";
 import {
   captureConversationAuthority,
@@ -24,6 +27,7 @@ import type { HarnessSeatAdapter, SeatEvent } from "@clankie/agent-hosts";
 import {
   bundledSkills,
   codexAccounts,
+  projectsRevision,
   selectLiveCodexAccount,
   type CodexAccount,
   type SkillsSettings,
@@ -672,7 +676,27 @@ export interface NativeLaunchPolicy {
   }): Promise<void>;
 }
 
+export interface ProjectHirePolicy {
+  settings(): Promise<ProjectsSettings>;
+  project(
+    input: Readonly<SpawnOperatorSeat>,
+    settings: ProjectsSettings,
+    authority?: ConversationAuthority,
+  ): Promise<string | undefined>;
+  proof?(fleet: string, pane: string): Promise<ProjectHireProcessProof | undefined>;
+}
+
 export class HerdrWatchStore implements HerdrWatchPort {
+  private readonly projectHires: ProjectHires;
+  private readonly projectPolicy: ProjectHirePolicy | undefined;
+  private readonly projectAllocations = new WeakMap<SpawnOperatorSeat, string>();
+  private readonly activeProjectHires = new Set<string>();
+  private readonly projectRecoveryOnly = new WeakSet<SpawnOperatorSeat>();
+  private readonly projectLiveReuse = new WeakSet<SpawnOperatorSeat>();
+  private readonly projectContexts = new WeakMap<
+    SpawnOperatorSeat,
+    { projectId: string; authority?: ConversationAuthority }
+  >();
   private readonly piSeatModel: (() => Promise<PiSeatModel | undefined>) | undefined;
   private readonly hireCapacity:
     | (() => Promise<{ readonly live: number; readonly limit: number } | undefined>)
@@ -719,6 +743,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     options: {
       readonly validateOwner?: (owner: ConversationOwner) => Promise<boolean>;
       readonly nativeLaunchPolicy?: NativeLaunchPolicy;
+      readonly projectHirePolicy?: ProjectHirePolicy;
       readonly codexAccounts?: () => Promise<readonly CodexAccount[]>;
       readonly skillBundle?: {
         readonly repoRoot: string;
@@ -773,6 +798,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.validateOwner = options.validateOwner;
     this.hireOwners = new HireOwners(`${path}.owners.json`);
     this.nativeLaunchPolicy = options.nativeLaunchPolicy;
+    this.projectHires = new ProjectHires(`${path}.project-hires.json`);
+    this.projectPolicy = options.projectHirePolicy;
     this.hireReceipts = new DeliveryFence(`${path}.hire-receipts.json`);
     this.skillBundle = options.skillBundle;
     this.accounts = options.codexAccounts ?? (async () => codexAccounts());
@@ -1011,7 +1038,104 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return requested?.startsWith(`${hosted.provider.id}/`) === true ? requested : hosted.model;
   }
 
+  public projectHireAssignment(fleet: string, pane: string, proof?: ProjectHireProcessProof) {
+    return this.projectHires.assignment(fleet, pane, proof);
+  }
+
   public async spawnSeat(
+    input: SpawnOperatorSeat,
+    subjectOverride?: string,
+    brief?: string,
+    resume?: SavedAgentSession,
+    authority?: HireAuthority,
+    adopt?: AdoptHire,
+  ): Promise<HerdrSeatSpawnResult> {
+    if (!this.projectPolicy)
+      return this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt);
+    let allocation: string | undefined;
+    try {
+      if (authority) await assertConversationAuthority(authority);
+      if (input.fleet === undefined) {
+        const canonicalDirectory = await realpath(input.workingDirectory).catch(() => undefined);
+        if (canonicalDirectory === undefined)
+          return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
+        input = { ...input, workingDirectory: canonicalDirectory };
+      }
+      const settings = await this.projectPolicy.settings();
+      const projectId = await this.projectPolicy.project(input, settings, authority);
+      if (input.projectId !== undefined && input.projectId !== projectId)
+        throw new Error("The selected project does not match this hiring conversation or workspace.");
+      if (projectId === undefined) {
+        if (this.projectHires.unresolved(input))
+          throw new Error(
+            "An earlier hire in this workspace is still being checked. Resolve it before hiring again.",
+          );
+        return this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt);
+      }
+      let live: HerdrAgentSnapshot | undefined;
+      if (this.runner.list) {
+        const inventory = await this.runner.list(input.fleet).catch(() => undefined);
+        if (inventory && resume) live = existingNativeSession(inventory, resume);
+        if (inventory)
+          this.projectHires.reconcile(
+            input.fleet ?? "default",
+            new Set(inventory.map((agent) => agent.paneId)),
+            this.activeProjectHires,
+          );
+      }
+      const reused =
+        live?.session === undefined
+          ? undefined
+          : this.projectHires.reuse(settings, projectId, input, {
+              pane: live.paneId,
+              seat: live.terminalId,
+              occupantId: occupantIdForHerdrSession(live.session),
+            });
+      const reserved = reused ?? this.projectHires.reserve(settings, projectId, input);
+      if (resume !== undefined && reserved.request.harness !== resume.file.harness) {
+        this.projectHires.failed(reserved.id);
+        throw new Error(
+          "This role now uses a different harness. Its saved session cannot be resumed with these settings.",
+        );
+      }
+      if (this.activeProjectHires.has(reserved.id))
+        return {
+          outcome: "failed",
+          reason: "start_unconfirmed",
+          detail: "The earlier hire is still starting. Wait for its result before trying again.",
+        };
+      allocation = reserved.id;
+      input = reserved.request;
+      this.projectAllocations.set(input, allocation);
+      this.projectContexts.set(input, { projectId, ...(authority === undefined ? {} : { authority }) });
+      if (reused) this.projectLiveReuse.add(input);
+      if (reserved.reused) this.projectRecoveryOnly.add(input);
+      this.activeProjectHires.add(allocation);
+      const result = await this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt);
+      if (result.outcome === "spawned") this.projectHires.confirmed(allocation);
+      else this.projectHires.failed(allocation);
+      return result;
+    } catch (error) {
+      if (allocation) this.projectHires.failed(allocation);
+      return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
+    } finally {
+      if (allocation) this.activeProjectHires.delete(allocation);
+    }
+  }
+
+  private async admitProjectLaunch(input: SpawnOperatorSeat): Promise<void> {
+    const id = this.projectAllocations.get(input);
+    const context = this.projectContexts.get(input);
+    if (!id || !context || !this.projectPolicy) return;
+    const settings = await this.projectPolicy.settings();
+    const project = await this.projectPolicy.project(input, settings, context.authority);
+    const latest = await this.projectPolicy.settings();
+    if (project !== context.projectId || projectsRevision(settings) !== projectsRevision(latest))
+      throw new Error("The project's settings or workspace changed. Check the project before hiring again.");
+    this.projectHires.launch(id, latest);
+  }
+
+  private async spawnAdmittedSeat(
     input: SpawnOperatorSeat,
     subjectOverride?: string,
     brief?: string,
@@ -1158,6 +1282,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           );
         }
         const recovered = spawnedSeat(agent, agent.paneId, agent.name ?? agent.terminalId, input, undefined);
+        await this.observeHireIdentity(receiptKey, agent, input, authority);
         adopt?.(recovered);
         this.hireReceipts.reconcile(receiptKey, pending.messageId);
         return { ...recovered, deliveryStage: hireDeliveryStage(recovered, brief !== undefined) };
@@ -1169,6 +1294,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
         detail: `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
       };
     }
+    if (this.projectRecoveryOnly.has(input))
+      return {
+        outcome: "failed",
+        reason: "start_unconfirmed",
+        detail: "The earlier hire still needs checking. No new agent was started.",
+      };
     const receipt = this.hireReceipts.begin(receiptKey, {
       fingerprint: deliveryFingerprint(brief ?? ""),
       ...(resume === undefined ? {} : { sessionId: resume.sessionId }),
@@ -1298,7 +1429,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw new Error(
             "The saved session is already live; its launch settings cannot be changed by resuming",
           );
-        this.observeHireIdentity(receiptKey, live, input, authority);
+        await this.observeHireIdentity(receiptKey, live, input, authority);
         // Reuse is allowed even at capacity. Never create another writer, or
         // turn a generic settlement of its current turn into this message's reply.
         if (brief !== undefined) {
@@ -1340,15 +1471,23 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
   }
 
-  private observeHireIdentity(
+  private async observeHireIdentity(
     receiptKey: string | undefined,
     agent: HerdrAgentSnapshot,
     input: SpawnOperatorSeat,
     authority?: HireAuthority,
-  ): void {
+  ): Promise<void> {
     if (agent.session === undefined) throw new Error("Native hire identity has not been observed");
     const occupantId = occupantIdForHerdrSession(agent.session);
     const sessionId = nativeSessionId(agent);
+    const allocation = this.projectAllocations.get(input);
+    if (allocation) {
+      this.projectHires.pane(allocation, agent.paneId);
+      const proof = await this.projectPolicy
+        ?.proof?.(input.fleet ?? "default", agent.paneId)
+        .catch(() => undefined);
+      this.projectHires.observe(allocation, agent.terminalId, occupantId, proof);
+    }
     // Recording the exact result is historical proof, not a new effect. Preserve
     // it even when the originating turn lost authority during native startup.
     if (authority !== undefined)
@@ -1379,6 +1518,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
     receiptKey?: string,
     authority?: HireAuthority,
   ): Promise<HerdrSeatSpawnResult> {
+    if (this.projectLiveReuse.has(input))
+      return {
+        outcome: "failed",
+        reason: "start_unconfirmed",
+        detail: "The running agent changed before it could be reused. No replacement was started.",
+      };
     const { createTab, startAgent } = this.runner;
     if (this.closed || createTab === undefined || startAgent === undefined) {
       return { outcome: "failed", reason: "herdr_unreachable" };
@@ -1510,6 +1655,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         resumed: resume !== undefined,
       });
       if (authority !== undefined) await assertConversationAuthority(authority);
+      await this.admitProjectLaunch(input);
       paneId = await createTab({
         cwd: input.workingDirectory,
         label: resume === undefined ? input.title : resumePaneLabel(resume),
@@ -1519,6 +1665,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } catch (caught) {
       return { outcome: "failed", reason: "herdr_unreachable", detail: reasonDetail(caught) };
     }
+    const projectAllocation = this.projectAllocations.get(input);
+    if (projectAllocation) this.projectHires.pane(projectAllocation, paneId);
     if (authority !== undefined) this.hireOwners.bind(paneId, authority.owner, undefined, authority.intentId);
     let control: SeatControlMode | undefined;
     let startAttempted = false;
@@ -1532,6 +1680,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
         this.hireReceipts.update(receiptKey, receipt.messageId, { paneId, agentName: subject });
       }
       const model = input.harness === "pi" ? await this.hostedPiModel(input.model) : input.model;
+      const requiredModel =
+        projectAllocation === undefined ? undefined : this.projectHires.requiredModel(projectAllocation);
+      if (requiredModel !== undefined && model !== requiredModel)
+        throw new Error(
+          "This role's model is not available on this machine. Choose an available model in the project settings.",
+        );
       // A model or effort the harness cannot take fails the hire typed, before
       // herdr is asked to start anything — the alternative is a hire that
       // silently launches the default the operator did not pick (ADR 0185).
@@ -1579,10 +1733,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
             ...(authority === undefined ? {} : { guard: () => assertConversationAuthority(authority) }),
             run: async (argv) => {
               if (authority !== undefined) await assertConversationAuthority(authority);
+              await this.admitProjectLaunch(input);
               return runInPane(paneId, argv);
             },
             start: async (harness, argv) => {
               if (authority !== undefined) await assertConversationAuthority(authority);
+              await this.admitProjectLaunch(input);
               return startAgent({
                 name: subject,
                 kind: harness,
@@ -1637,7 +1793,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               started.control.ref.sessionId !== nativeSessionId(agent))
           )
             throw new Error("Native hire result does not match its original adapter session");
-          this.observeHireIdentity(receiptKey, agent, input, authority);
+          await this.observeHireIdentity(receiptKey, agent, input, authority);
           return {
             ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
             control,
@@ -1661,6 +1817,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...chromeArgs,
         ...(resume === undefined ? [] : nativeResumeArgs(resume)),
       ];
+      await this.admitProjectLaunch(input);
       startAttempted = true;
       await startAgent({
         name: subject,
@@ -1684,7 +1841,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
             : "Herdr started an agent without a durable session identity",
         );
       }
-      this.observeHireIdentity(receiptKey, agent, input, authority);
+      await this.observeHireIdentity(receiptKey, agent, input, authority);
       return {
         ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
         control,

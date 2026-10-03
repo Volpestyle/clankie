@@ -42,6 +42,19 @@ role. Prefer a role already in use (`clankie agents roles`) over a near-duplicat
 `clankie agents role NAME "ROLE"|none` changes it later. Fleet seats you hired or opened report native
 Claude subagents as `subagents`; absent means unknown (ADR 0208).
 
+Project role settings override requested harness, model and effort at hire.
+Use the role already configured for the intended project. `projectId`, when
+supplied, must match the hiring conversation's verified project or canonical
+workspace; it cannot select another project's worker allowance. Conflicting or
+ambiguous workspaces refuse the hire. Role and project limits count starting,
+running and uncertain hires. A completed turn does not free a slot; close its
+Herdr pane and let the next complete inventory confirm the pane is gone. Exiting
+the harness while leaving its pane open keeps the slot. A zero
+limit prevents new hires. An existing exact live session can be reused at its
+limit, but a resume cannot change its recorded role settings or launch a second
+agent after losing the original. Inspect an uncertain hire instead of changing
+its model, harness or project to retry.
+
 Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion
 comes from turn events, and the owner can type into the same bound session.

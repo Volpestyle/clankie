@@ -24,8 +24,32 @@ defaults. A role can select a harness, model, effort, concurrency cap and naming
 rule. Roles retain the existing built-ins and validated custom names; comparison
 is case-insensitive while custom display spelling is preserved. Worker caps and
 role concurrency caps are independent limits, with zero meaning no new hires.
-Unset values inherit host policy. The schema stores these choices; VUH-1536
-must enforce them at hiring admission and again at the final effect boundary.
+Unset values inherit host policy. VUH-1536 enforces configured role harness,
+model and effort at the native launch, overriding conflicting hire inputs. The
+hiring conversation's verified native assignment or canonical effective workspace
+pins its project; otherwise the canonical destination workspace selects it. An
+optional requested project must match that context. Overlapping approvals and
+cross-project source/destination choices refuse rather than choose a cap bucket.
+Remote paths cannot be proven by the local filesystem and require a verified
+source project; unproven native process identity grants no project tools.
+
+The controller journals cap allocations before asynchronous startup, atomically
+across admission calls. Starting and uncertain hires count alongside live hires;
+settling a turn or marking a persona done never releases capacity. Close the pane to release its slot: a successful
+complete native inventory can confirm that allocated pane is gone. An exited
+harness in an open pane keeps its allocation until the pane closes. Missing or
+failed inventory retains capacity. Retry uses the original launch choice and
+receipt even when current settings change; it cannot allocate a replacement.
+A settings/project change is checked again immediately before native effects.
+An exact live session can be reused at capacity, but cannot change its recorded
+role settings or start a replacement if it disappears during resumption.
+
+This journal is controller-owned, separate from semantic role settings. A project
+assignment requires the actual native session plus a freshly observed harness
+process PID/start time, shell PID/start time and Herdr socket/session binding.
+Missing or stale proof refuses membership without workspace fallback. The same
+journal serves cap accounting and the host assignment lookup; it never creates
+or copies grants.
 
 A persona remains identity: name, appearance, avatar revision and stable binding.
 A project role association says what that character does _in that project_. The
@@ -118,8 +142,9 @@ merely by schema parsing.
 This change provides node-free project contracts, owner settings validation,
 migration, legacy compatibility and a membership selector with deterministic tests.
 The new assignment request is a contract, not a newly exposed endpoint. Project
-API/CLI/TUI editors, app selected-project views, per-hire project recording, cap
-execution, onboarding and project-grant enforcement are subsequent issue work.
+API/CLI/TUI editors, app selected-project views, onboarding and project-grant
+enforcement retain their separate issue boundaries. VUH-1536 adds deterministic
+per-hire project recording and cap execution; live acceptance remains unrun.
 Neither live owner settings nor real grants/hires are changed by this engineering
 verification. Existing fleet grants remain unchanged until VUH-1558 explicitly
 retires or replaces them; this release does not claim they are project-scoped.

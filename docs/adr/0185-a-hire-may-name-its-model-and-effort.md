@@ -19,7 +19,9 @@ inside the TUI by hand, which a first message sent at spawn time races.
 
 **Model and effort are hire-time choices, spelled the harness's own way.**
 Both are optional bounded strings on `SpawnOperatorSeat`; absent means the
-harness default, which is what an unopinionated hire gets.
+harness default, which is what an unopinionated hire gets. Configured project-role
+harness, model and effort take precedence over these request fields; see
+[ADR 0216](0216-projects-own-agent-roles-and-tool-policy.md).
 
 - **The captain maps them to argv, not config.** pi, claude, and codex all
   take `--model <value>`; for effort the flags differ — pi's `--thinking`,
@@ -43,8 +45,9 @@ harness default, which is what an unopinionated hire gets.
 - **A move carries neither.** Herdr does not report which model or effort a
   running seat was launched with, so the re-hire of
   [ADR 0166](0166-a-seat-moves-by-being-hired-again.md) starts the harness
-  defaults. Recording the launch pairing on the seat is a real feature if
-  the operator ever wants moves to preserve it; it is not this one.
+  defaults unless its project role supplies launch settings under ADR 0216.
+  A role policy is rechecked at the new launch; a persona role alone does not
+  establish a project assignment.
 
 ## Consequences
 

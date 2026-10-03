@@ -676,7 +676,7 @@ function hireAgentTool(
       "seat lands watched and messageable as a persona the moment it exists — never a bare `herdr agent start`, " +
       "which drops a stranger the roster has to notice. model and effort are spelled the harness's own way " +
       "(pi, claude and codex take --model; effort is pi's --thinking, claude's --effort, codex's " +
-      "model_reasoning_effort); omit both for the harness default. Outcomes are typed: unknown_directory, " +
+      "model_reasoning_effort); the selected project role overrides these choices; omit both for the harness default. Outcomes are typed: unknown_directory, " +
       "harness_unavailable (the harness has no wired flag for what you asked), not_ready (it rejected the " +
       "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, at_capacity (this body already runs as many hired agents " +
       "as its plan allows; close or reuse one). Pass brief to hand it " +
@@ -705,6 +705,12 @@ function hireAgentTool(
         }),
       ),
       title: Type.String({ minLength: 1, maxLength: 80, description: "What the roster calls it." }),
+      projectId: Type.Optional(
+        Type.String({
+          pattern: "^[a-z][a-z0-9_-]{0,63}$",
+          description: "Project to hire for. Its role settings and limits apply.",
+        }),
+      ),
       role: Type.Optional(
         Type.String({
           minLength: 1,
