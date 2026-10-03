@@ -1,7 +1,8 @@
+import { machinesSection } from "./machines-menu.ts";
 /**
- * `/connections` as a modal: what Clankie is connected to — execution runtimes,
- * the agent sessions he can read and resume, and linked accounts — as
- * menus you drill into instead of one JSON blob. `/runtime` and
+ * `/connections` as a modal: machines and accounts,
+ * with saved agent sessions available from each machine — as
+ * menus you drill into instead of one JSON blob. `/sessions` and
  * `/agents` open their own section. Every read goes through the same command
  * clients the CLI uses, so the modal and `clankie connections` never disagree.
  */
@@ -12,6 +13,7 @@ type Json = Record<string, unknown>;
 type Run = (args: readonly string[]) => Promise<unknown>;
 
 export interface ConnectionsMenuServices {
+  readonly machines: Run;
   readonly runtime: Run;
   readonly agents: Run;
   /** The existing `/herdr` menu, for the runtime Clankie runs his own workers in. */
@@ -20,17 +22,6 @@ export interface ConnectionsMenuServices {
   readonly now?: () => number;
 }
 
-interface Runtime {
-  readonly id: string;
-  readonly kind?: string;
-  readonly session?: string;
-  readonly socketPath?: string;
-  readonly state?: string;
-  readonly enabled?: boolean;
-  readonly capacity?: number | null;
-  readonly capacitySource?: string;
-  readonly capabilities?: readonly string[];
-}
 interface AgentSession {
   readonly ref: string;
   readonly harness: string;
@@ -81,25 +72,6 @@ export function projectLabel(project: string | undefined): string {
   return label || "~";
 }
 
-function runtimeHint(runtime: Runtime): string {
-  const parts = [
-    runtime.enabled === false ? "disabled" : (runtime.state ?? "unknown"),
-    runtime.session === undefined ? undefined : `session ${runtime.session}`,
-    runtime.capacity === undefined
-      ? undefined
-      : runtime.capacity === null
-        ? "unlimited workers"
-        : `${runtime.capacity} workers${runtime.capacitySource === "default" ? " (default)" : ""}`,
-  ];
-  return parts.filter(Boolean).join(" · ");
-}
-
-export function runtimesHint(runtimes: readonly Runtime[]): string {
-  if (runtimes.length === 0) return "none";
-  const healthy = runtimes.filter((runtime) => runtime.state === "healthy" && runtime.enabled !== false);
-  return `${runtimes.length} configured · ${healthy.length} healthy`;
-}
-
 export function accountsHint(accounts: Json): string {
   const linear = record(accounts.linear);
   if (linear.status === undefined) return "none";
@@ -111,10 +83,6 @@ export function accountsHint(accounts: Json): string {
         ? account.email
         : undefined;
   return `Linear: ${String(linear.status)}${who ? ` as ${who}` : ""}`;
-}
-
-function hostsHint(hosts: readonly AgentHost[]): string {
-  return hosts.map((host) => host.id).join(" + ");
 }
 
 function sessionOption(session: AgentSession, now: number): MenuOption {
@@ -154,27 +122,18 @@ export async function runConnectionsMenu(
   try {
     for (;;) {
       flow.setStatus("Reading connections…");
-      const [inventory, hosts] = await Promise.all([
-        services.runtime(["inventory"]).then(record, (error: unknown): Json => ({ error: message(error) })),
-        services.agents(["hosts"]).then(
-          (result) => array<AgentHost>(record(result).hosts),
-          () => [] as AgentHost[],
-        ),
-      ]);
+      const inventory = await services
+        .runtime(["inventory"])
+        .then(record, (error: unknown): Json => ({ error: message(error) }));
       flow.setStatus("connections");
       if (typeof inventory.error === "string") flow.renderLine(inventory.error, "error");
       const choice = await flow.readSelect({
         message: "Connections",
         options: [
           {
-            value: "runtimes",
-            label: "Execution runtimes",
-            hint: runtimesHint(array<Runtime>(inventory.runtimes)),
-          },
-          {
-            value: "agents",
-            label: "Agent sessions",
-            hint: hosts.length === 0 ? "unavailable" : hostsHint(hosts),
+            value: "machines",
+            label: "Machines",
+            hint: "/machines · sessions and workers",
           },
           {
             value: "accounts",
@@ -186,8 +145,11 @@ export async function runConnectionsMenu(
         ],
       });
       if (choice === undefined || choice === "done") return;
-      if (choice === "runtimes") await runtimesSection(shell, services);
-      else if (choice === "agents") await agentsSection(shell, services);
+      if (choice === "machines")
+        await machinesSection(shell, {
+          ...services,
+          openSessions: (id) => hostSessions(shell, services, { id }),
+        });
       else if (choice === "accounts") await accountsSection(flow, record(inventory.accounts));
       else shell.insertCommandResult("/connections json", JSON.stringify(inventory, null, 2), "success");
     }
@@ -201,15 +163,14 @@ export async function runConnectionsMenu(
 
 /** One section on its own, for `/runtime` and `/agents` with no argument. */
 export async function runConnectionsSection(
-  section: "runtimes" | "agents",
+  section: "agents",
   shell: ClankieFaceShell,
   services: ConnectionsMenuServices,
 ): Promise<void> {
   const flow = shell.setupFlow;
   flow.begin(section);
   try {
-    if (section === "runtimes") await runtimesSection(shell, services);
-    else await agentsSection(shell, services);
+    await agentsSection(shell, services);
   } catch (error) {
     // Closing the flow resets the status line, so a fatal error goes to the chat.
     shell.insertCommandResult("/connections", message(error), "error");
@@ -263,116 +224,6 @@ async function attempt(flow: SetupFlow, work: () => Promise<unknown>, done: stri
   } catch (error) {
     flow.renderLine(message(error), "error");
     return false;
-  }
-}
-
-async function runtimesSection(shell: ClankieFaceShell, services: ConnectionsMenuServices): Promise<void> {
-  const flow = shell.setupFlow;
-  for (;;) {
-    const runtimes = array<Runtime>(record(await services.runtime(["list"])).connections);
-    const choice = await flow.readSelect({
-      message: "Execution runtimes",
-      options: [
-        ...runtimes.map((runtime) => ({
-          value: `runtime:${runtime.id}`,
-          label: runtime.id,
-          hint: runtimeHint(runtime),
-        })),
-        {
-          value: "connect",
-          label: "Connect a Herdr session…",
-          hint: "name it, point at a session",
-        },
-        ...(services.openHerdrSettings
-          ? [{ value: "herdr", label: "Herdr settings…", hint: "Clankie's own runtime" }]
-          : []),
-      ],
-      allowBack: true,
-    });
-    if (choice === undefined) return;
-    if (choice === "herdr") {
-      await services.openHerdrSettings?.();
-      continue;
-    }
-    if (choice === "connect") {
-      const id = await flow.readText({
-        message: "Name for this runtime",
-        placeholder: "e.g. build",
-        allowBack: true,
-        validate: (value) =>
-          /^[a-z][a-z0-9-]{0,63}$/u.test(value.trim()) && value.trim() !== "default"
-            ? undefined
-            : "Lowercase letters, digits and dashes; not 'default'.",
-      });
-      if (id === undefined) continue;
-      const session = await flow.readText({
-        message: "Herdr session name",
-        placeholder: "e.g. workers",
-        allowBack: true,
-        validate: (value) => (value.trim() ? undefined : "Enter a session name."),
-      });
-      if (session === undefined) continue;
-      await attempt(
-        flow,
-        () => services.runtime(["connect", id.trim(), "--session", session.trim()]),
-        `Connected ${id.trim()}.`,
-      );
-      continue;
-    }
-    const runtime = runtimes.find((entry) => `runtime:${entry.id}` === choice);
-    if (runtime !== undefined) await runtimeDetail(flow, services, runtime);
-  }
-}
-
-/** Details as rows of the menu itself: status lines only hold one line. */
-async function runtimeDetail(
-  flow: SetupFlow,
-  services: ConnectionsMenuServices,
-  runtime: Runtime,
-): Promise<void> {
-  const info: MenuOption[] = [
-    {
-      value: "info:state",
-      label: "State",
-      hint: runtime.enabled === false ? "disabled" : (runtime.state ?? "unknown"),
-    },
-    ...(runtime.session ? [{ value: "info:session", label: "Session", hint: runtime.session }] : []),
-    ...(runtime.socketPath ? [{ value: "info:socket", label: "Socket", hint: runtime.socketPath }] : []),
-    ...(runtime.capacity === undefined
-      ? []
-      : [
-          {
-            value: "info:capacity",
-            label: "Capacity per coordinator",
-            hint:
-              runtime.capacity === null
-                ? "unlimited"
-                : `${runtime.capacity} (${runtime.capacitySource ?? "owner"})`,
-          },
-        ]),
-    ...(runtime.capabilities?.length
-      ? [{ value: "info:capabilities", label: "Capabilities", hint: runtime.capabilities.join(", ") }]
-      : []),
-  ];
-  for (;;) {
-    const action = await flow.readSelect({
-      message: runtime.id,
-      options: [
-        ...info,
-        // The fleet's own runtime is managed from Herdr settings, not disconnected here.
-        ...(runtime.id === "default"
-          ? []
-          : [{ value: "disconnect", label: "Disconnect…", hint: "workers keep running" }]),
-      ],
-      allowBack: true,
-    });
-    if (action === undefined) return;
-    if (action !== "disconnect") continue;
-    if (!(await confirm(flow, `Disconnect ${runtime.id}?`, "Disconnect"))) continue;
-    if (
-      await attempt(flow, () => services.runtime(["disconnect", runtime.id]), `Disconnected ${runtime.id}.`)
-    )
-      return;
   }
 }
 

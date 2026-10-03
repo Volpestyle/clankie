@@ -41,8 +41,8 @@ it("picks a listed session, saves before restarting, and allows cancellation", a
     .mockResolvedValueOnce("restart");
   await menu.run();
   expect(optionValues(menu.readSelect.mock.calls[0]!)).toEqual([
-    "session",
     "create",
+    "session",
     "disable",
     "open",
     "restart",
@@ -66,8 +66,8 @@ it("creates Clankie's session without asking the user to choose a runtime", asyn
   const labels = (menu.readSelect.mock.calls[0]![0] as { options: { label: string }[] }).options.map(
     (option) => option.label,
   );
-  expect(labels).toContain("Use an existing Herdr session");
-  expect(labels).toContain("Create a session for Clankie");
+  expect(labels).toContain("Lead your Herdr session");
+  expect(labels).toContain("Keep his own workspace (recommended)");
 });
 
 it("can run without Herdr without closing the user's sessions", async () => {

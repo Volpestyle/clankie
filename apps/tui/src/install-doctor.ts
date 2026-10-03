@@ -1,3 +1,4 @@
+import { listHerdrSessions } from "./session/herdr-report.ts";
 import { execFile as execFileCallback } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -96,6 +97,7 @@ export interface InstallDoctorReport {
   readonly mcpServers: readonly string[];
   readonly credentials: readonly InstallDoctorCredential[];
   readonly commands: { readonly [name: string]: CommandPresence };
+  readonly ownerHerdrSessions?: readonly string[];
   readonly herdrPlugin: HerdrPluginReport;
   readonly harnessBridges: Awaited<ReturnType<typeof inspectHarnessBridges>>;
   /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
@@ -264,6 +266,11 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     mcpServers: settings.mcp.servers.filter((server) => server.enabled).map((server) => server.id),
     credentials,
     commands,
+    ownerHerdrSessions: (
+      await listHerdrSessions({ env, runCommand: (command, args) => execute(command, args) })
+    )
+      .filter((session) => session.running)
+      .map((session) => session.name),
     herdrPlugin,
     harnessBridges: await inspectHarnessBridges(env, execute, options.fetchImpl ?? fetch),
     laneTools,

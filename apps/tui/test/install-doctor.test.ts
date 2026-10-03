@@ -372,3 +372,31 @@ describe("install doctor", () => {
     expect(called).not.toContain("herdr-lead");
   });
 });
+
+it("discovers only running owner Herdr sessions using a read-only installed CLI probe", async () => {
+  const root = await installRoot();
+  const calls: string[][] = [];
+  const report = await inspectInstall({
+    repoRoot: root,
+    env: { HOME: root, XDG_CONFIG_HOME: root },
+    settings: new SettingsStore(join(root, "settings.json")),
+    credentialStore: new FileCredentialStore(join(root, "credentials.json")),
+    fetchImpl: offline,
+    execFileImpl: async (command, args) => {
+      calls.push([command, ...args]);
+      if (command === "herdr" && args.join(" ") === "session list --json")
+        return {
+          stdout: JSON.stringify({
+            sessions: [
+              { name: "work", running: true, socket_path: "/tmp/work" },
+              { name: "saved", running: false, socket_path: "/tmp/saved" },
+            ],
+          }),
+          stderr: "",
+        };
+      return missing(command, args);
+    },
+  });
+  expect(report.ownerHerdrSessions).toEqual(["work"]);
+  expect(calls.filter((call) => call[0] === "herdr")).toEqual([["herdr", "session", "list", "--json"]]);
+});

@@ -1209,11 +1209,18 @@ Linear account identity as JSON. Its
 operator API is `GET /v1/connections`; the companion app shows it under
 Settings, where it can also connect a local Herdr session by name.
 
-In the TUI, `/connections` opens a menu over the same data: execution runtimes
-(details, connect, disconnect, Herdr settings), agent sessions (hosts → sessions →
-read or send, add or remove SSH hosts), and accounts. `/runtime` and
-`/sessions` with no argument open their own section; with arguments they print JSON
-as before, and `/connections json` prints the raw inventory.
+In the TUI, `/connections` links to `/machines` and accounts. `/machines`
+shows machine state and agent counts, discovered candidates before the typed-name
+fallback, and each machine's connected and discoverable Herdr sessions. Connect
+or disconnect named sessions live; manage their workspace grants and capacity.
+Native worker harnesses are chosen per hire. `/runtime` with no argument opens
+Machines; `/sessions` still browses saved transcripts. Both retain their arguments,
+and `/connections json` prints the raw inventory.
+
+Onboarding asks only how he thinks. Once ready, `/setup` offers the workspace
+choice only when doctor finds installed Herdr with running sessions. His own
+workspace is recommended; leading your session lets him see and message every
+pane in it. `/herdr` default workspace changes still offer Restart now / Later.
 
 ```sh
 clankie runtime list

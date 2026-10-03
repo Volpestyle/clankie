@@ -6,7 +6,6 @@ import {
   relativeAge,
   runConnectionsMenu,
   runConnectionsSection,
-  runtimesHint,
   type ConnectionsMenuServices,
 } from "../src/connections-menu.ts";
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
@@ -23,8 +22,6 @@ it("formats hints a person can scan", () => {
   expect(projectLabel("/Users/james/dev/rivals-agent")).toBe("~/dev/rivals-agent");
   expect(projectLabel(undefined)).toBe("unknown directory");
   expect(projectLabel("-Users-james--clankie-captain-evaluator")).toBe("~/.clankie-captain-evaluator");
-  expect(runtimesHint([])).toBe("none");
-  expect(runtimesHint([{ id: "default", state: "healthy", enabled: true }])).toBe("1 configured · 1 healthy");
   expect(accountsHint({ linear: { status: "connected", account: { name: "James" } } })).toBe(
     "Linear: connected as James",
   );
@@ -88,6 +85,7 @@ function services(overrides: Partial<ConnectionsMenuServices> = {}) {
   return {
     agentsCalls,
     services: {
+      machines: async () => ({ observedAt: new Date().toISOString(), machines: [] }),
       runtime: async (args: readonly string[]) =>
         args[0] === "inventory"
           ? {
@@ -102,26 +100,11 @@ function services(overrides: Partial<ConnectionsMenuServices> = {}) {
   };
 }
 
-it("drills from the hub to a remote session and shows its latest turns", async () => {
-  const { shell, readSelect, results } = fakeShell([
-    "agents",
-    "host:pc",
-    "pc:79b4e8ec-a455-444c-b285-d01660a1c52d",
-    "read",
-    undefined, // back out of the session
-    undefined, // back out of the host
-    undefined, // back out of agents
-    "done",
-  ]);
-  const { services: deps, agentsCalls } = services();
-  await runConnectionsMenu(shell, deps);
-  expect(values(readSelect.mock.calls[0]!)).toEqual(["runtimes", "agents", "accounts", "json", "done"]);
-  expect(values(readSelect.mock.calls[1]!)).toEqual(["host:local", "host:pc", "add"]);
-  expect(values(readSelect.mock.calls[2]!)).toEqual(["pc:79b4e8ec-a455-444c-b285-d01660a1c52d", "remove"]);
-  expect(agentsCalls).toContainEqual(["list", "--host", "pc", "--limit", "30"]);
-  expect(results).toEqual([
-    { prompt: "/agents read pc:79b4e8ec-a455-444c-b285-d01660a1c52d", message: "agent: last words" },
-  ]);
+it("links the hub to machines without separate session sections", async () => {
+  const { shell, readSelect } = fakeShell(["machines", undefined, "done"]);
+  await runConnectionsMenu(shell, services().services);
+  expect(values(readSelect.mock.calls[0]!)).toEqual(["machines", "accounts", "json", "done"]);
+  expect(values(readSelect.mock.calls[1]!)).toEqual(["add"]);
 });
 
 it("adds an SSH host from three answers", async () => {
@@ -178,9 +161,9 @@ it("reports a refused read in place instead of leaving the modal", async () => {
 });
 
 it("puts an error that ends the menu into the chat, where it outlives the status line", async () => {
-  const { shell, results } = fakeShell(["runtimes"]);
+  const { shell, results } = fakeShell(["machines"]);
   const { services: deps } = services({
-    runtime: async () => {
+    machines: async () => {
       throw new Error("Runtime connections need the operator credential");
     },
   });

@@ -74,7 +74,7 @@ export async function runRuntimeCommand(
     path += `/${encodeURIComponent(args[1]!)}`;
   } else if (args.length > 1 || (args[0] && !["list", "status"].includes(args[0]))) {
     throw new Error(
-      "Usage: clankie runtime [list|status] | connect ID (--session NAME | --socket PATH) | connect ID --ssh HOST --session NAME [--shell posix|powershell] | disconnect ID | workspaces ID (--repo PATH | --dir PATH)... | workspaces ID --clear | capacity ID N|--clear | budget N|--clear (limits count per coordinator scope) | mode ID interactive | harness ID claude|codex|pi",
+      "Usage: clankie runtime [list|status] | connect ID (--session NAME | --socket PATH) | connect ID --ssh HOST --session NAME [--shell posix|powershell] | disconnect ID | workspaces ID (--repo PATH | --dir PATH)... | workspaces ID --clear | capacity ID N|--clear (limits count per coordinator scope)",
     );
   }
   const credential = await resolveOperatorCredential({

@@ -1,3 +1,5 @@
+import { runMachinesCommand } from "./command/machines.ts";
+import { runMachinesMenu } from "./machines-menu.ts";
 import { planSeat, parseSeatArgs } from "./command/seat.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
@@ -144,6 +146,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   const closeBoard = herdLead?.close ?? (() => closeHerdLeadCompanion());
   const commands: FaceShellCommand[] = [];
   const connectionServices = (shell: ClankieFaceShell): ConnectionsMenuServices => ({
+    machines: (args) => runMachinesCommand(args),
     runtime: (args) => runRuntimeCommand(args),
     agents: (args) => runAgentsCommand(args),
     openHerdrSettings: () => showHerdrMenu(shell, context),
@@ -253,7 +256,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "connections",
       aliases: [],
-      description: "See and manage runtimes, agent sessions and accounts",
+      description: "Manage machines and accounts",
       argumentHint: "[json]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -266,14 +269,37 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     },
     {
+      name: "machines",
+      aliases: [],
+      description: "Discover machines, connect sessions and manage workers",
+      takesArgument: true,
+      argumentHint: "[discover | add NAME --ssh HOST | sessions NAME | remove NAME]",
+      async run(argument, shell): Promise<void> {
+        if (!argument.trim()) {
+          await runMachinesMenu(shell, connectionServices(shell));
+          return;
+        }
+        try {
+          const result = await runMachinesCommand(splitQuotedArguments(argument));
+          shell.insertCommandResult("/machines", JSON.stringify(result, null, 2), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/machines",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
       name: "runtime",
       aliases: [],
-      description: "Inspect, connect or disconnect named execution runtimes",
+      description: "Manage machine connections (compatibility command)",
       argumentHint: "[list | connect ID --session NAME | disconnect ID]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         if (argument.trim() === "") {
-          await runConnectionsSection("runtimes", shell, connectionServices(shell));
+          await runMachinesMenu(shell, connectionServices(shell));
           return;
         }
         try {
@@ -1521,7 +1547,7 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
   try {
     const current = await runHerdrCommand(["status"], options);
     flow.renderLine(
-      `Selected: ${current.herdr.runtime === "disabled" ? "No Herdr runtime" : current.herdr.runtime === "bundled" ? "Clankie’s own session" : current.herdr.runtime === "auto" ? "Use the saved connection, or Clankie’s own session" : current.herdr.session}`,
+      `Selected: ${current.herdr.runtime === "disabled" ? "No worker workspace" : current.herdr.runtime === "bundled" ? "Clankie’s own session" : current.herdr.runtime === "auto" ? "Use the saved connection, or Clankie’s own session" : current.herdr.session}`,
     );
     flow.renderLine(herdrActiveLine(current));
     flow.renderLine(
@@ -1531,19 +1557,19 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
       message: "Herdr",
       options: [
         {
-          value: "session",
-          label: "Use an existing Herdr session",
-          hint: "Choose the agents Clankie can see and lead",
+          value: "create",
+          label: "Keep his own workspace (recommended)",
+          hint: "His own workers, separate from your other sessions",
         },
         {
-          value: "create",
-          label: "Create a session for Clankie",
-          hint: "His own workers, separate from your other sessions",
+          value: "session",
+          label: "Lead your Herdr session",
+          hint: "He can see and message every pane in it",
         },
         {
           value: "disable",
           label: "Run without Herdr",
-          hint: "Keep conversations; no terminal runtime",
+          hint: "Keep conversations; no worker workspace",
         },
         { value: "open", label: "Open active session" },
         ...(context.restartCaptain
@@ -1583,7 +1609,7 @@ async function showHerdrMenu(shell: ClankieFaceShell, context: ConsoleCommandCon
       await runHerdrCommand(["use", session], options);
     }
     if (action !== "restart") {
-      flow.renderLine("Saved. Restart to apply the runtime selection.", "success");
+      flow.renderLine("Saved. Restart to apply the workspace choice.", "success");
       if (!context.restartCaptain) return;
       const apply = await flow.readSelect({
         message: "Apply Herdr changes?",

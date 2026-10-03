@@ -160,3 +160,10 @@ sessions too. Local discovery carries no bearer. Outward-facing sends still need
 the owner's instruction; the connection identity remains Clankie's connected
 account. A shared Codex app-server daemon cannot prove its pane; restart Codex in
 the pane under the existing daemon-disabled config, then check doctor again.
+
+The console's `/machines` lists discovered machines and their Herdr sessions
+before asking for typed names. Named connections apply live. Its session details
+manage workspace grants and capacity; choose native harnesses per hire. The
+`/herdr` default workspace choice still requires a restart. `/setup` offers that
+choice only after doctor finds installed Herdr with running sessions, explaining
+that leading the owner's session means seeing and messaging every pane.

@@ -186,7 +186,7 @@ export function checklistEntries(
 ): ChecklistEntry[] {
   const discord = report.discord;
   const discordOn = discord.textIngressEnabled || discord.voiceEnabled || discord.userSessionEnabled;
-  const workers = ["codex", "claude"].filter((name) => report.commands[name]?.present === true);
+
   return [
     { value: "connection", label: "Local or hosted Clankie", hint: "local", command: "connection" },
     {
@@ -267,13 +267,17 @@ export function checklistEntries(
       hint: report.emailConfigured ? "✓ email" : "not connected",
       command: "connect",
     },
-    {
-      value: "workers",
-      label: "Worker agents",
-      hint: workers.length === 0 ? "no codex or claude found" : `✓ ${workers.join(", ")}`,
-      description: "Harnesses he leads in Herdr keep their own logins (`codex login`, `claude login`).",
-      command: "herdr",
-    },
+    ...((report.ownerHerdrSessions?.length ?? 0) > 0
+      ? [
+          {
+            value: "workers",
+            label: "His workspace or your Herdr session",
+            hint: "His own workspace is recommended",
+            description: "Leading your session lets him see and message every pane in it.",
+            command: "herdr",
+          },
+        ]
+      : []),
     {
       value: "ask",
       label: "Ask Clankie to walk me through it",

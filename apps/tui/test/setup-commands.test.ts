@@ -217,7 +217,7 @@ describe("/setup", () => {
     const options = view.selects[0]?.options ?? [];
     expect(options.find((option) => option.value === "think")?.hint).toBe("✓ openai/gpt-5.5");
     expect(options.find((option) => option.value === "autostart")?.hint).toBe("off");
-    expect(options.find((option) => option.value === "workers")?.hint).toBe("✓ codex");
+    expect(options.find((option) => option.value === "workers")).toBeUndefined();
     expect(opened).toEqual(["persona"]);
   });
 
@@ -258,5 +258,24 @@ describe("/setup", () => {
 
     expect(view.drafts).toEqual([]);
     expect(view.results.join("\n")).toContain("can't reach Clankie's service");
+  });
+});
+
+it("offers the owner workspace choice only for running sessions found by doctor", () => {
+  const readiness = { ready: true, model: "test", providerId: "test" } as Parameters<
+    typeof checklistEntries
+  >[1];
+  expect(
+    checklistEntries({ ...report, ownerHerdrSessions: [] }, readiness, undefined).find(
+      (row) => row.value === "workers",
+    ),
+  ).toBeUndefined();
+  expect(
+    checklistEntries({ ...report, ownerHerdrSessions: ["work"] }, readiness, undefined).find(
+      (row) => row.value === "workers",
+    ),
+  ).toMatchObject({
+    command: "herdr",
+    description: "Leading your session lets him see and message every pane in it.",
   });
 });
