@@ -66,6 +66,7 @@ async function hookApp(
   const wakes: LinearActivityEvent[] = [];
   const inbox: LinearActivityEvent[] = [];
   const requestNotificationPoll = vi.fn();
+  const recordActivity = vi.fn();
   const clankie = await createClankieApp({
     captain: createStubCaptain({
       receiveLinearActivity: (comment, following) => {
@@ -89,6 +90,7 @@ async function hookApp(
     linearWebhook: {
       secret: () => Promise.resolve(SECRET),
       requestNotificationPoll,
+      recordActivity,
       ...(writes === undefined ? {} : { writes }),
       ...(ownAccount === undefined ? {} : { ownAccount }),
     },
@@ -107,7 +109,7 @@ async function hookApp(
       body,
     });
   hookStores.push({ root, store, close: () => clankie.close() });
-  return { post, wakes, inbox, root, store, requestNotificationPoll };
+  return { post, wakes, inbox, root, store, requestNotificationPoll, recordActivity };
 }
 
 describe("linear activity ingress", () => {
@@ -173,7 +175,7 @@ describe("linear activity ingress", () => {
       expect(persisted).not.toContain(issue);
       expect((await stat(path)).mode & 0o777).toBe(0o600);
       const resumed = new LinearWriteReceipts(path);
-      const { post, inbox } = await hookApp(true, resumed);
+      const { post, inbox, recordActivity, requestNotificationPoll } = await hookApp(true, resumed);
       let delivery = 0;
       const send = (overrides: Record<string, unknown> = {}, data: Record<string, unknown> = {}) =>
         post(
@@ -184,6 +186,15 @@ describe("linear activity ingress", () => {
           { "linear-delivery": `echo-${delivery++}` },
         );
       await expect((await send()).json()).resolves.toMatchObject({ ingested: false });
+      expect(recordActivity).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          actorId: "bot",
+          organizationId: "org",
+          data: expect.objectContaining({ id: own }),
+        }),
+      );
+      expect(inbox).toHaveLength(0);
+      expect(requestNotificationPoll).toHaveBeenCalledTimes(1);
       await expect(
         (await send({ action: "update", updatedFrom: { body: "Before" } })).json(),
       ).resolves.toMatchObject({ ingested: false });
@@ -808,7 +819,10 @@ it("reports blocked following when its webhook secret or URL is removed, and per
     missingWebhook: ["secret"],
   });
   secret = SECRET;
-  settings.linearWebhook = { following: true };
+  settings.linearWebhook = ClankieSettingsSchema.parse({
+    schemaVersion: 1,
+    linearWebhook: { following: true },
+  }).linearWebhook;
   expect(await (await app.request("/v1/linear/follow")).json()).toMatchObject({
     following: true,
     active: false,

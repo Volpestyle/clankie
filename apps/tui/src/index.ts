@@ -31,7 +31,7 @@ import {
 } from "./provider-commands.ts";
 import { buildSetupCommands, runFirstSetup, type SetupCommandServices } from "./setup-commands.ts";
 import { runAutostartCommand } from "./command/autostart.ts";
-import { buildConnectCommands } from "./connect-commands.ts";
+import { buildConnectCommands, runLinearFollowMenu } from "./connect-commands.ts";
 import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import { buildPersonaCommands } from "./persona-commands.ts";
 import { buildFleetCommands } from "./fleet-commands.ts";
@@ -410,11 +410,18 @@ const setupServices: SetupCommandServices = {
   },
 };
 
+const connectServices = {
+  ...brokeredCommands,
+  runDiscordWizard,
+  showDiscordInvite,
+  runLinearOauth: () => runLinearBrowserLogin(),
+};
 const commands = [
   ...buildHostedConnectionCommands(settingsStore, true),
   ...buildSetupCommands(setupServices),
   ...buildConsoleCommands({
     repoRoot,
+    linearFollowMenu: (shell) => runLinearFollowMenu(shell, connectServices),
     settings: settingsStore,
     commandStatus: () =>
       statusCommand({
@@ -455,12 +462,7 @@ const commands = [
     credentials: services.store,
     restartGateway: restartCaptain,
   }),
-  ...buildConnectCommands({
-    ...brokeredCommands,
-    runDiscordWizard,
-    showDiscordInvite,
-    runLinearOauth: () => runLinearBrowserLogin(),
-  }),
+  ...buildConnectCommands(connectServices),
   ...buildDiscordCommands(brokeredCommands),
   ...buildPersonaCommands({ settings: settingsStore }),
   ...buildFleetCommands({ settings: settingsStore }),

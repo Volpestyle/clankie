@@ -710,10 +710,26 @@ export const EmailSettingsSchema = z
   .strict();
 export type EmailSettings = z.infer<typeof EmailSettingsSchema>;
 
+/** Actor selectors are ORed; type exclusions always win. IDs are workspace-scoped. */
+export const LinearWakeSettingsSchema = z
+  .object({
+    ownerUserIds: z.array(z.string().min(1).max(256)).max(100).default([]),
+    actors: z
+      .array(z.enum(["owner", "human", "self", "users"]))
+      .max(4)
+      .default(["owner"]),
+    userIds: z.array(z.string().min(1).max(256)).max(100).default([]),
+    notificationTypes: z.array(z.string().min(1).max(128)).max(100).default([]),
+    excludedNotificationTypes: z.array(z.string().min(1).max(128)).max(100).default(["issueSubscribed"]),
+  })
+  .strict();
+export type LinearWakeSettings = z.infer<typeof LinearWakeSettingsSchema>;
+
 /** Live Linear awareness is opt-in; the signing secret lives in the credential broker. */
 export const LinearWebhookSettingsSchema = z
   .object({
     following: z.boolean().default(false),
+    wake: LinearWakeSettingsSchema.default(() => LinearWakeSettingsSchema.parse({})),
     /** Public URL registered in Linear; the signing secret remains broker-owned. */
     url: z.url({ protocol: /^https?$/ }).optional(),
   })

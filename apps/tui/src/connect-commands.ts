@@ -3,7 +3,7 @@
  * owner's own services (ADR 0093). Secrets go to the credential broker;
  * public identifiers go to settings.json — the same split `/discord` uses.
  */
-import { SettingsStore, type EmailSettings } from "@clankie/settings";
+import { LinearWakeSettingsSchema, SettingsStore, type EmailSettings } from "@clankie/settings";
 import {
   connectLinearApp,
   LINEAR_MCP_RESOURCE,
@@ -367,6 +367,48 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
   else if (method === "follow") await runLinearFollowFlow(shell, services);
 }
 
+async function runLinearWakeFlow(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {
+  const current = (await services.settings.load()).linearWebhook.wake;
+  const fields = [
+    ["actors", "Actors: owner, human, self (Clankie and workers), users"],
+    ["ownerUserIds", "Owner's Linear user IDs"],
+    ["userIds", "Named Linear user IDs (for users)"],
+    ["notificationTypes", "Notification types (none means all types)"],
+    ["excludedNotificationTypes", "Excluded types (always win)"],
+  ] as const;
+  const patch: Record<string, string[]> = {};
+  shell.setupFlow.renderLine(
+    "Comma-separated values; enter none to clear. Unknown authors never wake. Changes apply to new notifications.",
+    "info",
+  );
+  for (const [key, message] of fields) {
+    const value = await shell.setupFlow.readText({
+      message,
+      defaultValue: current[key].join(",") || "none",
+      validate: (value) => {
+        const values = value.trim() === "none" ? [] : value.split(",").map((part) => part.trim());
+        return LinearWakeSettingsSchema.safeParse({ ...current, [key]: values }).success
+          ? undefined
+          : "Use valid comma-separated values.";
+      },
+    });
+    if (value === undefined) return;
+    patch[key] = value.trim() === "none" ? [] : value.split(",").map((part) => part.trim());
+  }
+  await services.settings.update((value) => ({
+    ...value,
+    linearWebhook: { ...value.linearWebhook, wake: LinearWakeSettingsSchema.parse(patch) },
+  }));
+  shell.insertCommandResult("/linear", "Linear wake rules saved. Inbox collection is unchanged.", "success");
+}
+
+export async function runLinearFollowMenu(
+  shell: ClankieFaceShell,
+  services: ConnectCommandServices,
+): Promise<void> {
+  await withFlow(shell, "linear", () => runLinearFollowFlow(shell, services));
+}
+
 /** Configure the webhook independently of the switch that wakes the operator conversation. */
 async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {
   const flow = shell.setupFlow;
@@ -386,11 +428,16 @@ async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCom
           ? "Keep receiving inbox messages without waking him"
           : "Wake the operator conversation on the connected account’s Linear notifications",
       },
+      { value: "wake", label: "Wake rules", hint: "Who and which notifications wake Clankie" },
       { value: "setup", label: "Configure webhook", hint: "URL, all activity events, signing secret" },
     ],
     allowBack: true,
   });
   if (action === undefined) return;
+  if (action === "wake") {
+    await runLinearWakeFlow(shell, services);
+    return;
+  }
   if (action === "on" || action === "off") {
     if (action === "on" && (await services.listCredentials())[LINEAR_PROVIDER_ID] === undefined) {
       shell.insertCommandResult("/connect linear", "Connect Clankie’s Linear account first.", "error");

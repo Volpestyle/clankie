@@ -754,6 +754,50 @@ paths:
         "400": { description: Invalid acknowledgment }
         "401": { description: Operator authentication required }
         "409": { description: Cursor was not offered for this owner }
+  /v1/linear/wake:
+    get:
+      tags: [Operator]
+      operationId: inspectLinearWakeRules
+      summary: Inspect actor and notification type wake rules
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Current live wake rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, wake]
+                properties:
+                  schemaVersion: { const: 1 }
+                  wake: { $ref: "#/components/schemas/LinearWakeRules" }
+        "401": { description: Operator authentication required }
+        "503": { description: Operator authentication unavailable }
+    put:
+      tags: [Operator]
+      operationId: setLinearWakeRules
+      summary: Replace wake rules without restarting
+      description: Missing fields take defaults. Defaults select configured owner user IDs only and exclude issueSubscribed. Unknown or ambiguous authors never wake. Actor selectors are ORed; exclusions always win. Empty notificationTypes allows all types. Rules apply to new notification decisions and never replay collected history or change inbox collection. The follow switch still gates wakes.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LinearWakeRules" }
+      responses:
+        "200":
+          description: Persisted live wake rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, wake]
+                properties:
+                  schemaVersion: { const: 1 }
+                  wake: { $ref: "#/components/schemas/LinearWakeRules" }
+        "400": { description: Malformed rules }
+        "401": { description: Operator authentication required }
+        "503": { description: Settings or operator authentication unavailable }
   /v1/linear/follow:
     get:
       tags: [Operator]
@@ -775,7 +819,7 @@ paths:
     put:
       tags: [Operator]
       operationId: setLinearFollowing
-      summary: Enable or disable turns from the bot notification inbox
+      summary: Enable or disable rule-matched turns from the bot notification inbox
       description: Enabling requires a stored webhook URL and signing secret. It resumes previously accepted pending wakes, never passive backlog. Disabling leaves inbox delivery enabled. Status distinguishes the requested following switch from active readiness, with linear_webhook_required and missingWebhook when setup is removed. There is no periodic poll.
       security: [{ operatorBearer: [] }]
       requestBody:
@@ -2822,6 +2866,37 @@ paths:
 
 components:
   schemas:
+    LinearWakeRules:
+      type: object
+      additionalProperties: false
+      properties:
+        ownerUserIds:
+          type: array
+          maxItems: 100
+          default: []
+          description: Explicit owner human IDs in Linear; never inferred from app credentials or display names
+          items: { type: string, minLength: 1, maxLength: 256 }
+        actors:
+          type: array
+          maxItems: 4
+          default: [owner]
+          description: owner is a configured human; human is any signed user except self or workers; self is the connected account and attributed workers; users selects userIds
+          items: { enum: [owner, human, self, users] }
+        userIds:
+          type: array
+          maxItems: 100
+          default: []
+          items: { type: string, minLength: 1, maxLength: 256 }
+        notificationTypes:
+          type: array
+          maxItems: 100
+          default: []
+          items: { type: string, minLength: 1, maxLength: 128 }
+        excludedNotificationTypes:
+          type: array
+          maxItems: 100
+          default: [issueSubscribed]
+          items: { type: string, minLength: 1, maxLength: 128 }
     ModelKeySetRequest:
       type: object
       additionalProperties: false

@@ -67,6 +67,7 @@ type StatusTone = "normal" | "active" | "ok" | "warn" | "bad" | "muted";
 
 export interface ConsoleCommandContext {
   readonly repoRoot?: string;
+  readonly linearFollowMenu?: (shell: ClankieFaceShell) => Promise<void>;
   readonly settings?: SettingsStore;
   readonly herdrOptions?: HerdrConnectionOptions;
   /** Herdr's saved sessions, for the `/herdr` session picker. */
@@ -202,10 +203,15 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "linear",
       aliases: [],
-      description: "Read Linear activity and bind issues to Clankie conversations",
+      description: "Configure Linear following and wake rules, or read activity",
       takesArgument: true,
-      argumentHint: "[status|follow on/off|inbox read|work list/bind/unbind]",
+      argumentHint: "[status|follow on/off|wake show/set|inbox read|work list]",
       async run(argument, shell): Promise<void> {
+        if (!argument.trim()) {
+          if (!context.linearFollowMenu) throw new Error("Linear settings menu is unavailable");
+          await context.linearFollowMenu(shell);
+          return;
+        }
         const result = await runLinearCommand(argument.trim().split(/\s+/u).filter(Boolean));
         shell.insertCommandResult(
           "/linear",

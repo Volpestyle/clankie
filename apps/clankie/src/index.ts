@@ -73,6 +73,7 @@ import { createEmailPort } from "./email.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { LinearNotifications } from "./linear-notifications.ts";
 import { createMcpHost } from "./mcp-host.ts";
+import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -834,10 +835,13 @@ async function linearFollowing(): Promise<boolean> {
 
 const linearNotifications = new LinearNotifications({
   path: join(stateRoot, "linear-notifications.json"),
+const linearAttribution = new LinearAttributionJournal(join(stateRoot, "linear-attribution.json"));
   host: mcpHost,
   following: linearFollowing,
   receive: (activity, following) => captain.receiveLinearActivity(activity, following),
   onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
+  wakeRules: async () => (await settingsStore.load()).linearWebhook.wake,
+  attribute: (notification, organizationId) => linearAttribution.attribute(notification, organizationId),
 });
 const clankie = await createClankieApp({
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
@@ -944,6 +948,7 @@ const stopHostedWork =
         available: herdr.available,
       });
 hostedHeartbeat?.start();
+    recordActivity: (activity) => linearAttribution.record(activity),
 if (await linearFollowing()) captain.resumeLinearActivity();
 linearNotifications.start();
 

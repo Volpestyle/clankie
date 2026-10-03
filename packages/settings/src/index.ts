@@ -27,6 +27,8 @@ export {
   SwarmSettingsSchema,
   type SwarmConnection,
   LinearWebhookSettingsSchema,
+  LinearWakeSettingsSchema,
+  type LinearWakeSettings,
   OauthAppsSettingsSchema,
   McpServerSchema,
   McpSettingsSchema,
@@ -65,7 +67,7 @@ export { bundledSkills, projectSkillPlugin } from "./bundled-skills.ts";
 export { clankieSkillRoots, mergedLeadershipSkills } from "./skill-roots.ts";
 export { SERVICE_LOADOUT_ENV, serviceInLoadout } from "./loadout.ts";
 export { SettingsStore, defaultSettingsPath } from "./store.ts";
-export { linearFollowStatus } from "./linear-follow.ts";
+export { linearFollowStatus, linearWakeMatches } from "./linear-follow.ts";
 export {
   applyDiscordSettingsToEnvironment,
   discordSettingsToEnvironment,

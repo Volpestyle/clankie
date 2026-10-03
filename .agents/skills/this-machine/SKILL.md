@@ -73,6 +73,7 @@ index). Configure through the headless CLI:
 | Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`             |
 | Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`                       |
 | Persona images                        | `clankie persona images set <folder>`, `status`, `clear` (restart applies)                     |
+| Linear wake rules                     | `clankie linear wake show`, `clankie linear wake set --owner-user-ids ID --actors owner`       |
 | Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`               |
 | Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                        |
 | Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                            |

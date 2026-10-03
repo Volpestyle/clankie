@@ -132,6 +132,7 @@ describe("discord invite URL", () => {
 
 describe("Linear follow setup", () => {
   function harness(options: {
+    readonly texts?: readonly (string | undefined)[];
     readonly selections: readonly string[];
     readonly secret?: string | undefined;
     readonly following?: boolean;
@@ -143,9 +144,14 @@ describe("Linear follow setup", () => {
   }) {
     let settings: ClankieSettings = {
       ...emptySettings(),
-      linearWebhook: { following: options.following ?? false, url: options.url },
+      linearWebhook: {
+        ...emptySettings().linearWebhook,
+        following: options.following ?? false,
+        url: options.url,
+      },
     };
     const selections = [...options.selections];
+    const texts = options.texts ? [...options.texts] : undefined;
     const stored = new Map<string, string>();
     const removed: string[] = [];
     const lines: string[] = [];
@@ -158,7 +164,7 @@ describe("Linear follow setup", () => {
         return selections.shift();
       },
       readSecret: async () => options.secret,
-      readText: async () => "application-id",
+      readText: async () => (texts ? texts.shift() : "application-id"),
       renderLine: (line: string) => lines.push(line),
     } as unknown as SetupFlow;
     const shell = {
@@ -197,6 +203,30 @@ describe("Linear follow setup", () => {
     const connect = commands.find((command) => command.name === "connect")!;
     return { connect, shell, stored, removed, lines, results, settings: () => settings };
   }
+
+  it("edits every wake rule under Follow Linear without changing following, and cancels atomically", async () => {
+    const h = harness({
+      selections: ["follow", "wake"],
+      texts: ["owner,self,users", "james", "teammate", "issueMention", "issueSubscribed"],
+      stored: { linear: { type: "oauth" } },
+    });
+    await h.connect.run("linear", h.shell);
+    expect(h.settings().linearWebhook.wake).toEqual({
+      actors: ["owner", "self", "users"],
+      ownerUserIds: ["james"],
+      userIds: ["teammate"],
+      notificationTypes: ["issueMention"],
+      excludedNotificationTypes: ["issueSubscribed"],
+    });
+    expect(h.settings().linearWebhook.following).toBe(false);
+    const cancelled = harness({
+      selections: ["follow", "wake"],
+      texts: ["self", undefined],
+      stored: { linear: { type: "oauth" } },
+    });
+    await cancelled.connect.run("linear", cancelled.shell);
+    expect(cancelled.settings().linearWebhook.wake.actors).toEqual(["owner"]);
+  });
 
   it("connects a verified app using concealed secret entry and reports the workspace", async () => {
     const saved: string[] = [];

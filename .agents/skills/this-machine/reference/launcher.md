@@ -20,8 +20,8 @@ Follow Linear is off by default and changes live without restarting. Configure
 its signed webhook under `/connect linear` → **Follow Linear** → **Configure
 webhook**, selecting all activity events in Linear. Events always reach the
 **Linear inbox** conversation as **External activity**; open it with
-`clankie --chat linear-inbox`. Activity by his own Linear account never wakes
-him. His connected account's real Linear notifications are read once at startup
+`clankie --chat linear-inbox`. Wake rules default to configured owner humans only, excluding `issueSubscribed`.
+His own account and workers stay quiet unless explicitly selected. His connected account's real Linear notifications are read once at startup
 and after newly persisted signed webhook events with a 1.5-second debounce.
 There is no periodic poll. An empty webhook read or failed startup/manual read
 gets one delayed retry; a failed retry waits for the next webhook or restart.
@@ -32,8 +32,9 @@ and effective `active` separately if setup is removed. Use **Configure webhook**
 to store the URL and secret, including on old setups that stored only a secret;
 `clankie linear webhook set --url URL` records an already-registered URL.
 `clankie linear webhook clear` removes it. No restart is needed.
-Following on wakes `global-default` for these, including mentions, assignments,
-subscribed issue activity and replies. Old issue bindings remain inspectable
+Following on wakes `global-default` only for notifications attributed from signed
+webhook history that match `linearWebhook.wake`. Unknown or ambiguous actors are
+collected without waking. Old issue bindings remain inspectable
 with `clankie linear work list` but have no routing effect. For notification
 reads and acknowledgments keep `--conversation global-default`; omit it for
 all passive history. The owner-connected tracker account is the identity of Clankie and every worker
@@ -41,6 +42,19 @@ in his swarm. Use his connected tools or granted worker bridge for tracker write
 never fall back to a harness’s independent account. Without delegated access,
 ask the lead to perform the write. Linear is the current connector; the rule
 applies to any connected tracker.
+
+Use `clankie linear wake show` to inspect rules. Configure the owner's Linear ID
+with `clankie linear wake set --owner-user-ids ID` (no owner ID is assumed).
+`--actors owner,human,self,users` selects actor classes: `self` includes the
+connected app and workers; `users` matches `--user-ids`. `--types` allows chosen
+notification types, `--exclude-types` vetoes them. Comma-separated values; `none`
+clears a list. Defaults are owner only and excluded `issueSubscribed`.
+`clankie linear wake set --actors owner,self --types issueMention,issueCommentMention`
+opts into coordination requests through his own identity. Rules apply to new
+notifications without restart and never replay old collected notifications.
+`GET/PUT /v1/linear/wake` inspects/replaces rules; PUT takes the rule object.
+Bare `/linear` opens **Follow Linear**, including **Wake rules**. Names and
+subtitles are not authorship; use the connected `linear_get_user` to resolve IDs.
 
 `clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
 in `items`: the oldest unread events, 20 by default (`--limit N`, up to 100),

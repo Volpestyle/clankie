@@ -459,7 +459,7 @@ it("binds native tools, project doctrine and channel delivery to selected servic
     expect(await captain.pollSeatEvents(0)).toEqual([]);
     await ownerSettings.update((settings) => ({
       ...settings,
-      linearWebhook: { following: true },
+      linearWebhook: { ...settings.linearWebhook, following: true },
     }));
     const owner = {
       organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",

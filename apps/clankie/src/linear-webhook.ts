@@ -30,6 +30,7 @@ const LinearActivityPayloadSchema = z.looseObject({
   actor: z
     .looseObject({
       id: z.string().max(256).nullish(),
+      type: z.string().max(64).nullish(),
       name: z.string().max(256).nullish(),
       email: z.string().max(320).nullish(),
     })
@@ -47,6 +48,7 @@ export interface LinearActivityEvent {
   readonly type: string;
   readonly action: string;
   readonly actorId?: string | undefined;
+  readonly actorType?: string | undefined;
   readonly organizationId?: string | undefined;
   readonly worker?: { grantId: string; principalId: string; workId: string } | undefined;
   /** Set when another actor comments on content his verified account posted (ADR 0191). */
@@ -276,6 +278,7 @@ export function classifyLinearDelivery(input: {
   readonly secret: string;
   readonly now: Date;
   readonly writes?: LinearWriteReceipts;
+  readonly recordActivity?: ((activity: LinearActivityEvent) => void) | undefined;
 }): LinearWebhookOutcome {
   const { rawBody, headers, secret, now } = input;
   if (headers.signature === undefined || !signatureMatches(rawBody, secret, headers.signature)) {
@@ -299,27 +302,27 @@ export function classifyLinearDelivery(input: {
   }
 
   const receipt = input.writes?.match(payload, now);
-  if (receipt && !receipt.worker) return { kind: "ignored", reason: "self_echo" };
 
   const { webhookTimestamp: _sentAt, ...event } = payload;
-  return {
-    kind: "activity",
-    activity: {
-      eventId: createHash("sha256").update(canonicalJson(event)).digest("hex"),
-      deliveryId: headers.delivery,
-      type: payload.type,
-      action: payload.action,
-      actorId: payload.actor?.id ?? undefined,
-      organizationId: payload.organizationId,
-      ...(receipt?.worker ? { worker: receipt.worker } : {}),
-      actorName: payload.actor?.name ?? undefined,
-      actorEmail: payload.actor?.email ?? undefined,
-      createdAt: payload.createdAt,
-      url: payload.url,
-      updatedFrom: payload.updatedFrom,
-      data: payload.data ?? {},
-    },
+  const activity: LinearActivityEvent = {
+    eventId: createHash("sha256").update(canonicalJson(event)).digest("hex"),
+    deliveryId: headers.delivery,
+    type: payload.type,
+    action: payload.action,
+    actorId: payload.actor?.id ?? undefined,
+    actorType: payload.actor?.type ?? undefined,
+    organizationId: payload.organizationId,
+    ...(receipt?.worker ? { worker: receipt.worker } : {}),
+    actorName: payload.actor?.name ?? undefined,
+    actorEmail: payload.actor?.email ?? undefined,
+    createdAt: payload.createdAt,
+    url: payload.url,
+    updatedFrom: payload.updatedFrom,
+    data: payload.data ?? {},
   };
+  input.recordActivity?.(activity);
+  if (receipt && !receipt.worker) return { kind: "ignored", reason: "self_echo" };
+  return { kind: "activity", activity };
 }
 
 const HEADLINE_MAX = 160;

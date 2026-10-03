@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { LinearWakeSettingsSchema } from "@clankie/settings";
 import { LinearNotifications } from "../src/linear-notifications.ts";
 import type { McpHost } from "../src/mcp-host.ts";
 import type { LinearActivityEvent } from "../src/linear-webhook.ts";
@@ -56,10 +57,14 @@ async function fixture() {
   });
   const following = vi.fn(async () => true);
   const onError = vi.fn();
+  const attribute = vi.fn((): { id: string; type: string } | undefined => ({ id: "owner", type: "user" }));
+  const wakeRules = vi.fn(async () => LinearWakeSettingsSchema.parse({ ownerUserIds: ["owner"] }));
   const options = {
     path: join(root, "cursor.json"),
     host: { account, call },
     following,
+    attribute,
+    wakeRules,
     receive,
     onError,
     now: () => new Date(NOW),
@@ -83,6 +88,8 @@ async function fixture() {
     received,
     following,
     onError,
+    attribute,
+    wakeRules,
   };
 }
 
@@ -138,7 +145,10 @@ it("collects while off, suppresses self-authored notifications, and does not rep
   await f.poller.poll();
   expect(f.received[0]!.following).toBe(false);
   f.following.mockResolvedValue(true);
-  f.page([notification("off"), { ...notification("self"), actor: { id: "bot" } }, notification("human")]);
+  f.attribute
+    .mockReturnValueOnce({ id: "owner", type: "user" })
+    .mockReturnValueOnce({ id: "bot", type: "user" });
+  f.page([notification("off"), notification("self"), notification("human")]);
   await f.poller.poll();
   expect(f.received.map((entry) => [entry.activity.data.id, entry.following])).toEqual([
     ["off", false],
@@ -210,6 +220,10 @@ it("follows a replacement connected identity without depending on an email or di
     },
   };
   f.account.mockResolvedValue(replacement);
+  f.wakeRules.mockResolvedValue(LinearWakeSettingsSchema.parse({ actors: ["human"] }));
+  f.attribute
+    .mockReturnValueOnce({ id: "bot", type: "user" })
+    .mockReturnValueOnce({ id: "another-user", type: "user" });
   f.page([
     { ...notification("same-provider-id"), actor: { id: "another-user" } },
     { ...notification("former-account"), actor: { id: own.account.userId } },
@@ -396,4 +410,24 @@ it("does not start a queued refresh after closing during an active read", async 
   await vi.advanceTimersByTimeAsync(60_000);
   expect(f.call).toHaveBeenCalledTimes(1);
   expect(f.received).toEqual([]);
+});
+
+it("collects unattributed and excluded notifications, ignores purported MCP actors, and applies rule changes live", async () => {
+  const f = await fixture();
+  f.attribute.mockReturnValue(undefined);
+  f.page([{ ...notification("unknown"), actor: { id: "owner" } }]);
+  await f.poller.poll();
+  expect(f.received[0]).toMatchObject({ following: false, activity: { actorId: undefined } });
+  f.attribute.mockReturnValue({ id: "owner", type: "user" });
+  f.page([notification("subscribed", "issueSubscribed")]);
+  await f.poller.poll();
+  expect(f.received.at(-1)?.following).toBe(false);
+  f.attribute.mockReturnValue({ id: "bot", type: "app" });
+  f.page([notification("self-before")]);
+  await f.poller.poll();
+  expect(f.received.at(-1)?.following).toBe(false);
+  f.wakeRules.mockResolvedValue(LinearWakeSettingsSchema.parse({ actors: ["self"] }));
+  f.page([notification("self-after")]);
+  await f.poller.poll();
+  expect(f.received.at(-1)?.following).toBe(true);
 });

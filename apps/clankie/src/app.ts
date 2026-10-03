@@ -33,7 +33,7 @@ import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@cla
  * Discord presence, the captain seam, memory, embodiment (play), browser,
  * media, and device pairing live here.
  */
-import { linearFollowStatus } from "@clankie/settings";
+import { linearFollowStatus, LinearWakeSettingsSchema } from "@clankie/settings";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
@@ -181,7 +181,12 @@ import {
   mintDeviceSessionClaims,
 } from "./device-session.ts";
 import { createLaneMcpEndpoint } from "./lane-mcp.ts";
-import { type LinearWriteReceipts, classifyLinearDelivery, linearReplyTo } from "./linear-webhook.ts";
+import {
+  type LinearActivityEvent,
+  type LinearWriteReceipts,
+  classifyLinearDelivery,
+  linearReplyTo,
+} from "./linear-webhook.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
@@ -459,6 +464,7 @@ export interface ClankieAppDependencies {
   publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;
   captainLeaseDurationMs?: number;
+    recordActivity?(activity: LinearActivityEvent): void;
   captainHeartbeatRecordIntervalMs?: number;
   clock?: () => Date;
   idFactory?: () => string;
@@ -2748,6 +2754,24 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (secret === undefined || secret.length === 0) {
       return context.json({ error: "linear_webhook_unavailable" }, 503);
     }
+  app.on(["GET", "PUT"], "/v1/linear/wake", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
+    let current;
+    if (context.req.method === "PUT") {
+      const parsed = LinearWakeSettingsSchema.safeParse(await readJson(context.req.raw));
+      if (!parsed.success) return context.json({ error: "malformed" }, 400);
+      if (!settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
+      current = await settingsSource.update((value) => ({
+        ...value,
+        linearWebhook: { ...value.linearWebhook, wake: parsed.data },
+      }));
+    } else current = await settingsSource.load();
+    return context.json({ schemaVersion: 1, wake: current.linearWebhook.wake });
+  });
+
     // The raw bytes, before any parse: the signature covers what Linear sent,
     // and `readJson` would throw exactly those bytes away.
     const rawBody = new Uint8Array(await context.req.raw.arrayBuffer());
@@ -2775,7 +2799,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
 
     // Persist first; following controls model turns, not inbox delivery.
-    // Anything his own account wrote, captain or worker, is kept but never wakes him.
+    // Wake rules apply only after the notification is attributed from signed history.
     const own = await hook.ownAccount?.().catch(() => undefined);
     const replyTo = linearReplyTo(outcome.activity, own, hook.writes, clock());
     // Workspace webhooks are history. Only the connected account's actual Linear
@@ -2820,6 +2844,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       const offer = mintPairingOffer({
         now,
         mintedBy: purpose === "operator" ? "hosted-account-operator" : "hosted-account",
+      recordActivity: hook.recordActivity,
         idFactory,
       });
       await publisher.publishPairingOffer(offer);
@@ -2830,6 +2855,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         operatorId: offer.mintedBy,
         expiresAt: offer.expiresAt,
       });
+      if (outcome.reason === "self_echo") hook.requestNotificationPoll?.();
       dependencies.onHostedPairing?.();
       return { link: protectedOffer.deepLink, expiresAtMs: Date.parse(offer.expiresAt) };
     });

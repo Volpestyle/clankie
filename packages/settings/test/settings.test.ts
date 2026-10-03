@@ -467,7 +467,10 @@ describe("mcp and email settings", () => {
       "utf8",
     );
     expect((await new SettingsStore(path).load()).mcp.servers).toEqual([]);
-    expect((await new SettingsStore(path).load()).linearWebhook).toEqual({ following: false });
+    expect((await new SettingsStore(path).load()).linearWebhook).toMatchObject({
+      following: false,
+      wake: { actors: ["owner"], excludedNotificationTypes: ["issueSubscribed"] },
+    });
 
     await writeFile(path, `${JSON.stringify({ schemaVersion: 1, lienar: {} })}\n`, "utf8");
     await expect(new SettingsStore(path).load()).rejects.toThrow(/nrecognized/);

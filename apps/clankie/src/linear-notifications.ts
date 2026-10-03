@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { linearWakeMatches, type LinearWakeSettings } from "@clankie/settings";
+import type { LinearAttributionJournal } from "./linear-attribution.ts";
 import type { LinearActivityEvent } from "./linear-webhook.ts";
 import type { McpHost } from "./mcp-host.ts";
 
@@ -11,7 +13,6 @@ const NotificationSchema = z.looseObject({
   createdAt: z.string().datetime({ offset: true }),
   title: z.string().optional(),
   url: z.string().optional(),
-  actor: z.object({ id: z.string() }).nullish(),
 });
 const PageSchema = z.object({
   notifications: z.array(NotificationSchema),
@@ -27,6 +28,8 @@ interface LinearNotificationOptions {
   path: string;
   host: Pick<McpHost, "account" | "call">;
   following(): Promise<boolean>;
+  wakeRules(): Promise<LinearWakeSettings>;
+  attribute: LinearAttributionJournal["attribute"];
   receive(activity: LinearActivityEvent, following: boolean): unknown;
   onError(): void;
   now?: () => Date;
@@ -34,7 +37,7 @@ interface LinearNotificationOptions {
 
 /** Read the connected account's inbox through its MCP audience, never an inherited connector
  * or an OAuth token sent to GraphQL. Notification identity, not readAt/updatedAt,
- * drives wakes. The webhook remains a separate passive activity journal.
+ * drives wakes. Signed webhook history supplies attribution before wake rules are evaluated.
  */
 export class LinearNotifications {
   private checkpoint: z.infer<typeof CheckpointSchema> | undefined;
@@ -162,13 +165,15 @@ export class LinearNotifications {
       cursors.add(page.cursor);
       cursor = page.cursor;
     } while (cursor);
+    const rules = await this.options.wakeRules();
+    const wake = following && (await this.options.following());
     // Credential rotation during pagination cannot relabel somebody else's inbox.
     if ((await this.options.host.account("linear", "operator")).binding !== own.binding) return false;
     if (this.closed) return false;
-    const wake = following && (await this.options.following());
     let found = false;
     for (const item of notifications.reverse()) {
       if (item.createdAt === since && ids.includes(item.id)) continue;
+      const actor = this.options.attribute(item, own.account.workspaceId);
       this.options.receive(
         {
           eventId: createHash("sha256").update(`linear-notification:${account}:${item.id}`).digest("hex"),
@@ -176,16 +181,18 @@ export class LinearNotifications {
           deliveryId: undefined,
           type: "Notification",
           action: item.type,
-          actorId: item.actor?.id,
-          actorName: undefined,
-          actorEmail: undefined,
+          actorId: actor?.id,
+          actorType: actor?.type,
+          actorName: actor?.name,
+          actorEmail: actor?.email,
+          worker: actor?.worker,
           organizationId: own.account.workspaceId,
           createdAt: item.createdAt,
           url: item.url,
           updatedFrom: undefined,
           data: item,
         },
-        wake && item.actor?.id !== own.account.userId,
+        wake && linearWakeMatches(rules, item.type, actor, own.account.userId),
       );
       found = true;
     }
