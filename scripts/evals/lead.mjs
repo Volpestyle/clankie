@@ -179,39 +179,42 @@ function freshDirectory(path) {
   return realpathSync(absolute);
 }
 
+/** Exact historical inputs; callers never read an ambient checkout or fetch missing objects. */
+export function historicalDependencyInputs(task) {
+  verifyTask(task);
+  const paths = gitText("ls-tree", "-r", "--name-only", task.baseCommit).split("\n").filter((path) =>
+    path === "package.json" || path.endsWith("/package.json") ||
+    ["pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc", ".pnpmfile.cjs"].includes(path) ||
+    path.startsWith("patches/") || path.startsWith("vendor/"),
+  );
+  return paths.map((path) => ({ path, bytes: git("show", `${task.baseCommit}:${path}`) }));
+}
+
+/** A standalone pre-fix repository, with no future objects or held-out tests. */
+export function prepareHistoricalWorkspace(task, output) {
+  verifyTask(task);
+  const workspace = freshDirectory(output);
+  const tar = join(workspace, ".historical-source.tar");
+  writeFileSync(tar, git("archive", "--format=tar", task.baseCommit));
+  command("/usr/bin/tar", ["-xf", tar, "-C", workspace]);
+  rmSync(tar);
+  for (const grader of task.graders) rmSync(join(workspace, grader.path), { force: true });
+  rmSync(join(workspace, "scripts/evals"), { recursive: true, force: true });
+  rmSync(join(workspace, "docs/testing"), { recursive: true, force: true });
+  writeFileSync(join(workspace, "TASK.md"), `${task.prompt}\n\nTime budget: ${task.timeBudgetSeconds} seconds. Do not seek original fixes or held-out tests.\n`);
+  command("/usr/bin/git", ["init", "-q"], workspace);
+  command("/usr/bin/git", ["add", "."], workspace);
+  command("/usr/bin/git", ["-c", "user.name=Lead eval fixture", "-c", "user.email=eval@invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "Pinned pre-fix replay"], workspace);
+  return { task: task.id, baseCommit: task.baseCommit, workspace, status: "prepared-no-agents-launched" };
+}
+
 /** Export no future history/remote. All worker indexes live in a new repository. */
 export function prepareReplay(task, output, workers = 3) {
   verifyTask(task);
   if (!Number.isSafeInteger(workers) || workers < 1 || workers > 6) throw Error("workers must be 1..6");
   const root = freshDirectory(output);
-  const workspace = join(root, "worktree");
-  mkdirSync(workspace);
-  const tar = join(root, "source.tar");
-  writeFileSync(tar, git("archive", "--format=tar", task.baseCommit));
-  command("/usr/bin/tar", ["-xf", tar, "-C", workspace]);
-  rmSync(tar);
-  for (const grader of task.graders) rmSync(join(workspace, grader.path), { force: true });
-  // An exported replay must not reveal newer solution/grader sources through eval tooling.
-  rmSync(join(workspace, "scripts/evals"), { recursive: true, force: true });
-  rmSync(join(workspace, "docs/testing"), { recursive: true, force: true });
-  writeFileSync(
-    join(workspace, "TASK.md"),
-    `${task.prompt}\n\nTime budget: ${task.timeBudgetSeconds} seconds. Give concurrent writers separate worktrees and indexes. Do not seek the original fix or held-out tests.\n`,
-  );
+  const { workspace } = prepareHistoricalWorkspace(task, join(root, "worktree"));
   const local = (...args) => command("/usr/bin/git", args, workspace).toString().trim();
-  local("init", "-q");
-  local("add", ".");
-  local(
-    "-c",
-    "user.name=Lead eval fixture",
-    "-c",
-    "user.email=eval@invalid",
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "-qm",
-    "Pinned pre-fix replay",
-  );
   const worktrees = [{ role: "lead", path: workspace }];
   for (let i = 0; i < workers; i++) {
     const path = join(root, `worker-${i + 1}`);
@@ -491,7 +494,7 @@ export function validateGraderReport(task, workspace, report) {
 /** Grade only an explicitly prepared candidate with separately staged dependencies.
  * This command never starts agents. It uses the existing network-off OS sandbox.
  */
-export async function gradeCandidate(directory) {
+export async function gradeCandidate(directory, { execute = executeSandbox, runtime } = {}) {
   const root = realpathSync(resolve(directory));
   const workspace = join(root, "worktree");
   if (realpathSync(workspace) !== workspace || readdirSync(join(root, "home")).length)
@@ -533,7 +536,7 @@ export async function gradeCandidate(directory) {
   const reportPath = join(root, "tmp/heldout-results.json");
   rmSync(reportPath, { force: true });
   const started = Date.now();
-  const result = await executeSandbox({
+  const result = await execute({
     root,
     binary: process.execPath,
     args: [
@@ -584,7 +587,7 @@ export async function gradeCandidate(directory) {
     candidateTree: receipt.candidateTree,
     testHashes: task.graders,
     dependencies,
-    runtime: { nodeVersion: process.version, nodeSha256: sha(readFileSync(process.execPath)) },
+    runtime: runtime ?? { nodeVersion: process.version, nodeSha256: sha(readFileSync(process.execPath)) },
     runnerSha256: sha(readFileSync(fileURLToPath(import.meta.url))),
     isolationSha256: sha(readFileSync(join(repo, "scripts/evals/isolation.mjs"))),
     startedAt: new Date(started).toISOString(),
