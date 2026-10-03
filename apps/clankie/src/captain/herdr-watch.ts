@@ -656,6 +656,16 @@ export interface PiSeatModel {
   readonly provider?: { readonly id: string; readonly config: Readonly<Record<string, unknown>> };
 }
 
+/** Controller-owned launch admission; absent for ordinary production hires. */
+export interface NativeLaunchPolicy {
+  admit(input: {
+    seat: Readonly<SpawnOperatorSeat>;
+    phase: "request" | "launch";
+    account?: Readonly<CodexAccount>;
+    resumed: boolean;
+  }): Promise<void>;
+}
+
 export class HerdrWatchStore implements HerdrWatchPort {
   private readonly piSeatModel: (() => Promise<PiSeatModel | undefined>) | undefined;
   private readonly hireCapacity:
@@ -693,6 +703,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private watchingSummaries = false;
   private stateUnreadable = false;
   private closed = false;
+  private readonly nativeLaunchPolicy: NativeLaunchPolicy | undefined;
   private readonly accounts: () => Promise<readonly CodexAccount[]>;
   private readonly resumeInventory: ((fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>) | undefined;
   private readonly resumeStarts = new Map<string, Promise<void>>();
@@ -701,6 +712,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     path: string,
     options: {
       readonly validateOwner?: (owner: ConversationOwner) => Promise<boolean>;
+      readonly nativeLaunchPolicy?: NativeLaunchPolicy;
       readonly codexAccounts?: () => Promise<readonly CodexAccount[]>;
       readonly skillBundle?: {
         readonly repoRoot: string;
@@ -754,6 +766,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.path = path;
     this.validateOwner = options.validateOwner;
     this.hireOwners = new HireOwners(`${path}.owners.json`);
+    this.nativeLaunchPolicy = options.nativeLaunchPolicy;
     this.hireReceipts = new DeliveryFence(`${path}.hire-receipts.json`);
     this.skillBundle = options.skillBundle;
     this.accounts = options.codexAccounts ?? (async () => codexAccounts());
@@ -1059,6 +1072,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
         reason: "not_ready",
         detail: "Saved-session metadata must be resolved before hiring",
       };
+    try {
+      await this.nativeLaunchPolicy?.admit({
+        seat: structuredClone(input),
+        phase: "request",
+        resumed: resume !== undefined,
+      });
+    } catch (error) {
+      return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
+    }
     const receiptKey = JSON.stringify([
       input.fleet ?? "local",
       input.harness,
@@ -1467,6 +1489,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
           input.workingDirectory,
         );
       }
+      await this.nativeLaunchPolicy?.admit({
+        seat: structuredClone(input),
+        phase: "launch",
+        ...(account === undefined ? {} : { account: { ...account } }),
+        resumed: resume !== undefined,
+      });
       if (authority !== undefined) await assertConversationAuthority(authority);
       paneId = await createTab({
         cwd: input.workingDirectory,

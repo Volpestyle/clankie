@@ -109,6 +109,8 @@ import {
   createHerdrWatchRunner,
   type DiscordWatchOrigin,
   type HerdrAgentSnapshot,
+  type NativeLaunchPolicy,
+  type HerdrWatchRunner,
 } from "./herdr-watch.ts";
 import {
   SeatHookLog,
@@ -535,6 +537,8 @@ export function resolveOperatorPrompt(
 export interface CaptainOptions {
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
+  readonly nativeLaunchPolicy?: NativeLaunchPolicy;
+  readonly nativeHerdrRunner?: HerdrWatchRunner;
   readonly localCodexProcess?: (pid: number, pane: string) => () => void;
   readonly localCodexSocket?: () => string | undefined;
   readonly personaImages?: PersonaImageSource;
@@ -898,7 +902,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     })),
   ];
   const herdrRunner = routeHerdrFleets(
-    createHerdrWatchRunner(deps.herdrAvailable),
+    options.nativeHerdrRunner ?? createHerdrWatchRunner(deps.herdrAvailable),
     async () =>
       new Map([
         ...(await refreshFleets()).map((fleet) => {
@@ -987,6 +991,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     validateOwner: validateConversationOwner,
+    ...(options.nativeLaunchPolicy === undefined ? {} : { nativeLaunchPolicy: options.nativeLaunchPolicy }),
     codexAccounts: async () => codexAccounts(await settings()),
     skillBundle: {
       repoRoot: options.repoRoot,

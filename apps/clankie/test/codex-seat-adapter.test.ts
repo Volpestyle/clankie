@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import type { CodexAppServerSeat, CodexSeatEvent } from "../src/captain/codex-app-server.ts";
 
-function fixture() {
+function fixture(nativePolicy?: NonNullable<Parameters<typeof createCodexSeatAdapter>[0]>["nativePolicy"]) {
   let event: (event: CodexSeatEvent) => void = () => undefined;
   const emit = (method: string, params: Record<string, unknown> = {}) =>
     event({ method, params: { threadId: "thread-1", ...params } });
@@ -24,7 +24,12 @@ function fixture() {
     };
   });
   const trackerOverrides = vi.fn(async () => ["mcp_servers.linear.enabled=false"]);
-  const adapter = createCodexSeatAdapter({ start, herdr, trackerOverrides });
+  const adapter = createCodexSeatAdapter({
+    start,
+    herdr,
+    trackerOverrides,
+    ...(nativePolicy ? { nativePolicy } : {}),
+  });
   const view = { paneId: "w1:p1", run: vi.fn(async () => undefined) };
   return { adapter, emit, start, send, close, herdr, view, trackerOverrides };
 }
@@ -322,4 +327,20 @@ it("cancels pending startup when its native pane closes", async () => {
     warning.mockRestore();
     vi.useRealTimers();
   }
+});
+
+it("passes the exact native view and launch to the trusted policy factory", async () => {
+  const policy = {
+    connected: async () => {},
+    beforeTurn: async () => {},
+    audit: async () => {},
+    failed: async () => {},
+  };
+  const factory = vi.fn(() => policy);
+  const f = fixture(factory);
+  const launch = { harness: "codex" as const, cwd: "/owned/task", brief: "" };
+  const result = await f.adapter.start(launch, f.view);
+  expect(factory).toHaveBeenCalledWith(launch, f.view);
+  expect(f.start).toHaveBeenCalledWith(expect.objectContaining({ policy }));
+  if (result.outcome === "started") await result.control.close();
 });

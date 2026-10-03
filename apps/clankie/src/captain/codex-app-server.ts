@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import WebSocket from "ws";
+import type { Duplex } from "node:stream";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue =>
@@ -12,6 +13,32 @@ const record = (value: unknown): RecordValue =>
 export interface CodexSeatEvent {
   method: string;
   params: RecordValue;
+}
+
+/** Reads from this exact native server; callers cannot dispatch through this facade. */
+export interface CodexNativeRead {
+  request(
+    method: "account/read" | "account/rateLimits/read" | "thread/list" | "config/read",
+    params: RecordValue,
+  ): Promise<unknown>;
+}
+
+/** Optional trusted controller policy. Never supplied by worker input or settings. */
+export interface CodexNativePolicy {
+  /** Complete trusted environment and final native permission overrides. */
+  readonly launch?: {
+    readonly environment: Readonly<Record<string, string>>;
+    readonly socketRoot: string;
+    readonly config: readonly string[];
+  };
+  /** Install independent monitoring before the interactive client can start a turn. */
+  connected(read: CodexNativeRead): Promise<void>;
+  bound?(input: { threadId: string; read: CodexNativeRead }): Promise<void>;
+  beforeTurn(input: { threadId: string; read: CodexNativeRead }): Promise<void>;
+  /** Includes descendant events, before the seat's root-thread filtering. */
+  audit(event: CodexSeatEvent): Promise<void>;
+  /** Must revoke the exact enclosing execution boundary, including native TUI turns. */
+  failed(error: unknown): Promise<void>;
 }
 
 /** One connection to one selected app-server; requests never select another server. */
@@ -131,6 +158,8 @@ export type CodexServerLauncher = (input: {
   /** `-c key=value` pairs, already flattened. */
   readonly configArgs: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
+  readonly inheritEnvironment?: false;
+  readonly socketRoot?: string;
   /** The server exited or its link dropped; `code` is the exit status when known. */
   readonly onExit: (code: number | null) => void;
 }) => Promise<CodexServerConnection>;
@@ -140,13 +169,33 @@ export type CodexServerLauncher = (input: {
  * avoids a shared daemon losing the pane identity (VUH-1398), and TCP exposure.
  */
 const localCodexServer: CodexServerLauncher = async (input) => {
-  const directory = await mkdtemp(join(tmpdir(), "clankie-codex-"));
+  if (input.socketRoot !== undefined) {
+    for (let current = input.socketRoot; ; current = dirname(current)) {
+      const ancestor = await lstat(current);
+      if (!ancestor.isDirectory() || ancestor.isSymbolicLink())
+        throw new Error("Codex socket root has symbolic ancestry");
+      if (dirname(current) === current) break;
+    }
+    const stat = await lstat(input.socketRoot);
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      stat.uid !== process.getuid?.() ||
+      (stat.mode & 0o077) !== 0 ||
+      (await realpath(input.socketRoot)) !== input.socketRoot
+    )
+      throw new Error("Codex socket root must be a canonical private controller directory");
+  }
+  const directory = await mkdtemp(join(input.socketRoot ?? tmpdir(), "clankie-codex-"));
   const socketPath = join(directory, "rpc.sock");
   // The supervisor must not lend its own pane identity or Swarm enrollment to
   // the child. Explicit worker launch settings (including CODEX_HOME) survive.
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key)),
-  );
+  const env =
+    input.inheritEnvironment === false
+      ? {}
+      : Object.fromEntries(
+          Object.entries(process.env).filter(([key]) => !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key)),
+        );
   // `clankie restart` signals the service's whole process group. The native
   // TUI stays in Herdr, so its app-server must also outlive a service restart.
   // Redirect stderr to a file: a pipe back to the service would break on exit.
@@ -203,9 +252,12 @@ const localCodexServer: CodexServerLauncher = async (input) => {
 };
 
 /** One attempt to open a protocol socket; undefined while nothing listens. */
-export function openCodexSocket(address: string): Promise<WebSocket | undefined> {
+export function openCodexSocket(address: string, stream?: Duplex): Promise<WebSocket | undefined> {
   return new Promise<WebSocket | undefined>((resolve) => {
-    const attempt = new WebSocket(address, { handshakeTimeout: 1_000 });
+    const attempt = new WebSocket(address, {
+      handshakeTimeout: 1_000,
+      ...(stream === undefined ? {} : { createConnection: () => stream }),
+    });
     attempt.once("open", () => resolve(attempt));
     attempt.once("error", () => {
       attempt.terminate();
@@ -239,9 +291,11 @@ export async function startCodexAppServerSeat(options: {
   /** Start the native TUI on this server before sending any model input. */
   startView: (args: readonly string[]) => Promise<void>;
   onEvent?: (event: CodexSeatEvent) => void;
+  policy?: CodexNativePolicy;
 }): Promise<CodexAppServerSeat> {
   options.signal?.throwIfAborted();
-  const configArgs = (options.config ?? []).flatMap((value) => ["-c", value]);
+  const launch = options.policy?.launch;
+  const configArgs = [...(options.config ?? []), ...(launch?.config ?? [])].flatMap((value) => ["-c", value]);
   let client: CodexAppServerClient | undefined;
   let closed = false;
   let stopped = false;
@@ -253,7 +307,15 @@ export async function startCodexAppServerSeat(options: {
   const server = await (options.server ?? localCodexServer)({
     cwd: options.cwd,
     configArgs,
-    ...(options.env === undefined ? {} : { env: options.env }),
+    ...(launch === undefined
+      ? options.env === undefined
+        ? {}
+        : { env: options.env }
+      : {
+          env: { ...launch.environment },
+          inheritEnvironment: false as const,
+          socketRoot: launch.socketRoot,
+        }),
     onExit: (code) => {
       stoppedServer();
       client?.close();
@@ -271,6 +333,34 @@ export async function startCodexAppServerSeat(options: {
       stoppedServer();
     }
   };
+  let policyFailure: unknown;
+  let policyFailed = false;
+  let stopping: Promise<void> | undefined;
+  let auditTail: Promise<void> = Promise.resolve();
+  const failPolicy = (error: unknown): Promise<void> => {
+    if (stopping) return stopping;
+    policyFailed = true;
+    policyFailure = error;
+    // Observe every rejection and retain stop failures for the next operation/close.
+    stopping = (async () => {
+      try {
+        await options.policy?.failed(error);
+      } catch (stopError) {
+        policyFailure = new AggregateError([error, stopError], "Native policy containment failed");
+      } finally {
+        await close();
+      }
+    })().catch((closeError: unknown) => {
+      policyFailure = new AggregateError([policyFailure, closeError], "Native policy close failed");
+    });
+    return stopping;
+  };
+  const checkPolicy = async () => {
+    await auditTail;
+    if (stopping) await stopping;
+    if (policyFailed) throw policyFailure;
+    if (closed) throw new Error("Codex native seat is closed");
+  };
   try {
     if (server.pid !== undefined && !stopped) options.onServerStarted?.(server.pid);
     const deadline = Date.now() + (options.listenTimeoutMs ?? 15_000);
@@ -287,6 +377,13 @@ export async function startCodexAppServerSeat(options: {
     let activeTurn: string | undefined;
     let threadId: string | undefined;
     const observe = (event: CodexSeatEvent) => {
+      if (options.policy && !closed && !policyFailed) {
+        auditTail = auditTail
+          .then(async () => {
+            if (!policyFailed) await options.policy!.audit(event);
+          })
+          .catch(failPolicy);
+      }
       if (event.params.threadId === threadId) {
         const turn = record(event.params.turn);
         if (event.method === "turn/started" && typeof turn.id === "string") activeTurn = turn.id;
@@ -296,6 +393,32 @@ export async function startCodexAppServerSeat(options: {
     };
     client = new CodexAppServerClient(socket, observe);
     await client.initialize();
+    const read: CodexNativeRead = {
+      request(method, params) {
+        if (!["account/read", "account/rateLimits/read", "thread/list", "config/read"].includes(method))
+          return Promise.reject(new Error("Native policy RPC is not read-only"));
+        if (
+          method === "config/read" &&
+          (params.includeLayers !== true ||
+            typeof params.cwd !== "string" ||
+            Object.keys(params).some((key) => key !== "cwd" && key !== "includeLayers"))
+        )
+          throw new Error("Native config provenance requires an explicit cwd and complete layers");
+        if (method === "account/read" && params.refreshToken !== false)
+          return Promise.reject(new Error("Native policy cannot refresh authentication"));
+        if (closed || policyFailed) return Promise.reject(new Error("Native policy connection is closed"));
+        return client!.request(method, params);
+      },
+    };
+    if (options.policy) {
+      try {
+        await options.policy.connected(read);
+        await checkPolicy();
+      } catch (error) {
+        await failPolicy(error);
+        throw policyFailure;
+      }
+    }
     const viewArgs = [
       ...configArgs,
       "--remote",
@@ -339,7 +462,16 @@ export async function startCodexAppServerSeat(options: {
     const result = record(await client.request("thread/read", { threadId, includeTurns: false }));
     const thread = record(result.thread);
     if (typeof thread.id !== "string") throw new Error("Codex app-server returned no thread identity");
-    threadId = thread.id;
+    if (thread.id !== threadId) throw new Error("Native thread/read identity changed");
+    if (options.policy?.bound) {
+      try {
+        await options.policy.bound({ threadId, read });
+        await checkPolicy();
+      } catch (error) {
+        await failPolicy(error);
+        throw policyFailure;
+      }
+    }
     let subscribed = false;
     const subscribe = async (waitForRollout = true) => {
       if (subscribed) return;
@@ -385,6 +517,17 @@ export async function startCodexAppServerSeat(options: {
           const input = [{ type: "text", text: message, text_elements: [] }];
           // Serialize dispatch so simultaneous messages cannot start two turns.
           // A failed steer is not retried: only the server knows if it applied.
+          await checkPolicy();
+          if (options.policy) {
+            try {
+              await options.policy.beforeTurn({ threadId: threadId!, read });
+            } catch (error) {
+              await failPolicy(error);
+              throw policyFailure;
+            }
+            await checkPolicy();
+          }
+          // Initial brief authority expires independently of later follow-up turns.
           await guard?.();
           const steering = activeTurn;
           const response = record(
@@ -409,7 +552,12 @@ export async function startCodexAppServerSeat(options: {
         await client!.request("turn/interrupt", { threadId, turnId: activeTurn });
         return true;
       },
-      close,
+      async close() {
+        await close();
+        await auditTail;
+        if (stopping) await stopping;
+        if (policyFailed) throw policyFailure;
+      },
     };
   } catch (error) {
     await close();

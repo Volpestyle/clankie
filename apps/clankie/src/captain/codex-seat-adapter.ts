@@ -1,6 +1,7 @@
 import type {
   HarnessSeatAdapter,
   SeatControl,
+  SeatLaunch,
   SeatEvent,
   SeatRef,
   SeatStatus,
@@ -12,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import {
   startCodexAppServerSeat,
+  type CodexNativePolicy,
   type CodexAppServerSeat,
   type CodexSeatEvent,
   type CodexServerLauncher,
@@ -36,6 +38,8 @@ export function createCodexSeatAdapter(
     trackerOverrides?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<string[]>;
     server?: CodexServerLauncher;
     listenTimeoutMs?: number;
+    /** Trusted controller policy, instantiated separately for every native seat. */
+    nativePolicy?: (input: SeatLaunch, view: SeatView) => CodexNativePolicy;
     /** Extra server environment from the pane the seat is viewed in (a remote pane's Herdr identity). */
     viewEnv?: (view: SeatView) => Promise<Readonly<Record<string, string>>>;
   } = {},
@@ -193,6 +197,7 @@ export function createCodexSeatAdapter(
               ? { env: { ...launch.env, ...(await options.viewEnv?.(view)) } }
               : {}),
             ...(options.server === undefined ? {} : { server: options.server }),
+            ...(options.nativePolicy === undefined ? {} : { policy: options.nativePolicy(launch, view) }),
             ...(options.listenTimeoutMs === undefined ? {} : { listenTimeoutMs: options.listenTimeoutMs }),
             startView: async (args) => {
               // Monitor while waiting for owner trust as well as after startup.
