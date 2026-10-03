@@ -226,3 +226,43 @@ it("retains native session identity in assigned hire principals", async () => {
   f.state.proof = { ...f.state.proof, nativeOccupantId: "replacement-session" };
   expect((await f.resolve())?.occupantId).not.toEqual(first?.occupantId);
 });
+it.each(["valid", "missing-other", "junction", "wrong-machine", "case", "boundary", "cwd-change"])(
+  "resolves remote canonical workspaces with %s evidence",
+  async (kind) => {
+    const f = fixture();
+    f.state.proof = {
+      ...f.state.proof,
+      fleet: "pc",
+      workspace: { machineId: "pc", platform: "windows", canonicalPath: "C:\\code\\kh2\\src" },
+    };
+    f.state.settings.projects[0]!.workspaces = [
+      { id: "remote", machineId: "pc", platform: "windows", path: "C:\\code\\kh2" },
+    ];
+    f.state.settings.projects[1]!.workspaces = [
+      { id: "remote", machineId: "pc", platform: "windows", path: "C:\\gone" },
+    ];
+    if (kind === "wrong-machine") f.state.proof.workspace!.machineId = "another";
+    if (kind === "case") f.state.proof.workspace!.canonicalPath = "c:\\code\\kh2\\src";
+    if (kind === "boundary") f.state.proof.workspace!.canonicalPath = "C:\\code\\kh2-other";
+    const resolve = createProjectMembershipResolver({
+      settings: async () => f.state.settings,
+      hire: async () => f.state.hire,
+      cwd: async () => {
+        throw new Error("Must never inspect a remote PID on the Mac");
+      },
+      canonical: async () => {
+        throw new Error("Must never canonicalize a remote root on the Mac");
+      },
+      remoteCanonical: async (machineId, path) => {
+        expect(machineId).toBe("pc");
+        if (kind === "missing-other" && path === "C:\\gone") return undefined;
+        if (kind === "junction" && path === "C:\\code\\kh2") return "D:\\actual";
+        if (kind === "cwd-change") f.state.proof = { ...f.state.proof, workspace: { ...f.state.proof.workspace!, canonicalPath: "C:\\outside" } };
+        return path;
+      },
+    });
+    const result = await resolve(f.identity);
+    if (["valid", "missing-other"].includes(kind)) expect(result).toMatchObject({ projectId: "kh2" });
+    else expect(result).toBeUndefined();
+  },
+);
