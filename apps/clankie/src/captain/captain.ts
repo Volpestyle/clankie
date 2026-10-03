@@ -1010,14 +1010,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       settings: async () => (await settings()).projects,
       ...(options.projectHireIdentity === undefined ? {} : { proof: options.projectHireIdentity }),
       project: async (input, projects, authority) => {
-        if (projects.projects.length === 0) return undefined;
         let source: string | undefined;
         const origin = authority?.owner.conversationId;
         const native = origin === undefined ? undefined : conversations.nativeSource(origin);
+        if (!native && projects.projects.length === 0) return undefined;
         if (native) {
           const fleet = splitFleetQualified(native.terminalId)?.fleet ?? "default";
           const proof = await options.projectHireIdentity?.(fleet, native.paneId);
           source = await nativeHireProject(
+            projects,
             native.session === undefined ? undefined : occupantIdForHerdrSession(native.session),
             proof,
             (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),

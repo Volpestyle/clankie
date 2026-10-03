@@ -1074,6 +1074,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       let live: HerdrAgentSnapshot | undefined;
       if (this.runner.list) {
+        const candidates = this.projectHires.inventoryCandidates(input.fleet ?? "default");
         const inventory = await this.runner.list(input.fleet).catch(() => undefined);
         if (inventory && resume) live = existingNativeSession(inventory, resume);
         if (inventory)
@@ -1081,6 +1082,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
             input.fleet ?? "default",
             new Set(inventory.map((agent) => agent.paneId)),
             this.activeProjectHires,
+            candidates,
           );
       }
       const reused =

@@ -268,11 +268,27 @@ export class ProjectHires {
       if (a && !a.started) a.gone = true;
     });
   }
+  /** Capture before starting inventory so a stale census cannot release a newer allocation. */
+  public inventoryCandidates(fleet: string): ReadonlyMap<string, string> {
+    return new Map(
+      this.read()
+        .allocations.filter(
+          (a) => !a.gone && (a.request.fleet ?? "default") === fleet && a.pane !== undefined,
+        )
+        .map((a) => [a.id, JSON.stringify(a)]),
+    );
+  }
   /** Caller supplies a complete successful host inventory, never a missing get() response. */
-  public reconcile(fleet: string, panes: ReadonlySet<string>, active: ReadonlySet<string>): void {
+  public reconcile(
+    fleet: string,
+    panes: ReadonlySet<string>,
+    active: ReadonlySet<string>,
+    candidates: ReadonlyMap<string, string>,
+  ): void {
     this.change((state) => {
       for (const a of state.allocations)
         if (
+          candidates.get(a.id) === JSON.stringify(a) &&
           !active.has(a.id) &&
           !a.gone &&
           (a.request.fleet ?? "default") === fleet &&

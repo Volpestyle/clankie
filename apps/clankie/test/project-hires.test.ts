@@ -114,11 +114,21 @@ describe("project hiring", () => {
     });
     const first = f.store.spawnSeat(request(f.root));
     await vi.waitFor(() => expect(f.runner.createTab).toHaveBeenCalledOnce());
-    const second = await f.store.spawnSeat({ ...request(f.root), workingDirectory: tmpdir() });
-    expect(second).toMatchObject({ outcome: "failed", detail: expect.stringContaining("allows 1") });
-    expect(f.runner.createTab).toHaveBeenCalledOnce();
-    release();
-    await first;
+    let secondSettled = false;
+    const second = f.store.spawnSeat({ ...request(f.root), workingDirectory: tmpdir() }).then((result) => {
+      secondSettled = true;
+      return result;
+    });
+    try {
+      await vi.waitFor(() =>
+        expect(secondSettled || vi.mocked(f.runner.createTab!).mock.calls.length > 1).toBe(true),
+      );
+      expect(f.runner.createTab).toHaveBeenCalledOnce();
+      expect(await second).toMatchObject({ outcome: "failed", detail: expect.stringContaining("allows 1") });
+    } finally {
+      release();
+      await Promise.all([first, second]);
+    }
     f.store.close();
     const zero = await fixture();
     zero.projectSettings.projects[0]!.workerCap = 0;
@@ -170,7 +180,9 @@ describe("project hiring", () => {
     f.projectSettings.projects[0]!.roles[0]!.harness = "pi";
     f.projectSettings.projects[0]!.roles[0]!.model = "new-model";
     const restarted = new HerdrWatchStore(f.path, f.options);
-    expect(await restarted.spawnSeat(request(f.root))).toMatchObject({ outcome: "failed" });
+    expect(await restarted.spawnSeat({ ...request(f.root), harness: "claude" })).toMatchObject({
+      outcome: "failed",
+    });
     expect(f.runner.startAgent).toHaveBeenCalledOnce();
     expect(await restarted.spawnSeat({ ...request(f.root), workingDirectory: tmpdir() })).toMatchObject({
       outcome: "failed",
@@ -299,18 +311,74 @@ describe("project hiring", () => {
     const workspace = vi.fn(async (current: ProjectHireProcessProof) =>
       current === proof ? "game" : undefined,
     );
-    expect(await nativeHireProject(proof.nativeOccupantId, proof, () => ({ state: "none" }), workspace)).toBe(
-      "game",
-    );
+    expect(
+      await nativeHireProject(
+        settings(),
+        proof.nativeOccupantId,
+        proof,
+        () => ({ state: "none" }),
+        workspace,
+      ),
+    ).toBe("game");
     expect(workspace).toHaveBeenCalledWith(proof);
     workspace.mockClear();
     await expect(
-      nativeHireProject(proof.nativeOccupantId, proof, () => ({ state: "invalid" }), workspace),
+      nativeHireProject(settings(), proof.nativeOccupantId, proof, () => ({ state: "invalid" }), workspace),
     ).rejects.toThrow("agent has changed");
     await expect(
-      nativeHireProject("old-session", proof, () => ({ state: "none" }), workspace),
+      nativeHireProject(settings(), "old-session", proof, () => ({ state: "none" }), workspace),
     ).rejects.toThrow("agent has changed");
     expect(workspace).not.toHaveBeenCalled();
+  });
+  it("cannot repair an invalid native source role by requesting a different hire role", async () => {
+    const workspace = vi.fn(async () => "game");
+    await expect(
+      nativeHireProject(
+        settings(),
+        proof.nativeOccupantId,
+        proof,
+        () => ({ state: "assigned", projectId: "game", role: "Removed", occupantId: "verified" }),
+        workspace,
+      ),
+    ).rejects.toThrow("project or role has changed");
+    expect(workspace).not.toHaveBeenCalled();
+  });
+  it("keeps deleted native projects invalid even after all projects are removed", async () => {
+    const empty = ProjectsSettingsSchema.parse({});
+    const workspace = vi.fn(async () => "game");
+    await expect(
+      nativeHireProject(
+        empty,
+        proof.nativeOccupantId,
+        proof,
+        () => ({ state: "assigned", projectId: "game", role: "Engineer", occupantId: "verified" }),
+        workspace,
+      ),
+    ).rejects.toThrow("project or role has changed");
+    await expect(
+      nativeHireProject(empty, undefined, undefined, () => ({ state: "invalid" }), workspace),
+    ).rejects.toThrow("agent has changed");
+    expect(
+      await nativeHireProject(empty, undefined, undefined, () => ({ state: "none" }), workspace),
+    ).toBeUndefined();
+    expect(workspace).not.toHaveBeenCalled();
+  });
+  it("does not release an allocation created after an empty inventory began", async () => {
+    const f = await fixture();
+    const ledger = new ProjectHires(join(f.root, "ledger.json"));
+    const before = ledger.inventoryCandidates("default");
+    const held = ledger.reserve(f.projectSettings, "game", request(f.root));
+    ledger.launch(held.id, f.projectSettings);
+    ledger.pane(held.id, "p1");
+    ledger.reconcile("default", new Set(), new Set(), before);
+    expect(() => ledger.reserve(f.projectSettings, "game", request(tmpdir()))).toThrow("allows 1");
+    const next = ledger.inventoryCandidates("default");
+    ledger.observe(held.id, "t1", proof.nativeOccupantId, proof);
+    ledger.reconcile("default", new Set(), new Set(), next);
+    expect(() => ledger.reserve(f.projectSettings, "game", request(tmpdir()))).toThrow("allows 1");
+    ledger.reconcile("default", new Set(), new Set(), ledger.inventoryCandidates("default"));
+    expect(ledger.reserve(f.projectSettings, "game", request(tmpdir())).id).not.toBe(held.id);
+    f.store.close();
   });
   it("cannot select another project bucket from a project conversation", () => {
     expect(() => selectHireProject("game", "other", "other")).toThrow("different projects");

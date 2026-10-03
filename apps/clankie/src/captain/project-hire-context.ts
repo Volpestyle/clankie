@@ -44,21 +44,31 @@ export function selectHireProject(
 
 /** Native source attribution shares the service's current-process workspace resolver. */
 export async function nativeHireProject(
+  settings: ProjectsSettings,
   expectedOccupantId: string | undefined,
   proof: import("./project-hires.ts").ProjectHireProcessProof | undefined,
   lookup: (
-    proof: import("./project-hires.ts").ProjectHireProcessProof,
+    proof: import("./project-hires.ts").ProjectHireProcessProof | undefined,
   ) => import("./project-hires.ts").ProjectHireAssignment,
   workspace:
     | ((proof: import("./project-hires.ts").ProjectHireProcessProof) => Promise<string | undefined>)
     | undefined,
-): Promise<string> {
+): Promise<string | undefined> {
+  const assignment = lookup(proof);
+  if (assignment.state === "none" && settings.projects.length === 0) return undefined;
   if (!proof || expectedOccupantId === undefined || proof.nativeOccupantId !== expectedOccupantId)
     throw new Error("The conversation's original agent has changed. Check its project before hiring.");
-  const assignment = lookup(proof);
   if (assignment.state === "invalid")
     throw new Error("The conversation's original agent has changed. Check its project before hiring.");
-  if (assignment.state === "assigned") return assignment.projectId;
+  if (assignment.state === "assigned") {
+    const membership = resolveProjectMembership(settings, {
+      occupantId: assignment.occupantId,
+      hire: assignment,
+    });
+    if (membership.outcome !== "member")
+      throw new Error("This agent's project or role has changed. Check its project before hiring.");
+    return membership.projectId;
+  }
   const project = await workspace?.(proof);
   if (project === undefined)
     throw new Error(
