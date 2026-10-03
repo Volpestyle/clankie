@@ -61,8 +61,8 @@ export interface CaptainDeps {
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange"> &
     Partial<Pick<ExecutionConnections, "namedLocal" | "runNamed">>;
   /**
-   * Registered remote Herdr fleets (ADR 0184), as they stood when the captain
-   * started; changes take effect on `clankie restart captain`.
+   * The initial fleet seed and a live provider. Production reads current
+   * named connections per use; static seeds support isolated embeddings.
    */
   readonly fleets?: {
     readonly list: readonly HerdrFleet[];

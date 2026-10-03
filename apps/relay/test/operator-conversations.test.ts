@@ -330,6 +330,7 @@ describe("authenticated operator conversation relay", () => {
   it("returns the typed connection inventory to a supervising device", async () => {
     const inventory = {
       observedAt: NOW,
+      machines: [],
       runtimes: [],
       linear: { status: "verified" as const, email: "clankie@example.com", workspace: "Example" },
     };
@@ -356,34 +357,41 @@ describe("authenticated operator conversation relay", () => {
     });
   });
 
-  it.each(["list", "connect_runtime", "disconnect_runtime", "reconnect_runtime"])(
-    "requires steer for connection action %s",
-    async (action) => {
-      const dispatch = vi.fn();
-      const relay = await startRelay({
-        authorizeDevice: {
-          authorize: async () => ({
-            authorized: true,
-            device: { ...activeDevice, grants: { ...activeDevice.grants, steer: false } },
-          }),
-        },
-        dispatch,
-      });
-      const command =
-        action === "list"
-          ? { action }
+  it.each([
+    "list",
+    "discover",
+    "add_machine",
+    "remove_machine",
+    "connect_runtime",
+    "disconnect_runtime",
+    "reconnect_runtime",
+  ])("requires steer for connection action %s", async (action) => {
+    const dispatch = vi.fn();
+    const relay = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, grants: { ...activeDevice.grants, steer: false } },
+        }),
+      },
+      dispatch,
+    });
+    const command =
+      action === "list" || action === "discover"
+        ? { action }
+        : action === "add_machine"
+          ? { action, id: "pc", ssh: "pc", shell: "posix" }
           : action === "connect_runtime"
             ? { action, id: "work", session: "work" }
             : { action, id: "work" };
-      const response = await post(relay.url, "/operator/v1/dispatch", {
-        op: "connections",
-        schemaVersion: 1,
-        command,
-      });
-      expect(response.status).toBe(403);
-      expect(dispatch).not.toHaveBeenCalled();
-    },
-  );
+    const response = await post(relay.url, "/operator/v1/dispatch", {
+      op: "connections",
+      schemaVersion: 1,
+      command,
+    });
+    expect(response.status).toBe(403);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
 
   it("requires the steer grant to close a seat", async () => {
     const relay = await startRelay({
