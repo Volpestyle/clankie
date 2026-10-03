@@ -78,7 +78,11 @@ it("attributes actor-less MCP notifications through the signed route before waki
     now: () => now,
     host: {
       account: async () => own,
-      call: async () => ({ outcome: "ok", content: JSON.stringify({ notifications, hasNextPage: false }) }),
+      call: async () => ({
+        outcome: "ok",
+        content: JSON.stringify({ notifications, hasNextPage: false }),
+        isError: false,
+      }),
     },
     following: async () => true,
     wakeRules: async () => rules,
