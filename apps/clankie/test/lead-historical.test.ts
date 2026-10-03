@@ -87,6 +87,8 @@ function fixture() {
     beforeFault: undefined as string | undefined,
     failedAfter: false,
     stopUnconfirmed: false,
+    gradeStopUnconfirmed: false,
+    gradeStopInspections: 0,
     waited: false,
     stopInspections: 0,
     wait: undefined as undefined | (() => Promise<void>),
@@ -155,6 +157,14 @@ function fixture() {
     if (!c) throw Error(`Unexpected fixture command ${args[0]}`);
     if (args[0] === "inspect" && state.stopUnconfirmed && state.waited && ++state.stopInspections > 1)
       throw Error("fixture stop inspection unavailable");
+    if (
+      args[0] === "inspect" &&
+      state.gradeStopUnconfirmed &&
+      c.logs?.includes("/grade/linux-verifier") &&
+      !c.running &&
+      ++state.gradeStopInspections > 3
+    )
+      throw Error("fixture grade stop unavailable");
     if (args[0] === "inspect")
       return JSON.stringify([
         {
@@ -475,4 +485,36 @@ it("retains exact CID and typed uncertainty when final stop cannot be confirmed"
     containerId: expect.stringMatching(/^[a-f0-9]{64}$/),
     stop: { confirmed: false },
   });
+});
+
+it("actual gradeHistorical settlement never yields a passing result when its exact verifier stop is unknown", async () => {
+  const f = fixture(),
+    build = await f.build();
+  const calibration = await calibrateHistorical({
+    build,
+    command: f.command,
+    output: join(f.root, "calibration"),
+  });
+  const patchPath = join(f.root, "candidate.patch");
+  writeFileSync(
+    patchPath,
+    "diff --git a/apps/clankie/src/historical-fixture.ts b/apps/clankie/src/historical-fixture.ts\nnew file mode 100644\n--- /dev/null\n+++ b/apps/clankie/src/historical-fixture.ts\n@@ -0,0 +1 @@\n+export const fixture = true;\n",
+  );
+  f.state.gradeStopUnconfirmed = true;
+  await expect(
+    gradeHistorical({
+      profile: f.profile,
+      build,
+      calibration,
+      command: f.command,
+      patchPath,
+      output: join(f.root, "grade"),
+    }),
+  ).rejects.toMatchObject({ code: "historical-stop-unconfirmed" });
+  const receipt = JSON.parse(readFileSync(join(f.root, "grade/linux-verifier/container-stop.json"), "utf8"));
+  expect(receipt).toMatchObject({
+    containerId: expect.stringMatching(/^[a-f0-9]{64}$/),
+    stop: { confirmed: false },
+  });
+  expect(() => readFileSync(join(f.root, "grade/grading-result.json"))).toThrow();
 });

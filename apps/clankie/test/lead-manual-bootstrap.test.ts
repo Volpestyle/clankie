@@ -25,6 +25,7 @@ const fake = vi.hoisted(() => ({
   historicalReady: true,
   stopConfirmed: true,
   calibrationStopUnconfirmed: false,
+  gradeFailure: undefined as string | undefined,
 }));
 vi.mock("node:fs", async (original) => {
   const fs = await original<typeof import("node:fs")>();
@@ -149,6 +150,8 @@ vi.mock("../../../scripts/evals/lead-historical.mjs", () => ({
     expect(input.calibration.fixtureCalibration).toBe(true);
     expect(fake.events).toContain("container-stop");
     fake.events.push("historical-grade");
+    if (fake.gradeFailure)
+      throw Object.assign(Error("fixture grading unavailable"), { code: fake.gradeFailure });
     return { status: "passed", coverage: { executedTests: 11 } };
   },
 }));
@@ -351,6 +354,7 @@ beforeEach(() => {
     historicalReady: true,
     stopConfirmed: true,
     calibrationStopUnconfirmed: false,
+    gradeFailure: undefined,
   });
   Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
   Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
@@ -642,3 +646,26 @@ it("retains historical preparation stop uncertainty rather than an unsupported s
   });
   expect(fake.observers).toHaveLength(0);
 });
+
+it.each(["historical-stop-unconfirmed", "artifact-unavailable"])(
+  "preserves grading failure classification without claiming a confirmed verifier stop: %s",
+  async (code) => {
+    vi.useFakeTimers();
+    const f = historicalFixture();
+    fake.gradeFailure = code;
+    const running = bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path));
+    await vi.waitFor(() => expect(fake.events).toContain("task-send"));
+    await vi.advanceTimersByTimeAsync(1100);
+    const result = await running;
+    expect(result).toMatchObject({
+      status: code === "historical-stop-unconfirmed" ? "stop-unconfirmed" : "verification-unavailable",
+      verifierStopConfirmed: false,
+      taskResult: {
+        status: "unavailable",
+        reason: code === "historical-stop-unconfirmed" ? code : "historical-verifier-or-artifact-unavailable",
+      },
+    });
+    expect(result.taskResult.verifier).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(f.config.runParent, "once/result.json"), "utf8"))).toEqual(result);
+  },
+);

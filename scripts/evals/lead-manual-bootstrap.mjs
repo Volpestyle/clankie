@@ -836,15 +836,20 @@ export async function runManualBootstrap(invocation) {
               })),
           }),
         );
-      } catch {
-        result.status = "verification-unavailable";
+      } catch (error) {
+        const stopUnconfirmed = error?.code === "historical-stop-unconfirmed";
+        result.status = stopUnconfirmed ? "stop-unconfirmed" : "verification-unavailable";
         result.verifierStopConfirmed = false;
         persist(
           join(root, "verifier-result.json"),
           (result.taskResult = {
             taskId: task.id,
             status: "unavailable",
-            reason: "official-verifier-or-artifact-unavailable",
+            reason: stopUnconfirmed
+              ? "historical-stop-unconfirmed"
+              : historical
+                ? "historical-verifier-or-artifact-unavailable"
+                : "official-verifier-or-artifact-unavailable",
           }),
         );
       }
