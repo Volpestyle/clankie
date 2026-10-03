@@ -23,7 +23,7 @@ import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-iso
 
 const execFileAsync = promisify(execFileCallback);
 const SEAT_USAGE =
-  "Usage: clankie seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
+  "Usage: clankie seat [--harness claude|codex|opencode] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -102,7 +102,7 @@ export interface SeatCommandOptions {
 }
 
 interface SeatFlags {
-  readonly harness?: "claude" | "codex";
+  readonly harness?: "claude" | "codex" | "opencode";
   readonly conversationId?: string;
   readonly resume: boolean;
   readonly dryRun: boolean;
@@ -119,7 +119,7 @@ export function parseSeatArgs(args: readonly string[]): SeatFlags {
     const arg = args[index];
     if (arg === "--harness") {
       const value = args[++index];
-      if (value !== "claude" && value !== "codex") throw new Error(SEAT_USAGE);
+      if (value !== "claude" && value !== "codex" && value !== "opencode") throw new Error(SEAT_USAGE);
       harness = value;
     } else if (arg === "--resume") resume = true;
     else if (arg === "--dry-run") dryRun = true;
@@ -220,7 +220,11 @@ function herdrFailureText(caught: unknown): string {
 }
 
 export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): Promise<SeatPlan> {
-  if (options.claudeCommand !== undefined && flags.harness === "codex") throw new Error(SEAT_USAGE);
+  if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude") throw new Error(SEAT_USAGE);
+  if (flags.harness === "opencode") {
+    const { planOpenCodeSeat } = await import("./opencode-seat.ts");
+    return planOpenCodeSeat(flags, options);
+  }
   if (flags.harness === "codex") {
     const { planCodexSeat } = await import("./codex-seat.ts");
     return planCodexSeat(flags, options);
@@ -359,7 +363,11 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const flags = parseSeatArgs(args);
-  if (options.claudeCommand !== undefined && flags.harness === "codex") throw new Error(SEAT_USAGE);
+  if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude") throw new Error(SEAT_USAGE);
+  if (flags.harness === "opencode") {
+    const { runOpenCodeSeat } = await import("./opencode-seat.ts");
+    return runOpenCodeSeat(flags, options);
+  }
   if (flags.harness === "codex") {
     const { runCodexSeat } = await import("./codex-seat.ts");
     return runCodexSeat(flags, options);

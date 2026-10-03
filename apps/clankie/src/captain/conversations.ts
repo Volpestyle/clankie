@@ -1375,7 +1375,7 @@ export class ConversationStore {
     this.syncConversationTranscript(
       conversationId,
       `native:${sessionId}`,
-      { sessionKey: `claude:${sessionId}`, entries },
+      { sessionKey: `${sessionId.startsWith("ses_") ? "opencode" : "claude"}:${sessionId}`, entries },
       "captain",
     );
     // Native hooks provide display activity even without a Herdr presence feed.

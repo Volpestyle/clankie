@@ -1,3 +1,4 @@
+import { planSeat, parseSeatArgs } from "./command/seat.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runLinearCommand } from "./command/linear.ts";
@@ -176,6 +177,37 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         return ansi.bold(value);
     }
   }
+
+  commands.push({
+    name: "seat",
+    aliases: [],
+    description: "Review a native operator seat launch and required settings",
+    argumentHint: "[claude|codex|opencode] [--resume]",
+    takesArgument: true,
+    async run(argument, shell): Promise<void> {
+      const [harness = "opencode", ...extra] = argument.trim().split(/\s+/u).filter(Boolean);
+      if (!context.repoRoot) {
+        shell.insertCommandResult("/seat", "Install location unavailable", "error");
+        return;
+      }
+      try {
+        const args = [
+          "--harness",
+          harness,
+          ...extra,
+          ...(conversations?.conversationId ? ["--conversation", conversations.conversationId] : []),
+        ];
+        const plan = await planSeat(parseSeatArgs(args), { repoRoot: context.repoRoot });
+        shell.insertCommandResult(
+          "/seat",
+          `Launch from a terminal: clankie seat ${args.map((value) => JSON.stringify(value)).join(" ")}\n${JSON.stringify(plan, null, 2)}\nOpenCode uses per-launch settings; native permissions remain owner decisions. /skills controls bundled skill selection.`,
+          "success",
+        );
+      } catch (error) {
+        shell.insertCommandResult("/seat", String(error), "error");
+      }
+    },
+  });
 
   commands.push(
     {

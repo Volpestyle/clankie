@@ -131,53 +131,58 @@ it("resolves project context and keeps event polls/replies on that binding", asy
   }
 });
 
-it("accepts only bounded display transcripts for operator conversations", async () => {
-  const seen: string[] = [];
-  const clankie = await createClankieApp({
-    captain: createStubCaptain({
-      seatContext: (id) => (id === "project-a" ? { conversationId: id, cwd: "/project" } : undefined),
-      syncSeatTranscript: (id) => {
-        seen.push(id);
-        return seen.length === 1;
-      },
-    }),
-    authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer operator" ? { operatorId: "fixture" } : undefined,
-    authenticateCaptain: async (request) =>
-      request.headers.get("authorization") === "Bearer social"
-        ? { captainId: "fixture", steerSourceLane: "discord_text" }
-        : undefined,
-  });
-  const body = {
-    sessionId: "cbe70835-228a-4b68-bdae-1b55e984c9a0",
-    entries: [{ type: "message", id: "native-entry", role: "agent", text: "hello" }],
-  };
-  const send = (bearer: string, payload: unknown = body, id = "project-a") =>
-    clankie.app.request(`/v1/seat/transcript?conversationId=${id}`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
-      body: JSON.stringify(payload),
+it.each(["cbe70835-228a-4b68-bdae-1b55e984c9a0", "ses_opencodeNative123"])(
+  "accepts only bounded display transcripts for operator conversations (%s)",
+  async (sessionId) => {
+    const seen: string[] = [];
+    const clankie = await createClankieApp({
+      captain: createStubCaptain({
+        seatContext: (id) => (id === "project-a" ? { conversationId: id, cwd: "/project" } : undefined),
+        syncSeatTranscript: (id) => {
+          seen.push(id);
+          return seen.length === 1;
+        },
+      }),
+      authenticateOperator: async (request) =>
+        request.headers.get("authorization") === "Bearer operator" ? { operatorId: "fixture" } : undefined,
+      authenticateCaptain: async (request) =>
+        request.headers.get("authorization") === "Bearer social"
+          ? { captainId: "fixture", steerSourceLane: "discord_text" }
+          : undefined,
     });
-  try {
-    expect((await send("operator")).status).toBe(200);
-    expect((await send("operator")).status).toBe(409);
-    expect((await send("social")).status).toBe(403);
-    expect((await send("anonymous")).status).toBe(401);
-    expect((await send("operator", body, "missing")).status).toBe(404);
-    expect(
-      (
-        await send("operator", {
-          ...body,
-          entries: [{ type: "viewed_image", id: "image", path: "/private/file" }],
-        })
-      ).status,
-    ).toBe(400);
-    expect((await send("operator", { ...body, entries: Array(101).fill(body.entries[0]) })).status).toBe(400);
-    expect(seen).toEqual(["project-a", "project-a"]);
-  } finally {
-    clankie.close();
-  }
-});
+    const body = {
+      sessionId,
+      entries: [{ type: "message", id: "native-entry", role: "agent", text: "hello" }],
+    };
+    const send = (bearer: string, payload: unknown = body, id = "project-a") =>
+      clankie.app.request(`/v1/seat/transcript?conversationId=${id}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    try {
+      expect((await send("operator")).status).toBe(200);
+      expect((await send("operator")).status).toBe(409);
+      expect((await send("social")).status).toBe(403);
+      expect((await send("anonymous")).status).toBe(401);
+      expect((await send("operator", body, "missing")).status).toBe(404);
+      expect(
+        (
+          await send("operator", {
+            ...body,
+            entries: [{ type: "viewed_image", id: "image", path: "/private/file" }],
+          })
+        ).status,
+      ).toBe(400);
+      expect((await send("operator", { ...body, entries: Array(101).fill(body.entries[0]) })).status).toBe(
+        400,
+      );
+      expect(seen).toEqual(["project-a", "project-a"]);
+    } finally {
+      clankie.close();
+    }
+  },
+);
 
 it("requires operator authority and a workspace create request for a fresh seat chat", async () => {
   const clankie = await app();

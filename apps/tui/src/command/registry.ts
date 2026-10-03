@@ -312,8 +312,8 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["seat", "claude", "claude2"],
     lines: [
       "  claude[N]               Open a separate chat using claude or a numbered shell account command (e.g. claude2)",
-      "  seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
-      "                           Sit in Claude Code or Codex as Clankie (TTY); --dry-run prints the launch plan (JSON)",
+      "  seat [--harness claude|codex|opencode] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
+      "                           Sit in Claude Code, Codex or OpenCode as Clankie (TTY); --dry-run prints the launch plan (JSON)",
     ],
   },
   {

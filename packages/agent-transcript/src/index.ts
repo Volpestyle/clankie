@@ -863,7 +863,7 @@ function string(value: unknown): string | undefined {
 /** Only normalized display records cross the host boundary; never host image paths. */
 export const SeatTranscriptUploadSchema = z
   .object({
-    sessionId: z.uuid(),
+    sessionId: z.union([z.uuid(), z.string().regex(/^ses_[A-Za-z0-9]{8,128}$/u)]),
     activity: z.enum(["responding", "waiting"]).optional(),
     entries: z
       .array(

@@ -100,6 +100,14 @@ focus. Report unavailable control without falling back to terminal input.
 See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md)
 for the boundary between task records, native terminals and harness delivery.
 
+The OpenCode **operator** seat is available separately through
+`clankie seat --harness opencode`. Its plugin uses the native injected SDK client
+for the exact interactive session; the shared dispatch implementation lives in
+`integrations/opencode-plugin/runtime.mjs`. This does not add an OpenCode hire
+adapter or filesystem transcript discovery. See the
+[operator seat guide](../../integrations/opencode-plugin/README.md) for current
+capabilities and verification limits.
+
 ### External Codex active-turn delivery
 
 For an owner-started Codex session with a known Herdr thread identity, the service

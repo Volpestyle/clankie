@@ -61,6 +61,17 @@ dependent bodies. Older installations have only the console `/voice` wizard.
 A readiness check skips paid ElevenLabs synthesis: separate offline tests, real
 provider audio, and actual Discord audibility when reporting verification.
 
+### OpenCode operator seat
+
+Use `clankie seat --harness opencode --conversation ID --dry-run` to inspect the
+native launch before sitting as Clankie; `--resume` binds the exact saved native
+session. It is an operator seat, not an OpenCode `hire_agent` adapter. Native
+wakes use the bound session API, wait while busy, and never type into an owner's
+draft. Permissions stay with the owner. Uncertain delivery stops: inspect its
+native session and retained receipt before manually retrying. A service restart
+does not reattach from a saved ID. See `integrations/opencode-plugin/README.md`
+for per-launch MCP isolation, settings, version checks and current live gaps.
+
 ## Messages to external Codex sessions
 
 `message_seat` first tries the existing Codex app-server proxy on the selected

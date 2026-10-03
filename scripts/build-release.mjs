@@ -214,7 +214,7 @@ async function copyRuntimeAssets(targetRoot) {
     await mkdir(dirname(target), { recursive: true });
     await copyFile(join(repoRoot, source), target);
   }
-  for (const directory of ["integrations/herdr-plugin"]) {
+  for (const directory of ["integrations/herdr-plugin", "integrations/opencode-plugin"]) {
     await cp(join(repoRoot, directory), join(targetRoot, directory), {
       recursive: true,
       dereference: true,

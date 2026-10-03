@@ -2391,3 +2391,12 @@ Assignments persist across service restarts and follow the same native session
 between panes. They do not change tracker status or ownership. The fleet also
 projects local Codex goals from its native goal store and Clankie's conversation
 goals. Native goal state remains separate from turn activity.
+
+### OpenCode operator seat
+
+`clankie seat --harness opencode --conversation ID --dry-run` reviews the native
+launch, installed version, skill selection and required owner steps. Remove
+`--dry-run` to launch; `--resume` uses the exact recorded session. `/seat opencode`
+in the console reviews the same plan. Installation, per-launch settings,
+removal, native delivery semantics and current verification limits are in the
+[OpenCode seat guide](../integrations/opencode-plugin/README.md).
