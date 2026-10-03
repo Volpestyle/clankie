@@ -42,6 +42,7 @@ import {
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
+import { compactLinearWrite } from "./linear-write-receipt.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -536,10 +537,14 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             detail: `MCP ${server.id}/${input.tool} result exceeds ${MAX_DATA_RESULT_BYTES} bytes; request a smaller page or fewer fields`,
           };
         }
+        // Callers asking for data get the full record; model-facing results get a receipt.
+        const content =
+          input.resultMode !== "data" && server.id === "linear" && !result.isError
+            ? compactLinearWrite(input.tool, result.content)
+            : result.content;
         return {
           outcome: "ok",
-          content:
-            input.resultMode === "data" ? result.content : result.content.slice(0, MAX_RESULT_CHARACTERS),
+          content: input.resultMode === "data" ? content : content.slice(0, MAX_RESULT_CHARACTERS),
           isError: result.isError,
         };
       } catch (error) {
