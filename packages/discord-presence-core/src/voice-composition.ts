@@ -1,7 +1,6 @@
 import type { DiscordVoiceEvidence } from "@clankie/protocol";
 import type { DiscordBridgeReceipt, DiscordBridgeReceiptType } from "./receipt-store.ts";
 import {
-  MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
   openRealtimeConversationSession,
   openRealtimeTranscriptionSession,
   openXaiStreamingTranscriptionSession,
@@ -11,6 +10,7 @@ import {
   type RealtimeTranscriptEvent,
 } from "./realtime-session.ts";
 import { openElevenLabsTtsSession } from "./elevenlabs-tts.ts";
+import { VOICE_TONE_CAPABILITY } from "./voice-tone-text.ts";
 import { openExternalVoiceConversation } from "./external-voice.ts";
 import { DEFAULT_DECAY_WINDOW_MS } from "./voice-floor.ts";
 import type {
@@ -270,8 +270,7 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
   const openConversation =
     config.ttsProvider === "elevenlabs" && elevenLabsApiKey !== undefined
       ? (open: TranscriptVoiceConversationOpenInput) => {
-          let transcript = "";
-          let transcriptItemId = "";
+          const dialogue = config.elevenLabsModelId === "eleven_v4_turbo";
           return openExternalVoiceConversation(
             open,
             {
@@ -280,27 +279,15 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
                   ...common,
                   model: config.realtimeModel,
                   outputModality: "text",
-                  instructions: open.instructions,
+                  instructions: dialogue
+                    ? `${open.instructions}\n\n${VOICE_TONE_CAPABILITY}`
+                    : open.instructions,
                   truncationRetentionRatio: config.truncationRetentionRatio,
                   postInstructionsTokenLimit: config.postInstructionsTokenLimit,
                   onAudioDelta: open.onAudioDelta,
-                  onTextDelta: (delta, itemId) => {
-                    transcript = (transcript + delta).slice(0, MAX_REALTIME_RESPONSE_TEXT_CHARACTERS);
-                    transcriptItemId = itemId;
-                    open.onOutputTranscript?.({ itemId, text: delta, final: false }, "tts_text");
-                    handlers.onTextDelta(delta, itemId);
-                    open.onTranscript?.({ itemId, text: delta, final: false });
-                  },
+                  onTextDelta: handlers.onTextDelta,
                   onFunctionCall: handlers.onFunctionCall,
-                  onResponseDone: (meta) => {
-                    if (transcript.trim().length > 0) {
-                      const event = { itemId: transcriptItemId, text: transcript, final: true };
-                      open.onTranscript?.(event);
-                      open.onOutputTranscript?.(event, "tts_text");
-                    }
-                    transcript = "";
-                    handlers.onResponseDone(meta);
-                  },
+                  onResponseDone: handlers.onResponseDone,
                   onClose: handlers.onClose,
                   onError: handlers.onError,
                 }),
@@ -320,7 +307,11 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
                   onError: handlers.onError,
                 }),
             },
-            timers === undefined ? {} : { timers },
+            {
+              ...(timers === undefined ? {} : { timers }),
+              dialogue,
+              ...(open.onTranscript === undefined ? {} : { onTranscript: open.onTranscript }),
+            },
           );
         }
       : (open: TranscriptVoiceConversationOpenInput) =>

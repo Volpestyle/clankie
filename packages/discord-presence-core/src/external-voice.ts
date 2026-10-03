@@ -27,6 +27,13 @@
  */
 
 import type { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
+import { VoiceToneText } from "./voice-tone-text.ts";
+import {
+  MAX_REALTIME_RESPONSE_AUDIO_BYTES,
+  MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
+  type RealtimeTranscriptEvent,
+} from "./realtime-session.ts";
 import type {
   RealtimeFunctionCall,
   RealtimeResponseMeta,
@@ -94,6 +101,9 @@ export interface ExternalVoiceSessionFactories {
 export interface ExternalVoiceConversationOptions {
   readonly timers?: RealtimeTimers;
   readonly drainTimeoutMs?: number;
+  /** Exact selected v4 transport capability, never inferred from authored text. */
+  readonly dialogue?: boolean;
+  readonly onTranscript?: (event: RealtimeTranscriptEvent) => void;
 }
 
 const globalTimers: RealtimeTimers = {
@@ -102,6 +112,18 @@ const globalTimers: RealtimeTimers = {
     clearTimeout(handle as ReturnType<typeof setTimeout>);
   },
 };
+
+interface SpeechItem {
+  projection: VoiceToneText;
+  readable: string;
+  contextId: string | undefined;
+  first: boolean;
+  waiting: boolean;
+  remainder: string;
+  modelDone: boolean;
+  audioBytes: number;
+  textCharacters: number;
+}
 
 class ExternalVoiceConversation implements VoiceConversationPort {
   private readonly input: VoiceConversationOpenInput;
@@ -128,6 +150,12 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   /** Per-utterance tail held back until it completes a speakable unit. */
   private readonly pendingText = new Map<string, string>();
   private lastTextItemId = "";
+  private readonly items = new Map<string, SpeechItem>();
+  private readonly contexts = new Map<string, string>();
+  private readonly openedContexts = new Set<string>();
+  private mouthGeneration = 0;
+  private readonly dialogue: boolean;
+  private readonly onTranscript: ((event: RealtimeTranscriptEvent) => void) | undefined;
   private closed = false;
   private responseActive = false;
   private readonly responseQueue: { start: () => void; shouldStart?: () => boolean }[] = [];
@@ -138,6 +166,8 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     options: ExternalVoiceConversationOptions,
   ) {
     this.input = input;
+    this.dialogue = options.dialogue === true;
+    this.onTranscript = options.onTranscript;
     this.factories = factories;
     this.timers = options.timers ?? globalTimers;
     this.drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_TTS_DRAIN_TIMEOUT_MS;
@@ -162,7 +192,12 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     try {
       // Eager, so a bad voice id or dead vendor fails the conversation open
       // loudly instead of failing the first thing he tries to say.
-      this.tts = await this.factories.openTts(this.ttsHandlers());
+      const tts = await this.factories.openTts(this.ttsHandlers());
+      if (this.closed) {
+        tts.close();
+        throw new Error("External voice conversation closed while opening");
+      }
+      this.tts = tts;
     } catch (error) {
       this.realtime.close();
       throw error;
@@ -247,26 +282,109 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     for (const itemId of this.heldDone.keys()) this.releaseHeldDone(itemId);
     this.realtime?.close();
     this.tts?.close();
+    this.items.clear();
+    this.pendingText.clear();
+    this.contexts.clear();
+    this.openedContexts.clear();
+    this.liveItemIds.clear();
   }
 
   private handleTextDelta(delta: string, itemId: string): void {
     if (this.closed || this.droppedItemIds.has(itemId)) return;
-    if (!this.liveItemIds.has(itemId)) {
+    let item = this.items.get(itemId);
+    if (item?.modelDone) return;
+    if (item === undefined) {
+      item = {
+        projection: new VoiceToneText(this.dialogue),
+        readable: "",
+        contextId: undefined,
+        first: true,
+        waiting: false,
+        remainder: "",
+        modelDone: false,
+        audioBytes: 0,
+        textCharacters: 0,
+      };
+      this.items.set(itemId, item);
       this.liveItemIds.add(itemId);
       this.input.onFirstText?.(itemId);
       this.lastTextItemId = itemId;
-      this.queueItemStep(itemId, async () => {
-        await this.ensureTts();
-        this.requireTts().openContext(itemId);
-      });
     }
-    const pending = (this.pendingText.get(itemId) ?? "") + delta;
-    const { emit, rest } = splitSpeakableUnits(pending);
+    item.textCharacters += delta.length;
+    if (item.textCharacters > MAX_REALTIME_RESPONSE_TEXT_CHARACTERS) {
+      this.input.onError("External voice utterance text exceeded the character limit", itemId);
+      this.closeItemContext(itemId);
+      this.markSpeechFailure(itemId);
+      this.dropItem(itemId);
+      this.discardMouth();
+      return;
+    }
+    const projected = item.projection.append(delta);
+    if (projected.readable) {
+      item.readable = (item.readable + projected.readable).slice(0, MAX_REALTIME_RESPONSE_TEXT_CHARACTERS);
+      this.publishText({ itemId, text: projected.readable, final: false });
+    }
+    if (item.first && item.contextId === undefined && projected.speech.trim())
+      this.openItemContext(itemId, itemId);
+    const pending = (this.pendingText.get(itemId) ?? "") + projected.speech;
+    let { emit, rest } = splitSpeakableUnits(pending);
+    let early = false;
+    if (this.dialogue && item.first) {
+      const first = firstSpeakableUnit(pending);
+      const visible = first.emit.replace(/\[[^\]]*\]/gu, "").trim().length;
+      if (visible > 0 && visible < SHORT_FIRST_CLAUSE_CHARACTERS) {
+        ({ emit, rest } = first);
+        early = true;
+      }
+    }
     this.pendingText.set(itemId, rest);
-    if (emit.length === 0) return;
-    this.queueItemStep(itemId, () => {
-      this.requireTts().appendText(itemId, emit);
+    if (!emit) return;
+    item.first = false;
+    this.appendItemText(itemId, emit);
+    if (early) {
+      item.waiting = true;
+      this.flushItemContext(itemId);
+      const more = splitSpeakableUnits(rest);
+      this.pendingText.set(itemId, more.rest);
+      if (more.emit) this.appendItemText(itemId, more.emit);
+    }
+  }
+
+  private publishText(event: RealtimeTranscriptEvent): void {
+    this.input.onOutputTranscript?.(event, "tts_text");
+    this.onTranscript?.(event);
+  }
+
+  private openItemContext(itemId: string, contextId: string): void {
+    const item = this.items.get(itemId);
+    if (item === undefined) return;
+    item.contextId = contextId;
+    this.contexts.set(contextId, itemId);
+    this.queueItemStep(itemId, async () => {
+      await this.ensureTts();
+      // Reopening is asynchronous: barge-in/close must win before context creation.
+      if (this.closed || !this.liveItemIds.has(itemId) || item.contextId !== contextId) return;
+      this.requireTts().openContext(contextId);
+      this.openedContexts.add(contextId);
     });
+  }
+
+  private appendItemText(itemId: string, text: string): void {
+    if (!text.trim()) return;
+    const item = this.items.get(itemId);
+    if (item === undefined) return;
+    if (item.waiting) {
+      item.remainder += text;
+      return;
+    }
+    if (item.contextId === undefined) this.openItemContext(itemId, `voice_${randomUUID()}`);
+    const contextId = item.contextId!;
+    this.queueItemStep(itemId, () => this.requireTts().appendText(contextId, text));
+  }
+
+  private flushItemContext(itemId: string): void {
+    const contextId = this.items.get(itemId)?.contextId;
+    if (contextId !== undefined) this.queueItemStep(itemId, () => this.requireTts().flush(contextId));
   }
 
   /** Whatever the boundary splitter is still holding, so nothing is lost at the end. */
@@ -274,9 +392,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     const rest = this.pendingText.get(itemId);
     this.pendingText.delete(itemId);
     if (rest === undefined || rest.length === 0) return;
-    this.queueItemStep(itemId, () => {
-      this.requireTts().appendText(itemId, rest);
-    });
+    this.appendItemText(itemId, rest);
   }
 
   private handleResponseDone(meta: RealtimeResponseMeta): void {
@@ -293,6 +409,9 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       return;
     }
     this.lastTextItemId = "";
+    const item = this.items.get(itemId)!;
+    item.modelDone = true;
+    if (item.readable) this.publishText({ itemId, text: item.readable, final: true });
     const handle = this.timers.setTimeout(() => {
       this.input.onError("External voice synthesis did not drain in time", itemId);
       // A context that missed the drain window is abandoned, not merely
@@ -307,9 +426,10 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     }, this.drainTimeoutMs);
     this.heldDone.set(itemId, { meta, handle });
     this.drainPendingText(itemId);
-    this.queueItemStep(itemId, () => {
-      this.requireTts().flush(itemId);
-    });
+    if (!item.waiting) {
+      if (item.contextId === undefined) this.completeItem(itemId);
+      else this.flushItemContext(itemId);
+    }
   }
 
   private handleRealtimeClose(reason: RealtimeSessionCloseReason): void {
@@ -317,36 +437,79 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       this.closed = true;
       for (const itemId of this.heldDone.keys()) this.releaseHeldDone(itemId);
       this.tts?.close();
+      this.items.clear();
+      this.pendingText.clear();
+      this.contexts.clear();
+      this.openedContexts.clear();
+      this.liveItemIds.clear();
     }
     this.input.onClose(reason);
   }
 
   private ttsHandlers(): ExternalVoiceTtsHandlers {
+    const generation = ++this.mouthGeneration;
     return {
       onAudio: (pcm, contextId) => {
-        if (this.closed || this.droppedItemIds.has(contextId)) {
+        const itemId = this.contexts.get(contextId);
+        const item = itemId === undefined ? undefined : this.items.get(itemId);
+        if (
+          this.closed ||
+          generation !== this.mouthGeneration ||
+          itemId === undefined ||
+          item === undefined ||
+          !this.liveItemIds.has(itemId) ||
+          item.contextId !== contextId
+        ) {
           pcm.fill(0);
           return;
         }
-        this.input.onAudioDelta(pcm, contextId);
+        item.audioBytes += pcm.byteLength;
+        if (item.audioBytes > MAX_REALTIME_RESPONSE_AUDIO_BYTES) {
+          pcm.fill(0);
+          this.input.onError("External voice utterance audio exceeded the byte limit", itemId);
+          this.closeItemContext(itemId);
+          this.markSpeechFailure(itemId);
+          this.dropItem(itemId);
+          this.discardMouth();
+          return;
+        }
+        this.input.onAudioDelta(pcm, itemId);
       },
       onContextDone: (contextId) => {
-        this.liveItemIds.delete(contextId);
-        this.releaseHeldDone(contextId);
+        if (this.closed || generation !== this.mouthGeneration) return;
+        const itemId = this.contexts.get(contextId);
+        this.contexts.delete(contextId);
+        this.openedContexts.delete(contextId);
+        if (itemId === undefined || !this.liveItemIds.has(itemId)) return;
+        const item = this.items.get(itemId)!;
+        item.contextId = undefined;
+        if (item.waiting) {
+          item.waiting = false;
+          const remainder = item.remainder;
+          item.remainder = "";
+          if (remainder) this.appendItemText(itemId, remainder);
+          if (!item.modelDone) return;
+          if (item.contextId !== undefined) {
+            this.flushItemContext(itemId);
+            return;
+          }
+        }
+        this.completeItem(itemId);
       },
       onClose: () => {
-        // The mouth died; every in-flight utterance is over. Fail the held
-        // done events through rather than letting them wait out the drain
-        // timer, tell the brain the room missed a suffix, and let the next
-        // utterance reopen the session.
-        for (const itemId of this.liveItemIds) {
+        if (this.closed || generation !== this.mouthGeneration) return;
+        // Settling a done event can synchronously admit the next response.
+        const interruptedItems = [...this.liveItemIds];
+        for (const itemId of interruptedItems) {
           this.markSpeechFailure(itemId);
           this.dropItem(itemId);
         }
         for (const itemId of this.heldDone.keys()) this.releaseHeldDone(itemId);
+        this.contexts.clear();
+        this.openedContexts.clear();
       },
       onError: (message) => {
-        if (this.closed) return;
+        if (this.closed || generation !== this.mouthGeneration) return;
         if (this.liveItemIds.size === 0) this.input.onError(message, null);
         else for (const itemId of this.liveItemIds) this.input.onError(message, itemId);
       },
@@ -360,8 +523,10 @@ class ExternalVoiceConversation implements VoiceConversationPort {
    */
   private closeItemContext(itemId: string): void {
     if (!this.liveItemIds.has(itemId)) return;
+    const contextId = this.items.get(itemId)?.contextId;
     this.queue(() => {
-      if (this.tts?.isOpen === true) this.tts.closeContext(itemId);
+      if (contextId !== undefined && this.openedContexts.delete(contextId) && this.tts?.isOpen === true)
+        this.tts.closeContext(contextId);
     });
   }
 
@@ -370,6 +535,9 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     this.liveItemIds.delete(itemId);
     this.droppedItemIds.add(itemId);
     this.pendingText.delete(itemId);
+    const item = this.items.get(itemId);
+    if (item?.contextId !== undefined) this.contexts.delete(item.contextId);
+    this.items.delete(itemId);
     this.releaseHeldDone(itemId);
   }
 
@@ -389,11 +557,20 @@ class ExternalVoiceConversation implements VoiceConversationPort {
             error instanceof Error ? error.message : "External voice synthesis failed",
             itemId,
           );
+        this.closeItemContext(itemId);
         this.markSpeechFailure(itemId);
         this.dropItem(itemId);
         this.discardMouth();
       }
     });
+  }
+
+  private completeItem(itemId: string): void {
+    this.liveItemIds.delete(itemId);
+    this.pendingText.delete(itemId);
+    this.items.delete(itemId);
+    this.droppedItemIds.add(itemId);
+    this.releaseHeldDone(itemId);
   }
 
   private releaseHeldDone(itemId: string): void {
@@ -420,6 +597,8 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     if (this.liveItemIds.size > 0) return;
     const tts = this.tts;
     this.tts = undefined;
+    this.contexts.clear();
+    this.openedContexts.clear();
     try {
       tts?.close();
     } catch {
@@ -429,7 +608,12 @@ class ExternalVoiceConversation implements VoiceConversationPort {
 
   private async ensureTts(): Promise<void> {
     if (this.closed || this.tts?.isOpen === true) return;
-    this.tts = await this.factories.openTts(this.ttsHandlers());
+    const tts = await this.factories.openTts(this.ttsHandlers());
+    if (this.closed) {
+      tts.close();
+      return;
+    }
+    this.tts = tts;
   }
 
   private queue(step: () => void | Promise<void>): void {
@@ -502,6 +686,10 @@ const SPEAKABLE_BOUNDARY = /[.!?…:;\n]/gu;
  * be able to hold the mouth shut until the response ends.
  */
 const MAX_HELD_TEXT_CHARACTERS = 200;
+/** Engineering cutoff between the retained 21- and 45-character probe cases.
+ * Actual first-audio and cross-segment prosody still require the owner-run probe.
+ */
+const SHORT_FIRST_CLAUSE_CHARACTERS = 40;
 
 /**
  * Split streamed text into what can be spoken now and what must wait.
@@ -543,4 +731,12 @@ export function splitSpeakableUnits(pending: string): { emit: string; rest: stri
   }
   if (cut === -1) return { emit: "", rest: pending };
   return { emit: pending.slice(0, cut), rest: pending.slice(cut) };
+}
+
+/** The first complete unit, retaining punctuation and its following space. */
+function firstSpeakableUnit(text: string): { emit: string; rest: string } {
+  const match = /[.!?…:;\n](?:\s+|$)/u.exec(text);
+  if (match === null) return { emit: "", rest: text };
+  const end = match.index + match[0].length;
+  return { emit: text.slice(0, end), rest: text.slice(end) };
 }

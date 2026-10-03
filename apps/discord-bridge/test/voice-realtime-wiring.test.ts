@@ -9,6 +9,9 @@
  */
 
 import { Buffer } from "node:buffer";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DiscordVoiceEvidenceSchema, type DiscordVoiceEvidence } from "@clankie/protocol";
 import { ClankieApiClient } from "@clankie/api-client";
@@ -18,6 +21,8 @@ import {
   createVoiceRealtimePorts,
   DiscordVoiceIngress,
   DiscordVoiceSession,
+  DiscordVoiceTranscriptStore,
+  type DiscordVoiceSpokenTranscript,
   parseVoiceRealtimeEnv,
   type RealtimeSocket,
   type RealtimeSocketFactory,
@@ -385,7 +390,7 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
         type: "response.output_text.delta",
         response_id: "resp_1",
         item_id: "item_say",
-        delta: "Right here.",
+        delta: modelId === "eleven_v4_turbo" ? "[laughs]Right here." : "Right here.",
       });
       await flush(12);
       engaged.serverEvent({ type: "response.done", response: { id: "resp_1", status: "completed" } });
@@ -394,7 +399,7 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
         ...(modelId === "eleven_v4_turbo"
           ? [
               { voices: ["voice_abc123"], context_id: "item_say" },
-              { inputs: [{ text: "Right here.", voice_id: "voice_abc123" }], context_id: "item_say" },
+              { inputs: [{ text: "[laughs]Right here.", voice_id: "voice_abc123" }], context_id: "item_say" },
             ]
           : [
               { text: " ", context_id: "item_say" },
@@ -424,6 +429,19 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
           outcome: "played",
         }),
       ]);
+
+      // The same canonical opt-in store read by the app sees only the projected words.
+      const transcriptRoot = await mkdtemp(join(tmpdir(), "voice-tone-projection-"));
+      try {
+        const path = join(transcriptRoot, "voice.jsonl");
+        const store = new DiscordVoiceTranscriptStore(path);
+        await store.append("bot", spoken[0] as DiscordVoiceSpokenTranscript);
+        expect((await store.read()).entries[0]!.text).toBe("Right here.");
+        expect(await readFile(path, "utf8")).not.toContain("[laughs]");
+        expect(JSON.stringify(evidence)).not.toContain("[laughs]");
+      } finally {
+        await rm(transcriptRoot, { recursive: true, force: true });
+      }
 
       // A three-utterance burst while the provider is thinking becomes one
       // further audible answer through the real session and both response queues.
@@ -563,5 +581,66 @@ it.each(["openai", "xai"])(
       { itemId: "native", text: "Right here.", final: true, source: "native_audio" },
     ]);
     conversation.close();
+  },
+);
+
+it.each(["eleven_v4_turbo", "eleven_flash_v2_5"])(
+  "projects authored %s directions before every readable callback and preserves human text",
+  async (model) => {
+    const sockets: FakeRealtimeSocket[] = [],
+      readable: unknown[] = [],
+      retained: unknown[] = [];
+    const ports = createVoiceRealtimePorts({
+      apiKey: "fake",
+      elevenLabsApiKey: "fake",
+      config: parseVoiceRealtimeEnv({
+        CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+        CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "voice_test",
+        CLANKIE_VOICE_ELEVENLABS_MODEL_ID: model,
+      }),
+      socketFactory: async (url, headers) => {
+        const socket = new FakeRealtimeSocket(url, headers);
+        sockets.push(socket);
+        return socket;
+      },
+      timers: new TestTimers(),
+    });
+    const port = await ports.openConversation({
+      instructions: "Owner-authored literal [laughs] reference.",
+      onAudioDelta: (pcm) => pcm.fill(0),
+      onFunctionCall: () => {},
+      onResponseDone: () => {},
+      onClose: () => {},
+      onError: () => {},
+      onTranscript: (event) => readable.push(event),
+      onOutputTranscript: (event) => retained.push(event),
+    });
+    const instructions = (sockets[0]!.frames()[0]!.session as { instructions: string }).instructions;
+    expect(instructions).toContain("Owner-authored literal [laughs] reference.");
+    expect(instructions.includes("[deadpan]")).toBe(model === "eleven_v4_turbo");
+    port.createTextItem("Human says [laughs] as literal text.");
+    expect(JSON.stringify(sockets[0]!.frames())).toContain("Human says [laughs] as literal text.");
+    const text = "[laughs] This sentence is long enough to remain one provider context. [invented] [sighs]";
+    for (const delta of text)
+      sockets[0]!.serverEvent({
+        type: "response.output_text.delta",
+        response_id: "r",
+        item_id: "item",
+        delta,
+      });
+    sockets[0]!.serverEvent({ type: "response.done", response: { id: "r", status: "completed" } });
+    await flush(20);
+    expect(readable).toEqual(retained);
+    expect(JSON.stringify(readable)).not.toMatch(/laughs|sighs|invented/);
+    expect(readable.at(-1)).toEqual({
+      itemId: "item",
+      text: "This sentence is long enough to remain one provider context.",
+      final: true,
+    });
+    const wire = JSON.stringify(sockets[1]!.frames());
+    expect(wire).not.toContain("invented");
+    expect(wire.includes("[laughs]")).toBe(model === "eleven_v4_turbo");
+    expect(wire.includes("[sighs]")).toBe(model === "eleven_v4_turbo");
+    port.close();
   },
 );

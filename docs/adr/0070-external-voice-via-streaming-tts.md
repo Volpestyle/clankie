@@ -92,6 +92,43 @@ when PCM has reached a playback job; before first audio there is no playback id.
 Interruption and completed-playback receipts carry those same join keys. A
 socket failure with no live utterance must not borrow the previous reply's ids.
 
+### Authored tone directions and short V4 openings (2026-10-03)
+
+The external adapter recognizes exactly `[laughs]`, `[chuckles]`, `[sighs]`,
+`[whispers]`, `[sarcastic]`, `[excited]`, `[curious]`, and `[deadpan]` for the
+explicit `eleven_v4_turbo` transport. James approved this set after the retained
+`spike/voice-latency` probe at `dbd4c479`. That probe establishes behavior on its
+exact voice/model/WebSocket; it is not a first-party transport guarantee.
+The session receives a capability description, with no additional model call or
+rules selecting a tone. Other external models receive words without directions.
+
+A bounded per-item parser withholds partial square-bracket directions across
+streaming deltas. Unknown, malformed, or unfinished directions never reach the
+mouth; no direction reaches readable delta/final callbacks. Direction-only sound
+output remains possible on V4 without creating empty readable transcript entries.
+The projection precedes both the opt-in spoken transcript store and its app read
+path. Content-free canonical voice receipts stay content-free. Human input,
+owner instructions, and independently authored Discord/text-thread messages are
+not passed through this voice-markup parser.
+
+For V4, a first complete clause with fewer than 40 visible characters receives a
+terminal flush in its own provider context. The remainder starts only after that
+context's final frame, using a new provider context but the same original speech
+item/playback identity. This preserves audio ordering without buffering provider
+PCM or assuming nonterminal flush semantics. Completion waits for every segment;
+barge-in drops the live segment and pending remainder. The complete utterance,
+including both segments, shares the existing text/audio bounds. An asynchronous
+mouth reopen rechecks cancellation before creating a context, and stale mouth
+callbacks cannot reach the replacement utterance.
+
+Directions are consumed exactly where authored. A laugh/sigh is never replayed,
+and style is never inferred or carried from one segment to the next. A terminal
+segment can reset provider prosody; continuity and new first-audio latency are
+**unverified** until the owner runs the targeted before/after probe. The 40-character
+cutoff is an engineering choice between the prior 21/45-character examples, not a
+measured provider threshold. Deterministic fixtures prove frame order, projection,
+completion and cancellation, not live latency or perceptual quality.
+
 ## Alternatives considered
 
 - **Voice-change realtime audio** was rejected because it doubles synthesis and

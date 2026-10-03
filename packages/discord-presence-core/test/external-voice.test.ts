@@ -3,13 +3,18 @@ import { describe, expect, it } from "vitest";
 import {
   openExternalVoiceConversation,
   splitSpeakableUnits,
+  type ExternalVoiceConversationOptions,
   type ExternalVoiceRealtimeHandlers,
   type ExternalVoiceRealtimePort,
   type ExternalVoiceSessionFactories,
   type ExternalVoiceTtsHandlers,
   type ExternalVoiceTtsPort,
 } from "../src/external-voice.ts";
-import type { RealtimeResponseMeta, RealtimeTimers } from "../src/realtime-session.ts";
+import {
+  MAX_REALTIME_RESPONSE_AUDIO_BYTES,
+  type RealtimeResponseMeta,
+  type RealtimeTimers,
+} from "../src/realtime-session.ts";
 import type { VoiceConversationOpenInput } from "../src/voice-session.ts";
 
 class FakeRealtimePort implements ExternalVoiceRealtimePort {
@@ -131,6 +136,7 @@ interface Harness {
 
 async function openHarness(
   onFirstText?: (itemId: string) => void,
+  options: ExternalVoiceConversationOptions = {},
 ): Promise<Harness & { port: Awaited<ReturnType<typeof openExternalVoiceConversation>> }> {
   const realtime = new FakeRealtimePort();
   const ttsPorts: FakeTtsPort[] = [];
@@ -167,7 +173,7 @@ async function openHarness(
       return Promise.resolve(port);
     },
   };
-  const port = await openExternalVoiceConversation(input, factories, { timers });
+  const port = await openExternalVoiceConversation(input, factories, { timers, ...options });
   if (realtimeHandlers === undefined) throw new Error("realtime handlers were not captured");
   return { port, realtime, ttsPorts, timers, realtimeHandlers, ttsHandlers, events, failNextTtsOpen };
 }
@@ -526,5 +532,203 @@ it("absorbs a burst behind TTS and retains stale function results without speaki
   expect(realtime.functionResults).toEqual([{ callId: "old", output: "Useful context" }]);
   realtimeHandlers.onResponseDone(doneMeta("latest"));
   expect(realtime.responseCreates).toBe(2);
+  port.close();
+});
+
+describe("v4 authored directions and first-clause segments", () => {
+  it("flushes the short first clause early, serializes the remainder, and preserves original item identity", async () => {
+    const readable: unknown[] = [];
+    const h = await openHarness(undefined, { dialogue: true, onTranscript: (event) => readable.push(event) });
+    h.realtimeHandlers.onTextDelta("[lau", "original");
+    h.realtimeHandlers.onTextDelta("ghs] Nah. [deadpan] Mara, it's mushrooms.", "original");
+    await settle();
+    expect(h.ttsPorts[0]!.frames).toEqual([
+      { kind: "open", contextId: "original" },
+      { kind: "append", contextId: "original", text: "[laughs] Nah. " },
+      { kind: "flush", contextId: "original" },
+    ]);
+    h.realtimeHandlers.onResponseDone(doneMeta("response"));
+    await settle();
+    expect(h.events.done).toEqual([]);
+    h.ttsHandlers[0]!.onAudio(Buffer.from([1, 0]), "original");
+    h.ttsHandlers[0]!.onContextDone("original");
+    await settle();
+    const frames = h.ttsPorts[0]!.frames;
+    const remainderId = frames[3]!.contextId!;
+    expect(remainderId).not.toBe("original");
+    expect(frames.slice(3)).toEqual([
+      { kind: "open", contextId: remainderId },
+      { kind: "append", contextId: remainderId, text: "[deadpan] Mara, it's mushrooms." },
+      { kind: "flush", contextId: remainderId },
+    ]);
+    const late = Buffer.from([9, 0]);
+    h.ttsHandlers[0]!.onAudio(late, "original");
+    expect([...late]).toEqual([0, 0]);
+    h.ttsHandlers[0]!.onAudio(Buffer.from([2, 0]), remainderId);
+    expect(h.events.audio.map((event) => event.itemId)).toEqual(["original", "original"]);
+    expect(h.events.done).toEqual([]);
+    h.ttsHandlers[0]!.onContextDone(remainderId);
+    expect(h.events.done).toHaveLength(1);
+    expect(readable).toEqual([
+      { itemId: "original", text: "Nah. Mara, it's mushrooms.", final: false },
+      { itemId: "original", text: "Nah. Mara, it's mushrooms.", final: true },
+    ]);
+    h.port.close();
+  });
+
+  it("can receive the first segment final before later deltas or response.done without ending the utterance", async () => {
+    const h = await openHarness(undefined, { dialogue: true });
+    h.realtimeHandlers.onTextDelta("Cat.", "cat");
+    await settle();
+    h.ttsHandlers[0]!.onContextDone("cat");
+    expect(h.events.done).toEqual([]);
+    h.realtimeHandlers.onTextDelta(" [sighs] Still a cat.", "cat");
+    await settle();
+    const second = h.ttsPorts[0]!.frames.findLast((frame) => frame.kind === "open")!.contextId!;
+    expect(second).not.toBe("cat");
+    h.realtimeHandlers.onResponseDone(doneMeta("cat-response"));
+    await settle();
+    h.ttsHandlers[0]!.onContextDone(second);
+    expect(h.events.done).toHaveLength(1);
+    h.port.close();
+  });
+
+  it.each([false, true])("tag-only speech has no empty readable transcript (v4=%s)", async (dialogue) => {
+    const readable: unknown[] = [];
+    const h = await openHarness(undefined, { dialogue, onTranscript: (event) => readable.push(event) });
+    for (const delta of ["[si", "ghs] [invented]", " [chuckles]"])
+      h.realtimeHandlers.onTextDelta(delta, "sound");
+    h.realtimeHandlers.onResponseDone(doneMeta("sound-response"));
+    await settle();
+    const appends = h.ttsPorts[0]!.frames.filter((frame) => frame.kind === "append");
+    expect(appends.map((frame) => frame.text)).toEqual(dialogue ? ["[sighs]  [chuckles]"] : []);
+    expect(readable).toEqual([]);
+    h.port.close();
+  });
+
+  it.each([false, true])("only short first v4 clauses get early terminal flush (v4=%s)", async (dialogue) => {
+    const h = await openHarness(undefined, { dialogue });
+    h.realtimeHandlers.onTextDelta(
+      "This first sentence is long enough to stream without a forced short-clause boundary.",
+      "long",
+    );
+    await settle();
+    expect(h.ttsPorts[0]!.frames.some((frame) => frame.kind === "flush")).toBe(false);
+    h.port.close();
+    if (!dialogue) {
+      const short = await openHarness(undefined, { dialogue });
+      short.realtimeHandlers.onTextDelta("[laughs] Nah.", "short");
+      await settle();
+      expect(short.ttsPorts[0]!.frames).toEqual([
+        { kind: "open", contextId: "short" },
+        { kind: "append", contextId: "short", text: " Nah." },
+      ]);
+      short.port.close();
+    }
+  });
+
+  it("barge-in drops the current segment and queued remainder without replaying directions or late audio", async () => {
+    const h = await openHarness(undefined, { dialogue: true });
+    h.realtimeHandlers.onTextDelta("[laughs] Nah. [sighs] Not that one.", "interrupted");
+    await settle();
+    h.port.truncate("interrupted", 20);
+    await settle();
+    h.ttsHandlers[0]!.onContextDone("interrupted");
+    h.realtimeHandlers.onTextDelta(" [excited] Late tail.", "interrupted");
+    h.realtimeHandlers.onResponseDone(doneMeta("interrupted-response"));
+    await settle();
+    const late = Buffer.from([1, 0]);
+    h.ttsHandlers[0]!.onAudio(late, "interrupted");
+    expect([...late]).toEqual([0, 0]);
+    expect(h.ttsPorts[0]!.frames.filter((frame) => frame.kind === "open")).toHaveLength(1);
+    expect(h.ttsPorts[0]!.frames.at(-1)).toEqual({ kind: "close_context", contextId: "interrupted" });
+    expect(h.events.done).toHaveLength(1);
+    h.port.close();
+  });
+});
+
+it("keeps one utterance audio budget across both v4 provider contexts", async () => {
+  const h = await openHarness(undefined, { dialogue: true });
+  h.realtimeHandlers.onTextDelta("Nah. This is the rest.", "budget");
+  await settle();
+  h.realtimeHandlers.onResponseDone(doneMeta("budget-response"));
+  await settle();
+  h.ttsHandlers[0]!.onAudio(Buffer.alloc(MAX_REALTIME_RESPONSE_AUDIO_BYTES - 2), "budget");
+  h.ttsHandlers[0]!.onContextDone("budget");
+  await settle();
+  const second = h.ttsPorts[0]!.frames.findLast((frame) => frame.kind === "open")!.contextId!;
+  const over = Buffer.from([1, 0, 2, 0]);
+  h.ttsHandlers[0]!.onAudio(over, second);
+  await settle();
+  expect([...over]).toEqual([0, 0, 0, 0]);
+  expect(h.events.audio).toHaveLength(1);
+  expect(h.events.errors).toContain("External voice utterance audio exceeded the byte limit");
+  expect(h.events.done).toHaveLength(1);
+  expect(h.ttsPorts[0]!.closed).toBe(true);
+  h.port.close();
+});
+it("bounds held remainder/tag input and releases a failed utterance", async () => {
+  const h = await openHarness(undefined, { dialogue: true });
+  h.realtimeHandlers.onTextDelta("Nah. [", "bounded");
+  await settle();
+  h.realtimeHandlers.onTextDelta("x".repeat(8000), "bounded");
+  h.realtimeHandlers.onResponseDone(doneMeta("bounded-response"));
+  await settle();
+  expect(h.events.errors).toContain("External voice utterance text exceeded the character limit");
+  expect(h.events.done).toHaveLength(1);
+  expect(h.ttsPorts[0]!.frames.filter((frame) => frame.kind === "open")).toHaveLength(1);
+  h.port.close();
+});
+it("barge-in during asynchronous mouth reopen prevents late context creation and old-mouth callbacks", async () => {
+  const realtime = new FakeRealtimePort(),
+    first = new FakeTtsPort(),
+    reopened = new FakeTtsPort();
+  let handlers!: ExternalVoiceRealtimeHandlers, resolveOpen!: (port: ExternalVoiceTtsPort) => void;
+  const mouths: ExternalVoiceTtsHandlers[] = [],
+    heard: string[] = [];
+  const port = await openExternalVoiceConversation(
+    {
+      instructions: "fixture",
+      onAudioDelta: (pcm, itemId) => {
+        heard.push(itemId);
+        pcm.fill(0);
+      },
+      onFunctionCall: () => {},
+      onResponseDone: () => {},
+      onClose: () => {},
+      onError: () => {},
+    },
+    {
+      openRealtime: async (input) => {
+        handlers = input;
+        return realtime;
+      },
+      openTts: async (input) => {
+        mouths.push(input);
+        return mouths.length === 1
+          ? first
+          : new Promise<ExternalVoiceTtsPort>((resolve) => {
+              resolveOpen = resolve;
+            });
+      },
+    },
+    { dialogue: true, timers: new FakeTimers() },
+  );
+  first.isOpen = false;
+  mouths[0]!.onClose();
+  handlers.onTextDelta("[laughs] Nah.", "cancelled");
+  await settle();
+  port.truncate("cancelled", 0);
+  resolveOpen(reopened);
+  await settle();
+  expect(reopened.frames).toEqual([]);
+  handlers.onTextDelta("New reply.", "current");
+  await settle();
+  mouths[0]!.onClose();
+  const stale = Buffer.from([3, 0]);
+  mouths[0]!.onAudio(stale, "current");
+  expect([...stale]).toEqual([0, 0]);
+  mouths[1]!.onAudio(Buffer.from([1, 0]), "current");
+  expect(heard).toEqual(["current"]);
   port.close();
 });
