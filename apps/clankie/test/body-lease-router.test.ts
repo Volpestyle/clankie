@@ -149,7 +149,9 @@ it("ask never falls back to default head and rechecks route permission", async (
     text: "May I use voice next?",
     ttlMs: 1000,
   });
-  const deliver = vi.fn(async () => "consumed" as const);
+  const deliver = vi.fn(async (destination: string) =>
+    destination === "a" ? ("unavailable" as const) : ("consumed" as const),
+  );
   const ports = {
     identity: async (id: string) => (id === "a" ? undefined : identity(id)),
     authorizeDelivery: async () => false,
@@ -163,6 +165,7 @@ it("ask never falls back to default head and rechecks route permission", async (
   expect(
     await router.deliverRequests({
       ...ports,
+      identity: async (id: string) => identity(id),
       designatedHead: () => "explicit-head",
       authorizeDelivery: async () => true,
     }),
