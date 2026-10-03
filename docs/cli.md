@@ -1817,7 +1817,11 @@ registered `clankie-seat` stays inactive when the worker plugin is selected.
 An uncertain start or brief delivery retains its pane for inspection and reports
 uncertainty. The turn may already have started; reconcile its native session before
 retrying. `message_seat` distinguishes confirmed delivery, unconfirmed delivery,
-and unavailable control. An unavailable connection does not promise an automatic
+and unavailable control. External Codex messages first try the selected machine's
+existing app-server proxy. `state: steered` confirms the exact active turn;
+`state: queued` and `status: queued_until_turn_end` mean native queue acceptance,
+not that the agent saw the message. A goal may hold it until the whole goal ends.
+No new setting or daemon is enabled. An unavailable connection does not promise an automatic
 retry. The current Codex adapter's control map is in memory, so a saved session
 reference alone does not reattach after a service restart. Sends target the bound
 Codex thread even if the owner switches the TUI to another thread; they do not

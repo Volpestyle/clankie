@@ -1,3 +1,4 @@
+import { codexProxyControl, type ExternalCodexControl } from "./external-codex-control.ts";
 import { createFleetSeatControl, isMessageableSeat } from "./fleet-seat-control.ts";
 import {
   existingNativeSession,
@@ -131,6 +132,7 @@ export interface HerdrWatchRunner {
    * `codex queue --thread <id> --message <text>`. False on a non-zero exit or
    * "No active session".
    */
+  codexControl?: ExternalCodexControl;
   codexQueue?(sessionId: string, text: string, codexHome?: string): Promise<boolean>;
   closePane?(target: string): Promise<void>;
   /** Open a tab in a working directory; resolves with its root pane id. */
@@ -464,6 +466,7 @@ export function createHerdrWatchRunner(
       }
       return result.stdout;
     },
+    codexControl: codexProxyControl(),
     codexQueue: async (sessionId, text, codexHome) => {
       const result = await runExecFile(
         "codex",
@@ -724,6 +727,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
        */
       readonly remoteSeatAdapters?: (fleet: string) => readonly HarnessSeatAdapter[];
       /** `codex queue` on a remote fleet's machine, for its Codex sessions he did not start. */
+      readonly remoteCodexControl?: (fleet: string, paneId: string) => ExternalCodexControl | undefined;
       readonly remoteCodexQueue?: (fleet: string, sessionId: string, text: string) => Promise<boolean>;
       /** Include every configured Herdr server on the same exact SSH destination. */
       readonly resumeInventory?: (fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>;
@@ -757,6 +761,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       this.seatAdapters,
       this.remoteSeatAdapters,
       options.remoteCodexQueue,
+      options.remoteCodexControl,
     );
     this.summariesPath = options.summariesPath ?? herdrSummariesPath();
     this.summaryWatchIntervalMs = options.summaryWatchIntervalMs ?? 1_000;

@@ -60,3 +60,19 @@ writes. When authorized, `clankie restart` reloads the service and its
 dependent bodies. Older installations have only the console `/voice` wizard.
 A readiness check skips paid ElevenLabs synthesis: separate offline tests, real
 provider audio, and actual Discord audibility when reporting verification.
+
+## Messages to external Codex sessions
+
+`message_seat` first tries the existing Codex app-server proxy on the selected
+local or linked machine, using the pane's exact session and active turn. A
+`state: steered` receipt confirms that turn accepted it. A queue receipt has
+`state: queued`, `status: queued_until_turn_end`, and an explicit detail: it waits
+until the turn ends, potentially the entire goal. Do not interpret it as seen.
+An unconfirmed steer must be reconciled before retrying; never type a fallback
+into the pane. Owner approval/input remains pending.
+
+A shared daemon still may lack a valid Herdr pane/session report. Do not guess a
+thread from recent history, globally enable the daemon, or forge membership to
+repair it. Outbound owner-authorized control does not authorize inbound fleet
+MCP tools: shared-daemon local MCP membership continues to fail closed. Private
+`--no-daemon` sessions generally have no externally reachable control socket.

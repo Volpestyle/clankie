@@ -1,3 +1,4 @@
+import * as externalCodex from "../src/captain/external-codex-control.ts";
 import { EventEmitter, once } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, spawn } from "node:child_process";
@@ -7,6 +8,7 @@ import type { HerdrFleet } from "../src/herdr-fleet.ts";
 import {
   forwardSshArgs,
   remoteCodexQueue,
+  remoteCodexControl,
   remoteCodexServer,
   remoteCodexTrackerOverrides,
 } from "../src/captain/remote-codex-app-server.ts";
@@ -199,4 +201,99 @@ describe("replying to a Codex session Clankie did not start on another machine (
     expect(await remoteCodexQueue(posix, shell)("thread-9", "hi")).toBe(false);
     expect(shell.mock.calls[0]![0]).toBe("exec codex 'queue' '--thread' 'thread-9' '--message' 'hi'");
   });
+});
+
+describe("external Codex SSH proxy", () => {
+  it.each([posix, windows])("keeps the proxy on fleet $id and preserves bytes", async (fleet) => {
+    const delivery = vi.fn(async () => ({ outcome: "unconfirmed" as const, detail: "lost" }));
+    const proxy = vi.spyOn(externalCodex, "codexProxyControl").mockReturnValue(delivery);
+    try {
+      const shell = vi.fn(async () => JSON.stringify({ script: "C:\\npm\\codex.js" }));
+      expect(
+        await remoteCodexControl(
+          fleet,
+          shell,
+          async () =>
+            JSON.stringify({
+              result: {
+                process_info: {
+                  foreground_processes: [
+                    {
+                      pid: 123,
+                      name: fleet.ssh.shell === "powershell" ? "codex.exe" : "codex",
+                      argv: ["codex"],
+                    },
+                  ],
+                },
+              },
+            }),
+          `${fleet.id}/w1:p1`,
+        )("exact-thread", "hello"),
+      ).toEqual({
+        outcome: "unconfirmed",
+        detail: "lost",
+      });
+      const [command, args] = proxy.mock.calls[0]!;
+      expect(command).toBe("ssh");
+      expect(args?.at(-2)).toBe(fleet.ssh.host);
+      if (fleet.ssh.shell === "posix") {
+        expect(args?.at(-1)).toBe("exec codex 'app-server' 'proxy'");
+        expect(shell).not.toHaveBeenCalled();
+      } else {
+        const script = decoded(args!.at(-1)!);
+        expect(script).toContain("Get-Command node -CommandType Application");
+        expect(script).toContain("StandardOutput.BaseStream.CopyTo");
+        expect(
+          Buffer.from(/FromBase64String\('([^']+)'\)/u.exec(script)![1]!, "base64").toString("utf8"),
+        ).toBe("C:\\npm\\codex.js app-server proxy");
+      }
+      expect(delivery).toHaveBeenCalledWith("exact-thread", "hello");
+    } finally {
+      proxy.mockRestore();
+    }
+  });
+});
+
+it("never tries another server for a remote private or unknown pane", async () => {
+  const proxy = vi.spyOn(externalCodex, "codexProxyControl");
+  const shell = vi.fn();
+  try {
+    for (const argv of [["codex", "--no-daemon"], ["codex", "--remote", "wss://elsewhere"], undefined]) {
+      const herdr = vi.fn(async () =>
+        JSON.stringify({
+          result: { process_info: { foreground_processes: [{ pid: 123, name: "codex.exe", argv }] } },
+        }),
+      );
+      expect(await remoteCodexControl(windows, shell, herdr, "pc/w1:p1")("thread", "hello")).toBeUndefined();
+      expect(herdr).toHaveBeenCalledWith(["pane", "process-info", "--pane", "w1:p1"]);
+    }
+    expect(shell).not.toHaveBeenCalled();
+    expect(proxy).not.toHaveBeenCalled();
+  } finally {
+    proxy.mockRestore();
+  }
+});
+
+it("passes the exact remote Unix endpoint into the selected fleet's proxy", async () => {
+  const proxy = vi
+    .spyOn(externalCodex, "codexProxyControl")
+    .mockReturnValue(async () => ({ outcome: "delivered", state: "steered" }));
+  try {
+    const herdr = async () =>
+      JSON.stringify({
+        result: {
+          process_info: {
+            foreground_processes: [
+              { pid: 123, name: "codex", argv: ["codex", "--remote", "unix:///owned/rpc.sock"] },
+            ],
+          },
+        },
+      });
+    await remoteCodexControl(posix, vi.fn(), herdr, "box/w1:p1")("thread", "hello");
+    expect(proxy.mock.calls[0]?.[1]?.at(-1)).toBe(
+      "exec codex 'app-server' 'proxy' '--sock' '/owned/rpc.sock'",
+    );
+  } finally {
+    proxy.mockRestore();
+  }
 });

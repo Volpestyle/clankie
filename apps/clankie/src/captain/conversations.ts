@@ -2393,6 +2393,8 @@ export class ConversationStore {
       streaming: false,
       ...(attachments === undefined ? {} : { attachments: attachments.map((attachment) => attachment.file) }),
     });
+    if (typeof delivery === "object" && delivery.state === "queued" && delivery.detail)
+      this.append(meta, { type: "message", role: "captain", text: delivery.detail, streaming: false });
     this.append(meta, { type: "turn", runId, phase: "accepted" });
     this.append(meta, { type: "turn", runId, phase: "completed" });
     this.prune(meta.conversationId);
@@ -2403,6 +2405,16 @@ export class ConversationStore {
       runId,
       revision: meta.revision,
       safeCursor,
+      ...(typeof delivery === "object" && delivery.state !== undefined
+        ? {
+            seatDelivery: {
+              state: delivery.state,
+              ...(delivery.detail === undefined
+                ? {}
+                : { detail: delivery.detail.slice(0, OPERATOR_CONVERSATION_SUMMARY_MAX) }),
+            },
+          }
+        : {}),
     };
   }
 

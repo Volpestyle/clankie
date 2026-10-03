@@ -14,7 +14,7 @@ export interface CodexSeatEvent {
   params: RecordValue;
 }
 
-/** One connection to one owned app-server, never the shared Codex daemon. */
+/** One connection to one selected app-server; requests never select another server. */
 export class CodexAppServerClient {
   private readonly socket: WebSocket;
   private readonly event: (event: CodexSeatEvent) => void;

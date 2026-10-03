@@ -2,7 +2,8 @@
  * A Codex fleet seat's session: Herdr does not report one, so the uuid lives in
  * the rollout file the process keeps open
  * (`~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`). `codex
- * queue --thread` takes that uuid. The pty remains the fallback.
+ * queue --thread` takes that uuid. An exact Herdr session report is also usable;
+ * delivery never falls back to terminal input.
  */
 
 export interface HerdrForegroundProcess {
@@ -19,13 +20,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function basename(value: string): string {
-  const slash = value.lastIndexOf("/");
-  return slash < 0 ? value : value.slice(slash + 1);
-}
-
 function isCodexProcess(process: HerdrForegroundProcess): boolean {
-  return basename(process.name) === "codex" || basename(process.argv0 ?? "") === "codex";
+  return (
+    /(?:^|[\\/])codex(?:\.exe)?$/iu.test(process.name) ||
+    /(?:^|[\\/])codex(?:\.exe)?$/iu.test(process.argv0 ?? "")
+  );
 }
 
 export function parseHerdrForegroundProcesses(stdout: string): readonly HerdrForegroundProcess[] {
@@ -80,4 +79,17 @@ export function resolveCodexHome(openFiles: string, sessionId: string): string |
     ?.slice(1);
   const boundary = path?.lastIndexOf("/sessions/") ?? -1;
   return path && boundary > 0 ? path.slice(0, boundary) : undefined;
+}
+
+/** Null means no selected reachable endpoint; undefined selects this account's daemon. */
+export function codexControlEndpoint(process: HerdrForegroundProcess | undefined): string | undefined | null {
+  const argv = process?.argv;
+  if (argv === undefined || argv.length === 0) return null;
+  const index = argv.indexOf("--remote");
+  const endpoint =
+    index >= 0
+      ? (argv[index + 1] ?? "")
+      : argv.find((arg) => arg.startsWith("--remote="))?.slice("--remote=".length);
+  if (endpoint !== undefined) return endpoint.startsWith("unix://") && endpoint.length > 7 ? endpoint : null;
+  return argv.includes("--no-daemon") ? null : undefined;
 }

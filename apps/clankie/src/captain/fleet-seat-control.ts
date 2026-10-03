@@ -1,7 +1,8 @@
+import type { ExternalCodexControl } from "./external-codex-control.ts";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import { basename } from "node:path";
 import { splitFleetQualified } from "../herdr-fleet.ts";
-import { codexProcess, resolveCodexHome, resolveCodexSessionId } from "./codex-seat.ts";
+import { codexControlEndpoint, codexProcess, resolveCodexHome, resolveCodexSessionId } from "./codex-seat.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 
@@ -16,6 +17,7 @@ export function createFleetSeatControl(
    * Clankie did not start there receives his message as its next prompt.
    */
   remoteCodexQueue?: (fleet: string, sessionId: string, text: string) => Promise<boolean>,
+  remoteCodexControl?: (fleet: string, paneId: string) => ExternalCodexControl | undefined,
 ) {
   const attach = async (agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> => {
     const fleet = splitFleetQualified(agent.paneId)?.fleet;
@@ -41,7 +43,9 @@ export function createFleetSeatControl(
       // That machine's Herdr reports the session; its own Codex queues the message.
       if (remoteCodexQueue === undefined || agent.session?.kind !== "id") return undefined;
       try {
-        if (await remoteCodexQueue(remote, agent.session.value, text)) return { outcome: "delivered" };
+        const native = await remoteCodexControl?.(remote, agent.paneId)?.(agent.session.value, text);
+        if (native !== undefined) return native;
+        if (await remoteCodexQueue(remote, agent.session.value, text)) return queued();
         return {
           outcome: "unconfirmed",
           detail: "Codex queue did not confirm delivery; inspect the seat before resending.",
@@ -52,22 +56,34 @@ export function createFleetSeatControl(
     }
     const { paneProcesses, openFiles, codexQueue } = runner;
     if (paneProcesses === undefined || openFiles === undefined || codexQueue === undefined) return undefined;
-    let sessionId: string;
+    let sessionId = agent.session?.kind === "id" ? agent.session.value : undefined;
     let home: string | undefined;
+    // Until argv is observed, the pane might point at a different server.
+    let endpoint: string | undefined | null = null;
     try {
       const processes = await paneProcesses(agent.paneId);
       const process = codexProcess(processes);
-      if (process === undefined) return undefined;
-      const files = await openFiles(process.pid);
-      const resolved = resolveCodexSessionId(processes, files);
-      if (resolved === undefined) return undefined;
-      sessionId = resolved;
-      home = resolveCodexHome(files, sessionId);
+      if (process !== undefined) {
+        endpoint = codexControlEndpoint(process);
+        const files = await openFiles(process.pid);
+        const resolved = resolveCodexSessionId(processes, files);
+        if (sessionId !== undefined && resolved !== undefined && sessionId !== resolved)
+          return {
+            outcome: "undelivered",
+            detail: "Codex pane session identity changed; refresh before sending.",
+          };
+        sessionId ??= resolved;
+        if (sessionId !== undefined) home = resolveCodexHome(files, sessionId);
+      }
     } catch {
-      return undefined;
+      // A daemon TUI may not own a rollout; Herdr's exact session binding suffices.
     }
+    if (sessionId === undefined) return undefined;
     try {
-      if (await codexQueue(sessionId, text, home)) return { outcome: "delivered" };
+      const native =
+        endpoint === null ? undefined : await runner.codexControl?.(sessionId, text, home, endpoint);
+      if (native !== undefined) return native;
+      if (await codexQueue(sessionId, text, home)) return queued();
       return {
         outcome: "unconfirmed",
         detail: "Codex queue did not confirm delivery; inspect the seat before resending.",
@@ -125,4 +141,13 @@ export function createFleetSeatControl(
 
 export function isMessageableSeat(agent: HerdrAgentSnapshot | undefined): agent is HerdrAgentSnapshot {
   return agent !== undefined && agent.agent !== "shell" && agent.agent !== "unknown";
+}
+
+function queued(): FleetSeatDelivery {
+  return {
+    outcome: "delivered",
+    state: "queued",
+    detail:
+      "Queued until the current Codex turn ends (a goal may keep it pending until the goal ends); active-turn delivery was not confirmed.",
+  };
 }

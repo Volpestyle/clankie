@@ -2,7 +2,11 @@ import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
-import { createRemoteCodexSeatAdapter, remoteCodexQueue } from "./remote-codex-app-server.ts";
+import {
+  createRemoteCodexSeatAdapter,
+  remoteCodexQueue,
+  remoteCodexControl,
+} from "./remote-codex-app-server.ts";
 import { createRemoteClaudeWorkerSeatAdapter } from "./remote-claude-worker.ts";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import {
@@ -900,6 +904,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.fleets?.shell === undefined
       ? {}
       : {
+          remoteCodexControl: (fleetId: string, paneId: string) => {
+            const fleet = remoteFleets.find((entry) => entry.id === fleetId);
+            return fleet === undefined
+              ? undefined
+              : remoteCodexControl(fleet, deps.fleets!.shell!(fleet), deps.fleets!.run(fleet), paneId);
+          },
           remoteCodexQueue: (() => {
             const queues = new Map<string, ReturnType<typeof remoteCodexQueue>>();
             return async (fleetId: string, sessionId: string, text: string) => {
@@ -1790,6 +1800,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     });
     if (delivery.outcome === "offline") return { outcome: "seat_offline", seatId };
     if (delivery.outcome !== "delivered") return { ...delivery, seatId };
+    if (delivery.state === "queued" && delivery.detail !== undefined)
+      return { ...delivery, seatId, status: "queued_until_turn_end" };
     return { ...delivery, seatId, status: await herdrWatches.awaitPickup(seatId) };
   };
 

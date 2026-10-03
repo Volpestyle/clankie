@@ -13,6 +13,7 @@ export interface FleetSeatMessageContext {
 export type FleetSeatDelivery =
   | {
       readonly outcome: "delivered";
+      readonly detail?: string;
       readonly messageId?: string;
       readonly state?: "queued" | "started" | "steered";
     }

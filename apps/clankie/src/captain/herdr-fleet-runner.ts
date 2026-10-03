@@ -221,6 +221,7 @@ export function routeHerdrFleets(
     // A pid is only meaningful on the machine that reported it; the local
     // runner answers for local panes; remote codex seats use their own app-server.
     ...(local.openFiles === undefined ? {} : { openFiles: local.openFiles }),
+    ...(local.codexControl === undefined ? {} : { codexControl: local.codexControl }),
     ...(local.codexQueue === undefined ? {} : { codexQueue: local.codexQueue }),
     closePane: async (target) => {
       const { runner, id } = route(target);

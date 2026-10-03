@@ -1890,6 +1890,14 @@ export const OperatorConversationTurnAcceptedSchema = z
     runId: OperatorConversationRunIdSchema,
     revision: z.number().int().nonnegative(),
     safeCursor: OperatorConversationCursorSchema,
+    /** Native receipt, distinct from the conversation accepting the message. */
+    seatDelivery: z
+      .object({
+        state: z.enum(["queued", "started", "steered"]),
+        detail: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type OperatorConversationTurnAccepted = z.infer<typeof OperatorConversationTurnAcceptedSchema>;

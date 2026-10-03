@@ -1,3 +1,5 @@
+import { codexControlEndpoint, codexProcess, parseHerdrForegroundProcesses } from "./codex-seat.ts";
+import { codexProxyControl } from "./external-codex-control.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
@@ -318,5 +320,63 @@ export function remoteCodexQueue(fleet: HerdrFleet, shell: FleetShellRun) {
         : remoteProgramCommand("posix", "codex", argv),
     );
     return !/no active session/iu.test(stdout);
+  };
+}
+
+/** SSH carries only the selected fleet's existing proxy, never a new daemon. */
+export function remoteCodexControl(
+  fleet: HerdrFleet,
+  shell: FleetShellRun,
+  herdr: HerdrFleetRun,
+  paneId: string,
+) {
+  return async (sessionId: string, text: string) => {
+    const qualified = splitFleetQualified(paneId);
+    if (qualified?.fleet !== fleet.id) return undefined;
+    let endpoint: string | undefined | null;
+    try {
+      endpoint = codexControlEndpoint(
+        codexProcess(
+          parseHerdrForegroundProcesses(await herdr(["pane", "process-info", "--pane", qualified.id])),
+        ),
+      );
+    } catch {
+      return undefined;
+    }
+    if (endpoint === null) return undefined;
+    let program = "codex";
+    let prefix: string[] = [];
+    if (fleet.ssh.shell === "powershell") {
+      // ProcessStartInfo cannot execute npm's .cmd shim. Resolve its real JS
+      // entrypoint, just as the existing native queue does; transport stays raw.
+      const result = JSON.parse(
+        (
+          await shell(
+            powershellScriptCommand(
+              [
+                "$ErrorActionPreference = 'Stop'",
+                "$path = (Get-Command codex -CommandType Application | Select-Object -First 1).Source",
+                "if ($path -match '\\.cmd$') { $root = (& npm root -g 2>$null | Select-Object -First 1); $js = Join-Path $root '@openai\\codex\\bin\\codex.js'; if (-not (Test-Path -LiteralPath $js)) { throw 'Codex npm entrypoint is missing' }; @{ script = $js } | ConvertTo-Json -Compress } else { @{ script = $null } | ConvertTo-Json -Compress }",
+              ].join("; "),
+            ),
+          )
+        ).trim(),
+      ) as { script?: string | null };
+      if (typeof result.script === "string") {
+        program = "node";
+        prefix = [result.script];
+      }
+    }
+    return codexProxyControl("ssh", [
+      ...SSH_BASE_OPTIONS,
+      "--",
+      fleet.ssh.host,
+      remoteProgramCommand(fleet.ssh.shell, program, [
+        ...prefix,
+        "app-server",
+        "proxy",
+        ...(endpoint === undefined ? [] : ["--sock", endpoint.slice("unix://".length)]),
+      ]),
+    ])(sessionId, text);
   };
 }

@@ -99,3 +99,19 @@ owner switches the TUI to another thread, this connection does not follow UI
 focus. Report unavailable control without falling back to terminal input.
 See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md)
 for the boundary between task records, native terminals and harness delivery.
+
+### External Codex active-turn delivery
+
+For an owner-started Codex session with a known Herdr thread identity, the service
+tries `codex app-server proxy` on that machine before the native queue. The proxy
+carries a WebSocket upgrade and frames over stdio (also through SSH); it never
+starts a daemon. The exact thread must report active and its current turn is
+fenced with `expectedTurnId`. No thread is resumed, no approval answered, and no
+terminal draft touched. A lost steering receipt is unconfirmed and is never
+replayed through the queue. The selected machine never falls back to another.
+
+When the proxy cannot reach that active thread, queue acceptance reports
+`state: queued` with an explicit until-turn-end detail. It does not mean the agent
+has seen the message; a goal may hold it until the goal ends. Shared-daemon
+Herdr identity and MCP membership are separate limitations; see the
+[external Codex verification notes](../../docs/testing/2026-10-03-external-codex-control/README.md).

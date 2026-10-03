@@ -384,3 +384,42 @@ describe("seat conversations", () => {
     await store.close();
   });
 });
+
+it("exposes queued native delivery to API/CLI and the visible conversation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-queued-"));
+  roots.push(root);
+  const detail = "Queued until the current Codex turn ends; not yet seen.";
+  const sender = vi.fn(
+    async (): Promise<FleetSeatDelivery> => ({ outcome: "delivered", state: "queued", detail }),
+  );
+  const store = new ConversationStore(root, vi.fn(), undefined, sender);
+  try {
+    const created = await store.serve({
+      schemaVersion: 1,
+      op: "create",
+      scope: { kind: "seat", seatId: "codex" },
+      title: "Codex",
+    });
+    if (created.op !== "create") throw new Error("create expected");
+    const conversationId = created.conversation.conversationId;
+    const sent = await sendMessage(store, {
+      conversationId,
+      surfaceClientId: "tui",
+      expectedRevision: 0,
+      message: "hello",
+    });
+    if (sent.op !== "send") throw new Error("send expected");
+    expect(SubmitOperatorConversationTurnResultSchema.parse(sent.result)).toMatchObject({
+      status: "accepted",
+      seatDelivery: { state: "queued", detail },
+    });
+    const replay = await replayConversation(store, { conversationId, surfaceClientId: "tui" });
+    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("page expected");
+    expect(replay.result.events).toContainEqual(
+      expect.objectContaining({ type: "message", role: "captain", text: detail }),
+    );
+    expect(sender).toHaveBeenCalledOnce();
+  } finally {
+    await store.close();
+  }
+});
