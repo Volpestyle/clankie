@@ -45,6 +45,8 @@ async function fixture(symlinkReport = false) {
   mkdirSync(sourceRoot, { mode: 0o700 });
   const files = {
     "environment/Dockerfile": "FROM fixture\n",
+    "environment/check_routing.py": "# trusted initial checker\n",
+    "environment/layout_spec.json": '{"trusted":"layout"}\n',
     "tests/Dockerfile": "FROM fixture\nCOPY . /tests\n",
     "tests/test_fixture.py": "def test_fixture():\n    assert True\n",
     "tests/test.sh": "#!/bin/sh\nexit 0\n",
@@ -189,4 +191,45 @@ it("rejects external report symlinks despite successful exit/reward and retains 
     }),
   ).rejects.toThrow();
   expect(f.command.mock.calls.filter(([args]) => args[0] === "inspect").length).toBeGreaterThanOrEqual(4);
+});
+
+it("stages pinned initial task inputs without exposing held-out verifier files", async () => {
+  const f = await fixture();
+  const workspace = join(f.root, "workspace");
+  mkdirSync(workspace, { mode: 0o700 });
+  expect(f.bridge.stageWorkspaceInputs(workspace).map((entry: { name: string }) => entry.name)).toEqual([
+    "check_routing.py",
+    "layout_spec.json",
+  ]);
+  expect(readFileSync(join(workspace, "check_routing.py"), "utf8")).toContain("trusted initial");
+  expect(() => f.bridge.stageWorkspaceInputs(workspace)).toThrow();
+  expect(f.command).not.toHaveBeenCalled();
+});
+
+it("owner cancellation stops the exact active verifier and never accepts its later result", async () => {
+  const f = await fixture(),
+    built = await f.bridge.build("tests"),
+    abort = new AbortController();
+  const original = f.command.getMockImplementation()!;
+  let release!: (value: string) => void;
+  f.command.mockImplementation(async (args) =>
+    args[0] === "wait"
+      ? new Promise<string>((resolve) => {
+          release = resolve;
+        })
+      : original(args),
+  );
+  const pending = f.bridge.verify({
+    image: built.image,
+    candidateRoot: f.candidateRoot,
+    output: join(f.root, "cancelled"),
+    signal: abort.signal,
+  });
+  const rejected = expect(pending).rejects.toThrow();
+  await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+  abort.abort();
+  await vi.waitFor(() => expect(f.command.mock.calls.filter(([args]) => args[0] === "kill")).toHaveLength(1));
+  release("0");
+  await rejected;
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "kill")).toHaveLength(1);
 });

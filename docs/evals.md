@@ -541,12 +541,23 @@ complete supplied records `imported-unverified`; it cannot prove that the
 inventory is complete or that a native hire actually happened. Missing costs are
 never reported as zero. See [deterministic evidence and gaps](testing/2026-10-03-lead-eval/README.md).
 
-The native run refusal also emits machine-readable engineering gaps. Current
-`ClaudeWorkerSeatControl.interrupt()` returns false and `close()` is a no-op;
-`readClaudeSubagents` is a bounded UI summary, not an exhaustive ledger;
-`SeatControl` supplies neither account-bound subscription windows nor complete
-per-call descendant usage. The actual `hireSeat` → `HerdrWatch.spawnSeat` path
-exists, but a disposable service/fleet containment adapter is not wired into this
-runner. Those are engineering prerequisites separate from James's run decision.
-The candidate grader does not close those gaps or establish native Terminal-Bench
-execution. No production service/control contracts changed in this continuation.
+The campaign `run` command still refuses dispatch and reports machine-readable
+gaps. The separate [native integration continuation](testing/2026-10-03-lead-eval/native-continuation.md)
+now contains an explicit manual isolated-service bootstrap, real native hire and
+owner-attachment adapters, controller-origin account observers, continuous shared
+admission, a fenced Pi lead runtime and contained coding tools. Ordinary service
+launch behavior is unchanged. No import, check, CI job or timer starts a campaign.
+
+The manual neutral-task path composes the pinned official Terminal-Bench task
+image with the native runtime; HTML verification uses a separate candidate sandbox.
+Before dispatch, the future manual bootstrap must actually establish the exact
+image/daemon/binary/helper capability, selected-account coverage, all-account
+quota readiness and owner attachment. Deterministic fake-service/process/provider
+fixtures prove the wiring and refusals, not those runtime capabilities or benchmark
+quality. James's campaign decision remains a separate hold.
+
+Historical isolated Linux dependency/grader preparation, Claude subscription
+coverage and arbitrary descendant admission remain unsupported. The exhaustive
+native protocol ledger is separate from bounded UI summaries. Missing usage stays
+unknown; never-started allocations are explicit, and owner TTY interventions are
+not measured. See the continuation for validation evidence and limitations.

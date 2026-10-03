@@ -14,10 +14,24 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { LeadContainer } from "./lead-containment.mjs";
+import { LeadContainer, dockerTransportIdentity } from "./lead-containment.mjs";
+import { buildHtmlMediation, probeHtmlMediation, assertHtmlMediation } from "./lead-html-mediation.mjs";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const tasks = JSON.parse(readFileSync(new URL("./lead-tasks.json", import.meta.url))).neutral;
 const stagedRecords = new WeakMap();
+const environmentBuilds = new WeakMap();
+export async function requireTerminalBenchEnvironment(value, command) {
+  const record = environmentBuilds.get(value);
+  if (
+    !record ||
+    record.command !== command ||
+    JSON.stringify(record.endpoint) !== JSON.stringify(dockerTransportIdentity(command))
+  )
+    throw Error("Controller-built official task environment required");
+  const daemon = JSON.parse(await command(["info", "--format", "{{json .}}"]));
+  if (!daemon.ID || daemon.ID !== record.daemonId) throw Error("Official environment daemon changed");
+  return structuredClone(record.evidence);
+}
 const ARTIFACTS = { "html-js-filter": "filter.py", "photonic-waveguide-routing": "routing_result_1.json" };
 
 function ownedFile(root, path, maxBytes = 16 * 1024 * 1024) {
@@ -118,6 +132,8 @@ export function terminalBenchResult(report, reward, expectedTests) {
 export class TerminalBenchBridge {
   #images = new Map();
   #staged;
+  #htmlBuild;
+  #htmlProof;
   constructor({ staged, command }) {
     if (!stagedRecords.has(staged))
       throw Error("Only controller-staged pinned official sources are accepted");
@@ -126,6 +142,11 @@ export class TerminalBenchBridge {
   }
   async build(role) {
     if (!["environment", "tests"].includes(role)) throw Error("Unknown official build context");
+    const endpoint = role === "environment" ? dockerTransportIdentity(this.command) : undefined;
+    const daemon =
+      role === "environment" ? JSON.parse(await this.command(["info", "--format", "{{json .}}"])) : undefined;
+    if (role === "environment" && !daemon?.ID)
+      throw Error("Official environment daemon identity unavailable");
     const context = join(this.#staged.output, role);
     const prefix = `tasks/${this.#staged.taskId}/${role}/`;
     const expected = new Map(
@@ -152,15 +173,76 @@ export class TerminalBenchBridge {
     const image = ownedFile(this.#staged.output, iid, 256).toString().trim();
     if (!/^sha256:[a-f0-9]{64}$/u.test(image)) throw Error("Build returned no immutable image identity");
     this.#images.set(role, image);
-    return { image, role, sourceCommit: this.#staged.commit, files: this.#staged.files };
+    const result = Object.freeze({
+      image,
+      role,
+      taskId: this.#staged.taskId,
+      sourceCommit: this.#staged.commit,
+      files: structuredClone(this.#staged.files),
+    });
+    if (role === "environment")
+      environmentBuilds.set(result, {
+        command: this.command,
+        endpoint,
+        daemonId: daemon.ID,
+        evidence: structuredClone(result),
+      });
+    return result;
   }
-  async verify({ image, candidateRoot, output }) {
-    if (this.#images.get("tests") !== image)
+  /** Preserve exact initial environment inputs, separately from held-out grader files. */
+  stageWorkspaceInputs(workspace) {
+    if (
+      realpathSync(workspace) !== workspace ||
+      !lstatSync(workspace).isDirectory() ||
+      lstatSync(workspace).uid !== process.getuid() ||
+      lstatSync(workspace).mode & 0o077
+    )
+      throw Error("Private allocated task workspace required");
+    const names =
+      this.#staged.taskId === "photonic-waveguide-routing" ? ["check_routing.py", "layout_spec.json"] : [];
+    const records = [];
+    for (const name of names) {
+      const sourcePath = `tasks/${this.#staged.taskId}/environment/${name}`;
+      const expected = this.#staged.files.find((file) => file.path === sourcePath);
+      const bytes = ownedFile(this.#staged.output, join(this.#staged.output, "environment", name));
+      if (!expected || hash(bytes) !== expected.sha256) throw Error("Pinned initial task input changed");
+      writeFileSync(join(workspace, name), bytes, { flag: "wx", mode: 0o600 });
+      records.push({ name, sha256: expected.sha256 });
+    }
+    return records;
+  }
+  async buildHtml({ nativeBuild, output }) {
+    const baseImage = this.#images.get("tests");
+    if (this.#staged.taskId !== "html-js-filter" || !baseImage || this.#htmlBuild)
+      throw Error("One pinned HTML verifier build required");
+    this.#htmlBuild = await buildHtmlMediation({
+      command: this.command,
+      nativeBuild,
+      baseImage,
+      sourceCommit: this.#staged.commit,
+      output,
+    });
+    return this.#htmlBuild;
+  }
+  async probeHtml({ root }) {
+    if (!this.#htmlBuild || this.#htmlProof)
+      throw Error("One controller-built HTML mediation image required");
+    this.#htmlProof = await probeHtmlMediation({ build: this.#htmlBuild, command: this.command, root });
+    return this.#htmlProof;
+  }
+  async verify({ image, candidateRoot, output, signal }) {
+    signal?.throwIfAborted();
+    const html = this.#staged.taskId === "html-js-filter";
+    const mediation = html
+      ? await assertHtmlMediation(this.#htmlProof, {
+          command: this.command,
+          image,
+          baseImage: this.#images.get("tests"),
+          sourceCommit: this.#staged.commit,
+        })
+      : undefined;
+    if (!html && this.#images.get("tests") !== image)
       throw Error("Verifier image was not built from this pinned context");
-    if (this.#staged.taskId === "html-js-filter")
-      throw Error(
-        "HTML verifier requires controller-probed isolated candidate trampoline; same-UID report access is refused",
-      );
     mkdirSync(output, { mode: 0o700 });
     const app = join(output, "app"),
       logs = join(output, "logs");
@@ -175,16 +257,45 @@ export class TerminalBenchBridge {
       role: "verifier",
       command: this.command,
     });
-    await container.create(["/bin/sh", "-c", "HOME=/tmp /bin/bash /tests/test.sh"], {
+    const argv = [
+      "/usr/bin/env",
+      "-i",
+      "PATH=/usr/local/bin:/usr/bin:/bin",
+      "HOME=/tmp",
+      "PYTHONDONTWRITEBYTECODE=1",
+      ...(html ? ["PYTHONPATH=/opt/lead/bootstrap"] : []),
+      "/bin/bash",
+      "/tests/test.sh",
+    ];
+    await container.create(argv, {
       memoryMb: 8192,
       cpus: 2,
     });
+    let cancelledStop;
+    const cancel = () => {
+      cancelledStop ??= container.stop("official verification cancelled");
+      void cancelledStop.catch(() => {});
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
     try {
+      signal?.throwIfAborted();
       await container.start();
       const exitCode = await this.command(["wait", container.id], {
         timeout: this.#staged.taskId === "html-js-filter" ? 1_800_000 : 300_000,
+        ...(signal ? { signal } : {}),
       });
       await container.inspect();
+      signal?.throwIfAborted();
+      if (html) {
+        let failed = false;
+        try {
+          lstatSync(join(logs, "lead-mediation-failure"));
+          failed = true;
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+        if (failed) throw Error("HTML candidate mediation failed; verifier result is invalid");
+      }
       const reportBytes = ownedFile(logs, join(logs, "ctrf.json"));
       const reward = ownedFile(logs, join(logs, "reward.txt"), 64).toString();
       const result = terminalBenchResult(JSON.parse(reportBytes), reward, this.#staged.expectedTests);
@@ -196,10 +307,13 @@ export class TerminalBenchBridge {
         image,
         artifactSha256: hash(bytes),
         reportSha256: hash(reportBytes),
+        ...(mediation ? { mediation } : {}),
         sourceCommit: this.#staged.commit,
       };
     } finally {
-      await container.stop("official verification settled");
+      signal?.removeEventListener("abort", cancel);
+      if (cancelledStop) await cancelledStop;
+      else await container.stop("official verification settled");
     }
   }
 }

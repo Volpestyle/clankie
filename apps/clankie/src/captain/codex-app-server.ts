@@ -35,6 +35,8 @@ export interface CodexNativePolicy {
   connected(read: CodexNativeRead): Promise<void>;
   bound?(input: { threadId: string; read: CodexNativeRead }): Promise<void>;
   beforeTurn(input: { threadId: string; read: CodexNativeRead }): Promise<void>;
+  /** Synchronous final latch, after source guards and immediately before physical turn RPC. */
+  dispatch?(input: { threadId: string; method: "turn/start" | "turn/steer"; turnId?: string }): void;
   /** Includes descendant events, before the seat's root-thread filtering. */
   audit(event: CodexSeatEvent): Promise<void>;
   /** Must revoke the exact enclosing execution boundary, including native TUI turns. */
@@ -530,6 +532,20 @@ export async function startCodexAppServerSeat(options: {
           // Initial brief authority expires independently of later follow-up turns.
           await guard?.();
           const steering = activeTurn;
+          try {
+            const result: unknown = options.policy?.dispatch?.({
+              threadId: threadId!,
+              method: steering ? "turn/steer" : "turn/start",
+              ...(steering ? { turnId: steering } : {}),
+            });
+            if (result !== undefined) {
+              void Promise.resolve(result).catch(() => {});
+              throw new Error("Native dispatch policy must be synchronous");
+            }
+          } catch (error) {
+            await failPolicy(error);
+            throw policyFailure;
+          }
           const response = record(
             await client!.request(steering ? "turn/steer" : "turn/start", {
               threadId,

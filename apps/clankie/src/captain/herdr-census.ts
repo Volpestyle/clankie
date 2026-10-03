@@ -441,6 +441,7 @@ export interface ObservedFleet {
 export async function readFleet(
   options: {
     readonly runCommand?: HerdrCensusRunner;
+    readonly summaries?: Readonly<Record<string, HerdrAgentSummary>>;
     readonly fleets?: readonly HerdrCensusFleet[];
     readonly herdrSession?: string;
     readonly localAvailable?: boolean;
@@ -506,7 +507,11 @@ export async function readFleet(
 }
 
 async function readLocalFleet(
-  options: { readonly runCommand?: HerdrCensusRunner; readonly herdrSession?: string } = {},
+  options: {
+    readonly runCommand?: HerdrCensusRunner;
+    readonly herdrSession?: string;
+    readonly summaries?: Readonly<Record<string, HerdrAgentSummary>>;
+  } = {},
 ): Promise<ObservedFleet> {
   const run = options.runCommand ?? defaultRunner;
   try {
@@ -519,7 +524,7 @@ async function readLocalFleet(
           new Map(sessions.map(({ terminalId, workspace, tab }) => [terminalId, { workspace, tab }])),
       ),
     ]);
-    const summaries = readHerdrSummariesFile().agents;
+    const summaries = options.summaries ?? readHerdrSummariesFile().agents;
     const occupied = parseHerdrAgentList(stdout).filter(
       (
         entry,
@@ -592,6 +597,7 @@ export async function readHerdrSessionCensus(
   herdrPaneId: string | undefined,
   options: {
     readonly runCommand?: HerdrCensusRunner;
+    readonly summaries?: Readonly<Record<string, HerdrAgentSummary>>;
     readonly fleets?: readonly HerdrCensusFleet[];
     readonly localAvailable?: boolean;
   } = {},
@@ -611,7 +617,11 @@ export async function readHerdrSessionCensus(
     return {
       outcome: "ok",
       text: [
-        formatHerdrSessionCensus(herdrPaneId, parseHerdrAgentList(stdout), readHerdrSummariesFile().agents),
+        formatHerdrSessionCensus(
+          herdrPaneId,
+          parseHerdrAgentList(stdout),
+          options.summaries ?? readHerdrSummariesFile().agents,
+        ),
         ...remote.map(formatRemoteFleet),
       ].join("\n"),
     };

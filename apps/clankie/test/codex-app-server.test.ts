@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 import { CodexAppServerClient, type CodexSeatEvent } from "../src/captain/codex-app-server.ts";
 
@@ -323,6 +323,92 @@ describe("trusted native seat policy", () => {
     await seat.send("follow-up");
     expect(f.methods).toContain("turn/start");
     await seat.close();
+  });
+
+  it.each(["quota", "owner"])(
+    "the final synchronous dispatch latch refuses %s loss during initial source guard",
+    async (reason) => {
+      let revoked = false,
+        release!: () => void;
+      const f = await fixture({
+        connected: async () => {},
+        audit: async () => {},
+        beforeTurn: async () => {},
+        failed: async () => {},
+        dispatch: () => {
+          if (revoked) throw Error(`${reason} revoked`);
+        },
+      });
+      const seat = await f.pending;
+      const pending = seat.send(
+        "initial",
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const rejected = expect(pending).rejects.toThrow(`${reason} revoked`);
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      revoked = true;
+      release();
+      await rejected;
+      expect(f.methods).not.toContain("turn/start");
+      expect(f.methods).not.toContain("turn/steer");
+      await seat.close().catch(() => {});
+    },
+  );
+
+  it("records the actual new-turn method when the previous turn completes during the source guard", async () => {
+    const events: string[] = [],
+      dispatches: unknown[] = [];
+    let release!: () => void;
+    const f = await fixture({
+      connected: async () => {},
+      audit: async (event) => {
+        events.push(event.method);
+      },
+      beforeTurn: async () => {},
+      failed: async () => {},
+      dispatch: (input) => {
+        dispatches.push(input);
+      },
+    });
+    const seat = await f.pending;
+    f.event({ method: "turn/started", params: { threadId: "root", turn: { id: "previous" } } });
+    await vi.waitFor(() => expect(events).toContain("turn/started"));
+    const pending = seat.send(
+      "next",
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    f.event({
+      method: "turn/completed",
+      params: { threadId: "root", turn: { id: "previous", status: "completed" } },
+    });
+    await vi.waitFor(() => expect(events).toContain("turn/completed"));
+    release();
+    await pending;
+    expect(dispatches).toEqual([{ threadId: "root", method: "turn/start" }]);
+    expect(f.methods).toContain("turn/start");
+    expect(f.methods).not.toContain("turn/steer");
+    await seat.close();
+  });
+
+  it("refuses an asynchronous dispatch hook before any native turn RPC", async () => {
+    const f = await fixture({
+      connected: async () => {},
+      audit: async () => {},
+      beforeTurn: async () => {},
+      failed: async () => {},
+      dispatch: async () => {},
+    });
+    const seat = await f.pending;
+    await expect(seat.send("no async authority")).rejects.toThrow("must be synchronous");
+    expect(f.methods).not.toContain("turn/start");
+    await seat.close().catch(() => {});
   });
 
   it("requires monitoring before attaching the native TUI", async () => {

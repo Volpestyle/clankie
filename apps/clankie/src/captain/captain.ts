@@ -73,7 +73,9 @@ import {
   SettingsManager,
   type AgentSession,
   type InlineExtension,
+  type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
+import type { EvalSessionBoundary } from "./eval-session-boundary.ts";
 import { RoomConversations } from "./room-conversations.ts";
 import {
   ConversationResetError,
@@ -88,6 +90,7 @@ import { AutonomyStore } from "./autonomy.ts";
 import {
   readFleet,
   type HerdrCensusFleet,
+  type HerdrCensusRunner,
   readHerdrSessionCensus,
   readSeatIdForHerdrPane,
   type HerdrSessionCensus,
@@ -535,10 +538,14 @@ export function resolveOperatorPrompt(
 }
 
 export interface CaptainOptions {
+  /** Explicit controller-created eval boundary; ordinary sessions remain unchanged. */
+  readonly evalSessionBoundary?: EvalSessionBoundary;
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
   readonly nativeHerdrRunner?: HerdrWatchRunner;
+  readonly nativeCensusRunner?: HerdrCensusRunner;
+  readonly nativeSummariesPath?: string;
   readonly localCodexProcess?: (pid: number, pane: string) => () => void;
   readonly localCodexSocket?: () => string | undefined;
   readonly personaImages?: PersonaImageSource;
@@ -991,6 +998,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   const herdrWatches = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     validateOwner: validateConversationOwner,
+    ...(options.nativeSummariesPath === undefined ? {} : { summariesPath: options.nativeSummariesPath }),
     ...(options.nativeLaunchPolicy === undefined ? {} : { nativeLaunchPolicy: options.nativeLaunchPolicy }),
     codexAccounts: async () => codexAccounts(await settings()),
     skillBundle: {
@@ -1267,7 +1275,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const settings = (): Promise<ClankieSettings> => settingsStore.load();
   const cacheSalt = promptCacheSalt(join(options.stateDir, "prompt-cache-salt"));
   const runtime = (): Promise<CaptainModelRuntime> =>
-    (modelRuntime ??= createCaptainModelRuntime(options.repoRoot));
+    (modelRuntime ??=
+      options.evalSessionBoundary === undefined
+        ? createCaptainModelRuntime(options.repoRoot)
+        : Promise.resolve(options.evalSessionBoundary.runtime));
 
   function systemPrompt(
     lane: CaptainSessionLaneV2,
@@ -1286,6 +1297,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   async function projectInstructions(cwd: string) {
+    if (options.evalSessionBoundary !== undefined) {
+      return options.evalSessionBoundary.resources(cwd).getAgentsFiles().agentsFiles;
+    }
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: getAgentDir(),
@@ -1334,84 +1348,90 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const route = { current: await resolveRoute(purpose) };
     const budget = { compactBeforeNextRun: false };
     const selection = route.current.selection;
-    const hasPersonaImages = (await personaImages()).images.length > 0;
-    const piSettings = SettingsManager.inMemory();
+    const hasPersonaImages =
+      options.evalSessionBoundary === undefined && (await personaImages()).images.length > 0;
+    const piSettings = options.evalSessionBoundary?.settings() ?? SettingsManager.inMemory();
     const quietSkills = new Set<string>();
-    const loader: DefaultResourceLoader = new DefaultResourceLoader({
-      cwd,
-      agentDir: getAgentDir(),
-      systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
-      noExtensions: true,
-      extensionFactories: [
-        ...(hasPersonaImages
-          ? [
-              personaImagesExtension(personaImages, async () => {
-                const card = await deps.memory.recallEpisodeCard(lane).catch(() => undefined);
-                const selection = await resolveRoute(purpose)
-                  .then((route) => route.selection)
-                  .catch(() => undefined);
-                return [
-                  card === undefined ? "" : renderEpisodeCard(card),
-                  selection === undefined ? "" : modelCard(selection),
-                ]
-                  .filter(Boolean)
-                  .join("\n\n");
-              }),
-            ]
-          : [
-              captainMemoryExtension(deps.memory, lane),
-              captainModelExtension(async () => (await resolveRoute(purpose)).selection),
-            ]),
-        captainRequestExtension({
-          lane,
-          cacheSalt,
-          onTrimmed: () => {
-            budget.compactBeforeNextRun = true;
-          },
-        }),
-        captainRoutingExtension({
-          current: () => route.current,
-          onEscalated: (record) => console.info("Routine turn escalated:", JSON.stringify(record)),
-        }),
-        browserExtension(deps, capture),
-        mcpExtension(deps, lane),
-        ...(systemTools ? [skillSearchExtension(() => loader.getSkills().skills, quietSkills)] : []),
-      ],
-      noPromptTemplates: true,
-      // Every root explicitly: the loader is given in-memory settings and
-      // resolves no defaults of its own, so a path absent here is a skill he
-      // cannot load however plainly it is named.
-      noSkills: true,
-      additionalSkillPaths: clankieSkillRoots({
-        skills: currentSettings.skills,
-        repoRoot: options.repoRoot,
-        agentDir: getAgentDir(),
-        home: homedir(),
+    const loader: ResourceLoader =
+      options.evalSessionBoundary?.resources(cwd) ??
+      new DefaultResourceLoader({
         cwd,
-      }).filter((path) => existsSync(path)),
-      skillsOverride: (base) => ({
-        ...base,
-        skills: quietMachineSkills(base.skills, listedSkillRoots(options.repoRoot, cwd), quietSkills),
-      }),
-      settingsManager: piSettings,
-    });
+        agentDir: getAgentDir(),
+        systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
+        noExtensions: true,
+        extensionFactories: [
+          ...(hasPersonaImages
+            ? [
+                personaImagesExtension(personaImages, async () => {
+                  const card = await deps.memory.recallEpisodeCard(lane).catch(() => undefined);
+                  const selection = await resolveRoute(purpose)
+                    .then((route) => route.selection)
+                    .catch(() => undefined);
+                  return [
+                    card === undefined ? "" : renderEpisodeCard(card),
+                    selection === undefined ? "" : modelCard(selection),
+                  ]
+                    .filter(Boolean)
+                    .join("\n\n");
+                }),
+              ]
+            : [
+                captainMemoryExtension(deps.memory, lane),
+                captainModelExtension(async () => (await resolveRoute(purpose)).selection),
+              ]),
+          captainRequestExtension({
+            lane,
+            cacheSalt,
+            onTrimmed: () => {
+              budget.compactBeforeNextRun = true;
+            },
+          }),
+          captainRoutingExtension({
+            current: () => route.current,
+            onEscalated: (record) => console.info("Routine turn escalated:", JSON.stringify(record)),
+          }),
+          browserExtension(deps, capture),
+          mcpExtension(deps, lane),
+          ...(systemTools ? [skillSearchExtension(() => loader.getSkills().skills, quietSkills)] : []),
+        ],
+        noPromptTemplates: true,
+        // Every root explicitly: the loader is given in-memory settings and
+        // resolves no defaults of its own, so a path absent here is a skill he
+        // cannot load however plainly it is named.
+        noSkills: true,
+        additionalSkillPaths: clankieSkillRoots({
+          skills: currentSettings.skills,
+          repoRoot: options.repoRoot,
+          agentDir: getAgentDir(),
+          home: homedir(),
+          cwd,
+        }).filter((path) => existsSync(path)),
+        skillsOverride: (base) => ({
+          ...base,
+          skills: quietMachineSkills(base.skills, listedSkillRoots(options.repoRoot, cwd), quietSkills),
+        }),
+        settingsManager: piSettings,
+      });
     await loader.reload();
+    const authored = laneAuthoredTools(
+      deps,
+      capture,
+      laneLog,
+      lane,
+      currentSettings.gameplay,
+      autonomy,
+      herdrWatches,
+      hireSeat,
+      messageSeat,
+    );
+    const evalTools = options.evalSessionBoundary?.tools({ cwd, systemTools, authored });
     const { session } = await createAgentSession({
       cwd,
       model: selection.model,
       thinkingLevel: selection.thinkingLevel,
       modelRuntime: models,
-      customTools: laneAuthoredTools(
-        deps,
-        capture,
-        laneLog,
-        lane,
-        currentSettings.gameplay,
-        autonomy,
-        herdrWatches,
-        hireSeat,
-        messageSeat,
-      ),
+      customTools: evalTools?.customTools ?? authored,
+      ...(evalTools === undefined ? {} : { tools: evalTools.tools }),
       resourceLoader: loader,
       sessionManager,
       settingsManager: piSettings,
@@ -1749,6 +1769,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           live || oneShot || conversationId === LINEAR_INBOX_CONVERSATION_ID
             ? undefined
             : await readHerdrSessionCensus(paneId, {
+                ...(options.nativeCensusRunner
+                  ? { runCommand: options.nativeCensusRunner, summaries: {} }
+                  : {}),
                 fleets: await censusFleets(),
                 localAvailable: deps.herdrAvailable?.() !== false,
               });
@@ -2103,7 +2126,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   function conversationGoal(conversationId: string) {
-    if (conversationId === conversations.defaultGlobalConversationId() && headSeat?.harness === "codex") {
+    if (
+      !options.nativeCensusRunner &&
+      conversationId === conversations.defaultGlobalConversationId() &&
+      headSeat?.harness === "codex"
+    ) {
       try {
         return headSeat.session === undefined ? undefined : readCodexGoal(headSeat.session);
       } catch {
@@ -2126,6 +2153,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     await personas.ready(settingsStore);
     const binding = await deps.runtimes?.configuredBinding("default");
     const fleet = await readFleet({
+      ...(options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner, summaries: {} } : {}),
       fleets: await censusFleets(),
       localAvailable: deps.herdrAvailable?.() !== false,
       ...(binding ? { herdrSession: binding.session } : {}),
@@ -2147,17 +2175,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       captainGoals = nextGoals;
       fleetChanges.touch();
     }
-    const seats = withSeatWork(
-      withSeatSubagents(
-        personas.reconcile(fleet.seats),
-        fleet.seats,
-        (seat) =>
-          conversations.conversationIdForPersona(seat.personaId) !== undefined ||
-          conversations.conversationIdForSeat(seat.seatId) !== undefined,
-      ),
-      fleet.seats,
-      agentWork,
-    );
+    const seats = options.nativeCensusRunner
+      ? personas.reconcile(fleet.seats)
+      : withSeatWork(
+          withSeatSubagents(
+            personas.reconcile(fleet.seats),
+            fleet.seats,
+            (seat) =>
+              conversations.conversationIdForPersona(seat.personaId) !== undefined ||
+              conversations.conversationIdForSeat(seat.seatId) !== undefined,
+          ),
+          fleet.seats,
+          agentWork,
+        );
     const nextWork = JSON.stringify(seats.map((seat) => [seat.goal, seat.assignment]));
     if (seatWork !== nextWork) {
       seatWork = nextWork;
@@ -3026,7 +3056,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return request.view === "home" ? { ...result, snapshot: operatorFleetHome(result.snapshot) } : result;
       }
       if (request.op === "state_work") {
-        const seatId = await readSeatIdForHerdrPane(request.work.herdrPaneId);
+        const seatId = await readSeatIdForHerdrPane(
+          request.work.herdrPaneId,
+          options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner } : {},
+        );
         const seat =
           seatId === undefined
             ? undefined
@@ -3055,7 +3088,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // live census rather than believed — which is why this op is reachable
         // from the agent side at all (ADR 0148). A pane that holds no seat is
         // told so; it is a normal answer for a shell pane, not a failure.
-        const seatId = await readSeatIdForHerdrPane(request.stance.herdrPaneId);
+        const seatId = await readSeatIdForHerdrPane(
+          request.stance.herdrPaneId,
+          options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner } : {},
+        );
         // The fleet is asked before anything is written, so a caller told
         // `unseated` knows nothing was recorded — a pane can be a live terminal
         // and still hold no seat the roster carries a figure for.

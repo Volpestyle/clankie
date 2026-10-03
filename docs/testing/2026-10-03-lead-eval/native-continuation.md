@@ -101,31 +101,68 @@ coverage and consistent reward, not exit zero alone.
 Both verifier Dockerfiles create an empty `/app`; artifact-only mounting does not
 hide their trusted support. Routing grader inputs/checker live under `/tests` and
 the candidate is data-only JSON. Routing's initial environment files under `/app`
-still need staging into the native task workspace. Source base tags/installers are
+are staged from the pinned source manifest into the allocated task workspace. Source base tags/installers are
 not immutable; source pins alone cannot replace recorded built image identities.
 
 HTML's official grader executes `/app/filter.py` with `sys.executable` and permits
 in-place input changes. Same-UID execution could forge reports, so HTML verification
-currently refuses. The new Python bootstrap/trampoline preserves official grader
+requires a controller-built and separately probed mediation image. The Python bootstrap/trampoline preserves official grader
 source/argv and snapshots input into a private writable copy inside a separate
 credential-free PID/network/filesystem sandbox. It copies back only bounded owned
 regular output after settled execution; exceptions or uncertain termination never
 copy back. Fake-runner tests exercise these boundaries without executing candidate
-code. The mediated verifier image, nested-sandbox capability origin/probe and full
-bridge wiring are **not finished**. There is no unsafe fallback.
+code. The derived verifier image build, nested-sandbox capability origin/probe and
+bridge wiring now have deterministic fake-container coverage. The future probe
+checks the actual trampoline path, forbidden grader/log/parent access and detached
+descendant settlement; no image or probe has been run. Missing same-controller,
+exact-image/daemon proof refuses verification. A trusted mediation-failure marker
+invalidates even an otherwise passing official report. There is no unsafe fallback.
 
-## Checkpoint limits and next implementation
+## Integrated engineering and remaining runtime proof
 
-- Complete the deterministic `HerdrWatchStore` → actual adapter → fake WS-provider
-  hire fixture, including effective-profile response, pane proof and path mapping.
-- Add full positive fake Docker build/probe-origin-chain fixtures and integrate the
-  HTML mediated image/probe and native initial Terminal-Bench inputs.
-- Isolate Clankie's own built-in read/bash/edit/write tools: the current production
-  lead session still uses host-user tools. Add optional tool overrides plus hard
-  provider/compaction admission and complete lead account/usage enforcement.
-  Swallowed extension callbacks cannot serve as that boundary.
-- Wire an explicitly manual private throwaway service bootstrap only after those
-  boundaries are reviewed. Production defaults and the disabled run entry remain.
+- The actual `HerdrWatchStore` → adapter → fake WS-provider hire fixture now covers
+  effective-profile responses, pane proof, isolated path/account mapping and loss
+  of owner/proxy/audit channels. A trusted preparation seam avoids ordinary host
+  account probes and skill overlays. Capability substitution is explicit fixture
+  evidence, never proof of a live sandbox.
+- Positive fake Docker origin-chain tests cover native and HTML builds/probes,
+  copied-proof rejection and changed-daemon refusal; pinned routing inputs stage
+  without exposing held-out graders.
+- Clankie's optional eval session seam uses a controller-supplied runtime, inert
+  text snapshots, no resource/package/extension discovery and immutable in-memory
+  settings with cache warming off. Defaults retain ordinary production behavior.
+- Lead coding helper/tool wiring now uses fixed native sandbox argv, bounded text
+  operations, separate helper-path capability checks and descendant settlement.
+  The Pi bash executor is replaced because its output accumulator can write host
+  temporary files. This path has fake-process/container tests only.
+- Final physical SSE transport has bounded plain/zstd validation, fixed model and
+  effort, final account/header checks and hash-chained request/usage records.
+  The immutable provider runtime and actual controller → Captain → installed Pi
+  fixture exercise a contained read and compaction. Each physical request rechecks
+  the selected observer credential after all asynchronous admission work. Active
+  requests share the exact container stop signal. These fixtures do not establish
+  actual subscription or sandbox capability.
+- The explicit manual bootstrap composes an isolated service, independent archived
+  repositories/indexes, native hires, owner attachment and one read-only observer
+  per distinct selected account. Observer snapshots carry private one-use origins;
+  all accounts cross one readiness barrier before lead or worker dispatch. A
+  separate owner-proof watchdog stops even when the proof RPC hangs. First/latest
+  quota windows and raw lead/native usage ledgers remain distinct evidence.
+- The official task environment image is the native image's final base. Its exact
+  Python version, package versions and trusted initial files are checked by the
+  future credential-free capability probe; generic distro Python is not accepted
+  as the benchmark environment. The HTML verifier retains its separate mediated
+  candidate boundary. Cancellation stops its exact verifier container.
+- Production defaults and the disabled campaign run entry remain. Historical
+  tasks still refuse isolated Linux dependency/grader preparation; the manual
+  bootstrap currently supports the two pinned neutral tasks only. No native
+  build, capability probe, auth import, provider call or campaign has been run.
+- Owner TTY edits/interventions are not measured. Never-started allocations are
+  separate from started workers lacking token counters; incomplete accounting
+  produces unknown totals rather than zeros. Each native turn needs its exact
+  start, token counters and successful completion before totals become complete.
+  A later active, interrupted or unaccounted turn invalidates complete totals;
+  dispatch records are latched immediately before the physical native request.
 - Claude subscription/account coverage and arbitrary descendant prelaunch fencing
   remain unsupported; refusal is separate from James's explicit campaign hold.
 
@@ -135,3 +172,10 @@ benchmark quality or owner-authorized campaign completion. Full checkpoint gate
 results and source manifests are retained outside the repository in the authorized
 VUH-1474-native evidence directory. Earlier failed logs remain intact. No CI,
 scheduler, release or post-reset path dispatches this evaluation.
+
+During fixture development, omitted isolation options in earlier Captain tests
+may have attempted read-only owner Herdr census/terminal resolution. Exact tests
+and retained logs are recorded in the external evidence directory. Those fixtures
+now use explicit scoped fake runners or disabled Herdr availability, with test-local
+ambient-process tripwires. No mutating fleet, account, model or container operation
+was authorized or performed as part of these checks.

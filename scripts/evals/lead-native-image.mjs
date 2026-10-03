@@ -28,8 +28,22 @@ function sourceArchive(root, kind) {
   return git("archive", "--format=tar", NATIVE_SOURCE[kind]);
 }
 
-export async function buildNativeImage({ command, output, codexSource, herdrSource, rustImage, nodeImage }) {
+export async function buildNativeImage({
+  command,
+  output,
+  codexSource,
+  herdrSource,
+  rustImage,
+  nodeImage,
+  taskEnvironment,
+}) {
   const daemon = dockerTransportIdentity(command);
+  const environment =
+    taskEnvironment === undefined
+      ? undefined
+      : await (
+          await import("./lead-terminal-bench.mjs")
+        ).requireTerminalBenchEnvironment(taskEnvironment, command);
   if (
     !/^rust:1\.96\.1-bookworm@sha256:[a-f0-9]{64}$/u.test(rustImage) ||
     !/^node:24\.20\.0-bookworm@sha256:[a-f0-9]{64}$/u.test(nodeImage)
@@ -42,7 +56,13 @@ export async function buildNativeImage({ command, output, codexSource, herdrSour
     herdr = sourceArchive(herdrSource, "herdr");
   writeFileSync(join(output, "codex.tar"), codex, { flag: "wx", mode: 0o400 });
   writeFileSync(join(output, "herdr.tar"), herdr, { flag: "wx", mode: 0o400 });
-  const dockerfile = `FROM ${rustImage} AS build
+  const supervisor = readFileSync(new URL("./lead-coding-supervisor.mjs", import.meta.url));
+  const helperPolicy = readFileSync(new URL("./lead-native-policy.mjs", import.meta.url));
+  writeFileSync(join(output, "lead-coding-supervisor.mjs"), supervisor, { flag: "wx", mode: 0o400 });
+  writeFileSync(join(output, "lead-native-policy.mjs"), helperPolicy, { flag: "wx", mode: 0o400 });
+  const helper = readFileSync(new URL("./lead-coding-helper.mjs", import.meta.url));
+  writeFileSync(join(output, "lead-coding-helper.mjs"), helper, { flag: "wx", mode: 0o400 });
+  const dockerfile = `${environment ? `FROM ${nodeImage} AS node\n` : ""}FROM ${rustImage} AS build
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config libcap-dev libasound2-dev cmake ninja-build && rm -rf /var/lib/apt/lists/*
 ADD codex.tar /src/codex/
 ADD herdr.tar /src/herdr/
@@ -51,13 +71,16 @@ RUN cargo build --release --locked --bin bwrap
 RUN CODEX_BWRAP_SHA256=$(sha256sum target/release/bwrap | cut -d' ' -f1) cargo build --release --locked --bin codex
 WORKDIR /src/herdr
 RUN cargo build --release --locked --bin herdr
-FROM ${nodeImage}
-RUN apt-get update && apt-get install -y --no-install-recommends libcap2 libasound2 python3 git ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=build /src/codex/codex-rs/target/release/codex /opt/codex/bin/codex
+FROM ${environment?.image ?? nodeImage}
+${environment ? "COPY --from=node /usr/local/bin/node /usr/local/bin/node\n" : ""}RUN apt-get update && apt-get install -y --no-install-recommends libcap2 libasound2 ${environment ? "libstdc++6" : "python3"} git ca-certificates && rm -rf /var/lib/apt/lists/*
+${environment ? "RUN ln -sf /usr/local/bin/python3 /usr/bin/python3\n" : ""}COPY --from=build /src/codex/codex-rs/target/release/codex /opt/codex/bin/codex
 COPY --from=build /src/codex/codex-rs/target/release/bwrap /opt/codex/bin/bwrap
 COPY --from=build /src/herdr/target/release/herdr /usr/local/bin/herdr
 COPY --from=build /src/codex/LICENSE /usr/share/licenses/codex/LICENSE
+COPY --from=build /src/codex/codex-rs/vendor/bubblewrap/COPYING /usr/share/licenses/bubblewrap/COPYING
 COPY --from=build /src/herdr/LICENSE /usr/share/licenses/herdr/LICENSE
+COPY lead-coding-helper.mjs lead-coding-supervisor.mjs lead-native-policy.mjs /usr/local/lib/
+RUN chmod 444 /usr/local/lib/lead-coding-helper.mjs /usr/local/lib/lead-coding-supervisor.mjs /usr/local/lib/lead-native-policy.mjs
 ENV PATH=/opt/codex/bin:/usr/local/bin:/usr/bin:/bin
 RUN test ! -e /etc/codex
 WORKDIR /eval
@@ -77,8 +100,12 @@ WORKDIR /eval
     source: NATIVE_SOURCE,
     sources: { codex: hash(codex), herdr: hash(herdr) },
     dockerfile: hash(dockerfile),
+    codingHelper: hash(helper),
+    codingSupervisor: hash(supervisor),
+    codingPolicy: hash(helperPolicy),
     rustImage,
     nodeImage,
+    ...(environment ? { taskEnvironment: environment } : {}),
   });
   builds.set(result, { ...structuredClone(result), command, daemon });
   return result;

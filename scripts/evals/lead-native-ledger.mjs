@@ -147,6 +147,53 @@ export class NativeUsageLedger {
         this.#issues.add(`native session disappeared ${session.sessionId}`);
     this.record("inventory", { accountId, atMs, sessionIds: [...candidates.keys()] });
   }
+  dispatch(accountId, sessionId, { method = "turn/start", turnId } = {}) {
+    const session = this.#sessions.get(sessionId);
+    if (!session || session.accountId !== accountId) {
+      this.#issues.add(`unknown native dispatch ${sessionId}`);
+      return;
+    }
+    if (Object.values(session.turns ?? {}).some((turn) => turn.completed && !turn.usage))
+      this.#issues.add(`prior native turn lacks settled usage ${sessionId}`);
+    if (method === "turn/start") session.pendingDispatch = true;
+    else if (method !== "turn/steer" || !turnId || session.activeTurn !== turnId)
+      this.#issues.add(`unmatched native steer ${sessionId}`);
+    this.record("dispatch-admission", { accountId, sessionId });
+  }
+  lifecycle(accountId, event) {
+    const { threadId, turn } = event.params ?? {};
+    const session = this.#sessions.get(threadId);
+    if (!session || session.accountId !== accountId || !turn?.id || typeof turn.id !== "string") {
+      this.#issues.add(`unknown native turn ${threadId}`);
+      return;
+    }
+    session.turns ??= Object.create(null);
+    if (event.method === "turn/started") {
+      if ((session.activeTurn && session.activeTurn !== turn.id) || session.turns[turn.id]?.completed)
+        this.#issues.add(`overlapping/reused native turn ${threadId}`);
+      session.turns[turn.id] ??= { usage: false, completed: false };
+      session.activeTurn = turn.id;
+      session.pendingDispatch = false;
+    } else if (event.method === "turn/completed") {
+      const known = session.turns[turn.id];
+      if (!known || (!known.completed && session.activeTurn !== turn.id))
+        this.#issues.add(`native completion without matching start ${threadId}`);
+      else if (known.completed) {
+        if (known.status !== turn.status || turn.error != null)
+          this.#issues.add(`conflicting native completion ${threadId}/${turn.id}`);
+      } else {
+        known.completed = true;
+        known.status = turn.status;
+        if (turn.status !== "completed" || turn.error != null)
+          this.#issues.add(`native turn outcome uncertain ${threadId}/${turn.id}`);
+        session.activeTurn = undefined;
+      }
+    } else {
+      this.#issues.add("unknown native lifecycle event");
+      return;
+    }
+    this.record("turn-lifecycle", { accountId, event });
+  }
   usage(accountId, event) {
     if (event.method !== "thread/tokenUsage/updated") return;
     const { threadId, turnId, tokenUsage } = event.params;
@@ -156,7 +203,10 @@ export class NativeUsageLedger {
     if (
       !session ||
       session.accountId !== accountId ||
+      !session.turns?.[turnId] ||
+      typeof turnId !== "string" ||
       !turnId ||
+      turnId.length > 256 ||
       !usage ||
       !keys.every((key) => integer(usage[key])) ||
       usage.cachedInputTokens > usage.inputTokens ||
@@ -168,13 +218,22 @@ export class NativeUsageLedger {
     if (session.usage && keys.some((key) => usage[key] < session.usage[key]))
       this.#issues.add(`native cumulative usage regressed ${threadId}`);
     session.usage = { ...usage };
+    session.turns[turnId].usage = true;
     this.record("usage", { accountId, threadId, turnId, usage });
   }
   result() {
     const sessions = structuredClone([...this.#sessions.values()]);
     const issues = [...this.#issues];
     for (const root of this.#roots.keys()) if (!this.#sessions.has(root)) issues.push(`missing root ${root}`);
-    for (const session of sessions) if (!session.usage) issues.push(`missing usage ${session.sessionId}`);
+    for (const session of sessions) {
+      if (!session.usage) issues.push(`missing usage ${session.sessionId}`);
+      if (session.pendingDispatch) issues.push(`native dispatch outcome missing ${session.sessionId}`);
+      if (session.activeTurn)
+        issues.push(`native turn still active ${session.sessionId}/${session.activeTurn}`);
+      for (const [id, turn] of Object.entries(session.turns ?? {}))
+        if (!turn.completed || !turn.usage)
+          issues.push(`native turn coverage incomplete ${session.sessionId}/${id}`);
+    }
     const complete = this.#roots.size > 0 && issues.length === 0;
     const perAccount = {};
     if (complete)
@@ -182,6 +241,7 @@ export class NativeUsageLedger {
         perAccount[session.accountId] = (perAccount[session.accountId] ?? 0) + session.usage.totalTokens;
     return {
       complete,
+      valid: this.#issues.size === 0,
       issues,
       sessions,
       perAccount: complete ? perAccount : null,
@@ -234,13 +294,13 @@ export class NativeBudgetGuard {
     await this.#stopped;
     throw Error(`Native run stopped: ${reason}`);
   }
-  async admit() {
-    if (this.#stopped) return this.fail("stop latched");
+  assertCurrent() {
+    if (this.#stopped) throw Error("stop latched");
     const now = this.now();
     for (const account of this.accounts) {
       const snapshot = this.#snapshots.get(account);
       if (!snapshot || now < snapshot.atMs || now - snapshot.atMs > this.maxAgeMs)
-        return this.fail(`missing/stale account telemetry ${account}`);
+        throw Error(`missing/stale account telemetry ${account}`);
       for (const key of ["fiveHour", "sevenDay"]) {
         const window = snapshot[key];
         if (
@@ -251,10 +311,17 @@ export class NativeBudgetGuard {
           !Number.isFinite(window.resetsAtMs) ||
           window.resetsAtMs <= now
         )
-          return this.fail(`unknown/exhausted ${key} ${account}`);
+          throw Error(`unknown/exhausted ${key} ${account}`);
       }
     }
     return { admitted: true };
+  }
+  async admit() {
+    try {
+      return this.assertCurrent();
+    } catch (error) {
+      return this.fail(error.message);
+    }
   }
   /** Monitor is installed only by an authorized runtime; no import-time/background timer. */
   async monitor(sources, signal, intervalMs = 1000) {

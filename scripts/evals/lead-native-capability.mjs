@@ -23,6 +23,7 @@ export async function probeNativeRuntime({ build, command, root }) {
     "control",
     "control/home",
     "control/auth",
+    "control/coding-helper",
     "tasks",
     "tasks/probe",
     "tasks/probe/.git",
@@ -51,14 +52,64 @@ export async function probeNativeRuntime({ build, command, root }) {
         ...ENV,
         "/usr/local/bin/node",
         "-e",
-        `const fs=require('node:fs'),c=require('node:crypto');process.stdout.write(JSON.stringify(Object.fromEntries(['/opt/codex/bin/codex','/opt/codex/bin/bwrap','/usr/local/bin/herdr','/usr/local/bin/node'].map(p=>[p,c.createHash('sha256').update(fs.readFileSync(p)).digest('hex')]))));`,
+        `const fs=require('node:fs'),c=require('node:crypto');process.stdout.write(JSON.stringify(Object.fromEntries(['/opt/codex/bin/codex','/opt/codex/bin/bwrap','/usr/local/bin/herdr','/usr/local/bin/node','/usr/local/lib/lead-coding-helper.mjs','/usr/local/lib/lead-coding-supervisor.mjs','/usr/local/lib/lead-native-policy.mjs'].map(p=>[p,c.createHash('sha256').update(fs.readFileSync(p)).digest('hex')]))));`,
       ]),
     );
     if (
-      Object.keys(binaries).length !== 4 ||
+      Object.keys(binaries).length !== 7 ||
+      binaries["/usr/local/lib/lead-coding-supervisor.mjs"] !== built.codingSupervisor ||
+      binaries["/usr/local/lib/lead-native-policy.mjs"] !== built.codingPolicy ||
+      binaries["/usr/local/lib/lead-coding-helper.mjs"] !== built.codingHelper ||
       Object.values(binaries).some((value) => !/^[a-f0-9]{64}$/u.test(value))
     )
       throw Error("Native binary identity unavailable");
+    let taskEnvironment;
+    if (built.taskEnvironment) {
+      const expected = {
+        "html-js-filter": {
+          python: "3.12",
+          imports: ["bs4", "lxml.etree"],
+          packages: { beautifulsoup4: "4.13.4", lxml: "6.1.1" },
+        },
+        "photonic-waveguide-routing": {
+          python: "3.13",
+          imports: ["numpy", "scipy", "shapely", "rtree"],
+          packages: { numpy: "2.4.4", scipy: "1.17.1", shapely: "2.1.2", rtree: "1.4.1" },
+        },
+      }[built.taskEnvironment.taskId];
+      if (!expected) throw Error("Unsupported official task environment");
+      const inputs = built.taskEnvironment.files.filter(
+        (file) => file.path.includes("/environment/") && !file.path.endsWith("/Dockerfile"),
+      );
+      const observed = JSON.parse(
+        await container.exec([
+          ...ENV,
+          "/usr/local/bin/python3",
+          "-I",
+          "-c",
+          `import sys,json,hashlib,pathlib,importlib.metadata as m
+[__import__(name) for name in ${JSON.stringify(expected.imports)}]
+p=${JSON.stringify(Object.keys(expected.packages))}
+files=${JSON.stringify(inputs.map((file) => "/app/" + file.path.split("/environment/")[1]))}
+print(json.dumps({"python":".".join(map(str,sys.version_info[:2])),"packages":{k:m.version(k) for k in p},"executableSha256":hashlib.sha256(pathlib.Path(sys.executable).read_bytes()).hexdigest(),"inputs":{p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in files}}))`,
+        ]),
+      );
+      if (
+        observed.python !== expected.python ||
+        JSON.stringify(observed.packages) !== JSON.stringify(expected.packages) ||
+        !/^[a-f0-9]{64}$/u.test(observed.executableSha256) ||
+        inputs.some(
+          (file) => observed.inputs?.["/app/" + file.path.split("/environment/")[1]] !== file.sha256,
+        )
+      )
+        throw Error("Official native task environment preflight mismatch");
+      taskEnvironment = {
+        ...observed,
+        taskId: built.taskEnvironment.taskId,
+        sourceCommit: built.taskEnvironment.sourceCommit,
+        baseImage: built.taskEnvironment.image,
+      };
+    }
     const outside = JSON.parse(
       await container.exec([
         ...ENV,
@@ -103,13 +154,85 @@ export async function probeNativeRuntime({ build, command, root }) {
       result.network === outside.network
     )
       throw Error("Native sandbox did not establish the required isolation");
+    // A worker model-tool probe cannot authorize the Pi coding-tool helper path.
+    // Run the same isolation checks through the actual immutable helper and shell.
+    const helper = JSON.parse(
+      await container.exec(
+        [...ENV, "/usr/local/bin/node", "/usr/local/lib/lead-coding-supervisor.mjs", "/eval/tasks/probe"],
+        {
+          input: JSON.stringify({
+            op: "bash",
+            command: "/usr/local/bin/node -e " + "'" + check.replaceAll("'", "'\"'\"'") + "'",
+          }),
+        },
+      ),
+    );
+    const helperIsolation = JSON.parse(helper.result.output);
+    if (
+      helper.result.exitCode !== 0 ||
+      helper.settlement?.complete !== true ||
+      helperIsolation.nonce !== nonce ||
+      [
+        "gitConfigDenied",
+        "projectConfigDenied",
+        "cwdConfigDenied",
+        "controlDenied",
+        "authDenied",
+        "parentProcDenied",
+        "privateSocketDenied",
+        "allocatedWrite",
+      ].some((key) => helperIsolation[key] !== true) ||
+      typeof helperIsolation.namespace !== "string" ||
+      helperIsolation.namespace === outside.namespace ||
+      typeof helperIsolation.network !== "string" ||
+      helperIsolation.network === outside.network
+    )
+      throw Error("Coding helper did not establish its actual execution boundary");
+    const descendants = JSON.parse(
+      await container.exec(
+        [...ENV, "/usr/local/bin/node", "/usr/local/lib/lead-coding-supervisor.mjs", "/eval/tasks/probe"],
+        {
+          input: JSON.stringify({
+            op: "bash",
+            command: `/usr/local/bin/node -e 'const c=require("node:child_process").spawn(process.execPath,["-e",${JSON.stringify('setTimeout(()=>require("node:fs").writeFileSync("/eval/tasks/probe/late-descendant", "survived"),2000)')}],{detached:true,stdio:"ignore"});c.unref();'`,
+          }),
+        },
+      ),
+    );
+    if (
+      descendants.result.exitCode !== 0 ||
+      descendants.settlement?.complete !== true ||
+      !/^pid:\[[0-9]+\]$/u.test(descendants.settlement.namespace)
+    )
+      throw Error("Coding helper descendant canary did not complete");
+    const descendantSettlement = JSON.parse(
+      await container.exec(
+        [
+          ...ENV,
+          "/usr/local/bin/node",
+          "-e",
+          `const f=require('node:fs');setTimeout(()=>{let live=false;for(const p of f.readdirSync('/proc')){if(!/^[0-9]+$/.test(p))continue;try{if(f.readlinkSync('/proc/'+p+'/ns/pid')===process.argv[1])live=true}catch(e){if(e.code!=='ENOENT'&&e.code!=='ESRCH')throw e}}process.stdout.write(JSON.stringify({namespaceGone:!live,noLateWrite:!f.existsSync('/eval/tasks/probe/late-descendant')}))},3000)`,
+          descendants.settlement.namespace,
+        ],
+        { timeoutMs: 5000 },
+      ),
+    );
+    if (descendantSettlement.namespaceGone !== true || descendantSettlement.noLateWrite !== true)
+      throw Error("Coding helper descendants outlived execution");
     evidence = {
       source: built,
+      ...(taskEnvironment ? { taskEnvironment } : {}),
       daemonId: daemon.ID,
       endpoint: dockerTransportIdentity(command),
       binaries,
       probeContainerId: container.id,
       probe: result,
+      codingHelper: {
+        sha256: built.codingHelper,
+        supervisorSha256: built.codingSupervisor,
+        isolation: helperIsolation,
+        descendantSettlement,
+      },
       createdAt: Date.now(),
     };
   } finally {

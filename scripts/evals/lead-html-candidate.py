@@ -89,7 +89,7 @@ def run_filter(input_path, runtime, runner=subprocess.run, candidate="/app/filte
             child_path = Path(directory) / path.name
             child_path.write_bytes(initial)
             os.chmod(child_path, 0o600)
-            result = runner(command(str(path), directory, runtime, candidate), env={}, check=False)
+            result = runner(command(str(path), directory, runtime, candidate), env={}, check=False, timeout=30)
             if type(result.returncode) is not int:
                 raise ValueError("Candidate termination is uncertain")
             # PID namespace teardown completes before bwrap exits. Never follow a
@@ -124,4 +124,16 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        # The official grader can ignore a candidate's nonzero exit. A mediation
+        # failure must instead invalidate infrastructure even if pytest passes.
+        marker = "/logs/verifier/lead-mediation-failure"
+        try:
+            marker_fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            os.write(marker_fd, b"HTML candidate mediation failed\n")
+            os.close(marker_fd)
+        except FileExistsError:
+            pass
+        raise

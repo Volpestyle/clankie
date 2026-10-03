@@ -82,6 +82,8 @@ export class LeadContainer {
   #id;
   #imageId;
   #stopped = false;
+  #stopping;
+  #abort = new AbortController();
   constructor({ image, root, role = "native", command, verifierLogs, capability }) {
     if (!DIGEST.test(image) && !/^sha256:[a-f0-9]{64}$/.test(image))
       throw Error("A digest-pinned image is required");
@@ -105,6 +107,9 @@ export class LeadContainer {
   get id() {
     return this.#id;
   }
+  get signal() {
+    return this.#abort.signal;
+  }
   get stopped() {
     return this.#stopped;
   }
@@ -123,6 +128,7 @@ export class LeadContainer {
       !(inspected[0].Id === this.image || inspected[0].RepoDigests?.includes(this.image))
     )
       throw Error("Pinned Linux runtime image is not installed/verified; no implicit pull");
+    if (this.#stopped) throw Error("Stopped containers never create");
     this.#imageId = inspected[0].Id;
     const id = await this.command([
       "create",
@@ -195,6 +201,7 @@ export class LeadContainer {
     if (this.role === "native") await assertNativeRuntimeCapability(this.capability, this);
     if (this.#stopped) throw Error("Stopped containers never resume");
     await this.inspect();
+    if (this.#stopped) throw Error("Stopped containers never resume");
     await this.command(["start", this.#id]);
   }
   async exec(argv, { input, detached = false, cwd, timeoutMs, signal } = {}) {
@@ -202,6 +209,7 @@ export class LeadContainer {
     if (this.#stopped) throw Error("Stopped containers never dispatch");
     const info = await this.inspect();
     if (info.State?.Running !== true) throw Error("Owned container is not running");
+    if (this.#stopped) throw Error("Stopped containers never dispatch");
     return this.command(
       [
         "exec",
@@ -224,6 +232,7 @@ export class LeadContainer {
       throw Error("Native owner attachment requires the owner's interactive terminal");
     const info = await this.inspect();
     if (!info.State?.Running || !this.command.spawn) throw Error("Native attachment transport unavailable");
+    if (this.#stopped) throw Error("Stopped containers never dispatch");
     return this.command.spawn(["exec", "-it", this.#id, ...argv], { interactive: true });
   }
   async pipe(argv) {
@@ -232,17 +241,28 @@ export class LeadContainer {
       throw Error("Owned streaming transport unavailable");
     const info = await this.inspect();
     if (info.State?.Running !== true) throw Error("Owned container is not running");
+    if (this.#stopped) throw Error("Stopped containers never dispatch");
     return this.command.spawn(["exec", "-i", this.#id, ...argv]);
   }
   /** SIGKILL of the exact namespace boundary also stops detached/setsid descendants. */
-  async stop(reason) {
+  stop(reason) {
     if (!reason) throw Error("Stop requires a retained reason");
+    if (this.#stopping) return this.#stopping;
+    let settled, rejected;
+    this.#stopping = new Promise((resolve, reject) => {
+      settled = resolve;
+      rejected = reject;
+    });
     this.#stopped = true;
-    const info = await this.inspect();
-    if (info.State?.Running) await this.command(["kill", "--signal=KILL", this.#id]);
-    const after = await this.inspect();
-    if (after.State?.Running) throw Error("Container stop unconfirmed");
-    return { containerId: this.#id, stopped: true, reason };
+    this.#abort.abort(new Error(reason));
+    void (async () => {
+      const info = await this.inspect();
+      if (info.State?.Running) await this.command(["kill", "--signal=KILL", this.#id]);
+      const after = await this.inspect();
+      if (after.State?.Running) throw Error("Container stop unconfirmed");
+      return { containerId: this.#id, stopped: true, reason };
+    })().then(settled, rejected);
+    return this.#stopping;
   }
   /** Owner executes this manually; the controller never attaches or types. */
   attachCommand() {

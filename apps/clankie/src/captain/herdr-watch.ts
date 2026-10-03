@@ -658,6 +658,12 @@ export interface PiSeatModel {
 
 /** Controller-owned launch admission; absent for ordinary production hires. */
 export interface NativeLaunchPolicy {
+  /** Trusted preallocation replaces ordinary account probes and skill overlays. */
+  prepare?(input: { seat: Readonly<SpawnOperatorSeat>; resumed: boolean }): Promise<{
+    account: Readonly<CodexAccount>;
+    args: readonly string[];
+    env: Readonly<Record<string, string>>;
+  }>;
   admit(input: {
     seat: Readonly<SpawnOperatorSeat>;
     phase: "request" | "launch";
@@ -1426,18 +1432,26 @@ export class HerdrWatchStore implements HerdrWatchPort {
         control: { mode: "unavailable", reason: unavailableReason, detail },
       };
     }
+    const prepared = await this.nativeLaunchPolicy?.prepare?.({
+      seat: structuredClone(input),
+      resumed: resume !== undefined,
+    });
     const canApplySkills =
+      prepared === undefined &&
       remote === undefined &&
       this.skillBundle !== undefined &&
       ["claude", "pi", "codex"].includes(input.harness);
-    if (input.skills !== undefined && !canApplySkills) {
+    if (input.skills !== undefined && !canApplySkills && prepared === undefined) {
       return {
         outcome: "failed",
         reason: "harness_unavailable",
         detail: "Skill overrides require a local Claude, Pi or Codex hire.",
       };
     }
-    const configuredSkills = (await this.skillBundle?.settings?.()) ?? { opinionated: true, exclude: [] };
+    const configuredSkills =
+      prepared === undefined
+        ? ((await this.skillBundle?.settings?.()) ?? { opinionated: true, exclude: [] })
+        : { opinionated: false, exclude: [] };
     const selectedSkills = {
       ...configuredSkills,
       opinionated: input.skills === undefined ? configuredSkills.opinionated : input.skills === "bundled",
@@ -1453,7 +1467,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
             included: catalog.filter((skill) => skill.included).map((skill) => skill.name),
             excluded: catalog.filter((skill) => !skill.included).map((skill) => skill.name),
           };
-    let account: CodexAccount | undefined;
+    let account: CodexAccount | undefined = prepared?.account;
     if (input.account !== undefined && (remote !== undefined || input.harness !== "codex")) {
       return {
         outcome: "failed",
@@ -1461,7 +1475,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         detail: "Account overrides require a local Codex hire.",
       };
     }
-    if (remote === undefined && input.harness === "codex") {
+    if (prepared === undefined && remote === undefined && input.harness === "codex") {
       try {
         const accounts = await this.accounts();
         const selected =
@@ -1474,12 +1488,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
     }
     let paneId: string;
-    let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = {
+    let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = prepared ?? {
       args: [],
       ...(account ? { env: { CODEX_HOME: account.home } } : {}),
     };
     try {
-      if (remote === undefined && this.skillBundle !== undefined) {
+      if (prepared === undefined && remote === undefined && this.skillBundle !== undefined) {
         skillLaunch = await workerSkills(
           input.harness,
           this.skillBundle.repoRoot,

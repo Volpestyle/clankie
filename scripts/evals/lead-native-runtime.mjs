@@ -1,4 +1,5 @@
 /** Manual-only native transport. Importing never starts a service, agent or container. */
+import { assertLeadAdmission } from "./lead-admission.mjs";
 import { Duplex } from "node:stream";
 import { mkdirSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -55,7 +56,7 @@ export function writeNativeWrapper(path, environment, config, endpoint, { paneId
 }
 
 /** One allocated root; arbitrary descendants and resuming other roots are refused. */
-function createNativeRuntime({ container, allocation, ownerAttachment, now = Date.now }) {
+function createNativeRuntime({ container, allocation, ownerAttachment, sharedAdmission, now = Date.now }) {
   const { hostCwd, containerCwd, accountHome, accountId, email, accountLabel, model, effort } = allocation;
   if (!hostCwd || realpathSync(hostCwd) !== hostCwd || !accountId || !email || !accountLabel)
     throw Error("Exact controller allocation required");
@@ -132,6 +133,15 @@ function createNativeRuntime({ container, allocation, ownerAttachment, now = Dat
     now,
     stop: (reason) => container.stop(reason),
   });
+  if (sharedAdmission) {
+    assertLeadAdmission(sharedAdmission, { container, ownerAttachment });
+    const localAdmit = guard.admit.bind(guard);
+    guard.admit = async () => {
+      await sharedAdmission.admit();
+      await localAdmit();
+      sharedAdmission.assertCurrent();
+    };
+  }
   const checkOwner = async () => {
     // This is a controller-owned live attachment port, never an imported JSON claim.
     if (
@@ -235,6 +245,15 @@ function createNativeRuntime({ container, allocation, ownerAttachment, now = Dat
               }
               await guard.admit();
             }
+            if (frame.kind === "turn")
+              activePolicy.dispatch({
+                threadId: frame.message.params.threadId,
+                method: frame.message.method,
+                turnId: frame.message.params.expectedTurnId,
+              });
+            if (container.stopped || abort.signal.aborted)
+              throw Error("Native boundary stopped before proxy approval");
+            sharedAdmission?.assertCurrent();
             if (frame.message.id !== undefined) pendingRequests.set(frame.message.id, frame.message.method);
           } else if (frame.direction === "server") {
             const message = frame.message;
@@ -316,6 +335,9 @@ function createNativeRuntime({ container, allocation, ownerAttachment, now = Dat
   const baseRunner = createHerdrWatchRunner(() => !container.stopped, herdr);
   const runner = {
     ...baseRunner,
+    // The ordinary runner resolves transcript files in the host owner account.
+    // Eval native adapter protocol events and in-container Herdr reads own this lane.
+    transcript: async () => undefined,
     async createTab(input) {
       if (input.cwd !== hostCwd || input.fleet !== undefined) throw Error("Unallocated Herdr workspace");
       return baseRunner.createTab({ ...input, cwd: containerCwd, env: environment });
@@ -454,11 +476,23 @@ function createNativeRuntime({ container, allocation, ownerAttachment, now = Dat
         guard.observe(await source.snapshot(now));
         await guard.admit();
       },
+      dispatch({ threadId, method, turnId }) {
+        if (container.stopped || abort.signal.aborted || threadId !== rootSession)
+          throw Error("Native dispatch boundary unavailable");
+        guard.assertCurrent();
+        sharedAdmission?.assertCurrent();
+        ledger.dispatch(accountId, threadId, { method, turnId });
+        if (!ledger.result().valid) throw Error("Native prior-turn accounting unavailable");
+      },
       async audit(event, fromProxy = false) {
         if (event.method === "turn/started") {
           if (!rootSession || event.params.threadId !== rootSession)
             throw Error("Native turn before exact root binding");
           await guard.admit();
+        }
+        if (!fromProxy && ["turn/started", "turn/completed"].includes(event.method)) {
+          ledger.lifecycle(accountId, event);
+          if (!ledger.result().valid) throw Error("Native turn accounting coverage lost");
         }
         if (fromProxy && event.method === "turn/started") activeTurn = event.params.turn?.id;
         if (fromProxy && event.method === "turn/completed" && event.params.turn?.id === activeTurn)
@@ -472,7 +506,7 @@ function createNativeRuntime({ container, allocation, ownerAttachment, now = Dat
           // writer; duplicate notifications from the TUI proxy may arrive out of order.
           if (fromProxy) return;
           ledger.usage(accountId, event);
-          if (!ledger.result().complete) throw Error("Native usage coverage lost");
+          if (!ledger.result().valid) throw Error("Native usage coverage lost");
         }
       },
       async failed(error) {
@@ -489,6 +523,12 @@ function createNativeRuntime({ container, allocation, ownerAttachment, now = Dat
     trackerOverrides: async () => [],
   });
   return {
+    evidence: () => ({
+      started: boundPane !== undefined,
+      accountId,
+      cwd: containerCwd,
+      ledger: ledger.result(),
+    }),
     ledger,
     environment,
     endpoint,
@@ -497,6 +537,19 @@ function createNativeRuntime({ container, allocation, ownerAttachment, now = Dat
       nativeHerdrRunner: runner,
       seatAdapters: [adapter],
       nativeLaunchPolicy: {
+        async prepare({ seat, resumed }) {
+          await this.admit({
+            seat,
+            resumed,
+            phase: "launch",
+            account: { label: accountLabel, home: accountHome },
+          });
+          return {
+            account: { label: accountLabel, home: accountHome },
+            args: [],
+            env: { CODEX_HOME: accountHome },
+          };
+        },
         async admit({ seat, phase, account, resumed }) {
           if (
             resumed ||
@@ -535,8 +588,16 @@ function createNativeRuntime({ container, allocation, ownerAttachment, now = Dat
   };
 }
 
+const fleets = new WeakMap();
+export function assertNativeFleet(fleet, { container, admission }) {
+  const origin = fleets.get(fleet);
+  if (!origin || origin.container !== container || origin.sharedAdmission !== admission)
+    throw Error("Exact controller-created fleet/admission required");
+  return fleet;
+}
+
 /** Multiple independent indexes/native account homes, one exact Herdr pane namespace. */
-export function createNativeFleet({ container, allocations, ownerAttachment, now }) {
+export function createNativeFleet({ container, allocations, ownerAttachment, sharedAdmission, now }) {
   if (!allocations.length) throw Error("No preallocated native hires");
   const paths = new Set(),
     indexes = new Set(),
@@ -555,7 +616,7 @@ export function createNativeFleet({ container, allocations, ownerAttachment, now
   }
   const slots = allocations.map((allocation) => ({
     allocation,
-    runtime: createNativeRuntime({ container, allocation, ownerAttachment, now }),
+    runtime: createNativeRuntime({ container, allocation, ownerAttachment, sharedAdmission, now }),
   }));
   const selected = (cwd) => {
     const slot = slots.find((slot) => slot.allocation.hostCwd === cwd);
@@ -577,16 +638,20 @@ export function createNativeFleet({ container, allocations, ownerAttachment, now
       }
     },
   };
-  return {
+  const fleet = {
     slots,
     startHerdr: () => slots[0].runtime.startHerdr(),
     captainOptions: {
       nativeHerdrRunner: runner,
       seatAdapters: [adapter],
       nativeLaunchPolicy: {
+        prepare: async (input) =>
+          selected(input.seat.workingDirectory).captainOptions.nativeLaunchPolicy.prepare(input),
         admit: async (input) =>
           selected(input.seat.workingDirectory).captainOptions.nativeLaunchPolicy.admit(input),
       },
     },
   };
+  fleets.set(fleet, { container, sharedAdmission });
+  return fleet;
 }
