@@ -1184,6 +1184,13 @@ unregisters that machine's connections without stopping workers. Named and SSH
 connections apply live to census, hires and watches. Default workspace changes
 still require `clankie restart captain` (ADR 0172).
 
+Named local workspace connections support Codex structured hires and resume on their
+pinned socket. Claude structured hires on a named local workspace currently return
+`harness_unavailable`: its worker channel is not configured for that socket. They
+never launch through the default workspace or inherit its fleet grant. Removing a
+connection releases cached control without stopping its native workers; retained
+controllers cannot send or interrupt after removal or same-ID replacement.
+
 Existing `herdr add/remove/fleets`, `runtime connect` and `agents hosts` remain
 aliases. Machine records own transport; old connection IDs, transcript host
 aliases, exact-directory grants and saved seat IDs survive migration. Devices

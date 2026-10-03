@@ -443,10 +443,13 @@ export async function readFleet(
     readonly runCommand?: HerdrCensusRunner;
     readonly fleets?: readonly HerdrCensusFleet[];
     readonly herdrSession?: string;
+    readonly localAvailable?: boolean;
   } = {},
 ): Promise<ObservedFleet> {
   const [local, remote, remotePlacements] = await Promise.all([
-    readLocalFleet(options),
+    options.localAvailable === false
+      ? Promise.resolve<ObservedFleet>({ seats: [] })
+      : readLocalFleet(options),
     readRemoteFleets(options.fleets ?? []),
     Promise.all(
       (options.fleets ?? []).map(async (fleet) => {
@@ -587,9 +590,19 @@ async function readLocalFleet(
 /** Live agent census for a seated turn. Fail-soft: a down socket is not a failed turn. */
 export async function readHerdrSessionCensus(
   herdrPaneId: string | undefined,
-  options: { readonly runCommand?: HerdrCensusRunner; readonly fleets?: readonly HerdrCensusFleet[] } = {},
+  options: {
+    readonly runCommand?: HerdrCensusRunner;
+    readonly fleets?: readonly HerdrCensusFleet[];
+    readonly localAvailable?: boolean;
+  } = {},
 ): Promise<HerdrSessionCensus> {
   const run = options.runCommand ?? defaultRunner;
+  if (options.localAvailable === false) {
+    const remote = await readRemoteFleets(options.fleets ?? []);
+    return remote.length === 0
+      ? { outcome: "unavailable", error: "Default Herdr workspace is unavailable" }
+      : { outcome: "ok", text: remote.map(formatRemoteFleet).join("\n") };
+  }
   try {
     const [{ stdout }, remote] = await Promise.all([
       run("herdr", ["agent", "list"]),

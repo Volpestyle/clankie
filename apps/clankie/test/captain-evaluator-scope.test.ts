@@ -63,3 +63,35 @@ it("evaluates only Clankie's native head replies while enabled, never other flee
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+it("refreshes connected fleets and starts their watches with the default workspace disabled", async () => {
+  const root = mkdtempSync(join(tmpdir(), "clankie-disabled-default-"));
+  const watch = vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
+  vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
+  vi.spyOn(Evaluator.prototype, "tick").mockResolvedValue();
+  const read = vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
+  const fleet = { id: "pc", session: "work", ssh: { host: "pc", shell: "posix" as const } };
+  const captain = createCaptain(
+    {
+      herdrAvailable: () => false,
+      fleets: { list: [fleet], current: async () => [fleet], run: () => async () => "{}" },
+    } as unknown as CaptainDeps,
+    {
+      repoRoot: root,
+      stateDir: root,
+      settings: new SettingsStore(join(root, "settings.json")),
+    },
+  );
+  try {
+    await vi.waitFor(() =>
+      expect(read).toHaveBeenCalledWith(
+        expect.objectContaining({ localAvailable: false, fleets: [expect.objectContaining({ id: "pc" })] }),
+      ),
+    );
+    expect(watch).toHaveBeenCalled();
+  } finally {
+    await captain.close();
+    vi.restoreAllMocks();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -10,9 +10,13 @@ export function savedSessionFleet(
   session: SavedAgentSession,
   requested: string | undefined,
   fleets: readonly HerdrFleet[],
+  namedLocal: readonly { id: string }[] = [],
 ): string | undefined {
   if (session.host === "local") {
-    if (requested !== undefined) throw new Error("A local transcript cannot be resumed on a remote fleet");
+    if (requested !== undefined) {
+      if (namedLocal.some((entry) => entry.id === requested)) return requested;
+      throw new Error("A local transcript cannot be resumed on a remote fleet");
+    }
     return undefined;
   }
   const host = session.host;

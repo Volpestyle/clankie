@@ -1,3 +1,4 @@
+import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
 import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
 import { deliveryFingerprint } from "./delivery-fence.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
@@ -945,6 +946,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (herdrRunner.list === undefined) throw new Error("Complete Herdr inventory is unavailable");
       if (fleetId === undefined) return herdrRunner.list();
       await refreshFleets();
+      if (namedLocal.some((entry) => entry.id === fleetId)) return herdrRunner.list(fleetId);
       const selected = remoteFleets.find((fleet) => fleet.id === fleetId);
       if (selected === undefined) throw new Error(`Unknown Herdr fleet ${fleetId}`);
       const sameHost = remoteFleets.filter(
@@ -981,9 +983,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       : {
           remoteCodexControl: (fleetId: string, paneId: string) => {
             const fleet = remoteFleets.find((entry) => entry.id === fleetId);
-            return fleet === undefined
-              ? undefined
-              : remoteCodexControl(fleet, deps.fleets!.shell!(fleet), deps.fleets!.run(fleet), paneId);
+            if (fleet === undefined) return undefined;
+            const revision = fleetRevisions.get(fleetId) ?? 0;
+            const guard = async () => {
+              await refreshFleets();
+              if ((fleetRevisions.get(fleetId) ?? 0) !== revision || !fleetIdentities.has(fleetId))
+                throw new Error("Machine connection changed or disconnected");
+            };
+            return remoteCodexControl(
+              fleet,
+              async (...args) => {
+                await guard();
+                return deps.fleets!.shell!(fleet)(...args);
+              },
+              async (...args) => {
+                await guard();
+                return deps.fleets!.run(fleet)(...args);
+              },
+              paneId,
+            );
           },
           remoteCodexQueue: (() => {
             const queues = new Map<
@@ -997,37 +1015,61 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               const revision = fleetRevisions.get(fleetId) ?? 0;
               let cached = queues.get(fleetId);
               if (cached === undefined || cached.revision !== revision) {
-                cached = { revision, queue: remoteCodexQueue(fleet, deps.fleets!.shell!(fleet)) };
+                cached = {
+                  revision,
+                  queue: remoteCodexQueue(fleet, async (...args) => {
+                    await refreshFleets();
+                    if ((fleetRevisions.get(fleetId) ?? 0) !== revision)
+                      throw new Error("Machine connection changed or disconnected");
+                    return deps.fleets!.shell!(fleet)(...args);
+                  }),
+                };
                 queues.set(fleetId, cached);
               }
               return cached.queue(sessionId, text);
             };
           })(),
           remoteSeatAdapters: (fleetId: string) => {
-            if (namedLocal.some((entry) => entry.id === fleetId))
+            const revision = fleetRevisions.get(fleetId) ?? 0;
+            const current = async () => {
+              await refreshFleets();
+              return (fleetRevisions.get(fleetId) ?? 0) === revision && fleetIdentities.has(fleetId);
+            };
+            const guard = async () => {
+              if (!(await current())) throw new Error("Machine connection changed or disconnected");
+            };
+            const local = namedLocal.find((entry) => entry.id === fleetId);
+            if (local !== undefined)
               return [
                 createCodexSeatAdapter({
-                  herdr: (args) =>
-                    deps.runtimes!.runNamed!(
+                  herdr: async (args) => {
+                    await guard();
+                    return deps.runtimes!.runNamed!(
                       fleetId,
                       args.map((arg) =>
                         arg.startsWith(`${fleetId}/`) ? arg.slice(fleetId.length + 1) : arg,
                       ),
-                    ),
+                    );
+                  },
                   viewEnv: async (view) => ({
                     HERDR_PANE_ID: view.paneId.replace(`${fleetId}/`, ""),
-                    HERDR_SOCKET_PATH: (await deps.runtimes!.configuredBinding(fleetId))?.socketPath ?? "",
+                    HERDR_SOCKET_PATH: local.socketPath ?? "",
                   }),
                 }),
-                claudeWorkerSeats,
-              ];
+              ].map((adapter) => fenceFleetSeatAdapter(adapter, current));
             const fleet = remoteFleets.find((entry) => entry.id === fleetId);
             if (fleet === undefined) return [];
-            const shell = deps.fleets!.shell!(fleet);
+            const shell: ReturnType<NonNullable<typeof deps.fleets>["shell"] & {}> = async (...args) => {
+              await guard();
+              return deps.fleets!.shell!(fleet)(...args);
+            };
             return [
-              createRemoteCodexSeatAdapter(fleet, shell, deps.fleets!.run(fleet)),
+              createRemoteCodexSeatAdapter(fleet, shell, async (...args) => {
+                await guard();
+                return deps.fleets!.run(fleet)(...args);
+              }),
               createRemoteClaudeWorkerSeatAdapter(fleet, shell, claudeWorkerDeps),
-            ];
+            ].map((adapter) => fenceFleetSeatAdapter(adapter, current));
           },
         }),
   });
@@ -1615,12 +1657,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // nothing rather than herdr noise. The Linear inbox is a reading room,
         // not a lead room (ADR 0168): no census there.
         const census =
-          live ||
-          oneShot ||
-          deps.herdrAvailable?.() === false ||
-          conversationId === LINEAR_INBOX_CONVERSATION_ID
+          live || oneShot || conversationId === LINEAR_INBOX_CONVERSATION_ID
             ? undefined
-            : await readHerdrSessionCensus(paneId, { fleets: await censusFleets() });
+            : await readHerdrSessionCensus(paneId, {
+                fleets: await censusFleets(),
+                localAvailable: deps.herdrAvailable?.() !== false,
+              });
         // Owner attachments reach his model as images; the note numbers them
         // and names where each original is stored (ADR 0209).
         const attached =
@@ -1838,7 +1880,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         resume = await deps.agentSessions.resolve(request.resume);
         if (request.harness !== resume.file.harness || request.workingDirectory !== resume.workingDirectory)
           throw new Error("Harness and workingDirectory must match the saved transcript");
-        const fleet = savedSessionFleet(resume, request.fleet, await refreshFleets());
+        const fleet = savedSessionFleet(resume, request.fleet, await refreshFleets(), namedLocal);
         request = { ...request, ...(fleet === undefined ? {} : { fleet }) };
       } catch (error) {
         return {
@@ -1848,6 +1890,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
     }
+    if (request.harness === "claude" && namedLocal.some((entry) => entry.id === request.fleet))
+      return {
+        outcome: "failed",
+        reason: "harness_unavailable",
+        detail: "Claude structured control is not configured for this named local workspace",
+        control: {
+          mode: "unavailable",
+          reason: "unsupported_harness",
+          detail: "Claude worker channel requires an exact workspace binding",
+        },
+      };
     const result = await herdrWatches.spawnSeat(request, undefined, brief, resume);
     if (result.outcome !== "spawned") return result;
     const title = resume === undefined ? request.title : result.seat.title;
@@ -1956,13 +2009,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let captainGoals = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
     const binding = await deps.runtimes?.configuredBinding("default");
-    const fleet =
-      deps.herdrAvailable?.() === false
-        ? { seats: [], head: undefined }
-        : await readFleet({
-            fleets: await censusFleets(),
-            ...(binding ? { herdrSession: binding.session } : {}),
-          });
+    const fleet = await readFleet({
+      fleets: await censusFleets(),
+      localAvailable: deps.herdrAvailable?.() !== false,
+      ...(binding ? { herdrSession: binding.session } : {}),
+    });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const goalList = await conversations.serve({ op: "list", schemaVersion: 1 });
@@ -2105,94 +2156,92 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
 
   evaluator.start();
-  if (deps.herdrAvailable?.() !== false)
-    herdrWatches.start(
-      (conversationId, prompt, discord) => {
-        if (discord !== undefined) {
-          // Accepted once started: the room turn owns its own failures, and a
-          // retry would harvest the same pane twice.
-          void runDiscordWatchTurn(discord, prompt).catch((error) =>
-            console.error("Herdr watch Discord turn failed:", error),
-          );
-          return Promise.resolve();
-        }
-        if (!conversations.runsCaptainTurns(conversationId)) {
-          herdrWatches.cancelConversation(conversationId);
-          return Promise.resolve();
-        }
-        const result = conversations.submitInternal(conversationId, prompt, "watch");
-        if (result.status !== "accepted") throw new Error("Internal Herdr watcher turn was not accepted");
+  herdrWatches.start(
+    (conversationId, prompt, discord) => {
+      if (discord !== undefined) {
+        // Accepted once started: the room turn owns its own failures, and a
+        // retry would harvest the same pane twice.
+        void runDiscordWatchTurn(discord, prompt).catch((error) =>
+          console.error("Herdr watch Discord turn failed:", error),
+        );
         return Promise.resolve();
-      },
-      (seatId, projection) => {
-        if (seatId === headSeat?.seatId && projection.kind === "transcript") {
-          const entries = projection.transcript.entries;
-          const last = entries.at(-1);
-          if (last?.type === "message" && last.role === "agent" && !evaluator.excludesSeat(seatId)) {
-            evaluator.capture({
-              conversationId: `seat:${seatId}`,
-              runId: `${projection.transcript.sessionKey}:${last.id}`,
-              context: {
-                source: "herdr",
-                seatId,
-                head: true,
-                fleet: liveEdgeSeats,
-                seat: headSeat,
-                transcript: projection.transcript,
-                metrics: null,
-                toolInventory: null,
-              },
-            });
-          }
+      }
+      if (!conversations.runsCaptainTurns(conversationId)) {
+        herdrWatches.cancelConversation(conversationId);
+        return Promise.resolve();
+      }
+      const result = conversations.submitInternal(conversationId, prompt, "watch");
+      if (result.status !== "accepted") throw new Error("Internal Herdr watcher turn was not accepted");
+      return Promise.resolve();
+    },
+    (seatId, projection) => {
+      if (seatId === headSeat?.seatId && projection.kind === "transcript") {
+        const entries = projection.transcript.entries;
+        const last = entries.at(-1);
+        if (last?.type === "message" && last.role === "agent" && !evaluator.excludesSeat(seatId)) {
+          evaluator.capture({
+            conversationId: `seat:${seatId}`,
+            runId: `${projection.transcript.sessionKey}:${last.id}`,
+            context: {
+              source: "herdr",
+              seatId,
+              head: true,
+              fleet: liveEdgeSeats,
+              seat: headSeat,
+              transcript: projection.transcript,
+              metrics: null,
+              toolInventory: null,
+            },
+          });
         }
-        if (seatId === headSeat?.seatId) {
-          // His own words, in his own thread: the seat's transcript is the head
-          // conversation the app pins, spoken as captain, never as an agent.
-          if (projection.kind === "transcript") {
-            conversations.syncHeadTranscript(seatId, projection.transcript, headSeat.workingDirectory);
-          } else if (projection.kind === "status") {
-            conversations.publishHeadEvent({
-              type: "activity",
-              phase: projection.status === "working" ? "responding" : "waiting",
-            });
-          } else {
-            conversations.publishHeadEvent({
-              type: "message",
-              role: "captain",
-              text: projection.text,
-              streaming: false,
-            });
-          }
-          return;
-        }
-        if (projection.kind === "status") {
-          // A pane that was working and has stopped is this seat's run, and the
-          // status it stopped at is the only thing the host knows about how it
-          // went (ADR 0162). Recorded before the persona lookup: the ledger is
-          // keyed by seat, and a seat with no bound character still ran.
-          const previous = seatStatuses.get(seatId);
-          seatStatuses.set(seatId, projection.status);
-          const result = runResultForSeatStatus(previous, projection.status);
-          if (result !== undefined) {
-            seatLedger.runSettled(seatId, result);
-            fleetChanges.touch();
-          }
-        }
-        const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
-        const personaId = seat?.personaId;
-        if (personaId === undefined) return;
-        // Discovered seats contribute status to the roster, never conversation history.
-        if (projection.kind === "reply")
-          conversations.publishPersonaEvent(personaId, seatId, {
+      }
+      if (seatId === headSeat?.seatId) {
+        // His own words, in his own thread: the seat's transcript is the head
+        // conversation the app pins, spoken as captain, never as an agent.
+        if (projection.kind === "transcript") {
+          conversations.syncHeadTranscript(seatId, projection.transcript, headSeat.workingDirectory);
+        } else if (projection.kind === "status") {
+          conversations.publishHeadEvent({
+            type: "activity",
+            phase: projection.status === "working" ? "responding" : "waiting",
+          });
+        } else {
+          conversations.publishHeadEvent({
             type: "message",
-            role: "agent",
+            role: "captain",
             text: projection.text,
             streaming: false,
           });
-      },
-    );
-  if (deps.herdrAvailable?.() !== false)
-    for (const seatId of conversations.seatIds()) herdrWatches.trackSeat(seatId);
+        }
+        return;
+      }
+      if (projection.kind === "status") {
+        // A pane that was working and has stopped is this seat's run, and the
+        // status it stopped at is the only thing the host knows about how it
+        // went (ADR 0162). Recorded before the persona lookup: the ledger is
+        // keyed by seat, and a seat with no bound character still ran.
+        const previous = seatStatuses.get(seatId);
+        seatStatuses.set(seatId, projection.status);
+        const result = runResultForSeatStatus(previous, projection.status);
+        if (result !== undefined) {
+          seatLedger.runSettled(seatId, result);
+          fleetChanges.touch();
+        }
+      }
+      const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
+      const personaId = seat?.personaId;
+      if (personaId === undefined) return;
+      // Discovered seats contribute status to the roster, never conversation history.
+      if (projection.kind === "reply")
+        conversations.publishPersonaEvent(personaId, seatId, {
+          type: "message",
+          role: "agent",
+          text: projection.text,
+          streaming: false,
+        });
+    },
+  );
+  for (const seatId of conversations.seatIds()) herdrWatches.trackSeat(seatId);
   void refreshFleet().catch(() => undefined);
 
   /** The session a planned Discord turn runs in, whether a message or a watch woke it. */

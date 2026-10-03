@@ -288,6 +288,8 @@ it("binds remote transcripts by exact SSH target and shell, never by a matching 
     savedSessionFleet(session, undefined, [{ ...fleet, ssh: { host: "owner@actual", shell: "posix" } }]),
   ).toThrow(/exact SSH/);
   expect(() => savedSessionFleet(saved(), "pc", [fleet])).toThrow(/local transcript/);
+  expect(savedSessionFleet(saved(), "work", [fleet], [{ id: "work" }])).toBe("work");
+  expect(() => savedSessionFleet(session, "work", [fleet], [{ id: "work" }])).toThrow(/exact SSH/);
 });
 
 it("uses a fresh qualified remote inventory and refuses malformed panes before a native start", async () => {

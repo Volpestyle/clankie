@@ -240,13 +240,14 @@ export class Machines {
     ]);
     clearTimeout(configTimer);
     const candidates = sshConfigHosts(config).filter((ssh) => !configured.some((entry) => entry.ssh === ssh));
-    for (const [index, ssh] of candidates.entries()) {
+    for (const ssh of candidates) {
       let id = ssh
         .toLowerCase()
         .replace(/[^a-z0-9-]/gu, "-")
         .slice(0, 60);
       if (!/^[a-z]/u.test(id)) id = `ssh-${id}`;
-      if (configured.some((entry) => entry.id === id)) id = `candidate-${index}`;
+      const base = id.slice(0, 48);
+      for (let suffix = 1; configured.some((entry) => entry.id === id); suffix += 1) id = `${base}-${suffix}`;
       configured.push({
         id,
         ssh,

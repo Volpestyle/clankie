@@ -276,3 +276,23 @@ test("legacy host aliases refuse retargeting and ambiguous removal, preserving d
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("discovery IDs remain unique across case-folded aliases and configured candidate names", async () => {
+  const dir = await mkdtemp("/tmp/clankie-machine-ids-");
+  try {
+    const machines = new Machines({
+      settings: new SettingsStore(join(dir, "settings.json")),
+      primary: () => undefined,
+      changed: () => {},
+      sshConfig: async () => "Host box BOX candidate-1",
+      run: async () => ({ stdout: JSON.stringify({ sessions: [] }) }),
+    });
+    await machines.add({ id: "candidate-1", ssh: "other", shell: "posix" });
+    const rows = MachineInventorySchema.parse(await machines.list()).machines;
+    expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
+    expect(rows.find((row) => row.ssh === "BOX")?.id).toBe("box-1");
+    expect(rows.find((row) => row.ssh === "other")?.id).toBe("candidate-1");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
