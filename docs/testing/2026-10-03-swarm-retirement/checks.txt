@@ -1,0 +1,40 @@
+Clankie f05ed249 — full pnpm check exited 0.
+
+All matched files use the correct format.
+Checked 330 markdown files; local links resolve.
+Built public docs: 10 pages, 36 network routes, 108 API operations, 55 slash commands.
+Checked 10 public docs pages; links and anchors resolve.
+ Tasks:    25 successful, 25 total
+ Test Files  397 passed (397)
+      Tests  3346 passed | 2 skipped (3348)
+test result: ok. 124 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+Vox IPC smoke passed.
+
+App 64e94c6 with staged core — full pnpm check exited 0.
+Typecheck, lint, cycles, boundary, workspace, assets, atlas and skins passed.
+ℹ pass 7
+ℹ fail 0
+ℹ pass 6
+ℹ fail 0
+ℹ pass 3
+ℹ fail 0
+packages/skin-contract test:  Test Files  1 passed (1)
+packages/skin-contract test:       Tests  9 passed (9)
+packages/device-session test:  Test Files  8 passed (8)
+packages/device-session test:       Tests  102 passed (102)
+packages/default-skin test:  Test Files  1 passed (1)
+packages/default-skin test:       Tests  3 passed (3)
+packages/command-center test:  Test Files  134 passed (134)
+packages/command-center test:       Tests  997 passed (997)
+apps/macos test:  Test Files  2 passed (2)
+apps/macos test:       Tests  4 passed (4)
+apps/mobile test:  Test Files  15 passed (15)
+apps/mobile test:       Tests  100 passed (100)
+ℹ pass 2
+ℹ fail 0
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+
+Both snapshots used frozen offline dependency installs and isolated host configuration.
+Shared checkout retirement regression tests: 5 files / 26 tests passed.
+Concurrent fresh-seat plugin fixture after its owner added a mock: 6 tests passed.
