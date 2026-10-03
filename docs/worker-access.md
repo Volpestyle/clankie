@@ -205,6 +205,17 @@ ongoing handoff before restarting or resuming that pane. There is no
 owner-pane exemption or automatic assignment. Keep elevated-shell `--no-daemon`
 where required; it changes how Codex starts, not the access rules.
 
+The bridge's first `tools/list` retries an empty or refused granted-tool lookup
+with backoff for at most 20 seconds while a newly started pane settles. That
+budget includes HTTP requests and cancels a stalled lookup; every retry still
+requires current membership and live grants. Persistent denial returns only
+`message_clankie`. Later lists check current access immediately, and tool calls
+retain their existing dispatch rules: startup discovery never retries an effect.
+Codex currently retains its startup catalog and does not refresh it on
+`notifications/tools/list_changed`; an owner may need to reconnect its MCP server
+or restart the pane after access changes. Revocation remains enforced on every
+call even when a client still displays an old catalog.
+
 SSH/PC fleet links still carry native messages, but they do not yet provide the
 OS process proof needed for project tools (VUH-1563). Remote project calls deny
 access. Shared daemons, unregistered detached processes, foreground shell

@@ -80,6 +80,15 @@ Never share operator bearers or grant contents in transcripts. Exact
 Worker publishing grants must pin the exact `personaId`. Read
 `docs/worker-access.md` under `repoRoot` for the contract.
 
+The worker bridge gives its first `tools/list` up to 20 seconds to retry with
+backoff while native pane membership settles, including any stalled HTTP lookup.
+Proof and live grants must succeed before it advertises connected tools; otherwise
+only `message_clankie` remains. Later lists and every call still check current
+access. Codex currently keeps its initial catalog despite
+`notifications/tools/list_changed`; after an access change, an owner may need to
+reconnect MCP or restart that native pane. A displayed stale tool never bypasses
+revocation. Missing tools do not authorize another connector or an operator lane.
+
 OpenCode seats use the same isolation contract: a fresh `clankie seat --harness
 opencode` creates a separate workspace chat; `--conversation ID` reuses one,
 `--resume` keeps the exact native session and chat, and `--dry-run` creates none.

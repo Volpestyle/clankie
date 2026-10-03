@@ -27,7 +27,10 @@ afterEach(() => {
 });
 
 /** A stand-in for Clankie's link listener: one event in the mailbox, then nothing. */
-async function fakeService(dropAck = false) {
+async function fakeService(
+  dropAck = false,
+  mcpReply?: (method: string) => "deny" | "empty" | "stall" | undefined,
+) {
   const seen: Seen[] = [];
   let delivered = false;
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
@@ -53,6 +56,13 @@ async function fakeService(dropAck = false) {
       if (path === "/v1/fleet/mcp") {
         // The fleet's granted tools, as Clankie's worker endpoint answers them.
         const message = JSON.parse(body) as { id?: number; method: string; params?: { name?: string } };
+        const reply = mcpReply?.(message.method);
+        if (reply === "deny") {
+          response.statusCode = 403;
+          response.end("{}");
+          return;
+        }
+        if (reply === "stall") return;
         response.setHeader("mcp-session-id", "session-1");
         if (message.id === undefined) {
           response.statusCode = 202;
@@ -67,7 +77,10 @@ async function fakeService(dropAck = false) {
                 serverInfo: { name: "w", version: "1" },
               }
             : message.method === "tools/list"
-              ? { tools: [{ name: "linear_get_issue", inputSchema: { type: "object" } }] }
+              ? {
+                  tools:
+                    reply === "empty" ? [] : [{ name: "linear_get_issue", inputSchema: { type: "object" } }],
+                }
               : { content: [{ type: "text", text: `ran ${String(message.params?.name)}` }], isError: false };
         response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
         return;
@@ -494,10 +507,10 @@ function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string, cha
     }
   });
   let sequence = 0;
-  const call = async (method: string, params: unknown) => {
+  const call = async (method: string, params: unknown, timeoutMs = 5_000) => {
     const id = ++sequence;
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < Math.ceil(timeoutMs / 25); i++) {
       if (replies.has(id)) return replies.get(id) as { result: { content: { text: string }[] } };
       if (child.exitCode !== null) throw new Error(stderr);
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -516,12 +529,71 @@ function rawReceiptBridge(mode: "fleet" | "seat", home: string, url: string, cha
         capabilities: {},
         clientInfo: { name: "test", version: "1" },
       }),
+    list: async (timeoutMs?: number) =>
+      (await call("tools/list", {}, timeoutMs)) as unknown as {
+        result: { tools: { name: string }[] };
+      },
     message: async (text = "original") =>
       JSON.parse(
         (await call("tools/call", { name: "message_clankie", arguments: { text } })).result.content[0]!.text,
       ) as { received: boolean; deliveryStage: string; deliveryId: string },
   };
 }
+describe("the first native tool catalog while a pane settles (VUH-1558)", () => {
+  it.each(["deny", "empty"] as const)(
+    "retries a %s lookup before answering the first tools/list, then observes revocation immediately",
+    async (failure) => {
+      let attempts = 0;
+      let revoked = false;
+      const service = await fakeService(false, (method) => {
+        if (revoked) return "deny";
+        if (method === (failure === "deny" ? "initialize" : "tools/list") && ++attempts <= 2) return failure;
+      });
+      const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url);
+      await bridge.init();
+      expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
+        "message_clankie",
+        "linear_get_issue",
+      ]);
+      expect(attempts).toBe(3);
+      expect(
+        service.seen.every((request) => request.authorization === undefined && request.pane === "w8:p3"),
+      ).toBe(true);
+      revoked = true;
+      const before = service.seen.length;
+      expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(["message_clankie"]);
+      expect(service.seen.slice(before)).toHaveLength(1);
+    },
+  );
+
+  it("reopens a startup session whose occupant changed, sharing one lookup across concurrent first lists", async () => {
+    let initializes = 0;
+    const service = await fakeService(false, (method) => {
+      if (method === "initialize") initializes += 1;
+      if (method === "tools/list" && initializes === 1) return "deny";
+    });
+    const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url);
+    await bridge.init();
+    const replies = await Promise.all([bridge.list(), bridge.list()]);
+    for (const reply of replies)
+      expect(reply.result.tools.map((tool) => tool.name)).toEqual(["message_clankie", "linear_get_issue"]);
+    expect(initializes).toBe(2);
+  });
+
+  it.each(["deny", "stall"] as const)(
+    "answers without granted tools within the startup budget when proof continues to %s",
+    async (failure) => {
+      const service = await fakeService(false, () => failure);
+      const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url);
+      await bridge.init();
+      const started = performance.now();
+      expect((await bridge.list(25_000)).result.tools.map((tool) => tool.name)).toEqual(["message_clankie"]);
+      expect(performance.now() - started).toBeGreaterThanOrEqual(19_000);
+      expect(performance.now() - started).toBeLessThan(25_000);
+      expect(service.seen.some((request) => request.body.includes("tools/call"))).toBe(false);
+    },
+  );
+});
 it.each(["fleet", "seat"] as const)(
   "%s reconciles lost acceptance after raw bridge and service replacement, without another POST",
   async (mode) => {

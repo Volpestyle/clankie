@@ -18,6 +18,9 @@ import { approvesWorkerChannel, authorization, readLink, seatRoute, TEXT_MAX } f
 
 const WAIT_MS = 25_000;
 const RETRY_MS = 2_000;
+// Native clients can retain only their first catalog. Let a newly started pane
+// settle, within Codex's 30-second startup timeout, without weakening proof.
+const FIRST_TOOLS_WAIT_MS = 20_000;
 const INSTRUCTIONS =
   'Events tagged <channel source="clankie" kind="message" conversation="…" event_id="…"> ' +
   "are a message from the operator or Clankie addressed to this agent. " +
@@ -65,12 +68,12 @@ function fleetTools(current, refresh) {
     accept: "application/json, text/event-stream",
     ...(session === undefined ? {} : { "mcp-session-id": session }),
   });
-  const post = async (body) => {
+  const post = async (body, signal) => {
     const response = await fetch(new URL("/v1/fleet/mcp", current().url), {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ jsonrpc: "2.0", ...body }),
-      signal: AbortSignal.timeout(60_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
     });
     if (body.method === "initialize") session = response.headers.get("mcp-session-id") ?? undefined;
     if (response.status === 404) session = undefined;
@@ -80,44 +83,50 @@ function fleetTools(current, refresh) {
     if (reply.error) throw new Error(reply.error.message ?? "fleet tools refused");
     return reply.result;
   };
-  const open = async () => {
-    await post({
-      id: ++sequence,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "clankie-worker", version: "0.3.0" },
+  const open = async (signal) => {
+    await post(
+      {
+        id: ++sequence,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "clankie-worker", version: "0.3.0" },
+        },
       },
-    });
-    await post({ method: "notifications/initialized" });
+      signal,
+    );
+    await post({ method: "notifications/initialized" }, signal);
   };
-  const request = async (method, params) => {
+  const request = async (method, params, signal) => {
     if (session === undefined)
-      await open().catch(async (error) => {
+      await open(signal).catch(async (error) => {
         if (!refused(error) || !refresh()) throw error;
-        await open();
+        await open(signal);
       });
     try {
-      return await post({ id: ++sequence, method, params });
+      return await post({ id: ++sequence, method, params }, signal);
     } catch (error) {
       // The service restarted on a new local port: follow its link file once.
       if (refused(error) && refresh()) {
         session = undefined;
-        await open();
-        return post({ id: ++sequence, method, params });
+        await open(signal);
+        return post({ id: ++sequence, method, params }, signal);
       }
       if (session !== undefined) throw error;
       // The service forgot this session (it restarted): one fresh session, one retry.
-      await open();
-      return post({ id: ++sequence, method, params });
+      await open(signal);
+      return post({ id: ++sequence, method, params }, signal);
     }
   };
   return {
-    async list() {
+    async list(signal) {
       try {
-        return (await request("tools/list", {}))?.tools ?? [];
+        return (await request("tools/list", {}, signal))?.tools ?? [];
       } catch {
+        // A settling native occupant can invalidate its first MCP session.
+        // Only discovery discards it; tool calls retain their existing retry rules.
+        session = undefined;
         return [];
       }
     },
@@ -149,6 +158,33 @@ export function runSeatChannel({ paneId, parentArgv }) {
         },
       };
   let grantedNames = "";
+  let firstListComplete = false;
+  let firstListPending;
+  const listGrantedTools = () => {
+    if (firstListComplete || !link) return granted.list();
+    // Concurrent first requests share the bounded lookup, never an authority cache.
+    firstListPending ??= (async () => {
+      const signal = AbortSignal.timeout(FIRST_TOOLS_WAIT_MS);
+      const deadline = performance.now() + FIRST_TOOLS_WAIT_MS;
+      let backoff = 250;
+      try {
+        while (!signal.aborted) {
+          const tools = await granted.list(signal);
+          if (signal.aborted) break;
+          if (tools.length) return tools;
+          const remaining = deadline - performance.now();
+          if (remaining <= 0) break;
+          await delay(Math.min(backoff, remaining));
+          backoff = Math.min(backoff * 2, RETRY_MS);
+        }
+        return [];
+      } finally {
+        firstListComplete = true;
+        firstListPending = undefined;
+      }
+    })();
+    return firstListPending;
+  };
   const polling = link && paneId && approvesWorkerChannel(parentArgv);
   let started = false;
   let closed = false;
@@ -276,7 +312,7 @@ export function runSeatChannel({ paneId, parentArgv }) {
     }
     if (method === "ping") return send({ id, result: {} });
     if (method === "tools/list") {
-      const tools = await granted.list();
+      const tools = await listGrantedTools();
       grantedNames = tools.map((tool) => tool.name).join(",");
       return send({ id, result: { tools: link ? [MESSAGE_TOOL, ...tools] : [] } });
     }
