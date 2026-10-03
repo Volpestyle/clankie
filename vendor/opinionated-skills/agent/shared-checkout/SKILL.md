@@ -109,6 +109,23 @@ Afterwards confirm the other agent's hunks survive unstaged (`git diff -- <file>
 still shows them). Name the orphan work in your report rather than silently
 leaving or absorbing it.
 
+## Landing a reviewed branch into a dirty shared checkout
+
+A lead landing a worker's branch while another agent has uncommitted work in
+the checkout uses the bundled script rather than hand-applying patches:
+
+```bash
+node <this skill>/scripts/land.mjs <branch> --dry-run   # what it would do
+node <this skill>/scripts/land.mjs <branch>
+```
+
+The branch must contain HEAD (have its owner rebase it first). HEAD moves to
+the branch exactly, keeping its commits and tested tree. Each changed path in
+the working tree becomes the branch's version, or a clean three-way merge where
+someone has uncommitted edits. It refuses, changing nothing, on a conflict, a
+staged index, an untracked file in the way, or a new ADR whose number
+uncommitted work already uses.
+
 ## When your commit has disappeared
 
 It is almost certainly still in the reflog, unreachable rather than gone:

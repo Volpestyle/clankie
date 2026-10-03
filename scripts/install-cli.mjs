@@ -27,10 +27,15 @@ function pinRuntime() {
   } else {
     const run = (...gitArgs) => execFileSync("git", gitArgs, { cwd: runtime, encoding: "utf8" }).trim();
     if (run("status", "--porcelain", "--untracked-files=no") !== "")
-      throw new Error(`${runtime} has local changes; it is a pinned runtime, not a workspace. Leaving it alone.`);
+      throw new Error(
+        `${runtime} has local changes; it is a pinned runtime, not a workspace. Leaving it alone.`,
+      );
     run("checkout", "--quiet", "--detach", commit);
   }
-  execFileSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], { cwd: runtime, stdio: "inherit" });
+  execFileSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
+    cwd: runtime,
+    stdio: "inherit",
+  });
   // Machine-local ignored state stays in the primary checkout, shared rather than copied.
   const primary = dirname(resolve(checkout, git("rev-parse", "--git-common-dir")));
   for (const path of [".env.local", ".data", "apps/vox/target"]) {
