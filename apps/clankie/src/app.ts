@@ -444,6 +444,10 @@ export interface ClankieAppDependencies {
   /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
   prepareFleet?: (id: string) => Promise<unknown>;
   inspectFleetHarnesses?: (id: string) => Promise<unknown>;
+  /** Host-only project eligibility on a configured fleet; never verifies an MCP connection. */
+  inspectFleetMembership?: (
+    id: string,
+  ) => Promise<import("@clankie/protocol/projects").FleetMembershipReport>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
   deliveredFiles?: Pick<DeliveredFileStore, "read">;
   memory?: MemoryStores;
@@ -1262,6 +1266,19 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         },
         503,
       );
+    }
+  });
+  app.get("/v1/runtime-connections/:id/membership", async (context) => {
+    const authority = await authorizeOwnerSecrets(context.req.raw);
+    if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
+    if (!dependencies.inspectFleetMembership) return context.json({ error: "runtimes_unavailable" }, 503);
+    try {
+      const report = await dependencies.inspectFleetMembership(context.req.param("id"));
+      const current = await authorizeOwnerSecrets(context.req.raw);
+      if (current !== true) return context.json({ error: current }, current === "forbidden" ? 403 : 401);
+      return context.json(report);
+    } catch {
+      return context.json({ error: "membership_inspection_unavailable" }, 503);
     }
   });
   // The owner's one step for Claude workers on an ssh fleet (VUH-1527).

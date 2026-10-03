@@ -27,10 +27,15 @@ export async function inspectFleetMembership(options: Options): Promise<FleetMem
       nativeSession: "unavailable",
       hire: "unobserved",
       eligibility: "unproven",
-      reason: "Native process, lifetime, and actual cwd could not be proven; bridge and tools are unverified.",
+      reason:
+        "Native process, lifetime, and actual cwd could not be proven; bridge and tools are unverified.",
     };
     if (!options.supportedHarnesses.includes(entry.harness))
-      return { ...row, eligibility: "unsupported", reason: "Native host proof does not support this harness." };
+      return {
+        ...row,
+        eligibility: "unsupported",
+        reason: "Native host proof does not support this harness.",
+      };
     try {
       const proof = await options.observe(options.machine, entry.pane);
       if (!proof || proof.fleet !== options.machine || proof.pane !== entry.pane) return row;
@@ -49,7 +54,8 @@ export async function inspectFleetMembership(options: Options): Promise<FleetMem
         row.reason = "The private native seat has no current bound hire.";
       } else if (proof.nativeSessionPending && hire.state !== "none") {
         row.eligibility = "ineligible";
-        row.reason = "Native session reporting is pending; a hired/private seat cannot use startup eligibility.";
+        row.reason =
+          "Native session reporting is pending; a hired/private seat cannot use startup eligibility.";
       } else {
         // Reuse the tool policy, with host connection/proof checks explicitly substituting
         // for transport checks ONLY in this read-only report. No request identity is admitted.
@@ -79,7 +85,11 @@ export async function inspectFleetMembership(options: Options): Promise<FleetMem
       return membership ? { ...row, projectId: membership.projectId } : row;
     } catch {
       const { cwd: _cwd, projectId: _project, ...unproven } = row;
-      return { ...unproven, eligibility: "unproven", reason: "A required host observation failed; retry. Native tools are unverified." };
+      return {
+        ...unproven,
+        eligibility: "unproven",
+        reason: "A required host observation failed; retry. Native tools are unverified.",
+      };
     }
   };
   // Bound SSH work; preserve inventory order without launching one probe per pane at once.

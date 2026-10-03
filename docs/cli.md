@@ -2679,7 +2679,14 @@ It enables Claude in each discovered profile, uses native plugin installation fo
 Codex, preserves managed Codex configuration, and compares installed Claude
 versions with the service bundle. `clankie doctor` reports local profiles and
 connected remote fleets; `clankie doctor --machine NAME` inspects one registered
-fleet through `GET /v1/runtime-connections/NAME/harnesses`.
+fleet through `GET /v1/runtime-connections/NAME/harnesses` and
+`GET /v1/runtime-connections/NAME/membership`. The membership card reads native
+process and actual cwd observations for at most 64 panes, with two concurrent
+inspections. It distinguishes missing proof, unsupported harnesses, pending
+native sessions, stale hires, and project eligibility. Changed observations are
+discarded. `nativeTools: "not-verified"` means the card has not tested that pane's
+bridge socket, catalog or reply delivery; use a native tool call to verify those.
+Unregistered or disconnected machines never supply an arbitrary SSH target.
 
 Reports separate executable presence, version, activation, bridge, hooks, and the
 `clankie` skill. Static files never prove a live receiver or project membership.

@@ -51,6 +51,9 @@ export async function machineDoctorCommand(
   const value = (result: PromiseSettledResult<Record<string, unknown>>) =>
     result.status === "fulfilled"
       ? result.value
-      : { status: "unavailable", detail: result.reason instanceof Error ? result.reason.message : String(result.reason) };
+      : {
+          status: "unavailable",
+          detail: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        };
   return { machine, harnesses: value(results[0]!), membership: value(results[1]!) };
 }

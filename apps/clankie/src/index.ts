@@ -26,6 +26,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { serve, type WebSocketServerLike } from "@hono/node-server";
 import { MAX_REALTIME_AUDIO_APPEND_BYTES } from "@clankie/discord-presence-core";
 import { defaultGbaPlayJournalDir } from "@clankie/play";
@@ -74,6 +75,8 @@ import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-h
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain } from "./captain/captain.ts";
+import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
+import { parseHerdrPaneList } from "./captain/herdr-watch.ts";
 import { linearFollowStatus } from "@clankie/settings";
 import { createRivalsClient } from "./rivals.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
@@ -961,6 +964,30 @@ const clankie = await createClankieApp({
     return inspectFleetHarnesses(fleet, {
       shell: runtimes.fleetShell(fleet),
       workerPluginDir: workerPluginDir(repoRoot),
+    });
+  },
+  inspectFleetMembership: async (id: string) => {
+    const fleet = (await runtimes.fleets()).find((entry) => entry.id === id);
+    if (!fleet) throw new Error("Configured ssh fleet unavailable");
+    return inspectFleetMembership({
+      machine: fleet.id,
+      supportedHarnesses: fleet.ssh.shell === "powershell" ? ["claude", "codex"] : [],
+      connected: async () =>
+        isDeepStrictEqual(
+          (await runtimes.fleets()).find((entry) => entry.id === id),
+          fleet,
+        ),
+      panes: async () =>
+        parseHerdrPaneList(await runtimes.fleetRun(fleet)(["pane", "list"]), true).map((entry) => ({
+          pane: entry.paneId,
+          harness: entry.agent,
+        })),
+      observe: projectProcessObserver,
+      settings: async () => (await settingsStore.load()).projects,
+      hire: (proof) => captain.lookupProjectHire(proof),
+      remoteCanonical,
+      worktreeRoot: projectWorktreeRoot,
+      gitWorktree: projectGitWorktree,
     });
   },
   prepareFleet: async (id: string) => {

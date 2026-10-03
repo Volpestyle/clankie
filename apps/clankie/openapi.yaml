@@ -1044,6 +1044,23 @@ paths:
         "401": { description: Owner authentication required }
         "403": { description: Caller is not the owner }
         "503": { description: Fleet unavailable or inspector not yet prepared }
+  /v1/runtime-connections/{id}/membership:
+    get:
+      tags: [Operator]
+      operationId: inspectFleetMembership
+      summary: Inspect host-observed project eligibility on one registered remote fleet
+      description: Reports bounded per-pane process, native session, hire and actual cwd observations. Host eligibility does not verify a bridge socket, native tool catalog or delivery. Rechecks the configured fleet, settings, hire, native observations and caller authority before returning.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Per-pane host observations with native tools explicitly unverified }
+        "401": { description: Current owner authentication required }
+        "403": { description: Caller lacks owner control }
+        "503": { description: Fleet or native observations unavailable }
   /v1/operator/persona:
     get:
       tags: [Operator]
