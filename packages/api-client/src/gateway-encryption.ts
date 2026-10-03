@@ -95,7 +95,8 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
     const base = `${url.origin}/h/${credential.hostId}`;
     const transportOptions = { signal: request.signal, redirect: "error" as const };
     const challengeResponse = await fetcher(`${base}${GATEWAY_CHALLENGE_PATH}`, transportOptions);
-    if (!challengeResponse.ok) throw new GatewayRequestError(challengeResponse.status, "Gateway challenge unavailable");
+    if (!challengeResponse.ok)
+      throw new GatewayRequestError(challengeResponse.status, "Gateway challenge unavailable");
     const challengeBody = (await challengeResponse.json()) as { version?: unknown; challenge?: unknown };
     if (
       challengeBody.version !== 1 ||
@@ -147,7 +148,10 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
       body: JSON.stringify(envelope),
     });
     if (!outer.ok)
-      throw new GatewayRequestError(outer.status, `Encrypted gateway request refused (${outer.status}); re-pair if the host key changed`);
+      throw new GatewayRequestError(
+        outer.status,
+        `Encrypted gateway request refused (${outer.status}); re-pair if the host key changed`,
+      );
     const encoded = await outer.text();
     if (encoder.encode(encoded).length > 32 * 1024 * 1024 || !encoded.endsWith("\n"))
       throw new Error("Truncated or oversized encrypted response");
