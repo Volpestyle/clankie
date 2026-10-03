@@ -88,7 +88,8 @@ it.each(["current", "disabled", "missing-bridge", "missing-forwarding"])(
             mcpServers: {
               clankie: {
                 command: "node",
-                args: ["${CODEX_PLUGIN_ROOT}/bin/fleet-mcp.mjs"],
+                args: ["bin/fleet-mcp.mjs"],
+                cwd: ".",
                 env_vars: kind === "missing-forwarding" ? [] : ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"],
               },
             },

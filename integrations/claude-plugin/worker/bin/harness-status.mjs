@@ -144,7 +144,8 @@ export async function inspectHarnessProfiles({
   const bridge =
     codexManifest.mcpServers === "./codex-mcp.json" &&
     bridgeSpec?.command === "node" &&
-    JSON.stringify(bridgeSpec.args) === JSON.stringify(["${CODEX_PLUGIN_ROOT}/bin/fleet-mcp.mjs"]) &&
+    JSON.stringify(bridgeSpec.args) === JSON.stringify(["bin/fleet-mcp.mjs"]) &&
+    bridgeSpec.cwd === "." &&
     Boolean(root && (await exists(join(root, "bin", "fleet-mcp.mjs"))));
   return {
     machine: { platform: process.platform, home },
