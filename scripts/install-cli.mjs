@@ -18,9 +18,11 @@ if (args.some((arg, index) => !["--pinned", "--ref"].includes(arg) && args[index
  * Rerun it to move the runtime to the newest landed commit.
  */
 function pinRuntime() {
-  const runtime = process.env.CLANKIE_RUNTIME_DIR ?? join(homedir(), ".clankie", "runtime");
+  const runtime = process.env.CLANKIE_RUNTIME_DIR ?? join(homedir(), ".clankie", "pinned");
   const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: checkout, encoding: "utf8" }).trim();
   const commit = git("rev-parse", "--verify", `${ref}^{commit}`);
+  if (existsSync(runtime) && !existsSync(join(runtime, ".git")))
+    throw new Error(`${runtime} exists and is not a pinned worktree; set CLANKIE_RUNTIME_DIR elsewhere.`);
   if (!existsSync(join(runtime, ".git"))) {
     mkdirSync(dirname(runtime), { recursive: true });
     git("worktree", "add", "--detach", runtime, commit);
