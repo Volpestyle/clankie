@@ -10,7 +10,11 @@ export async function copySkillAssets(repoRoot, targetRoot) {
     await cp(source, join(targetRoot, "integrations", plugin), {
       recursive: true,
       dereference: true,
-      filter: (path) => path !== join(source, "skills") && basename(path) !== ".DS_Store",
+      filter: (path) =>
+        path !== join(source, "skills") &&
+        path !== join(source, "worker/skills/clankie") &&
+        path !== join(source, "worker/skills/clankie.bundle.json") &&
+        basename(path) !== ".DS_Store",
     });
   }
   for (const directory of [

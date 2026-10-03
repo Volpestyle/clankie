@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { access, lstat, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Build from the checkout when present; installed packages need only their snapshot. */
 export async function prepareWorkerSkill(workerRoot) {
@@ -16,11 +16,9 @@ export async function prepareWorkerSkill(workerRoot) {
   if (typeof version !== "string" || version.length === 0 || version !== codexVersion)
     throw new Error("Worker plugin versions differ or are missing; rebuild both packages");
   const hash = (text) => createHash("sha256").update(text).digest("hex");
+  const builder = new URL("../../../codex-plugin/build.mjs", import.meta.url);
   if (
-    await Promise.all([
-      access(join(source, "SKILL.md")),
-      access(join(sourceRoot, "integrations/codex-plugin/build.mjs")),
-    ]).then(
+    await Promise.all([access(join(source, "SKILL.md")), access(fileURLToPath(builder))]).then(
       () => true,
       (error) => {
         if (error.code === "ENOENT") return false;
@@ -28,9 +26,8 @@ export async function prepareWorkerSkill(workerRoot) {
       },
     )
   ) {
-    // Release assembly has the source skill but not its builder. The builder
-    // belongs to this module's repository/package, never to a remote runtime.
-    const builder = new URL("../../../codex-plugin/build.mjs", import.meta.url);
+    // Always use this module's trusted builder, never a caller-selected one.
+    // An installed standalone worker has neither builder nor canonical source.
     const { materializeSkill } = await import(builder.href);
     materializeSkill(source, target);
     await writeFile(

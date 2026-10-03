@@ -18,6 +18,7 @@ export function installHarnessBridges(options: {
   env?: NodeJS.ProcessEnv;
   consent(harness: HarnessInstallTarget, detail: string): Promise<boolean>;
   execute?(command: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<unknown>;
+  prepareSkills?(workerRoot: string): Promise<void>;
   codexSourceSetup?: { command: string; args: readonly string[] };
 }): Promise<HarnessInstallResult[]>;
 
