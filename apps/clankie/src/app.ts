@@ -1851,6 +1851,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
             origin === undefined ||
             origin.messageId !== sourceId ||
             ("channelId" in write.payload && origin.channelId !== write.payload.channelId) ||
+            ("guildId" in write.payload && origin.guildId !== write.payload.guildId) ||
             origin.presenceSessionId !== write.identity.presenceSessionId ||
             origin.transportKind !== captainTransportKind(captain) ||
             origin.characterId !== write.identity.characterId ||
@@ -2690,10 +2691,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         );
       if (input.action === "recover")
         return context.json(
-          await body.router.recover(identity, input.resource, (guard) =>
-            confirmBodyStopped(input.resource, guard),
+          await body.router.recover(
+            identity,
+            input.resource,
+            (guard) => confirmBodyStopped(input.resource, guard),
+            "operator_override",
           ),
         );
+      // Parsing and seat lookup may yield; fence the final synchronous transition.
+      if (!(await identity.authorize(input.resource, "effect")) || !identity.current())
+        return context.json({ outcome: "rejected", reason: "not_authorized" }, 409);
       if (input.action === "acquire") {
         const result = body.store.acquire(input.resource, input.conversationId, input.ttlMs);
         if (result.outcome === "busy") return context.json({ ...result, actions: ["queue", "ask"] }, 409);
@@ -2866,7 +2873,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
             dependencies.browserTools!.call(parsed.data, context.req.raw.signal, { shell: true, guard }),
           {
             lifetime: parsed.data.tool === "browser_use_close" ? "operation" : "session",
-            uncertain: (value) => value.outcome === "ok" && value.isError === true,
+            uncertain: (value) => value.outcome !== "ok" || value.isError === true,
           },
         );
         return context.json({ result: result.outcome === "completed" ? result.value : result });

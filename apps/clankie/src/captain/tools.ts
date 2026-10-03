@@ -1716,7 +1716,7 @@ export async function callConversationBrowser(
     (guard) => deps.browser.call(request, undefined, { shell, guard }),
     {
       lifetime: request.tool === "browser_use_close" ? "operation" : "session",
-      uncertain: (value) => value.outcome === "ok" && value.isError === true,
+      uncertain: (value) => value.outcome !== "ok" || value.isError === true,
     },
   );
   return result.outcome === "completed" ? result.value : result;

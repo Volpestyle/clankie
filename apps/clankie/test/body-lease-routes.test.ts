@@ -1,4 +1,4 @@
-import type { BodyResource, CallBrowserToolRequest } from "@clankie/protocol";
+import type { BodyResource, CallBrowserToolRequest, CallBrowserToolResult } from "@clankie/protocol";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +25,7 @@ async function fixture() {
       request: CallBrowserToolRequest,
       _signal?: AbortSignal,
       authority?: { guard?: () => Promise<void> },
-    ) => {
+    ): Promise<CallBrowserToolResult> => {
       await authority?.guard?.();
       return { outcome: "ok" as const, tool: request.tool, content: "page", isError: false, artifacts: [] };
     },
@@ -44,6 +44,13 @@ async function fixture() {
         schemaVersion: 1,
         available: true,
         tools: [
+          {
+            name: "browser_use_close",
+            description: "close",
+            inputSchema: {},
+            requiresApproval: false,
+            riskClass: "read",
+          },
           {
             name: "browser_use_read",
             description: "read",
@@ -73,6 +80,7 @@ async function fixture() {
     });
   return {
     app,
+    captain,
     store,
     call,
     post,
@@ -114,4 +122,34 @@ it("ordinary release verifies actual stop and cannot use a stale token", async (
   expect(result).toEqual({ outcome: "rejected", reason: "recovery_required" });
   expect(confirmStopped).toHaveBeenCalledTimes(1);
   expect(store.status("voice")?.conversationId).toBe("a");
+});
+
+it("retains the browser claim when close is refused", async () => {
+  const { post, call, store } = await fixture();
+  await post("/v1/browser/call", { schemaVersion: 1, tool: "browser_use_read", arguments: {} }, "a");
+  call.mockResolvedValueOnce({ outcome: "refused", tool: "browser_use_close", reason: "approval_required" });
+  await post("/v1/browser/call", { schemaVersion: 1, tool: "browser_use_close", arguments: {} }, "a");
+  expect(store.status("browser")).toMatchObject({ conversationId: "a", state: "recovery_required" });
+});
+
+it.each(["acquire", "renew"])("reauthorizes %s after seat lookup", async (action) => {
+  const { post, store, captain, revoke } = await fixture();
+  const held = store.acquire("voice", "a", 1000);
+  if (held.outcome !== "acquired") throw new Error("fixture acquire");
+  const expiresAt = store.status("voice")?.expiresAt;
+  if (action === "acquire") store.release(held.lease);
+  captain.seatContext = (id) => {
+    revoke();
+    return { conversationId: id ?? "a", cwd: "/tmp" };
+  };
+  const response = await post("/v1/body-leases", {
+    action,
+    conversationId: "a",
+    resource: "voice",
+    ttlMs: 2000,
+    ...(action === "renew" ? { incarnation: held.lease.token } : {}),
+  });
+  expect(await response.json()).toEqual({ outcome: "rejected", reason: "not_authorized" });
+  if (action === "acquire") expect(store.status("voice")).toBeUndefined();
+  else expect(store.status("voice")?.expiresAt).toBe(expiresAt);
 });

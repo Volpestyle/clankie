@@ -234,3 +234,22 @@ it("preserves each successful send receipt when same-conversation operations ove
   expect(store.status("discord_mouth")).toBeUndefined();
   store.close();
 });
+
+it("ordinary recovery cannot stop a peer's body; explicit operator override can", async () => {
+  const { store, router } = fixture();
+  store.acquire("voice", "a", 1000);
+  let stops = 0;
+  const stop = async () => {
+    stops += 1;
+    return true;
+  };
+  expect(await router.recover(identity("b"), "voice", stop)).toEqual({
+    outcome: "rejected",
+    reason: "not_authorized",
+  });
+  expect(stops).toBe(0);
+  expect(await router.recover(identity("b"), "voice", stop, "operator_override")).toEqual({
+    outcome: "released",
+  });
+  expect(stops).toBe(1);
+});

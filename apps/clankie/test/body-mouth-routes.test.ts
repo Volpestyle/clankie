@@ -155,3 +155,13 @@ it("persists confirmed delivery before release and deduplicates the original wri
   expect(effect).toHaveBeenCalledTimes(1);
   expect(store.status("discord_mouth")).toBeUndefined();
 });
+
+it.each(["reply", "join_thread"] as const)("rejects %s directed outside the source room", async (kind) => {
+  const { send, write, effect } = await fixture();
+  const foreign: DiscordPresenceWrite =
+    kind === "reply"
+      ? { ...write, payload: { kind, channelId: "foreign", messageId: "source", content: "hello" } }
+      : { ...write, action: "discord.presence.join_thread", payload: { kind, channelId: "foreign-thread" } };
+  expect(await (await send(foreign)).json()).toEqual({ outcome: "rejected", reason: "identity_required" });
+  expect(effect).not.toHaveBeenCalled();
+});

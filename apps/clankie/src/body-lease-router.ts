@@ -176,6 +176,7 @@ export class BodyLeaseRouter {
     identity: BodyConversationIdentity,
     resource: BodyResource,
     confirmStopped: (guard: () => Promise<void>) => Promise<boolean>,
+    authority: "owner" | "operator_override" = "owner",
   ): Promise<BodyLeaseResult> {
     const conversationId = identity.conversationId;
     const denied = await this.authorize(identity, conversationId, resource, "recover");
@@ -187,6 +188,8 @@ export class BodyLeaseRouter {
       return { outcome: "rejected", reason: "store_unavailable" };
     }
     if (reference === undefined) return { outcome: "released" };
+    if (authority === "owner" && reference.conversationId !== conversationId)
+      return { outcome: "rejected", reason: "not_authorized" };
     const expected = reference;
     const begun = this.store.beginRecovery(expected);
     if (begun.outcome !== "admitted") return begun;

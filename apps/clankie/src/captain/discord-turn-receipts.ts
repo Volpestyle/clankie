@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   CaptainChannelTurnResultSchema,
@@ -92,8 +92,20 @@ export class DiscordTurnReceipts {
     try {
       mkdirSync(dirname(this.path), { recursive: true });
       const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
-      writeFileSync(temporary, `${JSON.stringify(Object.fromEntries(this.records))}\n`, { mode: 0o600 });
+      const file = openSync(temporary, "wx", 0o600);
+      try {
+        writeFileSync(file, `${JSON.stringify(Object.fromEntries(this.records))}\n`);
+        fsyncSync(file);
+      } finally {
+        closeSync(file);
+      }
       renameSync(temporary, this.path);
+      const directory = openSync(dirname(this.path), "r");
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
     } catch (error) {
       this.unreadable = true;
       throw error;

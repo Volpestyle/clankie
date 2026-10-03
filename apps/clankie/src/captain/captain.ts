@@ -2361,6 +2361,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const syncTranscript = (): void => roomConversations.sync(conversationId, lane.session.sessionFile);
     syncTranscript();
     lane.turnCounter += 1;
+    const bodyRequiresShell = lane.capture.shell === true;
     const bodyIdentity = {
       conversationId,
       current: () => lane.capture.bodyIdentity === bodyIdentity,
@@ -2378,7 +2379,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           transportKind: origin.transportKind,
           settings: discord,
         });
-        return lane.capture.shell !== true || currentPlan.systemTools;
+        return !bodyRequiresShell || currentPlan.systemTools;
       },
     };
     lane.capture.bodyIdentity = bodyIdentity;
