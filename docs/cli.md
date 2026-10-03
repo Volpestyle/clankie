@@ -2680,6 +2680,9 @@ profile whose settings symlink points to another discovered unmanaged profile
 can update its own plugin cache without installing, enabling, or changing the
 shared settings. Generated sources, disabled/missing plugins, and unknown targets
 still require their source manager. Refusals include each profile's setup result.
+Native enable's exact "already enabled at user scope" result is successful only
+when a fresh read of that same regular profile confirms the plugin is enabled;
+other native errors still fail.
 Preparation uses native plugin installation for
 Codex, preserves managed Codex configuration, and compares installed Claude
 versions with the service bundle. `clankie doctor` reports local profiles and

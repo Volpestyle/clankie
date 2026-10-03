@@ -247,3 +247,8 @@ profile and already enable the shipped plugin. Preparation preserves the shared
 settings link and bytes; generated sources or disabled/missing alias plugins
 still require the owner's source setup. Read the per-profile refusal before
 retrying; never replace a settings symlink to work around it.
+
+Repeated native Claude setup may report "already enabled at user scope" with an
+error exit. Preparation accepts only that exact result after confirming the same
+regular profile still enables the plugin; other errors or changed links remain
+failures. A setup result is never live tool or socket acceptance.

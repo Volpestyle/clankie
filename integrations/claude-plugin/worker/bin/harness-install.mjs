@@ -159,7 +159,30 @@ async function installHarnessBridges(options) {
         if (harness === "claude") {
           await execute(harness, ["plugin", "install", "clankie-worker@clankie", "--scope", "user"]);
           await execute(harness, ["plugin", "update", "clankie-worker@clankie", "--scope", "user"]);
-          await execute(harness, ["plugin", "enable", "clankie-worker@clankie", "--scope", "user"]);
+          try {
+            await execute(harness, ["plugin", "enable", "clankie-worker@clankie", "--scope", "user"]);
+          } catch (error) {
+            const alreadyEnabled =
+              /^✘ Failed to enable plugin "clankie-worker@clankie": Plugin "clankie-worker@clankie" is already enabled at user scope$/u;
+            if (
+              error?.code !== 1 ||
+              error?.signal ||
+              error?.killed ||
+              String(error?.stdout ?? "").trim() ||
+              !alreadyEnabled.test(String(error?.stderr ?? "").trim())
+            )
+              throw error;
+            const current = await readFile(config, "utf8");
+            const expectedSource =
+              configBefore === undefined ? join(await realpath(profile), "settings.json") : source;
+            if (
+              !(await lstat(config)).isFile() ||
+              (await realpath(config)) !== expectedSource ||
+              managedText(current) ||
+              JSON.parse(current).enabledPlugins?.["clankie-worker@clankie"] !== true
+            )
+              throw error;
+          }
         } else await execute(harness, ["plugin", "add", "clankie-worker@clankie-fleet", "--json"]);
       }
       results.push({
