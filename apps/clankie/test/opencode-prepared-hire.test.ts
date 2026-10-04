@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "opencode-hire-"));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "opencode-hire-")));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const sessionId = "ses_nativeWorker123";
   const ref = { harness: "opencode" as const, paneId: "w1:p1", sessionId };
@@ -35,6 +35,7 @@ async function fixture() {
     agent: "opencode",
     title: "worker",
     status: "idle",
+    workingDirectory: directory,
     session: { source: "herdr:opencode", kind: "id", value: sessionId },
   };
   const proof: SeatProcessIdentity = {

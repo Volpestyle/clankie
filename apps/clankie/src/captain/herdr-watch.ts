@@ -1454,8 +1454,24 @@ export class HerdrWatchStore implements HerdrWatchPort {
             return proof;
           };
           await checkProof();
+          // A matching UUID is not the saved native session: cwd and Pi's
+          // independently resolved transcript address must also stay exact.
+          if (session.host !== "local" || input.fleet !== undefined)
+            throw new Error("Prepared native saved-session reuse is local only");
+          const savedCwd = await realpath(session.workingDirectory);
+          const savedPath = session.source === undefined ? await realpath(session.file.path) : undefined;
+          const matchesSaved = (agent: HerdrAgentSnapshot) =>
+            savedCwd === session.workingDirectory &&
+            agent.workingDirectory === savedCwd &&
+            (savedPath === undefined ||
+              (savedPath === session.file!.path &&
+                agent.session?.source === "herdr:pi" &&
+                agent.session.kind === "path" &&
+                agent.session.value === savedPath));
           const current = await this.runner.get(original.paneId);
           if (
+            !matchesSaved(original) ||
+            !matchesSaved(current) ||
             current.paneId !== original.paneId ||
             current.terminalId !== original.terminalId ||
             current.agent !== input.harness ||

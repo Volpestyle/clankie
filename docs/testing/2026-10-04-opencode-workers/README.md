@@ -107,7 +107,10 @@ when reusing a native OpenCode seat. Existing file-backed sessions retain their
 own resume behavior. Saved Pi live reuse also requires its original prepared
 controller verification; metadata-only reuse is refused, including without a brief.
 Live native reuse checks the exact pane, terminal, session and process lifetime
-before and after conversation/project admission awaits. It retains the original
+before and after conversation/project admission awaits. Cwd must equal the saved
+canonical directory. Pi additionally requires `herdr:pi` with the exact canonical
+saved transcript path; an ID-only report or the same UUID at another path cannot
+be adopted. This prepared reuse is local only. It retains the original
 project-hire process proof and refuses replacement without another allocation.
 Loss after accepted dispatch stays uncertain.
 

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,7 +29,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 async function scratch() {
-  const root = await mkdtemp(join(tmpdir(), "native-resume-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "native-resume-")));
   roots.push(root);
   return root;
 }
@@ -389,7 +389,10 @@ describe("prepared native saved-session reuse", () => {
     const live: HerdrAgentSnapshot = {
       ...f.live,
       agent: harness,
-      session: { source: `herdr:${harness}`, kind: "id", value: sessionId },
+      session:
+        harness === "pi"
+          ? { source: "herdr:pi", kind: "path", value: session.file!.path }
+          : { source: "herdr:opencode", kind: "id", value: sessionId },
     };
     const proof: SeatProcessIdentity = {
       nativeOccupantId: occupantIdForHerdrSession(live.session!),
@@ -414,11 +417,17 @@ describe("prepared native saved-session reuse", () => {
       attach: vi.fn(async () => control),
       start: vi.fn(async () => ({ outcome: "started" as const, control })),
     };
+    if (harness === "pi") {
+      // The shared production union is extended by the independent Pi producer.
+      Object.assign(control.ref, { harness: "pi" });
+      Object.assign(adapter, { harness: "pi" });
+      await writeFile(session.file!.path, JSON.stringify({ type: "session", id: UUID, cwd: f.root }) + "\n");
+    }
     f.runner.list.mockImplementation(async () => [structuredClone(live)]);
     f.runner.get.mockImplementation(async () => structuredClone(live));
     const store = new HerdrWatchStore(join(f.root, "native.json"), {
       runner: f.runner,
-      seatAdapters: harness === "opencode" ? [adapter] : [],
+      seatAdapters: [adapter],
     });
     const hire = (brief?: string) =>
       store.spawnSeat(
@@ -427,7 +436,7 @@ describe("prepared native saved-session reuse", () => {
         brief,
         session,
       );
-    return { ...f, live, proof, control, verify, adapter, store, hire };
+    return { ...f, session, live, proof, control, verify, adapter, store, hire };
   }
   it.each(["opencode", "pi"] as const)(
     "refuses metadata-only %s reuse even with no brief",
@@ -439,6 +448,68 @@ describe("prepared native saved-session reuse", () => {
       expect(f.send).not.toHaveBeenCalled();
     },
   );
+  it.each([undefined, "continue"])(
+    "reuses Pi only at the exact saved canonical path with brief %s",
+    async (brief) => {
+      const f = await nativeFixture("pi");
+      expect(await f.hire(brief)).toMatchObject({ outcome: "spawned" });
+      expect(f.verify).toHaveBeenCalled();
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+      expect(f.send).toHaveBeenCalledTimes(brief === undefined ? 0 : 1);
+    },
+  );
+  it.each(["different-path", "id-only", "wrong-source"] as const)(
+    "refuses Pi saved UUID at %s even with matching live proof",
+    async (mode) => {
+      const f = await nativeFixture("pi");
+      const changed =
+        mode === "different-path"
+          ? { source: "herdr:pi", kind: "path" as const, value: `${f.root}/another/${UUID}.jsonl` }
+          : mode === "id-only"
+            ? { source: "herdr:pi", kind: "id" as const, value: UUID }
+            : { source: "herdr:claude", kind: "path" as const, value: f.session.file!.path };
+      Object.assign(f.live, { session: changed });
+      Object.assign(f.proof, { nativeOccupantId: occupantIdForHerdrSession(changed) });
+      expect(await f.hire()).toMatchObject({ outcome: "failed", reason: "not_ready" });
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+      expect(f.send).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["opencode", "pi"] as const)("refuses %s current cwd different from saved cwd", async (harness) => {
+    const f = await nativeFixture(harness);
+    await mkdir(join(f.root, "different"));
+    Object.assign(f.live, { workingDirectory: join(f.root, "different") });
+    expect(await f.hire()).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+  it.each(["path", "cwd"] as const)("refuses Pi %s replacement across a held proof await", async (field) => {
+    const f = await nativeFixture("pi");
+    let entered!: () => void;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.verify.mockImplementationOnce(async () => {
+      entered();
+      await resume;
+      return structuredClone(f.proof);
+    });
+    const pending = f.hire("continue");
+    await held;
+    if (field === "cwd") Object.assign(f.live, { workingDirectory: `${f.root}/replacement` });
+    else
+      Object.assign(f.live, {
+        session: { source: "herdr:pi", kind: "path", value: `${f.root}/replacement/${UUID}.jsonl` },
+      });
+    release();
+    expect(await pending).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
   it("requires the original verification callback, not merely an attached controller", async () => {
     const f = await nativeFixture();
     delete f.control.verify;
