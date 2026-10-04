@@ -24,13 +24,16 @@ class FakeRealtimeSocket implements RealtimeSocket {
   public readonly sentRaw: string[] = [];
   public readonly sentBinary: Buffer[] = [];
   public closed = false;
+  public onSend: ((frame: Record<string, unknown>) => void) | undefined;
   private readonly messageHandlers: ((data: string) => void)[] = [];
   private readonly closeHandlers: (() => void)[] = [];
   private readonly errorHandlers: ((error: unknown) => void)[] = [];
 
   public send(data: string | Uint8Array): void {
-    if (typeof data === "string") this.sentRaw.push(data);
-    else this.sentBinary.push(Buffer.from(data));
+    if (typeof data === "string") {
+      this.sentRaw.push(data);
+      this.onSend?.(JSON.parse(data) as Record<string, unknown>);
+    } else this.sentBinary.push(Buffer.from(data));
   }
 
   public close(): void {
@@ -700,10 +703,12 @@ it.each(["openai", "xai"] as const)(
     session.createResponse();
     expect(framesOfType(socket, "response.create")).toHaveLength(1);
     // A tool-calling response is complete even while its handoff is unresolved.
+    socket.emit({ type: "response.created", response: { id: "ask" } });
     socket.emit({ type: "response.done", response: { id: "ask", status: "completed" } });
     expect(framesOfType(socket, "response.create")).toHaveLength(2);
     session.submitFunctionResult("ask-call", "Alice's answer");
     expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    socket.emit({ type: "response.created", response: { id: "banter" } });
     socket.emit({ type: "response.done", response: { id: "banter", status: "completed" } });
     expect(framesOfType(socket, "response.create")).toHaveLength(3);
     session.createResponse();
@@ -724,12 +729,14 @@ it.each(["openai", "xai"] as const)(
       revision = index;
       session.createResponse(`turn ${index}`, () => revision === index);
     }
+    socket.emit({ type: "response.created", response: { id: "first" } });
     socket.emit({ type: "response.done", response: { id: "first", status: "completed" } });
     expect(framesOfType(socket, "response.create")).toHaveLength(2);
     expect(framesOfType(socket, "conversation.item.create")).toMatchObject([
       { item: { type: "function_call_output", call_id: "old", output: "Useful context" } },
       { item: { content: [{ text: "turn 3" }] } },
     ]);
+    socket.emit({ type: "response.created", response: { id: "latest" } });
     socket.emit({ type: "response.done", response: { id: "latest", status: "completed" } });
     session.submitFunctionResult("joined", "Joined the original", false);
     expect(framesOfType(socket, "response.create")).toHaveLength(2);
@@ -748,9 +755,171 @@ it.each([
       session: { max_output_tokens: limit },
     });
     session.createResponse();
+    socket.emit({ type: "response.created", response: { id: "first" } });
     socket.emit({ type: "response.done", response: { id: "first", status: "completed" } });
     session.submitFunctionResult("handoff", "A very long result");
     expect(framesOfType(socket, "response.create")).toHaveLength(2);
     session.close();
   },
 );
+
+describe.each(["openai", "xai"] as const)("%s response error recovery", (provider) => {
+  it("releases a bare server error for the next offered line exactly once, without replay", async () => {
+    const { session, socket, events, factory } = await openConversation({ provider });
+    session.createResponse("failed offer");
+    socket.emit({ type: "response.created", response: { id: "failed" } });
+    socket.emit({ type: "error", error: { type: "server_error", code: "server_error", message: "private" } });
+    session.createResponse("next offer");
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    expect(framesOfType(socket, "conversation.item.create")).toMatchObject([
+      { item: { content: [{ text: "failed offer" }] } },
+      { item: { content: [{ text: "next offer" }] } },
+    ]);
+    expect(events.errors).toEqual(["Realtime session error (server_error)"]);
+    expect(events.done).toEqual([]);
+    expect(factory).toHaveLength(1);
+    expect(session.isOpen).toBe(true);
+    session.close();
+  });
+
+  it("rechecks queued eligibility after the error callback supersedes an offer", async () => {
+    let revision = 0;
+    const { session, socket } = await openConversation({
+      provider,
+      onError: () => {
+        revision = 1;
+      },
+    });
+    session.createResponse();
+    session.createResponse("stale", () => revision === 0);
+    session.createResponse("current", () => revision === 1);
+    socket.emit({ type: "error", error: { type: "server_error" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    expect(framesOfType(socket, "conversation.item.create")).toMatchObject([
+      { item: { content: [{ text: "current" }] } },
+    ]);
+    session.close();
+  });
+
+  it("ignores old terminal events and correlated errors before and after the next response starts", async () => {
+    const { session, socket } = await openConversation({ provider });
+    session.createResponse();
+    const oldEventId = framesOfType(socket, "response.create")[0]?.event_id;
+    expect(oldEventId).toEqual(expect.any(String));
+    socket.emit({ type: "response.created", response: { id: "old" } });
+    session.createResponse();
+    session.createResponse();
+    socket.emit({ type: "error", error: { type: "server_error" } });
+    const oldDone = { type: "response.done", response: { id: "old", status: "failed" } };
+    socket.emit(oldDone);
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    socket.emit({ type: "response.created", response: { id: "new" } });
+    socket.emit(oldDone);
+    socket.emit({ type: "error", error: { type: "server_error", event_id: oldEventId } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    socket.emit({ type: "response.done", response: { id: "new", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(3);
+    session.close();
+  });
+
+  it("does not release output for unrelated input errors, but releases a rejected create", async () => {
+    const { session, socket, events } = await openConversation({ provider });
+    session.createResponse();
+    session.createResponse();
+    socket.emit({ type: "error", error: { type: "invalid_request_error", code: "invalid_audio" } });
+    socket.emit({ type: "error", error: { type: "server_error", event_id: "input-event" } });
+    socket.emit({ type: "error", error: { type: "server_error", param: "audio" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(1);
+    const eventId = framesOfType(socket, "response.create")[0]?.event_id;
+    expect(eventId).toEqual(expect.any(String));
+    socket.emit({ type: "error", error: { type: "invalid_request_error", event_id: eventId } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    expect(events.errors).toHaveLength(4);
+    session.close();
+  });
+
+  it.each([false, true])("defers error-callback offers and honors callback close=%s", async (close) => {
+    const { session, socket } = await openConversation({
+      provider,
+      onError: () => {
+        session.createResponse("callback offer");
+        socket.emit({ type: "response.done", response: { id: "old", status: "failed" } });
+        expect(framesOfType(socket, "response.create")).toHaveLength(1);
+        if (close) session.close();
+      },
+    });
+    session.createResponse();
+    socket.emit({ type: "response.created", response: { id: "old" } });
+    socket.emit({ type: "error", error: { type: "server_error" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(close ? 1 : 2);
+    session.close();
+  });
+
+  it("does not send an abandoned create after a synchronous context-send error", async () => {
+    let failed = false;
+    const { session, socket } = await openConversation({
+      provider,
+      onError: () => {
+        session.createResponse("next offer");
+      },
+    });
+    socket.onSend = (frame) => {
+      if (frame.type !== "conversation.item.create" || failed) return;
+      failed = true;
+      socket.emit({ type: "error", error: { type: "server_error" } });
+    };
+    session.createResponse("failed offer");
+    expect(framesOfType(socket, "response.create")).toHaveLength(1);
+    socket.emit({ type: "response.created", response: { id: "next" } });
+    socket.emit({ type: "response.done", response: { id: "next", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(1);
+    expect(framesOfType(socket, "conversation.item.create")).toHaveLength(2);
+    session.close();
+  });
+
+  it("keeps a response started by a reentrant done callback active", async () => {
+    let reentered = false;
+    const { session, socket } = await openConversation({
+      provider,
+      onResponseDone: (meta) => {
+        if (meta.responseId !== "old" || reentered) return;
+        reentered = true;
+        session.createResponse();
+        socket.emit({ type: "response.done", response: { id: "old", status: "completed" } });
+        session.createResponse();
+      },
+    });
+    session.createResponse();
+    socket.emit({ type: "response.created", response: { id: "old" } });
+    socket.emit({ type: "response.done", response: { id: "old", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    socket.emit({ type: "response.created", response: { id: "new" } });
+    socket.emit({ type: "response.done", response: { id: "new", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(3);
+    session.close();
+  });
+
+  it("serializes a response enqueued inside shouldStart and honors a close inside it", async () => {
+    const { session, socket } = await openConversation({ provider });
+    session.createResponse("first", () => {
+      session.createResponse("second");
+      return true;
+    });
+    expect(framesOfType(socket, "response.create")).toHaveLength(1);
+    expect(framesOfType(socket, "conversation.item.create")).toMatchObject([
+      { item: { content: [{ text: "first" }] } },
+    ]);
+    socket.emit({ type: "response.created", response: { id: "first" } });
+    socket.emit({ type: "response.done", response: { id: "first", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+    session.createResponse("closed", () => {
+      session.close();
+      return true;
+    });
+    socket.emit({ type: "response.created", response: { id: "second" } });
+    expect(() =>
+      socket.emit({ type: "response.done", response: { id: "second", status: "completed" } }),
+    ).not.toThrow();
+    expect(framesOfType(socket, "response.create")).toHaveLength(2);
+  });
+});

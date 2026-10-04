@@ -528,6 +528,10 @@ abstract class RealtimeSessionCore {
   /** Provider-specific cleanup for content buffered before the server is ready. */
   protected handleClosing(): void {}
 
+  protected handleServerError(event: Record<string, unknown>): void {
+    this.onErrorCallback?.(describeServerError(event));
+  }
+
   protected sendFrame(frame: Record<string, unknown>): void {
     this.sendRaw(JSON.stringify(frame));
   }
@@ -574,7 +578,7 @@ abstract class RealtimeSessionCore {
     const type = asString(event.type);
     if (type === undefined) return;
     if (type === "error") {
-      this.onErrorCallback?.(describeServerError(event));
+      this.handleServerError(event);
       return;
     }
     this.handleServerEvent(type, event);
@@ -737,8 +741,11 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   private currentResponseId = "";
   private currentResponseAudioBytes = 0;
   private currentResponseTextCharacters = 0;
-  private responseActive = false;
-  private readonly queuedResponses: { start: () => void; shouldStart?: () => boolean }[] = [];
+  private activeResponse: { eventId: string; responseId?: string } | undefined;
+  private nextResponseEventId = 0;
+  private drainingResponses = false;
+  private responseCallbackDepth = 0;
+  private readonly queuedResponses: { start: (eventId: string) => void; shouldStart?: () => boolean }[] = [];
   private readonly provider: "openai" | "xai";
 
   public constructor(socket: RealtimeSocket, options: RealtimeConversationSessionOptions) {
@@ -839,30 +846,63 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       context === undefined
         ? undefined
         : boundedText(context, MAX_REALTIME_TEXT_ITEM_CHARACTERS, "Realtime response context");
-    this.queueResponse(() => {
+    this.queueResponse((eventId) => {
       if (bounded !== undefined) this.createTextItem(bounded);
-      this.sendFrame({ type: "response.create" });
+      // A synchronous transport/error callback can retire or close this attempt.
+      if (this.activeResponse?.eventId !== eventId || !this.isOpen) return;
+      this.sendFrame({ type: "response.create", event_id: eventId });
     }, shouldStart);
   }
 
-  private queueResponse(start: () => void, shouldStart?: () => boolean): void {
+  private queueResponse(start: (eventId: string) => void, shouldStart?: () => boolean): void {
     if (!this.isOpen) throw new Error("Realtime session is closed");
     this.queuedResponses.push({ start, ...(shouldStart === undefined ? {} : { shouldStart }) });
     this.startNextResponse();
   }
 
   private startNextResponse(): void {
-    while (!this.responseActive && this.isOpen) {
-      const next = this.queuedResponses.shift();
-      if (next === undefined) return;
-      if (next.shouldStart?.() === false) continue;
-      this.responseActive = true;
-      try {
-        next.start();
-      } catch (error) {
-        this.responseActive = false;
-        throw error;
+    if (this.drainingResponses || this.responseCallbackDepth > 0) return;
+    this.drainingResponses = true;
+    try {
+      while (this.activeResponse === undefined && this.isOpen) {
+        const next = this.queuedResponses.shift();
+        if (next === undefined) return;
+        if (next.shouldStart?.() === false) continue;
+        if (!this.isOpen) return;
+        const active = { eventId: `response-create-${++this.nextResponseEventId}` };
+        this.activeResponse = active;
+        try {
+          next.start(active.eventId);
+        } catch (error) {
+          if (this.activeResponse === active) this.activeResponse = undefined;
+          throw error;
+        }
       }
+    } finally {
+      this.drainingResponses = false;
+    }
+  }
+
+  protected override handleServerError(event: Record<string, unknown>): void {
+    const error = asRecord(event.error);
+    const clientEventId = asString(error?.event_id);
+    // Input/session errors do not finish output. A rejected response.create is
+    // correlated by its client event ID; a bare server failure abandons the
+    // current attempt without claiming completion or retrying its offered line.
+    const active = this.activeResponse;
+    if (
+      active !== undefined &&
+      (clientEventId === active.eventId ||
+        (clientEventId === undefined && error?.type === "server_error" && error.param == null))
+    ) {
+      this.activeResponse = undefined;
+    }
+    this.responseCallbackDepth++;
+    try {
+      super.handleServerError(event);
+    } finally {
+      this.responseCallbackDepth--;
+      this.startNextResponse();
     }
   }
 
@@ -949,6 +989,13 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
 
   protected override handleServerEvent(type: string, event: Record<string, unknown>): void {
     switch (type) {
+      case "response.created": {
+        const responseId = asString(asRecord(event.response)?.id);
+        if (this.activeResponse !== undefined && this.activeResponse.responseId === undefined && responseId) {
+          this.activeResponse.responseId = responseId;
+        }
+        return;
+      }
       case "response.output_audio.delta":
       // Pre-GA name, handled until a live run confirms it is gone.
       case "response.audio.delta": {
@@ -972,9 +1019,19 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
         return;
       }
       case "response.done": {
-        this.handleResponseDone(event);
-        this.responseActive = false;
-        this.startNextResponse();
+        const responseId = asString(asRecord(event.response)?.id);
+        // response.created is the first lifecycle event. A delayed terminal
+        // cannot release a new request that has not received its own ID yet.
+        if (responseId !== undefined && this.activeResponse?.responseId === responseId) {
+          this.activeResponse = undefined;
+        }
+        this.responseCallbackDepth++;
+        try {
+          this.handleResponseDone(event);
+        } finally {
+          this.responseCallbackDepth--;
+          this.startNextResponse();
+        }
         return;
       }
       case "response.output_item.done": {
