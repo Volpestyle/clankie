@@ -171,8 +171,11 @@ export async function runCodexSeat(
       .stdout,
   ) as { installed?: { pluginId: string }[] };
   if (!listed.installed?.some((plugin) => plugin.pluginId === PLUGIN)) {
+    const accountSetup = account
+      ? `For account ${account.label}, set CODEX_HOME to ${JSON.stringify(account.home)} in the environment of every setup command and native Codex session below. `
+      : "";
     throw new Error(
-      `Clankie's Codex plugin is not installed. Run codex plugin marketplace add ${JSON.stringify(plan.plugin.path)}, then codex plugin add ${PLUGIN}. Disable it globally in /plugins; clankie ${command} enables it only for its own session. Review its hooks in /hooks.`,
+      `Clankie's Codex plugin is not installed. ${accountSetup}Run codex plugin marketplace add ${JSON.stringify(plan.plugin.path)}, then codex plugin add ${PLUGIN}. Disable it globally in /plugins; clankie ${command} enables it only for its own session. Review its hooks in /hooks.`,
     );
   }
   if (plan.newConversation !== undefined) {

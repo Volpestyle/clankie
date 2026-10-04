@@ -390,3 +390,41 @@ it.each(["claude", "codex", "opencode"])(
     }
   },
 );
+
+it.each(["codex", "codex2"])(
+  "%s missing-plugin guidance scopes setup to the selected account",
+  async (command) => {
+    const f = await registeredFixture();
+    const settingsBefore = await readFile(f.options.env.CLANKIE_SETTINGS_FILE, "utf8");
+    const execFileImpl = vi.fn(async (_command: string, args: readonly string[]) => ({
+      stdout: args.includes("list") ? JSON.stringify({ installed: [] }) : "fixture version",
+      stderr: "",
+    }));
+    const spawnImpl = vi.fn(async () => 0);
+    let message = "";
+    try {
+      await runCodexSeat(
+        { resume: false, dryRun: false },
+        { ...f.options, harnessCommand: command, execFileImpl, spawnImpl },
+      );
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain("Clankie's Codex plugin is not installed.");
+    const original = `Run codex plugin marketplace add ${JSON.stringify(join(repoRoot, "integrations/codex-plugin"))}, then codex plugin add clankie@clankie-seat.`;
+    expect(message).toContain(original);
+    if (command === "codex2") {
+      expect(message).toContain(
+        `For account codex2, set CODEX_HOME to ${JSON.stringify(f.home)} in the environment of every setup command and native Codex session below.`,
+      );
+      expect(message.indexOf("set CODEX_HOME")).toBeLessThan(message.indexOf("Run codex plugin"));
+      expect(message).not.toContain(f.options.env.CODEX_HOME);
+    } else {
+      expect(message).toContain(`Clankie's Codex plugin is not installed. ${original}`);
+      expect(message).not.toContain("set CODEX_HOME");
+    }
+    expect(f.options.fetchImpl).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(await readFile(f.options.env.CLANKIE_SETTINGS_FILE, "utf8")).toBe(settingsBefore);
+  },
+);
