@@ -818,7 +818,7 @@ async function connectServer(
         timeout:
           timeoutMs === undefined
             ? REQUEST_TIMEOUT_MS
-            : z.number().int().positive().max(600_000).parse(timeoutMs),
+            : z.number().int().positive().max(1_200_000).parse(timeoutMs),
       });
       const blocks = Array.isArray(result.content) ? result.content : [];
       const text = blocks

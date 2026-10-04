@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "2.2",
+  "description": "Private Minecraft host RPC with encrypted responses",
+  "parameters": {
+    "Request": {
+      "type": "String",
+      "allowedPattern": "^[A-Za-z0-9+/=]+$"
+    },
+    "ExecutionTimeout": {
+      "type": "String",
+      "default": "30",
+      "allowedValues": ["30", "150", "550"]
+    }
+  },
+  "mainSteps": [
+    {
+      "action": "aws:runShellScript",
+      "name": "minecraft",
+      "inputs": {
+        "timeoutSeconds": "{{ ExecutionTimeout }}",
+        "runCommand": ["/usr/local/bin/clankie-minecraft-host '{{ Request }}'"]
+      }
+    }
+  ]
+}

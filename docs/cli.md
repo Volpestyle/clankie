@@ -960,7 +960,10 @@ See [Rivals setup and verification](rivals.md).
 Paper server. Hosting is off by default, stops after 15 minutes with no players,
 and has a six-hour maximum requested-run uptime. `host configure` reads its
 settings; `host configure JSON` updates stopped-server resource, backup and
-idle/uptime settings. `host admin JSON` accepts typed administration; `host approve
+idle/uptime settings. The `backend` field selects `{"kind":"local"}` or the
+pre-provisioned AWS EC2 backend (account, instance and region); see [AWS setup and cost controls](minecraft.md#aws-hosting-and-cost-controls).
+AWS starts use a scoped broker credential and SSM, and stop must confirm the
+instance is stopped. `host admin JSON` accepts typed administration; `host approve
 USERNAME` approves an existing verified Discord request. No op, raw RCON or
 account-secret arguments are accepted. `host tunnel claim` displays one playit
 browser claim and waits for approval; the permanent key goes straight to the

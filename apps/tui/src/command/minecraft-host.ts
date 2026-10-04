@@ -57,7 +57,13 @@ export async function runMinecraftHostCommand(
           ...(options.conversationId ? { "x-clankie-conversation-id": options.conversationId } : {}),
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(command.data.action === "claim" ? 650_000 : 180_000),
+        signal: AbortSignal.timeout(
+          command.data.action === "claim"
+            ? 650_000
+            : ["start", "stop", "restart"].includes(command.data.action)
+              ? 1_260_000
+              : 180_000,
+        ),
       },
     );
     if (!response.ok) throw new Error(`Minecraft hosting request refused (${response.status}).`);

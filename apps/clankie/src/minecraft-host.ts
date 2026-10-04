@@ -352,7 +352,7 @@ export class MinecraftHostService {
       arguments: args,
       bodyAccess: MINECRAFT_BODY_ACCESS,
       resultMode: "data",
-      timeoutMs: tool === "host_claim" ? 600_000 : tool === "host_lifecycle" ? 180_000 : 60_000,
+      timeoutMs: tool === "host_claim" ? 600_000 : tool === "host_lifecycle" ? 1_200_000 : 60_000,
       fence: async () => {
         const current = await this.options.guard(identity, { admin });
         return () => {
