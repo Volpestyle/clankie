@@ -1192,9 +1192,12 @@ leads — which harness is the workhorse, which one reviews, what never goes to
 which (up to 4,000 characters of free text) — and the budget he sizes the fleet
 to, plus the fleet connected-tool switch. `set` takes any combination of the flags;
 what is left out keeps its value. `clear` restores every default, including tools
-`connected`. `--tools off` immediately removes connected tools from fleet panes and
-refuses calls; manual grants keep working. `--tools connected` restores standing
-access to verified accounts through `clankie_tools` and `clankie_call`.
+`connected`. `--tools off` stops new standing tool admissions; manual grants keep
+working. A call already past its last asynchronous check can still dispatch after
+the change; there is no proven global concurrency or cancellation bound. VUH-1585's
+strict refusal guarantee remains unmet pending the owner's decision
+([ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md)). `--tools connected`
+restores standing access to verified accounts through `clankie_tools` and `clankie_call`.
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the
 leadership skill (`lead`) and his prompt use them to aim.
@@ -2151,9 +2154,12 @@ Projects retain roles, caps, hiring and tracker binding.
 The service lists exactly `clankie_tools` and `clankie_call`; the worker plugin
 adds `message_clankie`. Search with `{query}` for at most 20 names/descriptions,
 or `{names}` for up to 10 input schemas, then call with `{name, arguments}`.
-`clankie fleet set --tools off` immediately removes fleet tools and refuses calls.
-Each call rechecks live admission, account binding and the setting before effects.
-Manual grants keep their existing restrictions.
+`clankie fleet set --tools off` stops new standing tool admissions. Each call
+rechecks live admission, account binding and settings, but a call already past its
+last asynchronous check can still reach a provider after tools-off or admission
+loss. The strict refusal guarantee is not met; see
+[ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md) and VUH-1585. Manual
+grants keep their existing restrictions.
 
 `doctor.harnessBridges` reports installation, registration and invoking-process
 membership separately. Remote project `eligibility: unsupported` does not mean

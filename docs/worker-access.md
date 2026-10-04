@@ -30,7 +30,8 @@ and anyone holding a valid remote fleet bearer, can use the verified connected
 accounts, including ordinary Linear writes as Clankie. This is the owner's accepted
 trust boundary; project approval does not narrow it.
 
-`fleet.tools` defaults to `connected`. The owner can disable fleet tools immediately:
+`fleet.tools` defaults to `connected`. The owner can stop new standing tool
+admissions:
 
 ```sh
 clankie fleet status
@@ -38,12 +39,20 @@ clankie fleet set --tools off
 clankie fleet set --tools connected
 ```
 
-The console's `/fleet` editor exposes the same setting. `off` lists no fleet tools
-and refuses calls, including in sessions that still display a stale catalog. It
-does not revoke manual grants. Disconnecting a fleet removes its admission.
-Every call checks live admission, account binding and the setting again before
-outward dispatch; the MCP host also fences account and server configuration.
-An operation already dispatched to a provider cannot be recalled.
+The console's `/fleet` editor exposes the same setting. `off` lists no standing
+fleet tools and refuses new standing admissions, including calls from a stale
+catalog. It does not revoke manual grants. Disconnecting a fleet removes its
+admission. Calls recheck admission, account binding and settings; the MCP host
+also fences account and server configuration.
+
+These checks do not provide atomic revocation. A call already past its last
+asynchronous check can still reach the provider after tools-off or lost admission;
+this is not limited to operations already dispatched. No global concurrent-call
+or time bound has been proven. The original strict refusal guarantee remains
+unmet on VUH-1585, pending the owner's explicit decision
+([ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md)). Documentation does
+not turn that failed safety control into a pass. An operation already dispatched
+to a provider cannot be recalled.
 
 ## Discover and call
 

@@ -81,7 +81,9 @@ For shared Linear tools, inspect `clankie access linear`; verify an API-key
 or OAuth connection with `clankie access linear verify` and check the intended automation identity.
 Admitted fleet members discover connected tools with `clankie_tools` and invoke
 qualified names with `clankie_call`. The setting `fleet.tools` defaults to
-`connected`; `clankie fleet set --tools off` disables this access immediately.
+`connected`; `clankie fleet set --tools off` stops new standing tool admissions.
+Calls already past their last asynchronous check can still dispatch afterward;
+VUH-1585's strict refusal guarantee remains unmet (ADR 0217).
 Projects keep hiring, roles, caps and tracker policy, independently of tools.
 Unverified accounts and persona-bound worker publishing are excluded. For an individual
 manual grant, `clankie access issue REQUEST.json --out GRANT.json` creates a
@@ -98,8 +100,9 @@ Fleet admission and the connected-tools setting must permit discovery; otherwise
 only `message_clankie` remains. Later lists and every call still check current
 access. Codex currently keeps its initial catalog despite
 `notifications/tools/list_changed`; after an access change, an owner may need to
-reconnect MCP or restart that native pane. A displayed stale tool never bypasses
-revocation. Missing tools do not authorize another connector or an operator lane.
+reconnect MCP or restart that native pane. New calls from a displayed stale catalog are checked live; this is not a promise
+that calls already past a final asynchronous check cannot dispatch after revocation.
+Missing tools do not authorize another connector or an operator lane.
 Project membership proves initial and final socket/native-process checkpoints
 afresh for each request. Independent observations run together; no proof is
 cached across calls. Slow or unavailable process observations still deny access.
