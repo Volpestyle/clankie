@@ -12,7 +12,18 @@
 // a new ADR number already taken by uncommitted work refuses before anything
 // is written.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -39,14 +50,43 @@ if (spawnSync("git", ["merge-base", "--is-ancestor", head, target]).status !== 0
 if (git("diff", "--cached", "--name-only") !== "")
   fail("the index has staged changes; another agent may be mid-commit. Wait or coordinate.");
 
+const supported = new Set(["100644", "100755", "120000"]);
 const blob = (rev, path) => {
-  const result = spawnSync("git", ["cat-file", "blob", `${rev}:${path}`], { maxBuffer: 1 << 28 });
-  return result.status === 0 ? result.stdout : undefined;
+  const entry = gitBuffer("ls-tree", "-z", rev, "--", `:(literal)${path}`).toString();
+  if (!entry) return undefined;
+  const mode = entry.slice(0, 6);
+  if (!supported.has(mode)) fail(`${path}: unsupported Git mode ${mode}; nothing was changed.`);
+  return { mode, content: gitBuffer("cat-file", "blob", `${rev}:${path}`) };
 };
-const read = (path) => (existsSync(path) ? readFileSync(path) : undefined);
-const same = (a, b) => (a === undefined ? b === undefined : b !== undefined && a.equals(b));
+const stat = (path) => {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  }
+};
+const read = (path) => {
+  // Never traverse a directory link, including for a new path below one.
+  const parents = [];
+  for (let parent = dirname(path); parent !== "."; parent = dirname(parent)) parents.unshift(parent);
+  for (const parent of parents) {
+    const info = stat(parent);
+    if (info && !info.isDirectory()) fail(`${parent}: unsupported parent type; nothing was changed.`);
+  }
+  const info = stat(path);
+  if (!info) return undefined;
+  if (info.isSymbolicLink()) return { mode: "120000", content: readlinkSync(path, { encoding: "buffer" }) };
+  if (!info.isFile()) fail(`${path}: unsupported working-tree type; nothing was changed.`);
+  return { mode: info.mode & 0o111 ? "100755" : "100644", content: readFileSync(path) };
+};
+const same = (a, b) =>
+  a === undefined ? b === undefined : b !== undefined && a.mode === b.mode && a.content.equals(b.content);
 
-const changed = git("diff", "--name-only", "--no-renames", head, target).split("\n").filter(Boolean);
+const changed = gitBuffer("diff", "--name-only", "--no-renames", "-z", head, target)
+  .toString()
+  .split("\0")
+  .filter(Boolean);
 const dirty = new Set(
   git("status", "--porcelain", "--untracked-files=all", "-z")
     .split("\0")
@@ -60,7 +100,8 @@ for (const path of changed) {
   const number = adrNumber(path);
   if (!number || blob(head, path) !== undefined) continue;
   const clash = [...dirty].find((other) => other !== path && adrNumber(other) === number);
-  if (clash) fail(`${path} reuses ADR ${number}, already taken by uncommitted ${clash}; renumber it on ${branch}.`);
+  if (clash)
+    fail(`${path} reuses ADR ${number}, already taken by uncommitted ${clash}; renumber it on ${branch}.`);
 }
 
 const writes = [];
@@ -71,20 +112,30 @@ try {
     const theirs = blob(target, path);
     const ours = read(path);
     if (same(ours, base) || same(ours, theirs)) {
-      if (!same(ours, theirs)) writes.push({ path, content: theirs });
+      if (!same(ours, theirs)) writes.push({ path, entry: theirs });
       continue;
     }
     // Someone else's uncommitted edit (or untracked file) is in this path.
     if (same(theirs, base)) continue;
     if (base === undefined || theirs === undefined || ours === undefined)
       fail(`${path}: uncommitted work and ${branch} both add or delete it; resolve with its owner.`);
+    if ([base, ours, theirs].some((entry) => entry.mode === "120000"))
+      fail(`${path}: uncommitted link/type change overlaps ${branch}; resolve with its owner.`);
+    const mode =
+      ours.mode === base.mode
+        ? theirs.mode
+        : theirs.mode === base.mode || ours.mode === theirs.mode
+          ? ours.mode
+          : undefined;
+    if (!mode) fail(`${path}: conflicting file modes; resolve with its owner.`);
     const files = ["ours", "base", "theirs"].map((name) => join(scratch, name));
-    writeFileSync(files[0], ours);
-    writeFileSync(files[1], base);
-    writeFileSync(files[2], theirs);
+    writeFileSync(files[0], ours.content);
+    writeFileSync(files[1], base.content);
+    writeFileSync(files[2], theirs.content);
     const merged = spawnSync("git", ["merge-file", "-p", ...files], { maxBuffer: 1 << 28 });
-    if (merged.status !== 0) fail(`${path}: ${branch} conflicts with uncommitted work there; resolve with its owner.`);
-    writes.push({ path, content: merged.stdout, merged: true });
+    if (merged.status !== 0)
+      fail(`${path}: ${branch} conflicts with uncommitted work there; resolve with its owner.`);
+    writes.push({ path, entry: { mode, content: merged.stdout }, merged: true });
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
@@ -106,13 +157,16 @@ try {
   gitBuffer("read-tree", head);
   fail(`${current} moved while landing; nothing was changed. Retry.`);
 }
-for (const { path, content } of writes) {
-  if (content === undefined) {
-    if (existsSync(path)) unlinkSync(path);
-    continue;
-  }
+for (const { path, entry } of writes) {
+  // Remove the entry itself, never write through a link (even a dangling one).
+  if (stat(path)) unlinkSync(path);
+  if (entry === undefined) continue;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
+  if (entry.mode === "120000") symlinkSync(entry.content, path);
+  else {
+    writeFileSync(path, entry.content);
+    chmodSync(path, entry.mode === "100755" ? 0o755 : 0o644);
+  }
 }
 spawnSync("git", ["update-index", "-q", "--refresh"]);
 console.log(`Landed. ${current} is now ${target.slice(0, 8)}; uncommitted work elsewhere is untouched.`);

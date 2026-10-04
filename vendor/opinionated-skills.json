@@ -18,6 +18,7 @@
     "lead: workers end with a compact final report; the lead harvests from it and reads transcripts only for gaps (also applied upstream in agent/lead).",
     "Unbundled 12 process skills with near-zero loads (audit C22 plus robust-review, testing-archive and herdr-handoff, James 2026-10-02); the lead skill's Herdr fallback no longer names herdr-handoff.",
     "lead: decide reversible in-scope calls by default and record them; ask only before money, external accounts or publishing, deletion or other hard-to-reverse actions, batched (James 2026-10-03; also applied upstream in agent/lead).",
-    "shared-checkout: scripts/land.mjs lands a reviewed branch around uncommitted work (2026-10-03; also applied upstream)."
+    "shared-checkout: scripts/land.mjs lands a reviewed branch around uncommitted work (2026-10-03; also applied upstream).",
+    "VUH-1580: shared-checkout land.mjs preserves symlink/executable modes without following link targets; helper and temporary-repo regression copied byte-for-byte from skills 448056a99ae2ff4aed7a19cc818b99e0e302434a."
   ]
 }
