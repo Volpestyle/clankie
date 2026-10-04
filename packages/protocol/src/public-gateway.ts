@@ -1,3 +1,5 @@
+import { ACCOUNT_DIAGNOSTICS_PATH } from "./account-diagnostics.ts";
+import { CAPTAIN_READINESS_PATH } from "./captain-readiness.ts";
 import { DISCORD_INGRESS_PATH } from "./discord-ingress.ts";
 import {
   ACCOUNTS_PATH,
@@ -51,6 +53,8 @@ import { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
 export { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
 
 export const PUBLIC_GATEWAY_ROUTES = [
+  { method: "GET", path: ACCOUNT_DIAGNOSTICS_PATH, target: "control" },
+  { method: "GET", path: CAPTAIN_READINESS_PATH, target: "control" },
   { method: "POST", path: HOSTED_OPERATOR_PATH, target: "control" },
   { method: "POST", path: DISCORD_INGRESS_PATH, target: "control" },
   { method: "GET", path: MODEL_KEYS_PATH, target: "control" },
@@ -74,6 +78,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/v1/pairing/redeem", target: "control" },
   { method: "POST", path: "/v1/pairing/complete", target: "control" },
   { method: "GET", path: "/v1/devices/self", target: "control" },
+  { method: "GET", path: "/v1/devices", target: "control" },
+  { method: "POST", path: "/v1/devices/:id/revoke", target: "control" },
   { method: "POST", path: DEVICE_PUSH_PATH, target: "control" },
   { method: "POST", path: "/v1/devices/self/session/refresh", target: "control" },
   { method: "POST", path: LINEAR_WEBHOOK_PATH, target: "control" },
@@ -236,6 +242,7 @@ export function publicGatewayTargetFor(
   method: "GET" | "POST",
   path: string,
 ): PublicGatewayTarget | undefined {
+  if (method === "POST" && /^\/v1\/devices\/[A-Za-z0-9_-]{1,128}\/revoke$/u.test(path)) return "control";
   return PUBLIC_GATEWAY_ROUTES.find((route) => route.method === method && route.path === path)?.target;
 }
 

@@ -23,6 +23,11 @@ started_ms="$(now_ms)"
 restarts=0
 emit() {
   [ -n "$telemetry_dir" ] || return 0
+  # The service renews this secret-free account consent after a signed settings read.
+  # Missing, expired or disabled consent never opts the body in.
+  consent_until="$(cat "$telemetry_dir/diagnostics-enabled-until" 2>/dev/null || true)"
+  case "$consent_until" in ""|*[!0-9]*) return 0 ;; esac
+  [ "$consent_until" -gt "$(now_ms)" ] 2>/dev/null || return 0
   mkdir -p "$telemetry_dir" 2>/dev/null &&
     printf '{"v":1,"atMs":%s,%s}\n' "$(now_ms)" "$1" \
       >>"$telemetry_dir/$(date -u +%Y%m%d%H)-body.jsonl" 2>/dev/null || true

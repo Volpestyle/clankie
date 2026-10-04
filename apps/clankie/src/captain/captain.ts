@@ -4179,6 +4179,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     invalidateQuestionPrincipal: (deviceId) => conversations.invalidateQuestionPrincipal(deviceId),
 
+    operatorSeatReady: () => seatOutboxes.get(conversations.defaultGlobalConversationId())?.bound() === true,
+
     async observeLanes(): Promise<readonly ObservableCaptainLane[]> {
       return laneLog.list();
     },

@@ -63,6 +63,7 @@ export async function shipSpool(input: {
   readonly identity: BodyIdentity;
   readonly sink: LogSink;
   readonly now?: () => number;
+  readonly diagnosticsEnabled?: () => boolean;
 }): Promise<ShipResult> {
   const now = (input.now ?? Date.now)();
   const cursor = readCursor(input.cursorPath);
@@ -97,10 +98,17 @@ export async function shipSpool(input: {
   }
   events.sort((a, b) => a.atMs - b.atMs);
   const stream = `${input.identity.tenantId}/${input.identity.instanceId}`;
-  for (const batch of batches(events)) await input.sink.put(stream, batch);
+  let shipped = 0;
+  for (const batch of batches(events)) {
+    if (input.diagnosticsEnabled && !input.diagnosticsEnabled()) dropped += batch.length;
+    else {
+      await input.sink.put(stream, batch);
+      shipped += batch.length;
+    }
+  }
   // Files pruned from the spool drop out of the cursor with it.
   writeCursor(input.cursorPath, next);
-  return { shipped: events.length, dropped, files: names.length };
+  return { shipped, dropped, files: names.length };
 }
 
 function* batches(events: readonly ShippedEvent[]): Generator<ShippedEvent[]> {

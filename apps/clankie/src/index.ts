@@ -4,6 +4,7 @@ import { detectWindowsComputerUseHarnesses } from "./computer-windows-discovery.
 import { detectComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createBodyDiagnostics } from "./account-diagnostics.ts";
 import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
@@ -153,7 +154,14 @@ import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 /** Hosted bodies only: `clankie-body` names the spool; a Mac never does. */
-const bodyTelemetry = bodyTelemetryFromEnv(process.env, "service");
+const rawBodyTelemetry = bodyTelemetryFromEnv(process.env, "service");
+const accountDiagnostics = createBodyDiagnostics({
+  telemetry: rawBodyTelemetry,
+  ...(process.env.CLANKIE_BODY_TELEMETRY_DIR ? { spoolDir: process.env.CLANKIE_BODY_TELEMETRY_DIR } : {}),
+  read: async () =>
+    hostedBody === undefined ? { diagnosticsDefault: true } : hostedBody.readAccountSettings(),
+});
+const bodyTelemetry = rawBodyTelemetry === undefined ? undefined : accountDiagnostics;
 const onDoorwayChange =
   bodyTelemetry === undefined
     ? undefined
@@ -232,6 +240,11 @@ const hostedPairing =
         operatorCredentialStore,
         join(stateRoot, "hosted-pair-tickets.json"),
       );
+await accountDiagnostics.refresh();
+if (hostedBody !== undefined) {
+  const timer = setInterval(() => void accountDiagnostics.refresh(), 60_000);
+  timer.unref();
+}
 // The customer's own model for hired pi workers (VUH-1373): one resolver over
 // the operator broker, so the loopback and each hire read the same selection.
 const hostedCustomerModels =
@@ -1134,6 +1147,7 @@ const clankie = await createClankieApp({
     : {
         hostedBody,
         hostedCredits: hostedBody,
+        accountSettings: hostedBody,
         hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),
       }),
   agentSessions,
