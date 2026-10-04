@@ -84,7 +84,7 @@ export async function buildLaneToolBank(
     if (tool.requiresShell && lane !== "operator" && turn.shell !== true) continue;
     tools.push(browserLaneTool(deps, turn, tool, lane === "operator" || turn.shell === true));
   }
-  const services = await deps.mcp.catalog(lane);
+  const services = (await deps.mcp.catalog(lane)).filter((tool) => tool.server !== "minecraft");
   for (const tool of services) if (tool.initial) tools.push(mcpLaneTool(deps, lane, tool));
   if (services.some((tool) => !tool.initial)) tools.push(...serviceDirectoryTools(deps, lane, services));
   return { lane, tools };

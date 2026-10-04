@@ -50,6 +50,7 @@ import type { HireSeat, MessageSeat } from "./port.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { rivalsTools } from "./rivals-tools.ts";
+import { minecraftTools } from "./minecraft-tools.ts";
 import { WorkRequestSchema } from "../work-items.ts";
 
 /**
@@ -192,6 +193,7 @@ export function captainTools(
           },
         ]),
     ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
+    ...(deps.minecraft === undefined ? [] : minecraftTools(deps.minecraft, turn)),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     // A Discord room with a shell can start workers, so it watches and
     // harvests its own; its report belongs in the room that asked (ADR 0186).
@@ -1333,14 +1335,21 @@ function discordActionTools(
       description:
         "Show your live play surface in the speaker's current voice channel. The body chooses its supported " +
         "Discord surface and freshly resolves the speaker's voice channel; a refusal is a fact, not a retry cue.",
-      parameters: Type.Object({}),
-      execute: (callId) => {
+      parameters: Type.Object({
+        surface: Type.Optional(Type.Union([Type.Literal("gba_emulator"), Type.Literal("minecraft")])),
+      }),
+      execute: (callId, input) => {
         const grounded = context(callId);
         if (grounded.guildId === undefined) {
           return Promise.resolve(json({ ok: false, message: "Voice needs a server." }));
         }
         return deps
-          .discordActions!.execute({ action: "watch_start", ...grounded, guildId: grounded.guildId })
+          .discordActions!.execute({
+            action: "watch_start",
+            ...grounded,
+            guildId: grounded.guildId,
+            ...(input.surface === undefined ? {} : { surface: input.surface }),
+          })
           .then(json);
       },
     }),
@@ -1596,7 +1605,7 @@ export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): Inl
     name: "captain-mcp",
     hidden: true,
     async factory(pi) {
-      const catalog = await deps.mcp.catalog(lane);
+      const catalog = (await deps.mcp.catalog(lane)).filter((tool) => tool.server !== "minecraft");
       if (catalog.length === 0) return;
 
       const registeredNames = new Set<string>();

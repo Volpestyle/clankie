@@ -184,6 +184,7 @@ export class WorkerMcp {
         "Fleet grants are retired. Admitted fleet members use connected tools; inspect clankie fleet status and revoke old records with clankie access revoke ID.",
       );
     const request = WorkerGrantRequestSchema.parse(input);
+    if (request.server === "minecraft") throw new Error("Clankie's Minecraft play seat cannot be delegated");
     if (request.project !== undefined) {
       const project = (await this.options.projects?.())?.projects.find(
         (project) => project.id === request.project,
@@ -363,7 +364,9 @@ export class WorkerMcp {
     const expiresAt = Math.floor(Date.now() / 1000) + 900;
     const records: GrantRecord[] = [];
     if (await this.fleetToolsEnabled()) {
-      const catalog = await this.options.host.catalog("operator");
+      const catalog = (await this.options.host.catalog("operator")).filter(
+        (tool) => tool.server !== "minecraft",
+      );
       for (const server of new Set(catalog.map((tool) => tool.server))) {
         try {
           const { account, binding } = await this.options.host.account(server, "operator");
@@ -532,7 +535,7 @@ export class WorkerMcp {
               Object.entries(rule.arguments).every(([key, value]) => isDeepStrictEqual(args[key], value)),
           ),
         );
-        if (!current) throw new Error("Tool or arguments are not granted");
+        if (!current || current.server === "minecraft") throw new Error("Tool or arguments are not granted");
         const rule = current.tools.find((rule) => `${current.server}_${rule.name}` === name)!;
         // Manual authority stays durable; fleet authority comes from live admission and
         // the current catalog. Both retain the host's final account/config fence.
