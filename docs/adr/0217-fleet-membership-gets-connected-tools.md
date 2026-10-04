@@ -41,9 +41,11 @@ awaits, the host runs the fleet fence (admission, then the switch) and then its
 configuration check. A call whose last asynchronous check has already read the old
 state can still reach the provider after the change; this is not a cancellation,
 and there is no proven bound on how many concurrent calls can be in that position.
-Whether that is the contract, or dispatch must be refused after any change, is an
-open owner decision on VUH-1585. Refusing it absolutely needs a final check that
-does not await, which the current settings and admission reads cannot provide.
+That is the contract: the switch stops new calls, and calls already past their
+checks may finish (decided 2026-10-04 on VUH-1585, the owner delegating the choice).
+A hard stop would need a final check that does not await, such as an in-memory
+switch kept by a settings watcher plus synchronous admission; it can be added if a
+need appears.
 
 Standing records are synthesized in memory from the current verified catalog,
 not loaded from durable grant files. Audit principals include `fleet:ID:pane:PANE`,

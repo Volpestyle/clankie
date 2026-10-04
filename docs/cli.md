@@ -1194,9 +1194,9 @@ to, plus the fleet connected-tool switch. `set` takes any combination of the fla
 what is left out keeps its value. `clear` restores every default, including tools
 `connected`. `--tools off` stops new standing tool admissions; manual grants keep
 working. A call already past its last asynchronous check can still dispatch after
-the change; there is no proven global concurrency or cancellation bound. VUH-1585's
-strict refusal guarantee remains unmet pending the owner's decision
-([ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md)). `--tools connected`
+the change; there is no proven global concurrency or cancellation bound. That is the
+chosen contract: the switch stops new calls
+([ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md), VUH-1585). `--tools connected`
 restores standing access to verified accounts through `clankie_tools` and `clankie_call`.
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the

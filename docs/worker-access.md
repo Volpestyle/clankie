@@ -48,11 +48,11 @@ also fences account and server configuration.
 These checks do not provide atomic revocation. A call already past its last
 asynchronous check can still reach the provider after tools-off or lost admission;
 this is not limited to operations already dispatched. No global concurrent-call
-or time bound has been proven. The original strict refusal guarantee remains
-unmet on VUH-1585, pending the owner's explicit decision
-([ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md)). Documentation does
-not turn that failed safety control into a pass. An operation already dispatched
-to a provider cannot be recalled.
+or time bound has been proven. This is the chosen contract (VUH-1585,
+[ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md)): the switch stops new
+calls rather than promising atomic revocation. The original strict guarantee was
+not met and was replaced by this decision, not shown to pass. An operation already
+dispatched to a provider cannot be recalled.
 
 ## Discover and call
 
