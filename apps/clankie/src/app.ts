@@ -485,6 +485,11 @@ export interface ClankieAppDependencies {
   bodyVoiceStays?: BodyVoiceStays;
   bodyPlaySessions?: BodyPlaySessions;
   minecraft?: MinecraftService;
+  minecraftHost?: import("./minecraft-host.ts").MinecraftHostService;
+  minecraftPrivateDelivery?: Pick<
+    ReturnType<typeof import("./minecraft-host-invite.ts").createMinecraftPrivateDeliveryClient>,
+    "authorize"
+  >;
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;
@@ -1468,10 +1473,26 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json(binding);
   });
 
+  app.post("/v1/internal/minecraft-login-code/authorize", async (context) => {
+    const body = await authenticateCaptain(context.req.raw, dependencies);
+    if (!body || body === "unavailable" || body.steerSourceLane !== "discord_text")
+      return context.body(null, 403);
+    const input = await context.req.json().catch(() => undefined);
+    if (!input || typeof input !== "object" || typeof input.capability !== "string")
+      return context.body(null, 403);
+    const { capability, ...payload } = input;
+    const allowed = await dependencies.minecraftPrivateDelivery
+      ?.authorize(capability, payload)
+      .catch(() => false);
+    context.header("Cache-Control", "no-store");
+    return context.body(null, allowed ? 204 : 403);
+  });
+
   app.route(
     "/",
     createMinecraftRoutes({
       ...(dependencies.minecraft === undefined ? {} : { service: dependencies.minecraft }),
+      ...(dependencies.minecraftHost === undefined ? {} : { host: dependencies.minecraftHost }),
       settings: settingsSource,
       authorize: async (request) => {
         const operator = await authenticateOperator(request, dependencies);

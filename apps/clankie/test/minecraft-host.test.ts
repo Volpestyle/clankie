@@ -57,7 +57,7 @@ function fixture() {
   const reply = vi.fn(async (tool: string): Promise<unknown> => {
     if (tool === "host_status") return status;
     if (tool === "host_enroll")
-      return { classification: "nonpremium", providerId: "minecraft_friend_friend" };
+      return { classification: "nonpremium", providerId: "clankie_minecraft_friend_friend" };
     return { outcome: "completed", password: "DO_NOT_RETURN", rconSecret: "DO_NOT_RETURN" };
   });
   const call = vi.fn(async (input: Parameters<McpHost["call"]>[0]) => {
@@ -133,6 +133,25 @@ function fixture() {
 }
 
 describe("Minecraft host core receipts and authority", () => {
+  it("starts only for approved friends and keeps their other lifecycle/admin operations closed", async () => {
+    const f = fixture();
+    try {
+      expect(await f.service.lifecycle("start", f.friend)).toMatchObject({ outcome: "refused" });
+      await f.service.requestEnrollment("Friend", f.friend);
+      await f.service.approveEnrollment("Friend", f.owner);
+      expect(await f.service.lifecycle("start", f.friend)).toMatchObject({ phase: "running" });
+      expect(await f.service.lifecycle("stop", f.friend)).toMatchObject({ outcome: "refused" });
+      expect(await f.service.lifecycle("restart", f.friend)).toMatchObject({ outcome: "refused" });
+      expect(await f.service.admin({ operation: "time", value: "day" }, f.friend)).toMatchObject({
+        outcome: "refused",
+      });
+      await f.service.admin({ operation: "whitelist_remove", username: "Friend" }, f.owner);
+      expect(await f.service.lifecycle("start", f.friend)).toMatchObject({ outcome: "refused" });
+    } finally {
+      f.cleanup();
+    }
+  });
+
   it("refreshes authority after queued awaits and never dispatches the revoked second action", async () => {
     const f = fixture();
     try {
@@ -215,7 +234,7 @@ describe("Minecraft host core receipts and authority", () => {
         expect.objectContaining({
           owner: f.friend.route!.owner,
           username: "Friend",
-          providerId: "minecraft_friend_friend",
+          providerId: "clankie_minecraft_friend_friend",
         }),
         expect.any(Function),
       );

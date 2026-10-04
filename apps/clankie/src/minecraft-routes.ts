@@ -1,12 +1,14 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { MinecraftCommandSchema, type MinecraftCommand } from "@clankie/protocol";
+import { MinecraftHostCommandSchema, MinecraftCommandSchema, type MinecraftCommand } from "@clankie/protocol";
 import { MinecraftSettingsSchema, type SettingsStore } from "@clankie/settings";
 import type { BodyConversationIdentity } from "./body-lease-router.ts";
+import type { MinecraftHostService } from "./minecraft-host.ts";
 import { MinecraftServiceError, type MinecraftService } from "./minecraft.ts";
 
 export interface MinecraftRouteOptions {
   readonly service?: MinecraftService;
+  readonly host?: MinecraftHostService;
   readonly settings?: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>;
   /** Operator authentication is required even for reads; this must never accept a social grant. */
   readonly authorize: (request: Request) => Promise<BodyConversationIdentity | undefined>;
@@ -54,6 +56,51 @@ export function createMinecraftRoutes(options: MinecraftRouteOptions): Hono {
   const app = new Hono();
   app.use("/v1/minecraft/*", bodyLimit({ maxSize: 32_768 }));
   app.use("/v1/minecraft", bodyLimit({ maxSize: 32_768 }));
+  app.post("/v1/minecraft/host", async (context) => {
+    const identity = await options.authorize(context.req.raw);
+    if (!(await admitted(identity))) return context.json({ error: "operator_required" }, 403);
+    const parsed = MinecraftHostCommandSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_minecraft_host_command" }, 400);
+    if (!options.host) return context.json({ error: "minecraft_host_unavailable" }, 503);
+    const input = parsed.data;
+    let result: unknown;
+    switch (input.action) {
+      case "configuration":
+        result = await options.host.configuration(identity);
+        break;
+      case "configure":
+        result = await options.host.configure(input.settings, identity);
+        break;
+      case "status":
+        result = await options.host.status(identity);
+        break;
+      case "start":
+      case "stop":
+      case "restart":
+        result = await options.host.lifecycle(input.action, identity);
+        break;
+      case "backup":
+        result = await options.host.backup(identity);
+        break;
+      case "admin":
+        result = await options.host.admin(input.command, identity);
+        break;
+      case "claim":
+        result = await options.host.claim(identity);
+        break;
+      case "claim_complete":
+        result = await options.host.completeClaim(identity);
+        break;
+      case "request_enrollment":
+        result = await options.host.requestEnrollment(input.username, identity);
+        break;
+      case "approve_enrollment":
+        result = await options.host.approveEnrollment(input.username, identity);
+        break;
+    }
+    context.header("Cache-Control", "no-store");
+    return context.json(result);
+  });
   app.get("/v1/minecraft/configuration", async (context) => {
     const identity = await options.authorize(context.req.raw);
     if (!(await admitted(identity))) return context.json({ error: "operator_required" }, 403);

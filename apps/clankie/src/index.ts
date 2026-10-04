@@ -9,6 +9,9 @@ import { BodyVoiceStays } from "./body-voice-stays.ts";
 import { BodyPlaySessions } from "./body-play-sessions.ts";
 import { MinecraftMcpPort } from "./minecraft-mcp.ts";
 import { MinecraftService } from "./minecraft.ts";
+import { MinecraftHostService } from "./minecraft-host.ts";
+import { createMinecraftHostAuthority } from "./minecraft-host-authority.ts";
+import { createMinecraftHostInvite, createMinecraftPrivateDeliveryClient } from "./minecraft-host-invite.ts";
 import { minecraftProfiles, resolveMinecraftProfile } from "./minecraft-destination.ts";
 import { MinecraftCapture } from "./minecraft-capture.ts";
 import { BodyLeaseStore } from "./body-leases.ts";
@@ -72,6 +75,7 @@ import {
   parsePositiveInt,
   serviceInLoadout,
   SettingsStore,
+  resolveDiscordSettings,
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
@@ -539,6 +543,8 @@ const mcpHost = createMcpHost({
         "integrations/minecraft-mcp/src",
         existsSync(join(repoRoot, "integrations/minecraft-mcp/src/main.js")) ? "main.js" : "main.ts",
       ),
+      "--data-dir",
+      join(stateRoot, "minecraft-host"),
     ],
     cwd: repoRoot,
   },
@@ -666,6 +672,32 @@ const runtimeUpdater =
   hostedBody === undefined && existsSync(join(repoRoot, ".git"))
     ? createRuntimeUpdater({ repoRoot })
     : undefined;
+const minecraftPrivateDelivery = createMinecraftPrivateDeliveryClient();
+const minecraftHostGuard = createMinecraftHostAuthority({
+  settings: async () => resolveDiscordSettings((await settingsStore.load()).discord, process.env).settings,
+  routeAuthorized: (owner) => captain.validateConversationOwner(owner, "social"),
+  operatorAuthorized: async (identity) =>
+    identity.current() &&
+    identity.route?.mode === "machine" &&
+    (await captain.validateConversationOwner({ conversationId: identity.conversationId })) &&
+    (await identity.authorize("play", "effect")),
+});
+const minecraftHost = new MinecraftHostService({
+  host: mcpHost,
+  guard: minecraftHostGuard,
+  settings: settingsStore,
+  minecraft,
+  bindingPath: join(stateRoot, "minecraft-host", "discord-bindings.json"),
+  auditPath: join(stateRoot, "minecraft-host", "admin-audit.jsonl"),
+  routeAuthorized: (owner) => captain.validateConversationOwner(owner, "social"),
+  deliverCode: minecraftPrivateDelivery.deliverCode,
+  invite: createMinecraftHostInvite({
+    discordActions: createDiscordCaptainActionClient(process.env, fetch, discordTurnReceipts),
+    guard: async (identity) => {
+      (await minecraftHostGuard(identity, { admin: false }))();
+    },
+  }),
+});
 const captain = createCaptain(
   {
     ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
@@ -712,6 +744,7 @@ const captain = createCaptain(
     email,
     rivals,
     minecraft,
+    minecraftHost,
     bodyLeases,
     browser: {
       catalog: () =>
@@ -978,6 +1011,8 @@ const clankie = await createClankieApp({
   resolveBodyVoiceTarget: resolveDiscordVoiceTarget,
   bodyPlaySessions,
   minecraft,
+  minecraftHost,
+  minecraftPrivateDelivery,
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,

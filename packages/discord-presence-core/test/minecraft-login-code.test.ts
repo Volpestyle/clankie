@@ -5,7 +5,7 @@ const input = {
   operationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   recipientId: "123",
   username: "Friend",
-  providerId: "minecraft_friend_friend",
+  providerId: "clankie_minecraft_friend_friend",
 };
 it.each(["bot", "user_session"] as const)(
   "privately relays through %s with final guard and safe result",
@@ -64,7 +64,9 @@ it("rejects invented provider and arbitrary extra payload", async () => {
     getCredential,
     fetch: fetcher,
   });
-  expect(await deliver({ ...input, providerId: "minecraft_friend_other" })).toEqual({ outcome: "refused" });
+  expect(await deliver({ ...input, providerId: "clankie_minecraft_friend_other" })).toEqual({
+    outcome: "refused",
+  });
   expect(await deliver({ ...input, code: "leak" })).toEqual({ outcome: "refused" });
   expect(getCredential).not.toHaveBeenCalled();
   expect(fetcher).not.toHaveBeenCalled();

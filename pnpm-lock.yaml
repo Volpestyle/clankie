@@ -372,6 +372,9 @@ importers:
 
   integrations/minecraft-mcp:
     dependencies:
+      '@clankie/credential-broker':
+        specifier: workspace:*
+        version: link:../../packages/credential-broker
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

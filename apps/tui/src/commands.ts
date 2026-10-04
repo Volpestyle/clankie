@@ -1224,7 +1224,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "minecraft",
       aliases: [],
-      description: "Configure, join, and play in an approved Minecraft world",
+      description: "Host, invite, administer, configure, and play in Minecraft",
       argumentHint: "[configure|status|join PROFILE|leave|cancel|pause|resume|chat|follow]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {

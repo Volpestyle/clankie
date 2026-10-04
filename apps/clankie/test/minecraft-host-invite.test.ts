@@ -38,7 +38,7 @@ it("binds expiring ephemeral guard to verified recipient and exact enrollment", 
       operationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       owner,
       username: "Friend",
-      providerId: "minecraft_friend_friend",
+      providerId: "clankie_minecraft_friend_friend",
     },
     guard,
   );
@@ -78,7 +78,7 @@ it("refuses before dispatch when guard fails", async () => {
         operationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         owner,
         username: "Friend",
-        providerId: "minecraft_friend_friend",
+        providerId: "clankie_minecraft_friend_friend",
       },
       async () => {
         throw new Error("revoked");

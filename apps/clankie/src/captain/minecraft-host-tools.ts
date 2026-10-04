@@ -18,6 +18,7 @@ export interface MinecraftHostToolPort {
   ): Promise<unknown>;
   admin(command: MinecraftHostAdminCommand, identity: BodyConversationIdentity | undefined): Promise<unknown>;
   backup(identity: BodyConversationIdentity | undefined): Promise<unknown>;
+  invite?(identity: BodyConversationIdentity | undefined): Promise<unknown>;
   claim(identity: BodyConversationIdentity | undefined): Promise<unknown>;
   requestEnrollment(username: string, identity: BodyConversationIdentity | undefined): Promise<unknown>;
   approveEnrollment(username: string, identity: BodyConversationIdentity | undefined): Promise<unknown>;
@@ -48,6 +49,19 @@ export function minecraftHostTools(client: MinecraftHostToolPort, turn: TurnCont
     }
   };
   return [
+    defineTool({
+      name: "minecraft_host_invite",
+      label: "Invite to Minecraft",
+      description:
+        "Post your running server's public address and version in this requesting Discord channel. Only posts an auth-ready invite; never reveals credentials.",
+      parameters: Type.Object({}),
+      execute: async () =>
+        call(
+          (identity) =>
+            client.invite?.(identity) ??
+            Promise.resolve({ outcome: "refused", reason: "minecraft_invite_unavailable" }),
+        ),
+    }),
     defineTool({
       name: "minecraft_host_status",
       label: "Minecraft server status",

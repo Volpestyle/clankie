@@ -7,9 +7,9 @@ const RequestSchema = z
     operationId: z.uuid(),
     recipientId: z.string().regex(/^\d{1,32}$/u),
     username: z.string().regex(/^[A-Za-z0-9_]{3,16}$/u),
-    providerId: z.string().regex(/^minecraft_friend_[a-z0-9_]+$/u),
+    providerId: z.string().regex(/^clankie_minecraft_friend_[a-z0-9_]+$/u),
   })
-  .refine((input) => input.providerId === `minecraft_friend_${input.username.toLowerCase()}`);
+  .refine((input) => input.providerId === `clankie_minecraft_friend_${input.username.toLowerCase()}`);
 
 /** Host-only secret relay. No secret is returned or retained in a generic delivery receipt. */
 export function createMinecraftLoginCodeDelivery(options: {

@@ -52,6 +52,7 @@ import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { desktopTools } from "./desktop.ts";
 import { rivalsTools } from "./rivals-tools.ts";
 import { minecraftTools } from "./minecraft-tools.ts";
+import { minecraftHostTools } from "./minecraft-host-tools.ts";
 import { WorkRequestSchema } from "../work-items.ts";
 
 /**
@@ -196,6 +197,7 @@ export function captainTools(
         ]),
     ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
     ...(deps.minecraft === undefined ? [] : minecraftTools(deps.minecraft, turn)),
+    ...(deps.minecraftHost === undefined ? [] : minecraftHostTools(deps.minecraftHost, turn)),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     // A Discord room with a shell can start workers, so it watches and
     // harvests its own; its report belongs in the room that asked (ADR 0186).

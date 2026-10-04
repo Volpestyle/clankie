@@ -114,6 +114,8 @@ export interface McpHost {
     readonly arguments: Record<string, unknown>;
     /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
     readonly resultMode?: "model" | "data";
+    /** Host-selected bound for setup operations; never a model tool argument. */
+    readonly timeoutMs?: number;
     /** Only MinecraftMcpPort holds Clankie's motor; raw and delegated routes are denied. */
     readonly bodyAccess?: typeof MINECRAFT_BODY_ACCESS;
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
@@ -188,7 +190,11 @@ export interface McpHostOptions {
 /** The part of an MCP client this host uses, so tests can supply a fake. */
 export interface McpConnection {
   listTools(): Promise<readonly { name: string; description?: string | undefined; inputSchema?: unknown }[]>;
-  callTool(name: string, args: Record<string, unknown>): Promise<{ content: string; isError: boolean }>;
+  callTool(
+    name: string,
+    args: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<{ content: string; isError: boolean }>;
   close(): Promise<void>;
 }
 
@@ -560,7 +566,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               },
               ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
             })
-          : await dispatchFence.run(assertDispatch, () => client.callTool(input.tool, input.arguments));
+          : await dispatchFence.run(assertDispatch, () =>
+              client.callTool(input.tool, input.arguments, input.timeoutMs),
+            );
         options.logger.info(
           {
             event: "mcp.host.call",
@@ -729,9 +737,12 @@ async function connectServer(
       return collected;
     },
 
-    async callTool(name, args) {
+    async callTool(name, args, timeoutMs) {
       const result = await client.callTool({ name, arguments: args }, undefined, {
-        timeout: REQUEST_TIMEOUT_MS,
+        timeout:
+          timeoutMs === undefined
+            ? REQUEST_TIMEOUT_MS
+            : z.number().int().positive().max(600_000).parse(timeoutMs),
       });
       const blocks = Array.isArray(result.content) ? result.content : [];
       const text = blocks
