@@ -3,6 +3,9 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   projectsRevision,
+  createProjectSettings,
+  observeProjectEnrollment,
+  ProjectTrackerUnavailable,
   removeProjectWorkspace,
   addProjectWorktreeRoot,
   removeProjectWorktreeRoot,
@@ -13,6 +16,8 @@ import {
 } from "@clankie/settings";
 import {
   PROJECTS_PATH,
+  PROJECT_CREATE_SETTINGS_PATH,
+  CreateProjectSettingsSchema,
   PROJECT_REMOVE_WORKSPACE_PATH,
   RemoveProjectWorkspaceSchema,
   PROJECT_ADD_WORKTREE_ROOT_PATH,
@@ -32,6 +37,7 @@ export function createProjectRoutes(
   const app = new Hono();
   for (const path of [
     PROJECTS_PATH,
+    PROJECT_CREATE_SETTINGS_PATH,
     PROJECT_UPDATE_SETTINGS_PATH,
     PROJECT_REMOVE_WORKSPACE_PATH,
     PROJECT_ADD_WORKTREE_ROOT_PATH,
@@ -49,6 +55,49 @@ export function createProjectRoutes(
   app.get(PROJECTS_PATH, async (context) => {
     const value = (await settings.load()).projects;
     return context.json({ settings: value, revision: projectsRevision(value) });
+  });
+  app.post(PROJECT_CREATE_SETTINGS_PATH, async (context) => {
+    if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
+    const input = CreateProjectSettingsSchema.safeParse(await context.req.json().catch(() => null));
+    if (!input.success) return context.json({ error: "malformed" }, 400);
+    const requireOwner = async () => {
+      if ((await authorize(context.req.raw)) !== true) throw new Error("Owner authority changed");
+    };
+    try {
+      const original = await settings.load();
+      // Validate the pure command before reading owner-selected local paths.
+      createProjectSettings(original.projects, input.data);
+      await requireOwner();
+      const initial = await observeProjectEnrollment(original.projects, input.data);
+      await requireOwner();
+      let before: string | undefined;
+      const updated = await settings.update(
+        (current) => {
+          before = JSON.stringify(current);
+          return { ...current, projects: createProjectSettings(current.projects, input.data) };
+        },
+        async () => {
+          await requireOwner();
+          const current = await settings.load();
+          if (JSON.stringify(current) !== before) throw new Error("Settings changed");
+          if (!isDeepStrictEqual(await observeProjectEnrollment(current.projects, input.data), initial))
+            throw new Error("Project workspace or tracker changed");
+          await requireOwner();
+          if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
+        },
+      );
+      return context.json({ settings: updated.projects, revision: projectsRevision(updated.projects) }, 201);
+    } catch (error) {
+      return context.json(
+        {
+          error:
+            error instanceof ProjectTrackerUnavailable
+              ? "project_tracker_unavailable"
+              : "project_create_conflict",
+        },
+        409,
+      );
+    }
   });
   app.post(PROJECT_UPDATE_SETTINGS_PATH, async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);

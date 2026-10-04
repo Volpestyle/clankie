@@ -98,6 +98,7 @@ export {
 } from "./codex-accounts.ts";
 
 export * from "./projects.ts";
+export * from "./project-enrollment.ts";
 export { ProjectsSettingsSchema, type ProjectsSettings } from "@clankie/protocol/projects";
 
 export * from "./project-worktrees.ts";

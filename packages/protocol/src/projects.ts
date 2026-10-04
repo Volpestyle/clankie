@@ -202,6 +202,41 @@ export type ProjectMembership = z.infer<typeof ProjectMembershipSchema>;
 
 export const PROJECTS_PATH = "/v1/operator/projects";
 export const PROJECT_UPDATE_SETTINGS_PATH = "/v1/operator/projects/update";
+export const PROJECT_CREATE_SETTINGS_PATH = "/v1/operator/projects/create";
+/** Owner-confirmed NEW local project only. No remote enrollment or runtime authority. */
+export const CreateProjectSettingsSchema = z
+  .object({
+    projectId: ProjectIdSchema,
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    name: z.string().trim().min(1).max(100),
+    workspacePath: z.string().min(1).max(4096),
+    roles: z
+      .array(
+        ProjectRoleSchema.extend({
+          concurrencyCap: ProjectRoleSchema.shape.concurrencyCap.unwrap().nullable().optional(),
+        }).strict(),
+      )
+      .max(256)
+      .optional(),
+    workerCap: z.number().int().min(0).max(1000).nullable().optional(),
+    trackerRef: z
+      .object({ workspaceId: z.literal("primary"), path: z.literal(".clankie/tracking.json") })
+      .strict()
+      .nullable()
+      .optional(),
+    /** Preference only; neither field implies or changes a numeric hire cap. */
+    fleet: z
+      .object({
+        size: z.enum(["max", "large", "small", "solo"]).optional(),
+        models: z.enum(["optimal", "efficient"]).optional(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+  })
+  .strict();
+export type CreateProjectSettings = z.infer<typeof CreateProjectSettingsSchema>;
+
 /** Omitted fields stay unchanged; null removes an optional limit or tracker binding. */
 export const UpdateProjectSettingsSchema = z
   .object({
