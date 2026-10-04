@@ -106,6 +106,21 @@ async function command(binary: string, args: string[], cwd: string): Promise<voi
     });
   });
 }
+async function installedPlayit(dataDir: string): Promise<string> {
+  if (process.platform !== "darwin") throw new Error("playit-platform-not-supported");
+  const root = join(dataDir, `playit-${PLAYIT_PIN.commit}`);
+  const binary = join(root, `playit-agent-${PLAYIT_PIN.commit}`, "target/release/playit-cli");
+  try {
+    const recorded = (await readFile(join(root, "binary.sha256"), "utf8")).trim();
+    const actual = createHash("sha256")
+      .update(await readFile(binary))
+      .digest("hex");
+    if (recorded === actual && /^[a-f0-9]{64}$/.test(recorded)) return binary;
+  } catch {
+    /* explicit setup must provision the pinned executable */
+  }
+  throw new Error("playit-install-required");
+}
 /** Mac has no official binary asset: compile the checked official source and locked dependencies. */
 async function installPlayit(dataDir: string): Promise<string> {
   if (process.platform !== "darwin") throw new Error("playit-platform-not-supported");
@@ -114,15 +129,10 @@ async function installPlayit(dataDir: string): Promise<string> {
   const binary = join(source, "target/release/playit-cli");
   await mkdir(root, { recursive: true, mode: 0o700 });
   await chmod(root, 0o700);
-  // A cached binary is trusted only when its locally recorded digest still matches.
   try {
-    const recorded = (await readFile(join(root, "binary.sha256"), "utf8")).trim();
-    const actual = createHash("sha256")
-      .update(await readFile(binary))
-      .digest("hex");
-    if (recorded === actual && /^[a-f0-9]{64}$/.test(recorded)) return binary;
+    return await installedPlayit(dataDir);
   } catch {
-    /* install from pinned source */
+    /* explicit claim setup provisions from pinned source */
   }
   const response = await fetch(
     `https://github.com/playit-cloud/playit-agent/archive/${PLAYIT_PIN.commit}.tar.gz`,
@@ -178,6 +188,12 @@ export class MinecraftTunnel {
     return { ...this.state };
   }
   async prepareClaim(): Promise<{ claimUrl: string; expiresAt: string }> {
+    // Source compilation belongs to explicit setup, never service or game startup.
+    try {
+      await (this.options.install ?? installPlayit)(this.options.dataDir);
+    } catch {
+      throw new Error("playit-install-failed");
+    }
     const code = randomBytes(5).toString("hex");
     const expiresAt = this.now() + 10 * 60_000;
     try {
@@ -244,7 +260,7 @@ export class MinecraftTunnel {
         return this.status();
       }
       if (!/^[a-fA-F0-9]{32,512}$/.test(secret)) throw new Error("playit-credential-invalid");
-      const binary = await (this.options.install ?? installPlayit)(this.options.dataDir);
+      const binary = await (this.options.install ?? installedPlayit)(this.options.dataDir);
       if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
       const address = await this.ensureTunnel(secret);
       if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
@@ -282,7 +298,7 @@ export class MinecraftTunnel {
       if (!this.child) await rm(this.secretPath, { force: true });
       const safe =
         error instanceof Error &&
-        /^(playit-auth-not-ready|playit-credential-invalid|playit-tunnel-unsafe|playit-platform-not-supported)$/.test(
+        /^(playit-auth-not-ready|playit-credential-invalid|playit-tunnel-unsafe|playit-platform-not-supported|playit-install-required)$/.test(
           error.message,
         )
           ? error.message

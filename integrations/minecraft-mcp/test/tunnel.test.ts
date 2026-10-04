@@ -98,6 +98,30 @@ describe("Minecraft playit tunnel", () => {
     expect(f.install).not.toHaveBeenCalled();
     expect(f.launch).not.toHaveBeenCalled();
   });
+  test.skipIf(process.platform !== "darwin")(
+    "default start requires prior provisioning and never compiles source",
+    async () => {
+      const f = await fixture();
+      const host = new MinecraftTunnel({
+        dataDir: f.dataDir,
+        originPort: 25684,
+        credentials: f.credentials,
+        authReady: f.authReady,
+        api: f.api,
+        launch: f.launch,
+      });
+      expect(await host.start()).toEqual({ phase: "failed", error: "playit-install-required" });
+      expect(f.api).not.toHaveBeenCalled();
+      expect(f.launch).not.toHaveBeenCalled();
+    },
+  );
+  test("failed explicit provision creates no claim or account request", async () => {
+    const f = await fixture();
+    f.install.mockRejectedValue(new Error("unsafe subprocess output"));
+    await expect(f.host.prepareClaim()).rejects.toThrow("playit-install-failed");
+    expect(f.api).not.toHaveBeenCalled();
+    expect(f.credentials.set).not.toHaveBeenCalled();
+  });
   test("explicit blocked-on-claim status performs no external tunnel operation", async () => {
     const f = await fixture({ claimed: false });
     expect(await f.host.start()).toEqual({ phase: "blocked-on-claim" });
