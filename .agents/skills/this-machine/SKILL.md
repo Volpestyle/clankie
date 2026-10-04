@@ -31,9 +31,11 @@ Do not treat expiry or a process restart as proof that a send/session stopped.
 
 ## Watching workers
 
-The local console stays in the current terminal. Its live-agent strip uses the
-service fleet feed across connected machines: `Ctrl+G`, Up/Down, Enter opens a
-worker's existing conversation; Escape returns and leaves its work running.
+The local console stays in the current terminal. Its two-line live-agent dock
+below the prompt uses the service fleet feed across connected machines.
+`Ctrl+G` opens the full scrolling agent modal; Up/Down selects, Enter opens a
+worker's existing conversation, and Escape closes the modal without losing the
+draft. Escape from the worker conversation returns and leaves its work running.
 `Ctrl+Y` from that conversation opens the exact pane in the selected machine's
 Herdr workspace. It attaches to an existing server, never starts one. `/agents`
 also retains past agents with saved threads. Do not treat a visible working
