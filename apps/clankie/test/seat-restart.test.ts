@@ -136,10 +136,15 @@ it("shutdown rejects queued turns instead of falling through into a fresh model 
           delivery: "queue",
         },
       });
-    await send(0);
+    const receipt = send(0);
     const [event] = await poll;
     expect(await captain.acknowledgeSeatEvent(event!.id)).toBe(true);
-    await send(1);
+    expect(await receipt).toMatchObject({
+      result: { status: "accepted", seatDelivery: { state: "started" } },
+    });
+    expect(await send(1)).toMatchObject({
+      result: { status: "accepted", seatDelivery: { state: "queued" } },
+    });
     await captain.close();
     const turns = new ConversationJournal(join(root, "conversations"))
       .read("global-default")

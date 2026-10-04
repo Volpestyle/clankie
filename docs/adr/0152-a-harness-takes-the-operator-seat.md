@@ -231,8 +231,11 @@ releases one queued follow-up and reserves the next turn before another queued
 message can be taken. A different session's waiting report cannot release that
 hold. Queue admission does not wait for the older escalation's reply window.
 Polling still proves binding; a remembered transcript cannot take over a Pi run.
-If the bridge disconnects before taking an explicit send, it settles as
-unavailable without starting a fallback model turn.
+If the bridge disconnects after admitting a held Queue, it settles as
+unavailable without starting a fallback model turn. A definite refusal before
+any native admission reselects the conversation driver, preserving the service
+runner's stall-release and attachment handover. Take without acknowledgment is
+uncertain and never permits fallback.
 
 Pi keeps its native streaming steer and serial follow-up chain. Agent DM sends
 carry the mode into fleet native control; Codex Queue chooses its native queue

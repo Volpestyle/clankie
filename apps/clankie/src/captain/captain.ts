@@ -1853,9 +1853,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 preparation.close();
               }
               signal.throwIfAborted();
+              let queuedAtSeat = false;
               const delivery = await selectedOutbox.deliver({
                 ...(context.delivery === undefined ? {} : { delivery: context.delivery }),
                 onAdmitted: (state) => {
+                  if (state === "queued") queuedAtSeat = true;
                   context.deliveryOutcome?.({ state });
                   if (state !== "queued") publish({ type: "activity", phase: "responding" });
                 },
@@ -1882,7 +1884,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               if (delivery.outcome === "replied") {
                 publish({ type: "message", role: "captain", text: delivery.text, streaming: false });
               }
-              if (delivery.outcome === "unbound" && context.delivery !== undefined) {
+              if (delivery.outcome === "unbound" && queuedAtSeat) {
                 context.deliveryOutcome?.({
                   state: "rejected",
                   detail: "The channel disconnected before taking this message. Nothing was sent.",
@@ -1890,8 +1892,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 context.deliveryReceipt?.("unavailable");
                 return { handled: true as const, result: undefined };
               }
-              // Taken by the seat, or the operator cancelled: either way this run is
-              // over. Only a seat that vanished before taking it hands the turn to pi.
+              // A held Queue already belongs to the native turn. Only a definite
+              // refusal before admission may choose the service driver instead.
               return delivery.outcome === "unbound"
                 ? { handled: false as const }
                 : { handled: true as const, result: undefined };
