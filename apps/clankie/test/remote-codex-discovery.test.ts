@@ -98,7 +98,13 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
       `import {runSeatChannel} from ${JSON.stringify(bridgeModule)};runSeatChannel({paneId:"w1:p1",parentArgv:"codex app-server"});`,
     ],
     {
-      env: { ...process.env, HOME: home, HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "fixture" },
+      env: {
+        ...process.env,
+        HOME: home,
+        HERDR_PANE_ID: "w1:p1",
+        HERDR_SOCKET_PATH: "fixture",
+        CLANKIE_EXPECTED_TOOL_NAMES: JSON.stringify(["linear_get_issue"]),
+      },
       stdio: ["pipe", "pipe", "pipe"],
     },
   );

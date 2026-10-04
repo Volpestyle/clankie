@@ -1,3 +1,4 @@
+import { windowsCodexBridge, windowsCodexLaunchCommand } from "../src/windows-codex-launch.ts";
 import * as externalCodex from "../src/captain/external-codex-control.ts";
 
 import { EventEmitter, once } from "node:events";
@@ -318,10 +319,16 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
         pid: 4321,
         log: "",
         server: serverLife,
+        bridge: {
+          root: "C:\\Users\\volpe\\.clankie\\claude-plugin\\worker",
+          node: "C:\\node.exe",
+          entry: "C:\\Users\\volpe\\.clankie\\claude-plugin\\worker\\bin\\fleet-mcp.mjs",
+        },
         binding: { session: "default", socketPath: "C:\\herdr.sock" },
         shell: { pid: 42, startTime: "2026-10-03T00:00:00.0000001Z" },
       });
     if (script.includes("Get-NetTCPConnection")) return "true";
+    if (script.includes("bridge-current")) return "bridge-current";
     return "";
   });
   const server = await remoteCodexServer({
@@ -333,7 +340,7 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
     privateSeat: { pane: "w1:p1", register },
   })({
     cwd: "C:\\repo",
-    configArgs: [],
+    configArgs: ["-c", "mcp_servers.other.required=true", "-c", 'mcp_servers.clankie.env.OWNER_KEEP="yes"'],
     env: { HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "C:\\herdr.sock" },
     onExit: () => {},
   });
@@ -341,12 +348,25 @@ it("registers only atomic Windows launch evidence, fences the protocol listener 
     expect.objectContaining({ pane: "w1:p1", server: { ...serverLife, port: 47123 } }),
   );
   const script = decoded(commands[0]!);
+  expect(script).toContain("mcp_servers.other.required=true");
+  expect(script).toContain('mcp_servers.clankie.env.OWNER_KEEP="yes"');
   expect(script).toContain("GetProcessTimes(created.process");
   expect(script).toContain("ResumeThread(created.thread)");
   expect(script.indexOf("GetProcessTimes(created.process")).toBeLessThan(
     script.indexOf("ResumeThread(created.thread)"),
   );
   expect(script).toContain("[Environment]::GetEnvironmentVariables()");
+  expect(script).toContain("Worker bridge is stale or redirected");
+  expect(script).toContain("Get-Command node.exe -All");
+  expect(script).toContain("mcp_servers.clankie.env.HERDR_PANE_ID");
+  expect(script).not.toContain("mcp_servers.clankie.env_vars=");
+  expect(script).toContain('mcp_servers.clankie.env.NODE_OPTIONS=""');
+  expect(server.viewConfigArgs).toContain('mcp_servers.clankie.env.NODE_OPTIONS=""');
+  expect(script.indexOf("Worker bridge is stale or redirected")).toBeLessThan(
+    script.indexOf("$created=[ClankieCodexLaunch]::Start"),
+  );
+  expect(server.viewConfigArgs).toContain('mcp_servers.clankie.command="C:\\\\node.exe"');
+  await server.validateCatalog?.();
   expect(script).not.toContain("Invoke-CimMethod");
   expect(script).not.toContain("Get-Process -Id $created");
   const socket = await server.connect();
@@ -368,6 +388,7 @@ it("releases an atomic registration and its exact process when the local forward
       ? JSON.stringify({
           pid: 42,
           log: "",
+          bridge: { root: "C:\\worker", node: "C:\\node.exe", entry: "C:\\worker\\bin\\fleet-mcp.mjs" },
           binding: { session: "default", socketPath: "C:\\herdr.sock" },
           shell: { pid: 10, startTime: "shell" },
           server: { pid: 42, startTime: "2026-10-03T00:00:00.1234567Z", executable: "C:\\codex.exe" },
@@ -388,4 +409,75 @@ it("releases an atomic registration and its exact process when the local forward
   expect(decoded(shell.mock.calls.at(-1)![0])).toContain(
     "[ClankieCodexLaunch]::Stop(42,'2026-10-03T00:00:00.1234567Z')",
   );
+});
+
+it("rejects an oversized supported Windows launch before SSH or any agent is created", async () => {
+  const shell = vi.fn();
+  const spawn = vi.fn();
+  const register = vi.fn();
+  await expect(
+    remoteCodexServer({
+      fleet: windows,
+      shell,
+      spawn,
+      privateSeat: { pane: "w1:p1", register },
+    })({ cwd: "C:\\repo", configArgs: ["-c", `model=${JSON.stringify("a".repeat(4000))}`], onExit: vi.fn() }),
+  ).rejects.toThrow("exceeds 32000 characters; no agent created");
+  expect(shell).not.toHaveBeenCalled();
+  expect(spawn).not.toHaveBeenCalled();
+  expect(register).not.toHaveBeenCalled();
+});
+
+it("fits the approved 21-tool catalog and realistic Windows launch configuration within the transport limit", async () => {
+  const names = [
+    "linear_create_attachment",
+    "linear_create_attachment_from_upload",
+    "linear_extract_images",
+    "linear_get_attachment",
+    "linear_get_document",
+    "linear_get_issue",
+    "linear_get_project",
+    "linear_get_status_updates",
+    "linear_get_user",
+    "linear_list_comments",
+    "linear_list_documents",
+    "linear_list_issue_labels",
+    "linear_list_issue_statuses",
+    "linear_list_issues",
+    "linear_list_milestones",
+    "linear_list_projects",
+    "linear_list_teams",
+    "linear_list_users",
+    "linear_prepare_attachment_upload",
+    "linear_save_comment",
+    "linear_save_issue",
+  ];
+  const command = windowsCodexLaunchCommand({
+    session: "kh2-desktop",
+    pane: "w3:p8",
+    cwd: "C:\\Users\\volpe\\repos\\rivals-agent",
+    id: "fixture",
+    bridge: await windowsCodexBridge(),
+    args: [
+      "-c",
+      'model="gpt-6-astra"',
+      "-c",
+      'model_reasoning_effort="high"',
+      "-c",
+      'model_provider="openai"',
+      "-c",
+      'cli_auth_credentials_store="file"',
+      "-c",
+      "mcp_servers.other.required=true",
+      "-c",
+      "mcp_servers.clankie.required=false",
+      "-c",
+      `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_["linear_create_attachment", "linear_create_attachment_from_upload", "linear_extract_images", "linear_get_attachment", "linear_get_document", "linear_get_issue", "linear_get_project", "linear_get_status_updates", "linear_get_user", "linear_list_comments", "linear_list_documents", "linear_list_issue_labels", "linear_list_issue_statuses", "linear_list_issues", "linear_list_milestones", "linear_list_projects", "linear_list_teams", "linear_list_users", "linear_prepare_attachment_upload", "linear_save_comment", "linear_save_issue"]=${JSON.stringify(JSON.stringify(names))}`,
+      "app-server",
+      "--listen",
+      "ws://127.0.0.1:45000",
+    ],
+  });
+  expect(command.length).toBeLessThanOrEqual(32_000);
+  expect(decoded(command)).toContain("if(command.Length>=32767)");
 });

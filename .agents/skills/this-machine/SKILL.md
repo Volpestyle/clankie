@@ -259,3 +259,12 @@ layouts and reads its native MCP configuration. A legacy Node Clankie bridge
 with both Herdr environment variables is a registration, not a missing-plugin
 repair instruction. Config inspection never proves the agent's live socket or
 tool acceptance; preserve dotfiles-generated config and use its owning setup.
+
+Service-created Windows Codex hires bind their dedicated server's original OS
+lifetime to one live native pane/thread. They require the exact worker bridge
+shipped with the service; a stale, redirected or changed installation refuses
+before the first brief. The owner can update it with `clankie herdr prepare
+FLEET_ID`. Hiring does not rewrite the remote profile. The first brief waits for
+the assigned project's granted catalog, and changed project/grant/account state
+prevents dispatch. An unbound server or an arbitrary detached daemon grants no
+authority. An uncertain hire is not permission to retry or type into its pane.

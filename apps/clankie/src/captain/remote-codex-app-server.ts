@@ -1,5 +1,11 @@
 import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
-import { windowsCodexLaunchCommand, windowsCodexStopCommand } from "../windows-codex-launch.ts";
+import {
+  windowsCodexLaunchCommand,
+  windowsCodexStopCommand,
+  windowsCodexBridge,
+  windowsCodexBridgeCheckCommand,
+  type WindowsCodexBridgeBinding,
+} from "../windows-codex-launch.ts";
 import { codexControlEndpoint, codexProcess, parseHerdrForegroundProcesses } from "./codex-seat.ts";
 import { codexProxyControl } from "./external-codex-control.ts";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -63,6 +69,7 @@ interface Started {
   readonly binding?: RemoteCodexLaunch["binding"];
   readonly shell?: RemoteCodexLaunch["shell"];
   readonly server?: RemoteCodexLaunch["server"];
+  readonly bridge?: WindowsCodexBridgeBinding;
 }
 
 function startScript(
@@ -185,6 +192,7 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
       throw new Error("unsupported: a remote Codex server takes its environment from its own machine");
     const id = randomUUID();
     const remotePort = options.remotePort?.() ?? randomInt(REMOTE_PORTS.min, REMOTE_PORTS.max + 1);
+    const bridge = options.privateSeat ? await windowsCodexBridge() : undefined;
     const started = parseStarted(
       await shell(
         fleet.ssh.shell === "powershell"
@@ -195,6 +203,7 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
                 cwd: input.cwd,
                 args: [...input.configArgs, "app-server", "--listen", `ws://127.0.0.1:${remotePort}`],
                 id,
+                bridge: bridge!,
               })
             : powershellScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id }))
           : posixScriptCommand(startScript(fleet, { ...input, env, port: remotePort, id })),
@@ -210,7 +219,14 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
               : stopCommand(fleet, started.pid),
           ).catch(() => undefined);
     const registration =
-      options.privateSeat && started.binding && started.shell && started.server
+      options.privateSeat &&
+      started.binding &&
+      started.shell &&
+      started.server &&
+      started.bridge &&
+      [started.bridge.root, started.bridge.node, started.bridge.entry].every(
+        (value) => typeof value === "string" && value.length > 0,
+      )
         ? options.privateSeat.register({
             fleet,
             pane: options.privateSeat.pane,
@@ -270,7 +286,31 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
       return raw.trim() === "true";
     };
     return {
-      ...(registration ? { remoteRegistration: registration, waitForClankieCatalog: true as const } : {}),
+      ...(registration
+        ? {
+            remoteRegistration: registration,
+            waitForClankieCatalog: true as const,
+            viewConfigArgs: [
+              "mcp_servers.clankie.enabled=true",
+              'mcp_servers.clankie.env.NODE_OPTIONS=""',
+              'mcp_servers.clankie.env.NODE_PATH=""',
+              `mcp_servers.clankie.command=${JSON.stringify(started.bridge!.node)}`,
+              `mcp_servers.clankie.args=${JSON.stringify([started.bridge!.entry])}`,
+              `mcp_servers.clankie.env.HERDR_PANE_ID=${JSON.stringify(options.privateSeat!.pane)}`,
+              `mcp_servers.clankie.env.HERDR_SOCKET_PATH=${JSON.stringify(started.binding!.socketPath)}`,
+            ].flatMap((value) => ["-c", value]),
+            validateCatalog: async () => {
+              if (closed || failure) throw new Error("Private remote bridge is unavailable");
+              if (
+                (
+                  await shell(windowsCodexBridgeCheckCommand(bridge!, started.bridge!), START_TIMEOUT_MS)
+                ).trim() !== "bridge-current"
+              )
+                throw new Error("Worker bridge installation changed; no first brief was sent");
+              if (closed || failure) throw new Error("Private remote bridge is unavailable");
+            },
+          }
+        : {}),
       endpoint: `ws://127.0.0.1:${String(remotePort)}`,
       async connect() {
         if (!(await ownsListener())) return undefined;

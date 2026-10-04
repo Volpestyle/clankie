@@ -1138,6 +1138,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.projectHires.launch(id, latest);
   }
 
+  private async expectedHireTools(input: SpawnOperatorSeat): Promise<readonly string[]> {
+    const project = this.projectContexts.get(input)?.projectId;
+    if (!project) return [];
+    if (!this.projectPolicy?.tools)
+      throw new Error("Project catalog expectation is unavailable; no brief was sent");
+    return [...new Set(await this.projectPolicy.tools(project))].sort();
+  }
+
   private async spawnAdmittedSeat(
     input: SpawnOperatorSeat,
     subjectOverride?: string,
@@ -1727,6 +1735,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (authority !== undefined) await assertConversationAuthority(authority);
       if (adapter !== undefined && (brief !== undefined || resume !== undefined)) {
         const runInPane = this.runner.runInPane!;
+        const expectedToolNames =
+          adapter.harness === "codex" ? await this.expectedHireTools(input) : undefined;
+        const checkExpectedTools = async () => {
+          if (
+            expectedToolNames !== undefined &&
+            JSON.stringify(await this.expectedHireTools(input)) !== JSON.stringify(expectedToolNames)
+          )
+            throw new Error("Project granted tools changed during native startup; no brief was sent");
+        };
         startAttempted = true;
         const started = await adapter.start(
           {
@@ -1742,9 +1759,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
           {
             paneId,
             name: subject,
+            ...(expectedToolNames === undefined ? {} : { expectedToolNames }),
             guard: async () => {
               if (authority !== undefined) await assertConversationAuthority(authority);
               await this.admitProjectLaunch(input);
+              await checkExpectedTools();
             },
             bound: async (ref) => {
               if (ref.paneId !== paneId || ref.harness !== input.harness || !ref.sessionId)
@@ -1760,16 +1779,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
                 nativeSessionId(current) === ref.sessionId;
               if (!matches(agent)) throw new Error("Native hire binding does not match the live session");
               await this.observeHireIdentity(receiptKey, agent, input, authority, true);
-              const project = this.projectContexts.get(input)?.projectId;
-              if (project && !this.projectPolicy?.tools)
-                throw new Error("Project catalog expectation is unavailable; no brief was sent");
-              const expectedToolNames = project ? await this.projectPolicy!.tools!(project) : [];
+              const currentToolNames = await this.expectedHireTools(input);
+              await checkExpectedTools();
               const final = await this.runner.get(paneId);
               if (!matches(final) || final.terminalId !== agent.terminalId)
                 throw new Error("Native hire changed while binding; no brief was sent");
               if (authority !== undefined) await assertConversationAuthority(authority);
               await this.admitProjectLaunch(input);
-              return { expectedToolNames };
+              return { expectedToolNames: currentToolNames };
             },
             run: async (argv) => {
               if (authority !== undefined) await assertConversationAuthority(authority);

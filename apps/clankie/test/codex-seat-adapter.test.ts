@@ -64,7 +64,11 @@ describe("Codex harness seat adapter", () => {
     });
     const started = await adapter.start({ harness: "codex", cwd: "/scratch", brief: "" }, f.view);
     expect(started.outcome).toBe("started");
-    expect(f.start.mock.calls[0]![0].config).toEqual([...inherited, "mcp_servers.clankie.required=false"]);
+    expect(f.start.mock.calls[0]![0].config).toEqual([
+      ...inherited,
+      "mcp_servers.clankie.required=false",
+      'mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"',
+    ]);
     if (started.outcome === "started") await started.control.close();
     const ordinary = createCodexSeatAdapter({
       start: f.start,
@@ -74,6 +78,35 @@ describe("Codex harness seat adapter", () => {
     const local = await ordinary.start({ harness: "codex", cwd: "/scratch", brief: "" }, f.view);
     expect(f.start.mock.calls.at(-1)![0].config).toEqual(inherited);
     if (local.outcome === "started") await local.control.close();
+  });
+
+  it("passes a deny-only expected catalog to the dedicated server and rejects a changed binding", async () => {
+    const f = fixture();
+    const adapter = createCodexSeatAdapter({
+      start: f.start,
+      herdr: f.herdr,
+      trackerOverrides: async () => [],
+      serverForView: () => async () => {
+        throw new Error("fixture");
+      },
+    });
+    const result = await adapter.start(
+      { harness: "codex", cwd: "/scratch", brief: "first" },
+      {
+        ...f.view,
+        expectedToolNames: ["linear_get_issue"],
+        bound: async () => ({ expectedToolNames: ["linear_get_team"] }),
+      },
+    );
+    expect(result).toMatchObject({
+      outcome: "failed",
+      detail: expect.stringContaining("granted tools changed"),
+    });
+    expect(f.start.mock.calls[0]![0].config).toContain(
+      `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(["linear_get_issue"]))}`,
+    );
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.close).toHaveBeenCalledOnce();
   });
 
   it("resumes the exact existing thread without creating or prompting a fresh session", async () => {

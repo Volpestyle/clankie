@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { powershellLiteral, powershellScriptCommand } from "./herdr-fleet.ts";
 
 const launcher = String.raw`
@@ -42,6 +44,7 @@ public static class ClankieCodexLaunch {
   public static Result Start(string exe,string[] args,string cwd,string environment) {
     var startup=new Startup {size=Marshal.SizeOf(typeof(Startup))};var created=new Created();
     var command=new StringBuilder(Quote(exe));foreach(string arg in args)command.Append(' ').Append(Quote(arg));
+    if(command.Length>=32767)throw new Exception("Native Codex command exceeds Windows limit; no agent created");
     IntPtr env=Marshal.StringToHGlobalUni(environment);bool resumed=false;
     try {
       // Original process handle, suspended; no inherited SSH handles. Breakaway is mandatory.
@@ -59,6 +62,75 @@ public static class ClankieCodexLaunch {
 }
 `;
 
+export interface WindowsCodexBridge {
+  readonly version: string;
+  readonly files: Readonly<Record<string, string>>;
+}
+export interface WindowsCodexBridgeBinding {
+  readonly root: string;
+  readonly node: string;
+  readonly entry: string;
+}
+/** Exact service-packaged modules, not a claimed version or a discovery file. */
+export async function windowsCodexBridge(): Promise<WindowsCodexBridge> {
+  const paths = [
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    "bin/fleet-mcp.mjs",
+    "bin/seat-channel.mjs",
+    "bin/link.mjs",
+    "bin/inbound-receipt.mjs",
+  ];
+  const files: Record<string, string> = {};
+  let version: string | undefined;
+  for (const path of paths) {
+    const bytes = await readFile(
+      new URL(`../../../integrations/claude-plugin/worker/${path}`, import.meta.url),
+    );
+    files[path] = createHash("sha256").update(bytes).digest("hex");
+    if (path.endsWith("plugin.json")) {
+      const observed = (JSON.parse(bytes.toString("utf8")) as { version?: unknown }).version;
+      if (typeof observed !== "string" || (version !== undefined && observed !== version))
+        throw new Error("Worker bridge manifests disagree");
+      version = observed;
+    }
+  }
+  return { version: version!, files };
+}
+
+function bridgeScript(expected: WindowsCodexBridge, pinned?: WindowsCodexBridgeBinding): string {
+  return `
+$bridgeRoot=[ClankieCodexLaunch]::DirectoryCanonical((Join-Path $env:USERPROFILE '.clankie\\claude-plugin\\worker'))
+$nodes=@(Get-Command node.exe -All -CommandType Application -ErrorAction SilentlyContinue | ForEach-Object {[ClankieCodexLaunch]::Canonical($_.Source)} | Select-Object -Unique)
+if($nodes.Count -ne 1){throw 'Unique installed native Node unavailable'}
+$bridgeNode=$nodes[0]
+$bridgeEntry=Join-Path $bridgeRoot 'bin\\fleet-mcp.mjs'
+${pinned ? `if($bridgeRoot -cne ${powershellLiteral(pinned.root)} -or $bridgeNode -cne ${powershellLiteral(pinned.node)} -or $bridgeEntry -cne ${powershellLiteral(pinned.entry)}){throw 'Worker bridge installation changed'}` : ""}
+${Object.entries(expected.files)
+  .map(
+    ([path, hash]) => `$module=Join-Path $bridgeRoot ${powershellLiteral(path.replaceAll("/", "\\"))}
+if([ClankieCodexLaunch]::Canonical($module) -cne $module -or (Get-FileHash -LiteralPath $module -Algorithm SHA256).Hash.ToLowerInvariant() -cne ${powershellLiteral(hash)}){throw 'Worker bridge is stale or redirected; owner preparation required'}`,
+  )
+  .join("\n")}
+foreach($manifest in @('.claude-plugin\\plugin.json','.codex-plugin\\plugin.json')){
+ if((Get-Content -Raw -LiteralPath (Join-Path $bridgeRoot $manifest) | ConvertFrom-Json).version -cne ${powershellLiteral(expected.version)}){throw 'Worker bridge version is stale; owner preparation required'}
+}
+`;
+}
+
+export function windowsCodexBridgeCheckCommand(
+  expected: WindowsCodexBridge,
+  pinned: WindowsCodexBridgeBinding,
+): string {
+  return powershellScriptCommand(`$ErrorActionPreference='Stop'
+if (-not ('ClankieCodexLaunch' -as [type])) { Add-Type -TypeDefinition @'
+${launcher}
+'@
+}
+${bridgeScript(expected, pinned)}
+'bridge-current'`);
+}
+
 export function windowsCodexStopCommand(server: { pid: number; startTime: string }): string {
   return powershellScriptCommand(`$ErrorActionPreference='Stop'
 if (-not ('ClankieCodexLaunch' -as [type])) { Add-Type -TypeDefinition @'
@@ -74,12 +146,14 @@ export function windowsCodexLaunchCommand(input: {
   cwd: string;
   args: readonly string[];
   id: string;
+  bridge: WindowsCodexBridge;
 }): string {
-  return powershellScriptCommand(`$ErrorActionPreference='Stop'
+  const command = powershellScriptCommand(`$ErrorActionPreference='Stop'
 if (-not ('ClankieCodexLaunch' -as [type])) { Add-Type -TypeDefinition @'
 ${launcher}
 '@
 }
+${bridgeScript(input.bridge)}
 $session=${powershellLiteral(input.session)}
 $pane=${powershellLiteral(input.pane)}
 $bindings=@((& herdr session list --json | ConvertFrom-Json).sessions | Where-Object { $_.name -ceq $session -and $_.running })
@@ -103,7 +177,14 @@ $environment=[Environment]::GetEnvironmentVariables()
 $environment['HERDR_PANE_ID']=$pane
 $environment['HERDR_SOCKET_PATH']=$bindings[0].socket_path
 $block=(@($environment.Keys | Sort-Object | ForEach-Object {[string]$_ + '=' + [string]$environment[$_]}) -join [char]0) + [char]0 + [char]0
-$created=[ClankieCodexLaunch]::Start($installed[0],[string[]]@(${input.args.map(powershellLiteral).join(",")}),$cwd,$block)
-[ordered]@{pid=$created.pid;log='';binding=[ordered]@{session=$session;socketPath=$bindings[0].socket_path};shell=[ordered]@{pid=$shell.pid;startTime=$shell.startTime};server=[ordered]@{pid=$created.pid;startTime=$created.startTime;executable=$installed[0]}} | ConvertTo-Json -Compress -Depth 5
+$bridgeConfig=[string[]]@('-c','mcp_servers.clankie.enabled=true','-c','mcp_servers.clankie.env.NODE_OPTIONS=""','-c','mcp_servers.clankie.env.NODE_PATH=""','-c',('mcp_servers.clankie.command=' + (ConvertTo-Json -InputObject $bridgeNode -Compress)),'-c',('mcp_servers.clankie.args=' + (ConvertTo-Json -InputObject @($bridgeEntry) -Compress)),'-c',('mcp_servers.clankie.env.HERDR_PANE_ID=' + (ConvertTo-Json -InputObject $pane -Compress)),'-c',('mcp_servers.clankie.env.HERDR_SOCKET_PATH=' + (ConvertTo-Json -InputObject $bindings[0].socket_path -Compress)))
+$serverArgs=@(${input.args.slice(0, -3).map(powershellLiteral).join(",")}) + $bridgeConfig + @(${input.args.slice(-3).map(powershellLiteral).join(",")})
+$created=[ClankieCodexLaunch]::Start($installed[0],[string[]]$serverArgs,$cwd,$block)
+[ordered]@{pid=$created.pid;log='';bridge=[ordered]@{root=$bridgeRoot;node=$bridgeNode;entry=$bridgeEntry};bridgeConfig=$bridgeConfig;binding=[ordered]@{session=$session;socketPath=$bindings[0].socket_path};shell=[ordered]@{pid=$shell.pid;startTime=$shell.startTime};server=[ordered]@{pid=$created.pid;startTime=$created.startTime;executable=$installed[0]}} | ConvertTo-Json -Compress -Depth 5
 `);
+  // Includes the PowerShell executable/flags; reserve 767 characters for sshd
+  // default-shell wrapping and the terminating NUL. Reject before any SSH call.
+  if (command.length > 32_000)
+    throw new Error("Windows Codex launch command exceeds 32000 characters; no agent created");
+  return command;
 }

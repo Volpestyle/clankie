@@ -151,6 +151,8 @@ interface CodexServerConnection {
   readonly pid?: number;
   readonly remoteRegistration?: RemoteCodexRegistration;
   readonly waitForClankieCatalog?: true;
+  readonly viewConfigArgs?: readonly string[];
+  validateCatalog?(): Promise<void>;
   readonly endpoint: string;
   connect(): Promise<WebSocket | undefined>;
   /** Why the server is gone, once it is. */
@@ -435,6 +437,7 @@ export async function startCodexAppServerSeat(options: {
     }
     const viewArgs = [
       ...configArgs,
+      ...(server.viewConfigArgs ?? []),
       "--remote",
       endpoint,
       ...(options.model ? ["--model", options.model] : []),
@@ -533,6 +536,7 @@ export async function startCodexAppServerSeat(options: {
     let expectedTools: readonly string[] = ["message_clankie"];
     const waitForCatalog = async () => {
       if (catalogReady) return;
+      await server.validateCatalog?.();
       const deadline = Date.now() + 20_000;
       while (Date.now() < deadline) {
         options.signal?.throwIfAborted();
@@ -567,6 +571,7 @@ export async function startCodexAppServerSeat(options: {
       }
       throw new Error("Private Codex Clankie catalog was not ready; no first turn was sent");
     };
+    let firstDispatch = true;
     let sending: Promise<unknown> = Promise.resolve();
     return {
       expectTools(names) {
@@ -595,6 +600,8 @@ export async function startCodexAppServerSeat(options: {
             }
             await checkPolicy();
           }
+          // Recheck the installed contract after every startup/catalog await.
+          if (firstDispatch) await server.validateCatalog?.();
           // Initial brief authority expires independently of later follow-up turns.
           await guard?.();
           const steering = activeTurn;
@@ -620,6 +627,7 @@ export async function startCodexAppServerSeat(options: {
             }),
           );
           const turnId = steering ? response.turnId : record(response.turn).id;
+          firstDispatch = false;
           if (typeof turnId !== "string")
             throw new Error("Codex did not confirm the turn identity; delivery is uncertain");
           await subscribe();

@@ -1,7 +1,7 @@
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import type { SavedAgentSession } from "../src/agent-sessions.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -49,18 +49,21 @@ const proof: ProjectHireProcessProof = {
   processes: [{ pid: 22, startTime: "today" }],
   shell: { pid: 11, startTime: "earlier" },
 };
-async function fixture() {
+async function fixture(harness: "claude" | "codex" = "claude") {
   const root = await mkdtemp(join(tmpdir(), "project-hires-"));
   roots.push(root);
   const projectSettings = settings();
+  projectSettings.projects[0]!.roles[0]!.harness = harness;
+  if (harness === "codex") await writeFile(join(root, "auth.json"), "fixture presence only");
   const agent: HerdrAgentSnapshot = {
     paneId: "p1",
     terminalId: "t1",
     title: "Implement",
-    agent: "claude",
+    agent: harness,
     status: "working",
-    session: { source: "claude", kind: "id", value: "s1" },
+    session: { source: harness, kind: "id", value: "s1" },
   };
+  const processProof = { ...proof, nativeOccupantId: occupantIdForHerdrSession(agent.session!) };
   const runner: HerdrWatchRunner = {
     get: vi.fn(async () => agent),
     resolveTerminal: vi.fn(async () => agent),
@@ -73,17 +76,18 @@ async function fixture() {
   const path = join(root, "watches.json");
   const options = {
     runner,
+    codexAccounts: async () => [{ label: "fixture", home: root }],
     projectHirePolicy: {
       settings: async () => projectSettings,
       tools: async () => ["linear_get_issue"],
       project: async () => "game",
       proof: vi.fn(async (fleet: string, pane: string) =>
-        fleet === "default" && pane === "p1" ? proof : undefined,
+        fleet === "default" && pane === "p1" ? processProof : undefined,
       ),
     },
   };
   const store = new HerdrWatchStore(path, options);
-  return { root, path, runner, projectSettings, store, options, agent };
+  return { root, path, runner, projectSettings, store, options, agent, processProof };
 }
 
 describe("project hiring", () => {
@@ -97,27 +101,34 @@ describe("project hiring", () => {
     "missing-proof",
     "readiness-retarget",
     "readiness-role",
+    "binding-grants",
+    "readiness-grants",
+    "readiness-account",
   ])(
     "records project assignment before the first brief only for a current bound native seat: %s",
     async (mode) => {
-      const f = await fixture();
+      const f = await fixture("codex");
+      const proof = f.processProof;
       f.store.close();
       f.runner.runInPane = async () => {};
       const brief = vi.fn();
       let store: HerdrWatchStore;
-      const ref = { harness: "claude" as const, paneId: "p1", sessionId: "s1" };
+      const ref = { harness: "codex" as const, paneId: "p1", sessionId: "s1" };
       const adapter: HarnessSeatAdapter = {
-        harness: "claude",
+        harness: "codex",
         attach: async () => undefined,
         start: async (_launch, view) => {
-          await view.start?.("claude", []);
+          expect(view.expectedToolNames).toEqual(["linear_get_issue"]);
+          await view.start?.("codex", []);
           const claimed = {
             ...ref,
             ...(mode === "wrong-pane" ? { paneId: "victim" } : {}),
-            ...(mode === "wrong-harness" ? { harness: "codex" as const } : {}),
+            ...(mode === "wrong-harness" ? { harness: "claude" as const } : {}),
             ...(mode === "wrong-session" ? { sessionId: "victim" } : {}),
           };
           try {
+            if (mode === "binding-grants")
+              f.options.projectHirePolicy.tools = async () => ["linear_get_team"];
             const bound = await view.bound?.(claimed);
             expect(bound).toEqual({ expectedToolNames: ["linear_get_issue"] });
             expect(store.projectHireAssignment("default", "p1", proof)).toMatchObject({
@@ -126,6 +137,12 @@ describe("project hiring", () => {
             });
             if (mode === "readiness-retarget") f.options.projectHirePolicy.project = async () => "foreign";
             if (mode === "readiness-role") f.projectSettings.projects[0]!.roles[0]!.model = "changed";
+            if (mode === "readiness-grants")
+              f.options.projectHirePolicy.tools = async () => ["linear_get_team"];
+            if (mode === "readiness-account")
+              f.options.projectHirePolicy.tools = async () => {
+                throw new Error("account changed");
+              };
             await view.guard?.();
             brief();
             return { outcome: "started", control: { ref } as SeatControl };
@@ -139,7 +156,7 @@ describe("project hiring", () => {
         f.options.projectHirePolicy.proof.mockImplementation(async () => {
           vi.mocked(f.runner.get).mockResolvedValue({
             ...f.agent,
-            session: { source: "claude", kind: "id", value: "replacement" },
+            session: { source: "codex", kind: "id", value: "replacement" },
           });
           return proof;
         });

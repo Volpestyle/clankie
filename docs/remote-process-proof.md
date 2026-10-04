@@ -106,6 +106,18 @@ the original PID and checks its full creation timestamp on the held handle befor
 termination, so a reused PID is not killed. An unavailable SSH cleanup cannot
 restore authority. A service restart does not adopt detached survivors.
 
+Before a dedicated Windows launch, Clankie checks both worker manifests and the
+SHA-256 bytes of the fixed installed `fleet-mcp.mjs`, `seat-channel.mjs`,
+`link.mjs` and `inbound-receipt.mjs` against his own packaged worker. Canonical
+paths must remain under the fixed worker root, and installed `node.exe` must be
+unique. A stale, redirected or corrupt installation refuses before native launch;
+hiring never prepares or rewrites it. The service chooses the fixed node command,
+entry argv and trusted Herdr variables for both server and view. It clears only
+that bridge's Node loader overrides (`NODE_OPTIONS`/`NODE_PATH`), preserves other
+environment settings, and checks the same modules and paths again before the
+first brief. This assumes the same installed-code trust boundary as native
+executable discovery; it is not a defense against arbitrary same-user code tampering.
+
 Only the service-owned dedicated remote launch overrides
 `mcp_servers.clankie.required=false` in both server and view arguments. Other
 servers retain their required flags; owner configuration is unchanged. An
@@ -127,10 +139,38 @@ account bindings fail startup. Project admission is rechecked after readiness,
 immediately before dispatch. A missing or failed catalog prevents the first turn;
 this readiness state never substitutes for fresh per-tool authorization.
 
+The controller also captures expected granted tool names before launch and
+passes `CLANKIE_EXPECTED_TOOL_NAMES` only to that dedicated Clankie MCP bridge.
+This is a deny-only hint: malformed JSON refuses discovery and no value adds a
+grant. A nonempty expectation requires every successful `tools/list` to contain
+all expected tools. Missing, denied, malformed or incomplete paginated discovery
+returns an MCP error after the bounded startup lookup instead of a fallback-only
+success. Generic/no-grant bridges keep the existing fallback. Fresh expectations
+must still equal the captured set after binding and after readiness; changed
+project grants or account bindings prevent the brief.
+
+Codex's status API combines a live-thread connection status with a separate
+catalog snapshot. The fixed bridge contract is what closes that gap: Codex
+constructs its connected managed client only after an uncached initial
+`tools/list` succeeds. With this verified bridge, that success includes the
+captured expected tools. A status snapshot or version by itself is insufficient.
+
 The atomic launch inherits the remote machine's environment, including its
-provider/account context, and resolves the two Herdr discovery variables from
-the live allocated pane. As before, arbitrary Mac environment overrides are
-unsupported. The detached launch has no inherited SSH stdio or diagnostic log;
+provider/account variables, and resolves the two Herdr discovery variables from
+the live allocated pane. It executes the verified native binary directly;
+wrapper-specific context selection is not imported. The selected remote account
+therefore remains an explicit part of owner acceptance. As before, arbitrary Mac environment overrides are
+unsupported. The full encoded PowerShell command is capped at 32,000 characters before SSH,
+reserving 767 characters below the Windows limit for shell wrapping and the NUL.
+The native argument string is checked separately before `CreateProcessW`. An
+oversized configuration fails with no agent created. The actual 21 qualified
+Linear names plus model, provider, effort, account-storage and other-server
+configuration measured 30,266 characters (1,734 below the transport cap); its
+full script passed a read-only Windows parser control. The Herdr socket path is
+resolved on the PC rather than embedded in that encoded command, and remains
+covered by the native argument bound.
+
+The detached launch has no inherited SSH stdio or diagnostic log;
 actual native app-server startup remains part of owner acceptance.
 
 The atomic launch mechanism has an OS-only bounded sleeper check; native hired

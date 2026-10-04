@@ -91,7 +91,7 @@ function fleetTools(current, refresh) {
         params: {
           protocolVersion: "2025-06-18",
           capabilities: {},
-          clientInfo: { name: "clankie-worker", version: "0.4.0" },
+          clientInfo: { name: "clankie-worker", version: "0.5.0" },
         },
       },
       signal,
@@ -122,7 +122,21 @@ function fleetTools(current, refresh) {
   return {
     async list(signal) {
       try {
-        return (await request("tools/list", {}, signal))?.tools ?? [];
+        const tools = [];
+        const cursors = new Set();
+        let cursor;
+        for (let page = 0; page < 32; page++) {
+          const result = await request("tools/list", cursor === undefined ? {} : { cursor }, signal);
+          if (!Array.isArray(result?.tools)) throw new Error("Malformed granted catalog");
+          tools.push(...result.tools);
+          if (tools.length > 4096) throw new Error("Granted catalog exceeds its bound");
+          if (result.nextCursor == null) return tools;
+          if (typeof result.nextCursor !== "string" || !result.nextCursor || cursors.has(result.nextCursor))
+            throw new Error("Invalid granted catalog pagination");
+          cursor = result.nextCursor;
+          cursors.add(cursor);
+        }
+        throw new Error("Granted catalog pagination exceeds its bound");
       } catch {
         // A settling native occupant can invalidate its first MCP session.
         // Only discovery discards it; tool calls retain their existing retry rules.
@@ -157,11 +171,35 @@ export function runSeatChannel({ paneId, parentArgv }) {
           throw new Error("no link");
         },
       };
+  // A controller-supplied expectation can only deny discovery, never grant tools.
+  let expectedToolNames = [];
+  let expectationError;
+  try {
+    const raw = process.env.CLANKIE_EXPECTED_TOOL_NAMES;
+    const parsed = raw === undefined ? [] : JSON.parse(raw);
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length > 4096 ||
+      parsed.some((name) => typeof name !== "string" || !name || name.length > 256)
+    )
+      throw new Error("Invalid expected tool names");
+    expectedToolNames = [...new Set(parsed)];
+  } catch {
+    expectationError = new Error("Invalid Clankie tool catalog expectation");
+  }
+  const expectedPresent = (tools) =>
+    expectedToolNames.every((name) => tools.some((tool) => tool?.name === name));
+  const requireExpected = (tools) => {
+    if (expectationError) throw expectationError;
+    if (!expectedPresent(tools)) throw new Error("Clankie's expected granted catalog is unavailable");
+    return tools;
+  };
   let grantedNames = "";
   let firstListComplete = false;
   let firstListPending;
   const listGrantedTools = () => {
-    if (firstListComplete || !link) return granted.list();
+    if (expectationError) return Promise.reject(expectationError);
+    if (firstListComplete || !link) return granted.list().then(requireExpected);
     // Concurrent first requests share the bounded lookup, never an authority cache.
     firstListPending ??= (async () => {
       const signal = AbortSignal.timeout(FIRST_TOOLS_WAIT_MS);
@@ -171,13 +209,13 @@ export function runSeatChannel({ paneId, parentArgv }) {
         while (!signal.aborted) {
           const tools = await granted.list(signal);
           if (signal.aborted) break;
-          if (tools.length) return tools;
+          if (tools.length && expectedPresent(tools)) return tools;
           const remaining = deadline - performance.now();
           if (remaining <= 0) break;
           await delay(Math.min(backoff, remaining));
           backoff = Math.min(backoff * 2, RETRY_MS);
         }
-        return [];
+        return requireExpected([]);
       } finally {
         firstListComplete = true;
         firstListPending = undefined;
@@ -290,7 +328,7 @@ export function runSeatChannel({ paneId, parentArgv }) {
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
           capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
-          serverInfo: { name: "clankie-worker", version: "0.4.0" },
+          serverInfo: { name: "clankie-worker", version: "0.5.0" },
           instructions: sharedDaemon ? `${INSTRUCTIONS} ${SHARED_DAEMON_NOTE}` : INSTRUCTIONS,
         },
       });
@@ -356,7 +394,17 @@ export function runSeatChannel({ paneId, parentArgv }) {
         send({ id: null, error: { code: -32700, message: "Parse error" } });
         continue;
       }
-      void handle(message).catch((error) => log(String(error)));
+      void handle(message).catch((error) => {
+        log(String(error));
+        if (message.id !== undefined)
+          send({
+            id: message.id,
+            error: {
+              code: -32000,
+              message: error instanceof Error ? error.message : "Clankie request failed",
+            },
+          });
+      });
     }
   });
   const stop = () => {

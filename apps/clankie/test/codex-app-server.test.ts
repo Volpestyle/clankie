@@ -111,7 +111,7 @@ describe("trusted native seat policy", () => {
   async function fixture(
     policy: import("../src/captain/codex-app-server.ts").CodexNativePolicy,
     callerEnv?: Record<string, string>,
-    catalog?: { result: unknown; read(): void },
+    catalog?: { result: unknown; read(): void; validate?(): Promise<void> },
   ) {
     const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
     await once(server, "listening");
@@ -162,7 +162,12 @@ describe("trusted native seat policy", () => {
         launches.push(input);
         return {
           endpoint: "fixture",
-          ...(catalog ? { waitForClankieCatalog: true as const } : {}),
+          ...(catalog
+            ? {
+                waitForClankieCatalog: true as const,
+                ...(catalog.validate ? { validateCatalog: catalog.validate } : {}),
+              }
+            : {}),
           failure: () => undefined,
           output: () => "",
           close: async () => {
@@ -254,6 +259,43 @@ describe("trusted native seat policy", () => {
     seat.expectTools?.([]);
     try {
       expect(await seat.send("generic brief")).toMatchObject({ turnId: "turn" });
+    } finally {
+      await seat.close();
+    }
+  });
+
+  it.each([1, 2])("refuses installed bridge drift at validation %i before any first turn", async (failAt) => {
+    let validations = 0;
+    const f = await fixture(
+      {
+        connected: async () => {},
+        beforeTurn: async () => {},
+        audit: async () => {},
+        failed: async () => {},
+      },
+      undefined,
+      {
+        result: {
+          data: [
+            {
+              name: "clankie",
+              runtimeStatus: "connected",
+              tools: { message_clankie: {}, linear_get_issue: {} },
+            },
+          ],
+        },
+        read: () => {},
+        validate: async () => {
+          if (++validations === failAt) throw new Error("worker bridge changed");
+        },
+      },
+    );
+    const seat = await f.pending;
+    seat.expectTools?.(["linear_get_issue"]);
+    try {
+      await expect(seat.send("never dispatch")).rejects.toThrow("worker bridge changed");
+      expect(f.methods).not.toContain("turn/start");
+      expect(validations).toBe(failAt);
     } finally {
       await seat.close();
     }

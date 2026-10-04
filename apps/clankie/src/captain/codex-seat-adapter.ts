@@ -168,7 +168,12 @@ export function createCodexSeatAdapter(
           );
           // Only this dedicated remote launch must bootstrap before Clankie's
           // project assignment exists. Other servers retain their required flags.
-          if (options.serverForView) trackerOverrides.push("mcp_servers.clankie.required=false");
+          const expectedToolNames = [...new Set(view.expectedToolNames ?? [])].sort();
+          if (options.serverForView)
+            trackerOverrides.push(
+              "mcp_servers.clankie.required=false",
+              `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(expectedToolNames))}`,
+            );
           // A private local app-server needs the same worker bridge even when its
           // selected account has no user-scoped MCP registration. This grants no tools.
           if (options.localProcess)
@@ -233,6 +238,12 @@ export function createCodexSeatAdapter(
           await reporting;
           await view.guard?.();
           const bound = await view.bound?.(ref);
+          if (
+            options.serverForView &&
+            JSON.stringify([...new Set(bound?.expectedToolNames ?? [])].sort()) !==
+              JSON.stringify(expectedToolNames)
+          )
+            throw new Error("Project granted tools changed while binding; no brief was sent");
           seat.expectTools?.(bound?.expectedToolNames ?? []);
           let initialDispatch = Boolean(launch.brief);
           const control: SeatControl = {
