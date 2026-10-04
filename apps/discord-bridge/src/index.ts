@@ -1,3 +1,7 @@
+import {
+  createMinecraftLoginCodeDelivery,
+  tryHandleMinecraftLoginCodeRequest,
+} from "@clankie/discord-presence-core";
 import { voiceRoomEvidence } from "@clankie/discord-presence-core";
 import { tryHandleVoiceOutputControl } from "@clankie/discord-presence-core";
 import { tryHandleBodyVoiceReconcile } from "@clankie/discord-presence-core";
@@ -1840,6 +1844,13 @@ if (textIngress !== undefined) {
 }
 
 const musicControlPort = Number.parseInt(process.env.CLANKIE_DISCORD_BRIDGE_CONTROL_PORT ?? "4313", 10);
+const deliverMinecraftLoginCode = createMinecraftLoginCodeDelivery({
+  apiUrl,
+  bridgeToken,
+  discordToken: token,
+  transport: "bot",
+  getCredential: (providerId) => credentialStore.get(providerId),
+});
 const musicServer = createServer((request, response) => {
   const url = request.url ?? "/";
   if (request.method === "GET" && (url === "/" || url === "/health")) {
@@ -1944,6 +1955,7 @@ const musicServer = createServer((request, response) => {
     })
   )
     return;
+  if (tryHandleMinecraftLoginCodeRequest(request, response, deliverMinecraftLoginCode)) return;
   if (tryHandleCaptainDiscordActionRequest(request, response, executeCaptainDiscordAction)) return;
   response.writeHead(404);
   response.end();

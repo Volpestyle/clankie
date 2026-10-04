@@ -299,3 +299,7 @@ export {
 export { tryHandleVoiceOutputControl, type VoiceOutputControlPort } from "./voice-output-control.ts";
 
 export { voiceRoomEvidence } from "./voice-room-evidence.ts";
+export {
+  createMinecraftLoginCodeDelivery,
+  tryHandleMinecraftLoginCodeRequest,
+} from "./minecraft-login-code.ts";
