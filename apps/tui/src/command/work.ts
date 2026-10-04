@@ -1,3 +1,9 @@
+import { randomUUID } from "node:crypto";
+import {
+  WorkItemWriteRequestSchema,
+  WorkItemWriteReceiptRequestSchema,
+  WorkItemWriteReceiptSchema,
+} from "@clankie/protocol/work-item-write";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
@@ -9,6 +15,7 @@ const WORK_USAGE = [
   "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--note TEXT]",
   "  | list [--status S,S] [--owner O] [--label L] | show ID | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S]",
   "  | update ID [--status S] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
+  "  | write ID --owner O|--no-owner|--add-label L|--remove-label L|--add-blocker ID [--request-id UUID] | receipt ID --request-id UUID",
   "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
 ].join("\n");
@@ -138,6 +145,51 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
           : { addCriteria: many(parsed, "--add-criterion") }),
       };
     }
+    case "write": {
+      if (rest.length !== 1) throw new Error(WORK_USAGE);
+      const commands = [
+        ...(one(parsed, "--owner") === undefined
+          ? []
+          : [{ action: "assign", owner: one(parsed, "--owner") }]),
+        ...(one(parsed, "--no-owner") === "true" ? [{ action: "assign", owner: null }] : []),
+        ...(one(parsed, "--add-label") === undefined
+          ? []
+          : [{ action: "add_label", label: one(parsed, "--add-label") }]),
+        ...(one(parsed, "--remove-label") === undefined
+          ? []
+          : [{ action: "remove_label", label: one(parsed, "--remove-label") }]),
+        ...(one(parsed, "--add-blocker") === undefined
+          ? []
+          : [{ action: "add_dependency", id: one(parsed, "--add-blocker") }]),
+      ];
+      if (commands.length !== 1) throw new Error("Choose exactly one work-item write operation.");
+      const allowed = new Set([
+        "--owner",
+        "--no-owner",
+        "--add-label",
+        "--remove-label",
+        "--add-blocker",
+        "--request-id",
+      ]);
+      for (const [flag, values] of parsed.flags)
+        if (!allowed.has(flag) || values.length !== 1) throw new Error(WORK_USAGE);
+      return {
+        action: "write",
+        request: {
+          repoId: repo,
+          itemId: rest[0],
+          requestId: one(parsed, "--request-id") ?? randomUUID(),
+          command: commands[0],
+        },
+      };
+    }
+    case "receipt": {
+      if (rest.length !== 1 || !one(parsed, "--request-id")) throw new Error(WORK_USAGE);
+      return {
+        action: "write_receipt",
+        request: { repoId: repo, itemId: rest[0], requestId: one(parsed, "--request-id") },
+      };
+    }
     case "attach": {
       const url = one(parsed, "--url");
       const caption = one(parsed, "--caption");
@@ -185,12 +237,73 @@ export async function runWorkCommand(
   const request = workRequest(withoutRepo, repo);
   const credential = await resolveOperatorCredential({ env });
   if (!credential) throw new Error("Work tracking needs the operator credential. Run clankie doctor.");
-  const response = await (options.fetchImpl ?? fetch)(`${commandHost({ env })}/v1/work`, {
-    method: "POST",
-    body: JSON.stringify(request),
-    headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-    signal: AbortSignal.timeout(60_000),
-  });
-  const body = (await response.json().catch(() => ({ error: `HTTP ${String(response.status)}` }))) as unknown;
-  return { ok: response.ok, body };
+  const fetcher = options.fetchImpl ?? fetch;
+  const endpoint = `${commandHost({ env })}/v1/work`;
+  const headers = { authorization: `Bearer ${credential.token}`, "content-type": "application/json" };
+  const writing = request.action === "write";
+  const journaled = writing || request.action === "write_receipt";
+  const input = journaled
+    ? (request.request as { repoId: string; itemId: string; requestId: string })
+    : undefined;
+  if (input && repo.startsWith("/")) {
+    const response = await fetcher(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "repos" }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) throw new Error("Cannot read registered work repositories.");
+    const inventory = (await response.json()) as { repos?: { id: string; root?: string }[] };
+    const registered = inventory.repos?.find((entry) => entry.root === repo);
+    if (!registered)
+      return {
+        ok: false,
+        body: {
+          requestId: input.requestId,
+          outcome: "refused",
+          message: "Register this repository with clankie work status before writing.",
+        },
+      };
+    input.repoId = registered.id;
+  }
+  if (input)
+    request.request = writing
+      ? WorkItemWriteRequestSchema.parse(input)
+      : WorkItemWriteReceiptRequestSchema.parse(input);
+  try {
+    const response = await fetcher(endpoint, {
+      method: "POST",
+      body: JSON.stringify(request),
+      headers,
+      signal: AbortSignal.timeout(60_000),
+    });
+    const body = (await response.json()) as unknown;
+    if (writing && input) {
+      const parsedReceipt = WorkItemWriteReceiptSchema.safeParse(body);
+      if (parsedReceipt.success)
+        return { ok: parsedReceipt.data.outcome === "applied", body: parsedReceipt.data };
+      return {
+        ok: false,
+        body: {
+          requestId: input.requestId,
+          outcome: response.status >= 400 && response.status < 500 ? "refused" : "uncertain",
+          message:
+            response.status >= 400 && response.status < 500
+              ? "The owner-authorized work-item write was refused."
+              : "The response was lost. Read this receipt and the tracker; never resend this request.",
+        },
+      };
+    }
+    return { ok: response.ok, body };
+  } catch (error) {
+    if (!writing || !input) throw error;
+    return {
+      ok: false,
+      body: {
+        requestId: input.requestId,
+        outcome: "uncertain",
+        message: "The write may have happened. Read this receipt and the tracker; never resend this request.",
+      },
+    };
+  }
 }

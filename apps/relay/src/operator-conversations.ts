@@ -283,10 +283,15 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "input_get" ||
       serviceRequest.op === "input_answer" ||
       serviceRequest.op === "input_cancel";
+    const workWriteOp =
+      serviceRequest.op === "work_item_write" || serviceRequest.op === "work_item_write_receipt";
     const grant =
       serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
         ? "terminalObserve"
-        : questionOp || serviceRequest.op === "terminal_control" || serviceRequest.op === "terminal_input"
+        : questionOp ||
+            workWriteOp ||
+            serviceRequest.op === "terminal_control" ||
+            serviceRequest.op === "terminal_input"
           ? "terminalControl"
           : serviceRequest.op === "connections" ||
               serviceRequest.op === "reset" ||
@@ -351,7 +356,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     response.once("close", disconnected);
     if (request.aborted || response.destroyed) abort.abort();
     const ownerRoute =
-      questionOp || (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
+      questionOp ||
+      workWriteOp ||
+      (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
     try {
       if (abort.signal.aborted) return true;
       if (
@@ -367,7 +374,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       }
       const dispatch = () =>
         ownerRoute &&
-        (serviceRequest.op === "project_proposal_get" ||
+        (serviceRequest.op === "work_item_write" ||
+          serviceRequest.op === "work_item_write_receipt" ||
+          serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
           serviceRequest.op === "input_get" ||
           serviceRequest.op === "input_answer" ||

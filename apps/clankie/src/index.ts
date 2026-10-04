@@ -601,6 +601,10 @@ const agentSessions = createAgentSessions(
 const workItems = createWorkItemsService({
   stateDirectory: stateRoot,
   projects: async () => (await settingsStore.load()).projects,
+  projectsFence: async () => {
+    const snapshot = await settingsStore.loadFenced();
+    return { projects: snapshot.settings.projects, assertCurrent: snapshot.assertCurrent };
+  },
   localMachineId: "local",
   workspace: () => startupSettings.captain.workingDirectory ?? process.cwd(),
   mcpHost,

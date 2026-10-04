@@ -1,6 +1,8 @@
 # ADR 0191: Work is tracked where the repo tracks it
 
 Status: accepted (James, 2026-09-26). Tracks [VUH-1374](https://linear.app/vuhlp/issue/VUH-1374).
+Amended for parent metadata ([VUH-1593](https://linear.app/vuhlp/issue/VUH-1593))
+and owner-authorized receipt-backed writes ([VUH-1595](https://linear.app/vuhlp/issue/VUH-1595); journal direction approved 2026-10-04).
 
 ## Context
 
@@ -57,11 +59,20 @@ LABEL` and the init request's `linearLabel` record it. Omitting it preserves
    criteria and evidence) is an experimental feature that is off until the
    owner turns it on in Settings. Work tracking is an agent-facing foundation;
    a full tracker inside the app is not the product.
+6. **Owner-authorized gestures can update an existing item.** Paired devices
+   with `terminalControl` can assign its work-metadata owner, add or remove a
+   role label, or append a prerequisite through `work_item_write`
+   ([VUH-1595](https://linear.app/vuhlp/issue/VUH-1595)). Each request carries a
+   caller-created UUID. `work_item_write_receipt` reads that original receipt.
+   The CLI exposes the same narrow write and receipt operations. Generic
+   creation, status, criteria, evidence and parent edits remain agent/CLI work.
 
 ```mermaid
 flowchart LR
   Agent["Clankie, or any hire"] -->|clankie work / work_items tools| Service["work-items service"]
   App["iPhone, iPad, Mac"] -->|work_repos, work_items ops| Service
+  App -->|owner + terminalControl| Intent["scoped write intent and receipt"]
+  Intent -->|one dispatch; never replay| Service
   Service --> Convention{".clankie/tracking.json"}
   Convention -->|linear| Linear["Linear (MCP host)"]
   Convention -->|github| GitHub["GitHub issues (gh)"]
@@ -86,6 +97,35 @@ Hierarchy is separate from `dependsOn`. Items without a recorded parent still
 validate. This is read metadata; the unified write contract does not mutate
 parent relationships. An older client's response reader can omit the additive
 field while keeping its known fields strict.
+
+**Owner write authority and receipts.** The service authorizes the original
+owner identity and rechecks expiry, revocation, abort, saved repository or
+project binding, workspace identity and tracker convention immediately before
+publication. A device names an opaque registered or project repository ID,
+never a path. Project writes require the local enrolled tracker workspace.
+Linear additionally proves the source issue belongs to the configured canonical
+team and project. GitHub owner writes use the connected account, rather than
+an ambient `gh` login. Connected-provider dispatch retains its account and
+configuration fences. Dependencies remain prerequisite metadata; adding one
+never writes the referenced item.
+
+The narrow work-write journal shares the flat, atomic, private receipt store
+used by native seat calls. It uses the delivery fingerprint and unresolved
+claim fence; it does not extend the native seat tool enum. Intent is recorded
+before any effect. Every outcome carries the original request ID: `applied`,
+`refused` before dispatch, or `uncertain` after possible dispatch. A repeated ID
+can only return its existing receipt, after checking its exact owner, source
+item, tracker/account binding and command fingerprint. Restart, reconciliation
+and receipt expiry never execute a write. All uncertain records and admission
+tombstones remain; only the oldest settled result bodies beyond 1,000 are
+removed. Audit events record owner, source, request ID, action and outcome,
+without copying message contents or credentials.
+
+Updates read fresh tracker state before merging. Linear label writes preserve
+its entire raw label set because the provider replaces it; response display
+limits never become a write limit. GitHub role edits preserve reserved status
+labels. The backend accepts the write before a follow-up item read, so a lost
+read cannot turn a confirmed effect into a retry suggestion.
 
 **Evidence stays out of git.** An evidence entry is a link with a kind
 (`image`, `video`, `log`, `link`) and a caption saying what it proves. Large
@@ -112,8 +152,8 @@ changes nothing above: a device still names a repo only by its `id`.
   plan and read work.
 - No automatic sync between backends. An owner who wants the default format
   mirrored elsewhere records that backend instead.
-- No writes from paired devices. The app reads; agents and the owner write
-  through the CLI and tools, where the repo's own git history applies.
+- Paired-device writes cover only owner, role labels and prerequisite metadata.
+  Broader tracker edits remain with agents and the owner’s CLI tools.
 - No new Linear or GitHub credentials. Linear rides the account already
   connected to Clankie; GitHub rides the owner's `gh` login. A body without a
   `gh` login uses its GitHub account connection instead

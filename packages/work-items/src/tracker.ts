@@ -1,5 +1,5 @@
 import type { WorkConvention } from "@clankie/protocol/work-items";
-import type { WorkBackend } from "./backend.ts";
+import type { WorkBackend, WorkWriteCallbacks } from "./backend.ts";
 import { createFilesBackend } from "./backends/files.ts";
 import { createGithubBackend, type GhRunner, type GithubApi } from "./backends/github.ts";
 import { createLinearBackend, type LinearToolCall } from "./backends/linear.ts";
@@ -12,13 +12,14 @@ import {
   type Discovery,
 } from "./convention.ts";
 
-export interface TrackerDeps {
+export interface TrackerDeps extends WorkWriteCallbacks {
   readonly run?: CommandRunner;
   readonly gh?: GhRunner;
   /** A GitHub account connection (ADR 0196); preferred over `gh` when present. */
   readonly github?: GithubApi;
   readonly linear?: LinearToolCall;
   readonly clock?: () => Date;
+  readonly scopedWrites?: boolean;
 }
 
 /** Raised instead of guessing: the owner has to answer once (ADR 0191). */
@@ -39,12 +40,19 @@ export class BackendUnavailableError extends Error {
 }
 
 export function backendFor(root: string, convention: WorkConvention, deps: TrackerDeps): WorkBackend {
+  const writes = {
+    ...(deps.beforeWrite === undefined ? {} : { beforeWrite: deps.beforeWrite }),
+    ...(deps.onDispatch === undefined ? {} : { onDispatch: deps.onDispatch }),
+    ...(deps.effectConfirmed === undefined ? {} : { effectConfirmed: deps.effectConfirmed }),
+    ...(deps.scopedWrites === undefined ? {} : { scopedWrites: deps.scopedWrites }),
+  };
   switch (convention.backend) {
     case "default":
       return createFilesBackend({
         root,
         directory: DEFAULT_WORK_DIRECTORY,
         kind: "default",
+        ...writes,
         ...(deps.clock === undefined ? {} : { clock: deps.clock }),
       });
     case "markdown":
@@ -53,17 +61,18 @@ export function backendFor(root: string, convention: WorkConvention, deps: Track
         root,
         directory: convention.directory,
         kind: "markdown",
+        ...writes,
         ...(deps.clock === undefined ? {} : { clock: deps.clock }),
       });
     case "github":
       if (convention.github === undefined) throw new Error("A github convention names its repo");
       if (deps.github !== undefined)
-        return createGithubBackend({ repo: convention.github.repo, api: deps.github });
+        return createGithubBackend({ repo: convention.github.repo, api: deps.github, ...writes });
       if (deps.gh === undefined)
         throw new BackendUnavailableError(
           `This repo tracks work in GitHub issues (${convention.github.repo}); connect GitHub to Clankie to use it`,
         );
-      return createGithubBackend({ repo: convention.github.repo, gh: deps.gh });
+      return createGithubBackend({ repo: convention.github.repo, gh: deps.gh, ...writes });
     case "linear":
       if (convention.linear === undefined) throw new Error("A linear convention names its team");
       if (deps.linear === undefined)
@@ -75,6 +84,7 @@ export function backendFor(root: string, convention: WorkConvention, deps: Track
         ...(convention.linear.project === undefined ? {} : { project: convention.linear.project }),
         ...(convention.linear.label === undefined ? {} : { label: convention.linear.label }),
         call: deps.linear,
+        ...writes,
       });
   }
 }
@@ -93,11 +103,17 @@ export interface ResolvedTracker {
 export async function resolveTracker(
   root: string,
   deps: TrackerDeps,
-  options: { readonly record?: boolean; readonly requireRecorded?: boolean } = {},
+  options: {
+    readonly record?: boolean;
+    readonly requireRecorded?: boolean;
+    readonly scopedWrites?: boolean;
+  } = {},
 ): Promise<ResolvedTracker> {
+  const backendDeps =
+    options.scopedWrites === undefined ? deps : { ...deps, scopedWrites: options.scopedWrites };
   const recorded = await readConvention(root);
   if (recorded !== undefined)
-    return { convention: recorded, recorded: true, backend: backendFor(root, recorded, deps) };
+    return { convention: recorded, recorded: true, backend: backendFor(root, recorded, backendDeps) };
   if (options.requireRecorded) throw new Error("A saved work tracker is required");
   const discovery = await discoverConvention(root, deps.run);
   if (discovery.suggestion === undefined) throw new ConventionNeededError(discovery);
@@ -106,5 +122,9 @@ export async function resolveTracker(
     decidedAt: (deps.clock ?? (() => new Date()))().toISOString(),
   };
   if (options.record === true) await writeConvention(root, convention);
-  return { convention, recorded: options.record === true, backend: backendFor(root, convention, deps) };
+  return {
+    convention,
+    recorded: options.record === true,
+    backend: backendFor(root, convention, backendDeps),
+  };
 }

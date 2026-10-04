@@ -1,6 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
 import { CallToolResultSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   SEAT_CALL_META,
@@ -12,6 +9,8 @@ import {
   type SeatCallTool,
 } from "@clankie/protocol";
 import { z } from "zod";
+import { deliveryFingerprint } from "./captain/delivery-fence.ts";
+import { DurableReceiptStore } from "./durable-receipt-store.ts";
 
 const RecordSchema = z.object({
   id: SeatCallIdSchema,
@@ -24,42 +23,16 @@ const RecordSchema = z.object({
   result: CallToolResultSchema.optional(),
 });
 type ReceiptRecord = z.infer<typeof RecordSchema>;
-const RecordsSchema = z.array(RecordSchema);
-const SETTLED_BODY_LIMIT = 1_000;
 
 /** Durable dispatch receipts, never a queue. Reading or repeating an ID cannot execute a tool. */
 export class SeatCallReceipts {
-  private records = new Map<string, ReceiptRecord>();
-  private readonly path: string | undefined;
+  private readonly store: DurableReceiptStore<ReceiptRecord>;
   public constructor(path?: string) {
-    this.path = path;
-  }
-
-  private load(): void {
-    if (this.path === undefined) return;
-    try {
-      const records = RecordsSchema.parse(JSON.parse(readFileSync(this.path, "utf8")));
-      this.records = new Map(records.map((record) => [record.id, record]));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-        throw new Error("Operator seat-call receipts are unreadable; no action was dispatched", {
-          cause: error,
-        });
-      this.records.clear();
-    }
-  }
-
-  private save(): void {
-    // Keep identity tombstones and every uncertain record; bound only settled result bodies.
-    const settled = [...this.records.values()]
-      .filter((record) => record.state === "settled" && record.result !== undefined)
-      .sort((a, b) => b.createdAt - a.createdAt);
-    for (const record of settled.slice(SETTLED_BODY_LIMIT)) delete record.result;
-    if (this.path === undefined) return;
-    mkdirSync(dirname(this.path), { recursive: true });
-    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify([...this.records.values()])}\n`, { mode: 0o600 });
-    renameSync(temporary, this.path);
+    this.store = new DurableReceiptStore({
+      ...(path === undefined ? {} : { path }),
+      schema: RecordSchema,
+      unreadableMessage: "Operator seat-call receipts are unreadable; no action was dispatched",
+    });
   }
 
   private matches(record: ReceiptRecord, lane: CaptainSessionLaneV2, conversationId?: string): boolean {
@@ -91,11 +64,10 @@ export class SeatCallReceipts {
     lane: CaptainSessionLaneV2,
     conversationId?: string,
   ): CallToolResult | undefined {
-    this.load();
-    const fingerprint = createHash("sha256")
-      .update(JSON.stringify([tool, args]))
-      .digest("hex");
-    const previous = this.records.get(id);
+    const records = this.store.load();
+    // JSON has no literal newlines or surrounding whitespace, preserving the original hash bytes.
+    const fingerprint = deliveryFingerprint(JSON.stringify([tool, args]));
+    const previous = records.get(id);
     if (previous !== undefined) {
       if (!this.matches(previous, lane, conversationId) || previous.fingerprint !== fingerprint)
         throw new Error(
@@ -103,7 +75,7 @@ export class SeatCallReceipts {
         );
       return this.result(previous);
     }
-    this.records.set(id, {
+    records.set(id, {
       id,
       tool,
       lane,
@@ -113,17 +85,16 @@ export class SeatCallReceipts {
       state: "uncertain",
     });
     // This write must finish before entering the native hire/delivery path.
-    this.save();
+    this.store.save();
     return undefined;
   }
 
   public settle(id: string, result: CallToolResult): CallToolResult {
-    this.load();
-    const record = this.records.get(id);
+    const record = this.store.load().get(id);
     if (record === undefined) throw new Error("Missing original seat-call receipt");
     record.state = "settled";
     record.result = result;
-    this.save();
+    this.store.save();
     return this.result(record);
   }
 
@@ -133,8 +104,7 @@ export class SeatCallReceipts {
     lane: CaptainSessionLaneV2,
     conversationId?: string,
   ): CallToolResult {
-    this.load();
-    const record = this.records.get(id);
+    const record = this.store.load().get(id);
     if (record === undefined || record.tool !== tool || !this.matches(record, lane, conversationId))
       return {
         content: [
