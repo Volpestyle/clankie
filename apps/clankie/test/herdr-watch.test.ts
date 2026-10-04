@@ -1,3 +1,8 @@
+import {
+  SeatHookLog,
+  createClaudeWorkerSeatAdapter,
+  type WorkerSeatAgent,
+} from "../src/captain/claude-worker-seat.ts";
 import { HireOwners } from "../src/captain/hire-owners.ts";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -73,6 +78,76 @@ describe("HerdrWatchStore", () => {
     expect(wake.mock.calls[0]?.[1]).toContain("agent status done");
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ schemaVersion: 1, watches: [] });
     store.close();
+  });
+
+  it("a newly attached Claude watch wakes with uncorrelated Stop data, never a completed followup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-claude-settlement-watch-"));
+    roots.push(root);
+    const path = join(root, "hooks.json");
+    const hooks = new SeatHookLog(path);
+    const agent = {
+      ...working,
+      session: { source: "herdr:claude", kind: "id" as const, value: "10000000-0000-4000-8000-000000000001" },
+    };
+    const entries: { type: "message"; id: string; role: "operator"; text: string }[] = [];
+    const deps = {
+      consent: async () => ({ approved: true as const }),
+      hooks,
+      agent: async (): Promise<WorkerSeatAgent> => agent,
+      transcript: async () => ({ sessionKey: "claude", entries }),
+      mailbox: {
+        bound: () => true,
+        deliver: vi.fn(async (_seat: string, text: string) => {
+          entries.push({ type: "message", id: "native-receipt", role: "operator", text });
+          return true;
+        }),
+      },
+      timing: { readyMs: 20, receiptMs: 20, pollMs: 1 },
+      trackerDeny: () => [],
+    };
+    const original = createClaudeWorkerSeatAdapter(deps);
+    const started = await original.start(
+      { harness: "claude", cwd: root, brief: "queued followup" },
+      { paneId: agent.paneId, run: async () => undefined, start: async () => undefined },
+    );
+    expect(started.outcome).toBe("started");
+    // Watch constructs another control through the reopened persisted log.
+    const reopened = new SeatHookLog(path);
+    const next = vi.spyOn(reopened, "next");
+    const adapter = createClaudeWorkerSeatAdapter({ ...deps, hooks: reopened });
+    const attach = vi.spyOn(adapter, "attach");
+    const wake = vi.fn(async (_conversation: string, _prompt: string) => undefined);
+    const runner: HerdrWatchRunner = {
+      get: async () => agent,
+      resolveTerminal: async () => agent,
+      wait: vi.fn(async () => agent),
+    };
+    const store = new HerdrWatchStore(join(root, "watches.json"), { runner, seatAdapters: [adapter] });
+    store.start(wake);
+    try {
+      expect(await store.watch("global-default", agent.paneId, "Followup completion")).toMatchObject({
+        outcome: "watching",
+      });
+      await vi.waitFor(() => expect(next).toHaveBeenCalled());
+      reopened.record(agent.paneId, {
+        schemaVersion: 1,
+        event: "Stop",
+        sessionId: agent.session.value,
+        lastMessage: "Earlier busy turn report",
+      });
+      await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce());
+      expect(attach).toHaveBeenCalled();
+      expect(runner.wait).not.toHaveBeenCalled();
+      const prompt = wake.mock.calls[0]![1];
+      expect(prompt).toContain("Completion of the sent message is unverified");
+      expect(prompt).toContain("Earlier busy turn report");
+      expect(prompt).toContain("not correlated");
+      expect(prompt).not.toContain("reported its turn completed");
+      expect(prompt).not.toContain("Start from the worker's final report");
+      expect(deps.mailbox.deliver).toHaveBeenCalledOnce();
+    } finally {
+      store.close();
+    }
   });
 
   it("quotes an unhired pane's last message from its own transcript when it settles", async () => {

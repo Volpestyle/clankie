@@ -202,23 +202,37 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
       });
     return true;
   });
-  const adapter = createClaudeWorkerSeatAdapter({
+  const agentRead = vi.fn<ClaudeWorkerSeatDeps["agent"]>(async () => agent);
+  const deps: ClaudeWorkerSeatDeps = {
     consent: async () =>
       options.approved === false
         ? { approved: false, detail: "not approved", fix: "approve it" }
         : { approved: true },
     hooks,
-    agent: async () => agent,
+    agent: agentRead,
     transcript: async () => ({ sessionKey: "k", entries: [...entries] }),
     mailbox: { bound: () => bound, deliver },
     timing: { readyMs: 200, receiptMs: 200, pollMs: 10 },
     trackerDeny: () => [],
-  });
+  };
+  const adapter = createClaudeWorkerSeatAdapter(deps);
   const start = vi.fn(async () => {
     if (options.binds !== false) bound = true;
   });
   const view: SeatView = { paneId: "w1:p1", name: "worker-ab12", run: vi.fn(async () => undefined), start };
-  return { adapter, view, start, deliver, hooks, agent, entries, unbind: () => (bound = false) };
+  return {
+    root,
+    deps,
+    agentRead,
+    adapter,
+    view,
+    start,
+    deliver,
+    hooks,
+    agent,
+    entries,
+    unbind: () => (bound = false),
+  };
 }
 
 it("a hire starts the interactive TUI, briefs it over the channel, and waits for the transcript receipt", async () => {
@@ -465,21 +479,27 @@ it("a channel that never polls, or a brief that never lands, fails typed", async
   });
 });
 
-it("messages are acknowledged by the transcript, and completion is the Stop hook's final text", async () => {
+it("messages have transcript receipts, while Stop text remains separate from message completion", async () => {
   const { adapter, view, hooks, agent, entries, unbind } = await fixture();
   const started = await adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, view);
   if (started.outcome !== "started") throw new Error(JSON.stringify(started));
   const control = started.control;
-  expect(await control.send("follow-up")).toMatchObject({ outcome: "accepted", state: "started" });
+  expect(await control.send("follow-up")).toMatchObject({ outcome: "accepted", state: "queued" });
   agent.status = "working";
   expect(await control.status()).toBe("working");
   expect(await control.send("while busy")).toMatchObject({ outcome: "accepted", state: "queued" });
 
   const settled = control.settled();
   hooks.record("w1:p1", { schemaVersion: 1, event: "Stop", sessionId: SESSION, lastMessage: "all green" });
-  expect(await settled).toMatchObject({ type: "turn_completed", ok: true, text: "all green" });
+  expect(await settled).toMatchObject({
+    type: "settlement_unconfirmed",
+    observedStop: { ok: true, text: "all green" },
+  });
   agent.status = "idle";
-  expect(await control.settled()).toMatchObject({ type: "turn_completed", text: "all green" });
+  expect(await control.settled()).toMatchObject({
+    type: "settlement_unconfirmed",
+    observedStop: { text: "all green" },
+  });
   agent.status = "blocked";
   expect(await control.settled()).toMatchObject({ type: "blocked" });
   expect(await control.interrupt()).toBe(false);
@@ -509,4 +529,346 @@ it("rechecks the hiring source after readiness before delivering its initial bri
   expect(start).toHaveBeenCalledOnce();
   expect(guard).toHaveBeenCalledOnce();
   expect(deliver).not.toHaveBeenCalled();
+});
+
+describe("Claude completion evidence", () => {
+  async function ready() {
+    const f = await fixture();
+    const result = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "" }, f.view);
+    if (result.outcome !== "started") throw new Error(JSON.stringify(result));
+    return { ...f, control: result.control };
+  }
+
+  it("idle without a Stop never manufactures successful completion", async () => {
+    const f = await ready();
+    expect(await f.control.settled()).toMatchObject({ type: "settlement_unconfirmed" });
+  });
+
+  it("a new receipt cannot reuse the old Stop as completion", async () => {
+    const f = await ready();
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "Stop", sessionId: SESSION, lastMessage: "old turn" });
+    expect(await f.control.send("next turn")).toMatchObject({ outcome: "accepted" });
+    expect(await f.control.settled()).toEqual(
+      expect.objectContaining({
+        type: "settlement_unconfirmed",
+        reason: "message_correlation_unavailable",
+      }),
+    );
+    expect(await f.control.settled()).not.toHaveProperty("observedStop");
+  });
+
+  it("a queued channel receipt followed by the busy turn's Stop remains uncorrelated", async () => {
+    const f = await ready();
+    f.agent.status = "working";
+    expect(await f.control.send("queued followup")).toMatchObject({ outcome: "accepted", state: "queued" });
+    const waiting = f.control.settled();
+    f.hooks.record("w1:p1", {
+      schemaVersion: 1,
+      event: "Stop",
+      sessionId: SESSION,
+      lastMessage: "earlier turn",
+    });
+    expect(await waiting).toMatchObject({
+      type: "settlement_unconfirmed",
+      reason: "message_correlation_unavailable",
+      observedStop: { ok: true, text: "earlier turn" },
+    });
+  });
+
+  it("keeps a fast Stop during initial dispatch without calling the brief completed", async () => {
+    const f = await fixture();
+    f.deliver.mockImplementationOnce(async (_seat, text) => {
+      f.entries.push({ type: "message", id: "fast-receipt", role: "operator", text: channel(text) });
+      f.hooks.record("w1:p1", {
+        schemaVersion: 1,
+        event: "Stop",
+        sessionId: SESSION,
+        lastMessage: "fast native stop",
+      });
+      return true;
+    });
+    const result = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "brief" }, f.view);
+    if (result.outcome !== "started") throw new Error(JSON.stringify(result));
+    expect(await result.control.settled()).toMatchObject({
+      type: "settlement_unconfirmed",
+      observedStop: { ok: true, text: "fast native stop" },
+    });
+  });
+
+  it("new attach and a reopened hook log preserve dispatch uncertainty", async () => {
+    const f = await ready();
+    await f.control.send("accepted message");
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "Stop", sessionId: SESSION });
+    for (const hooks of [f.hooks, new SeatHookLog(join(f.root, "hooks.json"))]) {
+      const adapter = createClaudeWorkerSeatAdapter({ ...f.deps, hooks });
+      const attached = await adapter.attach(f.control.ref);
+      expect(attached).toBeDefined();
+      expect(await attached!.settled()).toMatchObject({
+        type: "settlement_unconfirmed",
+        reason: "message_correlation_unavailable",
+      });
+    }
+  });
+
+  it("legacy state never infers that no automated dispatch was pending", async () => {
+    const f = await ready();
+    await writeFile(
+      join(f.root, "hooks.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        sessions: {
+          [SESSION]: {
+            paneId: "w1:p1",
+            last: { type: "turn_completed", at: "2026-10-04T00:00:00Z", ok: true, text: "legacy stop" },
+          },
+        },
+      }),
+    );
+    const hooks = new SeatHookLog(join(f.root, "hooks.json"));
+    const attached = await createClaudeWorkerSeatAdapter({ ...f.deps, hooks }).attach(f.control.ref);
+    expect(await attached!.settled()).toMatchObject({
+      type: "settlement_unconfirmed",
+      reason: "dispatch_boundary_unknown",
+      observedStop: { ok: true, text: "legacy stop" },
+    });
+  });
+
+  it("a boundary save failure prevents any channel handoff", async () => {
+    const f = await ready();
+    await rm(join(f.root, "hooks.json"));
+    await mkdir(join(f.root, "hooks.json"));
+    expect(await f.control.send("must not cross")).toMatchObject({ outcome: "unconfirmed" });
+    expect(f.deliver).not.toHaveBeenCalled();
+  });
+
+  it("an already-aborted settlement never returns cached success or reads status", async () => {
+    const f = await ready();
+    const abort = new AbortController();
+    abort.abort(new Error("cancelled"));
+    f.agentRead.mockClear();
+    await expect(f.control.settled(abort.signal)).rejects.toThrow("cancelled");
+    expect(f.agentRead).not.toHaveBeenCalled();
+  });
+
+  it("a status lookup error is uncertainty rather than evidence of process exit", async () => {
+    const f = await ready();
+    f.agentRead.mockRejectedValueOnce(new Error("inventory unavailable"));
+    expect(await f.control.settled()).toMatchObject({
+      type: "settlement_unconfirmed",
+      reason: "status_unavailable",
+    });
+  });
+
+  it.each(["missing", "unreadable"])(
+    "%s boundary preserves a manual Stop without inferring no pending message",
+    async (kind) => {
+      const f = await ready();
+      if (kind === "missing") await rm(join(f.root, "hooks.json"));
+      else await writeFile(join(f.root, "hooks.json"), "not JSON");
+      const hooks = new SeatHookLog(join(f.root, "hooks.json"));
+      hooks.record("w1:p1", { schemaVersion: 1, event: "SessionStart", sessionId: SESSION });
+      hooks.record("w1:p1", {
+        schemaVersion: 1,
+        event: "Stop",
+        sessionId: SESSION,
+        lastMessage: "actual manual report",
+      });
+      const control = await createClaudeWorkerSeatAdapter({ ...f.deps, hooks }).attach(f.control.ref);
+      expect(await control!.settled()).toMatchObject({
+        type: "settlement_unconfirmed",
+        reason: "dispatch_boundary_unknown",
+        observedStop: { ok: true, text: "actual manual report" },
+      });
+    },
+  );
+
+  it("manual StopFailure stays authentic without claiming dispatched-message correlation", async () => {
+    const f = await ready();
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "UserPromptSubmit", sessionId: SESSION });
+    f.hooks.record("w1:p1", {
+      schemaVersion: 1,
+      event: "StopFailure",
+      sessionId: SESSION,
+      error: "rate_limit",
+      lastMessage: "native failure",
+    });
+    expect(f.hooks.latest(SESSION)).toMatchObject({
+      type: "turn_completed",
+      ok: false,
+      stopReason: "rate_limit",
+    });
+    expect(await f.control.settled()).toMatchObject({
+      type: "settlement_unconfirmed",
+      reason: "dispatch_boundary_unknown",
+      observedStop: { ok: false, stopReason: "rate_limit", text: "native failure" },
+    });
+  });
+
+  it("a later owner prompt does not clear automated dispatch uncertainty", async () => {
+    const f = await ready();
+    await f.control.send("automated followup");
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "UserPromptSubmit", sessionId: SESSION });
+    f.hooks.record("w1:p1", {
+      schemaVersion: 1,
+      event: "Stop",
+      sessionId: SESSION,
+      lastMessage: "owner turn",
+    });
+    expect(await f.control.settled()).toMatchObject({
+      type: "settlement_unconfirmed",
+      reason: "message_correlation_unavailable",
+    });
+  });
+
+  it("overlapping handoffs finishing in reverse order cannot clear the newest boundary", async () => {
+    const f = await ready();
+    const releases: (() => void)[] = [];
+    f.deliver.mockImplementation(async (_seat, text) => {
+      await new Promise<void>((resolve) => releases.push(resolve));
+      f.entries.push({ type: "message", id: text, role: "operator", text: channel(text) });
+      return true;
+    });
+    const first = f.control.send("first");
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    const second = f.control.send("second");
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    f.hooks.record("w1:p1", {
+      schemaVersion: 1,
+      event: "Stop",
+      sessionId: SESSION,
+      lastMessage: "older busy turn",
+    });
+    releases[1]!();
+    expect(await second).toMatchObject({ outcome: "accepted" });
+    releases[0]!();
+    expect(await first).toMatchObject({ outcome: "accepted" });
+    const hooks = new SeatHookLog(join(f.root, "hooks.json"));
+    const control = await createClaudeWorkerSeatAdapter({ ...f.deps, hooks }).attach(f.control.ref);
+    expect(await control!.settled()).toMatchObject({
+      type: "settlement_unconfirmed",
+      reason: "message_correlation_unavailable",
+    });
+    expect(f.deliver).toHaveBeenCalledTimes(2);
+  });
+
+  it("a new dispatch during an awaited status invalidates the prior Stop snapshot", async () => {
+    const f = await ready();
+    f.hooks.record("w1:p1", {
+      schemaVersion: 1,
+      event: "Stop",
+      sessionId: SESSION,
+      lastMessage: "old cached stop",
+    });
+    let release!: (agent: WorkerSeatAgent) => void;
+    f.agentRead.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const waiting = f.control.settled();
+    await f.control.send("new work");
+    release(f.agent);
+    const result = await waiting;
+    expect(result).toMatchObject({
+      type: "settlement_unconfirmed",
+      reason: "message_correlation_unavailable",
+    });
+    expect(result).not.toHaveProperty("observedStop");
+  });
+
+  it("cancels a settlement even while status is held", async () => {
+    const f = await ready();
+    const abort = new AbortController();
+    let release!: (agent: WorkerSeatAgent) => void;
+    f.agentRead.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const waiting = f.control.settled(abort.signal);
+    abort.abort(new Error("owner cancelled"));
+    await expect(waiting).rejects.toThrow("owner cancelled");
+    release(f.agent);
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "Stop", sessionId: SESSION });
+  });
+
+  it.each(["terminal", "session", "pane"])("refuses %s replacement during a held status", async (kind) => {
+    const f = await ready();
+    await f.control.send("held work");
+    let release!: (agent: WorkerSeatAgent) => void;
+    f.agentRead.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const waiting = f.control.settled();
+    f.hooks.record("w1:p1", {
+      schemaVersion: 1,
+      event: "Stop",
+      sessionId: SESSION,
+      lastMessage: "must not cross replacement",
+    });
+    const replacement = {
+      ...f.agent,
+      ...(kind === "terminal" ? { terminalId: "replacement" } : {}),
+      ...(kind === "session" ? { session: { kind: "id" as const, value: "replacement" } } : {}),
+      ...(kind === "pane" ? { paneId: "w1:p2" } : {}),
+    };
+    f.agentRead.mockResolvedValue(replacement);
+    release(replacement);
+    expect(await waiting).toMatchObject({ type: "exited" });
+  });
+
+  it("owner blockage and actual missing pane outrank an uncorrelated Stop", async () => {
+    const f = await ready();
+    await f.control.send("work");
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "Stop", sessionId: SESSION });
+    f.agent.status = "blocked";
+    expect(await f.control.settled()).toMatchObject({ type: "blocked" });
+    f.agentRead.mockResolvedValue(undefined);
+    expect(await f.control.settled()).toMatchObject({ type: "exited" });
+  });
+
+  it("initial brief also refuses dispatch if its durable boundary cannot be saved", async () => {
+    const f = await fixture();
+    await mkdir(join(f.root, "hooks.json"));
+    const result = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "must not send" }, f.view);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      reason: "not_ready",
+      detail: expect.stringContaining("no message was sent"),
+    });
+    expect(f.deliver).not.toHaveBeenCalled();
+  });
+
+  it("a same-session replacement terminal cannot be adopted through a reopened log", async () => {
+    const f = await ready();
+    await f.control.send("work");
+    const replacement = { ...f.agent, terminalId: "another-native-terminal" };
+    const adapter = createClaudeWorkerSeatAdapter({
+      ...f.deps,
+      hooks: new SeatHookLog(join(f.root, "hooks.json")),
+      agent: async () => replacement,
+    });
+    expect(await adapter.attach(f.control.ref)).toBeUndefined();
+  });
+
+  it("an idle channel receipt stays queued while working status is delayed", async () => {
+    const f = await ready();
+    const delivery = await f.control.send("channel work");
+    expect(f.agent.status).toBe("idle");
+    expect(
+      f.entries.some(
+        (entry) =>
+          entry.type === "message" && entry.role === "operator" && entry.text.includes("channel work"),
+      ),
+    ).toBe(true);
+    expect(delivery).toMatchObject({ outcome: "accepted", deliveryStage: "consumed", state: "queued" });
+    f.agent.status = "working";
+    expect(await f.control.status()).toBe("working");
+    expect(delivery).toMatchObject({ state: "queued" });
+  });
 });

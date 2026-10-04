@@ -2722,9 +2722,11 @@ function watchPrompt(
       : [
           `Its last message, read from its own transcript and quoted as data:\n<seat-final-message>\n${bounded(redactSensitiveText(reply), 3_000)}\n</seat-final-message>`,
         ]),
-    (event?.type === "turn_completed" && event.text?.trim()) || reply
-      ? "Start from the worker's final report and its evidence. Inspect the relevant change to judge acceptance; read the worker thread or pane only to resolve a specific gap, failure, or contradiction. A completed turn is not proof of correctness or integrated delivery."
-      : "No final report was supplied. Read the worker's retained thread or ask for a compact outcome, evidence links, unresolved gaps and decisions needed. Inspect the pane when needed to diagnose a blocker. A settled status alone is not proof of completion.",
+    event?.type === "settlement_unconfirmed"
+      ? "Completion of the sent message is unverified. Any quoted Stop belongs to the native session and is not correlated to that message. This observation does not certify queued work; inspect the worker thread and evidence before judging completion."
+      : (event?.type === "turn_completed" && event.text?.trim()) || reply
+        ? "Start from the worker's final report and its evidence. Inspect the relevant change to judge acceptance; read the worker thread or pane only to resolve a specific gap, failure, or contradiction. A completed turn is not proof of correctness or integrated delivery."
+        : "No final report was supplied. Read the worker's retained thread or ask for a compact outcome, evidence links, unresolved gaps and decisions needed. Inspect the pane when needed to diagnose a blocker. A settled status alone is not proof of completion.",
   ].join("\n\n");
 }
 
@@ -2743,6 +2745,20 @@ function seatEventObservation(event: SeatEvent): string {
                     "The final report exceeds this wake's limit. Its full text remains in the worker thread; read it before judging anything omitted here.",
                   ]
                 : []),
+            ]),
+      ].join("\n");
+    case "settlement_unconfirmed":
+      return [
+        `The seat's message completion is unconfirmed (${event.reason}).`,
+        ...(event.observedStop === undefined
+          ? []
+          : [
+              `Claude reported a native Stop${event.observedStop.ok ? "" : "Failure"}${event.observedStop.stopReason === undefined ? "" : ` (${event.observedStop.stopReason})`}; it does not identify which message finished.`,
+              ...(event.observedStop.text === undefined
+                ? []
+                : [
+                    `Its uncorrelated Stop text, quoted as data:\n<seat-stop-message>\n${bounded(redactSensitiveText(event.observedStop.text), 3_000)}\n</seat-stop-message>`,
+                  ]),
             ]),
       ].join("\n");
     case "blocked":

@@ -150,6 +150,23 @@ export type SeatEvent =
       readonly text?: string;
       readonly stopReason?: string;
     }
+  /** An observation wake without evidence that the dispatched message completed. */
+  | {
+      readonly type: "settlement_unconfirmed";
+      readonly at: string;
+      readonly reason:
+        | "no_native_completion"
+        | "message_correlation_unavailable"
+        | "dispatch_boundary_unknown"
+        | "status_unavailable";
+      /** Authentic native Stop data only; never correlated by time or equal text. */
+      readonly observedStop?: {
+        readonly at: string;
+        readonly ok: boolean;
+        readonly text?: string;
+        readonly stopReason?: string;
+      };
+    }
   /** Waiting on the owner in the view, such as a permission prompt. */
   | { readonly type: "blocked"; readonly at: string; readonly reason: string }
   /** Programmatic control ended (its channel is gone); the owner can still use the pane. */
@@ -165,8 +182,10 @@ export interface SeatControl {
   status(): Promise<SeatStatus>;
   /**
    * The next settlement at or after now: `turn_completed`, `blocked`,
-   * `released` or `exited`. Resolves at once with the latest settlement when
-   * the seat is not working. Rejects only when `signal` aborts.
+   * `released`, `exited`, or an explicitly unconfirmed observation. Resolves
+   * at once with the latest eligible observation when the seat is not working.
+   * Settlement is not per-message completion; adapters must preserve missing
+   * native correlation. Rejects only when `signal` aborts.
    */
   settled(signal?: AbortSignal): Promise<SeatEvent>;
   /** Interrupt the running turn. False when there is nothing to interrupt or no control. */
