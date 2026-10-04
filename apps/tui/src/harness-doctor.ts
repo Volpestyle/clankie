@@ -90,7 +90,7 @@ export async function inspectHarnessBridges(
         local.membership = response.status === 400 ? "verified" : "unavailable";
         local.detail =
           response.status === 400
-            ? "Local process membership verified. Tools still require a verified project and live owner-issued project grants (clankie access list)."
+            ? "Local process membership verified. Connected tools follow verified accounts and the fleet tools setting (clankie fleet status)."
             : local.sharedDaemon
               ? "Local process membership unavailable. Exit and restart Codex in this Herdr pane under the existing daemon_auto_start=false configuration; shared daemon MCP processes cannot prove pane ownership."
               : "Local process membership unavailable. Check clankie herdr status and the current pane. Private hires require a process registration owned by the running service; a pane ID alone grants nothing.";
@@ -143,6 +143,18 @@ export async function inspectHarnessBridges(
         : []),
       ...(claudeInstalled && settings.enabledPlugins?.["clankie-worker@clankie"] !== true
         ? ["claude plugin enable clankie-worker@clankie --scope user"]
+        : []),
+      // An installed but outdated plugin still loads, so it is drift doctor must name.
+      ...profiles.claude
+        .filter((profile) => profile.installed && (profile.versionMatches === false || !profile.bridge))
+        .map(
+          (profile) =>
+            `Update clankie-worker ${profile.version ?? "unknown"} in ${profile.profile} to ${profile.expectedVersion ?? "the bundled version"}: clankie harness install`,
+        ),
+      ...(profiles.codex.pluginInstalled && profiles.codex.versionMatches === false
+        ? [
+            `Update the Codex clankie-worker plugin ${profiles.codex.version ?? "unknown"} to ${profiles.codex.expectedVersion}: clankie harness install`,
+          ]
         : []),
     ] as readonly string[],
   };

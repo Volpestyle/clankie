@@ -69,3 +69,32 @@ it("reports harness registration, generated config source, and live membership s
     await rm(home, { recursive: true, force: true });
   }
 });
+
+it("names an installed but outdated Claude worker plugin as remediation", async () => {
+  const home = await mkdtemp(join(tmpdir(), "clankie-harness-doctor-stale-"));
+  try {
+    const bundle = join(home, "bundle");
+    await mkdir(join(bundle, ".claude-plugin"), { recursive: true });
+    await mkdir(join(home, ".claude/plugins"), { recursive: true });
+    await writeFile(join(bundle, ".claude-plugin/plugin.json"), JSON.stringify({ version: "0.2.0" }));
+    await writeFile(join(bundle, ".mcp.json"), JSON.stringify({ mcpServers: { swarm: {} } }));
+    await writeFile(
+      join(home, ".claude/settings.json"),
+      JSON.stringify({ enabledPlugins: { "clankie-worker@clankie": true } }),
+    );
+    await writeFile(
+      join(home, ".claude/plugins/installed_plugins.json"),
+      JSON.stringify({ plugins: { "clankie-worker@clankie": [{ scope: "user", installPath: bundle }] } }),
+    );
+    const execute = async () => ({ stdout: "", stderr: "" });
+    const repoRoot = join(import.meta.dirname, "../../..");
+    const report = await inspectHarnessBridges({ HOME: home }, execute, fetch, repoRoot);
+    const stale = report.remediation.filter((line) => line.includes(join(home, ".claude")));
+    expect(stale).toHaveLength(1);
+    expect(stale[0]).toMatch(
+      /^Update clankie-worker 0\.2\.0 in .+ to \d+\.\d+\.\d+: clankie harness install$/u,
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
