@@ -81,6 +81,10 @@ This repository is public. Both neighbors are private and consume
 - Keep the public/private boundary: code that runs only on Clankie's hosted
   service (gateway, accounts, managed-hosting control plane), its deployment,
   and business, App Store or production records go to `clankie-ops`, never here.
+- Hosted Clankie just works. A self-hosted feature may need owner setup, but its
+  hosted counterpart may not: a managed user asks Clankie (and pays, if their
+  plan requires it), and the control plane does the rest. No accounts,
+  credentials, tunnels, claims or infrastructure choices on their side.
 - The repository is Apache-2.0 except `apps/vox`, which retains its own
   AGPL-3.0-or-later license and provenance record.
 - The credential broker (Keychain on macOS) is the canonical secret store.
