@@ -1,14 +1,15 @@
 ---
 name: desktop-control
 description: >-
-  Use when Clankie needs general native macOS computer use: screenshots,
+  Use when Clankie needs general native computer use: macOS hands or read-only Windows
+  observations through the shared computer body. Screenshots,
   accessibility inspection, clicking, typing, scrolling, dragging, or menus.
   Use browser tools for web pages and purpose-built APIs when they cover the task.
 ---
 
 # Native computer use
 
-Use the installed Peekaboo CLI through the existing machine-authorized `bash`
+On macOS, use the installed Peekaboo CLI through the existing machine-authorized `bash`
 tool. Read its screenshots with the existing image-capable `read` tool. Clankie
 chooses each action from the latest observation; call Peekaboo's primitives
 directly. `peekaboo agent` and `--analyze` start separate model reasoning and are
@@ -33,6 +34,21 @@ explicit choice. Reconcile the same request UUID after transport loss and never
 replay an uncertain input. Its macOS adapter preserves Peekaboo's limitations;
 recovery needs host stop proof. Contract and examples:
 [desktop control](../../../docs/desktop-control.md#shared-computer-body).
+
+## Windows observations
+
+On a Windows machine, use the native Codex computer-use plugin's trusted
+`node_repl` and `@oai/sky` through the Windows observation host, not Peekaboo.
+The host exposes the same computer contract, bound to the owning conversation
+and the machine (`windows:pc:console`, for example). Use an SSH loopback forward
+when leading from another machine. Setup and limits:
+[Windows observation host](../../../docs/desktop-control.md#windows-observation-host).
+
+Only inventory and exact-window PNG capture ship through this adapter; frames
+have `inputReady: false`. Missing geometry or a changed window binding refuses.
+A configured harness in `browser harnesses` does not prove its app grants or
+input. Do not introduce a second driver, bypass native app grants, or fall back
+to `C:\desk` input. Windows action proof waits for an approved fixture window.
 
 ## Discover the target
 

@@ -185,9 +185,103 @@ outside this contract are not fenced by its driver lease; overlapping drivers
 must still be avoided.
 
 Hosted bodies can implement the same `ComputerAdapter` seam with their own
-inventory, capture bounds and host-confirmed input/recovery. This step registers
-only the local macOS adapter; a hosted Linux display, native Codex and provider
-routes are not implemented. The explicit
+inventory, capture bounds and host-confirmed input/recovery. The service registers its local macOS adapter; Windows can explicitly attach
+the read-only native observation host below. Hosted Linux displays and native
+Codex/provider reasoning routes are not implemented. The explicit
 [manual comparison harness](../scripts/manual/computer-use/README.md) freezes the
 tasks and grades artifacts independently. James starts that comparison and picks
 the model route; builds and checks never run it.
+
+## Windows observation host
+
+The Windows adapter uses Codex's existing `@oai/sky` window2 API inside its
+trusted `node_repl`. It lists native apps and captures the exact returned window
+without activating it. It starts no app, model, worker or native helper of its
+own, and does not use `C:\desk` to inject input. Native app grants and turn-stop
+checks stay with the harness. The installed package is supplied by Codex; it is
+not copied or redistributed by Clankie.
+
+This first Windows step is **read-only**. It registers the existing
+`ComputerBody` contract in an explicitly attached loopback observation host.
+Its body ID is `windows:MACHINE:console`, bound to one conversation. Incoming
+operator credentials are delegated to the original Clankie service's
+`POST /v1/computer/authority`; that service rechecks its existing conversation
+authority before and after observation. A selected conversation ID cannot
+create a grant. Credentials are neither persisted nor returned. Body leases,
+input journals and media retain the common contract's conventions.
+
+```mermaid
+flowchart LR
+  C[Owning conversation / computer CLI] --> F[Loopback or SSH forward]
+  F --> H[Windows observation host]
+  H --> A[Original Clankie authority checks]
+  H --> S[Native trusted node_repl / sky]
+  S --> W[Granted exact Windows window]
+  W --> H
+  H --> C
+```
+
+In a source checkout, `pnpm computer:windows:build` produces
+`.local/windows-computer/native-host.mjs`; it only builds JavaScript. Transfer
+that artifact to the Windows checkout when building on another machine. Load
+it in Clankie's own native Windows Codex view, with the computer-use plugin
+installed and enabled, after reading that plugin's Windows skill. No new seat
+or independent reasoning loop is required:
+
+```js
+var { sky } = await import("@oai/sky");
+var { startWindowsComputerHost } =
+  await import("file:///C:/path/to/clankie/.local/windows-computer/native-host.mjs");
+globalThis.clankieWindowsComputer = await startWindowsComputerHost({
+  sky,
+  machineId: "pc",
+  conversationId: "OWNING_CONVERSATION",
+  directory: "C:\\path\\to\\private-state\\computer-pc",
+  authorityURL: "http://127.0.0.1:CLANKIE_OR_FORWARDED_PORT",
+});
+nodeRepl.write(
+  JSON.stringify({
+    bodyId: clankieWindowsComputer.bodyId,
+    url: clankieWindowsComputer.url,
+    inputReady: clankieWindowsComputer.inputReady,
+  }),
+);
+```
+
+Use one stable private state directory per machine; the existing lease-store
+process lock refuses another host or an uncleared crash lock. When Clankie leads
+from a Mac, use authenticated SSH loopback forwards for the authority service
+and the returned observation port. His existing `clankie computer request`
+command targets that listener through `CLANKIE_CONTROL_PLANE_URL`, retaining
+its broker-resolved operator credential. Keep both ends loopback; never expose
+an unauthenticated desktop listener. Stop only the host/forwards you created.
+`await clankieWindowsComputer.close()` closes its listener, not Codex or the
+owner's apps. Closing a listener is not native driver stop proof.
+
+Inventory is explicitly partial: native grants can omit apps. Capture requires
+one bounded PNG belonging to the requested native window, with explicit logical
+screen origin and dimensions. Actual PNG dimensions determine image pixels;
+logical bounds determine their screen mapping, including display scaling and
+negative monitor origins. Missing geometry, ambiguous windows, multiple transient
+screenshots or a reused native screenshot reference refuse rather than guessing.
+The native reference stays host-private; the body issues its own fresh UUID and
+bounded media. Captures have `inputReady: false`; all input is refused before
+dispatch. Recovery remains refused without an independent native stop receipt.
+
+`clankie browser harnesses` also probes Windows hosts and registered PowerShell
+fleets, reporting `platform: win32`, fleet `machineId`, signed-out or disabled
+Codex installs, and missing Windows plugins. Reach/TUI text names that machine.
+These probes do not open apps or prove their grants or input readiness. A native
+harness on `pc` belongs to that machine; use its fleet-qualified terminal ID.
+Never drive while the person is using it. Keep sign-ins, codes, CAPTCHAs,
+payments and destructive steps with the person under ADR 0127.
+
+Read-only SSH inspection found Codex CLI 0.160.0 and Windows computer-use plugin
+26.928.40906 on the examined PC. This is an installation observation, not a
+minimum version, default model, successful capture or input claim. The supported
+API's mouse/keyboard methods return `Promise<void>`; a returned call cannot
+stand in for observed effect or quiescence. Native Windows fixture proof and
+input actions are a separate, approved driving window. The local
+`pnpm test:windows-observation` lane uses a real Chromium page and HTTP authority
+service to prove the adapter's response mapping and refusals. It does not prove
+Windows native behavior and is excluded from default tests and checks.

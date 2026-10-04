@@ -16,7 +16,10 @@ export default defineConfig({
     exclude: [
       ...(process.env.CLANKIE_COMPUTER_INTEGRATION === "1"
         ? []
-        : ["apps/clankie/test/computer-body.integration.test.ts"]),
+        : [
+            "apps/clankie/test/computer-body.integration.test.ts",
+            "apps/clankie/test/computer-windows.integration.test.ts",
+          ]),
       "**/node_modules/**",
       "**/.turbo/**",
       "**/dist/**",

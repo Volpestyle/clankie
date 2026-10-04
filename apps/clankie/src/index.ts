@@ -1,5 +1,9 @@
 import { ComputerBody } from "./computer-body.ts";
 import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
+import { detectWindowsComputerUseHarnesses } from "./computer-windows-discovery.ts";
+import { detectComputerUseHarnesses } from "./computer-use-harnesses.ts";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
@@ -603,11 +607,52 @@ const workItems = createWorkItemsService({
   githubToken: () => githubConnectionToken(operatorCredentialStore),
   hosted: hostedBody !== undefined,
 });
-// Computer-use harnesses drive the owner's own Mac apps and Chrome (ADR 0199).
-// A hosted body has no owner desktop, and the probes read macOS paths, so
-// detection is only wired where both hold.
+// Read-only capability discovery on this host and registered Windows fleets.
 const computerUseHarnesses =
-  hostedBody === undefined && process.platform === "darwin" ? cachedComputerUseHarnesses() : undefined;
+  hostedBody === undefined
+    ? cachedComputerUseHarnesses(async () => {
+        const local =
+          process.platform === "darwin"
+            ? detectComputerUseHarnesses()
+            : process.platform === "win32"
+              ? detectWindowsComputerUseHarnesses(async (command, timeoutMs) => {
+                  const encoded = command.split(" ").at(-1)!;
+                  return (
+                    await promisify(execFile)(
+                      "powershell.exe",
+                      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+                    )
+                  ).stdout;
+                })
+              : Promise.resolve([]);
+        const remote = runtimes.fleets().then((fleets) =>
+          Promise.all(
+            fleets
+              .filter((fleet) => fleet.ssh.shell === "powershell")
+              .map(async (fleet) => {
+                try {
+                  return await detectWindowsComputerUseHarnesses(runtimes.fleetShell(fleet), fleet.id);
+                } catch {
+                  return [
+                    {
+                      harness: "codex" as const,
+                      signedIn: false,
+                      surfaces: [],
+                      chromeNeedsHireFlag: false,
+                      platform: "win32" as const,
+                      machineId: fleet.id,
+                      missing: "Windows capability probe unavailable; re-check the fleet link",
+                    },
+                  ];
+                }
+              }),
+          ),
+        );
+        const [localFound, remoteFound] = await Promise.all([local, remote]);
+        return [...localFound, ...remoteFound.flat()];
+      })
+    : undefined;
 const localFleetBinding = async () => {
   const current = (await settingsStore.load()).herdr;
   const original = startupSettings.herdr;
