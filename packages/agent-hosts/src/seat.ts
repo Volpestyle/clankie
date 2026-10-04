@@ -178,7 +178,16 @@ export interface SeatControl {
   readonly ref: SeatRef;
   /** Original prepared controller/root observation; never a wire or saved-metadata proof. */
   verify?(): Promise<SeatProcessIdentity>;
-  send(message: string, options?: { readonly timeoutMs?: number }): Promise<SeatDelivery>;
+  /** Adapters must run beforeDispatch after preparation, immediately before a native mutation. */
+  send(
+    message: string,
+    options?: {
+      readonly timeoutMs?: number;
+      readonly beforeDispatch?: () => Promise<boolean>;
+      readonly source?: string;
+      readonly recipientBinding?: string;
+    },
+  ): Promise<SeatDelivery>;
   status(): Promise<SeatStatus>;
   /**
    * The next settlement at or after now: `turn_completed`, `blocked`,

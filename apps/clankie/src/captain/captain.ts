@@ -23,6 +23,7 @@ import {
 } from "./conversation-owner.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
 import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
+import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { deliveryFingerprint } from "./delivery-fence.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
@@ -1019,7 +1020,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         );
         return mailbox.bound() || mailbox.uncertain();
       },
-      deliver: async (seatId, text) => {
+      deliver: async (seatId, text, source?: string, recipientBinding?: string) => {
         const delivery = await fleetSeatMailbox(
           fleetMailboxes,
           seatId,
@@ -1027,9 +1028,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ).deliver({
           kind: "message",
           conversationId: conversations.conversationIdForSeat(seatId) ?? seatId,
-          source: "captain",
+          source: source ?? "captain",
           content: text,
           wantsReply: false,
+          ...(recipientBinding === undefined ? {} : { recipientBinding }),
         });
         return delivery.outcome === "unconfirmed" ? delivery : delivery.outcome === "delivered";
       },
@@ -1175,7 +1177,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               string,
               { revision: number; queue: ReturnType<typeof remoteCodexQueue> }
             >();
-            return async (fleetId: string, sessionId: string, text: string) => {
+            return async (
+              fleetId: string,
+              sessionId: string,
+              text: string,
+              beforeDispatch?: () => Promise<boolean>,
+            ) => {
               await refreshFleets();
               const fleet = remoteFleets.find((entry) => entry.id === fleetId);
               if (fleet === undefined) return false;
@@ -1185,7 +1192,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 cached = {
                   revision,
                   queue: remoteCodexQueue(fleet, async (...args) => {
-                    await refreshFleets();
                     if ((fleetRevisions.get(fleetId) ?? 0) !== revision)
                       throw new Error("Machine connection changed or disconnected");
                     return deps.fleets!.shell!(fleet)(...args);
@@ -1193,7 +1199,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 };
                 queues.set(fleetId, cached);
               }
-              return cached.queue(sessionId, text);
+              return cached.queue(sessionId, text, async () => {
+                await refreshFleets();
+                if ((fleetRevisions.get(fleetId) ?? 0) !== revision) return false;
+                return beforeDispatch ? beforeDispatch() : true;
+              });
             };
           })(),
           remoteSeatAdapters: (fleetId: string) => {
@@ -2234,21 +2244,44 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     seatId: string,
     message: string,
     context: FleetSeatMessageContext,
+    deliveryOptions?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> {
     const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
     const prior = nextTurnMailboxes.receipt(seatId, inboundBinding(current), message);
     if (prior) return prior;
+    const mailbox = fleetSeatMailbox(
+      fleetMailboxes,
+      seatId,
+      join(options.stateDir, "delivery-receipts", "fleet"),
+    );
+    if (deliveryOptions?.reconcileOnly) {
+      const receipt = mailbox.receipt(message);
+      if (receipt?.outcome === "delivered") return { outcome: "delivered", deliveryStage: "delivered" };
+    }
     // An adapter-driven seat takes its message through the adapter, which
     // waits for the harness's own receipt; any other seat needs a structured lane.
-    fleetSeatMailbox(fleetMailboxes, seatId, join(options.stateDir, "delivery-receipts", "fleet"));
+    const fallback = async (): Promise<FleetSeatDelivery> => {
+      const live = fleetMailboxes.get(seatId);
+      if (live?.bound() || live?.uncertain())
+        return deliverFleetSeatMessage(fleetMailboxes, seatId, message, {
+          ...context,
+          ...(deliveryOptions?.recipientBinding === undefined
+            ? {}
+            : { recipientBinding: deliveryOptions.recipientBinding }),
+        });
+      const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+      if (deliveryOptions?.fence && !(await deliveryOptions.fence(agent)))
+        return {
+          outcome: "undelivered",
+          deliveryStage: "rejected",
+          detail: "Peer authority changed before mailbox storage; nothing was sent.",
+        };
+      return nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
+    };
     const deliver = () =>
-      herdrWatches.deliverToSeat(seatId, message, async () => {
-        const live = fleetMailboxes.get(seatId);
-        if (live?.bound() || live?.uncertain())
-          return deliverFleetSeatMessage(fleetMailboxes, seatId, message, context);
-        const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
-        return nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
-      });
+      deliveryOptions
+        ? herdrWatches.deliverToSeat(seatId, message, fallback, deliveryOptions)
+        : herdrWatches.deliverToSeat(seatId, message, fallback);
     let delivery: FleetSeatDelivery | undefined;
     if (context.source === "room") {
       await herdrWatches.sendAndWatchReply(seatId, message, async () => {
@@ -3053,7 +3086,33 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return deliveryFingerprint(JSON.stringify([agent.paneId, agent.terminalId, agent.agent, agent.session]));
   }
 
+  const peerMessages = new PeerSeatMessages({
+    path: join(options.stateDir, "delivery-receipts", "peer-messages.json"),
+    enabled: async () => (await settings()).fleet.peerMessages === "on",
+    sender: (pane) => herdrRunner.get(pane).catch(() => undefined),
+    recipient: (seat) => herdrRunner.resolveTerminal(seat).catch(() => undefined),
+    seats: () => herdrRunner.list?.() ?? Promise.resolve([]),
+    deliver: (seat, text, deliveryOptions) =>
+      deliverToSeat(
+        seat,
+        text,
+        {
+          conversationId: conversations.defaultGlobalConversationId(),
+          source: "peer",
+        },
+        deliveryOptions,
+      ),
+    record: ({ message, receipt }) =>
+      conversations.publishFleetPeerExchange(
+        `${message}\n\nPeer delivery receipt: ${JSON.stringify(receipt)}`,
+      ),
+  });
+
   return {
+    listFleetPeerSeats: (authority) => peerMessages.list(authority),
+    sendFleetPeerMessage: (authority, input) => peerMessages.send(authority, input),
+    reconcileFleetPeerMessage: (authority, delivery, fingerprint) =>
+      peerMessages.reconcile(authority, delivery, fingerprint),
     async submitChannelProjectionMessage(request) {
       await refreshFleet();
       const accepted = conversations.submitProjectedMessage(request.guildId, request.channelId, request.body);
@@ -3797,11 +3856,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return undefined;
       const seatId = await herdrWatches.seatIdForPane(paneId);
       if (seatId === undefined) return undefined;
+      const native = await herdrRunner.get(paneId).catch(() => undefined);
       return fleetSeatMailbox(
         fleetMailboxes,
         seatId,
         join(options.stateDir, "delivery-receipts", "fleet"),
-      ).poll(waitMs, signal);
+      ).poll(waitMs, signal, native?.terminalId === seatId ? inboundBinding(native) : undefined);
     },
 
     async acknowledgeFleetSeatEvent(paneId, eventId) {

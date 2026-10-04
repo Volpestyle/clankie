@@ -53,7 +53,13 @@ service (`apps/clankie/src/captain/claude-worker-seat.ts`), as does Codex's.
 
 ### Tool flow and current support
 
-Clankie calls `hire_agent`, `message_seat`, and `herdr_watch`. The service selects
+Clankie calls `hire_agent`, `message_seat`, and `herdr_watch`. Same-fleet worker
+messages reuse the native seat delivery path with agent-output framing and receipts.
+Adapters must honor `SeatControl.send`'s optional `beforeDispatch` guard after
+asynchronous preparation, immediately before the native mutation. A denied guard
+returns a known unavailable receipt without sending. Channel delivery preserves
+the peer source and exact recipient binding; peer messages confer no owner authority.
+The service selects
 the registered adapter, which owns the harness-specific delivery and receipts.
 The adapter is runtime code. The shipped `this-machine` skill and captain
 instructions explain how to use those tools and interpret their outcomes; the

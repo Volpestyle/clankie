@@ -2123,6 +2123,109 @@ paths:
         "404":
           description: No messageable agent in that pane
 
+  /v1/fleet/seats/{paneId}/peers:
+    get:
+      tags: [Captain]
+      operationId: listFleetPeerSeats
+      summary: List native seats in the calling worker's fleet
+      description: |
+        Requires the local process listener or registered remote relay's exact
+        native pane/session proof. Operator and fleet bearers alone do not
+        identify a peer sender. Returns sender and recipient seat IDs, panes,
+        harnesses, titles and native binding hashes. The owner setting
+        fleet.peerMessages=off refuses discovery. No workspace or account
+        authority is granted by a peer message (ADR 0213 amendment).
+      security: []
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Current same-fleet native seat bindings
+        "403":
+          description: Peer messaging off or native sender proof unavailable
+
+  /v1/fleet/seats/{paneId}/peer-messages:
+    post:
+      tags: [Captain]
+      operationId: sendFleetPeerMessage
+      summary: Send one same-fleet peer message through native seat delivery
+      description: |
+        Uses the same native delivery path as message_seat, with server-authored
+        sender attribution and agent-output framing. Requires native process
+        admission, the sender binding, and the exact same-fleet recipient binding
+        returned by peers. Rechecks the owner switch and native bindings before
+        dispatch. Persists the original delivery UUID before sending. Uncertain
+        attempts reconcile through GET only; neither a duplicate UUID nor a new
+        follow-up replays the original. Records exchanges and receipts in the
+        service audit and Clankie's agent-role transcript without an owner turn.
+      security: []
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              seatId: pc/recipient-terminal
+              recipientBinding: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+              text: "The shared interface is ready."
+              delivery:
+                id: 10000000-0000-4000-8000-000000000001
+                binding: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      responses:
+        "200":
+          description: Exact receipt with deliveryId, bindings, fingerprint, outcome and deliveryStage
+        "400":
+          description: Invalid peer message
+        "403":
+          description: Native peer sender proof unavailable
+
+  /v1/fleet/seats/{paneId}/peer-messages/{id}:
+    get:
+      tags: [Captain]
+      operationId: reconcileFleetPeerMessage
+      summary: Inspect the original peer delivery receipt without resending
+      description: |
+        Requires the original sender's native process/session, original binding,
+        delivery UUID and fingerprint. The fingerprint covers recipient seat,
+        recipient binding and normalized text. Available while peer messaging
+        is off. May match the original native transcript or exact channel/hook
+        acknowledgment; absence of proof remains uncertain and never dispatches.
+      security: []
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: binding
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+        - in: query
+          name: fingerprint
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Original receipt, with no new send attempt
+        "400":
+          description: Invalid original receipt reference
+        "403":
+          description: Native peer sender proof unavailable
+        "404":
+          description: No exact original receipt available; delivery remains uncertain
+
   /v1/fleet/seats/{paneId}/hook:
     post:
       tags: [Captain, Operator]

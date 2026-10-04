@@ -1440,6 +1440,16 @@ export class ConversationStore {
     this.publishConversationEvent(this.conversationIdForSeat(seatId), body);
   }
 
+  /** Peer exchanges are visible context, never inbound owner turns or seat replies. */
+  public publishFleetPeerExchange(text: string): void {
+    this.publishConversationEvent(this.defaultGlobalConversationId(), {
+      type: "message",
+      role: "agent",
+      text,
+      streaming: false,
+    });
+  }
+
   private publishConversationEvent(
     conversationId: string | undefined,
     body: OperatorConversationEventBody,

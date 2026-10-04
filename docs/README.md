@@ -18,7 +18,7 @@ This directory and the module READMEs hold the technical references.
 | [Memory](memory.md)                             | Episodes, person facts, visibility, retention, and operator control |
 | [Bundled skills](bundled-skills.md)             | Skill sources, discovery, and worker distribution                   |
 | [Model keys](model-keys.md)                     | Paired-device API for model credentials and selection               |
-| [Worker access](worker-access.md)               | Restricted grants for connected tools                               |
+| [Worker access](worker-access.md)               | Connected tools, native peer messages and manual grants             |
 | [Tracker identity](worker-tracker-identity.md)  | Connected-account enforcement and remaining isolation work          |
 | [Worker posts](linear-worker-posts.md)          | One Linear app, worker names and portraits, compact handoffs        |
 | [Discord media](discord-media.md)               | Voice, music, Activity, Go Live, and screen-share differences       |

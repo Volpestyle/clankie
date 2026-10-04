@@ -28,6 +28,7 @@
         "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
         "integrations/claude-plugin/worker/bin/fleet-mcp.mjs",
         "integrations/claude-plugin/worker/bin/inbound-receipt.d.mts",
+        "integrations/claude-plugin/worker/bin/peer-receipt.d.mts",
         "integrations/codex-plugin/hooks/run.mjs",
         "integrations/opencode-plugin/plugin.mjs",
         "integrations/claude-plugin/worker/bin/seat-hook.mjs",

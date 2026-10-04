@@ -36,9 +36,9 @@ export class LocalFleetLink {
     return async (request: Request, env: HttpBindings | Http2Bindings): Promise<Response> => {
       const path = new URL(request.url).pathname;
       const seat =
-        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages)$/u.exec(path) ||
+        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages)$/u.exec(path) ||
         (request.method === "GET" &&
-          /^\/v1\/fleet\/seats\/([^/]+)\/messages\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
+          /^\/v1\/fleet\/seats\/([^/]+)\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
             path,
           )) ||
         (request.method === "POST" && /^\/v1\/fleet\/seats\/([^/]+)\/events\/[^/]+\/ack$/u.exec(path));

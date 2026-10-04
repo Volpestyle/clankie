@@ -203,6 +203,10 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
     return true;
   });
   const agentRead = vi.fn<ClaudeWorkerSeatDeps["agent"]>(async () => agent);
+  const transcript = vi.fn<ClaudeWorkerSeatDeps["transcript"]>(async () => ({
+    sessionKey: "k",
+    entries: [...entries],
+  }));
   const deps: ClaudeWorkerSeatDeps = {
     consent: async () =>
       options.approved === false
@@ -210,7 +214,7 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
         : { approved: true },
     hooks,
     agent: agentRead,
-    transcript: async () => ({ sessionKey: "k", entries: [...entries] }),
+    transcript,
     mailbox: { bound: () => bound, deliver },
     timing: { readyMs: 200, receiptMs: 200, pollMs: 10 },
     trackerDeny: () => [],
@@ -224,6 +228,7 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
     root,
     deps,
     agentRead,
+    transcript,
     adapter,
     view,
     start,
@@ -267,6 +272,53 @@ it("preserves a taken but unacknowledged channel event as uncertain without repl
   expect(f.deliver).toHaveBeenCalledTimes(1);
   expect(f.view.run).not.toHaveBeenCalled();
   expect(f.entries).toEqual([]);
+});
+
+it("rechecks peer authority after awaited transcript preparation before channel dispatch", async () => {
+  const f = await fixture();
+  const started = await f.adapter.start({ harness: "claude", cwd: "/w", brief: "" }, f.view);
+  if (started.outcome !== "started") throw new Error(JSON.stringify(started));
+  let prepared!: () => void;
+  let resume!: () => void;
+  const preparation = new Promise<void>((resolve) => {
+    prepared = resolve;
+  });
+  const continuePreparation = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  f.transcript.mockImplementationOnce(async () => {
+    prepared();
+    await continuePreparation;
+    return { sessionKey: "k", entries: [] };
+  });
+  let authorized = true;
+  const beforeDispatch = vi.fn(async () => authorized);
+  const beginDispatch = vi.spyOn(f.hooks, "beginDispatch");
+  const pending = started.control.send("peer work", { beforeDispatch });
+  await preparation;
+  authorized = false;
+  resume();
+  expect(await pending).toMatchObject({ outcome: "offline", deliveryStage: "unavailable" });
+  expect(beforeDispatch).toHaveBeenCalledOnce();
+  expect(beginDispatch).not.toHaveBeenCalled();
+  expect(f.deliver).not.toHaveBeenCalled();
+  authorized = true;
+  expect(
+    await started.control.send("new admitted work", {
+      beforeDispatch,
+      source: "peer",
+      recipientBinding: "native-recipient-binding",
+    }),
+  ).toMatchObject({
+    outcome: "accepted",
+  });
+  expect(f.deliver).toHaveBeenCalledOnce();
+  expect(f.deliver).toHaveBeenCalledWith(
+    f.agent.terminalId,
+    "new admitted work",
+    "peer",
+    "native-recipient-binding",
+  );
 });
 
 it("keeps an uncertain brief distinct from a released channel", async () => {

@@ -115,6 +115,42 @@ test("a changed process after native response cannot earn a successful controlle
   await expect(f.controller.request("status")).rejects.toThrow("unavailable");
 });
 
+test("revoked peer authority after awaited controller preparation sends no native frame or claim", async () => {
+  const f = await fixture();
+  const n = await native(f.controller);
+  f.controller.select(sessionId);
+  await f.controller.request("status");
+  let prepared!: () => void;
+  let resume!: () => void;
+  const preparation = new Promise<void>((resolve) => {
+    prepared = resolve;
+  });
+  const continuePreparation = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  f.guard.mockImplementationOnce(async () => {
+    prepared();
+    await continuePreparation;
+  });
+  let authorized = true;
+  const beforeDispatch = vi.fn(async () => authorized);
+  const received = vi.fn(async () => ({ outcome: "accepted", messageId, state: "queued" }));
+  n.handle(received);
+  const pending = f.controller.request("send", { messageId, text }, 1000, beforeDispatch);
+  await preparation;
+  authorized = false;
+  resume();
+  expect(await pending).toMatchObject({ outcome: "unavailable" });
+  expect(beforeDispatch).toHaveBeenCalledOnce();
+  expect(received).not.toHaveBeenCalled();
+  expect(f.controller.pending()).toBeUndefined();
+  authorized = true;
+  expect(await f.controller.request("send", { messageId, text }, 1000, beforeDispatch)).toMatchObject({
+    outcome: "accepted",
+  });
+  expect(received).toHaveBeenCalledOnce();
+});
+
 test("claim must match the actual controller dispatch and persists before native submission", async () => {
   const f = await fixture();
   const n = await native(f.controller);

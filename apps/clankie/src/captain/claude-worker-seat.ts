@@ -66,6 +66,8 @@ export interface ClaudeWorkerSeatDeps {
     deliver(
       seatId: string,
       text: string,
+      source?: string,
+      recipientBinding?: string,
     ): Promise<boolean | Extract<SeatDelivery, { readonly outcome: "unconfirmed" }>>;
   };
   readonly timing?: { readonly readyMs?: number; readonly receiptMs?: number; readonly pollMs?: number };
@@ -602,7 +604,7 @@ class ClaudeWorkerSeatControl implements SeatControl {
     return (await this.observe())?.status ?? "offline";
   }
 
-  public async send(message: string, options?: { readonly timeoutMs?: number }): Promise<SeatDelivery> {
+  public async send(message: string, options?: Parameters<SeatControl["send"]>[1]): Promise<SeatDelivery> {
     const agent = await this.deps.agent(this.ref.paneId).catch(() => undefined);
     if (agent === undefined || !this.matches(agent))
       return {
@@ -620,6 +622,12 @@ class ClaudeWorkerSeatControl implements SeatControl {
         deliveryStage: "unavailable",
         detail: "The seat binding changed before dispatch",
       };
+    if (options?.beforeDispatch && !(await options.beforeDispatch().catch(() => false)))
+      return {
+        outcome: "offline",
+        deliveryStage: "unavailable",
+        detail: "Peer authority changed before channel dispatch; no message was sent",
+      };
     try {
       this.deps.hooks.beginDispatch(this.ref, agent.terminalId);
     } catch {
@@ -630,7 +638,11 @@ class ClaudeWorkerSeatControl implements SeatControl {
         detail: "The settlement boundary could not be saved; no message was sent",
       };
     }
-    const delivery = await this.deps.mailbox.deliver(agent.terminalId, message);
+    const delivery = await (options?.recipientBinding !== undefined
+      ? this.deps.mailbox.deliver(agent.terminalId, message, options.source, options.recipientBinding)
+      : options?.source === undefined
+        ? this.deps.mailbox.deliver(agent.terminalId, message)
+        : this.deps.mailbox.deliver(agent.terminalId, message, options.source));
     if (typeof delivery !== "boolean") return { ...delivery, deliveryStage: "uncertain" };
     if (!delivery) return { outcome: "released", deliveryStage: "unavailable" };
     const id = await receipt(

@@ -13,7 +13,7 @@ import {
 
 const FLEET_USAGE = [
   "Usage: clankie fleet [status]",
-  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--tools connected|off]`,
+  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--tools connected|off] [--peer-messages on|off]`,
   "       clankie fleet clear",
 ].join("\n");
 
@@ -42,6 +42,7 @@ export function formatFleetLines(fleet: FleetSettings): string[] {
     `swarm size: ${fleet.size} — ${FLEET_SIZE_GUIDANCE[fleet.size]}`,
     `models: ${fleet.models} — ${FLEET_MODEL_GUIDANCE[fleet.models]}`,
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
+    `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
     "routing preferences:",
     ...(notes.length === 0
       ? ["  (none — the default: he picks a harness per job on his own)"]
@@ -99,6 +100,9 @@ function parseSet(flags: readonly string[]): FleetUpdate {
     } else if (flag === "--tools" && change.tools === undefined) {
       if (value !== "connected" && value !== "off") throw new Error("--tools must be connected or off.");
       change.tools = value;
+    } else if (flag === "--peer-messages" && change.peerMessages === undefined) {
+      if (value !== "on" && value !== "off") throw new Error("--peer-messages must be on or off.");
+      change.peerMessages = value;
     } else {
       throw new Error(FLEET_USAGE);
     }

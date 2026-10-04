@@ -21,6 +21,7 @@ async function fixture(
     fail?: string;
     approval?: boolean;
     mismatchedReceipt?: boolean;
+    beforeReply?: (method: string) => Promise<void>;
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "codex-proxy-test-"));
@@ -29,10 +30,11 @@ async function fixture(
   const wss = new WebSocketServer({ server: http });
   const requests: { method?: string; params?: Record<string, unknown>; id?: number }[] = [];
   wss.on("connection", (socket) =>
-    socket.on("message", (bytes) => {
+    socket.on("message", async (bytes) => {
       const request = JSON.parse(bytes.toString());
       requests.push(request);
       if (request.id === undefined) return;
+      await options.beforeReply?.(request.method);
       if (request.method === options.fail) {
         socket.close();
         return;
@@ -105,6 +107,41 @@ describe("external Codex control", () => {
     expect((await control("thread", "hello"))?.outcome).toBe("undelivered");
     expect(requests.some((r) => r.method === "turn/steer")).toBe(false);
   });
+  it.each(["off", "throws"])(
+    "refuses a %s authority guard after a deferred native turn read without steering",
+    async (mode) => {
+      let readStarted!: () => void;
+      const reading = new Promise<void>((resolve) => {
+        readStarted = resolve;
+      });
+      let finishRead!: () => void;
+      const prepared = new Promise<void>((resolve) => {
+        finishRead = resolve;
+      });
+      let authorized = true;
+      const beforeDispatch = vi.fn(async () => {
+        if (mode === "throws" && !authorized) throw new Error("authority lookup failed");
+        return authorized;
+      });
+      const { control, requests } = await fixture({
+        beforeReply: async (method) => {
+          if (method === "thread/turns/list") {
+            readStarted();
+            await prepared;
+          }
+        },
+      });
+      const sending = control("thread", "peer context", undefined, undefined, beforeDispatch);
+      await reading;
+      authorized = false;
+      finishRead();
+      expect(await sending).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+      expect(beforeDispatch).toHaveBeenCalledOnce();
+      expect(
+        requests.some((request) => request.method === "turn/steer" || request.method === "turn/start"),
+      ).toBe(false);
+    },
+  );
   it("reports uncertainty after dispatch without permitting queue fallback", async () => {
     const { control } = await fixture({ fail: "turn/steer" });
     expect((await control("thread", "hello"))?.outcome).toBe("unconfirmed");

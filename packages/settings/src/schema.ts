@@ -400,6 +400,8 @@ export const FleetSettingsSchema = z
     models: z.enum(FLEET_MODEL_MODES).default("optimal"),
     /** Fleet admission grants connected tools unless the owner turns this off. */
     tools: z.enum(["connected", "off"]).default("connected"),
+    /** Proven native workers may message their own fleet unless the owner turns this off. */
+    peerMessages: z.enum(["on", "off"]).default("on"),
   })
   .strict();
 export type FleetSettings = z.infer<typeof FleetSettingsSchema>;

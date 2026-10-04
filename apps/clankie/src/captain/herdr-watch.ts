@@ -16,6 +16,7 @@ import { channelBody } from "./claude-worker-seat.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
 import { codexProxyControl, type ExternalCodexControl } from "./external-codex-control.ts";
 import { createFleetSeatControl, isMessageableSeat } from "./fleet-seat-control.ts";
+import type { PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import {
   existingNativeSession,
   nativeResumeArgs,
@@ -771,7 +772,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly fleetRevision?: (fleet: string) => number;
       /** `codex queue` on a remote fleet's machine, for its Codex sessions he did not start. */
       readonly remoteCodexControl?: (fleet: string, paneId: string) => ExternalCodexControl | undefined;
-      readonly remoteCodexQueue?: (fleet: string, sessionId: string, text: string) => Promise<boolean>;
+      readonly remoteCodexQueue?: (
+        fleet: string,
+        sessionId: string,
+        text: string,
+        beforeDispatch?: () => Promise<boolean>,
+      ) => Promise<boolean | FleetSeatDelivery>;
       /** Include every configured Herdr server on the same exact SSH destination. */
       readonly resumeInventory?: (fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>;
     } = {},
@@ -964,10 +970,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     seatId: string,
     text: string,
     uncontrolled?: () => Promise<FleetSeatDelivery>,
+    options?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> {
+    if (this.closed && options)
+      return { outcome: "offline", deliveryStage: "unavailable", detail: "Native seat delivery is closed." };
     if (this.closed)
       return uncontrolled?.() ?? { outcome: "offline", detail: "Native hire service is closed." };
-    return this.seatControl.deliverToSeat(seatId, text, uncontrolled);
+    return this.seatControl.deliverToSeat(seatId, text, uncontrolled, options);
   }
 
   /** The herdr status an adapter-held seat's own status reads as; undefined when no adapter holds it. */
