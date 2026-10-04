@@ -3577,6 +3577,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     bodyRoomConversation: (lane, targetId) => conversations.roomConversation(lane, targetId),
 
+    projectHireMembershipCandidate: (fleet, pane) => herdrWatches.projectHireMembershipCandidate(fleet, pane),
+    confirmedProjectHireAssignment: (fleet, pane, revision, proof) =>
+      herdrWatches.confirmedProjectHireAssignment(fleet, pane, revision, proof),
     lookupProjectHire: async (proof) => herdrWatches.projectHireAssignment(proof.fleet, proof.pane, proof),
     designatedConversationHead: (id) => {
       const head = conversations.designatedHead(id);

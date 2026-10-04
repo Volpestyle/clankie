@@ -312,3 +312,121 @@ export interface FleetMembershipReport {
   truncated: boolean;
   panes: FleetPaneMembership[];
 }
+
+/** Optional owner-read display projection. Never control, admission or tool authority. */
+export const FLEET_PROJECT_MEMBERSHIP_PATH = "/v1/operator/fleet-membership/read";
+const FleetMembershipSeatSchema = z
+  .object({
+    seatId: z.string().trim().min(1).max(512),
+    occupantId: z.string().trim().min(1).max(512),
+    fleet: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
+  })
+  .strict();
+export const ReadFleetProjectMembershipSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    seats: z
+      .array(FleetMembershipSeatSchema)
+      .min(1)
+      .max(8)
+      .refine(
+        (seats) =>
+          new Set(seats.map((seat) => JSON.stringify([seat.fleet ?? "default", seat.seatId]))).size ===
+          seats.length,
+        "Duplicate seat",
+      ),
+  })
+  .strict();
+export const FleetProjectMembershipSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    projectsRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    observedAt: z.iso.datetime(),
+    seats: z
+      .array(
+        FleetMembershipSeatSchema.extend({
+          membership: z.discriminatedUnion("outcome", [
+            z
+              .object({
+                outcome: z.literal("member"),
+                source: z.literal("hire"),
+                projectId: ProjectIdSchema,
+                role: OperatorAgentRoleSchema.optional(),
+              })
+              .strict(),
+            z
+              .object({
+                outcome: z.literal("unknown"),
+                reason: z.enum([
+                  "no_confirmed_hire",
+                  "observation_unavailable",
+                  "identity_changed",
+                  "invalid_assignment",
+                  "unsupported_host",
+                  "timeout",
+                ]),
+              })
+              .strict(),
+          ]),
+        }).strict(),
+      )
+      .max(8),
+  })
+  .strict();
+export type ReadFleetProjectMembership = z.infer<typeof ReadFleetProjectMembershipSchema>;
+export type FleetProjectMembershipSnapshot = z.infer<typeof FleetProjectMembershipSnapshotSchema>;
+
+/** An older host is unavailable, never an empty successful membership projection. */
+export async function readFleetProjectMembership(
+  request: ReadFleetProjectMembership,
+  send: (
+    path: string,
+    body: ReadFleetProjectMembership,
+    signal?: AbortSignal,
+  ) => Promise<{ status: number; json(): Promise<unknown> }>,
+  signal?: AbortSignal,
+): Promise<FleetProjectMembershipSnapshot | undefined> {
+  signal?.throwIfAborted();
+  const input = ReadFleetProjectMembershipSchema.parse(request);
+  const response = await send(FLEET_PROJECT_MEMBERSHIP_PATH, input, signal);
+  signal?.throwIfAborted();
+  if ([404, 405, 501].includes(response.status)) return undefined;
+  if (response.status !== 200) throw new Error(`Membership read refused (${response.status})`);
+  const result = FleetProjectMembershipSnapshotSchema.parse(await response.json());
+  signal?.throwIfAborted();
+  if (
+    JSON.stringify(result.seats.map(({ membership: _membership, ...seat }) => seat)) !==
+    JSON.stringify(input.seats)
+  )
+    throw new Error("Membership response does not match the requested seats");
+  return result;
+}
+
+/** Call with monotonic request age and the CURRENT connection/roster/settings generation.
+ * A display receipt is not a lease. Disconnect/unknown callers discard old membership. */
+export function fleetProjectMembershipApplies(
+  result: FleetProjectMembershipSnapshot | undefined,
+  request: ReadFleetProjectMembership,
+  current: {
+    connected: boolean;
+    sameGeneration: boolean;
+    projectsRevision: string;
+    ageMs: number;
+    seats: ReadFleetProjectMembership["seats"];
+  },
+): boolean {
+  return (
+    result !== undefined &&
+    current.connected &&
+    current.sameGeneration &&
+    current.ageMs >= 0 &&
+    current.ageMs <= 5000 &&
+    result.projectsRevision === current.projectsRevision &&
+    JSON.stringify(current.seats) === JSON.stringify(request.seats) &&
+    JSON.stringify(result.seats.map(({ membership: _membership, ...seat }) => seat)) ===
+      JSON.stringify(request.seats)
+  );
+}
