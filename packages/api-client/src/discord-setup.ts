@@ -195,6 +195,10 @@ export class DiscordSetupClient {
   constructor(api: DiscordSetupApi) {
     this.api = api;
   }
+  /** The same host-bound value used in a sentence and its inline picker button. */
+  pickerText(view: DiscordSetupView, part: DiscordSetupPicker): string {
+    return pickerText(view, part);
+  }
   private async directory(
     query: Pick<DiscordDirectoryRequest, "kind" | "guildId">,
   ): Promise<DiscordDirectorySnapshot> {

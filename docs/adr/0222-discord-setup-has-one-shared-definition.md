@@ -8,7 +8,10 @@ and hosted dashboard consume this definition rather than authoring variants.
 Optional bindings also define picker server scopes, room kinds, enablement and
 the independent computer-access fields. `@clankie/api-client` supplies a shared
 sentence projection and revision-fenced writer; the TUI and CLI use it directly
-(VUH-1628). All blanks in one sentence save atomically. Directory member entries
+(VUH-1628), and the app adapts its paired transport to it (VUH-1627). Its
+`pickerText` method supplies inline blank labels from the same projection. The
+app consumes the host’s Advanced groups and check labels; it keeps no setting
+inventory or sentence-to-field mapping of its own. All blanks in one sentence save atomically. Directory member entries
 are scoped by server before deduplication, since one person can occur in more
 than one guild. Additive binding metadata is covered by an old-shape-client
 integration regression against the new loopback host.
