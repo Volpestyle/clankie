@@ -2078,7 +2078,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ? "pane_run_unavailable"
           : "adapter_unavailable";
     if (
-      (brief !== undefined || input.harness === "opencode" || input.harness === "grok" || input.harness === "pi") &&
+      (brief !== undefined || input.harness === "opencode" || input.harness === "grok") &&
       adapter === undefined
     ) {
       const detail = `No structured harness adapter is available (${unavailableReason}); no seat was started and no terminal input was sent.`;

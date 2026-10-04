@@ -16,6 +16,7 @@ import {
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
+import { createPiSeatAdapter } from "../src/captain/pi-seat-adapter.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -295,4 +296,66 @@ test("uncertain initial Pi brief cannot be recovered by an equal owner transcrip
   } finally {
     cold.close();
   }
+});
+
+test.each([undefined, "automated brief"])(
+  "unmanaged Pi launch preserves the no-brief boundary (%s)",
+  async (brief) => {
+    const f = await fixture();
+    const store = new HerdrWatchStore(join(f.directory, "unmanaged.json"), { runner: f.runner });
+    cleanups.push(async () => store.close());
+    const result = await store.spawnSeat(
+      { schemaVersion: 1, harness: "pi", title: "owner seat", workingDirectory: f.directory },
+      undefined,
+      brief,
+    );
+    if (brief === undefined) {
+      expect(result).toMatchObject({ outcome: "spawned" });
+      expect(f.runner.createTab).toHaveBeenCalledOnce();
+      expect(f.runner.startAgent).toHaveBeenCalledOnce();
+      expect(f.runner.installPiIntegration).toHaveBeenCalledOnce();
+    } else {
+      expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+      expect(f.runner.startAgent).not.toHaveBeenCalled();
+      expect(f.runner.installPiIntegration).not.toHaveBeenCalled();
+    }
+    expect(f.runner.runInPane).not.toHaveBeenCalled();
+  },
+);
+
+test("registered prepared Pi without a brief refuses failed native discovery before allocation or legacy fallback", async () => {
+  const f = await fixture();
+  const discover = vi.fn(async () => {
+    throw new Error("selected native binary unavailable");
+  });
+  const capture = vi.fn(async () => {
+    throw new Error("capture forbidden");
+  });
+  const adapter = createPiSeatAdapter({
+    repoRoot: f.directory,
+    stateDir: f.directory,
+    native: { createCommandTab: async () => "forbidden", capture },
+    discover,
+  });
+  const store = new HerdrWatchStore(join(f.directory, "missing-native.json"), {
+    runner: f.runner,
+    seatAdapters: [adapter],
+  });
+  cleanups.push(async () => store.close());
+  expect(
+    await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "pi",
+      title: "prepared seat",
+      workingDirectory: f.directory,
+    }),
+  ).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
+  expect(discover).toHaveBeenCalledOnce();
+  expect(capture).not.toHaveBeenCalled();
+  expect(f.runner.createTab).not.toHaveBeenCalled();
+  expect(f.runner.startAgent).not.toHaveBeenCalled();
+  expect(f.runner.runInPane).not.toHaveBeenCalled();
+  expect(f.runner.installPiIntegration).not.toHaveBeenCalled();
+  expect(f.runner.configurePiProvider).not.toHaveBeenCalled();
 });

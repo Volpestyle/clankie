@@ -29,6 +29,13 @@ its live native header does not claim persisted bytes. When the file appears its
 actual header and inode are checked. Resume resolves an existing exact confined
 native file and verifies its header before selecting `--session <file>`.
 
+An unmanaged or hosted launch without a brief retains its existing native launch
+behavior. If a prepared Pi adapter is registered, it is selected even without a
+brief; capability, binary or proof failures never fall back to that unmanaged
+path. An automated brief still requires a structured adapter. Saved live Pi
+resumption, with or without a brief, separately requires the original controller
+and exact saved-session proof described below.
+
 ## Delivery semantics
 
 The extension uses supported `pi.sendMessage` custom messages with `display: true`,
