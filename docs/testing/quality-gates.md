@@ -13,11 +13,12 @@ not select that corpus. `pnpm test:eval` uses `vitest.eval.config.ts` to run it.
 Authority and evaluator-runner unit regressions remain ordinary tests; they do
 not execute evaluations.
 
-| Lane                | Command                 | Evidence and limits                                                                                                     |
-| ------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Full gate           | `pnpm check`            | CI JUnit report in `.data/qa/tests.xml`; Rust/IPC results remain in the job log.                                        |
-| Host integration    | `pnpm test:integration` | Loopback HTTP boot/restart, pairing, device authority, encryption and conversation relay.                               |
-| Manual offline eval | `pnpm test:eval`        | Frozen play-evidence calibration cases. Every assertion must pass; this lane is excluded from full checks and releases. |
+| Lane                | Command                          | Evidence and limits                                                                                                            |
+| ------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Full gate           | `pnpm check`                     | CI JUnit report in `.data/qa/tests.xml`; Rust/IPC results remain in the job log.                                               |
+| Computer body       | `pnpm test:computer-integration` | Explicit real Chromium/localhost-fixture contract proof; excluded from default tests and checks. No comparison or model calls. |
+| Host integration    | `pnpm test:integration`          | Loopback HTTP boot/restart, pairing, device authority, encryption and conversation relay.                                      |
+| Manual offline eval | `pnpm test:eval`                 | Frozen play-evidence calibration cases. Every assertion must pass; this lane is excluded from full checks and releases.        |
 
 The host-integration command selects tests already in the full gate. The eval
 command is separate and never runs implicitly. Retries are disabled. CI cancels
@@ -26,6 +27,25 @@ days, and keeps its 30-minute ceiling. The private app's full client/host journe
 and native builds run at release time or on an explicit manual run.
 
 ## Isolation and reproducibility
+
+The shared `vitest.config.ts` setup gives each test file a fresh temporary HOME
+and XDG directories before its imports. It overrides `CLANKIE_SETTINGS_FILE`
+and `CLANKIE_CREDENTIALS_FILE`, selecting the file credential backend even on
+macOS, and removes inherited Clankie, Discord, Herdr and provider-key overrides.
+Node children inherit the same fixture paths. Cleanup removes the temporary
+directory after the file finishes; tests supply their own synthetic overrides
+when exercising configuration or authentication.
+
+The isolation regression launches focused Vitest fixtures against populated,
+empty and missing synthetic owner configs. A preload trap rejects filesystem
+access to those paths and the original owner config paths, and rejects Keychain
+commands, including in child processes. It also checks that fixture settings
+and credentials can be read and written normally.
+
+Live store access is an explicit manual opt-in: `CLANKIE_TEST_LIVE_STORES=1`
+disables the shared isolation. The existing Keychain smoke test separately
+requires `CLANKIE_KEYCHAIN_TESTS=1`; injected fake Keychain runners remain ordinary
+tests. Never enable either flag for an ordinary check or CI run.
 
 `apps/clankie/test/fixtures/qa-service.ts` binds an OS-assigned loopback port,
 uses a fixed injectable clock, a generated test-only signing key and bearer,

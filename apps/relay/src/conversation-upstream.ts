@@ -3,6 +3,7 @@ import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OperatorConversationServiceResultSchema,
+  parseProtocolResponse,
   type OperatorDeliveredFileDownloadRequest,
   type OperatorConversationServiceDispatch,
   type OperatorConversationServiceRequest,
@@ -33,7 +34,7 @@ export function createCaptainConversationDispatch(
       signal: dispatchSignal(signal),
     });
     if (!response.ok) throw new Error(`Captain conversation service returned HTTP ${response.status}`);
-    return OperatorConversationServiceResultSchema.parse(await response.json());
+    return parseProtocolResponse(OperatorConversationServiceResultSchema, await response.json());
   };
 }
 
@@ -110,7 +111,7 @@ export function createDeviceConversationDispatch(options: {
         throw new DeviceConversationRefusal(response.status);
       throw new Error("Conversation owner upstream unavailable");
     }
-    const result = OperatorConversationServiceResultSchema.parse(await response.json());
+    const result = parseProtocolResponse(OperatorConversationServiceResultSchema, await response.json());
     requestSignal.throwIfAborted();
     if (result.op !== request.op) throw new Error("Unexpected conversation owner response");
     return result;

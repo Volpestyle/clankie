@@ -5,7 +5,12 @@ import type {
   ProjectHireProcessProof,
   ProjectHireMembershipCandidate,
 } from "./project-hires.ts";
-import type { ConversationOwner, ConversationAuthority } from "./conversation-owner.ts";
+import type {
+  ConversationOwner,
+  ConversationAuthority,
+  NativeSeatRecipient,
+  WorkerWriteAuthority,
+} from "./conversation-owner.ts";
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import type { PeerSeatAuthority } from "./peer-seat-messages.ts";
@@ -18,6 +23,8 @@ import type {
   CaptainSessionLaneV2,
   CaptainTurnMedia,
   CaptainTurnSettledMetrics,
+  IssueMetricsQuery,
+  IssueMetricsReport,
   DiscordChannelProjectionMessage,
   DiscordChannelProjectionMessageResult,
   DiscordPresenceChannelTurnRequest,
@@ -36,7 +43,7 @@ import type {
   SpawnOperatorSeat,
 } from "@clankie/protocol";
 import type { DurableMessageNotice, LinearInboxPage, LinearInboxReadOptions } from "./conversations.ts";
-import type { LinearActivityEvent, LinearWorkOwner } from "../linear-webhook.ts";
+import type { LinearActivityEvent, LinearWorkOwner, LinearWorkOwnership } from "../linear-webhook.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
@@ -74,6 +81,7 @@ export type HireSeat = (
   seat: SpawnOperatorSeat,
   brief?: string,
   authority?: ConversationAuthority,
+  linearIssue?: Pick<LinearWorkOwner, "organizationId" | "issueId">,
 ) => Promise<OperatorSeatSpawnResult>;
 
 /**
@@ -87,6 +95,8 @@ export type MessageSeat = (
   message: string,
   /** Host-captured leading conversation; never a worker-selected route. */
   authority?: ConversationAuthority,
+  /** A response to one observed native request, never a new worker turn. */
+  questionAnswer?: import("@clankie/agent-hosts").SeatQuestionAnswer,
 ) => Promise<SeatMessageResult>;
 type SeatMessageResult = { readonly deliveryStage?: DeliveryStage } & (
   | (Extract<FleetSeatDelivery, { outcome: "delivered" }> & {
@@ -174,6 +184,7 @@ export interface CaptainPort {
     readonly limit?: number;
     readonly runId?: string;
   }): Promise<readonly CaptainTurnSettledMetrics[]>;
+  readIssueMetrics(query: IssueMetricsQuery): Promise<IssueMetricsReport>;
   /** Prompt fragment describing the voice lane, for the realtime voice briefing. */
   voiceLaneInstructions(): string;
   /**
@@ -268,7 +279,34 @@ export interface CaptainPort {
   /** Offer a bounded page without consuming it. */
   readLinearInbox(options?: LinearInboxReadOptions): LinearInboxPage;
   acknowledgeLinearInbox(cursor: string, conversationId?: string): boolean;
-  linearWorkOwners(): readonly LinearWorkOwner[];
+  linearWorkOwners(): readonly LinearWorkOwnership[];
+  bindLinearWorkOwner(binding: LinearWorkOwner, source: ConversationAuthority): Promise<boolean>;
+  unbindLinearWorkOwner(organizationId: string, issueId: string): boolean;
+  handoffLinearActivity(cursor: string): Promise<boolean>;
+  /** Host-only attribution of a settled connected write, never model-selected owner proof. */
+  recordLinearWorkOwner(
+    issue: Pick<LinearWorkOwner, "organizationId" | "issueId">,
+    owner: ConversationOwner,
+    recordedAt?: number,
+    replayed?: boolean,
+  ): boolean;
+  recordLinearNativeWorkOwner(
+    issue: Pick<LinearWorkOwner, "organizationId" | "issueId">,
+    recipient: NativeSeatRecipient,
+    recordedAt?: number,
+    replayed?: boolean,
+  ): boolean;
+  fleetConversationAuthority(principalId: string): Promise<ConversationAuthority | undefined>;
+  fleetWriteAuthority(
+    principalId: string,
+    nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>,
+  ): Promise<WorkerWriteAuthority | undefined>;
+  deliverLinearNativeRecipient(
+    recipient: NativeSeatRecipient,
+    content: string,
+    eventId: string,
+    guard: () => Promise<void>,
+  ): Promise<FleetSeatDelivery>;
   resumeLinearActivity(): void;
   /** Store verified context in the Linear inbox and optionally queue a model turn. */
   receiveLinearActivity(activity: LinearActivityEvent, following: boolean): boolean | void;
@@ -319,6 +357,9 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     },
     observeLanes: async () => [],
     readTurnMetrics: async () => [],
+    readIssueMetrics: async () => {
+      throw new Error("Issue metrics unavailable");
+    },
     voiceLaneInstructions: () => "You are in a voice room.",
     syncSeatTranscript: () => true,
     seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),
@@ -367,6 +408,14 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     acknowledgeLinearInbox: () => false,
     receiveLinearActivity: () => true,
     linearWorkOwners: () => [],
+    bindLinearWorkOwner: async () => false,
+    unbindLinearWorkOwner: () => false,
+    handoffLinearActivity: async () => false,
+    recordLinearWorkOwner: () => false,
+    recordLinearNativeWorkOwner: () => false,
+    fleetConversationAuthority: async () => undefined,
+    fleetWriteAuthority: async () => undefined,
+    deliverLinearNativeRecipient: async () => ({ outcome: "offline", detail: "Native delivery unavailable" }),
     resumeLinearActivity: () => {},
     close: async () => {},
     ...overrides,

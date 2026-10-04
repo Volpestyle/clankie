@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const BodyResourceSchema = z.enum(["discord_mouth", "voice", "browser", "play"]);
+export const BodyResourceSchema = z.enum(["discord_mouth", "voice", "browser", "play", "computer"]);
 export type BodyResource = z.infer<typeof BodyResourceSchema>;
 const conversationId = z.string().trim().min(1).max(512);
 const incarnation = z.uuid();

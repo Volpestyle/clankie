@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { parseInboxRead, runLinearCommand } from "../src/command/linear.ts";
-import { runHerdrCommand } from "../src/command/herdr.ts";
+import { herdrFleetRuntimeArgs, runHerdrCommand } from "../src/command/herdr.ts";
+import { runRuntimeCommand } from "../src/command/runtime.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 
 async function tempStore(): Promise<SettingsStore> {
@@ -55,6 +56,61 @@ describe("clankie herdr", () => {
   });
 });
 
+describe("clankie herdr prepare", () => {
+  it.each([undefined, "/owner/source/setup.py", "C:\\Owner Source\\setup.py", "\\\\pc\\source\\setup.py"])(
+    "passes the remote source setup %s through the runtime prepare request",
+    async (codexSourceSetup) => {
+      const args = [
+        "prepare",
+        "pc fleet",
+        ...(codexSourceSetup === undefined ? [] : ["--codex-source-setup", codexSourceSetup]),
+      ];
+      const runtimeArgs = herdrFleetRuntimeArgs(args)!;
+      expect(runtimeArgs).toEqual(args);
+      const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        expect(String(url)).toBe("http://fixture/v1/runtime-connections/pc%20fleet/prepare");
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture");
+        expect(init?.body ? JSON.parse(init.body as string) : undefined).toEqual(
+          codexSourceSetup === undefined ? undefined : { codexSourceSetup },
+        );
+        return Response.json({ ok: true });
+      });
+      expect(
+        await runRuntimeCommand(runtimeArgs, {
+          host: "http://fixture",
+          env: { CLANKIE_OPERATOR_TOKEN: "fixture" },
+          fetchImpl: fetchImpl as typeof fetch,
+        }),
+      ).toEqual({ ok: true });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ["prepare"],
+    ["prepare", "pc", "--codex-source-setup"],
+    ["prepare", "pc", "--host", "unregistered"],
+    ["prepare", "pc", "--codex-source-setup", "/setup.py", "--codex-source-setup", "/other.py"],
+  ])("rejects malformed prepare arguments %j before a request", async (...args) => {
+    expect(() => herdrFleetRuntimeArgs(args)).toThrow("Usage: clankie herdr");
+    const fetchImpl = vi.fn();
+    await expect(runRuntimeCommand(args, { fetchImpl })).rejects.toThrow("Usage: clankie runtime prepare");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "relative/setup.py", "~/setup.py", "C:setup.py", "/setup.py\nother", "/setup.py\u0000"])(
+    "rejects invalid remote source setup %j before a request",
+    async (codexSourceSetup) => {
+      const fetchImpl = vi.fn();
+      await expect(
+        runRuntimeCommand(["prepare", "pc", "--codex-source-setup", codexSourceSetup], { fetchImpl }),
+      ).rejects.toThrow("absolute script path on the remote machine");
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("clankie workdir", () => {
   it("defaults to the home directory and round-trips set/clear", async () => {
     const settings = await tempStore();
@@ -80,7 +136,7 @@ describe("clankie workdir", () => {
 });
 
 describe("clankie linear", () => {
-  it("reads legacy bindings and scoped inboxes without sending retired mutations", async () => {
+  it("reads bindings and scoped inboxes while refusing obsolete positional mutation syntax", async () => {
     const calls: Array<{ path: string; method: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
       expect(new Headers(init.headers).get("authorization")).toBe("Bearer fixture");
@@ -98,9 +154,9 @@ describe("clankie linear", () => {
       await runLinearCommand(["inbox", "ack", "000000000042", "--conversation", "project"], options);
       await expect(
         runLinearCommand(["work", "bind", "org", "issue", "project", "--from", "previous"], options),
-      ).rejects.toThrow("bindings are retired");
+      ).rejects.toThrow("Usage:");
       await expect(runLinearCommand(["work", "unbind", "org", "issue", "project"], options)).rejects.toThrow(
-        "bindings are retired",
+        "Usage:",
       );
       expect(calls).toEqual([
         { path: "/v1/linear/work", method: "GET", body: undefined },
@@ -123,7 +179,8 @@ describe("clankie linear", () => {
     expect(await runLinearCommand([], options)).toMatchObject({
       following: false,
       conversationId: "linear-inbox",
-      wakeConversationId: "global-default",
+      wakeConversationId: "linear-inbox",
+      wakeRouting: "work-owner",
     });
     expect(await runLinearCommand(["follow", "on"], options)).toMatchObject({
       ok: false,

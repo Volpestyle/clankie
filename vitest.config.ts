@@ -11,8 +11,12 @@ const packageTestPattern = /^(?:apps|integrations|packages)\/[^/]+$/u.test(packa
 export default defineConfig({
   root: repoRoot,
   test: {
+    setupFiles: [fileURLToPath(new URL("./scripts/testing/vitest-setup.ts", import.meta.url))],
     include: packageTestPattern,
     exclude: [
+      ...(process.env.CLANKIE_COMPUTER_INTEGRATION === "1"
+        ? []
+        : ["apps/clankie/test/computer-body.integration.test.ts"]),
       "**/node_modules/**",
       "**/.turbo/**",
       "**/dist/**",

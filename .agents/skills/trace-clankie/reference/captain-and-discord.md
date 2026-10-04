@@ -40,6 +40,20 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   process health and newer events; an old timestamp alone does not establish a
   dead process. A successor retires its predecessor's row.
 
+- **A worker message is not a completion harvest.** Native `message_clankie`
+  reports carry `kind="message"` as untrusted agent output; completion harvests
+  remain `kind="watch"`, and self-wakes remain `kind="wake"`. Match the original
+  receipt and service-resolved lead conversation. A room-owned worker message
+  still needs its correlated native reply through the original room authority;
+  its tag does not turn the worker's words into owner instructions.
+
+- **Bridge age is a reload hint, not build or delivery evidence.** Doctor and
+  the roster report `freshness: older-than-runtime` when the observed bridge
+  started before the running service, including a same-build service restart.
+  Read transport presence separately; `current` is a start-time comparison and
+  unavailable timing stays `unknown`. An operator bridge does not establish
+  worker readiness. Reconcile uncertain delivery before another attempt.
+
 - **The fleet roster and saved history answer different questions.** The roster
   observes native occupants in connected Herdr fleets; hires and messages use
   native harness channels/session APIs. Worker reports arrive with

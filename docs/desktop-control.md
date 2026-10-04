@@ -138,3 +138,56 @@ not establish that the app has repainted its contents.
 
 Persistent action-host interaction still requires live proof. No completed
 menu operation or no-focus parity is claimed from read-only evidence.
+
+## Shared computer body
+
+`clankie computer request JSON` and `POST /v1/computer` expose one computer
+contract over the existing Peekaboo path. An operator selects a runnable
+conversation; the service rechecks its authority before each input. Social
+turns cannot use this endpoint. No worker, native Codex reasoning loop or
+provider computer-use loop is started by the contract.
+
+Acquire the `macos:console` body, inventory its current PID/window IDs, then
+capture an exact target. Inventory reports whether its results are complete;
+missing or refused window discovery stays partial. Screenshot metadata has a fresh UUID, sequence, expiry,
+actual PNG dimensions, global display bounds, observed elements and digest.
+Retrieve PNG bytes separately with `frame`; only the newest, action-ready,
+unexpired screenshot can authorize input. Coordinates in requests are image
+pixels. The host maps them through the capture's bounds, including Retina and
+cropped windows, without assuming a scale factor.
+
+Inputs are an ordered batch of click, element click, type, key, scroll or drag.
+Background delivery remains the default; a foreground choice is explicit, and
+Peekaboo drag requires it. A batch stops at the first failed or uncertain input.
+Receipts distinguish `confirmed`, `failed` and `uncertain`; an exit code or event
+dispatch alone is not confirmation. Any attempted batch invalidates its screenshot.
+Observe again before choosing another action.
+
+The persistent conversation body registry owns one driver lease, with the
+interactive-environment lease clock conventions. Renew it within five minutes;
+`revoke` blocks the next input even during an admitted batch; expiry and restart
+also block further effects until recovery. An input request UUID
+and its payload digest are persisted before dispatch, then its semantic receipt
+is persisted without typed text or pixels. An identical retry reconciles that
+receipt; a changed payload with the same UUID refuses. Never replay an uncertain
+input with a new UUID. Each lease admits at most 256 input batches; retained
+screenshots are bounded to four, expire after thirty seconds, and have a separate
+16 MiB PNG ceiling. The legacy `/v1/body-leases` projection keeps its original
+resource set; computer status and mutations use `/v1/computer`.
+
+Today's classic caller-local capture remains read-only. The adapter does not
+bypass Peekaboo's remote-host refusal, change focus to rescue an operation, or
+change macOS permissions. The shared Bridge does not provide a quiescence
+receipt, so the macOS adapter refuses recovery after uncertainty or restart;
+closing a CLI process cannot prove queued native input stopped. The lease stays
+held until a host stop-proof capability is supplied. Raw Peekaboo invocations
+outside this contract are not fenced by its driver lease; overlapping drivers
+must still be avoided.
+
+Hosted bodies can implement the same `ComputerAdapter` seam with their own
+inventory, capture bounds and host-confirmed input/recovery. This step registers
+only the local macOS adapter; a hosted Linux display, native Codex and provider
+routes are not implemented. The explicit
+[manual comparison harness](../scripts/manual/computer-use/README.md) freezes the
+tasks and grades artifacts independently. James starts that comparison and picks
+the model route; builds and checks never run it.

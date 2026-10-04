@@ -1,17 +1,17 @@
-/**
- * `clankie metrics` — recent settled captain turns (VUH-1115).
- *
- * The same bounded rows the operator route answers: what ran each turn, what it
- * did, and what the provider reported. Never a transcript, tool arguments, or a
- * credential. `execution` and `usage` come back explicitly null when the turn
- * predates the capture or the provider reported nothing — neither is ever zero.
- */
+/** Read existing turn records or observed issue/worker costs, with explicit coverage. */
 import { ClankieApiClient } from "@clankie/api-client";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
-import { CAPTAIN_TURN_METRICS_LIMIT_MAX, type CaptainTurnSettledMetrics } from "@clankie/protocol";
+import {
+  CAPTAIN_TURN_METRICS_LIMIT_MAX,
+  IssueMetricsQuerySchema,
+  type IssueMetricsQuery,
+  type IssueMetricsReport,
+  type CaptainTurnSettledMetrics,
+} from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
-const METRICS_USAGE = "Usage: clankie metrics [--run ID] [--limit N]";
+const METRICS_USAGE =
+  "Usage: clankie metrics [--run ID] [--limit N] | --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]";
 
 export interface MetricsCliCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -22,19 +22,34 @@ export interface MetricsCliCommandOptions {
 
 export type MetricsCliResult =
   | { readonly ok: true; readonly items: readonly CaptainTurnSettledMetrics[] }
+  | { readonly ok: true; readonly report: IssueMetricsReport }
   | { readonly ok: false; readonly error: string };
 
 interface MetricsCliArgs {
+  readonly issues?: IssueMetricsQuery;
   readonly limit?: number;
   readonly runId?: string;
 }
 
 export function parseMetricsArgs(args: readonly string[]): MetricsCliArgs {
+  let issueMode = false;
+  const issueQuery: Record<string, string> = {};
   let limit: number | undefined;
   let runId: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
     const value = args[index + 1];
+    if (flag === "--issues") {
+      issueMode = true;
+      continue;
+    }
+    if (["--issue", "--worker", "--since", "--until"].includes(flag!)) {
+      if (value === undefined) throw new Error(METRICS_USAGE);
+      issueQuery[flag!.slice(2)] = value;
+      if (flag === "--issue" || flag === "--worker") issueMode = true;
+      index += 1;
+      continue;
+    }
     if (flag === "--run" || flag === "--limit") {
       if (value === undefined) throw new Error(METRICS_USAGE);
       index += 1;
@@ -50,6 +65,11 @@ export function parseMetricsArgs(args: readonly string[]): MetricsCliArgs {
     }
     throw new Error(METRICS_USAGE);
   }
+  if (issueMode) {
+    if (limit !== undefined || runId !== undefined) throw new Error(METRICS_USAGE);
+    return { issues: IssueMetricsQuerySchema.parse(issueQuery) };
+  }
+  if (Object.keys(issueQuery).length > 0) throw new Error(METRICS_USAGE);
   return { ...(limit === undefined ? {} : { limit }), ...(runId === undefined ? {} : { runId }) };
 }
 
@@ -72,6 +92,8 @@ export async function runMetricsCommand(
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
   try {
+    if (parsed.issues !== undefined)
+      return { ok: true, report: await client.readIssueMetrics(parsed.issues) };
     const page = await client.readCaptainTurnMetrics(parsed);
     return { ok: true, items: page.items };
   } catch (error) {

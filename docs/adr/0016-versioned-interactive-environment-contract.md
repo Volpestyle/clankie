@@ -51,6 +51,17 @@ and single-write the current version. Unknown versions fail closed and emit a
 compatibility event; stored history is migrated by explicit, tested
 translators rather than reinterpretation.
 
+VUH-1635 clarifies how clients uphold the additive-field rule. An authenticated
+JSON response reader projects the fields its bundled schema knows, recursively
+discarding unknown object keys while retaining validation of known values,
+bounds, versions, discriminators and refinements. Request validation, persisted
+history and encryption envelopes remain strict. The protocol owns the response
+parser so app, TUI and relay upstream clients share this rule rather than
+maintaining field-specific compatibility lists. A new host's optional metadata
+cannot grant authority or make a malformed known field valid. Already shipped
+strict readers need updated JavaScript; the host can temporarily omit optional
+metadata to recover them, but cannot retrofit a client parser remotely.
+
 ## Options weighed
 
 - **Expose every Minecraft MCP tool to every captain session** — rejected

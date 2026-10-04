@@ -4,6 +4,7 @@ import {
   MinecraftActionRequestSchema,
   MinecraftSessionRefSchema,
   MinecraftServerProfileIdSchema,
+  MinecraftHostSettingsSchema,
 } from "@clankie/protocol";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -17,25 +18,48 @@ import {
   type MinecraftHostingPort,
 } from "./hosting.ts";
 import { MinecraftTunnel } from "./tunnel.ts";
+import { AwsEc2Host } from "./aws-host.ts";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 const flag = (name: string) => {
   const index = process.argv.indexOf(name);
   return index < 0 ? undefined : process.argv[index + 1];
 };
 const credentials = createDefaultCredentialStore();
-let tunnel: MinecraftTunnel;
-const host: MinecraftHostingPort = new MinecraftHost({
-  ...(flag("--data-dir") ? { dataDir: flag("--data-dir")! } : {}),
-  ...(flag("--game-port") ? { gamePort: Number(flag("--game-port")) } : {}),
-  ...(flag("--rcon-port") ? { rconPort: Number(flag("--rcon-port")) } : {}),
-  ...(flag("--java") ? { java: flag("--java")! } : {}),
-  ...(flag("--idle-timeout-ms") ? { idleTimeoutMs: Number(flag("--idle-timeout-ms")) } : {}),
-  ...(flag("--max-uptime-ms") ? { maxUptimeMs: Number(flag("--max-uptime-ms")) } : {}),
-  credentials,
-  onUnavailable: async () => {
-    if (tunnel) await tunnel.stop();
-  },
-});
+const dataDir = flag("--data-dir") ?? join(homedir(), ".local", "share", "clankie", "minecraft-host");
+const backendPath = join(dataDir, "backend.json");
+const BackendSchema = MinecraftHostSettingsSchema.shape.backend.unwrap();
+let backend: typeof BackendSchema._output = { kind: "local" };
+try {
+  backend = BackendSchema.parse(JSON.parse(await readFile(backendPath, "utf8")));
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+    throw new Error("Minecraft host backend settings invalid");
+}
+let tunnel: MinecraftTunnel | undefined;
+function createHost(selected: typeof backend): MinecraftHostingPort {
+  if (selected.kind === "aws-ec2")
+    return new AwsEc2Host({ ...selected, dataDir: join(dataDir, "aws"), credentials });
+  return new MinecraftHost({
+    dataDir,
+    ...(flag("--game-port") ? { gamePort: Number(flag("--game-port")) } : {}),
+    ...(flag("--rcon-port") ? { rconPort: Number(flag("--rcon-port")) } : {}),
+    ...(flag("--java") ? { java: flag("--java")! } : {}),
+    ...(flag("--idle-timeout-ms") ? { idleTimeoutMs: Number(flag("--idle-timeout-ms")) } : {}),
+    ...(flag("--max-uptime-ms") ? { maxUptimeMs: Number(flag("--max-uptime-ms")) } : {}),
+    credentials,
+    onUnavailable: async () => {
+      await tunnel?.stop();
+    },
+  });
+}
+let host = createHost(backend);
+// Reattach the launch-time watchdog after an MCP restart without starting EC2.
+// Keep configuration/stop tools available if credentials or AWS are unavailable.
+if (host instanceof AwsEc2Host) void host.refresh().catch(() => undefined);
 const createTunnel = () =>
   new MinecraftTunnel({
     dataDir: host.dataDir,
@@ -50,21 +74,66 @@ const createTunnel = () =>
         credentials.set("clankie_minecraft_playit", { type: "api", key: secret }),
     },
   });
-tunnel = createTunnel();
-let tunnelPort = host.status().gamePort;
+let tunnelPort: number | undefined;
 const currentTunnel = async () => {
+  if (backend.kind !== "local") throw new Error("Minecraft AWS host does not use playit");
   await host.configuration();
-  if (tunnelPort !== host.status().gamePort) {
-    await tunnel.stop();
+  if (!tunnel || tunnelPort !== host.status().gamePort) {
+    await tunnel?.stop();
     tunnel = createTunnel();
     tunnelPort = host.status().gamePort;
   }
   return tunnel;
 };
+const hostStatus = async () => {
+  if (host instanceof AwsEc2Host) {
+    const status = await host.refresh();
+    return {
+      ...status,
+      tunnel: {
+        phase: status.phase === "running" && status.authReady ? "running" : "stopped",
+        ...(status.phase === "running" && status.authReady && status.publicAddress
+          ? { publicAddress: status.publicAddress }
+          : {}),
+      },
+    };
+  }
+  const activeTunnel = await currentTunnel();
+  return { ...host.status(), tunnel: activeTunnel.status() };
+};
+let hostQueue: Promise<unknown> = Promise.resolve();
+const withHost = <T>(operation: () => Promise<T>): Promise<T> => {
+  const pending = hostQueue.then(operation);
+  hostQueue = pending.catch(() => {});
+  return pending;
+};
+const configureHost = async (raw: unknown) => {
+  const { backend: requested, ...patch } = HostConfigurationPatchSchema.parse(raw);
+  const next = requested ?? backend;
+  const changing = JSON.stringify(next) !== JSON.stringify(backend);
+  if (changing) {
+    const status = await hostStatus();
+    if (status.phase !== "stopped") throw new Error("Stop Minecraft host before changing backend");
+    const candidate = createHost(next);
+    // configure performs a read-only stopped-state check. refresh would attach a
+    // watchdog to a running candidate even though this selection is rejected.
+    await candidate.configure(patch);
+    await tunnel?.stop();
+    await mkdir(dataDir, { recursive: true, mode: 0o700 });
+    const temporary = `${backendPath}.${randomUUID()}.tmp`;
+    await writeFile(temporary, JSON.stringify(next) + "\n", { mode: 0o600 });
+    await rename(temporary, backendPath);
+    host = candidate;
+    backend = next;
+    tunnel = undefined;
+    tunnelPort = undefined;
+  } else await host.configure(patch);
+  return { ...(await host.configuration()), backend };
+};
 const motor = new MinecraftMotor({
   isHosted: (endpoint) =>
     endpoint.host === "127.0.0.1" &&
-    endpoint.port === host.status().gamePort &&
+    endpoint.port === host.status().gameEndpoint.port &&
     endpoint.username === host.status().botUsername,
   hostedLogin: (endpoint) => host.botLogin(endpoint),
 });
@@ -206,7 +275,7 @@ server.registerTool(
 server.registerTool(
   "host_configuration",
   { description: "Operator hosted server resource/lifecycle settings.", inputSchema: z.strictObject({}) },
-  async () => result(await host.configuration()),
+  async () => withHost(async () => result({ ...(await host.configuration()), backend })),
 );
 server.registerTool(
   "host_configure",
@@ -214,11 +283,7 @@ server.registerTool(
     description: "Update integration-owned settings while stopped.",
     inputSchema: z.strictObject({ settings: HostConfigurationPatchSchema }),
   },
-  async ({ settings }) => {
-    const configuration = await host.configure(settings);
-    await currentTunnel();
-    return result(configuration);
-  },
+  async ({ settings }) => withHost(async () => result(await configureHost(settings))),
 );
 server.registerTool(
   "host_status",
@@ -226,10 +291,7 @@ server.registerTool(
     description: "Private hosted server and tunnel status; never credentials.",
     inputSchema: z.strictObject({}),
   },
-  async () => {
-    await currentTunnel();
-    return result({ ...host.status(), tunnel: tunnel.status() });
-  },
+  async () => withHost(async () => result(await hostStatus())),
 );
 server.registerTool(
   "host_lifecycle",
@@ -237,19 +299,20 @@ server.registerTool(
     description: "Operator-owned hosted server lifecycle.",
     inputSchema: z.strictObject({ operation: z.enum(["start", "stop", "restart"]) }),
   },
-  async ({ operation }) => {
-    if (operation === "stop" || operation === "restart") {
-      try {
-        await motor.close();
-      } catch {
-        await host.stop();
-        throw new Error("Minecraft bot shutdown unconfirmed; hosted server stopped");
+  async ({ operation }) =>
+    withHost(async () => {
+      if (operation === "stop" || operation === "restart") {
+        try {
+          await motor.close();
+        } catch {
+          await host.stop();
+          throw new Error("Minecraft bot shutdown unconfirmed; hosted server stopped");
+        }
       }
-    }
-    const status = await host[operation]();
-    if (operation !== "stop") await (await currentTunnel()).start();
-    return result({ ...status, tunnel: tunnel.status() });
-  },
+      await host[operation]();
+      if (operation !== "stop" && backend.kind === "local") await (await currentTunnel()).start();
+      return result(await hostStatus());
+    }),
 );
 server.registerTool(
   "host_backup",
@@ -257,7 +320,7 @@ server.registerTool(
     description: "Flush and archive hosted worlds, retaining seven backups.",
     inputSchema: z.strictObject({}),
   },
-  async () => result(await host.backup()),
+  async () => withHost(async () => result(await host.backup())),
 );
 server.registerTool(
   "host_admin",
@@ -265,7 +328,7 @@ server.registerTool(
     description: "Strict hosted-world command; no op, selectors, raw console or credentials.",
     inputSchema: z.strictObject({ command: HostAdminSchema }),
   },
-  async ({ command }) => result(await host.admin(command)),
+  async ({ command }) => withHost(async () => result(await host.admin(command))),
 );
 server.registerTool(
   "host_enroll",
@@ -274,7 +337,7 @@ server.registerTool(
       "Private core-only enrollment provisioning; caller binds Discord identity before whitelist admission.",
     inputSchema: z.strictObject({ username: z.string().regex(/^[A-Za-z0-9_]{3,16}$/u) }),
   },
-  async ({ username }) => result(await host.enroll(username)),
+  async ({ username }) => withHost(async () => result(await host.enroll(username))),
 );
 server.registerTool(
   "host_revoke_code",
@@ -282,23 +345,24 @@ server.registerTool(
     description: "Revoke a pending private login code.",
     inputSchema: z.strictObject({ username: z.string().regex(/^[A-Za-z0-9_]{3,16}$/u) }),
   },
-  async ({ username }) => result(await host.revokeCode(username)),
+  async ({ username }) => withHost(async () => result(await host.revokeCode(username))),
 );
 server.registerTool(
   "host_claim",
   { description: "Prepare one owner playit account claim.", inputSchema: z.strictObject({}) },
-  async () => result(await (await currentTunnel()).prepareClaim()),
+  async () => withHost(async () => result(await (await currentTunnel()).prepareClaim())),
 );
 server.registerTool(
   "host_claim_complete",
   { description: "Complete an approved playit claim into broker storage.", inputSchema: z.strictObject({}) },
-  async () => {
-    const activeTunnel = await currentTunnel();
-    const claim = await activeTunnel.completeClaim();
-    const status = host.status();
-    if (claim.claimed && status.phase === "running" && status.authReady) await activeTunnel.start();
-    return result(claim);
-  },
+  async () =>
+    withHost(async () => {
+      const activeTunnel = await currentTunnel();
+      const claim = await activeTunnel.completeClaim();
+      const status = host.status();
+      if (claim.claimed && status.phase === "running" && status.authReady) await activeTunnel.start();
+      return result(claim);
+    }),
 );
 await server.connect(new StdioServerTransport());
 let closing = false;
@@ -310,7 +374,7 @@ const shutdown = () => {
       await motor.close();
     } finally {
       try {
-        await tunnel.stop();
+        await tunnel?.stop();
       } finally {
         await host.stop();
       }

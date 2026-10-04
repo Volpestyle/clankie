@@ -47,6 +47,7 @@ import type { AutonomyStore } from "./autonomy.ts";
 import type { DiscordWatchOrigin, HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat, MessageSeat } from "./port.ts";
+import { SeatQuestionAnswerSchema } from "./codex-user-input.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { desktopTools } from "./desktop.ts";
@@ -694,6 +695,15 @@ function hireAgentTool(
       "its pane: reconcile before retrying. Follow up with message_seat and watch the returned seatId with " +
       "herdr_watch.",
     parameters: Type.Object({
+      linearIssue: Type.Optional(
+        Type.Object(
+          { organizationId: Type.String({ format: "uuid" }), issueId: Type.String({ format: "uuid" }) },
+          {
+            description:
+              "Canonical Linear issue this hire works on. The admitted hiring conversation owns its later events.",
+          },
+        ),
+      ),
       harness: Type.Optional(StringEnum(OPERATOR_SEAT_HARNESSES)),
       resume: Type.Optional(
         Type.String({
@@ -792,12 +802,14 @@ function hireAgentTool(
       if (available?.() === false)
         return json({ outcome: "failed", reason: "herdr_unreachable", deliveryStage: "unavailable" });
       const authority = captureConversationAuthority(turn.conversationAuthority);
+      const assignment = structuredClone(params);
       await assertConversationAuthority(authority);
-      const { brief, ...seat } = params as typeof params & { brief?: string };
+      const { brief, linearIssue, ...seat } = assignment as typeof params & { brief?: string };
       const result = await hire(
         SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }),
         brief,
         authority,
+        linearIssue,
       );
       if (result.outcome !== "spawned" || brief === undefined || message === undefined)
         return json({ ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) });
@@ -829,10 +841,22 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
       "channel or session API and never types into the owner's terminal draft. A steered receipt means " +
       "guidance reached the active turn, not an after-turn queue. deliveryStage reports stored, delivered, consumed or responded; native queue acceptance is consumed, never model-seen. Uncertain blocks every retry until the original receipt is reconciled. " +
       "This conversation adopts the seat as its lead; its future message_clankie reports return here. " +
+      "To answer an observed native Codex question, supply questionAnswer with its exact requestId and an answers map keyed by question ID ({answers: [text]} per ID), and omit message. This responds on the existing control channel; it never queues a new turn. The first native answer wins. Resolved IDs are refused, and uncertain acceptance must not be retried or replaced with an ordinary message. " +
       "Linked agents can initiate messages with message_clankie.",
     parameters: Type.Object({
       seat: Type.String({ minLength: 1, maxLength: 200 }),
-      message: Type.String({ minLength: 1, maxLength: SEAT_MESSAGE_MAX }),
+      message: Type.Optional(Type.String({ minLength: 1, maxLength: SEAT_MESSAGE_MAX })),
+      questionAnswer: Type.Optional(
+        Type.Object({
+          requestId: Type.Union([Type.String({ minLength: 1, maxLength: 200 }), Type.Integer()]),
+          answers: Type.Record(
+            Type.String(),
+            Type.Object({
+              answers: Type.Array(Type.String({ maxLength: 32768 }), { minItems: 1, maxItems: 16 }),
+            }),
+          ),
+        }),
+      ),
     }),
     executionMode: "sequential",
     // A watch wake is an internal turn, and answering the seat it woke for is
@@ -840,7 +864,16 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
     execute: async (_id, params) => {
       const authority = captureConversationAuthority(turn.conversationAuthority);
       await assertConversationAuthority(authority);
-      const result = await message(params.seat, params.message, authority);
+      if ((params.message === undefined) === (params.questionAnswer === undefined))
+        return json({
+          outcome: "undelivered",
+          deliveryStage: "unavailable",
+          detail: "Supply exactly one of message or questionAnswer; nothing was sent.",
+        });
+      const result =
+        params.questionAnswer === undefined
+          ? await message(params.seat, params.message!, authority)
+          : await message(params.seat, "", authority, SeatQuestionAnswerSchema.parse(params.questionAnswer));
       return json({ ...result, deliveryStage: fleetDeliveryStage(result) });
     },
   });
@@ -919,7 +952,7 @@ function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinit
         "Every finished result gets inspectable evidence: a screenshot or video for anything visible; test output, " +
         "numbers and commit links otherwise, each captioned with what it proves and what is sample data. " +
         "action=init records the repo's convention once (backend, plus directory, githubRepo or linearTeam/" +
-        "linearProject); omit backend to record what discovery found. Criteria numbers for check/uncheck are 1-based.",
+        "linearProject and optional linearLabel for an existing repo-board label); omit backend to record what discovery found. Criteria numbers for check/uncheck are 1-based.",
       parameters: Type.Object({
         action: StringEnum(["create", "update", "attach", "init"]),
         repo,
@@ -943,6 +976,13 @@ function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinit
         githubRepo: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
         linearTeam: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
         linearProject: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+        linearLabel: Type.Optional(
+          Type.String({
+            minLength: 1,
+            maxLength: 64,
+            description: "Existing Linear label to scope this repo's board and new items.",
+          }),
+        ),
       }),
       execute: async (_id, params) => {
         const target = params.repo ?? "workspace";
@@ -955,6 +995,7 @@ function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinit
             ...(params.githubRepo === undefined ? {} : { githubRepo: params.githubRepo }),
             ...(params.linearTeam === undefined ? {} : { linearTeam: params.linearTeam }),
             ...(params.linearProject === undefined ? {} : { linearProject: params.linearProject }),
+            ...(params.linearLabel === undefined ? {} : { linearLabel: params.linearLabel }),
           });
         if (params.action === "create") {
           if (params.title === undefined) return json({ error: "create needs a title" });
@@ -1626,7 +1667,11 @@ const MCP_TOOL_SEARCH = "mcp_tool_search";
  * registering them all active would tax every "hey clankie" in a voice channel
  * for capabilities that turn never uses.
  */
-export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): InlineExtension {
+export function mcpExtension(
+  deps: CaptainDeps,
+  lane: CaptainSessionLaneV2,
+  turn?: TurnContext,
+): InlineExtension {
   return {
     name: "captain-mcp",
     hidden: true,
@@ -1649,6 +1694,7 @@ export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): Inl
               server: tool.server,
               tool: tool.name,
               arguments: (params ?? {}) as Record<string, unknown>,
+              ...(turn?.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
             });
             // A server's own error is the model's to react to, so it is raised
             // rather than returned as a successful-looking payload.

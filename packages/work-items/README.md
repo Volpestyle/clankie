@@ -28,6 +28,17 @@ number of matching items (default 100, maximum 250) or the final page. Missing
 or repeated continuation cursors fail with `invalid_pagination` instead of
 looping or silently returning an incomplete list.
 
+A saved Linear convention may include `linear.label`, an existing label that
+scopes the repo's board within its team/project. Every provider page receives
+that filter; an ad-hoc role label is intersected against the provider's full
+labels before the item's 20-label display projection. Status and owner filters
+still apply. Omitting the saved label keeps the team/project-wide board.
+Creates carry that label; edits and attachments preserve existing labels.
+Direct known-item reads remain available: the scope is a board filter, not an
+authorization boundary. Unknown labels fail at the provider; none are created.
+Attachments beside uploaded media insert only new evidence, refusing ambiguous
+Evidence headings instead of replacing upload nodes.
+
 The service requests MCP `resultMode: "data"`: complete text up to 8 MiB in
 UTF-8, with typed `result_too_large` failure above that ceiling. The default
 model-facing 50,000-character cap is unchanged. The data limit is checked on

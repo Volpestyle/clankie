@@ -136,6 +136,13 @@ does not assert they were rebuilt.
 backups and auth. `tunnel.ts` owns pinned playit provisioning, broker-backed claim,
 mandatory PROXY V2, its supervised process and configuration checks. `main.ts`
 projects those operations through the same private MCP connection as the motor.
+The AWS provider implements the same `MinecraftHostingPort` for one configured
+EC2 instance. It uses a scoped broker credential, bounded custom SSM management,
+encrypted secret-bearing replies and a private SSM bot port forward. Guest
+provisioning keeps Paper/RCON loopback, with trusted public ingress supplying
+original client addresses. The guest idle/uptime watcher must remain independent
+of the controller; CloudWatch provides an additional stop path, while Budgets
+provides alerts rather than a spending cap. Account/resource records stay private.
 No server or tunnel starts merely because the MCP connection opens. Clankie's core
 retains authority, Discord bindings/invites, audit, profiles and play ownership.
 

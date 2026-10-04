@@ -32,6 +32,7 @@ function fixture(resume = false) {
         watch();
       }),
     },
+    keymap: { dispatchCommand: vi.fn(async (_name: string) => {}) },
     state: {
       config: { mcp: { clankie: { type: "local", command: ["clankie", "mcp", "--fleet"], enabled: true } } },
       get ready() {
@@ -106,6 +107,22 @@ test("first initializer creates and observes one session before caller mounts th
   await expect(f.initialize()).rejects.toThrow("only once");
   expect(f.api.client.session.create).toHaveBeenCalledTimes(1);
   expect(f.api.route.navigate).toHaveBeenCalledTimes(1);
+});
+
+test("native exit authorizes the original session and refuses a route change during authorization", async () => {
+  const f = fixture();
+  await f.initialize();
+  await f.runtime.exit();
+  expect(f.controller.authorize).toHaveBeenLastCalledWith("exit");
+  expect(f.api.keymap.dispatchCommand).toHaveBeenCalledExactlyOnceWith("app.exit");
+  const changed = fixture();
+  await changed.initialize();
+  changed.controller.authorize.mockImplementation(async () => {
+    changed.switch();
+    changed.switch(sessionId);
+  });
+  await expect(changed.runtime.exit()).rejects.toThrow();
+  expect(changed.api.keymap.dispatchCommand).not.toHaveBeenCalled();
 });
 
 test("exact resume never creates or navigates; wrong route and unsupported exact version refuse before effects", async () => {

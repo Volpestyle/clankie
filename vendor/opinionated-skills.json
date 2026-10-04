@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/Volpestyle/skills",
-  "revision": "2b71393f2ed151f440cf974383761b6903b5d8d9",
+  "revision": "4c30a34967f275ab3068fe0ee07c2cde5a5b9571",
   "license": "MIT",
   "skills": {
     "c": "agent/c",

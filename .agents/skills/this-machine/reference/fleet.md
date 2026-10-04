@@ -63,6 +63,10 @@ completion/error notification. Reads retain the native history adapter's
 1.18.18 pin and registered-profile boundary: at most 500 parent messages,
 2,000 parts, 4 MiB and 64 task calls. Owner-wide stores and v2-only histories
 are not read, and file idleness does not settle an OpenCode task.
+Local OpenCode hires preserve the chosen persona and conversation across native
+title changes. `close_seat` asks an owned live worker's original TUI to exit and
+reports success after its terminal disappears. A switched, replaced or cold
+session refuses this control; inspect it rather than retrying physical closure.
 
 Project hire profiles resolve explicit owner-authorized fields before role
 preferences, then `fleet.hire` defaults. Omit launch fields to inherit and inspect
@@ -155,6 +159,16 @@ pane. Codex gets its own app-server on that machine through his ssh. Claude uses
 the `clankie-worker` plugin over the fleet's link, so a briefed remote Claude
 hire fails with the fix until the owner has run `clankie herdr prepare NAME` for
 that machine once. `herdr fleets` reports each link's state.
+
+For a source-managed remote Codex config, use
+`clankie herdr prepare NAME --codex-source-setup ABSOLUTE_REMOTE_SCRIPT` with its
+owning setup. Dotfiles ships `scripts/codex-worker-setup.py` for its configuration
+symlinks; the hook uses native plugin installation and renders the generated
+source directly. Clankie preserves the runtime link and unrelated settings.
+Preparation is incomplete if native worker version, activation, bridge, identity
+forwarding or skill checks fail, even with a legacy MCP registration. Read
+`clankie doctor --machine NAME` after preparation. Installed files are static
+proof; do not restart another lane's pane or claim native tools were tested.
 
 Admitted fleet panes get verified connected tools through `clankie_tools` and
 `clankie_call`, independent of project grants or native process proof. The owner

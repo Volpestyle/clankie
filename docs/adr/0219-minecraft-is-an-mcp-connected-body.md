@@ -269,3 +269,40 @@ Server-side vec3 now uses the independent Apache workspace implementation; motor
 conformance and archive assembly passed without relaxing the release license gate.
 Precompiled prismarine-viewer browser assets remain separately supplied vendor
 assets. Setup and command details live in `docs/minecraft.md` and the shipped skill.
+
+## Instance-backed host boundary — 2026-10-04
+
+The AWS provider uses the same integration-owned hosting port for one explicitly
+configured EC2 instance. Core still owns authority, bindings, invitations and the
+play lease. Administrative SSO is reserved for provisioning; product operations
+use a broker credential scoped to that instance and the approved SSM documents.
+No public SSH, RCON or arbitrary remote shell is part of the gameplay contract.
+Secret-bearing SSM replies are encrypted to the adapter; the normal command
+history must contain no login credentials.
+
+```mermaid
+flowchart LR
+  C[Clankie authority and play lease] --> A[AWS hosting adapter]
+  A -->|Scoped instance operations| E[EC2 lifecycle]
+  A -->|Bounded SSM commands| G[Guest host control]
+  B[Clankie bot] -->|SSM loopback port forward| P[Loopback Paper and auth]
+  F[Friend Java client] --> H[Trusted public TCP proxy]
+  H -->|Generated original-source PROXY header| P
+  G --> P
+  W[Independent guest idle and uptime watcher] -->|Save, backup, power off| E
+  CW[CloudWatch stop backstop] --> E
+```
+
+The public proxy must generate source metadata rather than trust a client-supplied
+PROXY header. The bot keeps its loopback restriction through the private SSM
+forward. Disabling online-mode alone does not authorize a public world; the
+existing premium classification and one-time friend-code boundary remain required.
+
+Off-by-default, actual-player idle shutdown, independent guest uptime limits,
+service checks and an AWS-native stop action limit compute exposure under separate
+failures. Backup failure cannot keep an idle instance running. A low-CPU alarm
+is a heuristic and can stop a quiet occupied world or miss an unhealthy busy one.
+A tagged monthly budget provides notification, not a hard cap; stopped volumes
+and snapshots still accrue storage cost. Every manual run ends with EC2 state
+confirmed stopped. Live guardrail, premium-human and Discord acceptance remains
+separate from deterministic adapter tests and is recorded with its actual scope.

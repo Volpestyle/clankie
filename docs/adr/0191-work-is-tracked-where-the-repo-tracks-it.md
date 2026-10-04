@@ -38,6 +38,15 @@ One work-item contract, several backends, and the repo decides which.
    evidence a captioned link list under `## Evidence` in every backend, so an
    item reads the same in an issue body as in a file.
 
+   A Linear convention may save an existing `linear.label` to distinguish a
+   repo's board within a shared team/project. `clankie work init --linear-label
+LABEL` and the init request's `linearLabel` record it. Omitting it preserves
+   the team/project-wide board. Each provider page receives the saved label;
+   ad-hoc role, status and owner filters intersect it. New issues carry the
+   saved label; edits and evidence attachments preserve all existing labels and
+   uploaded media. Unknown labels fail rather than being created. Direct
+   known-item reads remain unchanged: this is board selection, not authority.
+
 4. **Every agent gets it.** The contract is the `clankie work` CLI (JSON in and
    out), the captain's `work_items` tools, and the `work-items` product skill,
    which is attached to every hire. A Codex, Claude or pi worker therefore

@@ -8,6 +8,7 @@ import { splitFleetQualified } from "../herdr-fleet.ts";
 import { codexControlEndpoint, codexProcess, resolveCodexHome, resolveCodexSessionId } from "./codex-seat.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
+import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import type { PeerDeliveryOptions } from "./peer-seat-messages.ts";
 
 /** Native control is shared by messages and watches; the adapters own its lifetime. */
@@ -49,6 +50,7 @@ export function createFleetSeatControl(
   const deliverCodexQueue = async (
     agent: HerdrAgentSnapshot,
     text: string,
+    begin: () => void,
     authorized?: () => Promise<boolean>,
     delivery?: "steer" | "queue",
   ): Promise<FleetSeatDelivery | undefined> => {
@@ -56,8 +58,9 @@ export function createFleetSeatControl(
     if (remote !== undefined) {
       // That machine's Herdr reports the session; its own Codex queues the message.
       if (remoteCodexQueue === undefined || agent.session?.kind !== "id") return undefined;
+      if (authorized && !(await authorized())) return refused();
+      begin();
       try {
-        if (authorized && !(await authorized())) return refused();
         const control = remoteCodexControl?.(remote, agent.paneId);
         const native =
           delivery === "queue"
@@ -106,8 +109,9 @@ export function createFleetSeatControl(
       // A daemon TUI may not own a rollout; Herdr's exact session binding suffices.
     }
     if (sessionId === undefined) return undefined;
+    if (authorized && !(await authorized())) return refused();
+    begin();
     try {
-      if (authorized && !(await authorized())) return refused();
       const native =
         delivery === "queue" || endpoint === null
           ? undefined
@@ -136,23 +140,25 @@ export function createFleetSeatControl(
     uncontrolled?: () => Promise<FleetSeatDelivery>,
     options?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> => {
+    const authorized =
+      options?.guard || options?.fence
+        ? async () => {
+            await options.guard?.();
+            return options.fence ? options.fence(current) : true;
+          }
+        : undefined;
     // Claude's channel supports both choices through the turn-aware mailbox.
     // Its older adapter receipt alone cannot distinguish a live steer from a hold.
     if (options?.delivery && isMessageableSeat(current) && current.agent === "claude" && uncontrolled) {
-      if (options.fence && !(await options.fence(current))) return refused();
+      if (authorized && !(await authorized())) return refused();
+      if (options.stableReceiptKey !== undefined) begin();
       return uncontrolled();
     }
     const control = current === undefined ? undefined : await attach(current);
     // Codex's native queue is distinct from app-server turn/steer, including
     // seats we own. An explicit Queue must never take the automatic live lane.
     if (options?.delivery === "queue" && isMessageableSeat(current) && current.agent === "codex") {
-      begin();
-      const result = await deliverCodexQueue(
-        current,
-        text,
-        options.fence ? () => options.fence!(current) : undefined,
-        "queue",
-      );
+      const result = await deliverCodexQueue(current, text, begin, authorized, "queue");
       if (result !== undefined) return result;
       clear();
       return modeUnavailable("queue");
@@ -162,15 +168,16 @@ export function createFleetSeatControl(
     if (control !== undefined) {
       if (options?.delivery && !control.deliveryModes?.includes(options.delivery))
         return modeUnavailable(options.delivery);
-      if (options?.fence && !(await options.fence(current))) return refused();
+      if (authorized && !(await authorized())) return refused();
       begin();
       try {
         const delivery =
-          options?.fence || options?.delivery
+          authorized || options?.delivery
             ? await control.send(text, {
-                ...(options.fence ? { beforeDispatch: () => options.fence!(current), source: "peer" } : {}),
-                ...(options.delivery === undefined ? {} : { delivery: options.delivery }),
-                ...(options.recipientBinding === undefined
+                ...(authorized ? { beforeDispatch: authorized } : {}),
+                ...(options?.fence === undefined ? {} : { source: "peer" }),
+                ...(options?.delivery === undefined ? {} : { delivery: options.delivery }),
+                ...(options?.recipientBinding === undefined
                   ? {}
                   : { recipientBinding: options.recipientBinding }),
               })
@@ -187,19 +194,14 @@ export function createFleetSeatControl(
       }
     }
     if (isMessageableSeat(current) && current.agent === "codex") {
-      begin();
-      const delivery = await deliverCodexQueue(
-        current,
-        text,
-        options?.fence ? () => options.fence!(current) : undefined,
-        options?.delivery,
-      );
+      const delivery = await deliverCodexQueue(current, text, begin, authorized, options?.delivery);
       if (delivery !== undefined) return delivery;
       clear();
     }
     if (options?.delivery === "steer") return modeUnavailable("steer");
     if (uncontrolled !== undefined) {
-      if (options?.fence && !(await options.fence(current))) return refused();
+      if (authorized && !(await authorized())) return refused();
+      if (options?.stableReceiptKey !== undefined) begin();
       return uncontrolled();
     }
     return isMessageableSeat(current)
@@ -218,6 +220,33 @@ export function createFleetSeatControl(
       options?: PeerDeliveryOptions,
     ): Promise<FleetSeatDelivery> {
       const agent = await runner.resolveTerminal(seatId).catch(() => undefined);
+      const stableReceiptKey = options?.stableReceiptKey;
+      const key = stableReceiptKey ?? seatId;
+      const completed = stableReceiptKey === undefined ? undefined : fence.completed(key);
+      const occupantId = agent?.session === undefined ? undefined : occupantIdForHerdrSession(agent.session);
+      if (completed) {
+        if (
+          completed.fingerprint !== deliveryFingerprint(text) ||
+          completed.paneId !== agent?.paneId ||
+          completed.occupantId !== occupantId
+        )
+          return {
+            outcome: "undelivered",
+            deliveryStage: "unavailable",
+            detail: "Stable delivery receipt does not match its original native author and content.",
+          };
+        return {
+          outcome: "delivered",
+          ...(completed.completed!.messageId === undefined
+            ? {}
+            : { messageId: completed.completed!.messageId }),
+          ...(completed.completed!.state === undefined ? {} : { state: completed.completed!.state }),
+          ...(completed.completed!.deliveryStage === undefined
+            ? {}
+            : { deliveryStage: completed.completed!.deliveryStage }),
+          detail: "Original native delivery was already confirmed; no message was sent again.",
+        };
+      }
       const session = agent?.session;
       const sessionId =
         session === undefined
@@ -225,8 +254,18 @@ export function createFleetSeatControl(
           : session.kind === "id"
             ? session.value
             : basename(session.value, ".jsonl");
-      const pending = fence.pending(seatId);
+      const pending =
+        fence.pending(key) ??
+        fence.pending(seatId) ??
+        fence.entries().find(([, receipt]) => receipt.seatId === seatId)?.[1];
       if (pending !== undefined) {
+        const pendingKey = fence.entries().find(([, receipt]) => receipt === pending)?.[0] ?? key;
+        if (stableReceiptKey !== undefined && pendingKey !== key)
+          return {
+            outcome: options?.reconcileOnly ? "unconfirmed" : "undelivered",
+            deliveryStage: options?.reconcileOnly ? "uncertain" : "unavailable",
+            detail: "A different original delivery owns this recipient; nothing was sent or reconciled.",
+          };
         if (!options?.reconcileOnly && pending.fingerprint !== deliveryFingerprint(text))
           return {
             outcome: "undelivered",
@@ -248,6 +287,7 @@ export function createFleetSeatControl(
           sessionId !== undefined &&
           sessionId === pending.sessionId &&
           agent.paneId === pending.paneId &&
+          (pending.occupantId === undefined || pending.occupantId === occupantId) &&
           pending.beforeIds !== undefined
             ? await runner.transcript?.(agent).catch(() => undefined)
             : undefined;
@@ -258,7 +298,32 @@ export function createFleetSeatControl(
             !pending.beforeIds?.includes(entry.id) &&
             deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
         );
-        if (matched !== undefined && fence.reconcile(seatId, pending.messageId)) {
+        if (matched !== undefined && pending.seatId) {
+          fence.complete(pendingKey, pending.messageId, {
+            messageId: matched.id,
+            state: "started",
+            deliveryStage: "consumed",
+          });
+          if (pending.fingerprint !== deliveryFingerprint(text))
+            return {
+              outcome: "undelivered",
+              deliveryStage: "unavailable",
+              detail: "Stable delivery ID already belongs to different content; nothing was sent.",
+            };
+          return {
+            outcome: "delivered",
+            deliveryStage: "consumed",
+            messageId: matched.id,
+            state: "started",
+            detail:
+              "Original uncertain native delivery was found in its exact session; no message was sent again.",
+          };
+        }
+        if (
+          matched !== undefined &&
+          stableReceiptKey === undefined &&
+          fence.reconcile(pendingKey, pending.messageId)
+        ) {
           if (pending.fingerprint !== deliveryFingerprint(text))
             return {
               outcome: "undelivered",
@@ -317,7 +382,11 @@ export function createFleetSeatControl(
       const transcript =
         agent === undefined ? undefined : await runner.transcript?.(agent).catch(() => undefined);
       // Recheck after asynchronous inspection so concurrent callers cannot both dispatch.
-      if (fence.pending(seatId) !== undefined)
+      if (
+        fence.pending(key) !== undefined ||
+        fence.pending(seatId) !== undefined ||
+        fence.entries().some(([, receipt]) => receipt.seatId === seatId)
+      )
         return {
           outcome: "unconfirmed",
           deliveryStage: "uncertain",
@@ -325,26 +394,58 @@ export function createFleetSeatControl(
         };
       const receiptData = {
         fingerprint: deliveryFingerprint(text),
+        ...(stableReceiptKey === undefined ? {} : { seatId }),
+        ...(occupantId === undefined ? {} : { occupantId }),
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(agent === undefined ? {} : { paneId: agent.paneId }),
         ...(transcript === undefined ? {} : { beforeIds: transcript.entries.map((entry) => entry.id) }),
       };
       let receipt: ReturnType<DeliveryFence["begin"]> | undefined;
+      let ownsActiveDelivery = false;
       const begin = () => {
-        receipt = fence.begin(seatId, receiptData);
+        // Attachment and authority checks await. Reserve the recipient again at
+        // the actual dispatch boundary, including deliveries with distinct keys.
+        if (
+          active.has(seatId) ||
+          fence.pending(seatId) !== undefined ||
+          fence.entries().some(([, value]) => value.seatId === seatId)
+        )
+          throw new Error("Another original delivery acquired this recipient before dispatch");
+        receipt = fence.begin(key, receiptData);
+        active.add(seatId);
+        ownsActiveDelivery = true;
       };
       const clear = () => {
-        if (receipt !== undefined) fence.reconcile(seatId, receipt.messageId);
+        if (receipt !== undefined) fence.reconcile(key, receipt.messageId);
         receipt = undefined;
       };
-      active.add(seatId);
       try {
         const result = await dispatch(agent, text, begin, clear, uncontrolled, options);
+        if (stableReceiptKey !== undefined && receipt && result.outcome === "delivered") {
+          fence.complete(key, receipt.messageId, {
+            ...(result.messageId === undefined ? {} : { messageId: result.messageId }),
+            ...(result.state === undefined ? {} : { state: result.state }),
+            deliveryStage: fleetDeliveryStage(result),
+          });
+          receipt = undefined;
+        }
         if (result.outcome !== "unconfirmed") clear();
-        return { ...result, deliveryStage: fleetDeliveryStage(result) };
+        // Automatic peer/native delivery retains its existing unavailable receipt
+        // when authority changes. An explicit app mode refusal reports rejected.
+        const deliveryStage =
+          options?.delivery === undefined && result.outcome === "undelivered"
+            ? "unavailable"
+            : fleetDeliveryStage(result);
+        return { ...result, deliveryStage };
       } catch (error) {
         if (receipt === undefined) {
-          if (fence.pending(seatId))
+          if (
+            active.has(seatId) ||
+            fence.pending(key) ||
+            fence.completed(key) ||
+            fence.pending(seatId) ||
+            fence.entries().some(([, value]) => value.seatId === seatId)
+          )
             return {
               outcome: "undelivered",
               deliveryStage: "unavailable",
@@ -359,7 +460,7 @@ export function createFleetSeatControl(
           detail: String(error),
         };
       } finally {
-        active.delete(seatId);
+        if (ownsActiveDelivery) active.delete(seatId);
       }
     },
   };

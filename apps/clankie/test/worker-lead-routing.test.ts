@@ -147,7 +147,10 @@ it("captures message_seat adoption from the admitted turn before asynchronous au
     undefined,
     message,
   ).find((candidate) => candidate.name === "message_seat")!;
-  expect(tool.parameters).toMatchObject({ required: ["seat", "message"] });
+  expect(tool.parameters).toMatchObject({
+    required: ["seat"],
+    properties: { message: { type: "string" }, questionAnswer: { type: "object" } },
+  });
   const call = tool.execute(
     "message",
     { seat: "term_one", message: "new assignment" },

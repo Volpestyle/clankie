@@ -11,6 +11,7 @@ import {
   type OperatorPresenceSnapshot,
 } from "./presence.ts";
 export * from "./presence.ts";
+export * from "./response.ts";
 import {
   ProjectProposalLocatorSchema,
   ProjectProposalTargetSchema,
@@ -150,6 +151,7 @@ export type CaptainLaneListing = z.infer<typeof CaptainLaneListingSchema>;
 
 /** The operator route that lists recent settled turns. */
 export const CAPTAIN_TURN_METRICS_PATH = "/v1/captain/turn-metrics";
+export * from "./issue-metrics.ts";
 export const CAPTAIN_TURN_METRICS_LIMIT_DEFAULT = 20;
 export const CAPTAIN_TURN_METRICS_LIMIT_MAX = 100;
 
@@ -939,7 +941,7 @@ export const OperatorSeatSubagentsSchema = z
   .strict();
 export type OperatorSeatSubagents = z.infer<typeof OperatorSeatSubagentsSchema>;
 
-const OperatorHarnessBridgeSchema = z
+const HarnessBridgeProcessSchema = z
   .object({
     status: z.enum(["live-process", "missing", "pane-mismatch", "unobserved"]),
     detail: z.string().max(1024),
@@ -947,8 +949,16 @@ const OperatorHarnessBridgeSchema = z
     bridgePid: z.number().int().positive().optional(),
     claimedPane: z.string().max(128).optional(),
     sharedDaemon: z.boolean().optional(),
+    /** Process age is a reload hint, not proof of the loaded build or tool delivery. */
+    freshness: z.enum(["older-than-runtime", "current", "unknown"]).optional(),
+    bridgeStartedAt: z.string().datetime().optional(),
+    runtimeStartedAt: z.string().datetime().optional(),
   })
   .strict();
+const OperatorHarnessBridgeSchema = HarnessBridgeProcessSchema.extend({
+  /** Operator channel and worker connected tools are independent processes. */
+  operatorBridge: HarnessBridgeProcessSchema.optional(),
+});
 
 export const OperatorFleetSeatSchema = z
   .object({
@@ -2418,8 +2428,8 @@ export const OPERATOR_HEAD_AGENT_NAME = "clankie";
 export const OPERATOR_SEAT_EVENTS_PATH = "/v1/seat/events";
 export const OPERATOR_SEAT_EVENT_WAIT_MS_MAX = 30_000;
 /**
- * `message` is a fleet seat's kind: a DM or a room turn that would otherwise
- * be typed into the pane. The head never receives one.
+ * `message` carries a fleet seat's DM or room turn, or an authenticated worker
+ * report to its leading conversation. Its content grants no new authority.
  */
 export const OperatorSeatEventKindSchema = z.enum(["wake", "watch", "escalation", "message"]);
 export type OperatorSeatEventKind = z.infer<typeof OperatorSeatEventKindSchema>;
@@ -6902,3 +6912,4 @@ export {
 export * from "./body-leases.ts";
 export * from "./minecraft.ts";
 export * from "./minecraft-host.ts";
+export * from "./seat-call.ts";

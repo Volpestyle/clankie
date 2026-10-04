@@ -1,6 +1,9 @@
+import { registerComputerRoutes } from "./computer-http.ts";
+import { ISSUE_METRICS_PATH, IssueMetricsQuerySchema } from "@clankie/protocol";
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
 import type { PeerSeatAuthority } from "./captain/peer-seat-messages.ts";
 import { isDeepStrictEqual } from "node:util";
+import { posix, win32 } from "node:path";
 import { FLEET_PEER_SEATS_PATH, FLEET_PEER_MESSAGES_PATH, FleetPeerMessageSchema } from "@clankie/protocol";
 import { createFleetProjectMembershipRoutes } from "./fleet-project-membership-routes.ts";
 import { createProjectRoutes } from "./project-routes.ts";
@@ -221,6 +224,7 @@ import { createLaneMcpEndpoint } from "./lane-mcp.ts";
 import {
   type LinearActivityEvent,
   type LinearWriteReceipts,
+  LinearWorkOwnerSchema,
   classifyLinearDelivery,
   linearReplyTo,
 } from "./linear-webhook.ts";
@@ -315,6 +319,18 @@ const DiscordPersonMemoryReadQuerySchema = z
   .object({
     channelId: z.string().min(1).max(64).optional(),
     query: z.string().trim().min(1).max(512).optional(),
+  })
+  .strict();
+
+const FleetPrepareRequestSchema = z
+  .object({
+    codexSourceSetup: z
+      .string()
+      .refine(
+        (path) => !/\p{Cc}/u.test(path) && (posix.isAbsolute(path) || win32.isAbsolute(path)),
+        "Codex source setup must be an absolute script path on the remote machine",
+      )
+      .optional(),
   })
   .strict();
 
@@ -413,6 +429,8 @@ export interface ClankieAppDependencies {
   discordIngress?: DiscordIngress;
   /** Durable exact Discord turn receipts; production supplies its state directory. */
   discordTurnReceiptPath?: string;
+  /** Durable operator MCP hire/delivery receipts, retained across service restarts. */
+  seatCallReceiptPath?: string;
   discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
   /** The owner's GitHub and Linear account connections (ADR 0196). */
@@ -450,8 +468,8 @@ export interface ClankieAppDependencies {
   localFleet?: { identity(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined };
   fleetProjectMembership?: Pick<import("./fleet-project-membership.ts").FleetProjectMembership, "read">;
   projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
-  /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
-  prepareFleet?: (id: string) => Promise<unknown>;
+  /** `clankie herdr prepare NAME`: prepare native workers through that fleet's registered transport. */
+  prepareFleet?: (id: string, options: { codexSourceSetup?: string }) => Promise<unknown>;
   inspectFleetHarnesses?: (id: string) => Promise<unknown>;
   /** Host-only project eligibility on a configured fleet; never verifies an MCP connection. */
   inspectFleetMembership?: (
@@ -493,6 +511,7 @@ export interface ClankieAppDependencies {
     ReturnType<typeof import("./minecraft-host-invite.ts").createMinecraftPrivateDeliveryClient>,
     "authorize"
   >;
+  computer?: import("./computer-body.ts").ComputerBody;
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;
@@ -1302,15 +1321,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "membership_inspection_unavailable" }, 503);
     }
   });
-  // The owner's one step for Claude workers on an ssh fleet (VUH-1527).
-  app.post("/v1/runtime-connections/:id/prepare", async (context) => {
+  // The owner's one step for native workers on an ssh fleet.
+  app.post("/v1/runtime-connections/:id/prepare", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     if (!dependencies.prepareFleet) return context.json({ error: "runtimes_unavailable" }, 503);
+    const input = FleetPrepareRequestSchema.safeParse(
+      await context.req
+        .text()
+        .then((raw) => (raw.length === 0 ? {} : JSON.parse(raw)))
+        .catch(() => undefined),
+    );
+    if (!input.success) return context.json({ error: "invalid_fleet_prepare" }, 400);
+    const options =
+      input.data.codexSourceSetup === undefined ? {} : { codexSourceSetup: input.data.codexSourceSetup };
     try {
-      return context.json({ ok: true, prepared: await dependencies.prepareFleet(context.req.param("id")) });
+      return context.json({
+        ok: true,
+        prepared: await dependencies.prepareFleet(context.req.param("id"), options),
+      });
     } catch (error) {
       return context.json(
         { error: "fleet_prepare_failed", detail: error instanceof Error ? error.message : "Prepare failed" },
@@ -1527,12 +1558,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const herdr = dependencies.herdrRuntime?.();
     const doorway = dependencies.publicGatewayDoorway?.();
     const power = dependencies.hostPower?.();
+    let runtime;
+    try {
+      const identity = z
+        .object({
+          pid: z.number().int().safe().min(2),
+          commit: z.string().regex(/^[a-f0-9]{40}$/iu),
+          root: z.string().min(1).max(4096),
+          instanceId: z.string().uuid(),
+        })
+        .safeParse(dependencies.runtimeUpdater?.status().runtime);
+      if (identity.success) runtime = identity.data;
+    } catch {
+      // Optional boot identity must not turn updater diagnostics into liveness failure.
+    }
     return context.json({
       ok: true,
       service: "clankie",
       ...(herdr === undefined ? {} : { herdr }),
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
+      ...(runtime === undefined ? {} : { runtime }),
     });
   });
 
@@ -1879,7 +1925,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // The same lane's tools, over streamable-HTTP MCP, for a seat in a harness
   // that speaks it (VUH-1085). The bearer selects the lane; the captain's tool
   // registry is still the only place a tool is defined.
-  const laneMcp = createLaneMcpEndpoint({ captain: dependencies.captain });
+  const laneMcp = createLaneMcpEndpoint({
+    captain: dependencies.captain,
+    ...(dependencies.seatCallReceiptPath === undefined
+      ? {}
+      : { receiptPath: dependencies.seatCallReceiptPath }),
+  });
   app.all("/v1/mcp", async (context) => {
     const auth = await authenticateLane(context);
     if ("denial" in auth) return auth.denial;
@@ -3497,14 +3548,26 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (dependencies.bodyLeases === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
     try {
       return context.json({
-        leases: BodyResourceSchema.options.flatMap((resource) => {
-          const lease = dependencies.bodyLeases!.store.status(resource);
-          return lease === undefined ? [] : [lease];
-        }),
+        // The computer contract is opt-in; old clients have a closed body-resource enum.
+        leases: BodyResourceSchema.options
+          .filter((resource) => resource !== "computer")
+          .flatMap((resource) => {
+            const lease = dependencies.bodyLeases!.store.status(resource);
+            return lease === undefined ? [] : [lease];
+          }),
       });
     } catch {
       return context.json({ error: "body_leases_unavailable" }, 503);
     }
+  });
+
+  registerComputerRoutes(app, {
+    ...(dependencies.computer === undefined ? {} : { body: dependencies.computer }),
+    async identity(request, conversationId) {
+      const operator = await authenticateOperator(request, dependencies);
+      if (!operator || operator === "unavailable") return undefined;
+      return operatorBodyIdentity(conversationId, request);
+    },
   });
 
   app.post("/v1/body-leases", async (context) => {
@@ -3516,6 +3579,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const body = dependencies.bodyLeases;
     if (body === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
     const input = parsed.data;
+    if (input.resource === "computer") return context.json({ error: "use_computer_contract" }, 409);
     // An operator bearer can select its own existing writable thread. Room inspection is insufficient.
     const identity = operatorBodyIdentity(input.conversationId, context.req.raw);
     if (identity === undefined)
@@ -3826,6 +3890,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   });
 
+  app.post("/v1/linear/inbox/handoff", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const input = z
+      .object({ cursor: z.string().regex(/^\d{12}$/u) })
+      .strict()
+      .safeParse(await readJson(context.req.raw));
+    if (!input.success) return context.json({ error: "invalid_linear_handoff" }, 400);
+    if (!(await dependencies.captain.handoffLinearActivity(input.data.cursor)))
+      return context.json({ error: "linear_handoff_refused" }, 409);
+    return context.json({ schemaVersion: 1, handedOff: input.data.cursor });
+  });
+
   // Work items in the repo's own convention (ADR 0191). The operator bearer is
   // a local caller: the CLI, the captain, or a hire on this machine. It may name
   // a repo path, which registers it for the app to read later.
@@ -3875,7 +3954,29 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     if (context.req.method === "GET")
       return context.json({ owners: dependencies.captain.linearWorkOwners() });
-    return context.json({ error: "linear_work_bindings_retired" }, 410);
+    if (context.req.method === "DELETE") {
+      const input = LinearWorkOwnerSchema.pick({ organizationId: true, issueId: true }).safeParse(
+        await readJson(context.req.raw),
+      );
+      if (!input.success) return context.json({ error: "invalid_linear_work_owner" }, 400);
+      return context.json({
+        schemaVersion: 1,
+        unbound: dependencies.captain.unbindLinearWorkOwner(input.data.organizationId, input.data.issueId),
+      });
+    }
+    const binding = LinearWorkOwnerSchema.safeParse(await readJson(context.req.raw));
+    if (!binding.success) return context.json({ error: "invalid_linear_work_owner" }, 400);
+    const identity = operatorBodyIdentity(binding.data.conversationId, context.req.raw);
+    if (identity === undefined || !identity.current() || !(await identity.authorize("browser", "effect")))
+      return context.json({ error: "linear_work_owner_refused" }, 409);
+    const source = {
+      owner: { conversationId: binding.data.conversationId },
+      current: identity.current,
+      authorize: () => identity.authorize("browser", "effect"),
+    };
+    if (!(await dependencies.captain.bindLinearWorkOwner(binding.data, source)))
+      return context.json({ error: "linear_work_owner_refused" }, 409);
+    return context.json({ schemaVersion: 1, bound: binding.data });
   });
 
   app.on(["GET", "PUT"], "/v1/linear/wake", async (context) => {
@@ -3941,7 +4042,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       schemaVersion: 1 as const,
       ...linearFollowStatus(current.linearWebhook, secretPresent),
       conversationId: LINEAR_INBOX_CONVERSATION_ID,
-      wakeConversationId: "global-default",
+      wakeConversationId: LINEAR_INBOX_CONVERSATION_ID,
+      wakeRouting: "work-owner",
     });
   });
 
@@ -4675,6 +4777,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json(await dependencies.captain.evaluatorCommand(parsed.data));
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
+  app.get(ISSUE_METRICS_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = IssueMetricsQuerySchema.safeParse(context.req.query());
+    if (!parsed.success) return context.json({ error: "invalid_metrics_query" }, 400);
+    try {
+      return context.json(await dependencies.captain.readIssueMetrics(parsed.data));
+    } catch (error) {
+      if (error instanceof RangeError) return context.json({ error: error.message }, 400);
+      throw error;
     }
   });
 

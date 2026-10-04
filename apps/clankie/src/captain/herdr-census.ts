@@ -448,6 +448,8 @@ export async function readFleet(
     readonly fleets?: readonly HerdrCensusFleet[];
     readonly herdrSession?: string;
     readonly bridgeSocket?: string;
+    /** Override only for isolated host-observation tests; production uses this service process. */
+    readonly runtimePid?: number;
     readonly localAvailable?: boolean;
   } = {},
 ): Promise<ObservedFleet> {
@@ -522,6 +524,7 @@ async function readLocalFleet(
     readonly runCommand?: HerdrCensusRunner;
     readonly herdrSession?: string;
     readonly bridgeSocket?: string;
+    readonly runtimePid?: number;
     readonly summaries?: Readonly<Record<string, HerdrAgentSummary>>;
   } = {},
 ): Promise<ObservedFleet> {
@@ -542,13 +545,15 @@ async function readLocalFleet(
         paneId: entry.paneId,
         harness: entry.agent,
       }));
-      const key = JSON.stringify([options.bridgeSocket, panes]);
+      const runtimePid = options.runtimePid ?? process.pid;
+      const key = JSON.stringify([options.bridgeSocket, runtimePid, panes]);
       if (options.runCommand || bridgeSample?.key !== key || Date.now() - bridgeSample.at >= 5_000) {
         bridgeSample = {
           key,
           at: Date.now(),
           report: inspectLiveHarnessBridges({
             socket: options.bridgeSocket,
+            runtimePid,
             panes,
             run: async (command, args) =>
               (

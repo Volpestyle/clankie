@@ -1,3 +1,5 @@
+import { ComputerBody } from "./computer-body.ts";
+import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
 import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
@@ -113,7 +115,7 @@ import {
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
 import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
-import { LinearWriteReceipts } from "./linear-webhook.ts";
+import { LinearWriteReceipts, linearWriteIssue } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { LinearNotifications } from "./linear-notifications.ts";
 import { createMcpHost } from "./mcp-host.ts";
@@ -551,7 +553,16 @@ const mcpHost = createMcpHost({
   credentials: operatorCredentialStore,
   settings: settingsStore,
   logger,
-  observeCall: (call) => linearWrites.record(call, new Date()),
+  writeAuthorityForWorker: (principalId, nativeWriteProof) =>
+    captain.fleetWriteAuthority(principalId, nativeWriteProof),
+  observeCall: (call) => {
+    const now = new Date();
+    linearWrites.record(call, now);
+    const issue = linearWriteIssue(call);
+    if (issue && call.owner) captain.recordLinearWorkOwner(issue, call.owner, now.getTime());
+    else if (issue && call.recipient?.kind === "native")
+      captain.recordLinearNativeWorkOwner(issue, call.recipient, now.getTime());
+  },
   linearAuthor: async (personaId) => {
     const result = await captain.serveOperatorConversation({ op: "personas", schemaVersion: 1 });
     const persona =
@@ -643,6 +654,10 @@ const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-ro
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
+const computer =
+  process.platform === "darwin"
+    ? new ComputerBody(new PeekabooComputerAdapter(), bodyLeaseStore, join(stateRoot, "body"))
+    : undefined;
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
 let minecraftCapture: MinecraftCapture | undefined;
@@ -955,6 +970,9 @@ const linearNotifications = new LinearNotifications({
   following: linearFollowing,
   wakeRules: async () => (await settingsStore.load()).linearWebhook.wake,
   attribute: (notification, organizationId) => linearAttribution.attribute(notification, organizationId),
+  resolveIssue: (notification, organizationId) => linearAttribution.issue(notification, organizationId),
+  resolveReplyRecipient: (notification, organizationId) =>
+    linearAttribution.replyRecipient(notification, organizationId),
   receive: (activity, following) => captain.receiveLinearActivity(activity, following),
   onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
 });
@@ -1013,6 +1031,7 @@ const clankie = await createClankieApp({
   minecraft,
   minecraftHost,
   minecraftPrivateDelivery,
+  ...(computer === undefined ? {} : { computer }),
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,
@@ -1042,6 +1061,7 @@ const clankie = await createClankieApp({
     },
   },
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
+  seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   localFleet,
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   accounts: createAccounts({
@@ -1101,11 +1121,12 @@ const clankie = await createClankieApp({
       gitWorktree: projectGitWorktree,
     });
   },
-  prepareFleet: async (id: string) => {
+  prepareFleet: async (id: string, options) => {
     const fleet = (await runtimes.fleets()).find((entry) => entry.id === id);
     if (fleet === undefined)
       throw new Error(`No ssh fleet ${id} is connected; add it with clankie herdr add first`);
     return prepareFleet(fleet, {
+      ...options,
       shell: runtimes.fleetShell(fleet),
       workerPluginDir: workerPluginDir(repoRoot),
     });
@@ -1170,7 +1191,23 @@ const clankie = await createClankieApp({
       return credential?.type === "api" ? credential.key : undefined;
     },
     writes: linearWrites,
-    recordActivity: (activity) => linearAttribution.record(activity),
+    recordActivity: (activity) => {
+      linearAttribution.record(activity);
+      if (activity.issueId && activity.organizationId && activity.conversationOwner)
+        captain.recordLinearWorkOwner(
+          { issueId: activity.issueId, organizationId: activity.organizationId },
+          activity.conversationOwner,
+          activity.conversationOwnerRecordedAt,
+          true,
+        );
+      else if (activity.issueId && activity.organizationId && activity.writeRecipient?.kind === "native")
+        captain.recordLinearNativeWorkOwner(
+          { issueId: activity.issueId, organizationId: activity.organizationId },
+          activity.writeRecipient,
+          activity.writeRecipientRecordedAt,
+          true,
+        );
+    },
     requestNotificationPoll: () => linearNotifications.requestPoll(),
     // Unverified identity leaves webhook history passive.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,

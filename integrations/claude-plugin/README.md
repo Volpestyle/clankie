@@ -245,9 +245,29 @@ on a loaded machine. Raising that outer limit alone does not fix credential cont
 ### Service restarts
 
 The operator bridge renews its MCP session after an explicit `unknown_session`
-rejection and retries that rejected request once. Concurrent requests share the
-new session. Network failures and lost tool results are not replayed because the
-tool may already have run. Persisted Herdr watches retain their stable terminal
+rejection before tool admission and retries that rejected request once. Concurrent
+requests share the new session. Old HTTP clients drain without closing pending
+calls when another request reconnects. Network failures and lost tool results
+never replay a pending action because the tool may already have run.
+
+Before protected `message_seat` or `hire_agent` dispatch, the bridge assigns a
+`deliveryId` or `hireId` in MCP `_meta["clankie/seat-call"]`; the service persists
+the receipt before the native effect. Lost results return typed uncertainty with
+the original ID. Use read-only `reconcile_seat_call({deliveryId})` or
+`reconcile_seat_call({hireId})` from the owning operator conversation to inspect
+that receipt. This never resends a message or starts a replacement hire. Settled
+receipts survive restart within bounded result-body retention; original IDs
+remain non-replayable, and uncertain originals remain retained. These
+operator call receipts are separate from the fleet peer-message ledger. See
+[ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md#mcp-reconnect-and-native-call-receipts-vuh-1638).
+
+Bridge stderr records `upstream_error`, `upstream_retired`, `upstream_closed`
+and `upstream_reconnected` with the client generation and pending-call count.
+`stdio_closed` identifies the harness closing its bridge. These diagnostics
+distinguish a replaced HTTP client from a closed stdio connection; they contain
+no tool arguments or response bodies. Restart an older MCP bridge to load them.
+
+Persisted Herdr watches retain their stable terminal
 identity when a wait process fails, retry observation, and resume on service start.
 A failed wait is not treated as agent completion.
 
@@ -275,7 +295,7 @@ physical appearance; the caption preserves that distinction. A restart of Clanki
 ### Owner installation across profiles
 
 `clankie harness install` offers consent for each discovered local Claude profile
-and native Codex worker plugin. `clankie herdr prepare NAME` explicitly installs
+and native Codex worker plugin. `clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` explicitly installs
 and enables the worker for hand-started and hired agents across remote Claude
 profiles, including `CLAUDE_CONFIG_DIR` and named `~/.claude-*` directories.
 The worker MCP server is `clankie`. Bump both worker manifests on every shipment
@@ -286,7 +306,13 @@ reports bridge, hook and `clankie` skill presence separately. Native Codex worke
 packaging lives beside the Claude packaging in `.agents/plugins/marketplace.json`
 and `worker/.codex-plugin`; it reuses the fleet bridge, has no operator bearer and
 does not advertise Claude hooks as Codex receivers. Managed Codex configuration
-must go through its real source/setup. Live membership and reply delivery require
+must go through its real source/setup. Remote preparation can invoke the explicitly
+selected source-owned script; it receives the prepared marketplace and native
+executable without rewriting the managed link. The dotfiles `codex-worker-setup.py`
+installs through native Codex using a temporary regular config with access to the
+runtime plugin cache, then renders only its owned worker selection. Missing native
+worker checks make preparation fail even if a legacy MCP registration exists.
+Live membership and reply delivery require
 native session proof; installation alone supplies neither.
 
 ### Working beside Clankie

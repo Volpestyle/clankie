@@ -1,6 +1,7 @@
 # ADR 0214: Linear wakes require attribution and rules
 
 Status: accepted (James / Clankie lead, 2026-10-02, [VUH-1549](https://linear.app/vuhlp/issue/VUH-1549)).
+Destination amended by [ADR 0218](0218-native-seats-drive-their-attached-conversation.md) (2026-10-04): eligible owned events wake their leading conversation; unowned/removed owners wake `linear-inbox`. Attribution and rules below remain unchanged.
 Amends [ADR 0189 (Linear echoes)](0189-his-own-linear-activity-does-not-wake-him.md).
 
 ## Context
@@ -44,7 +45,9 @@ flowchart TD
     Known -->|No| Quiet[No wake]
     Known -->|Yes| Rules{Following and rules match?}
     Rules -->|No| Quiet
-    Rules -->|Yes| Wake[Wake global-default]
+    Rules -->|Yes| Route{Existing work owner?}
+    Route -->|Yes| Wake[Wake owning conversation or original native author through ADR 0218 admission]
+    Route -->|No or removed| Inbox[Wake linear-inbox for triage]
 ```
 
 ## Consequences

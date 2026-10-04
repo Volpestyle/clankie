@@ -7,7 +7,10 @@ describe("ClankieApiClient live surface", () => {
       expect(String(input)).toBe("http://127.0.0.1:4310/v1/discord/presence-session-events");
       expect(init?.headers).toMatchObject({ authorization: "Bearer captain-secret" });
       const event = JSON.parse(String(init?.body)) as { data: { session: unknown } };
-      return Response.json({ accepted: true, session: event.data.session });
+      return Response.json({
+        accepted: true,
+        session: { ...(event.data.session as object), futureSessionField: true },
+      });
     });
     const client = new ClankieApiClient({
       baseUrl: "http://127.0.0.1:4310",

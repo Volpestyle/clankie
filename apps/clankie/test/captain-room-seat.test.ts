@@ -9,6 +9,7 @@ import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { ConversationOwner } from "../src/captain/conversation-owner.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import type { LinearActivityEvent } from "../src/linear-webhook.ts";
 
 const fake = vi.hoisted(() => ({ prompts: [] as string[], banks: [] as unknown[] }));
 vi.mock("../src/captain/model.ts", () => ({
@@ -144,6 +145,26 @@ async function fixture(granted = false) {
     },
   };
   return { captain, settings, route, execute, conversationId, owner, root };
+}
+
+const organizationId = "96d2a27b-950b-4a8a-afae-8776605c0ef1";
+const issueId = "593644be-7b60-4a77-9b58-7b0dc20be894";
+function linearNotice(title: string): LinearActivityEvent {
+  return {
+    eventId: "a".repeat(64),
+    notification: true,
+    organizationId,
+    issueId,
+    deliveryId: undefined,
+    type: "Notification",
+    action: "issueNewComment",
+    actorName: "James",
+    actorEmail: undefined,
+    createdAt: new Date().toISOString(),
+    url: undefined,
+    data: { title },
+    updatedFrom: undefined,
+  };
 }
 
 it("discovery persists observed text, voice and DM names and retains names across nameless turns", async () => {
@@ -336,3 +357,109 @@ it.each(["before dispatch", "before reply"])(
     expect(fake.prompts).toEqual([]);
   },
 );
+
+it("a followed Linear issue reaches its attached room and replies through the original guarded actor", async () => {
+  const { captain, settings, conversationId, owner, execute } = await fixture(true);
+  await settings.update((current) => ({
+    ...current,
+    linearWebhook: { ...current.linearWebhook, following: true },
+  }));
+  expect(
+    await captain.bindLinearWorkOwner(
+      { organizationId, issueId, conversationId },
+      { owner, current: () => true, authorize: async () => true },
+    ),
+  ).toBe(true);
+  const globalController = new AbortController();
+  const globalPoll = captain.pollSeatEvents(1000, globalController.signal);
+  const roomPoll = captain.pollSeatEvents(1000, undefined, conversationId);
+  const notice = linearNotice("Owned room notification");
+  expect(captain.receiveLinearActivity(notice, true)).toBe(true);
+  const [event] = await roomPoll;
+  expect(event).toMatchObject({ conversationId, kind: "escalation", source: "watch" });
+  expect(event?.content).toContain("Owned room notification");
+  expect(event?.content).toContain("untrusted external context");
+  expect(fake.prompts).toEqual([]);
+  expect(await captain.replySeatEvent(event!.id, "Room issue answer", conversationId)).toBe(true);
+  await vi.waitFor(() =>
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "send_reply",
+        actorId: owner.discord!.actorId,
+        guildId: owner.discord!.guildId,
+        channelId: owner.discord!.channelId,
+        messageId: owner.discord!.messageId,
+        text: "Room issue answer",
+      }),
+      expect.any(Function),
+    ),
+  );
+  await vi.waitFor(async () => {
+    const replay = await captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "replay",
+      replay: { schemaVersion: 1, conversationId, surfaceClientId: "owner" },
+    });
+    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("Expected replay");
+    expect(replay.result.events).toContainEqual(
+      expect.objectContaining({ type: "turn", phase: "completed" }),
+    );
+  });
+  expect(captain.receiveLinearActivity(notice, true)).toBe(false);
+  expect(await captain.pollSeatEvents(0, undefined, conversationId)).toEqual([]);
+  globalController.abort();
+  expect(await globalPoll).toEqual([]);
+  expect(captain.readLinearInbox({ conversationId: "global-default" }).unreadCount).toBe(0);
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(fake.prompts).toEqual([]);
+  expect((await settings.load()).linearWebhook.following).toBe(true);
+});
+
+it("following stays enabled while a revoked original room grant refuses Linear delivery without fallback", async () => {
+  const { captain, settings, conversationId, owner, execute, route } = await fixture(true);
+  await settings.update((current) => ({
+    ...current,
+    linearWebhook: { ...current.linearWebhook, following: true },
+  }));
+  expect(
+    await captain.bindLinearWorkOwner(
+      { organizationId, issueId, conversationId },
+      { owner, current: () => true, authorize: async () => true },
+    ),
+  ).toBe(true);
+  route.mockClear();
+  await settings.update((current) => ({
+    ...current,
+    discord: { ...current.discord, systemActorUserIds: [] },
+  }));
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const controller = new AbortController();
+  const roomPoll = captain.pollSeatEvents(1000, controller.signal, conversationId);
+  const globalPoll = captain.pollSeatEvents(1000, controller.signal);
+  expect(captain.receiveLinearActivity(linearNotice("Revoked room notification"), true)).toBe(true);
+  await vi.waitFor(async () => {
+    const replay = await captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "replay",
+      replay: { schemaVersion: 1, conversationId, surfaceClientId: "owner" },
+    });
+    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("Expected replay");
+    expect(replay.result.events).toContainEqual(
+      expect.objectContaining({
+        type: "turn",
+        phase: "failed",
+        summary: expect.stringContaining("Linear room ownership authority is unavailable"),
+      }),
+    );
+  });
+  controller.abort();
+  expect(await roomPoll).toEqual([]);
+  expect(await globalPoll).toEqual([]);
+  expect(route).toHaveBeenCalledWith(owner);
+  expect(error).toHaveBeenCalled();
+  expect(execute).not.toHaveBeenCalled();
+  expect(fake.prompts).toEqual([]);
+  expect(captain.readLinearInbox({ conversationId }).unreadCount).toBe(1);
+  expect(captain.readLinearInbox({ conversationId: "global-default" }).unreadCount).toBe(0);
+  expect((await settings.load()).linearWebhook.following).toBe(true);
+});

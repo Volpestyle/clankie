@@ -1,3 +1,4 @@
+import { readIssueMetrics } from "./issue-metrics.ts";
 import { DesktopExpressions } from "./desktop.ts";
 import { projectPresence, pollPresence, captainIsThinking } from "./presence.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
@@ -16,6 +17,7 @@ import { hireDisplayName } from "./hire-name.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { localWorkspaceProject, selectHireProject, nativeHireProject } from "./project-hire-context.ts";
 import type { ProjectHireProcessProof } from "./project-hires.ts";
+import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { captureDiscordBodyIdentity, planConversationWakeSession } from "./body-identity.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import {
@@ -23,6 +25,10 @@ import {
   captureConversationAuthority,
   assertConversationAuthority,
   type ConversationOwner,
+  NativeSeatRecipientSchema,
+  captureNativeSeatAuthority,
+  type NativeSeatRecipient,
+  type WorkerWriteAuthority,
 } from "./conversation-owner.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
 import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
@@ -99,6 +105,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { EvalSessionBoundary } from "./eval-session-boundary.ts";
 import { RoomConversations, roomSeatTurnResult } from "./room-conversations.ts";
+import { LinearWorkOwnerSchema } from "../linear-webhook.ts";
 import {
   ConversationResetError,
   ConversationStore,
@@ -943,8 +950,8 @@ export async function runOneShotDiscordTurn(
  * caller.
  */
 /**
- * Wakes, watches, Linear activity and human sends reach their conversation
- * seat. Goal continuations stay with their Pi loop.
+ * Wakes, watches, worker messages, Linear activity and human sends reach their
+ * conversation seat. Goal continuations stay with their Pi loop.
  */
 export function seatEventKindFor(
   context: Pick<ConversationTurnContext, "internal" | "origin">,
@@ -952,7 +959,8 @@ export function seatEventKindFor(
 ): OperatorSeatEventKind | undefined {
   if (context.internal === true) {
     if (context.origin === "hook") return "wake";
-    if (context.origin === "wake" || context.origin === "watch") return context.origin;
+    if (context.origin === "wake" || context.origin === "watch" || context.origin === "message")
+      return context.origin;
     return undefined;
   }
   return isHeadConversation ? "escalation" : undefined;
@@ -1602,7 +1610,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             onEscalated: (record) => console.info("Routine turn escalated:", JSON.stringify(record)),
           }),
           browserExtension(deps, capture),
-          mcpExtension(deps, lane),
+          mcpExtension(deps, lane, capture),
           ...(systemTools ? [skillSearchExtension(() => loader.getSkills().skills, quietSkills)] : []),
         ],
         noPromptTemplates: true,
@@ -2337,6 +2345,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   );
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
   conversations.projectOnboarding = projectOnboarding(settingsStore);
+  conversations.linearNativeRunner = deliverLinearNativeRecipient;
   conversations.questionEligible = (id) =>
     !conversations.nativeSource(id) && !seatOutboxes.get(id)?.bound() && !seatOutboxes.get(id)?.uncertain();
 
@@ -2393,8 +2402,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // tool (ADR 0187): a hired agent is watched the moment it exists, the way a
   // persona thread created through `create` is — otherwise its first reply
   // lands in a thread nothing is listening to.
-  const hireSeat: HireSeat = async (request, brief, source) => {
+  conversations.linearFollowing = async () =>
+    (await settings()).linearWebhook.following &&
+    (options.linearFollowing === undefined || (await options.linearFollowing()));
+  conversations.linearRoomRunner = async (owner, prompt, guard, owners) => {
+    const authorized = async () => {
+      await guard();
+      for (const original of owners)
+        if (!(await validateConversationOwner(original)))
+          throw new Error("Linear room ownership authority is unavailable");
+    };
+    await authorized();
+    if (!(await runDiscordWatchTurn(owner, prompt, authorized, "machine", true)))
+      throw new Error("Linear room could not admit its notification");
+  };
+
+  const hireSeat: HireSeat = async (request, brief, source, linearIssue) => {
     const authority = captureConversationAuthority(source);
+    const work =
+      linearIssue === undefined
+        ? undefined
+        : LinearWorkOwnerSchema.parse({
+            ...linearIssue,
+            conversationId: authority.owner.conversationId,
+          });
     await assertConversationAuthority(authority);
     await refreshFleets();
     if (brief?.trim()) {
@@ -2460,6 +2491,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       herdrWatches.trackSeat(seat.seatId);
       seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
       fleetChanges.touch();
+      if (work && !conversations.bindLinearWorkOwner(work, authority.owner))
+        throw new Error("Hiring conversation no longer owns its Linear work");
       adopted = seat;
     });
     if (result.outcome !== "spawned") return result;
@@ -2492,7 +2525,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   ): Promise<FleetSeatDelivery> {
     const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
     const prior = nextTurnMailboxes.receipt(seatId, inboundBinding(current), message);
-    if (prior) return prior;
+    if (prior && deliveryOptions?.stableReceiptKey === undefined) return prior;
     const mailbox = fleetSeatMailbox(
       fleetMailboxes,
       seatId,
@@ -2507,6 +2540,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const fallback = async (): Promise<FleetSeatDelivery> => {
       const live = fleetMailboxes.get(seatId);
       if (live?.bound() || live?.uncertain()) {
+        await deliveryOptions?.guard?.();
+        if (deliveryOptions?.fence && !(await deliveryOptions.fence(current)))
+          return {
+            outcome: "undelivered",
+            deliveryStage: "rejected",
+            detail: "Peer authority changed before mailbox delivery; nothing was sent.",
+          };
         if (context.delivery && current?.session?.kind === "id" && current.status === "working")
           live.observeTurn(current.session.value, "responding", true);
         return deliverFleetSeatMessage(fleetMailboxes, seatId, message, {
@@ -2525,6 +2565,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           detail: "This agent's channel is unavailable. Nothing was sent.",
         };
       const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+      await deliveryOptions?.guard?.();
       if (deliveryOptions?.fence && !(await deliveryOptions.fence(agent)))
         return {
           outcome: "undelivered",
@@ -2558,7 +2599,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   // The captain briefs a hired seat through the native channel the
   // operator would, by whichever id the hire handed back (VUH-1373).
-  const messageSeat: MessageSeat = async (target, message, source) => {
+  const messageSeat: MessageSeat = async (target, message, source, questionAnswer) => {
     const authority = captureConversationAuthority(source);
     await assertConversationAuthority(authority);
     const seat = liveSeats.find(
@@ -2577,13 +2618,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         detail: error instanceof Error ? error.message : String(error),
       };
     }
-    const delivery = await deliverToSeat(seatId, message, {
-      conversationId: seat?.conversationId ?? seatId,
-      source: "captain",
-    });
+    const delivery =
+      questionAnswer === undefined
+        ? await deliverToSeat(seatId, message, {
+            conversationId: seat?.conversationId ?? seatId,
+            source: "captain",
+          })
+        : await herdrWatches.answerSeatQuestion(seatId, questionAnswer, authority);
     if (delivery.outcome === "offline")
       return { outcome: "seat_offline", seatId, deliveryStage: "unavailable" };
     if (delivery.outcome !== "delivered") return { ...delivery, seatId };
+    if (questionAnswer !== undefined) return { ...delivery, seatId, status: "answered" };
     if (delivery.state === "queued" && delivery.detail !== undefined)
       return { ...delivery, seatId, status: "queued_until_turn_end" };
     return { ...delivery, seatId, status: await herdrWatches.awaitPickup(seatId) };
@@ -3008,6 +3053,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     guard?: () => Promise<void>,
     mode: "machine" | "social" = "machine",
     waitForCompletion = false,
+    nativeEventKind: "escalation" | "message" = "escalation",
   ): Promise<boolean> {
     const origin = owner.discord!;
     // No body reply port means this route cannot accept an asynchronous turn.
@@ -3054,7 +3100,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
     if (!(await validateConversationOwner(owner, mode))) return false;
     await guard?.();
-    const finished = finishDiscordWatchTurn(plan.systemTools, normalized, owner, mode, guard);
+    const finished = finishDiscordWatchTurn(
+      plan.systemTools,
+      normalized,
+      owner,
+      mode,
+      guard,
+      nativeEventKind,
+    );
     if (waitForCompletion) await finished;
     else void finished.catch((error) => console.error("Conversation wake failed:", error));
     return true;
@@ -3066,6 +3119,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     owner: ConversationOwner,
     mode: "machine" | "social" = "machine",
     guard?: () => Promise<void>,
+    nativeEventKind: "escalation" | "message" = "escalation",
   ): Promise<void> {
     const origin = owner.discord!;
     const result = await dispatchDiscordTurn(
@@ -3079,6 +3133,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           throw new Error("Conversation wake authority was revoked");
         await guard?.();
       },
+      nativeEventKind,
     );
     if (
       result.state !== "settled" ||
@@ -3111,6 +3166,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     origin: DiscordWatchOrigin,
     systemTools: boolean,
     guard?: () => Promise<void>,
+    nativeEventKind: "escalation" | "message" = "escalation",
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = conversations.roomConversation(normalized.lane, normalized.targetId);
     return conversations.runWithConversationDriver<CaptainChannelTurnResult>(
@@ -3128,9 +3184,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             }
             shutdown.signal.throwIfAborted();
             const delivery = await outbox.deliver({
-              kind: "escalation",
+              kind: nativeEventKind,
               conversationId,
-              source: deliveryId.startsWith("watch-") ? "watch" : "discord",
+              source:
+                nativeEventKind === "message"
+                  ? "worker"
+                  : deliveryId.startsWith("watch-")
+                    ? "watch"
+                    : "discord",
               content: normalized.prompt,
               wantsReply: true,
               signal: shutdown.signal,
@@ -3460,6 +3521,115 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   function inboundBinding(agent: HerdrAgentSnapshot | undefined): string | undefined {
     if (!agent?.session || agent.agent === "shell" || agent.agent === "unknown") return undefined;
     return deliveryFingerprint(JSON.stringify([agent.paneId, agent.terminalId, agent.agent, agent.session]));
+  }
+
+  async function nativeRecipientCurrent(recipient: NativeSeatRecipient): Promise<boolean> {
+    const agent = await herdrRunner.get(recipient.paneId).catch(() => undefined);
+    return (
+      agent?.session !== undefined &&
+      agent.terminalId === recipient.seatId &&
+      occupantIdForHerdrSession(agent.session) === recipient.occupantId &&
+      inboundBinding(agent) === recipient.binding &&
+      (recipient.owner === undefined || (await validateConversationOwner(recipient.owner)))
+    );
+  }
+
+  async function fleetWriteAuthority(
+    principalId: string,
+    nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>,
+  ): Promise<WorkerWriteAuthority | undefined> {
+    const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
+    if (!match || match[2] === "unverified" || !nativeWriteProof) return undefined;
+    const pane = match[1] === "default" ? match[2]! : `${match[1]}/${match[2]}`;
+    const agent = await herdrRunner.get(pane).catch(() => undefined);
+    const binding = inboundBinding(agent);
+    if (!agent?.session || !binding) return undefined;
+    const occupantId = occupantIdForHerdrSession(agent.session);
+    const prove = async () => {
+      const proof = await nativeWriteProof().catch(() => undefined);
+      return (
+        proof !== undefined &&
+        !proof.nativeSessionPending &&
+        proof.fleet === match[1] &&
+        proof.pane === match[2] &&
+        proof.nativeOccupantId === occupantId
+      );
+    };
+    if (!(await prove())) return undefined;
+    let owner: ConversationOwner | undefined;
+    try {
+      owner = herdrWatches.nativeOwner(agent);
+    } catch {
+      return undefined;
+    }
+    if (owner !== undefined && !(await validateConversationOwner(owner))) return undefined;
+    const native = captureNativeSeatAuthority({
+      recipient: {
+        kind: "native",
+        paneId: agent.paneId,
+        seatId: agent.terminalId,
+        occupantId,
+        binding,
+        ...(owner === undefined ? {} : { owner }),
+      },
+      current: () => owner === undefined || conversations.conversation(owner.conversationId) !== undefined,
+      authorize: async () => (await nativeRecipientCurrent(native.recipient)) && (await prove()),
+    });
+    if (!(await native.authorize())) return undefined;
+    if (owner === undefined) return { nativeRecipientAuthority: native };
+    const conversationAuthority = captureConversationAuthority({
+      owner,
+      current: native.current,
+      authorize: async () => {
+        if (!(await native.authorize())) return false;
+        const latest = await herdrRunner.get(pane).catch(() => undefined);
+        if (!latest) return false;
+        try {
+          return JSON.stringify(herdrWatches.nativeOwner(latest)) === JSON.stringify(native.recipient.owner);
+        } catch {
+          return false;
+        }
+      },
+    });
+    return { nativeRecipientAuthority: native, conversationAuthority };
+  }
+
+  async function deliverLinearNativeRecipient(
+    input: NativeSeatRecipient,
+    content: string,
+    eventId: string,
+    guard: () => Promise<void>,
+  ): Promise<FleetSeatDelivery> {
+    const recipient = NativeSeatRecipientSchema.parse(input);
+    const fence = async () => {
+      if (!(await nativeRecipientCurrent(recipient)))
+        throw new Error("Original native author is unavailable");
+      await guard();
+      if (!(await nativeRecipientCurrent(recipient)))
+        throw new Error("Original native author changed before delivery");
+    };
+    try {
+      await fence();
+      return await deliverToSeat(
+        recipient.seatId,
+        `Linear event ${eventId}\n${content}`,
+        {
+          conversationId: recipient.owner?.conversationId ?? recipient.seatId,
+          source: "linear",
+        },
+        {
+          guard: fence,
+          recipientBinding: recipient.binding,
+          stableReceiptKey: `linear:${deliveryFingerprint(JSON.stringify([recipient.seatId, recipient.occupantId, recipient.binding, eventId]))}`,
+        },
+      );
+    } catch (error) {
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   const peerMessages = new PeerSeatMessages({
@@ -4080,6 +4250,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return turnSettled.read(query);
     },
 
+    readIssueMetrics: (query) => readIssueMetrics(options.stateDir, query),
+
     voiceLaneInstructions(): string {
       return (
         "You are present in a Discord voice channel. You hear only participants permitted by the room's consent policy and you speak " +
@@ -4336,7 +4508,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         target.discord === undefined
           ? undefined
           : async (_id, prompt) => {
-              if (!(await runDiscordWatchTurn(target, prompt, undefined, "machine", true)))
+              if (!(await runDiscordWatchTurn(target, prompt, undefined, "machine", true, "message")))
                 throw new Error("Worker report room authority is unavailable");
             },
       );
@@ -4386,6 +4558,58 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     acknowledgeLinearInbox: (cursor, conversationId) =>
       conversations.acknowledgeLinearInbox(cursor, conversationId),
     linearWorkOwners: () => conversations.linearWorkOwners(),
+    async bindLinearWorkOwner(binding, source) {
+      const authority = captureConversationAuthority(source);
+      await assertConversationAuthority(authority);
+      if (!(await validateConversationOwner(authority.owner))) return false;
+      if (!authority.current()) return false;
+      return conversations.bindLinearWorkOwner(binding, authority.owner);
+    },
+    unbindLinearWorkOwner: (organizationId, issueId) =>
+      conversations.unbindLinearWorkOwner(organizationId, issueId),
+    handoffLinearActivity: async (cursor) => conversations.handoffLinearActivity(cursor),
+    recordLinearWorkOwner: (issue, owner, recordedAt, replayed) =>
+      conversations.bindLinearWorkOwner(
+        { ...issue, conversationId: owner.conversationId },
+        owner,
+        recordedAt,
+        replayed,
+      ),
+    recordLinearNativeWorkOwner: (issue, recipient, recordedAt, replayed) =>
+      conversations.bindLinearNativeWorkOwner(issue, recipient, recordedAt, replayed),
+    async fleetConversationAuthority(principalId) {
+      const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
+      if (!match || match[2] === "unverified") return undefined;
+      const pane = match[1] === "default" ? match[2]! : `${match[1]}/${match[2]}`;
+      const agent = await herdrRunner.get(pane).catch(() => undefined);
+      if (!agent) return undefined;
+      let owner: ConversationOwner | undefined;
+      try {
+        owner = herdrWatches.nativeOwner(agent);
+      } catch {
+        return undefined;
+      }
+      if (!owner || !(await validateConversationOwner(owner))) return undefined;
+      const frozen = ConversationOwnerSchema.parse(owner);
+      return {
+        owner: frozen,
+        current: () => conversations.conversation(frozen.conversationId) !== undefined,
+        authorize: async () => {
+          const latest = await herdrRunner.get(pane).catch(() => undefined);
+          if (!latest || inboundBinding(latest) !== inboundBinding(agent)) return false;
+          try {
+            return (
+              JSON.stringify(herdrWatches.nativeOwner(latest)) === JSON.stringify(frozen) &&
+              (await validateConversationOwner(frozen))
+            );
+          } catch {
+            return false;
+          }
+        },
+      };
+    },
+    fleetWriteAuthority,
+    deliverLinearNativeRecipient,
     resumeLinearActivity: () => conversations.resumeLinearActivity(),
     receiveLinearActivity: (activity, following) => conversations.receiveLinearActivity(activity, following),
 

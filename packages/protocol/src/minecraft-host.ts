@@ -63,6 +63,17 @@ export const MinecraftHostAdminCommandSchema = z.discriminatedUnion("operation",
 export type MinecraftHostAdminCommand = z.infer<typeof MinecraftHostAdminCommandSchema>;
 
 export const MinecraftHostSettingsSchema = z.strictObject({
+  backend: z
+    .discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("local") }),
+      z.strictObject({
+        kind: z.literal("aws-ec2"),
+        accountId: z.string().regex(/^\d{12}$/u),
+        instanceId: z.string().regex(/^i-[0-9a-f]{17}$/u),
+        region: z.string().regex(/^[a-z]{2}(?:-[a-z]+)+-\d$/u),
+      }),
+    ])
+    .optional(),
   gamePort: z.number().int().min(1024).max(65535),
   rconPort: z.number().int().min(1024).max(65535),
   java: z

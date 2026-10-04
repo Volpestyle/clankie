@@ -26,6 +26,10 @@ export interface PeerSeatAuthority {
 export interface PeerDeliveryOptions {
   /** Owner send intent, absent for peer messages and automatic delivery. */
   readonly delivery?: "steer" | "queue";
+  /** Host-only native author/admission check, combined with any peer fence. */
+  readonly guard?: () => Promise<void>;
+  /** Exact host-stamped original event key; retains confirmed native acceptance. */
+  readonly stableReceiptKey?: string;
   readonly reconcileOnly?: boolean;
   readonly originalId?: string;
   readonly recipientBinding?: string;

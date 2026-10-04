@@ -109,6 +109,7 @@ export async function tui(api, options) {
         else if (message.method === "history") result = await runtime.history();
         else if (message.method === "settlement") result = await runtime.settlement(message.input);
         else if (message.method === "interrupt") result = await runtime.interrupt();
+        else if (message.method === "exit") result = await runtime.exit();
         else throw new Error("Unsupported native worker action");
       }
       if (!connected) return;
@@ -134,3 +135,6 @@ export async function tui(api, options) {
     throw error;
   }
 }
+
+// OpenCode 1.18.18's readV1Plugin loads the TUI entry from a default object.
+export default { id, tui };

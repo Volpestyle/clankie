@@ -17,7 +17,7 @@ import {
 } from "@clankie/settings";
 
 const LINEAR_USAGE =
-  "Usage: clankie linear [status] | post comment|issue --json-stdin | follow on|off | wake [show|set --actors owner,human,self,users --owner-user-ids IDS --user-ids IDS --types TYPES --exclude-types TYPES | set --json-stdin] | webhook set --url URL | webhook clear | inbox [read [--limit N] [--before CURSOR] [--headlines] | ack CURSOR [--conversation ID]] | work [list]";
+  "Usage: clankie linear [status] | post comment|issue --json-stdin | follow on|off | wake [show|set --actors owner,human,self,users --owner-user-ids IDS --user-ids IDS --types TYPES --exclude-types TYPES | set --json-stdin] | webhook set --url URL | webhook clear | inbox [read [--limit N] [--before CURSOR] [--headlines] | ack CURSOR [--conversation ID] | handoff CURSOR] | work [list | bind --organization UUID --issue UUID --conversation ID | unbind --organization UUID --issue UUID]";
 
 function publishingResult(result: Awaited<ReturnType<LaneToolUpstream["callTool"]>>) {
   // Lane tools wrap the host result as JSON text. A refused host call is not
@@ -103,9 +103,31 @@ export async function runLinearCommand(
   };
   if (args[0] === "work") {
     if (args.length === 1 || (args.length === 2 && args[1] === "list")) return request("/v1/linear/work");
-    if (args[1] === "bind" || args[1] === "unbind")
-      throw new Error("Linear issue bindings are retired. Use clankie linear work list to read old records.");
-    throw new Error(LINEAR_USAGE);
+    if (args[1] !== "bind" && args[1] !== "unbind") throw new Error(LINEAR_USAGE);
+    const fields: Record<string, string> = {
+      "--organization": "organizationId",
+      "--issue": "issueId",
+      ...(args[1] === "bind" ? { "--conversation": "conversationId" } : {}),
+    };
+    const body: Record<string, string> = {};
+    for (let i = 2; i < args.length; i += 2) {
+      const field = fields[args[i]!];
+      const value = args[i + 1];
+      if (!field || !value || value.startsWith("--") || Object.hasOwn(body, field))
+        throw new Error(LINEAR_USAGE);
+      body[field] = value;
+    }
+    const issue = z.object({ organizationId: z.string().uuid(), issueId: z.string().uuid() }).strict();
+    const schema =
+      args[1] === "bind"
+        ? issue.extend({ conversationId: z.string().regex(/^[a-zA-Z0-9_-]{1,256}$/u) })
+        : issue;
+    if (!schema.safeParse(body).success) throw new Error(LINEAR_USAGE);
+    return request("/v1/linear/work", args[1] === "bind" ? "PUT" : "DELETE", body);
+  }
+  if (args[0] === "inbox" && args[1] === "handoff") {
+    if (args.length !== 3 || !/^\d{12}$/u.test(args[2]!)) throw new Error(LINEAR_USAGE);
+    return request("/v1/linear/inbox/handoff", "POST", { cursor: args[2] });
   }
   const ack =
     args[0] === "inbox" &&
@@ -202,7 +224,8 @@ export async function runLinearCommand(
     ...(refused ? { error: "linear_webhook_required" as const } : {}),
     ...linearFollowStatus(current.linearWebhook, secretPresent),
     conversationId: "linear-inbox",
-    wakeConversationId: "global-default",
+    wakeConversationId: "linear-inbox",
+    wakeRouting: "work-owner",
     settingsFile: settings.path,
   };
 }
