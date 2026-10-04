@@ -2548,6 +2548,22 @@ choose the destination. Worker reports fall back to `global-default` when that
 conversation has been removed; a retained room with revoked grants is refused.
 Local and fleet-qualified remote workers follow the same persisted ownership
 proof and delivery receipts.
+Without persisted adoption, the host reads the actual census parent/launcher
+edge and routes to that exact native lead or its attached conversation. Explicit
+adoption wins; tabs, titles and report text establish no ownership. The parent
+needs an exact-session native mailbox, authenticated hook or existing harness
+control/queue path. A room still needs its original Discord admission and grants.
+If no eligible parent exists, the report falls back to `global-default` with
+`workerReportRouting.source: "unadopted"` on its durable accepted turn and a
+reason (`no_parent`, `parent_unavailable`, `parent_unlinked`, or `owner_removed`).
+The fleet roster exposes the same diagnostic and parent pane/seat when known.
+An authority or occupant mismatch is `source: "refused"` with
+`reason: "authority_unavailable"`; it does not admit a default fallback.
+`clankie doctor` includes `linkedSession.parentLeads` and names lead panes whose
+bridges are missing or unobserved, including their child panes. These process
+observations do not prove native delivery or grant tools. Reconcile the original
+report ID after uncertainty; restarting or adopting a worker never resends an
+already accepted report to another conversation.
 `clankie fleet set --tools off` stops new standing tool admissions. Each call
 rechecks live admission, account binding and settings, but a call already past its
 last asynchronous check can still reach a provider after tools-off or admission
@@ -2748,6 +2764,8 @@ including messages, tools, typing state and contained images. Native cursors are
 opaque; clients follow the returned recovery cursor after a session or history
 change. The host persists the source locator, not a second native transcript.
 Explicit app sends and native messages remain durable host communications.
+An unadopted worker report can create its linked native parent's seat thread to
+retain the report's delivery receipt; discovery alone still creates no thread.
 Clankie can inspect panes and arm completion watches independently of chat views.
 See [the native chat decision](adr/0188-native-agent-chats-read-their-own-history.md).
 

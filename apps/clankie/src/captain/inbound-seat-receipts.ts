@@ -1,4 +1,8 @@
-import type { FleetSeatMessageDelivery, FleetSeatMessageReceipt } from "@clankie/protocol";
+import type {
+  FleetSeatMessageDelivery,
+  FleetSeatMessageReceipt,
+  WorkerReportRouting,
+} from "@clankie/protocol";
 import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
 import type { ConversationRunner, ConversationStore } from "./conversations.ts";
 
@@ -93,6 +97,7 @@ export class InboundSeatReceipts {
     conversationId = "global-default",
     /** An admitted room route keeps its authority and existing reply mouth. */
     runner?: ConversationRunner,
+    workerReportRouting?: WorkerReportRouting,
   ): FleetSeatMessageReceipt {
     const fingerprint = deliveryFingerprint(text);
     const previous = this.reconcile(paneId, delivery, fingerprint);
@@ -123,6 +128,7 @@ export class InboundSeatReceipts {
           fingerprint,
           paneId,
           text,
+          ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
         },
         conversationId,
         runner,

@@ -77,6 +77,44 @@ flowchart TD
   Guard --> Mouth[Existing conversation mouth]
 ```
 
+## Extension — Reports from unadopted workers, 2026-10-04
+
+In [VUH-1615](https://linear.app/vuhlp/issue/VUH-1615), James selected the
+host-observed Herdr parent/launcher edge for workers without persisted hire or
+message adoption. Explicit adoption always wins. The host refreshes the census,
+matches the reporting occupant, and resolves only its exact fleet-qualified
+parent pane and native occupant. Names, tabs and report content select no lead.
+An eligible parent receives the report in its attached conversation or through
+the existing native seat channel. Native-only parents retain acceptance in their
+existing seat conversation; they never invoke the generic service runner.
+
+Parent selection creates no ownership registry and grants no tools. Attachment
+uses the existing authenticated native-session association, with ambiguous
+associations refused. A room still requires its original admitted Discord owner
+proof and current grants; missing proof or revoked authority cannot escape into
+the default conversation or a native-only route. Bridge process observations
+are diagnostics, not delivery receipts or tool authority.
+
+Immediately before durable inbound acceptance, the host refreshes ancestry and
+both occupants and rechecks explicit adoption. Changed proof refuses that attempt.
+Acceptance retains the selected destination and routing reason in the existing
+inbound receipt and accepted turn. Later adoption or detach cannot redirect that
+ID. Native dispatch uses the existing per-seat fence with a stable report receipt
+key and rechecks the original recipient. Uncertain delivery is never replayed
+into a different conversation or channel.
+Every supplied native recipient binding applies to fleet mailbox takes and
+acknowledgments, regardless of message source. The existing receipt retains that
+binding across restart; a replacement occupant cannot take or acknowledge the
+original parent's queued report. Conversation-wide driver handover keeps its
+separate existing admission contract.
+
+With no eligible parent, `global-default` receives an explicitly tagged
+`unadopted` report identifying the missing-parent, unavailable-parent or
+unlinked-parent reason. The roster exposes the same routing diagnostic, and
+doctor names the observed parent and children when the parent lacks a bridge.
+A removed explicitly adopted conversation retains the existing default fallback
+with an `owner_removed` reason; it does not enable implicit parent adoption.
+
 ## Extension — Linear work ownership, 2026-10-04
 
 James selected issue-owned routing in

@@ -54,7 +54,7 @@ it("retains an exact peer channel acknowledgement for read-only reconciliation a
     const [event] = await poll;
     expect(event?.source).toBe("peer");
     expect(outbox.receipt(event!.content)).toBeUndefined();
-    expect(outbox.acknowledge(event!.id)).toBe(true);
+    expect(outbox.acknowledge(event!.id, recipientBinding)).toBe(true);
     expect(await sending).toMatchObject({ deliveryStage: "delivered" });
     outbox.close();
     const restarted = new SeatOutbox({ uncertaintyPath });

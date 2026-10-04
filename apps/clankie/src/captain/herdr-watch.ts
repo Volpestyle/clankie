@@ -1064,6 +1064,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.projectSeat?.(agent.terminalId, { kind: "reply", text });
   }
 
+  /** Reuse native attachment/queue capability; bridge display cards grant nothing. */
+  public async nativeRouteAvailable(agent: HerdrAgentSnapshot): Promise<boolean> {
+    if (this.closed || !agent.session) return false;
+    const control = await this.seatControl.attach(agent);
+    const status = await control?.status().catch(() => undefined);
+    if (status === "idle" || status === "working" || status === "blocked") return true;
+    // Unowned Codex sessions already have a native queue path (ADR 0185/0207).
+    return (
+      agent.agent === "codex" &&
+      (splitFleetQualified(agent.paneId) !== undefined || this.runner.codexQueue !== undefined)
+    );
+  }
+
   /** Only fresh host-observed native proof selects a worker's leading conversation. */
   public nativeOwner(agent: HerdrAgentSnapshot): ConversationOwner | undefined {
     const owner =

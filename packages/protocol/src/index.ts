@@ -962,6 +962,20 @@ const OperatorHarnessBridgeSchema = HarnessBridgeProcessSchema.extend({
   operatorBridge: HarnessBridgeProcessSchema.optional(),
 });
 
+/** Host routing diagnostics; never a worker-selected destination or tool grant. */
+export const WorkerReportRoutingSchema = z
+  .object({
+    source: z.enum(["adoption", "parent", "unadopted", "refused"]),
+    reason: z
+      .enum(["no_parent", "parent_unavailable", "parent_unlinked", "owner_removed", "authority_unavailable"])
+      .optional(),
+    leadPaneId: z.string().min(1).max(256).optional(),
+    leadSeatId: z.string().min(1).max(256).optional(),
+    conversationId: OperatorConversationIdSchema.optional(),
+  })
+  .strict();
+export type WorkerReportRouting = z.infer<typeof WorkerReportRoutingSchema>;
+
 export const OperatorFleetSeatSchema = z
   .object({
     /** Host-observed bridge facts, not tool or message delivery acceptance. */
@@ -1026,6 +1040,7 @@ export const OperatorFleetSeatSchema = z
      * the roster simply stops carrying one (ADR 0163).
      */
     parentSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+    workerReportRouting: WorkerReportRoutingSchema.optional(),
     /**
      * Native subagents the occupying harness started inside its own TUI
      * (Claude Code's Agent/Task tool), newest first (ADR 0208). Present only
@@ -1646,6 +1661,7 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
   }).strict(),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("turn"),
+    workerReportRouting: WorkerReportRoutingSchema.optional(),
     deliveryStage: DeliveryStageSchema.optional(),
     runId: OperatorConversationRunIdSchema,
     phase: z.enum(["accepted", "completed", "failed", "cancelled"]),
