@@ -49,6 +49,7 @@ import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat, MessageSeat } from "./port.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
+import { desktopTools } from "./desktop.ts";
 import { rivalsTools } from "./rivals-tools.ts";
 import { minecraftTools } from "./minecraft-tools.ts";
 import { WorkRequestSchema } from "../work-items.ts";
@@ -159,6 +160,7 @@ export function captainTools(
       : [],
   );
   return [
+    ...desktopTools(deps.desktop),
     ...(deps.bodyLeases === undefined
       ? []
       : [

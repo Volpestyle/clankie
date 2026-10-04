@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { OperatorPresenceSnapshot } from "@clankie/protocol/presence";
 
 export interface PresenceSources {
+  expression?: OperatorPresenceSnapshot["expression"];
   thinking: boolean;
   voiceSince?: string;
   inVoice: boolean;
@@ -36,6 +37,7 @@ export function projectPresence(sources: PresenceSources): OperatorPresenceSnaps
     since,
     activeSeats,
     ...(pendingOwnerItem === undefined ? {} : { pendingOwnerItem }),
+    ...(sources.expression === undefined ? {} : { expression: sources.expression }),
   };
   return { ...projection, cursor: createHash("sha256").update(JSON.stringify(projection)).digest("hex") };
 }

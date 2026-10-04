@@ -1,3 +1,4 @@
+import { DesktopSettingsSchema } from "./desktop.ts";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { MinecraftServerProfileIdSchema } from "@clankie/protocol";
@@ -753,6 +754,7 @@ export const ClankieSettingsSchema = z
     projects: ProjectsSettingsSchema.default(() => ProjectsSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
+    desktop: DesktopSettingsSchema.default(() => DesktopSettingsSchema.parse({})),
     minecraft: MinecraftSettingsSchema.default(() => MinecraftSettingsSchema.parse({})),
     browser: BrowserSettingsSchema.default(() => BrowserSettingsSchema.parse({})),
     mcp: McpSettingsSchema.default(() => McpSettingsSchema.parse({})),

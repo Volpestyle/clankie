@@ -240,6 +240,13 @@ const HEADLESS_COMMAND_HELP = [
       "                           Bundled skill classes and selection (JSON)",
     ],
   },
+  {
+    nouns: ["desktop"],
+    lines: [
+      "  desktop [status] | quiet-hours START END TIME_ZONE | quiet-hours off",
+      "                           Desktop quiet hours (HH:mm, IANA time zone); applies immediately",
+    ],
+  },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
     nouns: ["browser"],

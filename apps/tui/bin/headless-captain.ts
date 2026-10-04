@@ -1,3 +1,4 @@
+import { runDesktopCommand } from "../src/command/desktop.ts";
 import { runHarnessCommand } from "../src/command/harness.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
 import { runBodyCommand } from "../src/command/body.ts";
@@ -244,6 +245,10 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "skills") {
       outputJson(stdout, await runSkillsCommand(rest, options));
+      return 0;
+    }
+    if (command === "desktop") {
+      outputJson(stdout, await runDesktopCommand(rest, options));
       return 0;
     }
     if (command === "games") {

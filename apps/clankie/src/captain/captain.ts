@@ -1,3 +1,4 @@
+import { DesktopExpressions } from "./desktop.ts";
 import { projectPresence, pollPresence, captainIsThinking } from "./presence.ts";
 import { projectOnboarding } from "./project-onboarding.ts";
 import {
@@ -1305,6 +1306,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return shown;
   };
   const settingsStore = options.settings ?? new SettingsStore();
+  const desktop = new DesktopExpressions(async () => (await settingsStore.load()).desktop);
+  const desktopDeps = { ...deps, desktop };
   const personaImages = options.personaImages ?? createPersonaImageSource(settingsStore, options.repoRoot);
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
@@ -1512,7 +1515,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       });
     await loader.reload();
     const authored = laneAuthoredTools(
-      deps,
+      desktopDeps,
       capture,
       laneLog,
       lane,
@@ -3240,6 +3243,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               (session) => session.gatewayConnected && session.voiceGuildIds.length > 0,
             );
             return projectPresence({
+              expression: await desktop.current(),
               thinking,
               inVoice,
               playing:
@@ -3726,7 +3730,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       const currentSettings = await settings();
       return buildLaneToolBank(
-        deps,
+        desktopDeps,
         capture,
         laneLog,
         lane,

@@ -1547,6 +1547,13 @@ paths:
         immediately. A current cursor parks until the projected sources change,
         sampled within 500 ms, or the wait expires. Unreachable is a client
         transport state, never a mood. Paired hosted devices may read it.
+        Optional expression is a transient desktop action with UUID id and ISO
+        expiresAt: kind emote adds animation (a hero sprite tag), kind say adds
+        text (1–200 characters), and kind move adds x/y (normalized 0–1 on the
+        current display, left-to-right/top-to-bottom). Expiry or owner quiet
+        hours removes it and changes the cursor without changing the mood.
+        Clients discard expired actions even while disconnected, honor Focus,
+        and never take keyboard focus to show an expression.
         `fleet` returns one cursor-coherent snapshot. Optional `view: home`
         omits historical personas that are neither seated
         contacts nor channel participants. Seats, channels, tallies and edges

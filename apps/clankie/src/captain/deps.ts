@@ -46,6 +46,7 @@ import type { WorkItemsService } from "../work-items.ts";
 export interface CaptainDeps {
   /** Exact conversation-owned Minecraft stay, sharing the Pokémon play lease. */
   readonly minecraft?: import("../minecraft.ts").MinecraftService;
+  readonly desktop?: import("./desktop.ts").DesktopExpressions;
   readonly runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
   readonly roomObservations?: import("../discord-room-observations.ts").DiscordRoomObservations;
   /** Host-proven original body account, presence, source receipt and opt-in. */

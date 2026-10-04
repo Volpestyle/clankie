@@ -1,3 +1,4 @@
+import { runDesktopCommand } from "./command/desktop.ts";
 import { runMachinesCommand } from "./command/machines.ts";
 import { runProjectSettingsCommand } from "./command/project-settings.ts";
 import { planSeat, parseSeatArgs } from "./command/seat.ts";
@@ -1066,6 +1067,36 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           }
         } finally {
           flow.end();
+        }
+      },
+    },
+    {
+      name: "desktop",
+      aliases: [],
+      description: "Set desktop quiet hours",
+      argumentHint: "[status | quiet-hours START END TIME_ZONE | quiet-hours off]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (settings === undefined) {
+          shell.insertCommandResult("/desktop", "Desktop settings are unavailable.", "error");
+          return;
+        }
+        try {
+          const result = await runDesktopCommand(argument.trim().split(/\s+/u).filter(Boolean), { settings });
+          const hours = result.desktop.quietHours;
+          shell.insertCommandResult(
+            "/desktop",
+            hours === undefined
+              ? "Desktop quiet hours are off."
+              : `Desktop quiet hours: ${hours.start}–${hours.end} (${hours.timeZone}).`,
+            "success",
+          );
+        } catch (error) {
+          shell.insertCommandResult(
+            "/desktop",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
         }
       },
     },

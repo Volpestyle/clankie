@@ -1084,6 +1084,22 @@ Update one or more persona fields atomically:
 JSON contains `{ "ok": true, "persona": { … }, "settingsFile": "…", "restart": "clankie restart captain" }`.
 The TUI `/persona` modal calls this same writer.
 
+### `desktop [status]` / `desktop quiet-hours START END TIME_ZONE|off`
+
+Read or set desktop quiet hours. Times use `HH:mm` and an IANA time zone,
+for example `clankie desktop quiet-hours 22:00 07:00 America/Chicago`.
+Overnight ranges are supported; the start is inclusive and the end exclusive.
+Equal start and end times are rejected. `clankie desktop quiet-hours off`
+removes the range. The TUI `/desktop` takes the same arguments. Changes apply
+immediately without restarting. JSON returns `desktop` and `settingsFile`.
+
+The captain's `desktop` tool can emote, move within the current display using
+normalized coordinates, or show a short bubble. Expressions carry a unique ID
+and expiry in `presence`; they last five seconds by default, up to thirty.
+Quiet hours suppress them without changing the source-derived mood. Desktop
+clients also honor macOS Focus, discard expired expressions, and show them
+without taking keyboard focus. Publishing does not confirm a client displayed it.
+
 ### `games [status]` / `games set on|off`
 
 Read or set whether the PokeAgent MMO body is available. JSON contains the
