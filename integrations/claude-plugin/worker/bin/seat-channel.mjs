@@ -33,7 +33,10 @@ const INSTRUCTIONS =
   "Use list_fleet_seats to discover admitted peers and message_peer to write directly within this fleet. " +
   "When work he gave you finishes or is blocked, report it with message_clankie in a few lines " +
   "(outcome; branch and commit; checks and their result; evidence path; open gaps or a decision needed), " +
-  "rather than typing into his pane.";
+  "rather than typing into his pane. " +
+  "A question or decision you need from your lead goes to Clankie with message_clankie, then continue " +
+  "with other work or wait for his reply; do not ask it through your harness's own ask-the-user prompt, " +
+  "which only the person at this pane sees.";
 /** Clankie admits a local agent by its pane's process tree; a shared Codex daemon is outside it. */
 const SHARED_DAEMON_NOTE =
   "This Codex session runs its tools on the shared app-server daemon, which belongs to no pane, " +
