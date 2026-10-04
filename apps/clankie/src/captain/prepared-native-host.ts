@@ -38,7 +38,6 @@ const NativeSession = z.discriminatedUnion("source", [
 export interface PreparedCommandTab {
   readonly cwd: string;
   readonly label: string;
-  readonly workspaceId?: string;
   readonly command: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
 }
@@ -97,7 +96,6 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
       // Exactly one new-tab request. Unknown creation is never retried and no
       // existing tab_id is accepted; no shell command or terminal input exists.
       const result = await request(current, "layout.apply", {
-        ...(options.workspaceId === undefined ? {} : { workspace_id: options.workspaceId }),
         tab_label: options.label,
         focus: false,
         root: { type: "pane", cwd: options.cwd, command: options.command, env: options.env ?? {} },

@@ -109,7 +109,6 @@ describe("the GitHub backend", () => {
         ]);
       const method = args[args.indexOf("-X") + 1];
       const path = args[args.indexOf("-X") + 2]!;
-      if (path.endsWith("/parent")) throw new Error("gh: Not Found (HTTP 404)");
       const body = stdin === undefined ? {} : (JSON.parse(stdin) as Record<string, unknown>);
       const number = Number(/issues\/(\d+)/u.exec(path)?.[1]);
       if (method === "POST") {
@@ -334,10 +333,7 @@ describe("work item labels (ADR 0208)", () => {
       html_url: "https://github.com/o/r/issues/5",
       labels: [{ name: "Designer" }, "status: in progress", { name: "" }, "art"],
     };
-    const gh: GhRunner = async (args) => {
-      if (args.some((arg) => arg.endsWith("/parent"))) throw new Error("gh: Not Found (HTTP 404)");
-      return JSON.stringify([[issue]]);
-    };
+    const gh: GhRunner = async () => JSON.stringify([[issue]]);
     const backend = createGithubBackend({ repo: "o/r", gh });
     const [item] = await backend.list({ label: "designer" });
     expect(item).toMatchObject({ status: "in_progress", labels: ["Designer", "art"] });

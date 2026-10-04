@@ -70,7 +70,6 @@ export { linearFollowStatus, linearWakeMatches } from "./linear-follow.ts";
 export {
   applyDiscordSettingsToEnvironment,
   discordSettingsToEnvironment,
-  discordManagedGuildId,
   isDiscordBodyActive,
   parseDiscordActiveBody,
   resolveDiscordActiveBody,

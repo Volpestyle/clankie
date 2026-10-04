@@ -52,8 +52,6 @@ export const WorkItemSchema = z
   .object({
     /** Backend-native id: `W-ab12cd`, a GitHub issue number `#42`, a Linear `VUH-123`. */
     id: z.string().trim().min(1).max(64),
-    /** Backend-native parent id; a cross-repo GitHub parent is `owner/repo#42`. */
-    parent: z.string().trim().min(1).max(256).optional(),
     title: TextSchema(WORK_ITEM_TITLE_MAX),
     status: WorkItemStatusSchema,
     owner: z.string().trim().min(1).max(128).optional(),

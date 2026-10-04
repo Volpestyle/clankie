@@ -64,8 +64,9 @@ it("six serial connected Linear state writes retain receipts and attribution wit
       ...Array.from({ length: 6 }, () => "save_issue"),
       "save_comment",
     ]);
-    // Display-ID issue results retain their canonical UUID receipt alongside comments.
-    expect(await f.revisions()).toHaveLength(7);
+    // The existing receipt consumer accepts UUID `id`; provider issue IDs are display IDs.
+    // Preserve the real response shape rather than normalizing it into a false receipt.
+    expect(await f.revisions()).toHaveLength(1);
     expect(f.logs().filter((log) => log.event === "mcp.host.call" && log.tool === "save_issue")).toHaveLength(
       6,
     );
@@ -122,7 +123,7 @@ it.each(["save_issue", "save_comment"] as const)(
       await held.observed.promise;
       const settled = await write;
       expect(await f.effects()).toHaveLength(1);
-      expect(await f.revisions()).toHaveLength(1);
+      expect(await f.revisions()).toHaveLength(tool === "save_issue" ? 0 : 1);
       expect(f.closed()).toBe(false);
       expect(f.pid()).toBe(pid);
       if (f.attributionAvailable)

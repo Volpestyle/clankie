@@ -1,9 +1,5 @@
 import { ComputerBody } from "./computer-body.ts";
 import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
-import { detectWindowsComputerUseHarnesses } from "./computer-windows-discovery.ts";
-import { detectComputerUseHarnesses } from "./computer-use-harnesses.ts";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
@@ -128,7 +124,6 @@ import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
-import { readDiscordBodyDirectory } from "./discord-directory.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
 import { MemoryCapacityError, createFileMemory, defaultMemoryDir } from "./memory.ts";
 import { createWorldPlayExecution } from "./play-execution-world.ts";
@@ -607,52 +602,11 @@ const workItems = createWorkItemsService({
   githubToken: () => githubConnectionToken(operatorCredentialStore),
   hosted: hostedBody !== undefined,
 });
-// Read-only capability discovery on this host and registered Windows fleets.
+// Computer-use harnesses drive the owner's own Mac apps and Chrome (ADR 0199).
+// A hosted body has no owner desktop, and the probes read macOS paths, so
+// detection is only wired where both hold.
 const computerUseHarnesses =
-  hostedBody === undefined
-    ? cachedComputerUseHarnesses(async () => {
-        const local =
-          process.platform === "darwin"
-            ? detectComputerUseHarnesses()
-            : process.platform === "win32"
-              ? detectWindowsComputerUseHarnesses(async (command, timeoutMs) => {
-                  const encoded = command.split(" ").at(-1)!;
-                  return (
-                    await promisify(execFile)(
-                      "powershell.exe",
-                      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-                      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
-                    )
-                  ).stdout;
-                })
-              : Promise.resolve([]);
-        const remote = runtimes.fleets().then((fleets) =>
-          Promise.all(
-            fleets
-              .filter((fleet) => fleet.ssh.shell === "powershell")
-              .map(async (fleet) => {
-                try {
-                  return await detectWindowsComputerUseHarnesses(runtimes.fleetShell(fleet), fleet.id);
-                } catch {
-                  return [
-                    {
-                      harness: "codex" as const,
-                      signedIn: false,
-                      surfaces: [],
-                      chromeNeedsHireFlag: false,
-                      platform: "win32" as const,
-                      machineId: fleet.id,
-                      missing: "Windows capability probe unavailable; re-check the fleet link",
-                    },
-                  ];
-                }
-              }),
-          ),
-        );
-        const [localFound, remoteFound] = await Promise.all([local, remote]);
-        return [...localFound, ...remoteFound.flat()];
-      })
-    : undefined;
+  hostedBody === undefined && process.platform === "darwin" ? cachedComputerUseHarnesses() : undefined;
 const localFleetBinding = async () => {
   const current = (await settingsStore.load()).herdr;
   const original = startupSettings.herdr;
@@ -1060,12 +1014,6 @@ const workerMcp = new WorkerMcp({
 });
 
 const clankie = await createClankieApp({
-  discordDirectory: (query, body) =>
-    readDiscordBodyDirectory(query, {
-      body,
-      env: process.env,
-      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-    }),
   fleetProjectMembership: new FleetProjectMembership({
     settings: async () => (await settingsStore.load()).projects,
     binding: localFleetBinding,

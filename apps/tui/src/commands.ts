@@ -1570,7 +1570,7 @@ function formatBrowserHarnesses(result: BrowserHarnessesResult): string {
     const detail = ready
       ? `${entry.surfaces.join(", ")}${entry.chromeNeedsHireFlag ? " (hired with --chrome)" : ""}`
       : (entry.missing ?? "not ready");
-    return `${ready ? "✓" : "·"} ${entry.machineId === undefined ? "" : `${entry.machineId}/`}${entry.harness}${entry.platform === "win32" ? " (Windows; input unproven)" : ""}: ${detail}`;
+    return `${ready ? "✓" : "·"} ${entry.harness}: ${detail}`;
   });
   return [
     ...lines,

@@ -77,7 +77,7 @@ describe("presence runtime credential loading", () => {
  * rather than a new one made, and that an id from outside the home guild is
  * refused before anything is created.
  */
-describe("channel provisioning against the managed server", () => {
+describe("channel provisioning against the swarm home", () => {
   const GUILD_ROOMS = [
     { id: "42", name: "general", type: 0 },
     { id: "43", name: "fleet", type: 0 },
@@ -96,8 +96,8 @@ describe("channel provisioning against the managed server", () => {
     delete process.env.DISCORD_BOT_TOKEN;
     process.env.CLANKIE_CREDENTIALS_FILE = path;
     // The command server and the presence allowlist name guilds that are NOT
-    // the managed server, and the managed server appears on neither. Provisioning has
-    // to work anyway: the two are separate authorities, so a managed server that
+    // the swarm home, and the swarm home appears on neither. Provisioning has
+    // to work anyway: the two are separate authorities, so a swarm home that
     // only worked when it was also a presence guild would be the same field
     // wearing two names.
     process.env.DISCORD_GUILD_ID = "command-guild";
@@ -129,18 +129,18 @@ describe("channel provisioning against the managed server", () => {
     return createDiscordPresenceRuntime({ rest: rest as never });
   }
 
-  it("provisions only into the managed server, never the command server or an inhabited guild", async () => {
+  it("provisions only into the swarm home, never the command server or an inhabited guild", async () => {
     const { runtime } = await runtimeWithFakeRest();
     expect(runtime.swarmGuildId()).toBe("guild-1");
-    // Every route it builds names the managed server, though the command server and
+    // Every route it builds names the swarm home, though the command server and
     // an inhabited presence guild are both configured and one of them would
-    // have answered before the managed server existed as its own field.
+    // have answered before the swarm home existed as its own field.
     expect((await runtime.provisionChannel({ name: "Atlas slowness" })).guildId).toBe("guild-1");
 
     delete process.env.DISCORD_SWARM_GUILD_ID;
     const { createDiscordPresenceRuntime } = await import("../src/presence-runtime-module.ts");
     const unset = createDiscordPresenceRuntime({ rest: {} as never });
-    // No managed server is no room, rather than falling back to a guild he is only
+    // No swarm home is no room, rather than falling back to a guild he is only
     // a member of.
     await expect(unset.listRooms()).rejects.toThrow(/discord_swarm_guild_unset/);
     expect(unset.swarmGuildId()).toBeUndefined();
@@ -194,7 +194,7 @@ describe("channel provisioning against the managed server", () => {
     ]);
   });
 
-  it("refuses a channel id from outside the managed server before creating anything", async () => {
+  it("refuses a channel id from outside the swarm home before creating anything", async () => {
     const { runtime, calls } = await runtimeWithFakeRest();
     await expect(
       runtime.provisionChannel({

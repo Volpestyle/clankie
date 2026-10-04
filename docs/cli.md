@@ -640,12 +640,7 @@ remains broker-owned; it is never a CLI flag.
 The consumer accepts signed `create`, `update`, and `remove` activity from any
 resource type and actor. A verified, matching revision of Clankie's own MCP write
 is dropped at ingress; matching delegated-worker updates retain their provenance
-and enter the inbox. For issue writes, a response with a display-label `id` such
-as `VUH-1641` uses its returned `uuid` for receipt identity. A UUID-valued `id`
-is valid too; any supplied `uuid` must be valid and agree with it. Missing or
-conflicting UUID proof never suppresses activity. Workspace, actor, resource type,
-`updatedAt` and saved-field matching still apply to the exact revision.
-Ambiguous events remain visible under the existing wake rules. A wake carries
+and enter the inbox. Ambiguous events remain visible. A wake carries
 one headline per new event; the stored message carries the resource, action,
 author, URL, data and previous values as bounded untrusted context.
 Shared-account agent posts are not attributed to the human. Clankie decides
@@ -1349,7 +1344,7 @@ The TUI `/browser` command calls this same writer.
 
 ### `browser harnesses` / `browser delegate on|off`
 
-The configured computer-use harnesses here and on linked Windows fleets for hard
+The computer-use harnesses on this machine that Clankie can hire for hard
 computer and browser work
 ([ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
 `harnesses` asks the service (`GET /v1/browser/harnesses`, operator bearer),
@@ -1357,13 +1352,10 @@ which re-probes on every read: `codex login status` and `codex features list`
 plus Codex's plugin config for Codex computer use and Chrome, and
 `claude auth status` plus `~/.claude.json` and Chrome's native host for Claude
 in Chrome. Nothing is started or driven. JSON contains `detected` (false on a
-hosted body, where owner-machine probes are not configured), `harnesses` (each
+hosted body or a non-macOS host, where nothing is probed), `harnesses` (each
 with `harness`, `signedIn`, `surfaces` of `desktop` and/or `chrome`,
 `chromeNeedsHireFlag`, and `missing` saying what the owner does when it is not
-ready), optional `platform` and fleet `machineId`, and `harnessDelegation`.
-Windows probes read Codex login, flags and its installed Windows plugin; they
-report signed-out and disabled installs. App grants and successful input remain
-separate live proof.
+ready) and `harnessDelegation`.
 
 `delegate on|off` sets `browser.harnessDelegation` (default on): whether the
 ready harnesses appear in the `reach` section of his prompt, on lanes with
@@ -1648,31 +1640,10 @@ use its native children. `panes` assigns independent slices to separate hires.
 Closing a pane releases its admission only after successful inventory confirms
 it absent. Retry reconciliation retains the original profile.
 
-New hires use one Herdr workspace per repository on the selected fleet, even
-when the lead or another client is focused elsewhere. Herdr's observed Git
-identity groups linked worktrees of the same repo; equal directory names do not
-group unrelated repos. A workspace is created and named from the repo once,
-with a separate root tab reserved as `Clankie`. Existing labels are preserved.
-An unmarked hand-created workspace is reused only when all its observed pane
-directories belong to that repo. Mixed legacy workspaces stay untouched.
-Non-Git directories use their exact working directory instead.
-
-`new-tab` is the normal placement: a solo worker gets a `Name · role` tab.
-A deliberate pipeline supplies a per-hire `pipeline` name, for example
-`"VUH-1550 design → implement → review"`. Its first hire opens that named tab;
-later hires use `placement: "split"` with the same pipeline and split its last
-stage, preserving focus. `split` without a pipeline refuses. A same-named tab
-with unmarked panes refuses instead of appending to an unrelated lane. Pipeline
-names belong to the hire, not a blanket role or fleet default. Prepared
-initial-command Pi/OpenCode hires can create the first pipeline tab but cannot
-yet split into an existing one; they refuse rather than rebuild it.
-
-This policy allocates new panes only. Resuming an already live native session
-keeps its existing pane; a saved-session resume that needs a new pane uses the
-same repo/tab rule. An explicitly requested move re-hires in a solo tab at the destination,
-carrying its human name and known role; there is no automatic migration, rename or cleanup of older
-workspaces, tabs or panes. The protocol `spawn_seat` request and `hire_agent`
-accept the same optional `pipeline` field alongside `placement`.
+`new-tab` is the normal placement. `split` opens a sibling of the verified lead
+pane in the target fleet, preserving focus. It refuses when that native lead
+cannot be verified; prepared initial-command Pi/OpenCode launches currently
+require `new-tab`. It never uses another client's focused pane as a fallback.
 Local Codex accounts use the registered account labels and homes; local Claude
 accounts use `claudeAccounts` entries (`{label, home}`) plus the implicit
 `default` profile. The owner registers their existing alternate directory with
@@ -2681,26 +2652,6 @@ Return stored and effective non-secret Discord configuration:
 `discord` is the stored value. `effectiveDiscord` includes environment
 overrides, whose variable names appear in `overriddenByEnvironment`.
 
-### `discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]`
-
-Read the names, IDs and kinds the active Discord account can see. The default
-lists servers; channels, roles and people require `--server`. Pages contain at
-most 200 entries (default 100); pass the returned `nextCursor` as `--after`.
-`state` and `reason` distinguish a disconnected runtime, partial cache and
-failed read from a complete empty list. People and channel/thread coverage may
-be partial. No account is connected or configured by this command. Requires
-operator authentication. See [the directory contract](discord-rooms.md#discord-directory-for-settings-pickers).
-
-### `discord definition`
-
-Read the host's shared four-sentence Discord definition, picker kinds, help text,
-check kinds, Advanced groups and choice labels as JSON. Requires operator
-authentication, like `discord rooms`. The included `machineName` names the host
-Clankie uses, including “his cloud computer” when hosted. An older host without
-this optional metadata returns a clear unsupported error. See
-[Discord settings](discord-rooms.md) for revision checks and the preferred
-`DISCORD_MANAGED_GUILD_ID` environment name.
-
 ### `discord transcripts [--cursor CURSOR] [--limit N]`
 
 Read the private retained voice log through the authenticated service API.
@@ -3285,12 +3236,8 @@ uncertain input with a new request UUID. A busy body does not transfer ownership
 even during an input batch; its next input refuses. Recovery still needs host stop
 proof.
 
-The service registers a macOS Peekaboo adapter. A native Windows Codex
-`node_repl` can explicitly attach the read-only Windows observation host; the
-same command targets it through `CLANKIE_CONTROL_PLANE_URL` (loopback or an SSH
-forward). Its frames have `inputReady: false`; input is unavailable. Windows
-setup is in [desktop control](desktop-control.md#windows-observation-host).
-A host without an attached adapter returns `computer_body_unavailable`.
-Native reasoning/provider loops and hosted displays are not implemented. [Desktop control](desktop-control.md#shared-computer-body)
+The service currently registers a macOS Peekaboo adapter. Other hosts return
+`computer_body_unavailable`; native Codex/provider loops and hosted displays are
+not implemented. [Desktop control](desktop-control.md#shared-computer-body)
 explains capture freshness, coordinate mapping and the provider's recovery
 limitation.

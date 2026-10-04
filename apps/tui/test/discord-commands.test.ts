@@ -101,8 +101,8 @@ describe("Discord server allowlist resolution", () => {
   });
 });
 
-describe("managed server in /discord", () => {
-  /** One pass through "Server, application, and roles" with the managed-server answer given. */
+describe("swarm home in /discord", () => {
+  /** One pass through "Server, application, and roles" with the swarm-home answer given. */
   async function editSwarmHome(settings: SettingsStore, answer: string): Promise<void> {
     const picks = ["core", "done"];
     const texts = ["", "", answer, "", ""];

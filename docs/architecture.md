@@ -138,7 +138,7 @@ Their readable
 history folds the complete active user/assistant branch from Herdr's native
 Claude Code, Codex, Pi, or Grok session identity; raw terminal bytes stay on the
 terminal lane ([ADR 0135](adr/0135-a-herdr-seat-is-a-conversation.md)). The app
-and controlled managed-server Discord project those same host-owned records and
+and controlled swarm-home Discord project those same host-owned records and
 logs. Discord faces are app-baked PNGs served under content-hashed HTTPS paths
 by the existing Activity origin
 ([ADR 0147](adr/0147-an-agent-persona-outlives-its-herdr-seat.md)).

@@ -134,9 +134,6 @@ export function routeHerdrFleets(
   fleets: ReadonlyMap<string, HerdrWatchRunner> | (() => Promise<ReadonlyMap<string, HerdrWatchRunner>>),
 ): HerdrWatchRunner {
   const current = async () => (typeof fleets === "function" ? fleets() : fleets);
-  // Fleet factories refresh per call. Keep placement serialization at the
-  // controller boundary too, so concurrent hires cannot each found a workspace.
-  const allocations = new Map<string, Promise<string>>();
   const route = async (target: string): Promise<{ runner: HerdrWatchRunner; id: string; fleet?: string }> => {
     const qualified = splitFleetQualified(target);
     if (qualified === undefined) return { runner: local, id: target };
@@ -219,19 +216,13 @@ export function routeHerdrFleets(
     createTab: async (options) => {
       const runner = options.fleet === undefined ? local : (await current()).get(options.fleet);
       if (runner?.createTab === undefined) throw new Error(`Unknown Herdr fleet ${String(options.fleet)}`);
-      const key = options.fleet ?? "local";
-      const next = (allocations.get(key) ?? Promise.resolve())
-        .catch(() => undefined)
-        .then(async () => {
-          const paneId = await runner.createTab!(options);
-          return options.fleet === undefined ? paneId : fleetQualified(options.fleet, paneId);
-        });
-      allocations.set(key, next);
-      try {
-        return await next;
-      } finally {
-        if (allocations.get(key) === next) allocations.delete(key);
-      }
+      const beside = options.besidePane === undefined ? undefined : splitFleetQualified(options.besidePane);
+      if (beside && beside.fleet !== options.fleet) throw new Error("Lead pane belongs to a different fleet");
+      const paneId = await runner.createTab({
+        ...options,
+        ...(options.besidePane === undefined ? {} : { besidePane: beside?.id ?? options.besidePane }),
+      });
+      return options.fleet === undefined ? paneId : fleetQualified(options.fleet, paneId);
     },
     startAgent: async (options) => {
       const { runner, id } = await route(options.paneId);

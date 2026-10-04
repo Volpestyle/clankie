@@ -1492,7 +1492,6 @@ describe("hiring a seat", () => {
       subject: "release-prep-ab12",
       harness: "codex",
       title: "Release prep",
-      role: "reviewer",
       workingDirectory: tmpdir(),
     });
 
@@ -1500,8 +1499,7 @@ describe("hiring a seat", () => {
     expect(closePane).toHaveBeenCalledWith("w1C:p9");
     expect(createTab).toHaveBeenCalledWith({
       cwd: tmpdir(),
-      label: "Release prep · reviewer",
-      placement: "new-tab",
+      label: "Release prep",
       env: expect.objectContaining({ CODEX_HOME: codexHome }),
     });
     // Hired under the name it already had: that name is the persona's binding

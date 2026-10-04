@@ -16,7 +16,7 @@ import type {
   DiscordPresenceWrite,
 } from "@clankie/protocol";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
-import { discordAttachmentRoot, discordManagedGuildId } from "@clankie/settings";
+import { discordAttachmentRoot } from "@clankie/settings";
 import type { REST } from "discord.js";
 import { createFilesystemAttachmentResolver } from "./attachment-resolver.ts";
 import { DiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
@@ -67,10 +67,10 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
    * request it is handed, and the real fence is the guild allowlist that
    * `assertAllowed` applies to both.
    *
-   * Fenced to the managed server alone, and independently of the presence
-   * allowlist. Presence governs where Clankie talks; the managed server governs
+   * Fenced to the swarm home alone, and independently of the presence
+   * allowlist. Presence governs where Clankie talks; the swarm home governs
    * where his agents get rooms. Reading the grant off the presence list would
-   * quietly make the two one field again — the managed server would only work if
+   * quietly make the two one field again — the swarm home would only work if
    * it were also a guild he was configured to talk in.
    */
   const guildRest = async (guildId: string): Promise<REST> => {
@@ -93,13 +93,13 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
   };
   return {
     /**
-     * Which server is the managed server, so a pasted webhook can be held to it.
+     * Which server is the swarm home, so a pasted webhook can be held to it.
      * Not a secret — a guild id names a place, it does not open one — but it is
      * answered here because this module is what decides the question.
      */
-    swarmGuildId: () => discordManagedGuildId(),
+    swarmGuildId: () => process.env.DISCORD_SWARM_GUILD_ID?.trim() || undefined,
     /**
-     * The managed server's rooms, so the operator picks one instead of copying a
+     * The swarm home's rooms, so the operator picks one instead of copying a
      * webhook URL out of Server Settings. Same guild-scoped grant as
      * provisioning, and the same fence: nothing here can name a room outside
      * the one server Clankie controls.
@@ -185,7 +185,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
 }
 
 /**
- * The one guild Clankie makes rooms in: the managed server (ADR 0146). Named
+ * The one guild Clankie makes rooms in: the swarm home (ADR 0146). Named
  * explicitly and never inferred. `DISCORD_GUILD_ID` is the command and
  * live-proof server and deliberately does not answer here, and neither does the
  * presence allowlist: a server Clankie merely inhabits belongs on every ingress,
@@ -193,7 +193,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
  * given a channel. Unset means no room is provisioned at all.
  */
 function provisionGuildId(): string {
-  const swarm = discordManagedGuildId();
+  const swarm = process.env.DISCORD_SWARM_GUILD_ID?.trim();
   if (!swarm) throw new Error("discord_swarm_guild_unset");
   return swarm;
 }

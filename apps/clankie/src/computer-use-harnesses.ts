@@ -13,7 +13,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** A configured native desktop capability, or the owner's own signed-in Chrome. */
+/** What a harness can drive: native Mac apps, or the owner's own signed-in Chrome. */
 type ComputerUseSurface = "desktop" | "chrome";
 
 export interface ComputerUseHarness {
@@ -23,9 +23,6 @@ export interface ComputerUseHarness {
   readonly surfaces: readonly ComputerUseSurface[];
   /** A hire needs `chrome: true` for the Chrome surface (claude without Chrome on by default). */
   readonly chromeNeedsHireFlag: boolean;
-  readonly platform?: "darwin" | "win32";
-  /** Registered fleet identity; absent for this machine. */
-  readonly machineId?: string;
   /** Why it cannot take computer work yet, and what the owner does about it. */
   readonly missing?: string;
 }
@@ -198,23 +195,16 @@ const SURFACE_WORDS: Readonly<Record<ComputerUseSurface, string>> = {
  */
 export function renderComputerUseReach(harnesses: readonly ComputerUseHarness[]): string {
   const ready = harnesses.filter(computerUseReady);
-  if (ready.length === 0 && !harnesses.some((entry) => entry.platform === "win32")) return "";
+  if (ready.length === 0) return "";
   const lines = harnesses.map((entry) => {
-    const name = `${entry.machineId === undefined ? "" : `${entry.machineId}/`}${entry.harness}`;
-    if (!computerUseReady(entry)) return `- ${name}: ${entry.missing ?? "not ready"}`;
-    const surfaces = entry.surfaces
-      .map((surface) =>
-        surface === "desktop" && entry.platform === "win32"
-          ? "Windows apps (native harness; app grants and input still need live proof)"
-          : SURFACE_WORDS[surface],
-      )
-      .join(" and ");
-    return `- ${name}: ${surfaces}${entry.chromeNeedsHireFlag ? " (hire with `chrome: true`)" : ""}`;
+    if (!computerUseReady(entry)) return `- ${entry.harness}: ${entry.missing ?? "not ready"}`;
+    const surfaces = entry.surfaces.map((surface) => SURFACE_WORDS[surface]).join(" and ");
+    return `- ${entry.harness}: ${surfaces}${entry.chromeNeedsHireFlag ? " (hire with `chrome: true`)" : ""}`;
   });
   return [
     "# Computer use through a harness",
     "",
-    "These configured harnesses are on this machine or its linked fleets. Configuration does not prove app grants or successful input:",
+    "These harnesses on this machine can drive your person's real apps and signed-in browser:",
     ...lines,
     "",
     "For a hard computer or browser task they are usually stronger than your own browser: hire one with `hire_agent`, brief it, and watch it (the `computer-use-delegation` skill has the pattern). It works in your person's own sessions, so stop it for sign-ins, codes, payments or anything that changes an account, and don't drive while they are using the machine. Each run spends their plan for that harness. Your own browser is still yours for your accounts and quick lookups. `clankie browser harnesses` re-checks.",

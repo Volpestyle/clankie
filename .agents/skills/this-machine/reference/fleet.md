@@ -79,16 +79,7 @@ the worker owns its slices through native children with the configured child
 model/effort in the first brief. Another pane for that project/deliverable is
 refused while starting, live or uncertain. Message that worker rather than
 changing the key. `panes` permits independent slices in separate authorized hires.
-New hires target the repo's Herdr workspace in the selected fleet. Linked Git
-worktrees share it; solo workers get a `Name · role` tab regardless of lead/client
-focus. Existing mixed workspaces and their labels stay untouched. A deliberate
-pipeline supplies `pipeline: "ISSUE design → implement → review"` per hire:
-its first member opens that named tab, later members use `placement: "split"`.
-An unnamed split or an unmarked same-named tab refuses. `new-tab` is normal;
-role/fleet placement defaults still need an explicit pipeline for split.
-Prepared initial-command Pi/OpenCode hires cannot split into an existing pipeline.
-A live-session resume keeps its pane; a new resume uses the repo rule. An
-explicit move allocates a solo tab at its destination with its known role. Never rearrange existing lanes to adopt this layout.
+`new-tab` is normal; `split` needs a verified native lead in the target fleet.
 Local account labels select registered profiles; remote account overrides refuse.
 Friendly model names are registry-validated, and incompatible/retired names refuse.
 A cross-family override includes its harness; `subagents: null` clears inherited

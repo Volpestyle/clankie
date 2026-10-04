@@ -1,6 +1,5 @@
 import type { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { z } from "zod";
 import { ComputerRequestSchema } from "@clankie/interactive-environment";
 import type { BodyConversationIdentity } from "./body-lease-router.ts";
 import type { ComputerBody } from "./computer-body.ts";
@@ -12,27 +11,6 @@ export function registerComputerRoutes(
     identity(request: Request, conversationId: string): Promise<BodyConversationIdentity | undefined>;
   },
 ): void {
-  // A native Windows observation host uses this service's existing authority;
-  // it cannot manufacture a machine grant from a conversation ID.
-  app.post("/v1/computer/authority", bodyLimit({ maxSize: 4096 }), async (context) => {
-    const parsed = z
-      .strictObject({
-        conversationId: ComputerRequestSchema.shape.conversationId,
-        action: z.enum(["effect", "recover"]),
-      })
-      .safeParse(await context.req.json().catch(() => undefined));
-    if (!parsed.success) return context.json({ error: "invalid_computer_authority_request" }, 400);
-    const identity = await options.identity(context.req.raw, parsed.data.conversationId);
-    const authorized =
-      identity !== undefined &&
-      identity.route?.mode === "machine" &&
-      identity.current() &&
-      (await identity.authorize("computer", parsed.data.action)) &&
-      identity.current();
-    return context.json({ conversationId: parsed.data.conversationId, authorized }, authorized ? 200 : 401, {
-      "cache-control": "no-store",
-    });
-  });
   app.post("/v1/computer", bodyLimit({ maxSize: 2 * 1024 * 1024 }), async (context) => {
     let raw: unknown;
     try {

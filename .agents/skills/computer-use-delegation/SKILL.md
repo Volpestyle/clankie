@@ -2,7 +2,7 @@
 name: computer-use-delegation
 description: >-
   Use when Clankie hands a hard computer or browser task (a multi-step flow in
-  the person's own Chrome, a native app, a signed-in site his own browser
+  the person's own Chrome, a native Mac app, a signed-in site his own browser
   can't reach) to a computer-use harness seat: Codex computer use or Claude in
   Chrome. Covers choosing the harness, the brief file, the visible pane,
   stopping at human checks, and reporting through native fleet messages with evidence.
@@ -10,8 +10,8 @@ description: >-
 
 # Delegating computer use
 
-Your reach card lists configured harnesses here and on linked Windows fleets for your
-person's real apps and signed-in Chrome. Configuration is not live input proof. When it
+Your reach card lists the harnesses on this machine that can drive your
+person's real apps and signed-in Chrome, with what each can drive. When it
 lists none, you have no such harness. Use your own browser or `desktop-control`.
 `clankie browser harnesses` re-checks after a login or settings change
 ([ADR 0199](../../../docs/adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
@@ -22,10 +22,8 @@ _their_ sessions and apps.
 
 ## Pick the harness
 
-- **Native app, or a flow that crosses apps:** the Codex desktop capability
-  on the intended machine. Windows entries name their fleet; its shared body
-  adapter currently observes only. Verify native app grants and input before
-  promising a driving task, and use the fleet-qualified seat on that machine.
+- **Native Mac app, or a flow that crosses apps:** the one listing Mac apps
+  (codex).
 - **Browser-only work in their Chrome:** either Chrome harness. Chrome-only
   work drives tabs without taking the pointer, so prefer it whenever the
   person may be at the machine.

@@ -1,6 +1,4 @@
 import type { DiscordRawAttachment, DiscordRawEmbed } from "@clankie/discord-presence-core";
-import type { DiscordDirectoryRequest, DiscordDirectorySnapshot } from "@clankie/protocol";
-import { DiscordUserDirectory } from "./directory.ts";
 import { EventEmitter } from "node:events";
 import { WebSocket, type RawData } from "ws";
 
@@ -93,7 +91,6 @@ export interface DiscordUserGatewayOptions {
 }
 
 export class DiscordUserGateway {
-  private readonly directory = new DiscordUserDirectory();
   private readonly token: string;
   private readonly connect: (url: string) => WebSocket;
   private readonly url: string;
@@ -122,9 +119,6 @@ export class DiscordUserGateway {
 
   public get userId(): string | undefined {
     return this.selfUserId;
-  }
-  public readDirectory(query: DiscordDirectoryRequest, connected: boolean): DiscordDirectorySnapshot {
-    return this.directory.read(query, connected);
   }
 
   /** Discord voice session id for this user, once they have joined a channel. */
@@ -262,7 +256,6 @@ export class DiscordUserGateway {
   private dispatch(type: string, data: unknown): void {
     const payload = record(data);
     if (payload === undefined) return;
-    this.directory.observe({ t: type, d: payload });
     this.emit("raw", { t: type, d: payload });
     switch (type) {
       case "READY": {

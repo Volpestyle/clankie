@@ -196,32 +196,6 @@ async function fixture() {
       const index = argv.indexOf("herdr");
       if (index < 0) return "";
       const args = argv.slice(index + 1);
-      if (args[0] === "worktree")
-        return JSON.stringify({
-          result: { source: { repo_key: "fixture-repo", repo_root: cwd, repo_name: "fixture" } },
-        });
-      if (args[0] === "api")
-        return JSON.stringify({
-          result: {
-            snapshot: {
-              workspaces: [
-                {
-                  workspace_id: "w1",
-                  label: "fixture",
-                  number: 1,
-                  worktree: {
-                    repo_key: "fixture-repo",
-                    repo_root: cwd,
-                    repo_name: "fixture",
-                    is_linked_worktree: false,
-                  },
-                },
-              ],
-              tabs: [],
-              panes: [],
-            },
-          },
-        });
       if (args[0] === "tab" && args[1] === "create")
         return JSON.stringify({ result: { root_pane: { pane_id: "w1:p1" } } });
       if (args[0] === "agent" && args[1] === "start") {

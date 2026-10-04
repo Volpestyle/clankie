@@ -35,8 +35,6 @@
     "hosted:smoke": "node scripts/smoke-hosted.mjs",
     "test:integration": "vitest run --config vitest.config.ts apps/clankie/test/http-journey.test.ts apps/clankie/test/pairing.test.ts apps/clankie/test/devices.test.ts apps/clankie/test/gateway-encryption.test.ts apps/relay/test/operator-conversations.test.ts",
     "test:eval": "vitest run --config vitest.eval.config.ts",
-    "test:windows-observation": "CLANKIE_COMPUTER_INTEGRATION=1 vitest run --config vitest.config.ts apps/clankie/test/computer-windows.integration.test.ts",
-    "computer:windows:build": "node scripts/build-windows-computer.mjs",
     "test:computer-integration": "CLANKIE_COMPUTER_INTEGRATION=1 vitest run --config vitest.config.ts apps/clankie/test/computer-body.integration.test.ts"
   },
   "devDependencies": {

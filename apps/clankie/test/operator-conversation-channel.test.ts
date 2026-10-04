@@ -831,7 +831,7 @@ describe("channel conversations", () => {
   it("refuses a pasted webhook from a guild Clankie only inhabits", async () => {
     const root = await makeRoot("clankie-channel-inhabitant-");
     // Resolves into blinker city, a server on the ingress and presence lists
-    // that Clankie does not control. The managed server is oathkeeper.
+    // that Clankie does not control. The swarm home is oathkeeper.
     const resolve = vi.fn(() => Promise.resolve({ guildId: "blinker-city", channelId: "77" }));
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
@@ -873,7 +873,7 @@ describe("channel conversations", () => {
     ).rejects.toThrow("does not identify a post");
   });
 
-  it("projects nothing at all when no managed server is set", async () => {
+  it("projects nothing at all when no swarm home is set", async () => {
     const root = await makeRoot("clankie-channel-noswarm-");
     const resolve = vi.fn(() => Promise.resolve({ guildId: "anywhere", channelId: "77" }));
     const provision = vi.fn();
@@ -897,10 +897,10 @@ describe("channel conversations", () => {
     expect(provision).not.toHaveBeenCalled();
   });
 
-  it("stops routing and posting for a room left outside the managed server", async () => {
+  it("stops routing and posting for a room left outside the swarm home", async () => {
     const root = await makeRoot("clankie-channel-legacy-");
     const post = vi.fn(() => Promise.resolve());
-    // Projected while blinker city was admitted; the managed server is oathkeeper now.
+    // Projected while blinker city was admitted; the swarm home is oathkeeper now.
     const projection = {
       post,
       resolve: vi.fn(() => Promise.resolve({ guildId: "blinker-city", channelId: "77" })),
@@ -916,7 +916,7 @@ describe("channel conversations", () => {
     expect(store.submitProjectedMessage("blinker-city", "77", "still listening?")).toBeDefined();
 
     // The record outlives the setting that admitted it, so the invariant has to
-    // hold at use: the moment that guild stops being the managed server, the room
+    // hold at use: the moment that guild stops being the swarm home, the room
     // stops taking guild text and stops posting into it.
     projection.swarmGuildId = () => "oathkeeper";
     expect(store.submitProjectedMessage("blinker-city", "77", "still listening?")).toBeUndefined();
@@ -926,7 +926,7 @@ describe("channel conversations", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it("takes a pasted webhook that resolves inside the managed server", async () => {
+  it("takes a pasted webhook that resolves inside the swarm home", async () => {
     const root = await makeRoot("clankie-channel-swarmwebhook-");
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),

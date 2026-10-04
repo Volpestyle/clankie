@@ -1,4 +1,3 @@
-import { discordManagedGuildId } from "@clankie/settings";
 import type { DiscordControlPlaneReadiness } from "@clankie/api-client";
 import {
   DISCORD_BOT_PROVIDER_ID,
@@ -92,7 +91,7 @@ export async function inspectDiscordTextReadiness(
   }
   const applicationId = discordId(options.env.DISCORD_APPLICATION_ID);
   const guildId = discordId(options.env.DISCORD_GUILD_ID);
-  const swarmGuildId = discordId(discordManagedGuildId(options.env));
+  const swarmGuildId = discordId(options.env.DISCORD_SWARM_GUILD_ID);
   const ambientRoles = discordIdSet(options.env.DISCORD_AMBIENT_ROLE_IDS);
   const ambientUsers = discordIdSet(options.env.DISCORD_AMBIENT_USER_IDS);
   const ingressGuilds = discordIdSet(options.env.DISCORD_INGRESS_GUILD_IDS);
@@ -113,10 +112,10 @@ export async function inspectDiscordTextReadiness(
     "Set DISCORD_GUILD_ID to the guild used for live proof.",
   );
   add(
-    "managed server",
+    "swarm home",
     swarmGuildId !== undefined,
-    swarmGuildId === undefined ? "DISCORD_MANAGED_GUILD_ID is missing or invalid" : "configured",
-    "Set DISCORD_MANAGED_GUILD_ID to the one server Clankie controls; channels are made only there.",
+    swarmGuildId === undefined ? "DISCORD_SWARM_GUILD_ID is missing or invalid" : "configured",
+    "Set DISCORD_SWARM_GUILD_ID to the one server Clankie controls; channels are made only there.",
   );
   // Either binding admits: `authorizeAmbientCommand` takes a named user or a
   // mapped role, so an owner who granted themselves directly is configured, not
@@ -262,27 +261,27 @@ export async function inspectDiscordTextReadiness(
       try {
         const missing = await missingSwarmPermissions(rest, swarmGuildId, applicationId);
         add(
-          "managed server permissions",
+          "swarm home permissions",
           missing.length === 0,
           missing.length === 0
-            ? "Manage Channels, Manage Webhooks, and Send Messages are granted in the managed server"
-            : `missing ${missing.join(" and ")} in the managed server`,
+            ? "Manage Channels, Manage Webhooks, and Send Messages are granted in the swarm home"
+            : `missing ${missing.join(" and ")} in the swarm home`,
           "Reinstall the bot with the invite from /discord invite, which requests all three. Guild-wide grants can still be denied on one room by that channel's permission overwrites.",
         );
       } catch (error) {
         add(
-          "managed server permissions",
+          "swarm home permissions",
           false,
-          error instanceof Error ? error.message : "managed server permission lookup failed",
-          "Verify the bot is installed in DISCORD_MANAGED_GUILD_ID, then rerun readiness.",
+          error instanceof Error ? error.message : "swarm home permission lookup failed",
+          "Verify the bot is installed in DISCORD_SWARM_GUILD_ID, then rerun readiness.",
         );
       }
     } else {
       add(
-        "managed server permissions",
+        "swarm home permissions",
         false,
-        "not checked because the managed server is missing",
-        "Resolve the managed server check first.",
+        "not checked because the swarm home is missing",
+        "Resolve the swarm home check first.",
       );
     }
   } else {
@@ -305,7 +304,7 @@ export async function inspectDiscordTextReadiness(
       "Resolve the bot credential, application id, and target guild checks first.",
     );
     add(
-      "managed server permissions",
+      "swarm home permissions",
       false,
       "not checked because live Discord identity is incomplete",
       "Resolve the bot credential and application id checks first.",
@@ -326,7 +325,7 @@ const SEND_MESSAGES = 1n << 11n;
 const ADMINISTRATOR = 1n << 3n;
 
 /**
- * Which room-making permissions the bot lacks across the managed server,
+ * Which room-making permissions the bot lacks across the swarm home,
  * by name of the permission only — no guild, channel, role, or member name
  * enters the report. A bot application's user id is its application id, so the
  * member lookup needs no extra identity call.

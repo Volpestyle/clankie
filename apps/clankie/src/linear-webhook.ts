@@ -153,10 +153,6 @@ const ReturnedRevisionSchema = z.looseObject({
   id: z.string().uuid(),
   updatedAt: z.string().datetime({ offset: true }),
 });
-const ReturnedIssueRevisionSchema = ReturnedRevisionSchema.extend({
-  id: z.string().min(1).max(256),
-  uuid: z.string().uuid().optional(),
-});
 
 /** Canonical resource identity only; display identifiers and URL slugs cannot supply UUID proof. */
 export function linearActivityIssueId(
@@ -276,14 +272,7 @@ export class LinearWriteReceipts {
       return;
     let result: z.infer<typeof ReturnedRevisionSchema>;
     try {
-      const returned = (type === "Issue" ? ReturnedIssueRevisionSchema : ReturnedRevisionSchema).parse(
-        JSON.parse(call.content),
-      );
-      // Issue MCP results can use a display id; only agreeing returned UUIDs
-      // prove receipt identity. Webhook data keeps its UUID-id-only schema.
-      const id = type === "Issue" ? consistentUuid([returned.uuid, returned.id]) : returned.id;
-      if (id === undefined) return;
-      result = { ...returned, id };
+      result = ReturnedRevisionSchema.parse(JSON.parse(call.content));
     } catch {
       return; // An ambiguous or unstructured response cannot prove a particular echo.
     }

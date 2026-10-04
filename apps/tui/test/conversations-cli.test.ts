@@ -168,7 +168,7 @@ it("creates, projects and unprojects an agent channel from the CLI on the app's 
   );
   await expect(
     runConversationsCommand(["channel", "channel-1", "--discord", "provision", "--room", "999"], options),
-  ).rejects.toThrow("not in the managed server");
+  ).rejects.toThrow("not in the swarm home");
   await expect(runConversationsCommand(["channel", "channel-1", "--room", "777"], options)).rejects.toThrow(
     "--room",
   );
