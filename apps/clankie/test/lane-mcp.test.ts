@@ -427,7 +427,6 @@ it("initializes an operator MCP session with native and connected tools", async 
   const captain = createCaptain(
     {
       ...bankDeps(),
-      settings: new SettingsStore(join(root, "settings.json")),
       workItems,
       agentSessions: {
         list: async () => ({ sessions: [], errors: [] }),
@@ -440,6 +439,7 @@ it("initializes an operator MCP session with native and connected tools", async 
       repoRoot: root,
       stateDir: root,
       workingDirectory: root,
+      settings: new SettingsStore(join(root, "settings.json")),
     },
   );
   const app = await createClankieApp({
