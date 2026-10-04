@@ -8,6 +8,33 @@ import { promisify } from "node:util";
 const exec = promisify(execFile);
 const managedText = (text) =>
   /(?:generated|do not edit|managed by)/iu.test(text.split("\n").slice(0, 20).join("\n"));
+/** Read-only confirmation of one known native enable result; not plugin or tool authority. */
+async function confirmClaudeWorkerEnabled(error, { profile, source, configBefore }) {
+  const alreadyEnabled =
+    /^[×✘] Failed to enable plugin "clankie-worker@clankie": Plugin "clankie-worker@clankie" is already enabled at user scope$/u;
+  if (
+    error?.code !== 1 ||
+    error?.signal ||
+    error?.killed ||
+    String(error?.stdout ?? "").trim() ||
+    !alreadyEnabled.test(String(error?.stderr ?? "").trim())
+  )
+    return false;
+  try {
+    const config = join(profile, "settings.json");
+    const current = await readFile(config, "utf8");
+    const expectedSource =
+      configBefore === undefined ? join(await realpath(profile), "settings.json") : source;
+    return (
+      (await lstat(config)).isFile() &&
+      (await realpath(config)) === expectedSource &&
+      !managedText(current) &&
+      JSON.parse(current).enabledPlugins?.["clankie-worker@clankie"] === true
+    );
+  } catch {
+    return false;
+  }
+}
 /** An alias may refresh its own existing cache, never install/enable or edit shared settings. */
 async function updatableClaudeAlias(profile, profiles, source, marketplace) {
   try {
@@ -167,26 +194,7 @@ async function installHarnessBridges(options) {
           try {
             await execute(harness, ["plugin", "enable", "clankie-worker@clankie", "--scope", "user"]);
           } catch (error) {
-            const alreadyEnabled =
-              /^✘ Failed to enable plugin "clankie-worker@clankie": Plugin "clankie-worker@clankie" is already enabled at user scope$/u;
-            if (
-              error?.code !== 1 ||
-              error?.signal ||
-              error?.killed ||
-              String(error?.stdout ?? "").trim() ||
-              !alreadyEnabled.test(String(error?.stderr ?? "").trim())
-            )
-              throw error;
-            const current = await readFile(config, "utf8");
-            const expectedSource =
-              configBefore === undefined ? join(await realpath(profile), "settings.json") : source;
-            if (
-              !(await lstat(config)).isFile() ||
-              (await realpath(config)) !== expectedSource ||
-              managedText(current) ||
-              JSON.parse(current).enabledPlugins?.["clankie-worker@clankie"] !== true
-            )
-              throw error;
+            if (!(await confirmClaudeWorkerEnabled(error, { profile, source, configBefore }))) throw error;
           }
         } else await execute(harness, ["plugin", "add", "clankie-worker@clankie-fleet", "--json"]);
       }
@@ -208,4 +216,4 @@ async function installHarnessBridges(options) {
   }
   return results;
 }
-export { installHarnessBridges };
+export { installHarnessBridges, confirmClaudeWorkerEnabled };

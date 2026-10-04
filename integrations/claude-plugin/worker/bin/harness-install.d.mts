@@ -20,3 +20,13 @@ export function installHarnessBridges(options: {
   execute?(command: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<unknown>;
   codexSourceSetup?: { command: string; args: readonly string[] };
 }): Promise<HarnessInstallResult[]>;
+
+/** Read-only confirmation using native exit metadata and fresh settings from the same profile. */
+export function confirmClaudeWorkerEnabled(
+  error: unknown,
+  options: {
+    profile: string;
+    source: string;
+    configBefore: string | undefined;
+  },
+): Promise<boolean>;
