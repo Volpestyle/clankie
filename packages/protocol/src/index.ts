@@ -5353,6 +5353,7 @@ export const DeviceRecordSchema = z
     pendingExpiresAt: z.string().datetime(),
     activatedAt: z.string().datetime().optional(),
     lastRefreshAt: z.string().datetime().optional(),
+    lastSeenAt: z.string().datetime().optional(),
     /**
      * Last delivery state the device asked for, disabled included (ADR 0159).
      * Retained rather than dropped so its version keeps ordering the next
@@ -5589,6 +5590,7 @@ export const DeviceListItemSchema = z.object({
   createdAt: z.string().datetime(),
   activatedAt: z.string().datetime().optional(),
   lastRefreshAt: z.string().datetime().optional(),
+  lastSeenAt: z.string().datetime().optional(),
   /** Delivery reference and state only; the token and key live at the gateway (ADR 0159). */
   push: DevicePushRequestSchema.optional(),
   revokedAt: z.string().datetime().optional(),
@@ -5601,6 +5603,10 @@ export type DeviceListItem = z.infer<typeof DeviceListItemSchema>;
  * `data` payload is secret-free; token material and offer secrets never appear.
  */
 export const DeviceEventSchema = z.discriminatedUnion("type", [
+  EventBaseSchema.extend({
+    type: z.literal("device.seen"),
+    data: z.object({ schemaVersion: z.literal(1), deviceId: z.string().min(1) }),
+  }),
   EventBaseSchema.extend({
     type: z.literal("device.push.changed"),
     data: DevicePushRequestSchema.extend({

@@ -13,6 +13,8 @@ import {
   type ShipResult,
 } from "@clankie/observability/body-telemetry-shipper";
 
+import { readBodyDiagnosticsConsent } from "@clankie/observability/body-telemetry";
+
 const TELEMETRY_USAGE =
   "Usage: clankie telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval SECONDS]";
 const LOG_GROUP = /^[A-Za-z0-9_./#-]{1,512}$/u;
@@ -94,7 +96,14 @@ export async function runTelemetryCommand(
     credentials,
     ...(options.fetchImpl === undefined ? {} : { fetch: options.fetchImpl }),
   });
-  const ship = () => shipSpool({ spoolDir: parsed.spool, cursorPath: parsed.cursor, identity, sink });
+  const ship = () =>
+    shipSpool({
+      spoolDir: parsed.spool,
+      cursorPath: parsed.cursor,
+      identity,
+      sink,
+      diagnosticsEnabled: () => readBodyDiagnosticsConsent(parsed.spool),
+    });
   const report = (result: ShipResult) => options.stdout.write(`${JSON.stringify({ ok: true, ...result })}\n`);
   if (parsed.once) {
     report(await ship());

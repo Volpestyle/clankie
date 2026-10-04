@@ -446,6 +446,7 @@ export interface ClankieAppDependencies {
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
   /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */
   hostedCredits?: Pick<HostedBodyClient, "readCredits">;
+  accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;
   hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
@@ -861,6 +862,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (record === undefined || isDevicePendingExpired(record, now)) return { denied: "invalid" };
     if (record.status === "revoked") return { denied: "revoked" };
     if (record.status !== "active") return { denied: "invalid" };
+    if (record.lastSeenAt === undefined || now.getTime() - Date.parse(record.lastSeenAt) >= 60_000) {
+      const seen = recordEvent("device.seen", `device:${record.deviceId}`, now.toISOString(), {
+        schemaVersion: 1,
+        deviceId: record.deviceId,
+      });
+      applyDeviceEvent(devices, seen);
+    }
     return {
       deviceId: record.deviceId,
       grants: record.grants,
@@ -1176,6 +1184,41 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const device = await authenticateDevice(request);
     return device === "unavailable" || "denied" in device ? "authentication_required" : true;
   };
+  app.get("/v1/devices/self/diagnostics-default", async (context) => {
+    const authorized = await authorizeOwnerDevice(context.req.raw);
+    if (authorized !== true) return context.json({ error: authorized }, 401);
+    if (dependencies.hostedBody && !dependencies.accountSettings)
+      return context.json({ error: "unavailable" }, 503);
+    try {
+      const { AccountDiagnosticsDefaultSchema } = await import("@clankie/protocol/account-diagnostics");
+      const settings = dependencies.accountSettings
+        ? await dependencies.accountSettings.readAccountSettings()
+        : { diagnosticsDefault: true };
+      return context.json(AccountDiagnosticsDefaultSchema.parse(settings), 200, {
+        "cache-control": "no-store",
+      });
+    } catch {
+      return context.json({ error: "unavailable" }, 503);
+    }
+  });
+  app.get("/v1/captain/readiness", async (context) => {
+    const authorized = await authorizeOwnerDevice(context.req.raw);
+    if (authorized !== true)
+      return context.json({ error: authorized }, authorized === "forbidden" ? 403 : 401);
+    if (dependencies.captain.operatorSeatReady?.())
+      return context.json({ ready: true }, 200, { "cache-control": "no-store" });
+    if (!dependencies.modelKeys?.readiness) return context.json({ error: "unavailable" }, 503);
+    try {
+      const { CaptainReadinessResponseSchema } = await import("@clankie/protocol/captain-readiness");
+      return context.json(
+        CaptainReadinessResponseSchema.parse(await dependencies.modelKeys.readiness()),
+        200,
+        { "cache-control": "no-store" },
+      );
+    } catch {
+      return context.json({ error: "unavailable" }, 503);
+    }
+  });
   app.route("/", createHostedCreditsRoutes(dependencies.hostedCredits, authorizeOwnerDevice));
 
   /** Captain or authenticated operator, for reads the owner should never have to authorize. */
@@ -4508,12 +4551,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   wakeRevocationTimer?.unref();
   if (dependencies.hostedBody !== undefined) void retryWakeRevocations();
 
-  // Operator device management: list and revoke.
+  // Device management: paired devices may read; removing access requires Take Control.
   app.get("/v1/devices", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!operator) {
+      const device = await authenticateDevice(context.req.raw);
+      if (device === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+      if ("denied" in device) return context.json({ error: "authentication_required" }, 401);
+    }
     const now = clock();
     const items = [...devices.values()]
       .filter((record) => !isDevicePendingExpired(record, now))
@@ -4526,9 +4573,29 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const device = operator ? undefined : await authenticateDevice(context.req.raw);
+    if (!operator && (device === undefined || device === "unavailable" || "denied" in device))
+      return context.json({ error: "authentication_required" }, 401);
+    if (
+      !operator &&
+      device &&
+      device !== "unavailable" &&
+      !("denied" in device) &&
+      !device.grants.terminalControl
+    )
+      return context.json({ error: "forbidden" }, 403);
+    const revokedBy = operator ? operator.operatorId : (device as TrustedDeviceIdentity).deviceId;
     const deviceId = context.req.param("id");
     return withSerializedLock(deviceLocks, deviceId, async () => {
+      // A paired caller may lose authority while waiting on another revoke.
+      if (!operator) {
+        const current = await authenticateDevice(context.req.raw);
+        if (current === "unavailable")
+          return context.json({ error: "device_authentication_unavailable" }, 503);
+        if ("denied" in current || current.deviceId !== revokedBy)
+          return context.json({ error: "authentication_required" }, 401);
+        if (!current.grants.terminalControl) return context.json({ error: "forbidden" }, 403);
+      }
       const now = clock();
       const record = devices.get(deviceId);
       if (record === undefined || isDevicePendingExpired(record, now))
@@ -4537,12 +4604,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         const event = recordEvent("device.revoked", `device:${deviceId}`, now.toISOString(), {
           schemaVersion: 1,
           deviceId,
-          revokedBy: operator.operatorId,
+          revokedBy,
         });
         applyDeviceEvent(devices, event);
         if (event.type === "device.revoked" && typeof event.data.deviceId === "string")
           dependencies.captain.invalidateQuestionPrincipal?.(event.data.deviceId);
-        logger.info({ deviceId, operatorId: operator.operatorId }, "device revoked");
+        logger.info({ deviceId, operatorId: revokedBy }, "device revoked");
       }
       if (dependencies.hostedBody !== undefined) {
         pendingWakeRevocations.add(deviceId);

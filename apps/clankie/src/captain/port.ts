@@ -129,6 +129,8 @@ export interface LaneToolBank {
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  /** A live native operator bridge can answer independently of the fallback model. */
+  operatorSeatReady?(): boolean;
   projectHireMembershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate;
   confirmedProjectHireAssignment(
     fleet: string,

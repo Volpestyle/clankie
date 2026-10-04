@@ -708,6 +708,20 @@ export class HostedBodyClient {
       return response;
     }
   }
+  /** Signed, read-only account default; no other account fields leave the fleet. */
+  async readAccountSettings(): Promise<
+    import("@clankie/protocol/account-diagnostics").AccountDiagnosticsDefault
+  > {
+    const credential = await this.resolveHostToken();
+    const response = await this.request(
+      "settings",
+      { installationId: this.bootstrap.installationId },
+      credential.token,
+    );
+    const { AccountDiagnosticsDefaultSchema } = await import("@clankie/protocol/account-diagnostics");
+    return AccountDiagnosticsDefaultSchema.parse(await response.json());
+  }
+
   /**
    * This tenant's AI credits (VUH-1403), from the fleet: `POST
    * /fleet/v1/body/credits`, signed like every body call. The answer is the

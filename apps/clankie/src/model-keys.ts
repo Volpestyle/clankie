@@ -2,6 +2,7 @@ import type { BodyTelemetry, BodyModelTelemetryInput } from "@clankie/observabil
 import type { CredentialStore } from "@clankie/credential-broker";
 import { createModelRegistry, loadBundledCatalog } from "@clankie/model-registry";
 import {
+  captainReadiness,
   CODEX_PROVIDER_ID,
   isHostedModelEnvironment,
   modelCredentialAllowed,
@@ -27,6 +28,7 @@ import type {
 import { BrokerCredentialStore } from "./captain/model.ts";
 
 export interface ModelKeysPort {
+  readiness?(): Promise<import("@clankie/protocol/captain-readiness").CaptainReadinessResponse>;
   list(): Promise<ModelKeysResponse>;
   set(providerId: string, apiKey: string): Promise<ModelKeyResult>;
   validate(providerId: string, modelId: string): Promise<ModelKeyResult>;
@@ -143,6 +145,16 @@ export function createModelKeys(options: {
     }
   };
   return {
+    async readiness() {
+      const loaded = await loadConfig({ env, ...(options.cwd ? { cwd: options.cwd } : {}) });
+      if (loaded.issues.length > 0) throw new Error("model_configuration_invalid");
+      const report = captainReadiness({
+        config: loaded.config,
+        credentialIds: Object.keys(await store.list()),
+        env,
+      });
+      return report.ready ? { ready: true, model: report.model, providerId: report.providerId } : report;
+    },
     async list() {
       const state = await snapshot();
       const credentials = await store.list();

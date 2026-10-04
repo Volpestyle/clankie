@@ -57,6 +57,12 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
       );
       return;
     }
+    case "device.seen": {
+      const record = requireDevice(devices, parsed.data.deviceId);
+      if (record.status !== "active") throw new Error(`device ${record.deviceId} seen from ${record.status}`);
+      devices.set(record.deviceId, DeviceRecordSchema.parse({ ...record, lastSeenAt: event.occurredAt }));
+      return;
+    }
     case "device.session.refreshed": {
       const record = requireDevice(devices, parsed.data.deviceId);
       if (record.status !== "active") {
@@ -124,6 +130,7 @@ export function deviceListItem(record: DeviceRecord): DeviceListItem {
     ...(record.review === undefined ? {} : { review: record.review }),
     createdAt: record.createdAt,
     ...(record.activatedAt !== undefined ? { activatedAt: record.activatedAt } : {}),
+    ...(record.lastSeenAt !== undefined ? { lastSeenAt: record.lastSeenAt } : {}),
     ...(record.lastRefreshAt !== undefined ? { lastRefreshAt: record.lastRefreshAt } : {}),
     ...(record.push !== undefined ? { push: record.push } : {}),
     ...(record.revokedAt !== undefined ? { revokedAt: record.revokedAt } : {}),

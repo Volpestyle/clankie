@@ -12,7 +12,17 @@
  * command, or an error message. An event that fails its schema is dropped, not
  * repaired, and the shipper parses every line again before it leaves the host.
  */
-import { appendFileSync, mkdirSync, readdirSync, rmSync, statSync, statfsSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  statfsSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+} from "node:fs";
 import { cpus, freemem, loadavg, totalmem } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -310,4 +320,22 @@ export function startResourceSampler(
 
 function round(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+/** Short-lived account consent shared with the body supervisor and host shipper. */
+export const BODY_DIAGNOSTICS_CONSENT_FILE = "diagnostics-enabled-until";
+export const BODY_DIAGNOSTICS_CONSENT_MS = 70_000;
+export function writeBodyDiagnosticsConsent(dir: string, enabled: boolean, now = Date.now()): void {
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, BODY_DIAGNOSTICS_CONSENT_FILE);
+  writeFileSync(`${path}.tmp`, String(enabled ? now + BODY_DIAGNOSTICS_CONSENT_MS : 0), { mode: 0o600 });
+  renameSync(`${path}.tmp`, path);
+}
+export function readBodyDiagnosticsConsent(dir: string, now = Date.now()): boolean {
+  try {
+    const value = readFileSync(join(dir, BODY_DIAGNOSTICS_CONSENT_FILE), "utf8");
+    return /^\d{1,16}$/u.test(value) && Number(value) > now;
+  } catch {
+    return false;
+  }
 }
