@@ -1197,7 +1197,7 @@ paths:
       tags: [Health]
       operationId: getHealth
       summary: Public liveness
-      description: Optional Herdr, gateway or host-power findings are reported separately and do not change service liveness. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md).
+      description: Optional Herdr, gateway, host-power and runtime identity findings do not change service liveness. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md). When available, `runtime` exposes only this service boot's pid, commit, root and instanceId; update transaction details are omitted.
       security: []
       responses:
         "200":

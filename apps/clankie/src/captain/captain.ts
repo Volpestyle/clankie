@@ -935,8 +935,8 @@ export async function runOneShotDiscordTurn(
  * caller.
  */
 /**
- * Wakes, watches, Linear activity and human sends reach their conversation
- * seat. Goal continuations stay with their Pi loop.
+ * Wakes, watches, worker messages, Linear activity and human sends reach their
+ * conversation seat. Goal continuations stay with their Pi loop.
  */
 export function seatEventKindFor(
   context: Pick<ConversationTurnContext, "internal" | "origin">,
@@ -944,7 +944,8 @@ export function seatEventKindFor(
 ): OperatorSeatEventKind | undefined {
   if (context.internal === true) {
     if (context.origin === "hook") return "wake";
-    if (context.origin === "wake" || context.origin === "watch") return context.origin;
+    if (context.origin === "wake" || context.origin === "watch" || context.origin === "message")
+      return context.origin;
     return undefined;
   }
   return isHeadConversation ? "escalation" : undefined;
@@ -2998,6 +2999,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     guard?: () => Promise<void>,
     mode: "machine" | "social" = "machine",
     waitForCompletion = false,
+    nativeEventKind: "escalation" | "message" = "escalation",
   ): Promise<boolean> {
     const origin = owner.discord!;
     // No body reply port means this route cannot accept an asynchronous turn.
@@ -3044,7 +3046,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
     if (!(await validateConversationOwner(owner, mode))) return false;
     await guard?.();
-    const finished = finishDiscordWatchTurn(plan.systemTools, normalized, owner, mode, guard);
+    const finished = finishDiscordWatchTurn(
+      plan.systemTools,
+      normalized,
+      owner,
+      mode,
+      guard,
+      nativeEventKind,
+    );
     if (waitForCompletion) await finished;
     else void finished.catch((error) => console.error("Conversation wake failed:", error));
     return true;
@@ -3056,6 +3065,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     owner: ConversationOwner,
     mode: "machine" | "social" = "machine",
     guard?: () => Promise<void>,
+    nativeEventKind: "escalation" | "message" = "escalation",
   ): Promise<void> {
     const origin = owner.discord!;
     const result = await dispatchDiscordTurn(
@@ -3069,6 +3079,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           throw new Error("Conversation wake authority was revoked");
         await guard?.();
       },
+      nativeEventKind,
     );
     if (
       result.state !== "settled" ||
@@ -3101,6 +3112,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     origin: DiscordWatchOrigin,
     systemTools: boolean,
     guard?: () => Promise<void>,
+    nativeEventKind: "escalation" | "message" = "escalation",
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = conversations.roomConversation(normalized.lane, normalized.targetId);
     return conversations.runWithConversationDriver<CaptainChannelTurnResult>(
@@ -3118,9 +3130,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             }
             shutdown.signal.throwIfAborted();
             const delivery = await outbox.deliver({
-              kind: "escalation",
+              kind: nativeEventKind,
               conversationId,
-              source: deliveryId.startsWith("watch-") ? "watch" : "discord",
+              source:
+                nativeEventKind === "message"
+                  ? "worker"
+                  : deliveryId.startsWith("watch-")
+                    ? "watch"
+                    : "discord",
               content: normalized.prompt,
               wantsReply: true,
               signal: shutdown.signal,
@@ -4429,7 +4446,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         target.discord === undefined
           ? undefined
           : async (_id, prompt) => {
-              if (!(await runDiscordWatchTurn(target, prompt, undefined, "machine", true)))
+              if (!(await runDiscordWatchTurn(target, prompt, undefined, "machine", true, "message")))
                 throw new Error("Worker report room authority is unavailable");
             },
       );

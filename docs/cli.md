@@ -142,6 +142,17 @@ environment. The roster carries the same observation in each seat's
 selected pane's full fix when focused with `Ctrl+G`. Roster polls reuse these
 bounded process observations for up to five seconds; doctor takes a fresh sample.
 
+Doctor observes operator bridges separately from worker bridges; an operator
+bridge does not prove worker readiness. Process age is separate from transport
+status. `freshness: older-than-runtime` means the observed bridge started before
+the running service, with the remedy “seat bridge older than runtime; restart the
+seat”. `current` means the bridge started at least as recently as the service;
+`unknown` keeps unavailable timing unknown. The optional `bridgeStartedAt` and
+`runtimeStartedAt` fields expose the observed timestamps, not build identities.
+Age alone does not prove an obsolete build or successful delivery; a same-build
+service restart also produces this reload guidance. The roster warns seats it
+already lists; doctor also observes the named head's operator bridge.
+
 - `live-process`: the pane has a matching live bridge process. This does not
   verify the native tool catalog, a successful call, or reply delivery.
 - `missing`: a live native harness has no observed descendant or dedicated
@@ -2341,14 +2352,21 @@ or the launcher-set `CLANKIE_CONVERSATION_ID` binds tools, polls and replies to
 one service conversation; the API rejects a changed binding within an MCP session.
 
 It is also his channel. While it runs it long-polls `/v1/seat/events` and
-pushes each self-wake, herdr completion watch, and room escalation into the
-session as `<channel source="clankie" kind="wake|watch|escalation"
+pushes worker reports, self-wakes, herdr completion watches and room escalations into the
+session as `<channel source="clankie" kind="message|wake|watch|escalation"
 conversation="…" event_id="…">`; that polling is what binds the seat as his
 head, and with no bridge polling the same turns run the pi operator lane. A
 `reply` tool answers an escalation by `event_id`; the reply lands in the
 escalating conversation as his own message. Claude Code loads the channel
 only when `clankie claude` passes its development flag; without it the tools
 still work without consuming events, leaving those turns with the service.
+
+Worker `message_clankie` reports project as `kind="message"`, framed as
+untrusted agent output, never an owner instruction. Completion harvests remain
+`kind="watch"`, and self-wakes remain `kind="wake"`. These tags do not change
+the service-owned lead route or delivery receipts. A room-owned worker message
+still uses `reply` with its `event_id` for the correlated room reply; the original
+actor, route and mouth checks remain in force.
 
 ### `mcp --seat`
 

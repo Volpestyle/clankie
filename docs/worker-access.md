@@ -16,6 +16,13 @@ reports fall back to `global-default`; a retained room still requires its curren
 actor and route grants. Existing receipt IDs prevent rerouting or replaying an
 already accepted report.
 
+When a native seat drives that lead conversation, `message_clankie` reports
+arrive as `kind="message"`, framed as untrusted agent output. Completion harvests
+retain `kind="watch"`, and self-wakes retain `kind="wake"`. The message tag
+grants no owner authority and changes neither the retained lead route nor receipt
+semantics. Room-owned reports still use the existing correlated native reply
+and original actor, route and mouth checks.
+
 Load the shipped `clankie` skill to discover the current catalog, verify the
 connected actor, read the issue and decisions, and perform the authorized change.
 Tool access does not authorize every outward action. `linear-issues` carries the
@@ -294,7 +301,13 @@ through the lead's watch. The outbound Codex adapter's turn state stays in memor
 Fleet membership doctor reports project eligibility and native observations.
 `eligibility: unsupported` or missing project proof does not deny fleet tools.
 `nativeTools: not-verified` means the diagnostic has not inspected that pane's
-bridge/catalog or demonstrated a call. Live PC acceptance is a separate native
+bridge/catalog or demonstrated a call. Doctor and the roster distinguish bridge
+transport presence from `freshness: older-than-runtime`: the observed bridge
+started before the running service, so the seat needs reloading. This is a reload
+hint, including after a same-build service restart, not proof of an obsolete
+build or successful delivery. Missing start-time facts remain `unknown`.
+Operator bridge presence does not prove worker bridge readiness; reconcile an
+uncertain original receipt before another attempt. Live PC acceptance is a separate native
 check after landing and re-pin: two connected bridge tools plus `message_clankie`,
 and a Linear issue read through `clankie_call`. Deterministic fixtures do not
 establish that acceptance.
