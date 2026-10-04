@@ -105,6 +105,11 @@ interface Issue {
   readonly pull_request?: unknown;
 }
 
+interface ParentIssue {
+  readonly number: number;
+  readonly repository_url: string;
+}
+
 const STATUS_LABELS: Partial<Record<WorkItemStatus, string>> = {
   in_progress: "status: in progress",
   in_review: "status: in review",
@@ -137,10 +142,11 @@ export function createGithubBackend(
   const github = "api" in options ? options.api : ghCliApi(options.gh);
   const api = (method: string, path: string, body?: unknown) => github.request(method, path, body);
 
-  const toItem = (issue: Issue): WorkItem => {
+  const toItem = (issue: Issue, parent?: string): WorkItem => {
     const parsed = parseBody(issue.body ?? "");
     return WorkItemSchema.parse({
       id: `#${String(issue.number)}`,
+      ...(parent === undefined ? {} : { parent }),
       title: issue.title.slice(0, 200),
       status: statusOf(issue),
       ...(parsed.owner === undefined ? {} : { owner: parsed.owner }),
@@ -153,6 +159,26 @@ export function createGithubBackend(
       // The status labels this backend writes are its status, not the item's labels.
       ...workItemLabels(labelNames(issue).filter((name) => !Object.values(STATUS_LABELS).includes(name))),
     });
+  };
+
+  /** GitHub's issue reads do not embed their parent; the sub-issue endpoint does. */
+  const readItem = async (issue: Issue): Promise<WorkItem> => {
+    let parent: ParentIssue;
+    try {
+      parent = (await api("GET", `${base}/${String(issue.number)}/parent`)) as ParentIssue;
+    } catch (error) {
+      if (/\b404\b|Not Found/u.test(String(error))) return toItem(issue);
+      throw error;
+    }
+    if (!Number.isSafeInteger(parent?.number) || parent.number < 1)
+      throw new Error("GitHub returned an invalid parent issue number");
+    const parentRepo = /\/repos\/([^/]+\/[^/]+)\/?$/u.exec(new URL(parent.repository_url).pathname)?.[1];
+    if (parentRepo === undefined) throw new Error("GitHub returned an invalid parent repository");
+    const id =
+      parentRepo.toLowerCase() === options.repo.toLowerCase()
+        ? `#${String(parent.number)}`
+        : `${parentRepo}#${String(parent.number)}`;
+    return toItem(issue, id);
   };
 
   const fetchIssue = async (id: string): Promise<Issue> => {
@@ -187,13 +213,14 @@ export function createGithubBackend(
     kind: "github",
     async list(filter) {
       const pages = (await github.list(`${base}?state=all&per_page=100`)) as Issue[];
-      const items = pages.filter((issue) => issue.pull_request === undefined).map(toItem);
-      const matching = items.filter((item) => matchesFilter(item, filter));
-      return matching.slice(0, filter?.limit ?? matching.length);
+      const matching = pages.filter(
+        (issue) => issue.pull_request === undefined && matchesFilter(toItem(issue), filter),
+      );
+      return Promise.all(matching.slice(0, filter?.limit ?? matching.length).map(readItem));
     },
     async get(id) {
       try {
-        return toItem(await fetchIssue(id));
+        return await readItem(await fetchIssue(id));
       } catch (error) {
         if (error instanceof WorkItemNotFoundError) return undefined;
         throw error;

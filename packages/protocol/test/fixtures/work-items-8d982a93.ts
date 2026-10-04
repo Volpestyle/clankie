@@ -46,14 +46,11 @@ export type WorkEvidence = z.infer<typeof WorkEvidenceSchema>;
 export const WORK_ITEM_LABEL_MAX = 64;
 export const WORK_ITEM_LABELS_MAX = 20;
 export const WorkItemLabelSchema = z.string().max(WORK_ITEM_LABEL_MAX);
-export const WorkLinearLabelSchema = TextSchema(WORK_ITEM_LABEL_MAX);
 
 export const WorkItemSchema = z
   .object({
     /** Backend-native id: `W-ab12cd`, a GitHub issue number `#42`, a Linear `VUH-123`. */
     id: z.string().trim().min(1).max(64),
-    /** Backend-native parent id; a cross-repo GitHub parent is `owner/repo#42`. */
-    parent: z.string().trim().min(1).max(256).optional(),
     title: TextSchema(WORK_ITEM_TITLE_MAX),
     status: WorkItemStatusSchema,
     owner: z.string().trim().min(1).max(128).optional(),
@@ -75,7 +72,7 @@ export const WorkItemSchema = z
 export type WorkItem = z.infer<typeof WorkItemSchema>;
 
 /** The recorded answer to "where does this repo track work", written to `.clankie/tracking.json`. */
-const WorkConventionFieldsSchema = z
+export const WorkConventionSchema = z
   .object({
     schemaVersion: z.literal(1),
     backend: WorkBackendKindSchema,
@@ -86,12 +83,11 @@ const WorkConventionFieldsSchema = z
       .object({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/u) })
       .strict()
       .optional(),
-    /** `linear` only: the team key, optional project, and existing repo-board label. */
+    /** `linear` only: the team key, and optionally the project items belong to. */
     linear: z
       .object({
         team: z.string().trim().min(1).max(64),
         project: z.string().trim().min(1).max(200).optional(),
-        label: WorkLinearLabelSchema.optional(),
       })
       .strict()
       .optional(),
@@ -102,10 +98,6 @@ const WorkConventionFieldsSchema = z
     note: z.string().max(1000).optional(),
   })
   .strict();
-export const WorkConventionSchema = WorkConventionFieldsSchema.refine(
-  (convention) => convention.linear?.label === undefined || convention.backend === "linear",
-  { message: "A Linear board label requires the linear backend", path: ["linear", "label"] },
-);
 export type WorkConvention = z.infer<typeof WorkConventionSchema>;
 
 export const WorkSignalSchema = z
@@ -114,7 +106,7 @@ export const WorkSignalSchema = z
     /** What was found and where, in words an owner can check. */
     detail: z.string().max(500),
     /** A backend this signal could hold items in; absent for decision-only signals. */
-    suggests: WorkConventionFieldsSchema.omit({ decidedBy: true, decidedAt: true, schemaVersion: true })
+    suggests: WorkConventionSchema.omit({ decidedBy: true, decidedAt: true, schemaVersion: true })
       .partial({ backend: true })
       .optional(),
   })

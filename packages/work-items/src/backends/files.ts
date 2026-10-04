@@ -125,9 +125,11 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       /^#\s+(.+)$/mu.exec(file.body)?.[1]?.trim() ??
       name.replace(/\.md$/u, "").replace(/[-_]+/gu, " ");
     const owner = file.fields.get("owner") ?? parsed.owner;
+    const parent = file.fields.get("parent");
     const depends = file.fields.get("depends_on");
     return WorkItemSchema.parse({
       id,
+      ...(parent === undefined || parent.trim() === "" ? {} : { parent }),
       title: title.slice(0, 200),
       status: statusOf(file.fields.get("status")),
       ...(owner === undefined || owner === "" ? {} : { owner }),
