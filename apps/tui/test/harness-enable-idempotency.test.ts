@@ -31,6 +31,7 @@ it.each([
       repoRoot: home,
       env: { HOME: home },
       consent: async () => true,
+      prepareSkills: async () => {},
       execute: async (command, args) => {
         if (command !== "claude") throw new Error("absent");
         if (args[1] !== "enable") return;
