@@ -101,6 +101,7 @@ export interface ConsoleCommandContext {
     close(): Promise<HerdLeadCompanionResult>;
   };
   readonly conversations?: {
+    question?(argument: string): Promise<string>;
     readonly conversationId?: string | undefined;
     readonly title?: string | undefined;
     /** Directory the selected conversation's session works in. */
@@ -147,6 +148,26 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   const focusBoard = herdLead?.focus ?? (() => focusHerdLeadCompanion());
   const closeBoard = herdLead?.close ?? (() => closeHerdLeadCompanion());
   const commands: FaceShellCommand[] = [];
+  if (conversations?.question)
+    commands.push({
+      name: "question",
+      aliases: [],
+      description: "Read, answer or cancel the current preference question",
+      takesArgument: true,
+      argumentHint: "[answer NUMBER | text TEXT | cancel]",
+      async run(argument, shell) {
+        try {
+          shell.insertCommandResult("/question", await conversations.question!(argument), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/question",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    });
+
   commands.push({
     name: "update",
     aliases: [],

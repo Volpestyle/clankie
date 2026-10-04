@@ -1,3 +1,4 @@
+import { questionTools } from "./question-tools.ts";
 /**
  * A lane's tool bank, assembled once for every harness that runs it (VUH-1085).
  *
@@ -43,6 +44,7 @@ export function laneAuthoredTools(
 ): ToolDefinition[] {
   return [
     ...runtimeUpdateTools(deps.runtimeUpdater, turn),
+    ...(lane === "operator" ? questionTools(turn) : []),
     ...captainTools(deps, turn, laneLog, lane, gameplay, autonomy, herdrWatches, hireSeat, messageSeat),
     ...(lane === "operator" ? connectionTools(deps, lane) : []),
   ];

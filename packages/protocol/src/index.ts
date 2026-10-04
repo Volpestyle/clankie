@@ -1426,6 +1426,72 @@ export type OperatorAutonomyCommand = z.infer<typeof OperatorAutonomyCommandSche
  * impossible by schema; the captain redacts to these shapes before publishing
  * to the durable log/tail.
  */
+/** Ordinary context/preferences only. These DTOs never authorize configuration. */
+export const ConversationQuestionAnswerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("choice"), optionId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("text"), text: z.string().trim().min(1).max(4000) }).strict(),
+]);
+export type ConversationQuestionAnswer = z.infer<typeof ConversationQuestionAnswerSchema>;
+export const ConversationQuestionSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    incarnationId: z.string().uuid(),
+    conversationId: OperatorConversationIdSchema,
+    workspace: z.string().min(1).max(4096),
+    purpose: z.literal("preference"),
+    kind: z.enum(["text", "choice"]),
+    prompt: z.string().trim().min(1).max(2000),
+    options: z
+      .array(
+        z
+          .object({
+            optionId: z.string().uuid(),
+            label: z.string().trim().min(1).max(200),
+            description: z.string().max(500).optional(),
+          })
+          .strict(),
+      )
+      .max(8),
+    allowFreeform: z.boolean(),
+    createdAt: z.string().datetime(),
+    originRunId: z.string().min(1).max(256),
+    status: z.enum(["pending", "submitted", "cancelled"]),
+    resolvedAt: z.string().datetime().optional(),
+    reason: z.string().max(100).optional(),
+    answer: ConversationQuestionAnswerSchema.optional(),
+    continuation: z
+      .object({
+        runId: z.string().min(1).max(256),
+        state: z.enum(["accepted", "completed", "failed", "cancelled"]),
+        reasonCode: z.string().max(100).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type ConversationQuestion = z.infer<typeof ConversationQuestionSchema>;
+export const ConversationQuestionTargetSchema = z
+  .object({
+    conversationId: OperatorConversationIdSchema,
+    incarnationId: z.string().uuid(),
+    requestId: z.string().uuid(),
+    expectedRevision: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ConversationQuestionTarget = z.infer<typeof ConversationQuestionTargetSchema>;
+export const ConversationQuestionResultSchema = z
+  .object({
+    status: z.enum(["ready", "resolved", "revision_conflict", "refused"]),
+    conversationId: OperatorConversationIdSchema,
+    incarnationId: z.string().uuid().optional(),
+    revision: z.number().int().nonnegative().optional(),
+    safeCursor: OperatorConversationCursorSchema.optional(),
+    question: ConversationQuestionSchema.optional(),
+    reason: z.string().max(100).optional(),
+  })
+  .strict();
+export type ConversationQuestionResult = z.infer<typeof ConversationQuestionResultSchema>;
+
 const OperatorConversationEventEnvelopeSchema = z.object({
   schemaVersion: z.literal(1),
   conversationId: OperatorConversationIdSchema,
@@ -2452,6 +2518,24 @@ export type OperatorSeatReply = z.infer<typeof OperatorSeatReplySchema>;
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   z
     .object({
+      op: z.literal("input_get"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      requestId: z.string().uuid().optional(),
+    })
+    .strict(),
+  ConversationQuestionTargetSchema.extend({
+    op: z.literal("input_answer"),
+    schemaVersion: z.literal(1),
+    answer: ConversationQuestionAnswerSchema,
+  }).strict(),
+  ConversationQuestionTargetSchema.extend({
+    op: z.literal("input_cancel"),
+    schemaVersion: z.literal(1),
+  }).strict(),
+
+  z
+    .object({
       op: z.literal("connections"),
       schemaVersion: z.literal(1),
       command: OperatorConnectionCommandSchema,
@@ -2791,6 +2875,28 @@ export type OperatorWorkItemsOutcome =
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
   z
     .object({
+      op: z.literal("input_get"),
+      schemaVersion: z.literal(1),
+      result: ConversationQuestionResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("input_answer"),
+      schemaVersion: z.literal(1),
+      result: ConversationQuestionResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("input_cancel"),
+      schemaVersion: z.literal(1),
+      result: ConversationQuestionResultSchema,
+    })
+    .strict(),
+
+  z
+    .object({
       op: z.literal("connections"),
       schemaVersion: z.literal(1),
       result: OperatorConnectionResultSchema,
@@ -3119,6 +3225,12 @@ export type OperatorConversationTailItem =
  * captain-runtime internals — so every surface calls one identical contract.
  */
 export interface OperatorConversationServiceClient {
+  inputGet?(conversationId: string, requestId?: string): Promise<ConversationQuestionResult>;
+  inputAnswer?(
+    target: ConversationQuestionTarget & { answer: ConversationQuestionAnswer },
+  ): Promise<ConversationQuestionResult>;
+  inputCancel?(target: ConversationQuestionTarget): Promise<ConversationQuestionResult>;
+
   connections?(command?: OperatorConnectionCommand): Promise<z.infer<typeof OperatorConnectionResultSchema>>;
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
@@ -3263,6 +3375,26 @@ export function createOperatorConversationServiceClient(
   const workProjection = options.includeWork === true ? { includeWork: true } : {};
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   return {
+    async inputGet(conversationId, requestId) {
+      const result = await dispatch({
+        op: "input_get",
+        schemaVersion: 1,
+        conversationId,
+        ...(requestId === undefined ? {} : { requestId }),
+      });
+      if (result.op !== "input_get") throw new Error("Unexpected question response");
+      return result.result;
+    },
+    async inputAnswer(target) {
+      const result = await dispatch({ op: "input_answer", schemaVersion: 1, ...target });
+      if (result.op !== "input_answer") throw new Error("Unexpected question response");
+      return result.result;
+    },
+    async inputCancel(target) {
+      const result = await dispatch({ op: "input_cancel", schemaVersion: 1, ...target });
+      if (result.op !== "input_cancel") throw new Error("Unexpected question response");
+      return result.result;
+    },
     async connections(command = { action: "list" }) {
       const result = await dispatch({ op: "connections", schemaVersion: 1, command });
       if (result.op !== "connections") throw new Error(`Unexpected ${result.op} result for connections`);

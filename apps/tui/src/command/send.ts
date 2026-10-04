@@ -3,7 +3,11 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { text } from "node:stream/consumers";
 import { parseArgs } from "node:util";
-import { resolveCaptainCredential, type CredentialStore } from "@clankie/credential-broker";
+import {
+  resolveCaptainCredential,
+  resolveOperatorCredential,
+  type CredentialStore,
+} from "@clankie/credential-broker";
 import {
   OPERATOR_CONVERSATION_ATTACHMENTS_MAX,
   operatorAttachmentBytesMax,
@@ -41,6 +45,7 @@ export async function runSendCommand(
     readonly host?: string;
     readonly fetchImpl?: typeof fetch;
     readonly captainCredentialStore?: CredentialStore;
+    readonly operatorCredentialStore?: CredentialStore;
     readonly stdout?: Writable;
     readonly stdin?: Parameters<typeof text>[0];
   },
@@ -84,12 +89,30 @@ export async function runSendCommand(
   });
   if (credential === undefined)
     throw new Error("No captain credential is available; start the clankie service once first.");
+  // An explicit captain-only invocation stays in that lane. Normal local CLI
+  // sends can use the brokered owner credential, like the interactive console.
+  const operator =
+    !env.CLANKIE_CAPTAIN_TOKEN || env.CLANKIE_OPERATOR_TOKEN || options.operatorCredentialStore
+      ? await resolveOperatorCredential({
+          env,
+          ...(options.operatorCredentialStore === undefined
+            ? {}
+            : { store: options.operatorCredentialStore }),
+        })
+      : undefined;
   const client = createCaptainOperatorConversationClient(
     createCaptainRouteClient({
       host: commandHost({ ...options, env }),
       captainToken: credential.token,
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     }),
+    operator
+      ? createCaptainRouteClient({
+          host: commandHost({ ...options, env }),
+          captainToken: operator.token,
+          ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        })
+      : undefined,
   );
   const attachments: OperatorConversationAttachmentRef[] = [];
   for (const file of files) {
