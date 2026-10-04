@@ -1,0 +1,21 @@
+# key  hex      role                     ('.' is transparent)
+# --- from branding/clankie-logo-512-alpha.png ---
+L      c6d668   leaf light
+l      7d8f41   leaf dark
+s      6f5f36   stem
+f      806440   frame
+o      503b2c   outline
+c      f2e5c8   face
+e      262f3a   eyes
+p      f3b2a4   cheeks
+d      e3d3ae   face shade
+b      dfddb6   body
+B      b2ae7e   body shade
+# --- additions ---
+r      d0745a   handheld shell (play)
+g      3c4856   screen-off glare (offline)
+R      a85742   handheld shell shade: back-cover seams and grips (play)
+y      e6ebbf   screen glow on his face (play)
+n      cfc6a8   dimmed screen (sleep)
+# --- worker minis only ---
+M      ff00ff   tint mask: the app replaces this with the worker's color

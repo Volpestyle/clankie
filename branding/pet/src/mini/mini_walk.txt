@@ -1,0 +1,66 @@
+# mini_walk: front-facing shuffle, direction-neutral (no mirroring needed)
+direction forward
+
+frame 120
+............
+......LLLL..
+.LLL.sLLLLL.
+LLLlfsllll..
+.ll..fs.....
+.ooooofsooo.
+occcccccccco
+ocffffffffco
+ocfceccecfco
+ocfpccccpfco
+ocffffffffco
+.oooooooooo.
+.ooMMMMMMoo.
+..ooo.......
+
+frame 120
+LL....LLLLL.
+LLL..sLLLLLl
+.lllfsllll..
+.....fs.....
+.ooooofsooo.
+occcccccccco
+ocffffffffco
+ocfceccecfco
+ocfpccccpfco
+ocffffffffco
+.oooooooooo.
+obMMMMMMMMbo
+.ooMMMMMMoo.
+..ooo..ooo..
+
+frame 120
+............
+......LLLL..
+.LLL.sLLLLL.
+LLLlfsllll..
+.ll..fs.....
+.ooooofsooo.
+occcccccccco
+ocffffffffco
+ocfceccecfco
+ocfpccccpfco
+ocffffffffco
+.oooooooooo.
+.ooMMMMMMoo.
+.......ooo..
+
+frame 120
+LL....LLLLL.
+LLL..sLLLLLl
+.lllfsllll..
+.....fs.....
+.ooooofsooo.
+occcccccccco
+ocffffffffco
+ocfceccecfco
+ocfpccccpfco
+ocffffffffco
+.oooooooooo.
+obMMMMMMMMbo
+.ooMMMMMMoo.
+..ooo..ooo..
