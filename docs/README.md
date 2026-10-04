@@ -65,6 +65,8 @@ source setup and checks.
   [quality gates](testing/quality-gates.md) define the recurring checks.
 - [Desktop runtime design](desktop-runtime-design.md) is a dated proposal, not an
   implemented replacement for the desktop-control path.
+- [Clankie's own computer-use loop](proposals/2026-10-04-sota-computer-use.md)
+  proposes direct native/provider loops, a shared hosted body and a manual comparison.
 - [Discord surface review](proposals/2026-09-30-discord-surface-review.md) preserves
   the declined proposal to retire the Activity and the user-session lab body.
 - [Ruthless cut audit](proposals/2026-09-30-ruthless-cut-audit.md) is a dated
