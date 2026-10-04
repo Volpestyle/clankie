@@ -915,7 +915,18 @@ export const OperatorSeatSubagentsSchema = z
   .object({
     running: z.number().int().min(0),
     recent: z
-      .array(z.object({ label: z.string().max(120), status: z.enum(["running", "done"]) }).strict())
+      .array(
+        z
+          .object({
+            label: z.string().max(120),
+            status: z.enum(["running", "done"]),
+            // Optional for older hosts/transcripts; native readers fill available evidence.
+            id: z.string().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+            startedAt: z.string().datetime().optional(),
+            endedAt: z.string().datetime().optional(),
+          })
+          .strict(),
+      )
       .max(OPERATOR_SEAT_SUBAGENTS_RECENT_MAX),
   })
   .strict();

@@ -1,0 +1,61 @@
+{
+  "provenance": {
+    "store": "~/.local/share/opencode/opencode.db",
+    "readMode": "SQLite mode=ro&immutable=1; checkpointed main DB only",
+    "sessionVersion": "1.17.13",
+    "installedVersion": "1.18.34",
+    "schemaPin": "1.18.18, commit 4643e65ad6334de3e4e68dedc201d5fbb828c9fe",
+    "sanitized": "Session ids, descriptions and result/error content replaced; prompt omitted. Native call ids, time fields and structural keys retained."
+  },
+  "parent": "ses_fixtureParent123",
+  "child": "ses_fixtureChild123",
+  "completed": {
+    "type": "tool",
+    "tool": "task",
+    "callID": "call_yT06eNYVmD08dnUgwDRRsOgS",
+    "state": {
+      "status": "completed",
+      "input": {
+        "subagent_type": "general",
+        "description": "Inspect session reader"
+      },
+      "output": "<task id=\"ses_fixtureChild123\" state=\"completed\">\n<task_result>\nFixture result\n</task_result>\n</task>",
+      "metadata": {
+        "parentSessionId": "ses_fixtureParent123",
+        "sessionId": "ses_fixtureChild123"
+      },
+      "title": "Inspect session reader",
+      "time": {
+        "start": 1787187196598,
+        "end": 1787187640314
+      }
+    },
+    "metadata": {
+      "openai": {
+        "itemId": "fc_0dfc0d56f049c7e6016a864ffc07208196a9bcafdfd5043da8"
+      }
+    }
+  },
+  "error": {
+    "type": "tool",
+    "tool": "task",
+    "callID": "call_YGg5nPbze3VXbijBRaHoukPg",
+    "state": {
+      "status": "error",
+      "input": {
+        "subagent_type": "general",
+        "description": "Inspect session reader"
+      },
+      "error": "Fixture native task failure",
+      "time": {
+        "start": 1787187715127,
+        "end": 1787187739457
+      }
+    },
+    "metadata": {
+      "openai": {
+        "itemId": "fc_05f88652eee89afd016a8651fe61f487d1bc21fd6b616cafdf"
+      }
+    }
+  }
+}

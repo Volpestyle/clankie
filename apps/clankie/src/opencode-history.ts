@@ -5,10 +5,15 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { redactSensitiveText } from "@clankie/observability";
-import { OPERATOR_CONVERSATION_CODE_MAX, OPERATOR_CONVERSATION_REF_MAX } from "@clankie/protocol";
+import {
+  OPERATOR_CONVERSATION_CODE_MAX,
+  OPERATOR_CONVERSATION_REF_MAX,
+  type OperatorSeatSubagents,
+} from "@clankie/protocol";
 import {
   AgentSessionRequestError,
   SeatTranscriptUploadSchema,
+  projectOpenCodeSubagents,
   type AgentSessionEntry,
 } from "@clankie/agent-transcript";
 import {
@@ -50,6 +55,7 @@ export interface OpenCodeHistorySource {
   readonly workingDirectory: string;
 }
 export interface OpenCodeHistorySnapshot {
+  readonly subagents?: OperatorSeatSubagents;
   readonly source: OpenCodeHistorySource;
   readonly title: string;
   readonly modifiedAt: string;
@@ -179,7 +185,12 @@ function cursor(value: string | undefined) {
 export async function readOpenCodeHistory(
   source: OpenCodeHistorySource,
   profileRoot: string,
-  options: { readonly tail?: number; readonly after?: string; readonly metadataOnly?: boolean } = {},
+  options: {
+    readonly tail?: number;
+    readonly after?: string;
+    readonly metadataOnly?: boolean;
+    readonly subagentsOnly?: boolean;
+  } = {},
 ): Promise<OpenCodeHistorySnapshot> {
   const after = cursor(options.after);
   const tail = options.tail ?? after?.tail ?? 50;
@@ -260,6 +271,7 @@ export async function readOpenCodeHistory(
     )
       refuse("native v2-only history is unsupported");
     const messages: unknown[] = [];
+    const taskMessages: unknown[] = [];
     let partsCount = 0;
     for (const metadata of selected) {
       const messageId = RowId.parse(metadata.id);
@@ -268,7 +280,7 @@ export async function readOpenCodeHistory(
         refuse("native history payload exceeds 4 MiB");
       const partMetadata = db
         .prepare(
-          "SELECT CASE WHEN length(id)<=160 THEN id ELSE NULL END AS id,CASE WHEN length(session_id)<=160 THEN session_id ELSE NULL END AS session_id,length(CAST(data AS BLOB)) AS bytes FROM part INDEXED BY part_message_id_id_idx WHERE message_id=? ORDER BY id LIMIT ?",
+          "SELECT CASE WHEN length(id)<=160 THEN id ELSE NULL END AS id,CASE WHEN length(session_id)<=160 THEN session_id ELSE NULL END AS session_id,time_created,length(CAST(data AS BLOB)) AS bytes FROM part INDEXED BY part_message_id_id_idx WHERE message_id=? ORDER BY id LIMIT ?",
         )
         .all(messageId, MAX_PARTS - partsCount + 1);
       partsCount += partMetadata.length;
@@ -294,6 +306,7 @@ export async function readOpenCodeHistory(
         })
         .passthrough()
         .parse(decode(infoRow.data));
+      const taskParts: unknown[] = [];
       const parts = partMetadata.map((metadata) => {
         const row = db
           .prepare("SELECT data FROM part WHERE id=? AND message_id=? AND session_id=?")
@@ -318,6 +331,12 @@ export async function readOpenCodeHistory(
           })
           .passthrough()
           .parse(decode(row.data));
+        if (options.subagentsOnly)
+          taskParts.push({
+            ...part,
+            sessionID: source.sessionId,
+            createdAt: Time.parse(metadata.time_created),
+          });
         if (part.type === "text") {
           const value = z.object({ text: z.string(), synthetic: z.boolean().optional() }).parse(part);
           // Redact the entire native field before projection chunks/truncates it.
@@ -355,10 +374,12 @@ export async function readOpenCodeHistory(
         return { ...part, id: metadata.id, messageID: messageId, sessionID: source.sessionId };
       });
       messages.push({ info: { ...info, id: messageId, sessionID: source.sessionId }, parts });
+      if (options.subagentsOnly)
+        taskMessages.push({ info: { ...info, sessionID: source.sessionId }, parts: taskParts });
     }
     const content = digest([session, messages, truncated]);
     const entries: AgentSessionEntry[] =
-      after?.content === content
+      options.subagentsOnly || after?.content === content
         ? []
         : (projectMessages(source.sessionId, messages) as unknown[]).map((value) =>
             SeatTranscriptUploadSchema.shape.entries.element.parse(value),
@@ -366,6 +387,17 @@ export async function readOpenCodeHistory(
     if (Buffer.byteLength(JSON.stringify(entries)) > MAX_BYTES)
       refuse("projected native history exceeds bound");
     result = {
+      ...(options.subagentsOnly
+        ? {
+            subagents: projectOpenCodeSubagents(source.sessionId, taskMessages, (id) => {
+              SessionId.parse(id);
+              const child = db
+                .prepare("SELECT 1 FROM session WHERE id=? AND parent_id=? AND directory=? AND version=?")
+                .get(id, source.sessionId, source.workingDirectory, source.version);
+              return child !== undefined;
+            }),
+          }
+        : {}),
       source,
       title: session.title,
       modifiedAt: new Date(session.time_updated).toISOString(),

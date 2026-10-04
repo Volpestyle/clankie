@@ -2428,12 +2428,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ? personas.reconcile(fleet.seats)
       : await withRemoteGoals(
           withSeatWork(
-            withSeatSubagents(
+            await withSeatSubagents(
               personas.reconcile(fleet.seats),
               fleet.seats,
               (seat) =>
                 conversations.conversationIdForPersona(seat.personaId) !== undefined ||
                 conversations.conversationIdForSeat(seat.seatId) !== undefined,
+              undefined,
+              async (session) =>
+                session.kind === "id" ? deps.agentSessions?.subagents?.(`local:${session.value}`) : undefined,
             ),
             fleet.seats,
             agentWork,

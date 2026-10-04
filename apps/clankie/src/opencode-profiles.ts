@@ -151,7 +151,10 @@ export class OpenCodeProfiles {
     await readOpenCodeHistory(source, join(await this.root(), source.profileId), { metadataOnly: true });
     return source;
   }
-  public async read(sessionId: string, options: { tail?: number; after?: string } = {}) {
+  public async read(
+    sessionId: string,
+    options: { tail?: number; after?: string; subagentsOnly?: boolean } = {},
+  ) {
     const source = await this.resolve(sessionId);
     const page = await readOpenCodeHistory(source, join(await this.root(), source.profileId), options);
     if (JSON.stringify(await this.resolve(sessionId)) !== JSON.stringify(source))
