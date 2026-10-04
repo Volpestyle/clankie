@@ -20,6 +20,12 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
         kind: "text",
         help: "The server where Clankie can create rooms.",
       },
+      {
+        key: "teamVisible",
+        label: "Show the team’s rooms",
+        kind: "boolean",
+        help: "Hide or show the team without forgetting its server or deleting its room connections. Unset means visible.",
+      },
       { key: "ownerUserId", label: "Owner user ID", kind: "text" },
       { key: "ambientRoleIds", label: "Roles Clankie can chat with", kind: "ids" },
       { key: "ambientUserIds", label: "People Clankie can chat with", kind: "ids" },
@@ -139,7 +145,7 @@ export const DISCORD_CHOICE_LABELS: Readonly<Record<string, string>> = {
 const SettingKey = z.enum(
   Object.keys(DiscordSettingsSchema.shape) as [keyof DiscordSettings, ...Array<keyof DiscordSettings>],
 );
-const PickerKind = z.enum(["server", "channels", "computer_access", "optional_server"]);
+const PickerKind = z.enum(["server", "channels", "computer_access", "team_visibility"]);
 const SentencePart = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("text"), text: z.string() }).strict(),
   z
@@ -232,11 +238,18 @@ export const DISCORD_SETUP_SENTENCES: readonly DiscordSetupSentence[] = [
   {
     id: "team",
     parts: [
-      { kind: "text", text: "The team’s rooms show up in " },
-      { kind: "picker", picker: "optional_server", fields: ["swarmGuildId"], placeholder: "Off / server" },
+      { kind: "text", text: "The team’s rooms " },
+      {
+        kind: "picker",
+        picker: "team_visibility",
+        fields: ["teamVisible"],
+        placeholder: "show up / stay hidden",
+      },
+      { kind: "text", text: " in " },
+      { kind: "picker", picker: "server", fields: ["swarmGuildId"], placeholder: "server" },
       { kind: "text", text: "." },
     ],
-    help: "Choose the managed server where Clankie may create rooms for the team, or turn their display off.",
+    help: "Choose the managed server for the team. Hiding keeps that choice and its room connections; showing restores them.",
     checks: ["manage_channels", "manage_webhooks", "send_messages", "test_post"],
   },
 ];

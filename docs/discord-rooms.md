@@ -56,7 +56,7 @@ through the relay and recheck grants after awaited work.
 Discord settings object. Writes require actual operator authority. The hosted
 operator bridge still requires `mintedBy=hosted-account-operator` and
 `terminalControl`; `steer` does not grant settings access. The canonical schema
-lives in protocol and is reexported by settings. All 37 fields are editable under
+lives in protocol and is reexported by settings. All canonical fields are editable under
 TUI `/discord` → **All Discord settings** and existing `clankie discord set/clear`.
 The optional `setup` member contains the shared four-sentence definition, picker
 kinds, help, check kinds, Advanced groups and choice labels from protocol's
@@ -68,6 +68,10 @@ this foundation does not claim that an invite, permission check or test post ran
 Clients read responses through `parseProtocolResponse`; strict settings writes
 retain `expectedRevision` and never accept display metadata or unknown fields.
 Computer access remains a separate explicit choice, never a server/room preset.
+The team's server (`swarmGuildId`) and optional visibility (`teamVisible`) have
+separate pickers. Omission of `teamVisible` means visible; old-client writes
+preserve a stored gate. VUH-1626 owns reversible suspension without deleting
+room webhooks.
 
 `DISCORD_MANAGED_GUILD_ID` is the preferred environment spelling. The old
 `DISCORD_SWARM_GUILD_ID` is accepted as a compatibility alias, with the preferred

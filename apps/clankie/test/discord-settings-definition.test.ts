@@ -21,7 +21,7 @@ afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true
 // The response shape before VUH-1624. Deliberately knows nothing of `setup`.
 const OldSettingsSnapshot = z
   .object({
-    settings: DiscordSettingsSchema,
+    settings: DiscordSettingsSchema.omit({ teamVisible: true }),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict();
@@ -49,6 +49,7 @@ function fixture(machineName = "James’s Mac") {
 }
 it("an old-shape client reads the new host definition response and still revision-checks writes", async () => {
   const { client, fetchImpl, settings } = fixture();
+  await settings.update((current) => ({ ...current, discord: { ...current.discord, teamVisible: false } }));
   const response = await fetchImpl("http://fixture.invalid/v1/discord/settings", {
     headers: { authorization: "Bearer fixture-operator" },
   });
@@ -57,10 +58,13 @@ it("an old-shape client reads the new host definition response and still revisio
   expect(wire.setup.machineName).toBe("James’s Mac");
   expect(OldSettingsSnapshot.safeParse(wire).success).toBe(false);
   const old = parseProtocolResponse(OldSettingsSnapshot, wire);
-  expect(old).toEqual({ settings: (await settings.load()).discord, revision: wire.revision });
+  expect(old.settings).not.toHaveProperty("teamVisible");
+  expect(wire.settings.teamVisible).toBe(false);
+  expect(old.revision).toBe(wire.revision);
   const changed = { ...old.settings, guildId: "12345" };
   const saved = await client.updateDiscordSettings({ expectedRevision: old.revision, settings: changed });
   expect(parseProtocolResponse(OldSettingsSnapshot, saved).settings.guildId).toBe("12345");
+  expect(saved.settings.teamVisible).toBe(false);
   await expect(
     client.updateDiscordSettings({ expectedRevision: old.revision, settings: changed }),
   ).rejects.toThrow();
@@ -108,7 +112,7 @@ it("API and CLI receive the same four sentences and all Advanced fields from the
     "Clankie lives in [server].",
     "He talks with [#general, #dev].",
     "[Only me] can ask him to use his cloud computer.",
-    "The team’s rooms show up in [Off / server].",
+    "The team’s rooms [show up / stay hidden] in [server].",
   ]);
   expect(
     setup.definition.sentences
@@ -140,4 +144,28 @@ it("the preferred managed-server environment name preserves stored and legacy wi
   const empty = {};
   applyDiscordSettingsToEnvironment(stored, empty);
   expect(discordManagedGuildId(empty)).toBe("11111");
+});
+
+it("the independent visibility setting keeps the team's selected server across hide and show", async () => {
+  const { client, settings } = fixture();
+  const initial = await client.discordSettings();
+  expect(initial.settings.teamVisible ?? true).toBe(true);
+  const command = await runDiscordCommand(["set", "--team-visible", "off"], { settings, env: {} });
+  expect("discord" in command && command.discord.teamVisible).toBe(false);
+  const refreshed = await client.discordSettings();
+  const hidden = await client.updateDiscordSettings({
+    expectedRevision: refreshed.revision,
+    settings: { ...refreshed.settings, swarmGuildId: "12345", teamVisible: false },
+  });
+  const visible = await client.updateDiscordSettings({
+    expectedRevision: hidden.revision,
+    settings: { ...hidden.settings, teamVisible: true },
+  });
+  expect(hidden.settings.swarmGuildId).toBe("12345");
+  expect(visible.settings.swarmGuildId).toBe("12345");
+  const team = visible.setup!.definition.sentences.find((sentence) => sentence.id === "team")!;
+  expect(team.parts.filter((part) => part.kind === "picker").map((part) => part.fields)).toEqual([
+    ["teamVisible"],
+    ["swarmGuildId"],
+  ]);
 });

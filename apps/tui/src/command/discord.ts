@@ -1,4 +1,5 @@
 import { ClankieApiClient } from "@clankie/api-client";
+import { DISCORD_SETTING_GROUPS } from "@clankie/protocol";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import type {
   DiscordRoomStatus,
@@ -177,7 +178,12 @@ export function parseDiscordSettingValue(
           .map((value) => value.trim())
           .filter(Boolean);
   }
-  if (typeof example === "boolean") {
+  if (
+    typeof example === "boolean" ||
+    DISCORD_SETTING_GROUPS.some((group) =>
+      group.fields.some((entry) => entry.key === field && entry.kind === "boolean"),
+    )
+  ) {
     if (["true", "on", "enabled"].includes(raw)) return true;
     if (["false", "off", "disabled"].includes(raw)) return false;
     throw new Error(`${field} must be on or off.`);

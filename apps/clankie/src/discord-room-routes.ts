@@ -128,7 +128,17 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
         if (!authority.current()) throw new Error("operator_revoked");
         if (discordSettingsRevision(current.discord) !== parsed.data.expectedRevision)
           throw new Error("settings_revision_conflict");
-        return { ...current, discord: parsed.data.settings };
+        // An older client's response schema cannot carry this additive field
+        // back. Omission preserves its current gate; explicit true restores it.
+        return {
+          ...current,
+          discord: {
+            ...parsed.data.settings,
+            ...(parsed.data.settings.teamVisible === undefined && current.discord.teamVisible !== undefined
+              ? { teamVisible: current.discord.teamVisible }
+              : {}),
+          },
+        };
       },
       async () => {
         await authority.guard();

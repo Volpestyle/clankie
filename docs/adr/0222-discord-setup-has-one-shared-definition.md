@@ -24,3 +24,9 @@ Managed-server wording replaces the retired name. `DISCORD_MANAGED_GUILD_ID`
 is preferred; the old environment spelling remains a read alias. The stored
 and wire key `swarmGuildId` is retained so existing clients can still read and
 write it. Environment overrides continue to win over stored values.
+
+The team server stays in `discord.swarmGuildId`. Independent optional
+`discord.teamVisible` gates its display; omission means visible. Its server
+picker and visibility picker are separate. Old-client writes that omit this
+new field preserve the existing gate. Hiding/showing changes the gate, keeps
+the selected server and is implemented by VUH-1626 without deleting webhooks.

@@ -31,6 +31,7 @@ export function resolveDiscordSettings(
   takeString(merged, "guildId", "DISCORD_GUILD_ID");
   takeString(merged, "swarmGuildId", "DISCORD_SWARM_GUILD_ID");
   takeString(merged, "swarmGuildId", "DISCORD_MANAGED_GUILD_ID");
+  takeBoolean(merged, "teamVisible", "DISCORD_TEAM_VISIBLE");
   takeList(merged, "ambientRoleIds", "DISCORD_AMBIENT_ROLE_IDS");
   takeList(merged, "ambientUserIds", "DISCORD_AMBIENT_USER_IDS");
   takeList(merged, "approvalRoleIds", "DISCORD_APPROVAL_ROLE_IDS");
@@ -133,6 +134,7 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   put("DISCORD_APPLICATION_ID", settings.applicationId);
   put("DISCORD_GUILD_ID", settings.guildId);
   put("DISCORD_MANAGED_GUILD_ID", settings.swarmGuildId);
+  if (settings.teamVisible !== undefined) env.DISCORD_TEAM_VISIBLE = String(settings.teamVisible);
   putList("DISCORD_AMBIENT_ROLE_IDS", settings.ambientRoleIds);
   putList("DISCORD_AMBIENT_USER_IDS", settings.ambientUserIds);
   putList("DISCORD_APPROVAL_ROLE_IDS", settings.approvalRoleIds);

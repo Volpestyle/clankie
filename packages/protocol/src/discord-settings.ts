@@ -18,6 +18,8 @@ export const DiscordSettingsSchema = z
      * the way into a server nobody named.
      */
     swarmGuildId: SnowflakeSchema.optional(),
+    /** Reversible team display gate. Omitted means visible; hiding retains the selected server. */
+    teamVisible: z.boolean().optional(),
     ambientRoleIds: SnowflakeListSchema,
     /** Individual operators holding the ambient tier without a mapped role. */
     ambientUserIds: SnowflakeListSchema,
