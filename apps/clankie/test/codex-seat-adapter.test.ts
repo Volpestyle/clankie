@@ -4,8 +4,17 @@ import type { CodexAppServerSeat, CodexSeatEvent } from "../src/captain/codex-ap
 
 function fixture(nativePolicy?: NonNullable<Parameters<typeof createCodexSeatAdapter>[0]>["nativePolicy"]) {
   let event: (event: CodexSeatEvent) => void = () => undefined;
-  const emit = (method: string, params: Record<string, unknown> = {}) =>
-    event({ method, params: { threadId: "thread-1", ...params } });
+  const emit = (method: string, params: Record<string, unknown> = {}, requestId?: string | number) =>
+    event({
+      method,
+      params: { threadId: "thread-1", ...params },
+      ...(requestId === undefined ? {} : { requestId }),
+    });
+  const answerQuestion = vi.fn<NonNullable<CodexAppServerSeat["answerQuestion"]>>(async (answer, guard) => {
+    await guard?.();
+    emit("serverRequest/resolved", { requestId: answer.requestId });
+    return { outcome: "answered", deliveryStage: "responded" };
+  });
   const send = vi.fn<CodexAppServerSeat["send"]>(async (_message, guard) => {
     await guard?.();
     emit("turn/started", { turn: { id: "turn-1" } });
@@ -21,6 +30,7 @@ function fixture(nativePolicy?: NonNullable<Parameters<typeof createCodexSeatAda
       viewArgs: ["--remote", "unix:///owned/socket", "resume", "thread-1"],
       send,
       close,
+      answerQuestion,
       interrupt: vi.fn(async () => true),
     };
   });
@@ -32,8 +42,67 @@ function fixture(nativePolicy?: NonNullable<Parameters<typeof createCodexSeatAda
     ...(nativePolicy ? { nativePolicy } : {}),
   });
   const view = { paneId: "w1:p1", run: vi.fn(async () => undefined) };
-  return { adapter, emit, start, send, close, herdr, view, trackerOverrides };
+  return { adapter, emit, start, send, close, herdr, view, trackerOverrides, answerQuestion };
 }
+
+it("forwards a native question once after binding, blocks new turns, and keeps completion armed", async () => {
+  const f = fixture();
+  const question = vi.fn(async () => undefined);
+  const started = await f.adapter.start(
+    { harness: "codex", cwd: "/scratch", brief: "go" },
+    { ...f.view, question },
+  );
+  if (started.outcome !== "started") throw new Error("fixture did not start");
+  try {
+    const complete = vi.fn();
+    void started.control.settled().then(complete);
+    const params = {
+      turnId: "turn-1",
+      itemId: "call1",
+      isBlocking: true,
+      questions: [{ id: "scope", header: "Scope", question: "Which package?", options: null }],
+    };
+    f.emit("item/tool/requestUserInput", { ...params, threadId: "child" }, 7);
+    f.emit("thread/status/changed", { status: { type: "active", activeFlags: ["waitingOnUserInput"] } });
+    f.emit("item/tool/requestUserInput", params, "question-1");
+    f.emit("thread/status/changed", { status: { type: "active", activeFlags: ["waitingOnUserInput"] } });
+    f.emit("item/tool/requestUserInput", params, "question-1");
+    await vi.waitFor(() => expect(question).toHaveBeenCalledOnce());
+    expect(question).toHaveBeenCalledWith(
+      started.control.ref,
+      expect.objectContaining({
+        requestId: "question-1",
+        questions: [expect.objectContaining({ question: "Which package?" })],
+      }),
+    );
+    expect(await started.control.status()).toBe("blocked");
+    expect(complete).not.toHaveBeenCalled();
+    expect(await started.control.send("ordinary follow-up")).toMatchObject({
+      outcome: "offline",
+      detail: expect.stringContaining("questionAnswer"),
+    });
+    expect(f.send).toHaveBeenCalledOnce();
+    const guard = vi.fn(async () => undefined);
+    expect(
+      await started.control.answerQuestion!(
+        { requestId: "question-1", answers: { scope: { answers: ["clankie"] } } },
+        guard,
+      ),
+    ).toMatchObject({ outcome: "answered" });
+    expect(guard).toHaveBeenCalledOnce();
+    expect(await started.control.status()).toBe("working");
+    f.emit("turn/completed", {
+      turn: { id: "turn-1", status: "completed", items: [{ type: "agentMessage", text: "done" }] },
+    });
+    await vi.waitFor(() =>
+      expect(complete).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "turn_completed", text: "done" }),
+      ),
+    );
+  } finally {
+    await started.control.close();
+  }
+});
 
 describe("Codex harness seat adapter", () => {
   it("binds the reported native session before its first brief, and closes on binding failure", async () => {

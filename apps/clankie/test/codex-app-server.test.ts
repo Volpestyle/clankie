@@ -76,7 +76,7 @@ describe("Codex app-server protocol", () => {
         method: "turn/completed",
         params: { threadId: "one", turn: { id: "two", status: "failed", error: { message: "quota" } } },
       },
-      { method: "item/commandExecution/requestApproval", params: { threadId: "one" } },
+      { method: "item/commandExecution/requestApproval", params: { threadId: "one" }, requestId: 8 },
     ]);
     expect(messages).toEqual([]);
   });
@@ -548,4 +548,109 @@ describe("trusted native seat policy", () => {
     expect(f.views()).toBe(0);
     expect(f.closed()).toBe(1);
   });
+});
+
+const nativeQuestion = {
+  threadId: "one",
+  turnId: "turn",
+  itemId: "call",
+  isBlocking: true,
+  questions: [
+    {
+      id: "docs",
+      header: "Docs",
+      question: "Which docs worktree?",
+      isOther: true,
+      isSecret: false,
+      options: [{ label: "Existing", description: "Use the existing worktree." }],
+    },
+  ],
+};
+
+it.each(["request-9", 9])(
+  "replies once to native question %s without starting or steering a turn",
+  async (requestId) => {
+    const { client, peer, events, next } = await connection();
+    peer.send(
+      JSON.stringify({ id: requestId, method: "item/tool/requestUserInput", params: nativeQuestion }),
+    );
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    expect(events[0]).toMatchObject({ requestId, params: nativeQuestion });
+    const response = next();
+    const answering = client.answerQuestion("one", {
+      requestId,
+      answers: { docs: { answers: ["Existing"] } },
+    });
+    expect(await response).toEqual({
+      id: requestId,
+      result: { answers: { docs: { answers: ["Existing"] } } },
+    });
+    await expect(
+      client.answerQuestion("one", { requestId, answers: { docs: { answers: ["Other"] } } }),
+    ).resolves.toMatchObject({ outcome: "refused" });
+    peer.send(JSON.stringify({ method: "serverRequest/resolved", params: { threadId: "one", requestId } }));
+    await expect(answering).resolves.toEqual({ outcome: "resolved" });
+    await expect(
+      client.answerQuestion("one", { requestId, answers: { docs: { answers: ["Other"] } } }),
+    ).resolves.toMatchObject({ outcome: "refused" });
+  },
+);
+
+it("refuses an owner-first answer, including resolution during the dispatch guard", async () => {
+  const { client, peer, events } = await connection();
+  peer.send(JSON.stringify({ id: 7, method: "item/tool/requestUserInput", params: nativeQuestion }));
+  await vi.waitFor(() => expect(events).toHaveLength(1));
+  const messages: unknown[] = [];
+  peer.on("message", (message) => messages.push(message));
+  const result = await client.answerQuestion(
+    "one",
+    { requestId: 7, answers: { docs: { answers: ["lead"] } } },
+    async () => {
+      peer.send(
+        JSON.stringify({ method: "serverRequest/resolved", params: { threadId: "one", requestId: 7 } }),
+      );
+      await vi.waitFor(() => expect(events).toHaveLength(2));
+    },
+  );
+  expect(result).toMatchObject({ outcome: "refused", detail: expect.stringContaining("already_resolved") });
+  expect(messages).toEqual([]);
+});
+
+it("does not answer approvals, foreign threads, unknown IDs or incomplete question maps", async () => {
+  const { client, peer, events } = await connection();
+  peer.send(JSON.stringify({ id: 7, method: "item/tool/requestUserInput", params: nativeQuestion }));
+  peer.send(
+    JSON.stringify({ id: 8, method: "item/commandExecution/requestApproval", params: { threadId: "one" } }),
+  );
+  await vi.waitFor(() => expect(events).toHaveLength(2));
+  const messages: unknown[] = [];
+  peer.on("message", (message) => messages.push(message));
+  for (const [threadId, requestId, answers] of [
+    ["foreign", 7, { docs: { answers: ["lead"] } }],
+    ["one", 8, { docs: { answers: ["lead"] } }],
+    ["one", 7, { wrong: { answers: ["lead"] } }],
+  ] as const) {
+    expect(await client.answerQuestion(threadId, { requestId, answers })).toMatchObject({
+      outcome: "refused",
+    });
+  }
+  peer.send(
+    JSON.stringify({ method: "serverRequest/resolved", params: { threadId: "foreign", requestId: 7 } }),
+  );
+  await vi.waitFor(() => expect(events).toHaveLength(3));
+  expect(client.pendingQuestion("one", 7)).toBeDefined();
+  expect(messages).toEqual([]);
+});
+
+it("keeps a lost native response uncertain and fences every retry", async () => {
+  const { client, peer, events, next } = await connection(30);
+  peer.send(JSON.stringify({ id: 7, method: "item/tool/requestUserInput", params: nativeQuestion }));
+  await vi.waitFor(() => expect(events).toHaveLength(1));
+  const response = next();
+  const first = client.answerQuestion("one", { requestId: 7, answers: { docs: { answers: ["lead"] } } });
+  await response;
+  await expect(first).resolves.toMatchObject({ outcome: "unconfirmed" });
+  expect(
+    await client.answerQuestion("one", { requestId: 7, answers: { docs: { answers: ["retry"] } } }),
+  ).toMatchObject({ outcome: "refused" });
 });

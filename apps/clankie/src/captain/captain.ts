@@ -2323,7 +2323,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   // The captain briefs a hired seat through the native channel the
   // operator would, by whichever id the hire handed back (VUH-1373).
-  const messageSeat: MessageSeat = async (target, message, source) => {
+  const messageSeat: MessageSeat = async (target, message, source, questionAnswer) => {
     const authority = captureConversationAuthority(source);
     await assertConversationAuthority(authority);
     const seat = liveSeats.find(
@@ -2342,13 +2342,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         detail: error instanceof Error ? error.message : String(error),
       };
     }
-    const delivery = await deliverToSeat(seatId, message, {
-      conversationId: seat?.conversationId ?? seatId,
-      source: "captain",
-    });
+    const delivery =
+      questionAnswer === undefined
+        ? await deliverToSeat(seatId, message, {
+            conversationId: seat?.conversationId ?? seatId,
+            source: "captain",
+          })
+        : await herdrWatches.answerSeatQuestion(seatId, questionAnswer, authority);
     if (delivery.outcome === "offline")
       return { outcome: "seat_offline", seatId, deliveryStage: "unavailable" };
     if (delivery.outcome !== "delivered") return { ...delivery, seatId };
+    if (questionAnswer !== undefined) return { ...delivery, seatId, status: "answered" };
     if (delivery.state === "queued" && delivery.detail !== undefined)
       return { ...delivery, seatId, status: "queued_until_turn_end" };
     return { ...delivery, seatId, status: await herdrWatches.awaitPickup(seatId) };

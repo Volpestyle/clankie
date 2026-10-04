@@ -87,6 +87,8 @@ export type MessageSeat = (
   message: string,
   /** Host-captured leading conversation; never a worker-selected route. */
   authority?: ConversationAuthority,
+  /** A response to one observed native request, never a new worker turn. */
+  questionAnswer?: import("@clankie/agent-hosts").SeatQuestionAnswer,
 ) => Promise<SeatMessageResult>;
 type SeatMessageResult = { readonly deliveryStage?: DeliveryStage } & (
   | (Extract<FleetSeatDelivery, { outcome: "delivered" }> & {

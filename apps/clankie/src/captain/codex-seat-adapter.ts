@@ -8,6 +8,7 @@ import type {
   SeatStatus,
   SeatStartResult,
   SeatView,
+  SeatQuestion,
 } from "@clankie/agent-hosts";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -20,6 +21,7 @@ import {
   type CodexServerLauncher,
 } from "./codex-app-server.ts";
 import { codexTrackerOverrides } from "./tracker-isolation.ts";
+import { codexQuestion } from "./codex-user-input.ts";
 
 const exec = promisify(execFile);
 const object = (value: unknown): Record<string, unknown> =>
@@ -69,6 +71,25 @@ export function createCodexSeatAdapter(
       let closed = false;
       let releaseProcess: LocalCodexRegistration | undefined;
       let reporting: Promise<unknown> = Promise.resolve();
+      let questionReporting: Promise<unknown> = Promise.resolve();
+      let bound = false;
+      let nativeInputWaiting = false;
+      const questions = new Map<string | number, { threadId: string; question: SeatQuestion }>();
+      const forwarded = new Set<string | number>();
+      const forwardQuestions = () => {
+        if (!ref || !bound || closed || !view.question) return;
+        for (const { threadId, question } of questions.values()) {
+          if (threadId !== ref.sessionId || forwarded.has(question.requestId)) continue;
+          forwarded.add(question.requestId);
+          const identity = ref;
+          questionReporting = questionReporting
+            .catch(() => undefined)
+            .then(() => view.question!(identity, question));
+          void questionReporting.catch((error) =>
+            console.warn("Codex native question forwarding failed:", view.paneId, String(error)),
+          );
+        }
+      };
       const waiters = new Set<(event: SeatEvent) => void>();
       const report = () => {
         if (!ref || closed) return;
@@ -96,15 +117,41 @@ export function createCodexSeatAdapter(
         const turn = object(event.params.turn);
         const messageId = typeof turn.id === "string" ? turn.id : undefined;
         let settlement: SeatEvent | undefined;
-        if (event.method === "turn/started") state = "working";
+        if (event.method === "item/tool/requestUserInput") {
+          const question = codexQuestion(event.requestId, event.params);
+          if (!question) {
+            state = "blocked";
+            settlement = { type: "blocked", at, reason: "native_question_invalid_or_unattributed" };
+          } else {
+            questions.set(question.requestId, { threadId: String(event.params.threadId), question });
+            if (question.isBlocking) {
+              state = "blocked";
+              nativeInputWaiting = true;
+            }
+            forwardQuestions();
+            report();
+            // Its dedicated question channel reaches the lead. Keep the hired
+            // completion watch armed instead of consuming it for this prompt.
+            return;
+          }
+        } else if (event.method === "serverRequest/resolved") {
+          const id = event.params.requestId;
+          if (typeof id !== "string" && typeof id !== "number") return;
+          if (!questions.delete(id)) return;
+          nativeInputWaiting = [...questions.values()].some((q) => q.question.isBlocking);
+          if (state === "blocked" && !nativeInputWaiting) state = "working";
+        } else if (event.method === "turn/started") state = "working";
         else if (event.method === "thread/status/changed" && object(event.params.status).type === "active") {
           const flags = object(event.params.status).activeFlags;
+          nativeInputWaiting = Array.isArray(flags) && flags.includes("waitingOnUserInput");
           if (Array.isArray(flags) && flags.length > 0) {
             state = "blocked";
-            settlement = { type: "blocked", at, reason: flags.join(", ") };
+            if (flags.some((flag) => flag !== "waitingOnUserInput"))
+              settlement = { type: "blocked", at, reason: flags.join(", ") };
           } else state = "working";
         } else if (event.method === "turn/completed") {
           state = "idle";
+          nativeInputWaiting = false;
           const text = Array.isArray(turn.items)
             ? turn.items
                 .map(object)
@@ -126,6 +173,8 @@ export function createCodexSeatAdapter(
           settlement = { type: "blocked", at, reason: event.method };
         } else if (event.method === "connection/closed") {
           releaseProcess?.();
+          questions.clear();
+          nativeInputWaiting = false;
           state = "offline";
           settlement = {
             type: "exited",
@@ -234,17 +283,21 @@ export function createCodexSeatAdapter(
             throw new Error("Codex resumed a different thread; no brief was sent");
           await releaseProcess?.bindSession?.(seat.threadId);
           ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
+          for (const [id, question] of questions)
+            if (question.threadId !== ref.sessionId) questions.delete(id);
           report();
           await reporting;
           await view.guard?.();
-          const bound = await view.bound?.(ref);
+          const binding = await view.bound?.(ref);
           if (
             options.serverForView &&
-            JSON.stringify([...new Set(bound?.expectedToolNames ?? [])].sort()) !==
+            JSON.stringify([...new Set(binding?.expectedToolNames ?? [])].sort()) !==
               JSON.stringify(expectedToolNames)
           )
             throw new Error("Project granted tools changed while binding; no brief was sent");
-          seat.expectTools?.(bound?.expectedToolNames ?? []);
+          seat.expectTools?.(binding?.expectedToolNames ?? []);
+          bound = true;
+          forwardQuestions();
           let initialDispatch = Boolean(launch.brief);
           const control: SeatControl = {
             ref,
@@ -254,6 +307,13 @@ export function createCodexSeatAdapter(
                   outcome: "offline",
                   deliveryStage: "unavailable",
                   detail: "Codex app-server is offline",
+                };
+              if (questions.size > 0)
+                return {
+                  outcome: "offline",
+                  deliveryStage: "unavailable",
+                  detail:
+                    "Codex is waiting on a native question. Use message_seat with questionAnswer; no follow-up turn was sent.",
                 };
               const messageId = randomUUID();
               const previousState = state;
@@ -304,9 +364,19 @@ export function createCodexSeatAdapter(
             async status() {
               return state;
             },
+            async answerQuestion(answer, guard) {
+              if (closed || state === "offline")
+                return { outcome: "offline", detail: "Codex app-server is offline" };
+              if (!seat?.answerQuestion)
+                return {
+                  outcome: "refused",
+                  detail: "Native question control is unavailable; no turn or terminal fallback was sent",
+                };
+              return seat.answerQuestion(answer, guard);
+            },
             settled(abort) {
               if (abort?.aborted) return Promise.reject(abort.reason);
-              if (state !== "working") return Promise.resolve(latest);
+              if (state !== "working" && !nativeInputWaiting) return Promise.resolve(latest);
               return new Promise((resolve, reject) => {
                 const done = (event: SeatEvent) => {
                   abort?.removeEventListener("abort", cancel);
