@@ -409,6 +409,64 @@ it("does not harvest a rebound native occupant or move an unowned worker", async
   store.close();
 });
 
+it("releases an unconfirmed hire once its pane is closed, so a retry can start", async () => {
+  const path = join(root(), "watches.json");
+  let allowed = true;
+  let panes: HerdrAgentSnapshot[] = [];
+  const agent: HerdrAgentSnapshot = {
+    paneId: "w1:p1",
+    terminalId: "term_one",
+    agent: "claude",
+    status: "working",
+    title: "worker",
+    session: { source: "herdr:claude", kind: "id", value: "10000000-0000-4000-8000-000000000001" },
+  };
+  const createTab = vi.fn(async () => {
+    panes = [agent];
+    return agent.paneId;
+  });
+  const startAgent = vi.fn(async () => {
+    allowed = false;
+  });
+  const runner: HerdrWatchRunner = {
+    get: async () => agent,
+    list: async () => panes,
+    resolveTerminal: async () => agent,
+    wait: () => new Promise(() => {}),
+    createTab,
+    startAgent,
+  };
+  const store = new HerdrWatchStore(path, { runner });
+  const authority = {
+    owner: { conversationId: "owner-a" },
+    current: () => true,
+    authorize: async () => allowed,
+  };
+  const request = {
+    schemaVersion: 1 as const,
+    harness: "claude" as const,
+    title: "worker",
+    workingDirectory: tmpdir(),
+  };
+  expect(await store.spawnSeat(request, undefined, undefined, undefined, authority)).toMatchObject({
+    reason: "start_unconfirmed",
+  });
+  allowed = true;
+  // Pane still open: the uncertain hire keeps refusing a second launch.
+  const blocked = { ...authority, owner: { conversationId: "owner-b" } };
+  expect(await store.spawnSeat(request, undefined, undefined, undefined, blocked)).toMatchObject({
+    reason: "delivery_unconfirmed",
+  });
+  expect(createTab).toHaveBeenCalledOnce();
+  // The owner closed it: nothing can start there later, so the retry launches.
+  panes = [];
+  expect(await store.spawnSeat(request, undefined, undefined, undefined, blocked)).not.toMatchObject({
+    reason: "delivery_unconfirmed",
+  });
+  expect(createTab).toHaveBeenCalledTimes(2);
+  store.close();
+});
+
 it("retains the original hire receipt when authority expires after startup, and reconciles without another launch", async () => {
   const path = join(root(), "watches.json");
   let allowed = true;

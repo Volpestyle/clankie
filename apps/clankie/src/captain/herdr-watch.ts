@@ -1221,7 +1221,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
       input.workingDirectory,
       resume?.sessionId ?? "new",
     ]);
-    const pending = this.hireReceipts.pending(receiptKey);
+    let pending = this.hireReceipts.pending(receiptKey);
+    if (
+      pending?.paneId !== undefined &&
+      input.fleet === undefined &&
+      !this.activeHires.has(receiptKey) &&
+      (await this.runner.list?.().catch(() => undefined))?.some((pane) => pane.paneId === pending!.paneId) ===
+        false
+    ) {
+      // Its pane is closed, so the uncertain hire can never start later:
+      // release it instead of refusing every retry forever.
+      this.hireReceipts.reconcile(receiptKey, pending.messageId);
+      pending = undefined;
+    }
     if (pending !== undefined) {
       const agent =
         !this.activeHires.has(receiptKey) && pending.paneId !== undefined
