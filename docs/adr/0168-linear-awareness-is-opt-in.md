@@ -146,8 +146,16 @@ census (ADR 0149), whoever opens them.
 
 The MCP host reports settled writes with the verified account used for the call
 and any delegated worker provenance. Private, atomic receipts in
-`linear-writes.json` retain the returned resource type, ID, `updatedAt`, workspace,
-actor and hashes of returned resource fields. Matching requires all those fields;
+`linear-writes.json` retain the returned resource type, canonical UUID, `updatedAt`,
+workspace, actor and hashes of returned resource fields. When an issue response's
+`id` is a display label such as `VUH-1641`, its returned `uuid` supplies the
+canonical identity. A UUID-valued `id` is also valid. Any supplied `uuid` must be
+valid and agree with a UUID-valued `id`. Comments, other resources and signed
+webhook payloads still require a UUID-valued `id`. Display labels, request
+arguments and related resource IDs never supply receipt identity proof.
+Missing or conflicting UUID proof cannot suppress signed activity; it
+remains ordinary inbox context under the existing wake rules.
+Matching still requires all retained revision fields;
 updates also require coverage of every changed field named by `updatedFrom`.
 Related IDs mentioned in a response are not receipts. Only a matching captain
 write is dropped as `self_echo`. Matching worker writes enter the inbox with
