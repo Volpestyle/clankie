@@ -261,6 +261,12 @@ remain non-replayable, and uncertain originals remain retained. These
 operator call receipts are separate from the fleet peer-message ledger. See
 [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md#mcp-reconnect-and-native-call-receipts-vuh-1638).
 
+Bridge stderr records `upstream_error`, `upstream_retired`, `upstream_closed`
+and `upstream_reconnected` with the client generation and pending-call count.
+`stdio_closed` identifies the harness closing its bridge. These diagnostics
+distinguish a replaced HTTP client from a closed stdio connection; they contain
+no tool arguments or response bodies. Restart an older MCP bridge to load them.
+
 Persisted Herdr watches retain their stable terminal
 identity when a wait process fails, retry observation, and resume on service start.
 A failed wait is not treated as agent completion.

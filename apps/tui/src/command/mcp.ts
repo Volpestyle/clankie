@@ -373,12 +373,24 @@ export async function pumpSeatEvents(
   }
 }
 
+/** Transport diagnostics contain no arguments, credentials, response bodies or error messages. */
+export interface LaneUpstreamTransportEvent {
+  readonly event: "upstream_error" | "upstream_retired" | "upstream_closed" | "upstream_reconnected";
+  readonly generation: number;
+  readonly pending: number;
+  readonly retired: boolean;
+  readonly closing: boolean;
+  readonly errorCode?: number;
+  readonly errorName?: string;
+}
+
 /** Opens the service's `/v1/mcp` as a client and its seat outbox; the bearer rides every request. */
 export async function connectLaneUpstream(input: {
   readonly host: string;
   readonly bearer: string;
   readonly conversationId?: string;
   readonly fetchImpl?: typeof fetch;
+  readonly onTransportEvent?: (event: LaneUpstreamTransportEvent) => void;
 }): Promise<LaneToolUpstream> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const headers = { authorization: `Bearer ${input.bearer}` };
@@ -399,7 +411,42 @@ export async function connectLaneUpstream(input: {
   const retired = new WeakSet<Client>();
   const closing = new WeakSet<Client>();
   const pending = new Map<Client, number>();
+  const generationIds = new WeakMap<Client, number>();
+  let nextGeneration = 0;
   const listeners = new Set<() => void>();
+  const standardErrorNames = new Set([
+    "Error",
+    "TypeError",
+    "RangeError",
+    "ReferenceError",
+    "SyntaxError",
+    "URIError",
+    "AggregateError",
+    "AbortError",
+    "TimeoutError",
+    "McpError",
+  ]);
+  const emit = (event: LaneUpstreamTransportEvent["event"], active: Client, error?: unknown) => {
+    try {
+      const errorCode =
+        typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+      const errorName =
+        error instanceof Error ? (standardErrorNames.has(error.name) ? error.name : "Error") : undefined;
+      void Promise.resolve(
+        input.onTransportEvent?.({
+          event,
+          generation: generationIds.get(active)!,
+          pending: pending.get(active) ?? 0,
+          retired: retired.has(active),
+          closing: closing.has(active),
+          ...(typeof errorCode === "number" && Number.isSafeInteger(errorCode) ? { errorCode } : {}),
+          ...(errorName === undefined ? {} : { errorName }),
+        }),
+      ).catch(() => undefined);
+    } catch {
+      // Diagnostics must not change transport or delivery behavior.
+    }
+  };
   const closeIfIdle = (previous: Client) => {
     if (!retired.has(previous) || pending.has(previous) || closing.has(previous)) return;
     closing.add(previous);
@@ -410,8 +457,15 @@ export async function connectLaneUpstream(input: {
   };
   const connect = async () => {
     const next = new Client(SEAT_CLIENT, { capabilities: {} });
-    next.onclose = () => invalidated.add(next);
-    next.onerror = () => invalidated.add(next);
+    generationIds.set(next, ++nextGeneration);
+    next.onclose = () => {
+      invalidated.add(next);
+      emit("upstream_closed", next);
+    };
+    next.onerror = (error) => {
+      invalidated.add(next);
+      emit("upstream_error", next, error);
+    };
     let initializing = true;
     const initializationDeadline = AbortSignal.timeout(CONNECT_TIMEOUT_MS);
     const transport = new StreamableHTTPClientTransport(urlFor("/v1/mcp"), {
@@ -475,6 +529,8 @@ export async function connectLaneUpstream(input: {
       // Closing an SDK Client rejects every admitted request on it. A new
       // generation can serve callers while the old one finishes its receipts.
       retired.add(previous);
+      emit("upstream_retired", previous);
+      emit("upstream_reconnected", next);
       closeIfIdle(previous);
       for (const listener of listeners) listener();
     })().finally(() => {
@@ -634,7 +690,12 @@ export async function connectLaneUpstream(input: {
       closed = true;
       listeners.clear();
       await reconnecting?.catch(() => undefined);
-      await Promise.all([...generations].map((active) => active.close()));
+      await Promise.all(
+        [...generations].map((active) => {
+          closing.add(active);
+          return active.close();
+        }),
+      );
       generations.clear();
     },
   };
@@ -888,6 +949,13 @@ export async function runMcpCommand(
   if (conversationId !== undefined && (lane !== "operator" || !conversationId.trim()))
     throw new Error(MCP_USAGE);
   const stderr = options.stderr ?? process.stderr;
+  const lifecycle = (event: LaneUpstreamTransportEvent | { readonly event: "stdio_closed" }) => {
+    try {
+      stderr.write(`clankie mcp: ${JSON.stringify(event)}\n`);
+    } catch {
+      // Diagnostic output must not interrupt a receipt or shutdown.
+    }
+  };
   const parentArgv = await (options.readParentArgv ?? defaultReadParentArgv)().catch(() => undefined);
   // `clankie seat` loads the projected plugin as the session-only
   // `clankie@inline`; an installed marketplace copy is `clankie@clankie`.
@@ -901,6 +969,7 @@ export async function runMcpCommand(
   const closing = new AbortController();
   const closed = new Promise<void>((resolve) => {
     server.onclose = () => {
+      lifecycle({ event: "stdio_closed" });
       closing.abort();
       resolve();
     };
@@ -945,6 +1014,7 @@ export async function runMcpCommand(
     return connectLaneUpstream({
       host: commandHost({ ...options, env }),
       bearer: credential.token,
+      onTransportEvent: lifecycle,
       ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
     });
   }
