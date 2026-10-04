@@ -45,10 +45,11 @@ export async function planOpenCodeSeat(
     !["--session", "--hostname", "--port"].every((flag) => help.includes(flag))
   )
     throw new Error(
-      `Unsupported OpenCode ${version}; this seat requires the verified 1.18.x plugin/server contract.`,
+      `Unsupported OpenCode ${version}; clankie opencode requires the verified 1.18.x plugin/server contract.`,
     );
   const source = resolve(flags.pluginDir ?? join(options.repoRoot, "integrations/opencode-plugin"));
-  if (!existsSync(join(source, "plugin.mjs"))) throw new Error(`OpenCode seat plugin missing at ${source}`);
+  if (!existsSync(join(source, "plugin.mjs")))
+    throw new Error(`Clankie's OpenCode plugin is missing at ${source}`);
   let previous: Binding | undefined;
   if (flags.resume) {
     try {
@@ -57,7 +58,9 @@ export async function planOpenCodeSeat(
       /* no prior seat */
     }
     if (!previous || !SESSION.test(previous.sessionId) || typeof previous.cwd !== "string")
-      throw new Error("No exact OpenCode seat to resume; start a seat and create its native session first.");
+      throw new Error(
+        "No exact OpenCode chat to resume; run `clankie opencode` and create its native session first.",
+      );
     if (
       flags.conversationId !== undefined &&
       flags.conversationId !== (previous.conversationId ?? "global-default")
@@ -123,7 +126,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
     env,
     ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
   });
-  if (!credential) throw new Error("OpenCode seat needs the operator credential in the broker");
+  if (!credential) throw new Error("clankie opencode needs the operator credential in the broker");
   const host = commandHost({ ...options, env });
   const nativeFence = new OpenCodeReceiptFence(
     join(
@@ -408,7 +411,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
     ],
   };
   childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(config);
-  stderr.write(`OpenCode seat: waiting for native context; ${plan.delivery} Receipts: ${directory}\n`);
+  stderr.write(`clankie opencode: waiting for native context; ${plan.delivery} Receipts: ${directory}\n`);
   try {
     const launch =
       options.spawnImpl ??
@@ -430,7 +433,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
     await delivery;
     await upstream?.close();
     stderr.write(
-      `OpenCode seat closed: ${failure}. Receipts and ${warnings.size} warning(s): ${directory}\n`,
+      `clankie opencode closed: ${failure}. Receipts and ${warnings.size} warning(s): ${directory}\n`,
     );
   }
 }

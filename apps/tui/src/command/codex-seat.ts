@@ -1,9 +1,10 @@
 import { execFile as execFileCallback, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { realpath, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { bundledSkills, defaultSettingsPath, SettingsStore } from "@clankie/settings";
+import { bundledSkills, codexAccounts, defaultSettingsPath, SettingsStore } from "@clankie/settings";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { clankieStateHome } from "../state-home.ts";
 import { commandHost, outputJson } from "./io.ts";
@@ -16,43 +17,92 @@ import { codexTrackerOverrides } from "../../../clankie/src/captain/tracker-isol
 const PLUGIN = "clankie@clankie-seat";
 const exec = promisify(execFileCallback);
 type Flags = { resume: boolean; dryRun: boolean; conversationId?: string; pluginDir?: string };
-type Binding = { sessionId?: string; conversationId?: string; cwd: string; ready?: boolean };
+type Binding = {
+  sessionId?: string;
+  conversationId?: string;
+  cwd: string;
+  ready?: boolean;
+  accountHome?: string;
+};
 
-function recordPath(env: NodeJS.ProcessEnv): string {
-  return join(clankieStateHome(env), "clankie", "codex-seat.json");
+function recordPath(env: NodeJS.ProcessEnv, command: string): string {
+  return join(
+    clankieStateHome(env),
+    "clankie",
+    command === "codex" ? "codex-seat.json" : `codex-seat-${command}.json`,
+  );
 }
 
+/** Resolve one explicit label, never an ordinal or quota-based substitute. */
+async function selectAccount(options: SeatCommandOptions) {
+  const command = options.harnessCommand ?? "codex";
+  if (!/^codex\d*$/u.test(command)) throw new Error("Invalid Codex command");
+  const env = options.env ?? process.env;
+  if (command === "codex") return { options, command, account: undefined };
+  const registered = codexAccounts(undefined, env).find((account) => account.label === command);
+  if (!registered)
+    throw new Error(
+      `No Codex account labelled ${command}; register it with clankie accounts codex add HOME --label ${command}.`,
+    );
+  let home: string;
+  try {
+    home = await realpath(registered.home);
+    if (!(await stat(home)).isDirectory()) throw new Error("not a directory");
+  } catch {
+    throw new Error(`Codex account ${command} has no available home directory.`);
+  }
+  return {
+    options: { ...options, env: { ...env, CODEX_HOME: home } },
+    command,
+    account: { label: command, home },
+  };
+}
+
+type Selection = Awaited<ReturnType<typeof selectAccount>>;
+
 export async function planCodexSeat(flags: Flags, options: SeatCommandOptions): Promise<SeatPlan> {
+  return planSelectedCodexSeat(flags, await selectAccount(options));
+}
+
+async function planSelectedCodexSeat(
+  flags: Flags,
+  { options, command, account }: Selection,
+): Promise<SeatPlan> {
   const env = options.env ?? process.env;
   const run = options.execFileImpl ?? ((command, args) => exec(command, [...args], { env, timeout: 15000 }));
   try {
-    await run("codex", ["--version"]);
+    await run("codex", ["--version"], env);
   } catch {
     throw new Error("Codex is not on PATH; install Codex CLI first.");
   }
   const source = resolve(flags.pluginDir ?? join(options.repoRoot, "integrations/codex-plugin"));
   if (!existsSync(join(source, ".codex-plugin/plugin.json")))
-    throw new Error(`The Codex seat plugin is not bundled at ${source}; update this install.`);
+    throw new Error(`The Clankie Codex plugin is not bundled at ${source}; update this install.`);
   let previous: Binding | undefined;
   if (flags.resume) {
     try {
-      previous = JSON.parse(readFileSync(recordPath(env), "utf8"));
+      previous = JSON.parse(readFileSync(recordPath(env, command), "utf8"));
     } catch {
       /* No recorded native thread yet. */
     }
-    if (!previous?.sessionId) throw new Error("No Codex seat to resume; launch and trust its hooks first.");
+    if (!previous?.sessionId)
+      throw new Error(`No Codex chat to resume; run \`clankie ${command}\` and trust its hooks first.`);
+    if (account && previous.accountHome !== account.home)
+      throw new Error(`The ${command} account home changed; start a new chat without --resume.`);
     if (
       flags.conversationId !== undefined &&
       flags.conversationId !== (previous.conversationId ?? "global-default")
     )
-      throw new Error("A resumed seat keeps its conversation; start a new seat to select another one.");
+      throw new Error(
+        `A resumed Codex chat keeps its conversation; run \`clankie ${command}\` without --resume to select another one.`,
+      );
   }
   const context = await resolveSeatContext(
     {
       conversationId:
         previous === undefined ? flags.conversationId : (previous.conversationId ?? "global-default"),
       cwd: previous?.cwd ?? process.cwd(),
-      command: "codex",
+      command,
       dryRun: true,
     },
     options,
@@ -67,6 +117,7 @@ export async function planCodexSeat(flags: Flags, options: SeatCommandOptions): 
   const trackerOverrides = await (options.trackerOverrides ?? codexTrackerOverrides)(cwd, env);
   return {
     command: "codex",
+    ...(account ? { account } : {}),
     args: [
       ...trackerOverrides.flatMap((override) => ["-c", override]),
       "-c",
@@ -98,15 +149,17 @@ export async function runCodexSeat(
     connectImpl?: typeof connectLaneUpstream;
   },
 ): Promise<number> {
+  const selection = await selectAccount(options);
+  options = { ...options, ...selection.options };
+  const { command, account } = selection;
   const env = options.env ?? process.env;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  let plan = await planCodexSeat(flags, options);
+  let plan = await planSelectedCodexSeat(flags, selection);
   const ownerStep = {
     kind: "hook_trust_required",
     command: "/hooks",
-    detail:
-      "Review and trust the Clankie hooks in Codex, then exit and launch this seat again. New or changed hooks are skipped until trusted.",
+    detail: `Review and trust the Clankie hooks in Codex, then exit and repeat your clankie ${command} command. New or changed hooks are skipped until trusted.`,
   };
   if (flags.dryRun) {
     outputJson(stdout, { ok: true, ...plan, ownerSteps: [ownerStep] });
@@ -114,25 +167,27 @@ export async function runCodexSeat(
   }
   const run = options.execFileImpl ?? ((command, args) => exec(command, [...args], { env, timeout: 15000 }));
   const listed = JSON.parse(
-    (await run("codex", [...plan.args, "plugin", "list", "--json", "--marketplace", "clankie-seat"])).stdout,
+    (await run("codex", [...plan.args, "plugin", "list", "--json", "--marketplace", "clankie-seat"], env))
+      .stdout,
   ) as { installed?: { pluginId: string }[] };
   if (!listed.installed?.some((plugin) => plugin.pluginId === PLUGIN)) {
     throw new Error(
-      `Codex seat plugin is not installed. Run codex plugin marketplace add ${JSON.stringify(plan.plugin.path)}, then codex plugin add ${PLUGIN}. Disable it globally in /plugins; this launcher enables it only for the seat. Review its hooks in /hooks.`,
+      `Clankie's Codex plugin is not installed. Run codex plugin marketplace add ${JSON.stringify(plan.plugin.path)}, then codex plugin add ${PLUGIN}. Disable it globally in /plugins; clankie ${command} enables it only for its own session. Review its hooks in /hooks.`,
     );
   }
   if (plan.newConversation !== undefined) {
     plan = {
       ...plan,
-      ...(await resolveSeatContext({ cwd: plan.cwd, command: "codex", dryRun: false }, options)),
+      ...(await resolveSeatContext({ cwd: plan.cwd, command, dryRun: false }, options)),
     };
   }
-  stderr.write(`clankie seat: ${ownerStep.kind}: ${ownerStep.detail}\n`);
+  stderr.write(`clankie ${command}: ${ownerStep.kind}: ${ownerStep.detail}\n`);
   const directory = join(clankieStateHome(env), "clankie", "codex-seat-launches", randomUUID());
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const bindingPath = join(directory, "binding.json");
   const binding: Binding = {
     cwd: plan.cwd,
+    ...(account ? { accountHome: account.home } : {}),
     ...(plan.resumed ? { sessionId: plan.sessionId } : {}),
     ...(plan.conversationId ? { conversationId: plan.conversationId } : {}),
   };
@@ -182,7 +237,9 @@ export async function runCodexSeat(
     throw error;
   }
   // Record the server's thread even if its hooks still need owner trust.
-  writeFileSync(recordPath(env), JSON.stringify({ ...binding, sessionId: seat.threadId }), { mode: 0o600 });
+  writeFileSync(recordPath(env, command), JSON.stringify({ ...binding, sessionId: seat.threadId }), {
+    mode: 0o600,
+  });
   let upstream: Awaited<ReturnType<typeof connectLaneUpstream>> | undefined;
   const delivery = (async () => {
     while (!stop.signal.aborted) {
@@ -210,10 +267,10 @@ export async function runCodexSeat(
       },
       upstream,
       stop.signal,
-      { onError: (error) => stderr.write(`clankie seat outbox: ${String(error)}\n`) },
+      { onError: (error) => stderr.write(`clankie ${command} outbox: ${String(error)}\n`) },
     );
   })().catch((error) => {
-    stderr.write(`clankie seat delivery stopped: ${String(error)}; no terminal fallback.\n`);
+    stderr.write(`clankie ${command} delivery stopped: ${String(error)}; no terminal fallback.\n`);
   });
   try {
     return await running!;

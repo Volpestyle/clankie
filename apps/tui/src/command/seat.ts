@@ -1,6 +1,6 @@
 import { bundledSkills, projectSkillPlugin, SettingsStore, defaultSettingsPath } from "@clankie/settings";
 /**
- * `clankie seat` — land in Claude Code as Clankie
+ * `clankie claude` — land in Claude Code as Clankie
  * ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)).
  *
  * The plugin carries everything a plugin can declare: the output style, the
@@ -21,10 +21,11 @@ import type { CredentialStore } from "@clankie/credential-broker";
 import { outputJson, type Writable } from "./io.ts";
 import { resolveSeatContext, type NewSeatConversation } from "./seat-context.ts";
 import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
+import { operatorHarness } from "./harness-command.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const SEAT_USAGE =
-  "Usage: clankie seat [--harness claude|codex|opencode] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
+  "Usage: clankie claude|codex|opencode [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -54,6 +55,7 @@ const HERDR_DETECT_POLL_MS = 500;
 
 export interface SeatPlan {
   readonly command: string;
+  readonly account?: { readonly label: string; readonly home: string };
   readonly args: readonly string[];
   readonly plugin: { readonly source: "plugin-dir"; readonly path: string };
   readonly skills: ReturnType<typeof bundledSkills>;
@@ -77,6 +79,8 @@ interface SeatRecord {
 
 export interface SeatCommandOptions {
   readonly repoRoot: string;
+  /** Owner-facing harness command; pins selection even if --harness is supplied. */
+  readonly harnessCommand?: string;
   /** Claude command selected by `clankie claude[N]`. */
   readonly claudeCommand?: string;
   readonly host?: string;
@@ -88,6 +92,7 @@ export interface SeatCommandOptions {
   readonly execFileImpl?: (
     command: string,
     args: readonly string[],
+    env?: NodeJS.ProcessEnv,
   ) => Promise<{ readonly stdout: string; readonly stderr: string }>;
   readonly spawnImpl?: (
     command: string,
@@ -110,8 +115,11 @@ interface SeatFlags {
   readonly pluginDir?: string;
 }
 
-export function parseSeatArgs(args: readonly string[]): SeatFlags {
-  let harness: SeatFlags["harness"];
+export function parseSeatArgs(args: readonly string[], command?: string): SeatFlags {
+  const selected = operatorHarness(command);
+  const usage = command === undefined ? SEAT_USAGE : SEAT_USAGE.replace("claude|codex|opencode", command);
+  if (command !== undefined && selected === undefined) throw new Error(usage);
+  let harness: SeatFlags["harness"] = selected;
   let conversationId: string | undefined;
   let resume = false;
   let dryRun = false;
@@ -120,20 +128,21 @@ export function parseSeatArgs(args: readonly string[]): SeatFlags {
     const arg = args[index];
     if (arg === "--harness") {
       const value = args[++index];
-      if (value !== "claude" && value !== "codex" && value !== "opencode") throw new Error(SEAT_USAGE);
+      if (value !== "claude" && value !== "codex" && value !== "opencode") throw new Error(usage);
+      if (selected !== undefined && value !== selected) throw new Error(usage);
       harness = value;
     } else if (arg === "--resume") resume = true;
     else if (arg === "--dry-run") dryRun = true;
     else if (arg === "--conversation") {
       const value = args[++index]?.trim();
-      if (!value || value.startsWith("--")) throw new Error(SEAT_USAGE);
+      if (!value || value.startsWith("--")) throw new Error(usage);
       conversationId = value;
     } else if (arg === "--plugin-dir") {
       const value = args[index + 1];
-      if (value === undefined || value.length === 0) throw new Error(SEAT_USAGE);
+      if (value === undefined || value.length === 0 || value.startsWith("--")) throw new Error(usage);
       pluginDir = value;
       index += 1;
-    } else throw new Error(SEAT_USAGE);
+    } else throw new Error(usage);
   }
   return {
     ...(harness === undefined ? {} : { harness }),
@@ -238,6 +247,13 @@ function withoutUserSkills<T extends { readonly name: string; readonly included:
 }
 
 export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): Promise<SeatPlan> {
+  const named = options.harnessCommand ?? options.claudeCommand;
+  if (named !== undefined) {
+    const harness = operatorHarness(named);
+    if (harness === undefined || (flags.harness !== undefined && flags.harness !== harness))
+      throw new Error(SEAT_USAGE.replace("claude|codex|opencode", named));
+    flags = { ...flags, harness };
+  }
   if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
     throw new Error(SEAT_USAGE);
   if (flags.harness === "opencode") {
@@ -249,7 +265,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     return planCodexSeat(flags, options);
   }
   const env = options.env ?? process.env;
-  const command = options.claudeCommand ?? "claude";
+  const command = named ?? "claude";
   if (!/^claude\d*$/u.test(command)) throw new Error("Invalid Claude command");
   const execFile =
     options.execFileImpl ??
@@ -280,7 +296,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
 
   const previous = flags.resume ? readSeatRecord(env, command) : undefined;
   if (flags.resume && previous === undefined) {
-    throw new Error("No seat to resume; `clankie seat` first.");
+    throw new Error(`No Claude chat to resume; run \`clankie ${command}\` first.`);
   }
   const sessionId = previous?.sessionId ?? randomUUID();
   if (
@@ -351,6 +367,7 @@ async function claimHerdrSeat(
   execFile: NonNullable<SeatCommandOptions["execFileImpl"]>,
   sleep: (ms: number) => Promise<void>,
   stderr: Writable,
+  command: string,
 ): Promise<void> {
   const deadline = Date.now() + HERDR_DETECT_TIMEOUT_MS;
   for (;;) {
@@ -362,17 +379,19 @@ async function claimHerdrSeat(
       // Not detected yet, or herdr is not answering; keep waiting until the deadline.
     }
     if (Date.now() >= deadline) {
-      stderr.write("clankie seat: herdr never saw Claude Code in this pane; the seat is unnamed.\n");
+      stderr.write(`clankie ${command}: Herdr never saw Claude Code in this pane; it remains unnamed.\n`);
       return;
     }
     await sleep(HERDR_DETECT_POLL_MS);
   }
   try {
     await execFile("herdr", ["agent", "rename", paneId, SEAT_AGENT_NAME]);
-    stderr.write(`clankie seat: pane ${paneId} is now ${SEAT_AGENT_NAME}; this seat is his head.\n`);
+    stderr.write(
+      `clankie ${command}: pane ${paneId} is now ${SEAT_AGENT_NAME}; it receives his main chat.\n`,
+    );
   } catch (caught) {
     stderr.write(
-      `clankie seat: another pane already holds the ${SEAT_AGENT_NAME} seat (${herdrFailureText(caught)}); this pane stays an ordinary fleet agent.\n`,
+      `clankie ${command}: another pane already receives his main chat (${herdrFailureText(caught)}); this pane stays an ordinary fleet agent.\n`,
     );
   }
 }
@@ -381,7 +400,7 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const env = options.env ?? process.env;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  const flags = parseSeatArgs(args);
+  const flags = parseSeatArgs(args, options.harnessCommand ?? options.claudeCommand);
   if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
     throw new Error(SEAT_USAGE);
   if (flags.harness === "opencode") {
@@ -435,7 +454,7 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const claim =
     plan.herdrPaneId === undefined
       ? Promise.resolve()
-      : claimHerdrSeat(plan.herdrPaneId, execFile, sleep, stderr).catch(() => undefined);
+      : claimHerdrSeat(plan.herdrPaneId, execFile, sleep, stderr, plan.command).catch(() => undefined);
   const exitCode = await running;
   await claim;
   if (plan.herdrPaneId !== undefined) {

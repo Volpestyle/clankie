@@ -43,6 +43,7 @@ test("Codex launcher selects its conversation and presents native trust as an ow
         CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
       },
       execFileImpl: async () => ({ stdout: "codex-cli 0.159.1", stderr: "" }),
+      trackerOverrides: async () => [],
       fetchImpl: async (url) => {
         expect(String(url)).toContain("conversationId=scratch");
         return Response.json({ conversationId: "scratch", cwd: root });

@@ -57,6 +57,7 @@ import { runMemoryCommand } from "../src/command/memory.ts";
 import { runMetricsCommand } from "../src/command/metrics.ts";
 import { runTelemetryCommand } from "../src/command/telemetry.ts";
 import { runSeatCommand } from "../src/command/seat.ts";
+import { operatorHarness } from "../src/command/harness-command.ts";
 import { runMcpCommand } from "../src/command/mcp.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
 import { runGatewayCommand } from "../src/command/gateway.ts";
@@ -132,7 +133,7 @@ export async function runHeadlessCaptainCommand(
       (await new SettingsStore(defaultSettingsPath(env)).load()).client?.mode === "hosted" &&
       !["help", "--help", "-h"].includes(command ?? "")
     ) {
-      if (HOSTED_LOCAL_ONLY.has(command ?? ""))
+      if (HOSTED_LOCAL_ONLY.has(command ?? "") || operatorHarness(command) !== undefined)
         throw new Error(`${command} is managed by the hosted service; no local action was taken.`);
       const transport = await hostedTransportFor(env);
       // These existing commands are HTTP-only. The transport replaces their local
@@ -392,12 +393,17 @@ export async function runHeadlessCaptainCommand(
     // speaks JSON-RPC on stdout, so it never goes through outputJson.
     if (command === "seat-sync") return await runSeatSyncCommand(rest, options);
     if (command === "seat-hook") return await runSeatHookCommand(rest, options);
-    if (command === "seat" || /^claude\d*$/u.test(command ?? "")) {
+    if (command === "seat" || operatorHarness(command) !== undefined) {
       return await runSeatCommand(rest, {
-        ...(command === "seat" ? {} : { claudeCommand: command }),
+        ...(command === "seat" ? {} : { harnessCommand: command }),
         repoRoot: options.repoRoot,
         ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        ...(options.host === undefined ? {} : { host: options.host }),
+        ...(options.operatorCredentialStore === undefined
+          ? {}
+          : { operatorCredentialStore: options.operatorCredentialStore }),
         stdout,
         stderr,
       });
