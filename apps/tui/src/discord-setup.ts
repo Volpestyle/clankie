@@ -16,7 +16,7 @@ import type { ClankieFaceShell } from "./shell/shell.ts";
 import type { SetupFlow } from "./shell/setup-flow.ts";
 
 const plain = (text: string) => stripVTControlCharacters(text).replace(/[\r\n\t]/gu, " ");
-export function formatDiscordSetup(view: DiscordSetupView): string {
+function formatDiscordSetup(view: DiscordSetupView): string {
   return view.sentences
     .map(
       (sentence) =>
