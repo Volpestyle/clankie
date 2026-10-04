@@ -289,3 +289,124 @@ it("reports remote harness diagnostics only to the owner through the registered 
     await app.close();
   }
 });
+
+it("prepares registered fleets only for the owner and passes remote source setup through the CLI/API", async () => {
+  const seen: Array<{ id: string; options: { codexSourceSetup?: string } }> = [];
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+    authenticateCaptain: async () => ({ captainId: "captain", steerSourceLane: "api" }),
+    fleetLinks: { authenticate: (token) => (token === "fleet" ? "pc" : undefined) },
+    prepareFleet: async (id, options) => {
+      seen.push({ id, options });
+      return { machine: id, codex: { plugin: true, bridge: true, forwarding: true } };
+    },
+  });
+  const cli = {
+    host: "http://localhost",
+    env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+    fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
+  };
+  try {
+    for (const authorization of [undefined, "Bearer captain", "Bearer fleet"]) {
+      const denied = await app.app.request("/v1/runtime-connections/pc/prepare", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(authorization === undefined ? {} : { authorization }),
+        },
+        body: JSON.stringify({ codexSourceSetup: "C:\\Owner Source\\setup.py" }),
+      });
+      expect(denied.status).toBe(401);
+    }
+    expect(seen).toEqual([]);
+    expect(await runRuntimeCommand(["prepare", "pc"], cli)).toMatchObject({ ok: true });
+    for (const codexSourceSetup of [
+      "/owner/source/setup.py",
+      "C:\\Owner Source\\setup.py",
+      "\\\\pc\\source\\setup.py",
+    ]) {
+      expect(
+        await runRuntimeCommand(["prepare", "pc", "--codex-source-setup", codexSourceSetup], cli),
+      ).toMatchObject({ ok: true });
+    }
+    expect(seen).toEqual([
+      { id: "pc", options: {} },
+      { id: "pc", options: { codexSourceSetup: "/owner/source/setup.py" } },
+      { id: "pc", options: { codexSourceSetup: "C:\\Owner Source\\setup.py" } },
+      { id: "pc", options: { codexSourceSetup: "\\\\pc\\source\\setup.py" } },
+    ]);
+  } finally {
+    await app.close();
+  }
+});
+
+it("refuses malformed prepare bodies and unknown fields before fleet preparation", async () => {
+  const seen: string[] = [];
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    authenticateOperator: async () => ({ operatorId: "owner" }),
+    prepareFleet: async (id) => {
+      seen.push(id);
+      return {};
+    },
+  });
+  try {
+    const bodies = [
+      "{",
+      "null",
+      "[]",
+      JSON.stringify("/setup.py"),
+      JSON.stringify({ codexSourceSetup: null }),
+      JSON.stringify({ codexSourceSetup: 123 }),
+      JSON.stringify({ codexSourceSetup: { command: "/setup.py", args: [] } }),
+      JSON.stringify({ codexSourceSetup: "" }),
+      JSON.stringify({ codexSourceSetup: "relative/setup.py" }),
+      JSON.stringify({ codexSourceSetup: "~/setup.py" }),
+      JSON.stringify({ codexSourceSetup: "C:setup.py" }),
+      JSON.stringify({ codexSourceSetup: "/setup.py\nother" }),
+      JSON.stringify({ codexSourceSetup: "/setup.py\u0000" }),
+      JSON.stringify({ host: "unregistered" }),
+      JSON.stringify({ codexSourceSetup: "/setup.py", args: ["--login"] }),
+    ];
+    for (const body of bodies) {
+      const result = await app.app.request("/v1/runtime-connections/pc/prepare", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      expect(result.status, body).toBe(400);
+      expect(await result.json()).toEqual({ error: "invalid_fleet_prepare" });
+    }
+    expect(seen).toEqual([]);
+  } finally {
+    await app.close();
+  }
+});
+
+it("returns incomplete native Codex preparation as a conflict and preserves the repair detail for the CLI", async () => {
+  const detail =
+    "Codex preparation incomplete on pc: missing native plugin, Clankie bridge, forwarding. Inspect clankie doctor; managed configuration requires --codex-source-setup.";
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    authenticateOperator: async () => ({ operatorId: "owner" }),
+    prepareFleet: async () => {
+      throw new Error(detail);
+    },
+  });
+  try {
+    const result = await app.app.request("/v1/runtime-connections/pc/prepare", { method: "POST" });
+    expect(result.status).toBe(409);
+    expect(await result.json()).toEqual({ error: "fleet_prepare_failed", detail });
+    await expect(
+      runRuntimeCommand(["prepare", "pc"], {
+        host: "http://localhost",
+        env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+        fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
+      }),
+    ).rejects.toThrow(detail);
+  } finally {
+    await app.close();
+  }
+});

@@ -4,7 +4,7 @@ import { claudeProfileDirectories } from "./harness-status.mjs";
 import { execFile } from "node:child_process";
 import { lstat, readFile, readlink, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, win32, posix } from "node:path";
 import { promisify } from "node:util";
 const exec = promisify(execFile);
 const managedText = (text) =>
@@ -168,8 +168,17 @@ async function installHarnessBridges(options) {
         await execute(harness, ["plugin", "update", "clankie-worker@clankie", "--scope", "user"]);
         await checkAlias();
       } else if (managed) {
-        await execute(sourceSetup.command, sourceSetup.args);
-        if ((await realpath(config)) !== source || (await lstat(config)).isSymbolicLink() !== wasSymlink)
+        await run(sourceSetup.command, sourceSetup.args, {
+          ...targetEnv,
+          CLANKIE_CODEX_WORKER_MARKETPLACE: marketplace,
+          CLANKIE_CODEX_NATIVE_EXECUTABLE: await nativeCodexExecutable({ env: targetEnv }),
+          CODEX_HOME: env.CODEX_HOME || join(home, ".codex"),
+        });
+        if (
+          (await realpath(config)) !== source ||
+          (await lstat(config)).isSymbolicLink() !== wasSymlink ||
+          (wasSymlink && (await readlink(config)) !== linkBefore)
+        )
           throw new Error(
             "Source setup changed the managed configuration link; inspect its source before continuing",
           );
@@ -219,3 +228,21 @@ async function installHarnessBridges(options) {
   return results;
 }
 export { installHarnessBridges, confirmClaudeWorkerEnabled };
+
+/** Execute an owner-selected source script without a shell or a config rewrite. */
+export function codexSourceSetupCommand(
+  script,
+  { platform = process.platform, node = process.execPath } = {},
+) {
+  if (!(platform === "win32" ? win32 : posix).isAbsolute(script) || /\p{Cc}/u.test(script))
+    throw new Error("Codex source setup must be an absolute source-owned script path");
+  if (/\.m?js$/iu.test(script)) return { command: node, args: [script] };
+  if (/\.py$/iu.test(script))
+    return {
+      command: platform === "win32" ? "py" : "python3",
+      args: [...(platform === "win32" ? ["-3"] : []), script],
+    };
+  if (platform === "win32" && /\.ps1$/iu.test(script))
+    return { command: "powershell", args: ["-NoProfile", "-NonInteractive", "-File", script] };
+  return { command: script, args: [] };
+}

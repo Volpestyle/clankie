@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { parseInboxRead, runLinearCommand } from "../src/command/linear.ts";
-import { runHerdrCommand } from "../src/command/herdr.ts";
+import { herdrFleetRuntimeArgs, runHerdrCommand } from "../src/command/herdr.ts";
+import { runRuntimeCommand } from "../src/command/runtime.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
 
 async function tempStore(): Promise<SettingsStore> {
@@ -53,6 +54,61 @@ describe("clankie herdr", () => {
     await expect(runHerdrCommand(["set", "--session", "no spaces"], { settings })).rejects.toThrow();
     await expect(runHerdrCommand(["set"], { settings })).rejects.toThrow("Usage: clankie herdr");
   });
+});
+
+describe("clankie herdr prepare", () => {
+  it.each([undefined, "/owner/source/setup.py", "C:\\Owner Source\\setup.py", "\\\\pc\\source\\setup.py"])(
+    "passes the remote source setup %s through the runtime prepare request",
+    async (codexSourceSetup) => {
+      const args = [
+        "prepare",
+        "pc fleet",
+        ...(codexSourceSetup === undefined ? [] : ["--codex-source-setup", codexSourceSetup]),
+      ];
+      const runtimeArgs = herdrFleetRuntimeArgs(args)!;
+      expect(runtimeArgs).toEqual(args);
+      const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        expect(String(url)).toBe("http://fixture/v1/runtime-connections/pc%20fleet/prepare");
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture");
+        expect(init?.body ? JSON.parse(init.body as string) : undefined).toEqual(
+          codexSourceSetup === undefined ? undefined : { codexSourceSetup },
+        );
+        return Response.json({ ok: true });
+      });
+      expect(
+        await runRuntimeCommand(runtimeArgs, {
+          host: "http://fixture",
+          env: { CLANKIE_OPERATOR_TOKEN: "fixture" },
+          fetchImpl: fetchImpl as typeof fetch,
+        }),
+      ).toEqual({ ok: true });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ["prepare"],
+    ["prepare", "pc", "--codex-source-setup"],
+    ["prepare", "pc", "--host", "unregistered"],
+    ["prepare", "pc", "--codex-source-setup", "/setup.py", "--codex-source-setup", "/other.py"],
+  ])("rejects malformed prepare arguments %j before a request", async (...args) => {
+    expect(() => herdrFleetRuntimeArgs(args)).toThrow("Usage: clankie herdr");
+    const fetchImpl = vi.fn();
+    await expect(runRuntimeCommand(args, { fetchImpl })).rejects.toThrow("Usage: clankie runtime prepare");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "relative/setup.py", "~/setup.py", "C:setup.py", "/setup.py\nother", "/setup.py\u0000"])(
+    "rejects invalid remote source setup %j before a request",
+    async (codexSourceSetup) => {
+      const fetchImpl = vi.fn();
+      await expect(
+        runRuntimeCommand(["prepare", "pc", "--codex-source-setup", codexSourceSetup], { fetchImpl }),
+      ).rejects.toThrow("absolute script path on the remote machine");
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("clankie workdir", () => {

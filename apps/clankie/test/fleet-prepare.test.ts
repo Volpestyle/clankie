@@ -121,7 +121,7 @@ it.each([true, false])(
       if (text.includes("harness-inspect.mjs"))
         return JSON.stringify({
           claude: [{ executable: true, enabled: true, versionMatches: current }],
-          codex: { registered: false, pluginInstalled: false, versionMatches: false },
+          codex: { executable: true, registered: true, pluginInstalled: false, versionMatches: false },
         });
       if (text.includes("CLANKIE-POLICY-PATH"))
         return `---CLANKIE-POLICY-PATH---C:\\policy.json\n${JSON.stringify({ channelsEnabled: true, allowedChannelPlugins: [worker] })}`;
@@ -134,11 +134,7 @@ it.each([true, false])(
         copied.push(destination);
       },
     });
-    if (current)
-      expect(await result).toMatchObject({
-        codex: { registered: false, changed: false },
-        installations: [{ status: "source-manager-required" }],
-      });
+    if (current) await expect(result).rejects.toThrow("Codex preparation incomplete on pc");
     else
       await expect(result).rejects.toThrow(
         ".claude-james: source-manager-required (Use the owning source setup)",
@@ -148,35 +144,107 @@ it.each([true, false])(
   },
 );
 
-it.each(["ready", "disabled", "missing-bridge", "missing-forwarding"])(
-  "does not mark an unusable Codex plugin registered: %s",
-  async (kind) => {
+it.each([
+  "ready",
+  "disabled",
+  "missing-plugin",
+  "stale",
+  "missing-bridge",
+  "missing-forwarding",
+  "missing-skill",
+  "absent",
+])("rejects incomplete native Codex preparation despite a legacy registration: %s", async (kind) => {
+  const { prepareFleet } = await import("../src/fleet-prepare.ts");
+  const shell = async (command: string) => {
+    const encoded = command.match(/-EncodedCommand\s+['"]?([A-Za-z0-9+/=]+)/u)?.[1];
+    const text = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
+    if (text.includes("harness-setup.mjs")) return "[]";
+    if (text.includes("harness-inspect.mjs"))
+      return JSON.stringify({
+        claude: [],
+        codex: {
+          executable: kind !== "absent",
+          registered: kind !== "absent",
+          pluginInstalled: !["missing-plugin", "absent"].includes(kind),
+          versionMatches: kind !== "stale",
+          skill: kind !== "missing-skill",
+          enabled: kind !== "disabled",
+          bridge: kind !== "missing-bridge",
+          identityForwarding: kind !== "missing-forwarding",
+        },
+      });
+    if (text.includes("CLANKIE-POLICY-PATH"))
+      return `---CLANKIE-POLICY-PATH---C:\\policy.json\n${JSON.stringify({ channelsEnabled: true, allowedChannelPlugins: [worker] })}`;
+    return "";
+  };
+  const result = prepareFleet(pc, {
+    shell,
+    workerPluginDir: new URL("../../../integrations/claude-plugin/worker", import.meta.url).pathname,
+    copy: async () => {},
+  });
+  if (["ready", "absent"].includes(kind)) expect((await result).codex.registered).toBe(kind === "ready");
+  else await expect(result).rejects.toThrow("Codex preparation incomplete on pc");
+});
+
+it.each(["powershell", "posix"] as const)(
+  "passes an explicitly selected remote source manager (%s)",
+  async (shellKind) => {
     const { prepareFleet } = await import("../src/fleet-prepare.ts");
-    const shell = async (command: string) => {
-      const encoded = command.match(/-EncodedCommand\s+['"]?([A-Za-z0-9+/=]+)/u)?.[1];
-      const text = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
-      if (text.includes("harness-setup.mjs")) return "[]";
-      if (text.includes("harness-inspect.mjs"))
-        return JSON.stringify({
-          claude: [],
-          codex: {
-            registered: false,
-            pluginInstalled: true,
-            versionMatches: true,
-            enabled: kind !== "disabled",
-            bridge: kind !== "missing-bridge",
-            identityForwarding: kind !== "missing-forwarding",
-          },
-        });
-      if (text.includes("CLANKIE-POLICY-PATH"))
-        return `---CLANKIE-POLICY-PATH---C:\\policy.json\n${JSON.stringify({ channelsEnabled: true, allowedChannelPlugins: [worker] })}`;
-      return "";
-    };
-    const result = await prepareFleet(pc, {
-      shell,
-      workerPluginDir: new URL("../../../integrations/claude-plugin/worker", import.meta.url).pathname,
-      copy: async () => {},
-    });
-    expect(result.codex.registered).toBe(kind === "ready");
+    const script =
+      shellKind === "powershell"
+        ? "C:\\owner's source\\codex-worker-setup.py"
+        : "/owner's source/codex-worker-setup.py";
+    const commands: string[] = [];
+    const result = await prepareFleet(
+      { ...pc, ssh: { ...pc.ssh, shell: shellKind } },
+      {
+        codexSourceSetup: script,
+        workerPluginDir: new URL("../../../integrations/claude-plugin/worker", import.meta.url).pathname,
+        copy: async () => {},
+        shell: async (command) => {
+          const encoded = command.match(/-EncodedCommand\s+['"]?([A-Za-z0-9+/=]+)/u)?.[1];
+          const text = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
+          commands.push(text);
+          if (text.includes("harness-setup.mjs"))
+            return JSON.stringify([{ harness: "codex", status: "source-setup-completed" }]);
+          if (text.includes("harness-inspect.mjs"))
+            return JSON.stringify({
+              claude: [],
+              codex: {
+                executable: true,
+                registered: false,
+                pluginInstalled: true,
+                versionMatches: true,
+                enabled: true,
+                bridge: true,
+                identityForwarding: true,
+                skill: true,
+              },
+            });
+          return (
+            "---CLANKIE-POLICY-PATH---policy.json\n" +
+            JSON.stringify({ channelsEnabled: true, allowedChannelPlugins: [worker] })
+          );
+        },
+      },
+    );
+    expect(result.codex).toEqual({ registered: true, changed: true });
+    const install = commands.find((command) => command.includes("harness-setup.mjs"))!;
+    expect(install).toContain("--codex-source-setup");
+    expect(install).not.toContain("${setupArgs}");
+    expect(install).toContain(
+      shellKind === "powershell" ? "C:\\owner''s source\\codex-worker-setup.py" : "owner",
+    );
   },
 );
+
+it("rejects a relative remote setup path before staging or copying", async () => {
+  const { prepareFleet } = await import("../src/fleet-prepare.ts");
+  const shell = vi.fn(async () => "");
+  const copy = vi.fn(async () => {});
+  await expect(
+    prepareFleet(pc, { shell, copy, workerPluginDir: "/never-read", codexSourceSetup: "relative/setup.py" }),
+  ).rejects.toThrow("absolute script path");
+  expect(shell).not.toHaveBeenCalled();
+  expect(copy).not.toHaveBeenCalled();
+});

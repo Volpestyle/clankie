@@ -3,7 +3,7 @@ import type { HerdrBinding } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath, type HerdrSettings } from "@clankie/settings";
 
 const HERDR_USAGE =
-  "Usage: clankie herdr [status|open|create|disable]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external|disabled\n       clankie herdr fleets\n       clankie herdr add NAME --ssh HOST --session SESSION [--shell posix|powershell]\n       clankie herdr remove NAME\n       clankie herdr prepare NAME";
+  "Usage: clankie herdr [status|open|create|disable]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external|disabled\n       clankie herdr fleets\n       clankie herdr add NAME --ssh HOST --session SESSION [--shell posix|powershell]\n       clankie herdr remove NAME\n       clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]";
 
 /**
  * Remote fleets are runtime connections with an ssh transport (ADR 0184,
@@ -15,8 +15,13 @@ export function herdrFleetRuntimeArgs(args: readonly string[]): string[] | undef
   if (verb === "fleets" && args.length === 1) return ["list"];
   if (verb === "remove" && args.length === 2 && name !== undefined) return ["disconnect", name];
   if (verb === "add" && name !== undefined && rest.includes("--ssh")) return ["connect", name, ...rest];
-  // Claude workers on that machine (VUH-1527): ship and approve the worker plugin there.
-  if (verb === "prepare" && args.length === 2 && name !== undefined) return ["prepare", name];
+  // Prepare native workers on that machine, optionally through its source-owned Codex setup.
+  if (
+    verb === "prepare" &&
+    name !== undefined &&
+    (rest.length === 0 || (rest.length === 2 && rest[0] === "--codex-source-setup"))
+  )
+    return ["prepare", name, ...rest];
   if (verb === "add" || verb === "remove" || verb === "fleets" || verb === "prepare")
     throw new Error(HERDR_USAGE);
   return undefined;
