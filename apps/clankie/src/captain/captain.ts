@@ -1,3 +1,4 @@
+import { projectOnboarding } from "./project-onboarding.ts";
 import {
   authorizeQuestion,
   questionWorkspaceContext,
@@ -1751,6 +1752,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         current: bodyIdentity.current,
         authorize: bodyIdentity.authorize,
       };
+      lane.capture.proposeProjectCreate =
+        context.ownerAuthority && context.questionBinding
+          ? (draft) =>
+              conversations.proposeProjectCreate(conversationId, draft, {
+                ...context,
+                questionCurrent: bodyIdentity.current,
+              })
+          : undefined;
       lane.capture.requestQuestion =
         context.ownerAuthority && context.questionBinding
           ? (draft) =>
@@ -2073,6 +2082,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     workingDirectory,
     ownerAttachmentHost(),
   );
+  conversations.projectOnboarding = projectOnboarding(settingsStore);
   conversations.questionEligible = (id) =>
     !conversations.nativeSource(id) && !seatOutboxes.get(id)?.bound() && !seatOutboxes.get(id)?.uncertain();
 

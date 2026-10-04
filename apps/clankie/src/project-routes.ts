@@ -1,10 +1,9 @@
+import { applyProjectCreate } from "./project-create.ts";
 import { isDeepStrictEqual } from "node:util";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   projectsRevision,
-  createProjectSettings,
-  observeProjectEnrollment,
   ProjectTrackerUnavailable,
   removeProjectWorkspace,
   addProjectWorktreeRoot,
@@ -64,29 +63,12 @@ export function createProjectRoutes(
       if ((await authorize(context.req.raw)) !== true) throw new Error("Owner authority changed");
     };
     try {
-      const original = await settings.load();
-      // Validate the pure command before reading owner-selected local paths.
-      createProjectSettings(original.projects, input.data);
-      await requireOwner();
-      const initial = await observeProjectEnrollment(original.projects, input.data);
-      await requireOwner();
-      let before: string | undefined;
-      const updated = await settings.update(
-        (current) => {
-          before = JSON.stringify(current);
-          return { ...current, projects: createProjectSettings(current.projects, input.data) };
-        },
-        async () => {
-          await requireOwner();
-          const current = await settings.load();
-          if (JSON.stringify(current) !== before) throw new Error("Settings changed");
-          if (!isDeepStrictEqual(await observeProjectEnrollment(current.projects, input.data), initial))
-            throw new Error("Project workspace or tracker changed");
-          await requireOwner();
-          if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
-        },
+      const result = await applyProjectCreate(
+        { load: () => settings.load(), update: (mutate, guard) => settings.update!(mutate, guard) },
+        input.data,
+        requireOwner,
       );
-      return context.json({ settings: updated.projects, revision: projectsRevision(updated.projects) }, 201);
+      return context.json(result, 201);
     } catch (error) {
       return context.json(
         {

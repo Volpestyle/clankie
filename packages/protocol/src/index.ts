@@ -1,3 +1,11 @@
+import {
+  ProjectProposalLocatorSchema,
+  ProjectProposalTargetSchema,
+  ProjectProposalResultSchema,
+  type ProjectProposalLocator,
+  type ProjectProposalTarget,
+  type ProjectProposalResult,
+} from "./projects.ts";
 export * from "./discord-settings.ts";
 export * from "./discord-rooms.ts";
 import { BodyLeaseResultSchema } from "./body-leases.ts";
@@ -2516,6 +2524,14 @@ export const OperatorSeatReplySchema = z
 export type OperatorSeatReply = z.infer<typeof OperatorSeatReplySchema>;
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
+  ProjectProposalLocatorSchema.extend({
+    op: z.literal("project_proposal_get"),
+    schemaVersion: z.literal(1),
+  }).strict(),
+  ProjectProposalTargetSchema.extend({
+    op: z.literal("project_proposal_confirm"),
+    schemaVersion: z.literal(1),
+  }).strict(),
   z
     .object({
       op: z.literal("input_get"),
@@ -2875,6 +2891,20 @@ export type OperatorWorkItemsOutcome =
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
   z
     .object({
+      op: z.literal("project_proposal_get"),
+      schemaVersion: z.literal(1),
+      result: ProjectProposalResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("project_proposal_confirm"),
+      schemaVersion: z.literal(1),
+      result: ProjectProposalResultSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("input_get"),
       schemaVersion: z.literal(1),
       result: ConversationQuestionResultSchema,
@@ -3225,6 +3255,8 @@ export type OperatorConversationTailItem =
  * captain-runtime internals — so every surface calls one identical contract.
  */
 export interface OperatorConversationServiceClient {
+  projectProposalGet?(target: ProjectProposalLocator): Promise<ProjectProposalResult>;
+  projectProposalConfirm?(target: ProjectProposalTarget): Promise<ProjectProposalResult>;
   inputGet?(conversationId: string, requestId?: string): Promise<ConversationQuestionResult>;
   inputAnswer?(
     target: ConversationQuestionTarget & { answer: ConversationQuestionAnswer },
@@ -3375,6 +3407,16 @@ export function createOperatorConversationServiceClient(
   const workProjection = options.includeWork === true ? { includeWork: true } : {};
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   return {
+    async projectProposalGet(target) {
+      const result = await dispatch({ op: "project_proposal_get", schemaVersion: 1, ...target });
+      if (result.op !== "project_proposal_get") throw new Error("Unexpected proposal response");
+      return result.result;
+    },
+    async projectProposalConfirm(target) {
+      const result = await dispatch({ op: "project_proposal_confirm", schemaVersion: 1, ...target });
+      if (result.op !== "project_proposal_confirm") throw new Error("Unexpected proposal response");
+      return result.result;
+    },
     async inputGet(conversationId, requestId) {
       const result = await dispatch({
         op: "input_get",

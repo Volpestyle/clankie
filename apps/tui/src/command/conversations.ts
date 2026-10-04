@@ -1,3 +1,4 @@
+import { ProjectProposalLocatorSchema, ProjectProposalTargetSchema } from "@clankie/protocol/projects";
 import { ClankieApiClient } from "@clankie/api-client";
 import { parseArgs } from "node:util";
 import {
@@ -20,6 +21,8 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 
 const USAGE = [
   "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
+  "       clankie conversations project-proposal ID --request UUID --incarnation UUID",
+  "       clankie conversations confirm-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
   "       clankie conversations channels | rooms",
   "       clankie conversations head OWNER HEAD|none",
   "       clankie conversations channel [CHANNEL_ID] [--title TITLE] [--member PERSONA_ID]...",
@@ -43,7 +46,9 @@ export async function runConversationsCommand(
     readonly stdin?: AsyncIterable<unknown> & { readonly isTTY?: boolean };
   },
 ): Promise<number> {
-  if (["questions", "answer", "cancel-question"].includes(args[0] ?? ""))
+  if (
+    ["questions", "answer", "cancel-question", "project-proposal", "confirm-project"].includes(args[0] ?? "")
+  )
     return runQuestionAction(args, options);
   if (args[0] === "head") {
     if (args.length !== 3 || !args[1] || !args[2]) throw new Error(USAGE);
@@ -255,6 +260,9 @@ async function runQuestionAction(
     args: [...args],
     allowPositionals: true,
     options: {
+      proposal: { type: "string" },
+      artifact: { type: "string" },
+      "projects-revision": { type: "string" },
       request: { type: "string" },
       incarnation: { type: "string" },
       revision: { type: "string" },
@@ -279,6 +287,36 @@ async function runQuestionAction(
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     }),
   );
+  if (action === "project-proposal" || action === "confirm-project") {
+    if (positionals.length !== 2 || values.option || values.text || values.stdin)
+      throw new Error("Project confirmation accepts an exact proposal target only");
+    const locator = ProjectProposalLocatorSchema.parse({
+      conversationId,
+      requestId: values.request,
+      incarnationId: values.incarnation,
+    });
+    if (
+      action === "project-proposal" &&
+      (values.revision || values.proposal || values.artifact || values["projects-revision"])
+    )
+      throw new Error("Proposal read accepts request and incarnation only");
+    const result =
+      action === "project-proposal"
+        ? await client.projectProposalGet!(locator)
+        : await client.projectProposalConfirm!(
+            ProjectProposalTargetSchema.parse({
+              ...locator,
+              expectedRevision: values.revision === undefined ? undefined : Number(values.revision),
+              proposalId: values.proposal,
+              artifactSha256: values.artifact,
+              expectedProjectsRevision: values["projects-revision"],
+            }),
+          );
+    outputJson(options.stdout ?? process.stdout, result);
+    return result.status === "pending" || result.status === "created" ? 0 : 1;
+  }
+  if (values.proposal || values.artifact || values["projects-revision"])
+    throw new Error("Project target flags require a project action");
   let result;
   if (action === "questions") {
     if (requestId || Object.keys(values).some((k) => k !== "request"))

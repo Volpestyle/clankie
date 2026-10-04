@@ -1,3 +1,4 @@
+import type { ProjectProposalDraft } from "@clankie/protocol/projects";
 import type { QuestionDraft } from "./conversation-questions.ts";
 import type { ConversationQuestionResult } from "@clankie/protocol";
 import {
@@ -57,6 +58,7 @@ import { WorkRequestSchema } from "../work-items.ts";
  * (which scopes every room-keyed read and write a tool makes).
  */
 export interface TurnContext {
+  proposeProjectCreate?: ((draft: ProjectProposalDraft) => Promise<ConversationQuestionResult>) | undefined;
   requestQuestion?: ((draft: QuestionDraft) => Promise<ConversationQuestionResult>) | undefined;
   /** Host-only immutable conversation ownership and current admission authority. */
   conversationAuthority?: ConversationAuthority | undefined;
