@@ -567,7 +567,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
             })
           : await dispatchFence.run(assertDispatch, () =>
-              client.callTool(input.tool, input.arguments, input.timeoutMs),
+              input.timeoutMs === undefined
+                ? client.callTool(input.tool, input.arguments)
+                : client.callTool(input.tool, input.arguments, input.timeoutMs),
             );
         options.logger.info(
           {
