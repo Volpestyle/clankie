@@ -8,6 +8,7 @@ import {
   PROJECTS_PATH,
   PROJECT_CREATE_SETTINGS_PATH,
   CreateProjectSettingsSchema,
+  readFleetProjectMembership,
   PROJECT_UPDATE_SETTINGS_PATH,
   ProjectsSnapshotSchema,
   UpdateProjectSettingsSchema,
@@ -24,10 +25,12 @@ export async function runProjectSettingsCommand(
     operatorCredentialStore?: CredentialStore;
   } = {},
 ) {
+  const membership = args.length === 3 && args[0] === "membership";
   const list = args.length === 1 && args[0] === "list";
   const create = args[0] === "create";
   if (
     !list &&
+    !membership &&
     !(
       args.length === 6 &&
       (create || args[0] === "update") &&
@@ -36,10 +39,10 @@ export async function runProjectSettingsCommand(
     )
   )
     throw new Error(
-      "Usage: clankie project list | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION",
+      "Usage: clankie project list | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
     );
   let command: unknown;
-  if (!list) {
+  if (!list && !membership) {
     if ((await stat(args[3]!)).size > 16 * 1024) throw new Error("Project changes are too large");
     const text = await readFile(args[3]!, "utf8");
     if (Buffer.byteLength(text) > 16 * 1024) throw new Error("Project changes are too large");
@@ -71,6 +74,30 @@ export async function runProjectSettingsCommand(
     throw new Error("Project settings require the canonical operator credential");
   const credential = await resolveOperatorCredential(auth);
   if (!credential) throw new Error("Operator credential unavailable");
+  if (membership) {
+    const result = await readFleetProjectMembership(
+      { schemaVersion: 1, seats: [{ seatId: args[1]!, occupantId: args[2]! }] },
+      async (path, body, signal) => {
+        const response = await (options.fetchImpl ?? fetch)(new URL(path, commandHost(options)), {
+          method: "POST",
+          headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+          body: JSON.stringify(body),
+          ...(signal === undefined ? {} : { signal }),
+        });
+        return {
+          status: response.status,
+          json: async () => {
+            const text = await response.text();
+            if (Buffer.byteLength(text) > 32 * 1024) throw new Error("Membership response is too large");
+            return JSON.parse(text) as unknown;
+          },
+        };
+      },
+      AbortSignal.timeout(10000),
+    );
+    if (!result) throw new Error("This host does not support live project membership reads");
+    return result;
+  }
   const response = await (options.fetchImpl ?? fetch)(
     new URL(
       list ? PROJECTS_PATH : create ? PROJECT_CREATE_SETTINGS_PATH : PROJECT_UPDATE_SETTINGS_PATH,

@@ -1,4 +1,5 @@
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
+import { createFleetProjectMembershipRoutes } from "./fleet-project-membership-routes.ts";
 import { createProjectRoutes } from "./project-routes.ts";
 import { createRuntimeUpdateRoutes } from "./runtime-update-routes.ts";
 import { resolveDiscordSettings } from "@clankie/settings";
@@ -442,6 +443,7 @@ export interface ClankieAppDependencies {
     identity?(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined;
   };
   localFleet?: { identity(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined };
+  fleetProjectMembership?: Pick<import("./fleet-project-membership.ts").FleetProjectMembership, "read">;
   projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
   /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
   prepareFleet?: (id: string) => Promise<unknown>;
@@ -1108,6 +1110,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (device === "unavailable" || "denied" in device) return "authentication_required";
     return device.grants.terminalControl ? true : "forbidden";
   };
+  app.route(
+    "/",
+    createFleetProjectMembershipRoutes(dependencies.fleetProjectMembership, authorizeOwnerSecrets),
+  );
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route(

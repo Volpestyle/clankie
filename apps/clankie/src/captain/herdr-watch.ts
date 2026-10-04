@@ -1020,6 +1020,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return requested?.startsWith(`${hosted.provider.id}/`) === true ? requested : hosted.model;
   }
 
+  public projectHireMembershipCandidate(fleet: string, pane: string) {
+    return this.projectHires.membershipCandidate(fleet, pane);
+  }
+  public confirmedProjectHireAssignment(
+    fleet: string,
+    pane: string,
+    revision: string,
+    proof: ProjectHireProcessProof,
+  ) {
+    return this.projectHires.confirmedAssignment(fleet, pane, revision, proof);
+  }
+
   public projectHireAssignment(fleet: string, pane: string, proof?: ProjectHireProcessProof) {
     return this.projectHires.assignment(fleet, pane, proof);
   }

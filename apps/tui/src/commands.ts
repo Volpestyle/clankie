@@ -343,10 +343,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "project",
       aliases: [],
-      description: "Create, read or edit projects, roles, limits and tracked work",
+      description: "Create or edit projects, roles, limits and tracked work; read live membership",
       takesArgument: true,
       argumentHint:
-        "list | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION",
+        "list | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
       async run(argument, shell): Promise<void> {
         try {
           const result = await runProjectSettingsCommand(

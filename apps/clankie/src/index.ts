@@ -1,3 +1,5 @@
+import { FleetProjectMembership } from "./fleet-project-membership.ts";
+import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { DiscordRoomVoice } from "./discord-room-voice.ts";
@@ -918,6 +920,12 @@ const workerMcp = new WorkerMcp({
 });
 
 const clankie = await createClankieApp({
+  fleetProjectMembership: new FleetProjectMembership({
+    settings: async () => (await settingsStore.load()).projects,
+    binding: localFleetBinding,
+    hires: captain,
+    ...fleetMembershipNative(localFleetBinding),
+  }),
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
   roomObservations,
