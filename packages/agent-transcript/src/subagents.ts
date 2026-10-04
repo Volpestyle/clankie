@@ -1,7 +1,11 @@
 import { closeSync, globSync, openSync, readSync, statSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { redactSensitiveText } from "@clankie/observability";
-import { OPERATOR_SEAT_SUBAGENTS_RECENT_MAX, type OperatorSeatSubagents } from "@clankie/protocol";
+import {
+  OPERATOR_CONVERSATION_REF_MAX,
+  OPERATOR_SEAT_SUBAGENTS_RECENT_MAX,
+  type OperatorSeatSubagents,
+} from "@clankie/protocol";
 import { resolveHerdrSeatTranscriptPath, type HerdrAgentSession } from "./index.ts";
 
 /**
@@ -471,6 +475,90 @@ function summarize(calls: ReadonlyMap<string, SubagentCall>): OperatorSeatSubage
         ...(!call.done || call.endedAt === undefined ? {} : { endedAt: call.endedAt }),
       })),
   };
+}
+
+/** Native OpenCode v1 task parts, supplied by the confined registered-profile reader. */
+export function projectOpenCodeSubagents(
+  parentId: string,
+  messages: readonly unknown[],
+  isChild: (id: string) => boolean,
+): OperatorSeatSubagents {
+  const calls = new Map<string, SubagentCall & { childId: string | undefined }>();
+  for (const raw of messages) {
+    const message = openCodeRecord(raw);
+    const info = openCodeRecord(message?.info);
+    if (info?.sessionID !== parentId || !Array.isArray(message?.parts)) continue;
+    const created = openCodeRecord(info.time)?.created;
+    for (const rawPart of message.parts) {
+      const part = openCodeRecord(rawPart);
+      if (!part || part.sessionID !== parentId) continue;
+      if (part.type === "text" && part.synthetic === true && info.role === "user") {
+        const signal = openCodeTaskEnvelope(part.text);
+        if (!signal || signal.status === "running") continue;
+        const endedAt = openCodeTime(created);
+        for (const call of calls.values())
+          if (
+            call.childId === signal.id &&
+            call.background &&
+            !call.done &&
+            (endedAt === undefined ||
+              call.startedAt === undefined ||
+              Date.parse(endedAt) >= Date.parse(call.startedAt))
+          ) {
+            call.done = true;
+            call.endedAt = endedAt;
+          }
+        continue;
+      }
+      if (part.type !== "tool" || part.tool !== "task" || typeof part.callID !== "string") continue;
+      if (part.callID.length === 0 || part.callID.length > OPERATOR_CONVERSATION_REF_MAX) continue;
+      const state = openCodeRecord(part.state);
+      if (!state || !["pending", "running", "completed", "error"].includes(String(state.status))) continue;
+      const input = openCodeRecord(state.input);
+      const metadata = openCodeRecord(state.metadata);
+      const envelope = openCodeTaskEnvelope(state.output);
+      const childId = typeof metadata?.sessionId === "string" ? metadata.sessionId : envelope?.id;
+      if (metadata?.parentSessionId !== undefined && metadata.parentSessionId !== parentId) continue;
+      if (childId !== undefined && !isChild(childId)) continue;
+      const time = openCodeRecord(state.time);
+      const background = metadata?.background === true || envelope?.status === "running";
+      const done =
+        state.status === "error" ||
+        (state.status === "completed" &&
+          (!background || envelope?.status === "completed" || envelope?.status === "error"));
+      calls.set(part.callID, {
+        label: label(
+          [input?.subagent_type, input?.description ?? state.title]
+            .filter((v) => typeof v === "string")
+            .join(": "),
+        ),
+        childId,
+        startedAt: openCodeTime(time?.start ?? part.createdAt),
+        endedAt: done ? openCodeTime(time?.end) : undefined,
+        messageId: undefined,
+        background,
+        done,
+      });
+      if (calls.size > MAX_CALLS) calls.delete(calls.keys().next().value!);
+    }
+  }
+  return summarize(calls);
+}
+
+function openCodeTaskEnvelope(value: unknown): { id: string; status: string } | undefined {
+  if (typeof value !== "string") return undefined;
+  const match = /^<task id="(ses_[A-Za-z0-9]{8,128})" state="(running|completed|error)">\r?\n/u.exec(value);
+  return match ? { id: match[1]!, status: match[2]! } : undefined;
+}
+
+function openCodeTime(value: unknown): string | undefined {
+  return typeof value === "number" && value >= 0 && value <= 8_640_000_000_000_000
+    ? new Date(value).toISOString()
+    : undefined;
+}
+
+function openCodeRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
 }
 
 function endClaudeCall(call: SubagentCall, at: string | undefined): void {

@@ -106,7 +106,7 @@ afterEach(() => {
 });
 
 describe("Codex children on the existing seat subagents path", () => {
-  it("labels a native child by nickname and task, then settles in one fleet read of collection", () => {
+  it("labels a native child by nickname and task, then settles in one fleet read of collection", async () => {
     const { parent, session } = setup();
     const seat = {
       seatId: "codex",
@@ -117,11 +117,11 @@ describe("Codex children on the existing seat subagents path", () => {
       harness: "codex",
     } satisfies OperatorFleetSeat;
     const observed = [{ ...seat, paneId: seat.seatId, subject: seat.seatId, session }] as ObservedFleetSeat[];
-    const fleet = () => withSeatSubagents([seat], observed, () => true)[0]?.subagents;
-    expect(fleet()).toEqual(running);
+    const fleet = async () => (await withSeatSubagents([seat], observed, () => true))[0]?.subagents;
+    expect(await fleet()).toEqual(running);
     appendFileSync(parent, line(fixture.collected));
-    expect(fleet()).toEqual(done);
-    expect(fleet()).toEqual(done);
+    expect(await fleet()).toEqual(done);
+    expect(await fleet()).toEqual(done);
   });
 
   it("does not infer completion from an untargeted wait, ordinary message or quoted FINAL_ANSWER", () => {

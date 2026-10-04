@@ -49,13 +49,20 @@ designer" (1–24 letters, digits, spaces, hyphens). The owner's world places th
 agent at that station and reads its backlog from work items labelled with the
 role. Prefer a role already in use (`clankie agents roles`) over a near-duplicate.
 `clankie agents role NAME "ROLE"|none` changes it later. Fleet seats you hired or opened report native
-Claude and Codex subagents as `subagents`; absent means unknown (ADR 0208).
+Claude, Codex and registered local OpenCode worker subagents as `subagents`;
+absent means unknown (ADR 0208).
 Recent entries can carry a stable native `id` and `startedAt`/`endedAt`; older
 hosts may omit them. Running children omit `endedAt`. Codex idle endings are
 estimates at last file write plus five minutes. Codex entries combine nickname and task path. Parent collection/status records
 settle children on the next fleet read; without a current parent status, five
 minutes of file idleness is a fallback and may misclassify a quiet running tool.
 Remote and unaddressed seats remain unknown.
+OpenCode entries use the task call ID, agent type/description and native task
+times. Background launch results remain running until a synthetic parent
+completion/error notification. Reads retain the native history adapter's
+1.18.18 pin and registered-profile boundary: at most 500 parent messages,
+2,000 parts, 4 MiB and 64 task calls. Owner-wide stores and v2-only histories
+are not read, and file idleness does not settle an OpenCode task.
 
 Project role settings override requested harness, model and effort at hire.
 Use the role already configured for the intended project. `projectId`, when

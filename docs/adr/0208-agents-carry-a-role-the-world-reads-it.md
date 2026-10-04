@@ -61,6 +61,28 @@ so it is an estimate. Running entries omit `endedAt`; reopening preserves the
 native ID. Missing/invalid native timestamps remain absent. These fields are
 optional in the protocol so entries from older hosts and journals still validate.
 
+OpenCode is covered through the same seat enrichment path (VUH-1586,
+2026-10-04). Its registered local worker profile supplies a bounded SQLite v1
+projection through the existing native history reader; no owner-wide database
+discovery is added. A `task` part uses its native call ID for identity, its
+`subagent_type` and description for the label, and `state.time.start/end` for
+timing. A pending part can use its native creation time before a start is
+recorded. Continuations into the same child session have distinct call IDs.
+Child references must name a direct child in the same registered profile and
+working directory. Completed/error foreground calls are done. A background
+tool return whose native envelope says `state="running"` remains running until
+the parent's synthetic completion/error notification; its message creation
+time supplies the ending. There is no SQLite-file idleness heuristic.
+
+OpenCode retains the history adapter's 1.18.18 schema/version pin. Each read
+selects at most 500 recent parent messages, 2,000 parts and 4 MiB of payload,
+then retains 64 task calls and emits eight recent entries. Older tasks outside
+that window and v2-only history remain unsupported. The inspected installed
+1.18.34 store contained historical 1.17.13 task records, not fresh 1.18.34
+subagents; the sanitized shapes and source-pinned background semantics are
+documented in the
+[inspection record](../testing/2026-10-04-opencode-subagents/README.md).
+
 To respect ADR 0188, discovery alone never reads a transcript. The host reads
 only seats it already has an address for: one it hired or whose chat the owner
 opened. It reads only local seats. It stores nothing and imports no entries,
@@ -82,7 +104,7 @@ flowchart LR
   Owner[Owner: app, CLI, TUI] -->|set_persona_role| Persona[(Persona store: role)]
   Hire[hire_agent / spawn_seat role] --> Persona
   Fleet[fleet read] --> Persona
-  Fleet -->|addressed local Claude/Codex seats only| Transcript[Native transcript: incremental tail]
+  Fleet -->|addressed local Claude/Codex/OpenCode seats only| Transcript[Native transcript: bounded projection]
   Transcript --> Subagents[seat.subagents]
   Station[Role station] -->|work_items label=role| Tracker[Linear / GitHub / Markdown labels]
 ```

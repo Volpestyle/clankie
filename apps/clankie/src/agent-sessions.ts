@@ -15,6 +15,7 @@ import {
   sessionIdFromPath,
 } from "@clankie/agent-transcript";
 import type { AgentHostConnection, ClankieSettings } from "@clankie/settings";
+import type { OperatorSeatSubagents } from "@clankie/protocol";
 
 /** Fresh, confined transcript metadata for the ordinary native hire path. */
 interface SavedAgentSessionBase {
@@ -58,6 +59,8 @@ export interface AgentSessions {
     errors: { host: string; error: string }[];
   }>;
   read(ref: string, options?: { tail?: number; after?: string }): Promise<AgentSessionPage>;
+  /** Native OpenCode projection for an already-addressed local seat, never discovery. */
+  subagents?(ref: string): Promise<OperatorSeatSubagents | undefined>;
   resolve(ref: string): Promise<SavedAgentSession>;
   addHost(connection: AgentHostConnection): Promise<readonly AgentHostConnection[]>;
   removeHost(id: string): Promise<readonly AgentHostConnection[]>;
@@ -95,6 +98,11 @@ export function createAgentSessions(
       .then((next) => next.agentHosts.connections);
   };
   return {
+    async subagents(ref) {
+      const { host: hostId, session } = parseAgentSessionRef(ref);
+      if (hostId !== "local" || !session.startsWith("ses_") || !native) return undefined;
+      return (await native.read(session, { tail: 500, subagentsOnly: true })).subagents;
+    },
     async resolve(ref) {
       const { host: hostId, session } = parseAgentSessionRef(ref);
       if (!session || session.includes("\0")) throw new AgentSessionRequestError("Invalid session ref");

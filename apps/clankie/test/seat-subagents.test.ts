@@ -106,7 +106,7 @@ describe("Claude subagents from the native transcript", () => {
     expect(readClaudeSubagents({ ...session, value: join(root, "missing.jsonl") })).toBeUndefined();
   });
 
-  it("reads only local Claude/Codex seats the host already has an address for", () => {
+  it("reads only local Claude/Codex seats the host already has an address for", async () => {
     const base = {
       occupantId: "o",
       personaId: "p",
@@ -129,7 +129,7 @@ describe("Claude subagents from the native transcript", () => {
         }) as ObservedFleetSeat,
     );
     const read: string[] = [];
-    const result = withSeatSubagents(
+    const result = await withSeatSubagents(
       seats,
       observed,
       (seat) => seat.seatId !== "roster-only",
@@ -142,13 +142,15 @@ describe("Claude subagents from the native transcript", () => {
     expect(result.map((seat) => seat.subagents?.running)).toEqual([1, undefined, 1, undefined]);
     // An unreadable transcript leaves the count unknown rather than failing the roster.
     expect(
-      withSeatSubagents(
-        seats,
-        observed,
-        () => true,
-        () => {
-          throw new Error("EACCES");
-        },
+      (
+        await withSeatSubagents(
+          seats,
+          observed,
+          () => true,
+          () => {
+            throw new Error("EACCES");
+          },
+        )
       )[0],
     ).not.toHaveProperty("subagents");
   });
