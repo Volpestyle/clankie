@@ -124,8 +124,34 @@ server occupancy and teardown remain the operator's responsibility.
 Pass `--motor /absolute/path/to/main.js` to run the same probes against a compiled
 motor and its adjacent runtime packages outside the checkout.
 
-Full release archive assembly currently stops at `vec3@0.1.10`: its published
-package and pinned upstream tag `0e571deb0d892d0ddc9f4612ec937ae113c343be` declare
-`BSD` but supply no license text or precise variant. The release license gate
-remains in force. A verified upstream notice is needed before publishing the
-archive; compiled motor conformance outside the checkout does not waive it.
+The workspace override replaces server-side `vec3` resolution with the independent
+Apache-2.0 [`@clankie/vec3`](../../packages/vec3/README.md) package. Manual motor
+conformance and archive assembly passed with the release license gate unchanged.
+Prismarine-viewer's precompiled browser assets remain vendor assets; the override
+does not assert they were rebuilt.
+
+## Integration-owned hosting
+
+`hosting.ts` owns local Paper lifecycle, pinned plugin provisioning, loopback RCON,
+backups and auth. `tunnel.ts` owns pinned playit provisioning, broker-backed claim,
+mandatory PROXY V2, its supervised process and configuration checks. `main.ts`
+projects those operations through the same private MCP connection as the motor.
+No server or tunnel starts merely because the MCP connection opens. Clankie's core
+retains authority, Discord bindings/invites, audit, profiles and play ownership.
+
+The local default is Java 21, Paper 1.21.4 build 232 and game/RCON ports 25684/25685.
+Hosting data/settings are integration-owned under the supplied `--data-dir`.
+Empty-server timeout defaults to 15 minutes; maximum requested-run uptime to six
+hours, including crash restarts. Shutdown saves/backs up and stops the tunnel.
+Configuration is stopped-only. See [hosting setup](../../docs/minecraft.md#host-clankies-own-server).
+
+Java plugin downloads are separate upstream programs and retain their own licenses:
+[Paper](https://github.com/PaperMC/Paper),
+[FastLogin MIT](https://github.com/TuxCoding/FastLogin/blob/main/LICENSE),
+[ProtocolLib GPL-2.0](https://github.com/dmulloy2/ProtocolLib/blob/master/License.txt),
+and [AuthMe GPL-3.0](https://github.com/AuthMe/AuthMeReloaded/blob/master/LICENSE).
+Pinned URLs/checksums live in `HOST_ARTIFACTS`; the Apache service license does not
+relicense downloaded plugins. Playit's pinned official source is
+[BSD-2-Clause](https://github.com/playit-cloud/playit-agent/blob/3adf0fd4fb72c866511890eabb766732734f3cda/LICENSE.txt).
+The Mac installer verifies its source archive and compiles with `--locked`.
+No plugin or playit binary is bundled into the release archive.

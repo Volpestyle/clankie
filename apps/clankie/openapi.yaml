@@ -2513,6 +2513,73 @@ paths:
         "409": { description: Busy play lease, stale identity or refused operation }
         "503": { description: Motor unavailable }
 
+  /v1/minecraft/host:
+    post:
+      tags: [Operator]
+      operationId: commandMinecraftHost
+      summary: Configure, start, administer or back up Clankie's own Minecraft server
+      description: Integration-owned on-demand Paper host and broker-backed playit claim. Hosting is off by default, idle-stops after at most 15 minutes, and has a maximum uptime watchdog. x-clankie-conversation-id selects an existing operator conversation. Typed administration has no op, raw RCON or secret arguments. Enrollment approval uses a previously verified Discord requester; operator arguments cannot select a Discord subject.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  {
+                    type: string,
+                    enum:
+                      [
+                        status,
+                        configuration,
+                        configure,
+                        start,
+                        stop,
+                        restart,
+                        backup,
+                        admin,
+                        claim,
+                        claim_complete,
+                        request_enrollment,
+                        approve_enrollment,
+                      ],
+                  }
+                command:
+                  {
+                    type: object,
+                    description: Strict MinecraftHostAdminCommandSchema union; operation whitelist_add/remove,
+                    kick,
+                    ban,
+                    pardon,
+                    gamerule,
+                    time,
+                    weather,
+                    gamemode,
+                    say,
+                    tell or list,
+                  }
+                settings:
+                  {
+                    type: object,
+                    description: Stopped-only partial MinecraftHostSettingsSchema; resource,
+                    game/RCON ports,
+                    backups and bounded idle/max uptime settings,
+                  }
+                username: { type: string, pattern: "^[A-Za-z0-9_]{3,16}$" }
+      responses:
+        "200":
+          {
+            description: Safe status,
+            configuration,
+            completed/refused/uncertain action or one-time claim URL; no account keys or login codes,
+          }
+        "400": { description: Invalid typed hosting command }
+        "403": { description: Operator authority required }
+        "503": { description: Hosting adapter unavailable }
+
   /v1/minecraft/configuration:
     get:
       tags: [Operator]

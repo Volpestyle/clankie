@@ -208,3 +208,64 @@ with API/CLI/TUI behavior in `docs/cli.md`. Keep procedures out of the
 standing identity instructions. No hosted provisioning or production records
 move into this public repo. Ordinary CI stays narrow; live checks are manual
 and evals are excluded.
+
+## On-demand hosted world and hybrid auth — 2026-10-04
+
+The Minecraft integration now owns the local Paper host and playit tunnel behind
+the existing service-owned MCP connection. Its hosting port is the seam for a
+future instance-backed provider; this change implements only the Mac provider.
+Core remains responsible for existing owner/per-user admin policy, Discord
+identity binding, audit, play ownership, approved profiles and invitations.
+No extra public MCP or RCON route exists.
+
+Hosting is off by default and starts for requested play. An already approved
+Discord-bound friend can request a start under the standing play grant; this
+confers no stop/restart or administrative permission. With no players for
+approximately 15 minutes, save and backup precede shutdown; a six-hour default
+watchdog caps even occupied requested runs. Crash backoff retains that deadline.
+The tunnel stops with the server. Cost controls apply to local hosting now;
+AWS instance, budget, storage and snapshot work belongs to a subsequent wave.
+
+```mermaid
+flowchart LR
+  D[Verified Discord request] --> C[Clankie authority, binding and audit]
+  C --> M[Service-owned Minecraft MCP]
+  M --> H[Local Paper host and backups]
+  M --> T[Supervised playit agent]
+  F[Friend Java client] --> T
+  T -->|PROXY V2 original source| H
+  B[Clankie bot, shared play lease] -->|Loopback PROXY and broker login| H
+```
+
+Use Paper 1.21.4-232 with pinned FastLogin, ProtocolLib 5.4.0 and AuthMe 5.6.0.
+Premium classification fails closed during provisioning and persists a forced
+premium marker before whitelist admission, preventing a lookup outage demoting
+a premium identity to offline authentication. The bot uses a currently unregistered
+name and a broker password restricted to loopback. Nonpremium friends are bound
+to authenticated Discord requests and receive expiring one-use login codes through
+a host-internal DM relay. AuthMe sessions/IP remembering and in-game registration
+are disabled. An authenticated login rotates the code using the pinned plugin's
+anchored authentication event; expiry/reissue revokes the previous code. Failure
+to rotate stops the server rather than retaining a reusable invitation.
+
+Raw TCP loopback tunneling would collapse public source identities onto loopback.
+Mandatory Paper PROXY forwarding and playit's original peer metadata preserve the
+bot restriction. The bot emits its local header internally. No player is op;
+commands are typed and RCON stays loopback. A persisted uncertain enrollment or
+DM outcome is not silently repeated. The reserved self-profile remains loopback
+and normal play ownership still applies.
+
+Residual risks: AuthMe restriction takes effect after a brief unauthenticated
+spawn; plugin configuration/startup and original-IP forwarding are part of the
+security boundary. Code consumption depends on the exact pinned AuthMe event
+format. Mojang outages can prevent new name classification and premium login.
+Trusted local processes can access loopback and the owner's broker. Public source
+forwarding, account-claimed playit connectivity, a premium human join and actual
+Discord DM/invite delivery require live acceptance; local synthetic forwarding
+and scripted bot tests cannot establish those paths. Plugin artifacts retain their
+upstream licenses and are downloaded for the host, not relicensed or bundled.
+
+Server-side vec3 now uses the independent Apache workspace implementation; motor
+conformance and archive assembly passed without relaxing the release license gate.
+Precompiled prismarine-viewer browser assets remain separately supplied vendor
+assets. Setup and command details live in `docs/minecraft.md` and the shipped skill.

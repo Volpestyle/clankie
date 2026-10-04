@@ -11,6 +11,27 @@ operator-owned. The CLI equivalent is `clankie minecraft`, and `/minecraft`
 exposes it in the console. Setup and limitations live in
 [`docs/minecraft.md`](../../../docs/minecraft.md).
 
+Your own hosted server uses `minecraft_host_*` tools through the same service-owned
+connection. Hosting is off by default: start on a request to play, then use the
+reserved `clankie-hosted` profile through normal join. It stops after about 15
+minutes with no players and has a maximum uptime watchdog; a connected bot counts
+as a player. An approved Discord-bound friend may request a start. Other host lifecycle and
+administration require the configured owner or an individually designated machine
+operator, not a guild-wide machine grant.
+Use status to check auth and tunnel readiness. A claim is an operator setup step;
+never manufacture or publish an address. `minecraft_host_invite` posts the safe
+address/version only in the requesting Discord channel.
+
+For friends, capture a username request with `minecraft_host_request_enrollment`;
+`minecraft_host_approve_enrollment` approves that stored Discord identity. Do not
+invent a Discord subject from a player name. Premium friends use their normal
+launcher. Nonpremium friends receive a private one-time `/login` code and request
+a fresh code for later joins; in-game registration and remembered IP sessions are
+disabled. Codes, bot login and RCON credentials remain internal. Never put them
+through game chat or repeat them in a room. Refused or uncertain delivery must be
+resolved, not retried with a new code. All server commands are typed and audited;
+there is no op or arbitrary console tool.
+
 Join claims the shared play body. Pokémon and Minecraft cannot run together.
 Follow, goto, dig, place, craft and build return action handles immediately;
 inspect status to decide the next action. Follow is continuous until stopped.

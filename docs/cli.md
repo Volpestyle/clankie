@@ -866,6 +866,16 @@ See [Rivals setup and verification](rivals.md).
 
 ### `minecraft`
 
+`minecraft host status|start|stop|restart|backup` manages the integration-owned
+Paper server. Hosting is off by default, stops after 15 minutes with no players,
+and has a six-hour maximum requested-run uptime. `host configure` reads its
+settings; `host configure JSON` updates stopped-server resource, backup and
+idle/uptime settings. `host admin JSON` accepts typed administration; `host approve
+USERNAME` approves an existing verified Discord request. No op, raw RCON or
+account-secret arguments are accepted. `host tunnel claim` displays one playit
+browser claim and waits for approval; the permanent key goes straight to the
+broker. This Mac builds pinned playit source during setup and requires Cargo.
+
 `minecraft configure PROFILE HOST --version VERSION [--port PORT] [--username NAME]`
 adds an offline Java server profile. `configure` shows settings; `configure remove PROFILE`
 and `configure allow-public|revoke-public HOST [PORT]` manage destinations.
