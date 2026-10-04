@@ -1,6 +1,6 @@
 import { SettingsStore, defaultSettingsPath, DesktopSettingsSchema } from "@clankie/settings";
 
-export const DESKTOP_USAGE =
+const DESKTOP_USAGE =
   "Usage: clankie desktop [status]\n       clankie desktop quiet-hours START END TIME_ZONE\n       clankie desktop quiet-hours off";
 export async function runDesktopCommand(
   args: readonly string[],
