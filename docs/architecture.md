@@ -156,7 +156,7 @@ even in the same directory or account. `--resume` retains the last seat's bindin
 `--conversation ID` selects an existing chat, including `global-default` for the
 shared global head. Dry runs create no conversation.
 
-`clankie seat --harness codex` selects the [Codex plugin](../integrations/codex-plugin/README.md).
+`clankie codex` selects the [Codex plugin](../integrations/codex-plugin/README.md).
 Its trusted native hooks add the shared identity, service context and memory card,
 and sync redacted transcript entries to the selected conversation. The real Codex
 TUI creates a thread on its owned app-server; the launcher reuses the same Codex
@@ -165,7 +165,7 @@ escalations. Hook trust is an owner step in `/hooks`. Until those hooks run, the
 launcher does not bind the outbox. Claude remains the default harness.
 
 The operator seat is a place any harness can sit
-([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)). `clankie seat`
+([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)). `clankie claude`
 opens Claude Code, on the owner's own plan, as Clankie: the plugin at
 [`integrations/claude-plugin`](../integrations/claude-plugin/README.md) forces
 his identity as the output style, injects the owner persona, reach, address,
