@@ -27,6 +27,9 @@ import {
   type TrackerDeps,
 } from "@clankie/work-items";
 import type { McpHost } from "./mcp-host.ts";
+import type { ProjectsSettings } from "@clankie/protocol/projects";
+import { WORK_REPO_LIST_MAX } from "@clankie/protocol/work-items";
+import { createProjectWorkReader } from "./project-work-items.ts";
 
 /**
  * The work-item layer every agent and the app go through (ADR 0191). It owns
@@ -107,6 +110,8 @@ const RegistrySchema = z.object({
 });
 
 export interface WorkItemsServiceOptions {
+  readonly projects?: () => Promise<ProjectsSettings>;
+  readonly localMachineId?: string;
   /** Where the registry of readable repos lives. */
   readonly stateDirectory: string;
   /** The captain's working directory, always readable as `workspace`. */
@@ -189,6 +194,10 @@ function repoId(path: string): string {
 }
 
 export function createWorkItemsService(options: WorkItemsServiceOptions) {
+  const projectReader =
+    options.projects && options.localMachineId
+      ? createProjectWorkReader({ projects: options.projects, localMachineId: options.localMachineId })
+      : undefined;
   const registryPath = join(options.stateDirectory, "work-repos.json");
   const run = options.run ?? defaultRun;
   const clock = options.clock ?? (() => new Date());
@@ -287,9 +296,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
-  const tracker = async (path: string, record: boolean) => {
+  const tracker = async (path: string, record: boolean, requireRecorded = false) => {
     try {
-      return await resolveTracker(path, await deps(path), { record });
+      return await resolveTracker(path, await deps(path), { record, requireRecorded });
     } catch (error) {
       if (error instanceof ConventionNeededError)
         throw new WorkRequestError("needs_decision", error.message, {
@@ -304,7 +313,50 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
 
   return {
     async handle(request: WorkRequest, local: boolean): Promise<WorkResult> {
-      if (request.action === "repos") return { repos: await Promise.all((await known()).map(describe)) };
+      if (request.action === "repos") {
+        const repos = [
+          ...((await projectReader?.repos()) ?? []),
+          ...(await Promise.all((await known()).map(describe))),
+        ];
+        if (repos.length > WORK_REPO_LIST_MAX)
+          throw new WorkRequestError("result_too_large", "There are too many work trackers to list at once.");
+        return { repos };
+      }
+      if (/^project-[a-f0-9]{48}$/u.test(request.repo)) {
+        if (request.action !== "list" && request.action !== "show")
+          throw new WorkRequestError("invalid", "Project tracker references are read-only");
+        try {
+          if (!projectReader) throw new Error("Project settings unavailable");
+          const read = await projectReader.prepare(request.repo);
+          const { backend } = await tracker(read.path, false, true);
+          await read.validate();
+          if (request.action === "list") {
+            const items = await backend.list({
+              ...(request.status === undefined ? {} : { status: request.status }),
+              ...(request.owner === undefined ? {} : { owner: request.owner }),
+              ...(request.label === undefined ? {} : { label: request.label }),
+              limit: request.limit ?? 250,
+            });
+            await read.validate();
+            return { repo: read.repo, items };
+          }
+          const item = await backend.get(request.id);
+          await read.validate();
+          if (!item) throw new WorkRequestError("not_found", `No work item ${request.id}`);
+          return { repo: read.repo, item };
+        } catch (error) {
+          if (error instanceof WorkRequestError && error.code === "not_found") throw error;
+          if (error instanceof WorkRequestError && error.code === "result_too_large")
+            throw new WorkRequestError(
+              "result_too_large",
+              "This project’s work is too large to read at once.",
+            );
+          throw new WorkRequestError(
+            "backend_unavailable",
+            "This project’s workspace or saved work tracker can’t be read here. Read the work again.",
+          );
+        }
+      }
       const entry = await locate(request.repo, local);
       switch (request.action) {
         case "discover": {

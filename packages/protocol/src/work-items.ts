@@ -118,6 +118,13 @@ export const WorkRepoSchema = z
     /** Stable id for the device contract; never a raw path a device chose. */
     id: z.string().regex(/^[a-z0-9-]{1,64}$/u),
     name: z.string().max(200),
+    /** An existing project binding; never a device-selected filesystem path. */
+    projectId: z
+      .string()
+      .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
+      .optional(),
+    /** Fixed owner-facing reason an explicitly bound repo cannot currently be read. */
+    unavailable: z.string().min(1).max(240).optional(),
     /**
      * The repo's root working directory on the body, so a surface keyed by the
      * directory a seat works in (the app's commons districts) can join this

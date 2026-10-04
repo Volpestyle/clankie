@@ -201,6 +201,32 @@ export const ProjectMembershipSchema = z.discriminatedUnion("outcome", [
 export type ProjectMembership = z.infer<typeof ProjectMembershipSchema>;
 
 export const PROJECTS_PATH = "/v1/operator/projects";
+export const PROJECT_UPDATE_SETTINGS_PATH = "/v1/operator/projects/update";
+/** Omitted fields stay unchanged; null removes an optional limit or tracker binding. */
+export const UpdateProjectSettingsSchema = z
+  .object({
+    projectId: ProjectIdSchema,
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    changes: z
+      .object({
+        name: z.string().trim().min(1).max(100).optional(),
+        roles: z.array(ProjectRoleSchema).max(256).optional(),
+        workerCap: z.number().int().min(0).max(1000).nullable().optional(),
+        trackerRef: z
+          .object({ workspaceId: ProjectIdSchema, path: z.literal(".clankie/tracking.json") })
+          .strict()
+          .nullable()
+          .optional(),
+      })
+      .strict()
+      .refine(
+        (value) => Object.values(value).some((field) => field !== undefined),
+        "No project changes supplied",
+      ),
+  })
+  .strict();
+export type UpdateProjectSettings = z.infer<typeof UpdateProjectSettingsSchema>;
+export type ProjectsSnapshot = z.infer<typeof ProjectsSnapshotSchema>;
 export const PROJECT_REMOVE_WORKSPACE_PATH = "/v1/operator/projects/remove-workspace";
 export const RemoveProjectWorkspaceSchema = z
   .object({

@@ -7,6 +7,8 @@ import {
   projectRolePolicy,
   type ProjectsSettings,
   type ProjectMembership,
+  UpdateProjectSettingsSchema,
+  type UpdateProjectSettings,
 } from "@clankie/protocol/projects";
 import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "@clankie/protocol";
 
@@ -14,6 +16,28 @@ export function projectsRevision(settings: ProjectsSettings): string {
   return createHash("sha256")
     .update(JSON.stringify(ProjectsSettingsSchema.parse(settings)))
     .digest("hex");
+}
+
+/** Edit only project policy; full validation preserves assignments, labels and unrelated authority. */
+export function updateProjectSettings(
+  settings: ProjectsSettings,
+  command: UpdateProjectSettings,
+): ProjectsSettings {
+  const input = UpdateProjectSettingsSchema.parse(command);
+  if (projectsRevision(settings) !== input.expectedRevision) throw new Error("Project settings changed");
+  const original = settings.projects.find((project) => project.id === input.projectId);
+  if (!original) throw new Error("Unknown project");
+  const project = { ...original };
+  if (input.changes.name !== undefined) project.name = input.changes.name;
+  if (input.changes.roles !== undefined) project.roles = input.changes.roles;
+  if (input.changes.workerCap === null) delete project.workerCap;
+  else if (input.changes.workerCap !== undefined) project.workerCap = input.changes.workerCap;
+  if (input.changes.trackerRef === null) delete project.trackerRef;
+  else if (input.changes.trackerRef !== undefined) project.trackerRef = input.changes.trackerRef;
+  return ProjectsSettingsSchema.parse({
+    ...settings,
+    projects: settings.projects.map((saved) => (saved.id === project.id ? project : saved)),
+  });
 }
 
 /** Retains exact legacy role spelling and associations; migration creates no workspace or grant. */
