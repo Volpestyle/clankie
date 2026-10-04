@@ -24,7 +24,9 @@ import {
   type RealtimeSessionCloseReason,
   type RealtimeResponseMeta,
   type RealtimeFunctionCall,
+  type RealtimeSocket,
 } from "../src/realtime-session.ts";
+import { createVoiceRealtimePorts, parseVoiceRealtimeEnv } from "../src/voice-composition.ts";
 import type { VoiceFloorOptions } from "../src/voice-floor.ts";
 import { DiscordVoiceIngress } from "../src/voice-ingress.ts";
 import {
@@ -4389,3 +4391,235 @@ it("speaking identities come only from current consented captures and the curren
   await harness.session.dispose();
   expect(harness.session.status().speakers).toBeUndefined();
 });
+
+class VoiceRecoverySocket implements RealtimeSocket {
+  readonly sent: Record<string, unknown>[] = [];
+  closed = false;
+  private receive: ((data: string) => void) | undefined;
+  private closing: (() => void) | undefined;
+  send(data: string | Uint8Array): void {
+    if (typeof data !== "string") throw new Error("Expected a JSON frame");
+    this.sent.push(JSON.parse(data) as Record<string, unknown>);
+  }
+  onMessage(handler: (data: string) => void): void {
+    this.receive = handler;
+  }
+  onClose(handler: () => void): void {
+    this.closing = handler;
+  }
+  onError(_handler: (error: unknown) => void): void {}
+  close(): void {
+    if (!this.closed) {
+      this.closed = true;
+      this.closing?.();
+    }
+  }
+  emit(frame: Record<string, unknown>): void {
+    this.receive?.(JSON.stringify(frame));
+  }
+  creates(): Record<string, unknown>[] {
+    return this.sent.filter((frame) => frame.type === "response.create");
+  }
+}
+
+it.each([
+  { external: false, beforeCreated: false, partial: false, ambiguousXai: false },
+  { external: true, beforeCreated: false, partial: false, ambiguousXai: false },
+  { external: false, beforeCreated: true, partial: false, ambiguousXai: false },
+  { external: true, beforeCreated: true, partial: false, ambiguousXai: false },
+  { external: false, beforeCreated: false, partial: true, ambiguousXai: false },
+  { external: true, beforeCreated: false, partial: true, ambiguousXai: false },
+  { external: false, beforeCreated: false, partial: false, ambiguousXai: true },
+])(
+  "retires failed Alice delivery before Bob output (external=$external, pre-created=$beforeCreated, partial=$partial, ambiguous-xai=$ambiguousXai)",
+  async ({ external, beforeCreated, partial, ambiguousXai }) => {
+    const h = await joinedHarness();
+    await h.consent(ALICE);
+    await h.consent(BOB);
+    const sockets: { tts: boolean; socket: VoiceRecoverySocket }[] = [];
+    const production = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      ...(external ? { elevenLabsApiKey: "fixture-tts" } : {}),
+      config: parseVoiceRealtimeEnv(
+        external
+          ? {
+              CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+              CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "fixture",
+            }
+          : ambiguousXai
+            ? { CLANKIE_VOICE_REALTIME_PROVIDER: "xai" }
+            : {},
+      ),
+      timers: h.timers,
+      socketFactory: async (url) => {
+        const socket = new VoiceRecoverySocket();
+        sockets.push({ tts: url.includes("elevenlabs"), socket });
+        return socket;
+      },
+    });
+    h.ports.openConversation = production.openConversation;
+    await h.say(ALICE, "hey clankie answer Alice");
+    const a = sockets.find((entry) => !entry.tts)!.socket;
+    expect(a.creates()).toHaveLength(1);
+    const oldEventId = a.creates()[0]!.event_id;
+    const requestA = h
+      .ofType("model_response")
+      .find((event) => event.phase === "requested" && event.userId === ALICE)!;
+    expect(requestA).toBeDefined();
+    if (!beforeCreated) a.emit({ type: "response.created", response: { id: "response-A" } });
+    if (partial) {
+      if (external) {
+        a.emit({
+          type: "response.output_text.delta",
+          response_id: "response-A",
+          item_id: "item-A",
+          delta: "Alice's unfinished answer.",
+        });
+        await flush();
+        sockets
+          .find((entry) => entry.tts)!
+          .socket.emit({ contextId: "item-A", audio: pcmDelta(2_400).toString("base64") });
+      } else
+        a.emit({
+          type: "response.output_audio.delta",
+          response_id: "response-A",
+          item_id: "item-A",
+          delta: pcmDelta(2_400).toString("base64"),
+        });
+      await flush();
+      expect(h.vox.audio).toHaveLength(1);
+    }
+    if (!beforeCreated && !partial && !ambiguousXai) await h.say(BOB, "clankie answer Bob instead");
+    a.emit({ type: "error", error: { type: "server_error" } });
+    if (ambiguousXai) {
+      a.emit({
+        type: "response.function_call_arguments.done",
+        call_id: "old-uncertain",
+        name: "ask_clankie",
+        arguments: '{"request":"old work"}',
+      });
+      expect(h.submitCalls).toEqual([]);
+    }
+    await flush();
+    const opensAfterError = sockets.length;
+    if (partial) {
+      expect(h.vox.stops).toHaveLength(1);
+      await h.say(BOB, "clankie answer Bob after that failure");
+    }
+    if (beforeCreated || ambiguousXai) {
+      expect(a.closed).toBe(true);
+      expect(opensAfterError).toBe(external ? 2 : 1);
+      // The closed socket's late created/done cannot acquire the next offer.
+      a.emit({ type: "response.created", response: { id: "late-A" } });
+      a.emit({ type: "response.done", response: { id: "late-A", status: "completed" } });
+      expect(sockets).toHaveLength(opensAfterError);
+      await h.say(BOB, "clankie answer Bob now");
+    } else {
+      expect(a.closed).toBe(false);
+      expect(a.creates()).toHaveLength(2);
+      expect(opensAfterError).toBe(external ? 2 : 1);
+    }
+    const b = sockets.filter((entry) => !entry.tts).at(-1)!.socket;
+    const requestB = h
+      .ofType("model_response")
+      .find((event) => event.phase === "requested" && event.userId === BOB)!;
+    expect(requestB).toBeDefined();
+    expect(requestB.deliveryId).not.toBe(requestA.deliveryId);
+    const lateDone = {
+      type: "response.done",
+      response: { id: "response-A", status: "completed", usage: { input_tokens: 100, output_tokens: 200 } },
+    };
+    a.emit(lateDone);
+    b.emit({ type: "response.created", response: { id: "response-B" } });
+    a.emit({ type: "response.created", response: { id: "late-A" } });
+    a.emit(lateDone);
+    a.emit({ type: "error", error: { type: "server_error", event_id: oldEventId } });
+    const audioBeforeBob = h.vox.audio.length;
+    a.emit({
+      type: "response.output_audio.delta",
+      response_id: "response-A",
+      item_id: "late-A-audio",
+      delta: pcmDelta(2_400).toString("base64"),
+    });
+    a.emit({
+      type: "response.output_text.delta",
+      response_id: "response-A",
+      item_id: "late-A-text",
+      delta: "Late old words.",
+    });
+    await flush();
+    expect(h.vox.audio).toHaveLength(audioBeforeBob);
+    if (external) {
+      b.emit({
+        type: "response.output_text.delta",
+        response_id: "response-B",
+        item_id: "item-B",
+        delta: "This is Bob's answer.",
+      });
+      await flush();
+      const tts = sockets.filter((entry) => entry.tts).at(-1)!.socket;
+      tts.emit({ contextId: "item-B", audio: pcmDelta(2_400).toString("base64") });
+      b.emit({
+        type: "response.done",
+        response: { id: "response-B", status: "completed", usage: { input_tokens: 3, output_tokens: 4 } },
+      });
+      await flush();
+      tts.emit({ contextId: "item-B", isFinal: true });
+    } else {
+      b.emit({
+        type: "response.output_audio.delta",
+        response_id: "response-B",
+        item_id: "item-B",
+        delta: pcmDelta(2_400).toString("base64"),
+      });
+      b.emit({
+        type: "response.done",
+        response: { id: "response-B", status: "completed", usage: { input_tokens: 3, output_tokens: 4 } },
+      });
+    }
+    await flush();
+    const aReceipts = h.ofType("model_response").filter((event) => event.deliveryId === requestA.deliveryId);
+    expect(aReceipts.map((event) => event.phase)).toEqual(["requested", "failed"]);
+    const bReceipts = h.ofType("model_response").filter((event) => event.deliveryId === requestB.deliveryId);
+    expect(bReceipts.map((event) => event.phase)).toEqual(["requested", "completed"]);
+    expect(h.ofType("response")).toMatchObject([
+      { userId: BOB, deliveryId: requestB.deliveryId, itemId: "item-B", inputTokens: 3, outputTokens: 4 },
+    ]);
+    expect(h.ofType("response")).toHaveLength(1);
+    expect(
+      h.ofType("failed").filter((event) => "deliveryId" in event && event.deliveryId === requestB.deliveryId),
+    ).toEqual([]);
+    a.emit(lateDone);
+    await flush();
+    expect(h.ofType("response")).toHaveLength(1);
+    expect(sockets).toHaveLength(beforeCreated || ambiguousXai ? (external ? 4 : 2) : external ? 2 : 1);
+    await h.session.leave("fixture_done");
+  },
+);
+
+it.each(["membership", "narration"] as const)(
+  "binds %s abandonment through its own dispatch guard",
+  async (trigger) => {
+    const h = trigger === "membership" ? buildHarness() : await joinedHarness();
+    if (trigger === "membership") {
+      await h.session.join({ guildId: GUILD, channelId: CHANNEL, invokingUserId: OWNER });
+      await flush();
+    } else await h.session.narrate("A game observation.");
+    const conversation = h.conversation();
+    const request = h.ofType("model_response").find((event) => event.phase === "requested")!;
+    expect(request).toBeDefined();
+    expect(conversation.responseGuards[0]?.()).toBe(true);
+    conversation.input.onResponseStarted?.({ requestEventId: trigger });
+    conversation.input.onResponseAbandoned?.({ requestEventId: trigger, responseId: "failed" });
+    conversation.input.onResponseDone(completedResponse("failed", { requestEventId: trigger }));
+    await flush();
+    expect(
+      h
+        .ofType("model_response")
+        .filter((event) => event.deliveryId === request.deliveryId)
+        .map((event) => event.phase),
+    ).toEqual(["requested", "failed"]);
+    expect(h.ofType("response")).toEqual([]);
+    await h.session.leave("fixture_done");
+  },
+);

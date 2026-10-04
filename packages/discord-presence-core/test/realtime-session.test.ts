@@ -791,6 +791,7 @@ describe.each(["openai", "xai"] as const)("%s response error recovery", (provide
       },
     });
     session.createResponse();
+    socket.emit({ type: "response.created", response: { id: "first" } });
     session.createResponse("stale", () => revision === 0);
     session.createResponse("current", () => revision === 1);
     socket.emit({ type: "error", error: { type: "server_error" } });
@@ -869,11 +870,12 @@ describe.each(["openai", "xai"] as const)("%s response error recovery", (provide
       socket.emit({ type: "error", error: { type: "server_error" } });
     };
     session.createResponse("failed offer");
-    expect(framesOfType(socket, "response.create")).toHaveLength(1);
-    socket.emit({ type: "response.created", response: { id: "next" } });
-    socket.emit({ type: "response.done", response: { id: "next", status: "completed" } });
-    expect(framesOfType(socket, "response.create")).toHaveLength(1);
-    expect(framesOfType(socket, "conversation.item.create")).toHaveLength(2);
+    expect(framesOfType(socket, "response.create")).toHaveLength(0);
+    expect(session.isOpen).toBe(false);
+    socket.emit({ type: "response.created", response: { id: "late-old" } });
+    socket.emit({ type: "response.done", response: { id: "late-old", status: "completed" } });
+    expect(framesOfType(socket, "response.create")).toHaveLength(0);
+    expect(framesOfType(socket, "conversation.item.create")).toHaveLength(1);
     session.close();
   });
 
@@ -923,3 +925,64 @@ describe.each(["openai", "xai"] as const)("%s response error recovery", (provide
     expect(framesOfType(socket, "response.create")).toHaveLength(2);
   });
 });
+
+it("closes a matched server error before created instead of treating correlation as rejection", async () => {
+  const { session, socket, events } = await openConversation();
+  session.createResponse();
+  session.createResponse();
+  const eventId = framesOfType(socket, "response.create")[0]!.event_id;
+  socket.emit({ type: "error", error: { type: "server_error", event_id: eventId } });
+  expect(session.isOpen).toBe(false);
+  expect(framesOfType(socket, "response.create")).toHaveLength(1);
+  socket.emit({ type: "response.created", response: { id: "late-old" } });
+  socket.emit({ type: "response.done", response: { id: "late-old", status: "completed" } });
+  expect(events.done).toEqual([]);
+});
+
+it("preserves normal ID-less xAI tools but closes on uncorrelatable post-abandon output", async () => {
+  const { session, socket, events } = await openConversation({ provider: "xai" });
+  session.createResponse();
+  socket.emit({ type: "response.created", response: { id: "old" } });
+  const call = {
+    type: "response.function_call_arguments.done",
+    call_id: "normal",
+    name: "ask_clankie",
+    arguments: "{}",
+  };
+  socket.emit(call);
+  expect(events.calls).toEqual([{ callId: "normal", name: "ask_clankie", argumentsJson: "{}" }]);
+  session.createResponse();
+  socket.emit({ type: "error", error: { type: "server_error" } });
+  socket.emit({ type: "response.created", response: { id: "new" } });
+  socket.emit({ ...call, call_id: "uncertain" });
+  expect(events.calls).toHaveLength(1);
+  expect(session.isOpen).toBe(false);
+  expect(events.errors).toContain("Realtime output could not be attributed to a response");
+  expect(events.done).toEqual([]);
+});
+
+it.each(["openai", "xai"] as const)(
+  "retains identified %s tool calls and drops stale ones",
+  async (provider) => {
+    const { session, socket, events } = await openConversation({ provider });
+    session.createResponse();
+    socket.emit({ type: "response.created", response: { id: "current" } });
+    const event =
+      provider === "openai"
+        ? {
+            type: "response.output_item.done",
+            item: { type: "function_call", call_id: "call", name: "ask_clankie", arguments: "{}" },
+          }
+        : {
+            type: "response.function_call_arguments.done",
+            call_id: "call",
+            name: "ask_clankie",
+            arguments: "{}",
+          };
+    socket.emit({ ...event, response_id: "old" });
+    expect(events.calls).toEqual([]);
+    socket.emit({ ...event, response_id: "current" });
+    expect(events.calls).toEqual([{ callId: "call", name: "ask_clankie", argumentsJson: "{}" }]);
+    session.close();
+  },
+);

@@ -303,8 +303,15 @@ export interface RealtimeFunctionCall {
   readonly argumentsJson: string;
 }
 
+/** Local request identity; an absent responseId means the provider never identified it. */
+export interface RealtimeResponseAttempt {
+  readonly requestEventId: string;
+  readonly responseId?: string;
+}
+
 /** Content-free by construction: ids, status, and scalar counters only. */
 export interface RealtimeResponseMeta {
+  readonly requestEventId?: string;
   readonly responseId: string;
   readonly status: string;
   /** Total decoded response audio bytes observed for this response. */
@@ -373,6 +380,10 @@ export interface RealtimeConversationSessionOptions extends RealtimeSessionCommo
    * by {@link MAX_REALTIME_RESPONSE_TEXT_CHARACTERS}; retained only by the opt-in private transcript sink.
    */
   readonly onTextDelta?: (delta: string, itemId: string) => void;
+  /** Local dispatch, before any frame is sent; not an acknowledgement of provider success. */
+  readonly onResponseStarted?: (attempt: RealtimeResponseAttempt) => void;
+  /** The attempt was abandoned with unknown completion/usage; never an automatic retry. */
+  readonly onResponseAbandoned?: (attempt: RealtimeResponseAttempt) => void;
   readonly onResponseDone?: (meta: RealtimeResponseMeta) => void;
   readonly onFunctionCall?: (call: RealtimeFunctionCall) => void;
 }
@@ -727,6 +738,19 @@ export class XaiStreamingTranscriptionSession extends RealtimeSessionCore {
   }
 }
 
+const RESPONSE_OUTPUT_EVENTS = new Set([
+  "response.output_audio.delta",
+  "response.audio.delta",
+  "response.output_text.delta",
+  "response.text.delta",
+  "response.output_audio_transcript.delta",
+  "response.audio_transcript.delta",
+  "response.output_audio_transcript.done",
+  "response.audio_transcript.done",
+  "response.output_item.done",
+  "response.function_call_arguments.done",
+]);
+
 /**
  * The engaged tier: speaks and listens, holds no controller. Responses only
  * ever happen through {@link createResponse}; VAD cannot create or interrupt
@@ -735,6 +759,8 @@ export class XaiStreamingTranscriptionSession extends RealtimeSessionCore {
 export class RealtimeConversationSession extends RealtimeSessionCore {
   private readonly onAudioDeltaCallback: (pcm: Buffer, itemId: string) => void;
   private readonly onTextDeltaCallback: ((delta: string, itemId: string) => void) | undefined;
+  private readonly onResponseStartedCallback: ((attempt: RealtimeResponseAttempt) => void) | undefined;
+  private readonly onResponseAbandonedCallback: ((attempt: RealtimeResponseAttempt) => void) | undefined;
   private readonly onResponseDoneCallback: ((meta: RealtimeResponseMeta) => void) | undefined;
   private readonly onFunctionCallCallback: ((call: RealtimeFunctionCall) => void) | undefined;
   private readonly onTranscriptCallback: ((event: RealtimeTranscriptEvent) => void) | undefined;
@@ -743,6 +769,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   private currentResponseTextCharacters = 0;
   private activeResponse: { eventId: string; responseId?: string } | undefined;
   private nextResponseEventId = 0;
+  private hasAbandonedResponse = false;
   private drainingResponses = false;
   private responseCallbackDepth = 0;
   private readonly queuedResponses: { start: (eventId: string) => void; shouldStart?: () => boolean }[] = [];
@@ -775,6 +802,8 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     super(coreInit(socket, options));
     this.onAudioDeltaCallback = options.onAudioDelta;
     this.onTextDeltaCallback = options.onTextDelta;
+    this.onResponseStartedCallback = options.onResponseStarted;
+    this.onResponseAbandonedCallback = options.onResponseAbandoned;
     this.onResponseDoneCallback = options.onResponseDone;
     this.onFunctionCallCallback = options.onFunctionCall;
     this.onTranscriptCallback = options.onTranscript;
@@ -847,6 +876,8 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
         ? undefined
         : boundedText(context, MAX_REALTIME_TEXT_ITEM_CHARACTERS, "Realtime response context");
     this.queueResponse((eventId) => {
+      this.onResponseStartedCallback?.({ requestEventId: eventId });
+      if (this.activeResponse?.eventId !== eventId || !this.isOpen) return;
       if (bounded !== undefined) this.createTextItem(bounded);
       // A synchronous transport/error callback can retire or close this attempt.
       if (this.activeResponse?.eventId !== eventId || !this.isOpen) return;
@@ -886,20 +917,43 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   protected override handleServerError(event: Record<string, unknown>): void {
     const error = asRecord(event.error);
     const clientEventId = asString(error?.event_id);
-    // Input/session errors do not finish output. A rejected response.create is
-    // correlated by its client event ID; a bare server failure abandons the
-    // current attempt without claiming completion or retrying its offered line.
     const active = this.activeResponse;
-    if (
+    const abandoned =
       active !== undefined &&
       (clientEventId === active.eventId ||
-        (clientEventId === undefined && error?.type === "server_error" && error.param == null))
-    ) {
+        (clientEventId === undefined && error?.type === "server_error" && error.param == null));
+    // Only a matched invalid request establishes rejection before creation.
+    // A server failure may still produce a late created event, even when it
+    // names our client event. Never bind that uncertain response to a new offer.
+    const ambiguousCreation =
+      abandoned && active.responseId === undefined && error?.type !== "invalid_request_error";
+    this.reportResponseError(describeServerError(event), abandoned ? active : undefined, ambiguousCreation);
+  }
+
+  private reportResponseError(
+    message: string,
+    abandoned: { eventId: string; responseId?: string } | undefined,
+    close: boolean,
+  ): void {
+    if (abandoned !== undefined) {
       this.activeResponse = undefined;
+      this.hasAbandonedResponse = true;
     }
     this.responseCallbackDepth++;
     try {
-      super.handleServerError(event);
+      try {
+        this.onErrorCallback?.(message);
+      } finally {
+        try {
+          if (abandoned !== undefined)
+            this.onResponseAbandonedCallback?.({
+              requestEventId: abandoned.eventId,
+              ...(abandoned.responseId === undefined ? {} : { responseId: abandoned.responseId }),
+            });
+        } finally {
+          if (close) this.closeWith("error");
+        }
+      }
     } finally {
       this.responseCallbackDepth--;
       this.startNextResponse();
@@ -988,6 +1042,27 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   }
 
   protected override handleServerEvent(type: string, event: Record<string, unknown>): void {
+    if (RESPONSE_OUTPUT_EVENTS.has(type) && this.nextResponseEventId > 0) {
+      const responseId = asString(event.response_id);
+      if (responseId === undefined && this.provider === "xai") {
+        // xAI's documented function-call example does not establish a
+        // response_id. Preserve normal ID-less events, but after abandonment
+        // they could belong to the failed attempt: close, never guess or run it.
+        if (this.hasAbandonedResponse) {
+          this.reportResponseError(
+            "Realtime output could not be attributed to a response",
+            this.activeResponse,
+            true,
+          );
+          return;
+        }
+      } else if (
+        this.activeResponse === undefined ||
+        this.activeResponse.responseId === undefined ||
+        this.activeResponse.responseId !== responseId
+      )
+        return;
+    }
     switch (type) {
       case "response.created": {
         const responseId = asString(asRecord(event.response)?.id);
@@ -1022,12 +1097,14 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
         const responseId = asString(asRecord(event.response)?.id);
         // response.created is the first lifecycle event. A delayed terminal
         // cannot release a new request that has not received its own ID yet.
-        if (responseId !== undefined && this.activeResponse?.responseId === responseId) {
-          this.activeResponse = undefined;
-        }
+        const requestEventId =
+          responseId !== undefined && this.activeResponse?.responseId === responseId
+            ? this.activeResponse.eventId
+            : undefined;
+        if (requestEventId !== undefined) this.activeResponse = undefined;
         this.responseCallbackDepth++;
         try {
-          this.handleResponseDone(event);
+          this.handleResponseDone(event, requestEventId);
         } finally {
           this.responseCallbackDepth--;
           this.startNextResponse();
@@ -1103,7 +1180,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     this.onAudioDeltaCallback(pcm, itemId);
   }
 
-  private handleResponseDone(event: Record<string, unknown>): void {
+  private handleResponseDone(event: Record<string, unknown>, requestEventId?: string): void {
     const response = asRecord(event.response);
     const responseId = asString(response?.id) ?? "";
     const status = asString(response?.status) ?? "unknown";
@@ -1119,6 +1196,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       this.currentResponseTextCharacters = 0;
     }
     this.onResponseDoneCallback?.({
+      ...(requestEventId === undefined ? {} : { requestEventId }),
       responseId,
       status,
       audioBytes,

@@ -37,6 +37,7 @@ import {
 import type {
   RealtimeFunctionCall,
   RealtimeResponseMeta,
+  RealtimeResponseAttempt,
   RealtimeSessionCloseReason,
   RealtimeTimers,
 } from "./realtime-session.ts";
@@ -75,6 +76,8 @@ export interface ExternalVoiceTtsPort {
 export interface ExternalVoiceRealtimeHandlers {
   readonly onTextDelta: (delta: string, itemId: string) => void;
   readonly onFunctionCall: (call: RealtimeFunctionCall) => void;
+  readonly onResponseStarted: (attempt: RealtimeResponseAttempt) => void;
+  readonly onResponseAbandoned: (attempt: RealtimeResponseAttempt) => void;
   readonly onResponseDone: (meta: RealtimeResponseMeta) => void;
   readonly onClose: (reason: RealtimeSessionCloseReason) => void;
   readonly onError: (message: string) => void;
@@ -157,7 +160,10 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   private readonly dialogue: boolean;
   private readonly onTranscript: ((event: RealtimeTranscriptEvent) => void) | undefined;
   private closed = false;
-  private responseActive = false;
+  private activeResponse: { requestEventId?: string; itemIds: Set<string> } | undefined;
+  private correlatedResponses = false;
+  private drainingResponses = false;
+  private responseCallbackDepth = 0;
   private readonly responseQueue: { start: () => void; shouldStart?: () => boolean }[] = [];
 
   public constructor(
@@ -181,6 +187,12 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       onFunctionCall: (call) => {
         this.input.onFunctionCall(call);
       },
+      onResponseStarted: (attempt) => {
+        this.correlatedResponses = true;
+        if (this.activeResponse !== undefined) this.activeResponse.requestEventId = attempt.requestEventId;
+        this.input.onResponseStarted?.(attempt);
+      },
+      onResponseAbandoned: (attempt) => this.abandonResponse(attempt),
       onResponseDone: (meta) => {
         this.handleResponseDone(meta);
       },
@@ -236,28 +248,70 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   }
 
   private startNextResponse(): void {
-    while (!this.responseActive && !this.closed) {
-      const next = this.responseQueue.shift();
-      if (next === undefined) return;
-      if (next.shouldStart?.() === false) continue;
-      this.responseActive = true;
-      try {
-        next.start();
-      } catch (error) {
-        this.responseActive = false;
-        throw error;
+    if (this.drainingResponses || this.responseCallbackDepth > 0) return;
+    this.drainingResponses = true;
+    try {
+      while (this.activeResponse === undefined && !this.closed) {
+        const next = this.responseQueue.shift();
+        if (next === undefined) return;
+        if (next.shouldStart?.() === false) continue;
+        if (this.closed) return;
+        const active = { itemIds: new Set<string>() };
+        this.activeResponse = active;
+        try {
+          next.start();
+        } catch (error) {
+          if (this.activeResponse === active) this.activeResponse = undefined;
+          throw error;
+        }
       }
+    } finally {
+      this.drainingResponses = false;
     }
   }
 
+  private ownsResponse(meta: { requestEventId?: string }): boolean {
+    return (
+      !this.correlatedResponses ||
+      (meta.requestEventId !== undefined && this.activeResponse?.requestEventId === meta.requestEventId)
+    );
+  }
+
   private finishResponse(meta: RealtimeResponseMeta): void {
-    this.input.onResponseDone(meta);
-    this.responseActive = false;
-    if (this.closed) {
-      this.responseQueue.length = 0;
-      return;
+    if (!this.ownsResponse(meta)) return;
+    this.activeResponse = undefined;
+    this.responseCallbackDepth++;
+    try {
+      this.input.onResponseDone(meta);
+    } finally {
+      this.responseCallbackDepth--;
+      if (this.closed) this.responseQueue.length = 0;
+      else this.startNextResponse();
     }
-    this.startNextResponse();
+  }
+
+  private abandonResponse(attempt: RealtimeResponseAttempt): void {
+    const active = this.activeResponse;
+    if (this.closed || active?.requestEventId !== attempt.requestEventId) return;
+    this.activeResponse = undefined;
+    this.responseCallbackDepth++;
+    try {
+      // This attempt owns these items, not any response admitted by callbacks.
+      for (const itemId of active.itemIds) {
+        const held = this.heldDone.get(itemId);
+        if (held !== undefined) {
+          this.timers.clearTimeout(held.handle);
+          this.heldDone.delete(itemId);
+        }
+        if (this.lastTextItemId === itemId) this.lastTextItemId = "";
+        this.closeItemContext(itemId);
+        this.dropItem(itemId);
+      }
+      this.input.onResponseAbandoned?.(attempt);
+    } finally {
+      this.responseCallbackDepth--;
+      this.startNextResponse();
+    }
   }
 
   /**
@@ -291,6 +345,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
 
   private handleTextDelta(delta: string, itemId: string): void {
     if (this.closed || this.droppedItemIds.has(itemId)) return;
+    this.activeResponse?.itemIds.add(itemId);
     let item = this.items.get(itemId);
     if (item?.modelDone) return;
     if (item === undefined) {
@@ -395,6 +450,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   }
 
   private handleResponseDone(meta: RealtimeResponseMeta): void {
+    if (!this.ownsResponse(meta)) return;
     if (this.closed) {
       this.finishResponse(meta);
       return;

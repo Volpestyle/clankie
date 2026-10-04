@@ -61,6 +61,7 @@ import {
   REALTIME_AUDIO_SAMPLE_RATE,
   type RealtimeFunctionCall,
   type RealtimeResponseMeta,
+  type RealtimeResponseAttempt,
   type RealtimeSessionCloseReason,
   type RealtimeTimers,
   type RealtimeTranscriptEvent,
@@ -332,6 +333,8 @@ export interface VoiceConversationOpenInput {
   /** Content-free notification before external synthesis waits for a clause. */
   readonly onFirstText?: (itemId: string) => void;
   readonly onFunctionCall: (call: RealtimeFunctionCall) => void;
+  readonly onResponseStarted?: (attempt: RealtimeResponseAttempt) => void;
+  readonly onResponseAbandoned?: (attempt: RealtimeResponseAttempt) => void;
   readonly onResponseDone: (meta: RealtimeResponseMeta) => void;
   readonly onClose: (reason: RealtimeSessionCloseReason) => void;
   /** null explicitly means an idle mouth failure, with no utterance to attribute. */
@@ -425,6 +428,7 @@ export interface DiscordVoiceSessionOptions {
 
 /** One `response.create` decision awaiting its audio; receipts are cut from these. */
 interface PendingVoiceResponse {
+  requestEventId?: string;
   /** Allocated only for an explicit spoken-transcript subscriber. */
   outputTranscript?: {
     guildId: string;
@@ -467,7 +471,7 @@ interface PendingVoiceResponse {
   readonly inputTiming?: VoiceInputTiming;
   inputTokens?: number;
   outputTokens?: number;
-  /** Set when the server finished the response this decision produced. */
+  /** No longer awaiting provider output: terminal event or explicit abandonment. */
   done: boolean;
   /** Playback failed before response.done; late media must not bind to this decision. */
   invalidated?: boolean;
@@ -608,6 +612,9 @@ export class DiscordVoiceSession {
   private staySpokenCount = 0;
   private stayNarrationSuppressed = 0;
   private pendingResponses: PendingVoiceResponse[] = [];
+  /** Selected by the existing queue guard, consumed when that exact request dispatches. */
+  private startingResponse: PendingVoiceResponse | undefined;
+  private hasResponseIdentity = false;
   private readonly speakerResponseEpochs = new Map<string, number>();
   private roomResponseEpoch = 0;
   private quietEpoch = 0;
@@ -924,7 +931,7 @@ export class DiscordVoiceSession {
           return;
         const deliveryId = this.membershipDeliveryId;
         this.membershipDeliveryId = undefined;
-        this.pendingResponses.push({
+        const pending: PendingVoiceResponse = {
           deliveryId,
           wake,
           fastPath: true,
@@ -933,10 +940,11 @@ export class DiscordVoiceSession {
           handoffMs: 0,
           decidedAtMs: this.clock(),
           done: false,
-        });
+        };
+        this.pendingResponses.push(pending);
         void this.emitSafely({ type: "model_response", guildId, channelId, deliveryId, phase: "requested" });
         try {
-          this.conversation.createResponse();
+          this.conversation.createResponse(undefined, this.responseGuard(pending));
         } catch {
           this.pendingResponses = this.pendingResponses.filter(
             (pending) => pending.deliveryId !== deliveryId,
@@ -1185,7 +1193,7 @@ export class DiscordVoiceSession {
       }
       this.armTick();
       this.lastNarrationResponseAtMs = this.clock();
-      this.pendingResponses.push({
+      const pending: PendingVoiceResponse = {
         deliveryId,
         wake,
         fastPath: true,
@@ -1194,7 +1202,8 @@ export class DiscordVoiceSession {
         handoffMs: 0,
         decidedAtMs: this.clock(),
         done: false,
-      });
+      };
+      this.pendingResponses.push(pending);
       void this.emitSafely({
         type: "model_response",
         guildId,
@@ -1203,7 +1212,7 @@ export class DiscordVoiceSession {
         phase: "requested",
       });
       try {
-        conversation.createResponse();
+        conversation.createResponse(undefined, this.responseGuard(pending));
       } catch {
         this.pendingResponses.pop();
         void this.emitSafely({
@@ -2128,8 +2137,11 @@ export class DiscordVoiceSession {
         !pending.superseded &&
         !pending.invalidated &&
         pending.isCurrent?.() !== false
-      )
+      ) {
+        this.startingResponse = pending;
         return true;
+      }
+      if (this.startingResponse === pending) this.startingResponse = undefined;
       pending.done = true;
       this.settleOffer(pending, false);
       if (generation === this.sessionGeneration) this.emitModelResponseCompletion(pending);
@@ -2201,8 +2213,21 @@ export class DiscordVoiceSession {
           if (generation === this.sessionGeneration && this.conversation === port && port.isOpen)
             this.handleFunctionCall(call, guildId, channelId);
         },
+        onResponseStarted: (attempt) => {
+          if (generation !== this.sessionGeneration || this.conversation !== port) return;
+          this.hasResponseIdentity = true;
+          const pending = this.startingResponse;
+          this.startingResponse = undefined;
+          if (pending !== undefined && !pending.done && this.pendingResponses.includes(pending))
+            pending.requestEventId = attempt.requestEventId;
+        },
+        onResponseAbandoned: (attempt) => {
+          if (generation === this.sessionGeneration && this.conversation === port)
+            this.handleResponseAbandoned(attempt);
+        },
         onResponseDone: (meta) => {
-          if (generation === this.sessionGeneration) this.handleResponseDone(meta);
+          if (generation === this.sessionGeneration && this.conversation === port)
+            this.handleResponseDone(meta);
         },
         onClose: (reason) => {
           this.handleConversationClose(reason, generation, guildId, channelId);
@@ -2214,16 +2239,21 @@ export class DiscordVoiceSession {
           // from silence or a cleanly settled response. Boundary messages are
           // already sanitized one-liners; the code keeps them machine-readable.
           if (generation !== this.sessionGeneration) return;
-          const job = [this.openPlayback, this.playingJob].find(
-            (candidate) =>
-              candidate !== undefined &&
-              (itemId === undefined || candidate.itemId === itemId) &&
-              candidate.outcome === undefined,
-          );
-          const pending =
-            itemId === null
-              ? undefined
-              : (job?.pending ?? this.pendingResponses.find((candidate) => !candidate.done));
+          // A generic realtime error carries no delivery identity. The typed
+          // abandonment callback owns failure attribution; a delayed old error
+          // must not acquire whichever pending response happens to be next.
+          const unattributed = itemId === null || (itemId === undefined && this.hasResponseIdentity);
+          const job = unattributed
+            ? undefined
+            : [this.openPlayback, this.playingJob].find(
+                (candidate) =>
+                  candidate !== undefined &&
+                  (itemId === undefined || candidate.itemId === itemId) &&
+                  candidate.outcome === undefined,
+              );
+          const pending = unattributed
+            ? undefined
+            : (job?.pending ?? this.pendingResponses.find((candidate) => !candidate.done));
           if (pending?.outputTranscript !== undefined) pending.outputTranscript.failed = true;
           const failedItemId = itemId ?? job?.itemId;
           void this.emitSafely({
@@ -2258,6 +2288,8 @@ export class DiscordVoiceSession {
       return;
     }
     this.conversation = port;
+    this.hasResponseIdentity = false;
+    this.startingResponse = undefined;
     try {
       // Seed order: what he overheard, then who he is. The ring is the
       // bounded recent-transcript window; the briefing is the projection that
@@ -3124,8 +3156,55 @@ export class DiscordVoiceSession {
     if (this.playingJob === job) this.pumpPlayback(job);
   }
 
+  private handleResponseAbandoned(attempt: RealtimeResponseAttempt): void {
+    const pending = this.pendingResponses.find(
+      (candidate) => !candidate.done && candidate.requestEventId === attempt.requestEventId,
+    );
+    if (pending === undefined) return;
+    pending.done = true;
+    pending.invalidated = true;
+    pending.modelResponseEmitted = true;
+    if (pending.outputTranscript !== undefined) pending.outputTranscript.failed = true;
+    this.settleOffer(pending, false);
+    const jobs = new Set([this.openPlayback, this.playingJob]);
+    for (const job of jobs) {
+      if (job?.pending !== pending) continue;
+      this.invalidPlaybackItemIds.add(job.itemId);
+      job.stopping = true;
+      job.encodedChunks.length = 0;
+      this.settlePlayback(job, "stopped");
+      if (this.openPlayback === job) this.openPlayback = undefined;
+      try {
+        this.options.vox.stopTtsPlayback(job.playbackId);
+      } catch {
+        /* Already retired locally. */
+      }
+      this.emitSpokenTranscript(pending, "failed", job);
+    }
+    this.emitSpokenTranscript(pending, "failed");
+    this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== pending);
+    const guildId = this.guildId,
+      channelId = this.channelId;
+    if (guildId !== undefined && channelId !== undefined)
+      void this.emitSafely({
+        type: "model_response",
+        guildId,
+        channelId,
+        deliveryId: pending.deliveryId,
+        ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
+        ...(attempt.responseId === undefined ? {} : { responseId: attempt.responseId }),
+        phase: "failed",
+      });
+    // No response.done or usage arrived. Leave token accounting unknown.
+  }
+
   private handleResponseDone(meta?: RealtimeResponseMeta): void {
-    const settled = this.pendingResponses.find((candidate) => !candidate.done);
+    if (this.hasResponseIdentity && meta?.requestEventId === undefined) return;
+    const settled = this.pendingResponses.find(
+      (candidate) =>
+        !candidate.done &&
+        (meta?.requestEventId === undefined || candidate.requestEventId === meta.requestEventId),
+    );
     if (settled === undefined) return;
     settled.done = true;
     if (meta !== undefined) settled.responseMeta = meta;
