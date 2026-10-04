@@ -23,6 +23,12 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["computer"],
+    lines: [
+      "  computer request JSON [--image-path NEW_PNG_PATH]  Drive the conversation-leased computer body (JSON)",
+    ],
+  },
+  {
     nouns: ["body"],
     lines: ["  body status | request JSON  Inspect or explicitly request conversation body leases (JSON)"],
   },

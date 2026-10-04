@@ -2876,7 +2876,7 @@ paths:
       tags: [Captain]
       operationId: requestBodyLease
       summary: Explicitly acquire, renew, release, queue, ask or recover a body resource
-      description: Strict BodyLeaseRequest protocol union. Operator bound to a selected runnable conversation. Renew/release require the acquisition incarnation. Ordinary release is owner-only and confirms termination; explicit recover uses the current private host claim under operator authority. Queue/ask are bounded notifications and never run body effects.
+      description: Computer ownership uses /v1/computer; this endpoint refuses computer mutations. Strict BodyLeaseRequest protocol union. Operator bound to a selected runnable conversation. Renew/release require the acquisition incarnation. Ordinary release is owner-only and confirms termination; explicit recover uses the current private host claim under operator authority. Queue/ask are bounded notifications and never run body effects.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -2893,6 +2893,43 @@ paths:
           description: Typed acquired, renewed, released, queued or asked result
         "409":
           description: Typed busy with public holder and queue/ask choices, or rejected reason; no silent takeover
+
+  /v1/computer:
+    post:
+      tags: [Captain]
+      operationId: requestComputerBody
+      summary: Drive the conversation-leased computer body
+      description: >-
+        Strict ComputerRequestSchema (conversationId and command) from
+        @clankie/interactive-environment. Operator authority bound to an existing
+        runnable conversation, rechecked at each input. Actions: status, acquire,
+        renew, release, revoke, recover, inventory, capture, frame, input. Capture returns
+        fresh screenshot metadata and image-pixel coordinate mapping; frame returns
+        bounded PNG media separately. Input is ordered and uses screenshotId plus
+        a persistent requestId; identical retries reconcile, never replay. Failed
+        and uncertain are distinct from confirmed. Expiry/restart/uncertainty retain
+        the lease until host stop proof. Local macOS Peekaboo only; native model and
+        hosted display routes are not implemented.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              conversationId: global-default
+              command:
+                action: status
+      responses:
+        "200": { description: Command result or typed busy/rejected receipt }
+        "400": { description: Invalid strict request }
+        "401": { description: Operator conversation authority required }
+        "409":
+          {
+            description: Stale reference,
+            changed authority or refused operation; never replay uncertain input,
+          }
+        "413": { description: Request exceeds 2 MiB }
+        "503": { description: Computer body unavailable on this host }
 
   /v1/browser/harnesses:
     get:

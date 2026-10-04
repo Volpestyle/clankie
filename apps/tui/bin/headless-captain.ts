@@ -1,3 +1,4 @@
+import { runComputerCommand } from "../src/command/computer.ts";
 import { runDesktopCommand } from "../src/command/desktop.ts";
 import { runHarnessCommand } from "../src/command/harness.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
@@ -202,6 +203,10 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "play") return await runPlayCommand(rest, options);
+    if (command === "computer") {
+      outputJson(stdout, await runComputerCommand(rest, options));
+      return 0;
+    }
     if (command === "minecraft") {
       outputJson(stdout, await runMinecraftCommand(rest, options));
       return 0;

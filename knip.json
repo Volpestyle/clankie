@@ -41,7 +41,9 @@
         "integrations/claude-plugin/worker/bin/native-codex.d.mts",
         "integrations/claude-plugin/worker/bin/skill-bundle.d.mts",
         "integrations/opencode-plugin/worker-tui.mjs",
-        "integrations/opencode-plugin/worker-server.mjs"
+        "integrations/opencode-plugin/worker-server.mjs",
+        "scripts/manual/computer-use/run.mjs",
+        "scripts/manual/computer-use/fixture-server.d.mts"
       ],
       "paths": {
         "/clankie/*": ["./*"]
