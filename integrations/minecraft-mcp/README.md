@@ -121,3 +121,5 @@ The live conformance script is manual-only, never an eval or CI check. It uses
 the retained isolated Paper 1.21.4 server in `~/dev/minecraft-spike`, separate RCON
 observations, bounded cancel samples and same-bot PNGs. See the script's usage;
 server occupancy and teardown remain the operator's responsibility.
+Pass `--motor /absolute/path/to/main.js` to run the same probes against a compiled
+motor and its adjacent runtime packages outside the checkout.

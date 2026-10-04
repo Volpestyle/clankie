@@ -61,6 +61,7 @@ const licenseName = /^(?:licen[cs]e|copying|notice|copyright)(?:[._-].*)?$/iu;
 const spdxLicenseChecksums = new Map([
   ["Apache-2.0", "c274f80372d90c012937370f0e1f15087d22e308ef98b27cea5dc0d2d088366c"],
   ["BSD-2-Clause", "ffcd6a8c421ee58d9f85b115ee0642805be3b497d2023565739622f044dc11e2"],
+  ["CC0-1.0", "e0456cbab4f7b5e7203e678faff37eadbdfef02e822db3b7a52a1dd9d3dc514a"],
   ["LGPL-2.1-or-later", "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"],
   ["MIT", "c3b1b78bc8bd3ea13aa4bc9778442d16560270afa235006d816e5e88cef24db4"],
   ["MPL-2.0", "66c10535a495f4cd8115607e890f8116d657064b98557f660c51e123b3f3fee6"],
