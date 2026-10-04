@@ -29,8 +29,11 @@ and unsupported harnesses are unknown. Linked Codex seats use the registered
 fleet SSH connection and the remote Node SQLite reader against `CODEX_HOME`
 (or the remote user’s `.codex`), selecting only host-observed session IDs.
 Reads are bounded to 48 sessions and five seconds per fleet, cached for ten
-seconds, and shared across concurrent polls. An unavailable store or invalid
-observation preserves the last known goal with its original native timestamps;
+seconds, and shared across concurrent polls. Only complete remote objectives
+of at most 16,384 SQLite characters are transferred; oversized or NUL-containing
+text is unknown, never a raw prefix to redact after truncation. Local reads
+retain the full objective for redaction before bounding the projected text.
+An unavailable store or invalid observation preserves the last known goal with its original native timestamps;
 it never clears the goal or invents a status. Changing a fleet connection or
 native session does not transfer that cached goal to its replacement.
 Codex owns goal lifecycle

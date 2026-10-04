@@ -23,7 +23,7 @@ export function readCodexGoal(
     let db: DatabaseSync | undefined;
     try {
       db = new DatabaseSync(path, { readOnly: true });
-      const row = db.prepare(CODEX_GOAL_QUERY).get(id);
+      const row = db.prepare(LOCAL_CODEX_GOAL_QUERY).get(id);
       if (row === undefined) continue;
       return parseCodexGoal(row);
     } catch {
@@ -44,9 +44,14 @@ export function codexGoalSessionId(session: HerdrAgentSession): string | undefin
   return id !== undefined && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(id) ? id : undefined;
 }
 
-/** Bound the one selected row before transferring it from a linked machine. */
+// Local reads retain the complete objective until the shared redactor runs.
+// Cutting raw text can remove a closing quote or part of a credential prefix.
+const LOCAL_CODEX_GOAL_QUERY =
+  "SELECT objective, status, token_budget, tokens_used, time_used_seconds, created_at_ms, updated_at_ms FROM thread_goals WHERE thread_id = ? LIMIT 1";
+
+/** Transfer complete bounded text only; a partial objective is an unknown observation. */
 export const CODEX_GOAL_QUERY =
-  "SELECT substr(objective, 1, 16384) AS objective, status, token_budget, tokens_used, time_used_seconds, created_at_ms, updated_at_ms FROM thread_goals WHERE thread_id = ? LIMIT 1";
+  "SELECT CASE WHEN typeof(objective) = 'text' AND instr(objective, char(0)) = 0 AND length(objective) <= 16384 THEN objective ELSE NULL END AS objective, status, token_budget, tokens_used, time_used_seconds, created_at_ms, updated_at_ms FROM thread_goals WHERE thread_id = ? LIMIT 1";
 
 /** The local and SSH readers share the same validation, redaction and native states. */
 export function parseCodexGoal(value: unknown): OperatorGoal | undefined {

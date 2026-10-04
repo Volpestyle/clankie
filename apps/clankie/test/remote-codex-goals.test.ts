@@ -309,3 +309,119 @@ it("projects the remote Herdr-observed session through fleet and roster without 
     await captain.close();
   }
 });
+
+const objectiveLimit = 16_384;
+const crossBoundObjectives = [
+  {
+    name: "quoted credential",
+    objective: "x".repeat(objectiveLimit - 26) + ' password: "FAKE ONE TWO THREE FOUR FIVE SIX"',
+  },
+  {
+    name: "provider-shaped credential",
+    objective: "x".repeat(objectiveLimit - 8) + " sk-FAKE_ONLY_SYNTHETIC_TOKEN",
+  },
+];
+
+it.each(crossBoundObjectives)(
+  "local SQLite reader redacts a complete $name before bounding",
+  ({ objective }) => {
+    const home = scratch();
+    const db = store(home);
+    try {
+      db.prepare("UPDATE thread_goals SET objective = ? WHERE thread_id = ?").run(objective, id);
+      const before = readFileSync(join(home, "goals_1.sqlite"));
+      const goal = readCodexGoal(session, [home]);
+      expect(goal).toBeDefined();
+      expect(goal!.objective).toContain("[REDACT");
+      expect(goal!.objective).not.toContain("FAKE");
+      expect(goal!.objective).not.toContain("ONE TWO");
+      expect(goal!.objective.length).toBeLessThanOrEqual(objectiveLimit);
+      expect(readFileSync(join(home, "goals_1.sqlite"))).toEqual(before);
+    } finally {
+      db.close();
+    }
+  },
+);
+
+it.each([
+  ...crossBoundObjectives,
+  { name: "embedded NUL credential", objective: 'Task password: "FAKE\0ONE TWO THREE"' },
+  {
+    name: "Unicode over-bound credential",
+    objective: "😀".repeat(objectiveLimit - 8) + " sk-FAKE_ONLY_SYNTHETIC_TOKEN",
+  },
+])("remote SQLite command treats $name as unknown and retains the safe cache", async ({ objective }) => {
+  const home = scratch();
+  const db = store(home);
+  const shell = localShell(home);
+  let now = 0;
+  const project = createRemoteCodexGoals({ shell: () => shell, now: () => now });
+  try {
+    const safe = (await project([seat], [observed], [fleet]))[0]?.goal;
+    expect(safe).toBeDefined();
+    db.prepare("UPDATE thread_goals SET objective = ?, updated_at_ms = ? WHERE thread_id = ?").run(
+      objective,
+      row.updated_at_ms + 1000,
+      id,
+    );
+    const before = readFileSync(join(home, "goals_1.sqlite"));
+    now += 10_000;
+    expect((await project([seat], [observed], [fleet]))[0]?.goal).toEqual(safe);
+    const response = await shell.mock.results.at(-1)!.value;
+    expect(JSON.parse(response)).toEqual([
+      [id, { ...row, objective: null, updated_at_ms: row.updated_at_ms + 1000 }],
+    ]);
+    expect(Buffer.byteLength(response, "utf8")).toBeLessThan(1000);
+    expect(response).not.toContain("FAKE");
+    const cold = createRemoteCodexGoals({ shell: () => shell });
+    expect((await cold([seat], [observed], [fleet]))[0]?.goal).toBeUndefined();
+    expect(readFileSync(join(home, "goals_1.sqlite"))).toEqual(before);
+  } finally {
+    db.close();
+  }
+});
+
+it.each([
+  {
+    name: "short quoted credential",
+    objective: 'Task password: "FAKE ONE TWO THREE FOUR FIVE SIX"',
+    expected: "Task [REDACTED]",
+  },
+  {
+    name: "short provider-shaped credential",
+    objective: "Task sk-FAKE_ONLY_SYNTHETIC_TOKEN",
+    expected: "Task [REDACTED]",
+  },
+  {
+    name: "Unicode credential across the JS projection bound",
+    objective: "😀".repeat((objectiveLimit - 26) / 2) + ' password: "FAKE ONE TWO THREE FOUR FIVE SIX"',
+    expected: "😀".repeat((objectiveLimit - 26) / 2) + " [REDACTED]",
+  },
+  {
+    name: "complete ASCII exact-bound objective",
+    objective: "x".repeat(objectiveLimit),
+    expected: "x".repeat(objectiveLimit),
+  },
+  {
+    name: "complete Unicode exact-bound objective",
+    objective: "😀".repeat(objectiveLimit - 36) + ' password: "FAKE ONE TWO THREE FOUR"',
+    expected: "😀".repeat(objectiveLimit / 2),
+  },
+])("local and actual remote readers preserve $name", async ({ objective, expected }) => {
+  const home = scratch();
+  const db = store(home);
+  const shell = localShell(home);
+  const project = createRemoteCodexGoals({ shell: () => shell });
+  try {
+    db.prepare("UPDATE thread_goals SET objective = ? WHERE thread_id = ?").run(objective, id);
+    const local = readCodexGoal(session, [home]);
+    const remote = (await project([seat], [observed], [fleet]))[0]?.goal;
+    expect(local?.objective).toBe(expected);
+    expect(remote).toEqual(local);
+    expect(remote?.objective).not.toContain("FAKE");
+    const response = JSON.parse(await shell.mock.results.at(-1)!.value);
+    expect(response[0][1].objective).toBe(objective); // Complete raw syntax reaches the existing redactor.
+  } finally {
+    db.close();
+  }
+});
