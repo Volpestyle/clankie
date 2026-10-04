@@ -97,6 +97,12 @@ that receipt. After it settles, a different follow-up remains unsent; invoke aga
 deliberately if that message is still needed. A confirmed delivery means the stated native handoff;
 it does not prove the recipient model read it or accepted its authority.
 
+`recipient_gone` with outcome `unconfirmed` is terminal: the original recipient
+lost its binding, so delivery stays unknown and must never be resent. The bridge
+clears that original claim; a later deliberate call may send fresh intent. The
+service prunes older settled bodies after 100 messages, retaining exact receipt
+identities; unresolved originals keep their full bodies.
+
 The owner can disable this capability with `clankie fleet set --peer-messages off`
 or `/fleet`, independently of connected tools. Current catalogs hide the peer
 tools and the server refuses stale sends, while original receipt reads remain

@@ -2197,7 +2197,11 @@ paths:
         delivery UUID and fingerprint. The fingerprint covers recipient seat,
         recipient binding and normalized text. Available while peer messaging
         is off. May match the original native transcript or exact channel/hook
-        acknowledgment; absence of proof remains uncertain and never dispatches.
+        acknowledgment; absence of proof remains uncertain while the original
+        recipient is bound. A lost recipient binding settles to recipient_gone
+        with outcome unconfirmed: delivery remains unknown, never resends, and
+        no longer blocks fresh messages. Older settled bodies are pruned after
+        100 messages; exact compact receipts and unresolved originals are retained.
       security: []
       parameters:
         - in: path

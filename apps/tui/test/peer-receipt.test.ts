@@ -89,6 +89,91 @@ it("a restarted sender only reconciles its original recipient and text after a l
   expect(readdirSync(directory)).toEqual([]);
 });
 
+it.each(["original", "different follow-up"])(
+  "a restarted sender settles recipient_gone for %s without resending, then accepts fresh intent",
+  async (followUp) => {
+    const directory = root();
+    const replacement = {
+      seatId: "replacement-peer",
+      paneId: "w1:p3",
+      binding: "c".repeat(64),
+      harness: "codex",
+      title: "Replacement peer",
+    };
+    let liveCatalog = catalog;
+    const discover = vi.fn(async () => response(liveCatalog));
+    const posts: PeerBody[] = [];
+    let terminalUnknown!: ReturnType<typeof receipt> & { detail: string };
+    const request = vi.fn(async (suffix: string, init?: { method: string; body: string }) => {
+      if (init) {
+        const body: PeerBody = JSON.parse(init.body);
+        posts.push(body);
+        if (posts.length === 1) {
+          terminalUnknown = {
+            ...receipt(body, "recipient_gone", "unconfirmed"),
+            detail: "The original recipient is gone; its original delivery outcome is unknown. Never resend.",
+          };
+          throw new Error("original native receipt lost");
+        }
+        return response(receipt(body));
+      }
+      expect(suffix).toBe(
+        `/${terminalUnknown.deliveryId}?binding=${senderBinding}&fingerprint=${terminalUnknown.fingerprint}`,
+      );
+      return response(terminalUnknown);
+    });
+    const original = createPeerSender({ directory, scope: "pane", discover, request });
+    expect((await original("peer-seat", "original message")).deliveryStage).toBe("uncertain");
+    liveCatalog = { ...catalog, seats: [replacement] };
+    const restarted = createPeerSender({ directory, scope: "pane", discover, request });
+    const result = await restarted(
+      followUp === "original" ? "peer-seat" : replacement.seatId,
+      followUp === "original" ? "original message" : "fresh intent",
+    );
+    if (followUp === "original") expect(result).toEqual(terminalUnknown);
+    else {
+      expect(result).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+      expect(result.detail).toContain("different follow-up was not sent");
+    }
+    expect(posts).toHaveLength(1);
+    expect(discover).toHaveBeenCalledOnce();
+    expect(readdirSync(directory)).toEqual([]);
+    expect(await restarted(replacement.seatId, "fresh intent")).toMatchObject({
+      outcome: "delivered",
+      deliveryStage: "consumed",
+      seatId: replacement.seatId,
+      recipientBinding: replacement.binding,
+    });
+    expect(discover).toHaveBeenCalledTimes(2);
+    expect(posts).toHaveLength(2);
+    expect(posts.filter((body) => body.delivery.id === terminalUnknown.deliveryId)).toHaveLength(1);
+    expect(posts[1]).toMatchObject({
+      seatId: replacement.seatId,
+      recipientBinding: replacement.binding,
+      text: "fresh intent",
+    });
+    expect(posts[1]!.delivery.id).not.toBe(terminalUnknown.deliveryId);
+  },
+);
+
+it.each(["delivered", "undelivered", "offline"])(
+  "recipient_gone with inconsistent %s outcome keeps the original fence after restart",
+  async (outcome) => {
+    const directory = root();
+    let original!: ReturnType<typeof receipt>;
+    const request = vi.fn(async (_suffix: string, init?: { method: string; body: string }) => {
+      if (init) original = receipt(JSON.parse(init.body), "recipient_gone", outcome);
+      return response(original);
+    });
+    const options = { directory, scope: "pane", discover: async () => response(catalog), request };
+    expect((await createPeerSender(options)("peer-seat", "original")).deliveryStage).toBe("uncertain");
+    const restarted = createPeerSender(options);
+    expect((await restarted("peer-seat", "fresh intent")).deliveryStage).toBe("uncertain");
+    expect(request.mock.calls.filter(([, init]) => init)).toHaveLength(1);
+    expect(claim(directory).deliveryId).toBe(original.deliveryId);
+  },
+);
+
 it.each(["stored", "delivered", "consumed"])(
   "preserves an exact %s native receipt and normalized fingerprint",
   async (stage) => {

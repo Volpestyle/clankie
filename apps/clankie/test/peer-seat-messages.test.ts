@@ -402,20 +402,132 @@ it("keeps independent senders available and denies another sender's receipt", as
   expect(f.observedNative).not.toHaveBeenCalled();
 });
 
-it("does not observe an uncertain receipt after the recipient's native session changes", async () => {
+it.each(["closed", "session", "pane"])(
+  "unblocks the sender with a terminal unknown receipt when the recipient's %s is gone",
+  async (change) => {
+    const f = fixture();
+    f.setResult({ outcome: "unconfirmed", detail: "Lost receipt." });
+    const input = await f.input();
+    const original = await f.peer.send(f.authority, input);
+    const next = await f.input(f.authority, f.third.terminalId);
+    await expect(f.peer.send(f.authority, next)).resolves.toMatchObject({ deliveryStage: "rejected" });
+    if (change === "closed") f.seats.delete(f.recipient.paneId);
+    else
+      f.seats.set(f.recipient.paneId, {
+        ...f.recipient,
+        ...(change === "session"
+          ? { session: { ...f.recipient.session!, value: "replacement" } }
+          : { paneId: "w1:p4" }),
+      });
+    f.setObserved({ outcome: "delivered", messageId: "unrelated-native-message" });
+    f.setEnabled(false);
+    const terminal = await f.create().reconcile(f.authority, input.delivery, original.fingerprint);
+    expect(FleetPeerReceiptSchema.parse(terminal)).toMatchObject({
+      deliveryId: input.delivery.id,
+      deliveryStage: "recipient_gone",
+      outcome: "unconfirmed",
+      detail: expect.stringContaining("delivery outcome is unknown"),
+    });
+    expect(FleetPeerReceiptSchema.safeParse({ ...terminal, outcome: "delivered" }).success).toBe(false);
+    await expect(f.create().send(f.authority, input)).resolves.toEqual(terminal);
+    expect(f.audit.mock.calls.at(-1)?.[0].receipt).toEqual(terminal);
+    expect(f.observedNative).not.toHaveBeenCalled();
+    expect(f.dispatched).toHaveBeenCalledTimes(1);
+    f.setEnabled(true);
+    f.setResult({ outcome: "delivered", messageId: "new-intent", state: "queued" });
+    await expect(f.create().send(f.authority, next)).resolves.toMatchObject({ outcome: "delivered" });
+    expect(f.dispatched).toHaveBeenCalledTimes(2);
+  },
+);
+
+it("resolves a thrown delivery as unknown when its recipient closes without resending", async () => {
+  const f = fixture();
+  const input = await f.input();
+  f.deliver.mockRejectedValueOnce(new Error("Native app-server died mid-delivery"));
+  const original = await f.peer.send(f.authority, input);
+  expect(original.deliveryStage).toBe("uncertain");
+  f.seats.delete(f.recipient.paneId);
+  await expect(
+    f.create().reconcile(f.authority, input.delivery, original.fingerprint),
+  ).resolves.toMatchObject({
+    deliveryStage: "recipient_gone",
+    outcome: "unconfirmed",
+  });
+  expect(f.deliver).toHaveBeenCalledTimes(1);
+  await expect(
+    f.create().send(f.authority, await f.input(f.authority, f.third.terminalId)),
+  ).resolves.toMatchObject({ outcome: "delivered" });
+  expect(f.dispatched).toHaveBeenCalledTimes(1);
+});
+
+it("keeps recipient-gone terminal when an earlier native receipt observation finishes later", async () => {
   const f = fixture();
   f.setResult({ outcome: "unconfirmed", detail: "Lost receipt." });
   const input = await f.input();
   const original = await f.peer.send(f.authority, input);
-  f.seats.set(f.recipient.paneId, {
-    ...f.recipient,
-    session: { ...f.recipient.session!, value: "replacement" },
+  const started = deferred();
+  const finish = deferred();
+  f.deliver.mockImplementationOnce(async () => {
+    started.resolve();
+    await finish.promise;
+    return { outcome: "delivered", messageId: "late-native-proof", state: "started" };
   });
-  f.setObserved({ outcome: "delivered", messageId: "unrelated-native-message" });
-  await expect(f.peer.reconcile(f.authority, input.delivery, original.fingerprint)).resolves.toEqual(
-    original,
+  const pending = f.peer.reconcile(f.authority, input.delivery, original.fingerprint);
+  await started.promise;
+  f.seats.delete(f.recipient.paneId);
+  const terminal = await f.peer.reconcile(f.authority, input.delivery, original.fingerprint);
+  expect(terminal).toMatchObject({ deliveryStage: "recipient_gone", outcome: "unconfirmed" });
+  finish.resolve();
+  await expect(pending).resolves.toEqual(terminal);
+  await expect(f.create().reconcile(f.authority, input.delivery, original.fingerprint)).resolves.toEqual(
+    terminal,
   );
+  expect(f.dispatched).toHaveBeenCalledTimes(1);
+});
+
+it("prunes settled bodies while retaining uncertain originals and exact no-resend receipts across restart", async () => {
+  const f = fixture();
+  const fromC = authorityFor(f.third, "default");
+  const unresolved = await f.input(
+    fromC,
+    f.recipient.terminalId,
+    randomUUID(),
+    "Keep this uncertain original.",
+  );
+  f.setResult({ outcome: "unconfirmed", detail: "Lost receipt." });
+  const unknown = await f.peer.send(fromC, unresolved);
+  f.setResult({ outcome: "delivered", messageId: "settled", state: "queued" });
+  const oldest = await f.input(f.authority, f.recipient.terminalId, randomUUID(), "Prune this settled body.");
+  const oldestReceipt = await f.peer.send(f.authority, oldest);
+  for (let i = 0; i < 100; i++) {
+    await f.peer.send(
+      f.authority,
+      await f.input(f.authority, f.recipient.terminalId, randomUUID(), `Settled message ${i}`),
+    );
+  }
+  const journal = JSON.parse(readFileSync(f.path, "utf8"));
+  expect(journal[oldest.delivery.id]).toEqual({
+    fleet: "default",
+    paneId: f.sender.paneId,
+    senderSeatId: f.sender.terminalId,
+    receipt: oldestReceipt,
+  });
+  expect(Object.values(journal).filter((record) => (record as { input?: unknown }).input)).toHaveLength(101);
+  expect(readFileSync(f.path, "utf8")).not.toContain(oldest.text);
+  expect(journal[unresolved.delivery.id]).toMatchObject({
+    input: unresolved,
+    message: expect.stringContaining(unresolved.text),
+  });
+  const restarted = f.create();
+  await expect(restarted.send(f.authority, oldest)).resolves.toEqual(oldestReceipt);
+  expect(f.dispatched).toHaveBeenCalledTimes(102);
   expect(f.observedNative).not.toHaveBeenCalled();
+  f.setObserved({ outcome: "delivered", messageId: "original-proof", state: "started" });
+  await expect(restarted.reconcile(fromC, unresolved.delivery, unknown.fingerprint)).resolves.toMatchObject({
+    outcome: "delivered",
+  });
+  expect(f.observedNative.mock.calls[0]?.[1]).toContain(unresolved.text);
+  expect(f.dispatched).toHaveBeenCalledTimes(102);
 });
 
 it.each([

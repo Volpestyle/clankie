@@ -179,6 +179,20 @@ request fields, establishes the sender and scope of each receipt read. An
 uncertain bridge request keeps its original ID across bridge replacement and
 reconciles by reading; missing acknowledgment never authorizes another POST.
 
+When an uncertain original's recipient is no longer bound, reconciliation
+settles it to `recipient_gone` with outcome `unconfirmed`: the native handoff's
+outcome remains unknown, the original is never resent, and it no longer blocks
+the sender from a fresh message. This terminal state survives restart and cannot
+be promoted by a concurrent late native observation. The bridge clears the exact
+original claim only for this stage/outcome pair; a different follow-up in that
+same call remains unsent.
+
+The receipt journal retains full bodies for the latest 100 settled messages and
+all uncertain originals. Older settled records become compact receipts containing
+the original identity, scope and result. Those receipts remain queryable and
+prevent replay of old IDs; body pruning never deletes uncertainty or authorizes
+another dispatch. Pruning commits only after the journal is persisted successfully.
+
 The owner controls this separately from connected tools through
 `clankie fleet set --peer-messages off|on` and the `/fleet` editor. `off` hides
 both peer tools and refuses new sends server-side, including stale calls. Receipt

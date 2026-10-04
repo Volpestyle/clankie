@@ -2185,8 +2185,8 @@ this path. The server requires the caller's proven native pane process and match
 session, confines recipients to the same fleet and checks their current binding.
 Peer content reaches the existing `message_seat` native channel/session delivery
 path as agent output, never an owner instruction. It records a server audit and
-an agent-role message in Clankie's default transcript, with `source: peer`, without
-waking him or creating an owner turn.
+an agent-role message in Clankie's default transcript. Native channel events carry
+`source: peer`; the exchange does not wake him or create an owner turn.
 
 An uncertain peer send keeps its original receipt. Reconcile that ID through
 `GET /v1/fleet/seats/{paneId}/peer-messages/{id}`; do not issue another POST,
@@ -2194,7 +2194,12 @@ delete receipt state or switch bridges to replay it. Discovery uses
 `GET /v1/fleet/seats/{paneId}/peers`; new sends use
 `POST /v1/fleet/seats/{paneId}/peer-messages`. These worker routes derive authority
 from the admitted identity, not caller-supplied pane or fleet fields. Receipt reads
-remain available with peer messages off. See [worker access](worker-access.md#messages-between-workers).
+remain available with peer messages off. A lost recipient binding terminates
+reconciliation as `recipient_gone` with outcome `unconfirmed`: delivery stays
+unknown, the original is never resent, and fresh messages are allowed. The service
+keeps full bodies for the latest 100 settled messages and all unresolved originals;
+older settled bodies become exact compact receipts that still prevent ID replay.
+See [worker access](worker-access.md#messages-between-workers).
 
 `doctor.harnessBridges` reports installation, registration and invoking-process
 membership separately. Remote project `eligibility: unsupported` does not mean

@@ -2532,13 +2532,25 @@ export const FleetPeerReceiptSchema = z
     seatId: z.string().min(1).max(200),
     recipientBinding: z.string().regex(/^[a-f0-9]{64}$/u),
     fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
-    deliveryStage: z.enum(["stored", "delivered", "consumed", "uncertain", "rejected", "unavailable"]),
+    deliveryStage: z.enum([
+      "stored",
+      "delivered",
+      "consumed",
+      "uncertain",
+      "recipient_gone",
+      "rejected",
+      "unavailable",
+    ]),
     outcome: z.enum(["delivered", "unconfirmed", "undelivered", "offline"]),
     detail: z.string().optional(),
     messageId: z.string().optional(),
     state: z.enum(["queued", "started", "steered"]).optional(),
   })
-  .strict();
+  .strict()
+  .refine((receipt) => receipt.deliveryStage !== "recipient_gone" || receipt.outcome === "unconfirmed", {
+    path: ["outcome"],
+    message: "A recipient-gone receipt retains an unknown delivery outcome",
+  });
 export type FleetPeerReceipt = z.infer<typeof FleetPeerReceiptSchema>;
 export const FLEET_PEER_SEATS_PATH = "/v1/fleet/seats/:paneId/peers";
 export const FLEET_PEER_MESSAGES_PATH = "/v1/fleet/seats/:paneId/peer-messages";

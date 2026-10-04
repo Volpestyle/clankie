@@ -72,7 +72,7 @@ export function createPeerSender({ directory, scope, discover, request }) {
   const exact = (value, record) =>
     value?.schemaVersion === 1 &&
     Object.entries(identity(record)).every(([key, expected]) => value[key] === expected) &&
-    ["stored", "delivered", "consumed", "uncertain", "rejected", "unavailable"].includes(
+    ["stored", "delivered", "consumed", "uncertain", "rejected", "unavailable", "recipient_gone"].includes(
       value.deliveryStage,
     ) &&
     ["delivered", "unconfirmed", "undelivered", "offline"].includes(value.outcome);
@@ -80,7 +80,10 @@ export function createPeerSender({ directory, scope, discover, request }) {
     exact(value, record) &&
     ((["stored", "delivered", "consumed"].includes(value.deliveryStage) && value.outcome === "delivered") ||
       (["rejected", "unavailable"].includes(value.deliveryStage) &&
-        ["undelivered", "offline"].includes(value.outcome)));
+        ["undelivered", "offline"].includes(value.outcome)) ||
+      // A lost recipient ends reconciliation without claiming whether it read
+      // the original. Clearing permits fresh intent, never replay of this ID.
+      (value.deliveryStage === "recipient_gone" && value.outcome === "unconfirmed"));
   const inspect = () => {
     try {
       const record = JSON.parse(readFileSync(path, "utf8"));

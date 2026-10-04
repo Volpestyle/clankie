@@ -1,6 +1,13 @@
 interface PeerReceipt {
   schemaVersion: 1;
-  deliveryStage: "stored" | "delivered" | "consumed" | "uncertain" | "rejected" | "unavailable";
+  deliveryStage:
+    | "stored"
+    | "delivered"
+    | "consumed"
+    | "uncertain"
+    | "recipient_gone"
+    | "rejected"
+    | "unavailable";
   outcome: "delivered" | "unconfirmed" | "undelivered" | "offline";
   deliveryId?: string;
   binding?: string;

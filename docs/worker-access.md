@@ -112,6 +112,12 @@ delivery receipt proves the stated handoff, not that the model read or accepted
 the message. While unresolved, another `message_peer` call reads only the
 original receipt. Once that receipt is settled, a different recipient or follow-up
 remains unsent; invoke again deliberately if that new message is still needed.
+If the original recipient closes or loses its native binding, reconciliation
+terminates as `recipient_gone` with an `unconfirmed` outcome. Delivery remains
+unknown; the original is never resent, and the sender can send a fresh message.
+The service retains full bodies for the latest 100 settled messages and every
+unresolved message. Older settled bodies are pruned, with compact exact receipts
+retained to prevent an old delivery ID from dispatching again.
 [ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608)
 records this contract.
 

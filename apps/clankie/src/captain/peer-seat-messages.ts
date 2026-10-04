@@ -29,17 +29,22 @@ export interface PeerDeliveryOptions {
   readonly recipientBinding?: string;
   readonly fence?: (agent: HerdrAgentSnapshot | undefined) => Promise<boolean>;
 }
-const RecordSchema = z
+const ReceiptRecordSchema = z
   .object({
     fleet: z.string(),
     paneId: z.string(),
     senderSeatId: z.string(),
-    input: FleetPeerMessageSchema,
-    message: z.string(),
     receipt: FleetPeerReceiptSchema,
   })
   .strict();
+const MessageRecordSchema = ReceiptRecordSchema.extend({
+  input: FleetPeerMessageSchema,
+  message: z.string(),
+});
+const RecordSchema = z.union([MessageRecordSchema, ReceiptRecordSchema]);
+type MessageRecord = z.infer<typeof MessageRecordSchema>;
 type Record = z.infer<typeof RecordSchema>;
+const SETTLED_MESSAGE_LIMIT = 100;
 
 export function peerMessageFingerprint(
   input: Pick<FleetPeerMessage, "seatId" | "recipientBinding" | "text">,
@@ -83,12 +88,14 @@ export class PeerSeatMessages {
         .parse(JSON.parse(readFileSync(options.path, "utf8")));
       for (const [id, record] of Object.entries(records)) {
         if (
-          id !== record.input.delivery.id ||
           record.receipt.deliveryId !== id ||
-          record.receipt.binding !== record.input.delivery.binding ||
-          record.receipt.seatId !== record.input.seatId ||
-          record.receipt.recipientBinding !== record.input.recipientBinding ||
-          record.receipt.fingerprint !== peerMessageFingerprint(record.input)
+          ("input" in record
+            ? id !== record.input.delivery.id ||
+              record.receipt.binding !== record.input.delivery.binding ||
+              record.receipt.seatId !== record.input.seatId ||
+              record.receipt.recipientBinding !== record.input.recipientBinding ||
+              record.receipt.fingerprint !== peerMessageFingerprint(record.input)
+            : record.receipt.deliveryStage === "uncertain")
         )
           throw new Error("Invalid peer receipt");
         this.records.set(id, record);
@@ -214,7 +221,7 @@ export class PeerSeatMessages {
         "",
         input.text,
       ].join("\n");
-      const record: Record = {
+      const record: MessageRecord = {
         fleet: authority.proof.fleet,
         paneId: pane,
         senderSeatId: sender.terminalId,
@@ -257,7 +264,7 @@ export class PeerSeatMessages {
       this.unreadable ||
       record.paneId !== paneOf(authority.proof) ||
       record.fleet !== authority.proof.fleet ||
-      record.input.delivery.binding !== delivery.binding ||
+      record.receipt.binding !== delivery.binding ||
       record.receipt.fingerprint !== fingerprint
     )
       return undefined;
@@ -265,19 +272,33 @@ export class PeerSeatMessages {
     if (!sender || seatBinding(sender) !== delivery.binding || !(await authority.validate()))
       return undefined;
     if (record.receipt.deliveryStage !== "uncertain" || this.active.has(record.paneId)) return record.receipt;
+    if (!("input" in record)) return record.receipt;
     // Reading the original receipt is allowed while off. No dispatch, alternate path or new ID.
     const recipient = await this.options.recipient(record.input.seatId);
+    if (record.receipt.deliveryStage !== "uncertain") return record.receipt;
     if (
       !recipient ||
       fleetOf(recipient) !== record.fleet ||
       seatBinding(recipient) !== record.input.recipientBinding
-    )
-      return record.receipt;
+    ) {
+      try {
+        return this.resolve(record, {
+          ...record.receipt,
+          deliveryStage: "recipient_gone",
+          outcome: "unconfirmed",
+          detail:
+            "The original recipient is no longer bound; delivery outcome is unknown. Never resend this message.",
+        });
+      } catch {
+        return record.receipt;
+      }
+    }
     try {
       const result = await this.options.deliver(record.input.seatId, record.message, {
         reconcileOnly: true,
         originalId: record.input.delivery.id,
       });
+      if (record.receipt.deliveryStage !== "uncertain") return record.receipt;
       if (result.outcome === "delivered") return this.settle(record, result);
     } catch {
       /* Keep the original uncertain claim. */
@@ -285,13 +306,17 @@ export class PeerSeatMessages {
     return record.receipt;
   }
 
-  private settle(record: Record, result: FleetSeatDelivery): FleetPeerReceipt {
+  private settle(record: MessageRecord, result: FleetSeatDelivery): FleetPeerReceipt {
     const receipt: FleetPeerReceipt = {
       ...record.receipt,
       ...result,
       detail: result.detail,
       deliveryStage: fleetDeliveryStage(result) as FleetPeerReceipt["deliveryStage"],
     };
+    return this.resolve(record, receipt);
+  }
+
+  private resolve(record: MessageRecord, receipt: FleetPeerReceipt): FleetPeerReceipt {
     const previous = record.receipt;
     record.receipt = receipt;
     try {
@@ -310,15 +335,31 @@ export class PeerSeatMessages {
   }
 
   private save(): void {
+    // Prune settled payloads, retaining exact receipts as permanent no-resend tombstones.
+    // Uncertain originals need their complete message for native reconciliation.
+    const records = new Map(this.records);
+    const settled = [...records.entries()].filter(
+      ([, record]) => record.receipt.deliveryStage !== "uncertain" && "input" in record,
+    );
+    for (const [id, record] of settled.slice(0, Math.max(0, settled.length - SETTLED_MESSAGE_LIMIT))) {
+      records.set(id, {
+        fleet: record.fleet,
+        paneId: record.paneId,
+        senderSeatId: record.senderSeatId,
+        receipt: record.receipt,
+      });
+    }
     mkdirSync(dirname(this.options.path), { recursive: true, mode: 0o700 });
     const temporary = `${this.options.path}.${randomUUID()}.tmp`;
     const fd = openSync(temporary, "wx", 0o600);
     try {
-      writeFileSync(fd, `${JSON.stringify(Object.fromEntries(this.records))}\n`);
+      writeFileSync(fd, `${JSON.stringify(Object.fromEntries(records))}\n`);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
     }
     renameSync(temporary, this.options.path);
+    // Commit pruning only after persistence succeeds, preserving the original fence on failure.
+    for (const [id, record] of records) this.records.set(id, record);
   }
 }
