@@ -27,9 +27,9 @@ export interface DiscordPresenceRuntimePort {
    * handed one, rather than holding the credential that makes one.
    *
    * Absent on an older runtime module. That is not a fallback to pasting: the
-   * same module answers for the swarm home, so without it nothing projects.
+   * same module answers for the managed server, so without it nothing projects.
    * The manual path is for a runtime that is here and simply lacks
-   * `Manage Webhooks` in the swarm home.
+   * `Manage Webhooks` in the managed server.
    */
   provisionChannel?(input: {
     readonly name: string;
@@ -46,7 +46,7 @@ export interface DiscordPresenceRuntimePort {
     readonly webhookToken: string;
   }>;
   /**
-   * The swarm home's rooms, so projecting onto one the owner already made is a
+   * The managed server's rooms, so projecting onto one the owner already made is a
    * pick rather than a webhook URL copied out of Server Settings.
    */
   listRooms?(): Promise<readonly DiscordGuildRoom[]>;

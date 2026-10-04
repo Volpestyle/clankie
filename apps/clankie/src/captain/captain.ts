@@ -625,11 +625,11 @@ export interface CaptainOptions {
     Partial<Pick<DeliveredFileStore, "beginUpload" | "appendUpload" | "commitUpload" | "attachment">>;
   /**
    * Trusted Discord runtime, used to make a channel's room and webhook
-   * (ADR 0146). It is also what answers which guild the swarm home is, so an
+   * (ADR 0146). It is also what answers which guild the managed server is, so an
    * absent runtime is no Discord projection at all rather than a fallback to
    * pasting — a deployment with no Discord bot has nothing to paste into.
    * Only a runtime that is present but lacks `Manage Webhooks` leaves the
-   * manual path, and that webhook still has to be in the swarm home.
+   * manual path, and that webhook still has to be in the managed server.
    */
   readonly discordChannels?: Pick<
     DiscordPresenceRuntimePort,

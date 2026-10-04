@@ -143,7 +143,7 @@ describe("Discord text readiness", () => {
     }
   });
 
-  it("names the room-making permissions the swarm home is missing, and nothing else", async () => {
+  it("names the room-making permissions the managed server is missing, and nothing else", async () => {
     const store = new MemoryCredentialStore();
     store.credentials.set(DISCORD_BOT_PROVIDER_ID, { type: "api", key: "bot-secret-marker" });
     const env = {
@@ -176,10 +176,10 @@ describe("Discord text readiness", () => {
       clock: () => new Date("2026-07-25T16:00:00.000Z"),
     });
 
-    const check = report.checks.find((entry) => entry.name === "swarm home permissions");
+    const check = report.checks.find((entry) => entry.name === "managed server permissions");
     expect(check).toMatchObject({
       ok: false,
-      detail: "missing Manage Channels and Manage Webhooks in the swarm home",
+      detail: "missing Manage Channels and Manage Webhooks in the managed server",
     });
     expect(check?.remediation).toContain("/discord invite");
     // Guild-wide grants are not the whole answer, and the report says so.
@@ -215,7 +215,7 @@ describe("Discord text readiness", () => {
       clock: () => new Date("2026-07-25T16:00:00.000Z"),
     });
 
-    expect(report.checks.find((entry) => entry.name === "swarm home permissions")).toMatchObject({
+    expect(report.checks.find((entry) => entry.name === "managed server permissions")).toMatchObject({
       ok: true,
     });
   });

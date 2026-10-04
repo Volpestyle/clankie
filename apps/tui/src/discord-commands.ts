@@ -1,5 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
-import { DiscordSettingsSchema } from "@clankie/protocol";
+import { DiscordSettingsSchema, DISCORD_SETTING_GROUPS } from "@clankie/protocol";
 import type { ClankieApiClient } from "@clankie/api-client";
 import { formatDiscordRoomStatus } from "./discord-room-view.ts";
 import { parseDiscordSettingValue } from "./command/discord.ts";
@@ -218,7 +218,7 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
  * Files, Read Message History, Add Reactions, Connect, Speak, Use VAD, Use
  * Application Commands, Manage Channels, Manage Webhooks. The last two are what
  * let him make a channel's room and its webhook himself (ADR 0146), and they
- * are needed in the configured swarm home specifically — without them the only
+ * are needed in the configured managed server specifically — without them the only
  * projection left is a webhook made by hand in that same server and pasted per
  * room. Message Content is a privileged *intent*, not a bit here — the primer
  * tells the owner to flip it in the portal.
@@ -558,7 +558,8 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
   // The one server he controls, and the only one agent channels may be
   // projected into (ADR 0146). Never inferred from the servers he inhabits.
   const swarmGuildId = await flow.readText({
-    message: "Swarm home server id — where agent channels may get Discord rooms. Blank keeps, `none` clears.",
+    message:
+      "Managed server server id — where agent channels may get Discord rooms. Blank keeps, `none` clears.",
     placeholder: current.swarmGuildId ?? "blank = no server he may make rooms in",
     validate: (value) => (value.trim().toLowerCase() === "none" ? undefined : validateSnowflake(true)(value)),
   });
@@ -1078,7 +1079,9 @@ async function showEnvironmentExport(
   );
 }
 
-export const DISCORD_EDITABLE_FIELDS = Object.keys(DiscordSettingsSchema.shape) as (keyof DiscordSettings)[];
+export const DISCORD_EDITABLE_FIELDS = DISCORD_SETTING_GROUPS.flatMap((group) =>
+  group.fields.map((field) => field.key),
+);
 async function editAllDiscordSettings(
   shell: ClankieFaceShell,
   services: DiscordCommandServices,
@@ -1088,7 +1091,9 @@ async function editAllDiscordSettings(
     message: "Discord setting",
     options: DISCORD_EDITABLE_FIELDS.map((value) => ({
       value,
-      label: value,
+      label:
+        DISCORD_SETTING_GROUPS.flatMap((group) => group.fields).find((field) => field.key === value)?.label ??
+        value,
       hint: String(current[value] ?? "unset"),
     })),
   });

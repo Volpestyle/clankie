@@ -16,6 +16,11 @@ import {
 } from "../../../packages/protocol/src/discord-rooms.ts";
 import { BODY_LEASE_STATUS_PATH, BodyLeaseStatusSchema } from "../../../packages/protocol/src/body-leases.ts";
 import { hostedOperatorAllows } from "../../../packages/protocol/src/hosted-operator.ts";
+import {
+  DISCORD_DIRECTORY_PATH,
+  DiscordDirectorySnapshotSchema,
+  safeParseProtocolResponse,
+} from "../../../packages/protocol/src/index.ts";
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { once } from "node:events";
@@ -82,6 +87,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       path === DISCORD_ROOMS_PATH ||
       path === DISCORD_ROOM_GUIDANCE_PATH ||
       path === DISCORD_SETTINGS_PATH ||
+      path === DISCORD_DIRECTORY_PATH ||
       path === DISCORD_ROOM_VOICE_PATH ||
       path === DISCORD_VOICE_TRANSCRIPTS_PATH;
     if (roomRoute) {
@@ -128,8 +134,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               ? DiscordRoomVoiceStatusSchema
               : path === DISCORD_VOICE_TRANSCRIPTS_PATH
                 ? DiscordVoiceTranscriptPageSchema
-                : DiscordSettingsSnapshotSchema;
-      const parsed = schema.safeParse(data);
+                : path === DISCORD_DIRECTORY_PATH
+                  ? DiscordDirectorySnapshotSchema
+                  : DiscordSettingsSnapshotSchema;
+      const parsed = safeParseProtocolResponse<unknown>(schema, data);
       writeJson(
         response,
         parsed.success ? 200 : 502,

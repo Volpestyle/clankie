@@ -424,7 +424,7 @@ export interface ChannelProjection {
    * Make the webhook rather than being handed one — on a fresh room, or on an
    * existing container named by `room`. A forum container gets one new post.
    * Absent where the bot lacks
-   * `Manage Webhooks` in the swarm home, which is the one case the manual
+   * `Manage Webhooks` in the managed server, which is the one case the manual
    * pasted webhook is for; a host with no Discord runtime at all has no swarm
    * home either, and projects nothing by any path.
    */
@@ -435,7 +435,7 @@ export interface ChannelProjection {
     readonly webhookId: string;
     readonly webhookToken: string;
   }>;
-  /** The swarm home's rooms, so an existing one can be picked to project onto. */
+  /** The managed server's rooms, so an existing one can be picked to project onto. */
   rooms?: () => Promise<readonly DiscordGuildRoom[]>;
   /** The one guild rooms may live in, which a pasted webhook is held to. */
   swarmGuildId?: () => string | undefined;
@@ -910,7 +910,7 @@ export class ConversationStore {
           op: "discord_rooms",
           schemaVersion: 1,
           // Empty rather than an error where no Discord runtime can list them,
-          // or where no swarm home is set: the compose screen still opens, and
+          // or where no managed server is set: the compose screen still opens, and
           // says what it can offer rather than failing to draw.
           rooms: [...((await this.projection?.rooms?.()) ?? [])],
         };
@@ -2491,7 +2491,7 @@ export class ConversationStore {
   ): Promise<NonNullable<ConversationMeta["channelDiscord"]>> {
     if (this.projection === undefined) throw new Error("Discord projection is unavailable here");
     // Required before either path resolves, never merely compared against when
-    // it happens to be set: an unset swarm home is not "no opinion", it is no
+    // it happens to be set: an unset managed server is not "no opinion", it is no
     // server Clankie controls, and the fleet may not be put anywhere at all.
     const swarmGuildId = this.projection.swarmGuildId?.();
     if (swarmGuildId === undefined) {
@@ -2528,7 +2528,7 @@ export class ConversationStore {
       ...(choice.room === undefined ? {} : { room: choice.room }),
     });
     // Held to the same fence as a paste. The trusted module answers for the
-    // swarm home, but a room is only a room here if it landed in the guild this
+    // managed server, but a room is only a room here if it landed in the guild this
     // side was told about — a disagreement is a refusal, not a projection.
     if (provisioned.guildId !== swarmGuildId) {
       throw new Error("That Discord room is not in Clankie’s swarm server.");
@@ -2556,10 +2556,10 @@ export class ConversationStore {
   }
 
   /**
-   * A room's projection, but only while it still points inside the swarm home.
+   * A room's projection, but only while it still points inside the managed server.
    * Records outlive the setting that admitted them: a guild dropped as the
-   * swarm home, or one projected before this fence existed, must stop routing
-   * and stop posting immediately rather than at the next edit. No swarm home
+   * managed server, or one projected before this fence existed, must stop routing
+   * and stop posting immediately rather than at the next edit. No managed server
    * set means no projection is live at all.
    */
   private liveProjection(meta: ConversationMeta): ConversationMeta["channelDiscord"] {
