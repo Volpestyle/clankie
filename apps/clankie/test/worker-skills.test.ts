@@ -70,6 +70,28 @@ describe("hired worker skill discovery", () => {
     expect(config).toContain(`[hooks.state."${other}:session_start:0:0"]`);
   });
 
+  it("keeps one hook-trust table when two account homes name the same hooks file", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "worker-skills-")));
+    roots.push(root);
+    const shared = join(root, "dotfiles");
+    const primary = join(root, "primary");
+    const second = join(root, "second");
+    for (const dir of [shared, primary, join(second, "sessions")]) await mkdir(dir, { recursive: true });
+    await writeFile(join(shared, "hooks.json"), "{}\n");
+    await symlink(join(shared, "hooks.json"), join(primary, "hooks.json"));
+    await symlink(join(shared, "hooks.json"), join(second, "hooks.json"));
+    await writeFile(
+      join(second, "config.toml"),
+      `["hooks"."state"."${join(primary, "hooks.json")}:session_start:0:0"]\ntrusted_hash = "sha256:shared"\n` +
+        `["hooks"."state"."${join(second, "hooks.json")}:session_start:0:0"]\ntrusted_hash = "sha256:shared"\n` +
+        `[other]\nvalue = 1\n`,
+    );
+    const overlay = (await workerSkills("codex", root, root, second)).env!.CODEX_HOME!;
+    const config = await readFile(join(overlay, "config.toml"), "utf8");
+    expect(config.split(`${join(overlay, "hooks.json")}:session_start:0:0`)).toHaveLength(2);
+    expect(config).toContain("[other]\nvalue = 1");
+  });
+
   it.each([
     { opinionated: true, exclude: [], lead: true, reflect: true },
     { opinionated: false, exclude: [], lead: false, reflect: false },

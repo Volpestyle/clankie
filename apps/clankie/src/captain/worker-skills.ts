@@ -76,7 +76,7 @@ export async function workerSkills(
             (hooks !== undefined && (await realpath(path).catch(() => undefined)) === hooks);
           if (same) config = config.replaceAll(`${path}:`, `${join(overlay, "hooks.json")}:`);
         }
-        await writeFile(destination, config);
+        await writeFile(destination, withoutRepeatedTables(config));
       }
     } else {
       await symlink(source, destination);
@@ -92,4 +92,26 @@ export async function workerSkills(
       await symlink(join(codexHome, "skills", name), join(overlay, "skills", name));
   }
   return { args: [], env: { CODEX_HOME: overlay } };
+}
+
+/**
+ * Two homes that share one hooks file (`~/.codex` and `~/.codex-james`) both
+ * map onto the copied file, which would repeat a table and make Codex refuse
+ * the whole config. Keep the first table under each header.
+ */
+function withoutRepeatedTables(config: string): string {
+  const seen = new Set<string>();
+  let skipping = false;
+  return config
+    .split("\n")
+    .filter((line) => {
+      const header = /^\s*\[(?!\[)(.*)\]\s*$/u.exec(line)?.[1];
+      if (header !== undefined) {
+        const key = header.replace(/["\s]/gu, "");
+        skipping = seen.has(key);
+        seen.add(key);
+      }
+      return !skipping;
+    })
+    .join("\n");
 }
