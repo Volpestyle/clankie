@@ -145,13 +145,16 @@ credential holder.
   observation reconnects without resending its message.
 - `/chats` (aliases `/chat`, `/conversation`, `/conversations`) opens only
   personal and workspace chats with Clankie. `/chats <name-or-path>` switches directly.
-- Live agents appear in the editor dock with name, harness, state, current step
-  and remote machine. `Ctrl+G` focuses the strip, Up/Down selects, and Enter opens
+- Live agents appear below the editor in a two-line dock with status counts and
+  a selected-agent preview. Statuses use the shell colors and machines are dim.
+  `Ctrl+G` opens a scrolling modal of every agent; Up/Down selects, and Enter opens
   the existing persona conversation. Escape returns without cancelling the
   worker; drafts stay with their conversation. `Ctrl+Y` opens that exact agent's
   pane in its full Herdr workspace, using the selected connection. It attaches
   only, or focuses without nesting when already inside the same session. The
-  strip disappears when empty; a large fleet scrolls through three visible rows.
+  dock disappears when empty. Escape closes the modal; the selected agent's full
+  name, harness, status, machine and distinct current step wrap below its list.
+  Unavailable-agent errors show a readable message instead of Herdr's JSON.
 - `/agents` opens the agents that are live now (a Herdr seat here or on a
   remote fleet). Offline agents that kept a thread
   sit behind one "Past agents" entry, newest first; offline agents without a

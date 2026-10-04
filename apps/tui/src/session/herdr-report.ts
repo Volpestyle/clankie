@@ -173,7 +173,7 @@ export async function jumpToHerdrAgent(
 }
 
 /** herdr refuses with a JSON envelope on stderr; surface its message, not the spawn noise. */
-function herdrJumpError(caught: unknown): string {
+export function herdrJumpError(caught: unknown): string {
   if (caught instanceof Error && "code" in caught && caught.code === "ENOENT") return "herdr is not on PATH";
   const failure = caught as {
     readonly stderr?: unknown;
