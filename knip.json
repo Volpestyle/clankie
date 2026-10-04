@@ -50,7 +50,10 @@
       }
     },
     "apps/clankie": {
-      "entry": ["test/fixtures/mcp-stdio-bridge.ts"]
+      "entry": ["test/fixtures/mcp-stdio-bridge.ts", "src/computer-windows-host.ts"]
+    },
+    "packages/protocol": {
+      "entry": ["test/fixtures/*.ts"]
     },
     "apps/discord-user-session": {
       "entry": ["src/presence-runtime-module.ts"]
@@ -60,9 +63,6 @@
     },
     "packages/play": {
       "ignoreExportsUsedInFile": true
-    },
-    "apps/clankie": {
-      "entry": ["src/computer-windows-host.ts"]
     },
     "apps/tui": {
       "entry": ["bin/runtime-update-helper.mjs"]
