@@ -57,7 +57,7 @@ Discord settings object. Writes require actual operator authority. The hosted
 operator bridge still requires `mintedBy=hosted-account-operator` and
 `terminalControl`; `steer` does not grant settings access. The canonical schema
 lives in protocol and is reexported by settings. All canonical fields are editable under
-TUI `/discord` → **All Discord settings** and existing `clankie discord set/clear`.
+TUI `/discord` → **Advanced** and existing `clankie discord set/clear`.
 The optional `setup` member contains the shared four-sentence definition, picker
 kinds, help, check kinds, Advanced groups and choice labels from protocol's
 `discord-setup.ts`. `machineName` comes from the host (its name when self-hosted,
@@ -65,6 +65,16 @@ kinds, help, check kinds, Advanced groups and choice labels from protocol's
 settings. `clankie discord definition` reads the same metadata with operator
 authentication. Check kinds describe which checks a surface should present;
 this foundation does not claim that an invite, permission check or test post ran.
+The TUI and `clankie discord setup` render the returned definition through
+`DiscordSetupClient` from `@clankie/api-client`. Optional picker bindings define
+server scopes, room kinds and enablement; surfaces do not maintain their own
+field mappings. Names or numbered choices replace ID entry outside Advanced.
+Each sentence writes atomically through the existing revision fence. Selecting
+a social server or rooms preserves all computer grants; choosing computer
+access explicitly replaces its grants. The independent team visibility picker
+can retain its server even when the directory is disconnected. Only account
+connection and selected-room visibility have directory-backed check results;
+the rest say “not checked” pending VUH-1642. Nothing posts automatically.
 Clients read responses through `parseProtocolResponse`; strict settings writes
 retain `expectedRevision` and never accept display metadata or unknown fields.
 Computer access remains a separate explicit choice, never a server/room preset.

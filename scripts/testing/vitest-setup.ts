@@ -9,6 +9,15 @@ export const ownerConfigRoots = [
   join(homedir(), ".config", "clankie"),
   ...(process.env.XDG_CONFIG_HOME ? [join(process.env.XDG_CONFIG_HOME, "clankie")] : []),
 ];
+// Descriptor bytes may be guarded in integration tests; paths only, no credentials.
+export const ownerDescriptorPaths = [
+  ...new Set([
+    join(homedir(), ".clankie", "links", "default-local.json"),
+    ...(process.env.CLANKIE_STATE?.trim()
+      ? [join(process.env.CLANKIE_STATE.trim(), "links", "default-local.json")]
+      : []),
+  ]),
+];
 
 // Runs before each test file's imports, including package-local and eval runs.
 // Separate roots also keep files from leaking settings into the next suite.

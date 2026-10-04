@@ -1,4 +1,6 @@
 import { questionConsoleCommand } from "./question-commands.ts";
+import { ClankieApiClient } from "@clankie/api-client";
+import { buildDiscordCommands } from "./discord-commands.ts";
 import { runAccountsCommand } from "./command/accounts.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
@@ -174,7 +176,21 @@ export async function runHostedConsole() {
       "success",
     );
   const questionCommand = questionConsoleCommand(client, () => selection.conversationId);
+  const discordApi = new ClankieApiClient({
+    baseUrl: transport.host,
+    fetchImpl: transport.fetchImpl,
+    operatorToken: "hosted-device-transport",
+  });
   const commands: FaceShellCommand[] = [
+    ...buildDiscordCommands({
+      settings,
+      localAdvanced: false,
+      setup: discordApi,
+      rooms: discordApi,
+      listCredentials: () => store.list(),
+      setCredential: (id, key) => store.set(id, { type: "api", key }),
+      removeCredential: (id) => store.delete(id),
+    }).filter((command) => command.name === "discord"),
     {
       name: "question",
       aliases: [],
@@ -211,6 +227,7 @@ export async function runHostedConsole() {
               { value: "persona", label: "Persona" },
               { value: "model", label: "Model" },
               { value: "connect", label: "Connected accounts" },
+              { value: "discord", label: "Discord" },
             ],
           });
         } finally {

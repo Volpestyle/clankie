@@ -1,6 +1,8 @@
 import { stripVTControlCharacters } from "node:util";
 import { DiscordSettingsSchema, DISCORD_SETTING_GROUPS } from "@clankie/protocol";
 import type { ClankieApiClient } from "@clankie/api-client";
+import type { DiscordSetupApi } from "@clankie/api-client";
+import { runDiscordSetup, showDiscordSetup } from "./discord-setup.ts";
 import { formatDiscordRoomStatus } from "./discord-room-view.ts";
 import { parseDiscordSettingValue } from "./command/discord.ts";
 import { SettingsStore, discordSettingsToEnvironment, type DiscordSettings } from "@clankie/settings";
@@ -24,6 +26,9 @@ interface DiscordUserSessionOptInClient {
 
 export interface DiscordCommandServices {
   settings: SettingsStore;
+  setup?: DiscordSetupApi;
+  /** Hosted consoles expose raw fields through the host, never local credentials/settings. */
+  localAdvanced?: boolean;
   rooms?: Pick<
     ClankieApiClient,
     "discordRooms" | "discordRoomGuidance" | "discordRoomVoice" | "controlDiscordRoomVoice"
@@ -88,7 +93,7 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
     {
       name: "discord",
       aliases: [],
-      description: "Configure Discord ids, allowlists, and the activity plane",
+      description: "Choose Discord servers, rooms and computer access",
       argumentHint: "[status|invite|rooms|guide|call]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -200,7 +205,9 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
           return;
         }
         if (selector === "status") {
-          await showDiscordStatus(shell, services);
+          if (!services.setup)
+            throw new Error("Discord settings need an authenticated connection to Clankie.");
+          await showDiscordSetup(shell, services.setup);
           return;
         }
         if (selector === "invite") {
@@ -362,13 +369,25 @@ export async function runDiscordWizard(
   shell: ClankieFaceShell,
   services: DiscordCommandServices,
 ): Promise<void> {
+  if (!services.setup) throw new Error("Discord settings need an authenticated connection to Clankie.");
+  await runDiscordSetup(shell, services.setup, () =>
+    services.localAdvanced === false
+      ? editAllDiscordSettings(shell, services)
+      : runDiscordAdvancedWizard(shell, services),
+  );
+}
+
+export async function runDiscordAdvancedWizard(
+  shell: ClankieFaceShell,
+  services: DiscordCommandServices,
+): Promise<void> {
   const flow = shell.setupFlow;
   flow.begin("discord");
   try {
     for (;;) {
       const settings = (await services.settings.load()).discord;
       const action = await flow.readSelect({
-        message: "Discord configuration",
+        message: "Advanced Discord settings",
         options: [
           {
             value: "primer",
@@ -1040,7 +1059,11 @@ export async function showDiscordInvite(
   shell: ClankieFaceShell,
   services: DiscordCommandServices,
 ): Promise<void> {
-  const applicationId = (await services.settings.load()).discord.applicationId;
+  const applicationId = (
+    services.setup
+      ? (await services.setup.discordSettings()).settings
+      : (await services.settings.load()).discord
+  ).applicationId;
   if (applicationId === undefined) {
     shell.insertCommandResult(
       "/discord invite",
@@ -1086,15 +1109,17 @@ async function editAllDiscordSettings(
   shell: ClankieFaceShell,
   services: DiscordCommandServices,
 ): Promise<void> {
-  const current = (await services.settings.load()).discord;
+  const snapshot = await services.setup?.discordSettings();
+  const current = snapshot?.settings ?? (await services.settings.load()).discord;
+  const fields =
+    snapshot?.setup?.definition.advancedGroups.flatMap((group) => group.fields) ??
+    DISCORD_SETTING_GROUPS.flatMap((group) => group.fields);
   const field = await shell.setupFlow.readSelect({
     message: "Discord setting",
-    options: DISCORD_EDITABLE_FIELDS.map((value) => ({
-      value,
-      label:
-        DISCORD_SETTING_GROUPS.flatMap((group) => group.fields).find((field) => field.key === value)?.label ??
-        value,
-      hint: String(current[value] ?? "unset"),
+    options: fields.map((entry) => ({
+      value: entry.key,
+      label: entry.label,
+      hint: String(current[entry.key] ?? "unset"),
     })),
   });
   if (field === undefined) return;
@@ -1115,10 +1140,15 @@ async function editAllDiscordSettings(
     },
   });
   if (raw === undefined || !raw.trim()) return;
-  await apply(services, (value) =>
+  const transform = (value: DiscordSettings) =>
     DiscordSettingsSchema.parse({
       ...value,
       [key]: raw.trim() === "none" ? undefined : parseDiscordSettingValue(key, raw, value),
-    }),
-  );
+    });
+  if (snapshot && services.setup)
+    await services.setup.updateDiscordSettings({
+      expectedRevision: snapshot.revision,
+      settings: transform(snapshot.settings),
+    });
+  else await apply(services, transform);
 }
