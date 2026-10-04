@@ -404,6 +404,10 @@ The console's `/pair` runs this same command and accepts the same flags.
 
 Public-gateway pairing uses a secure QR or full pasted link; the encryption
 credential is in its fragment. Short codes are for direct private connections.
+An ordinary offer also returns `localCode`, the offer's own short code, even when
+`code` is the gateway link; human output shows it as `On this Mac code` for the
+Mac app's **On this Mac** pairing. Only the authenticated operator's offer
+response carries it, and review offers never do.
 One link carries every route the Mac has (ADR 0204): the gateway fragment when
 remote access is on, and `direct=<origin>` when `clankie gateway direct` has
 configured a device-reachable control origin. With a direct route, the App
@@ -423,6 +427,7 @@ is omitted when the link carries neither route:
 {
   "ok": true,
   "code": "ABCD-EFGH",
+  "localCode": "ABCD-EFGH",
   "deepLink": "clankie://connect?v=1&offer=…&direct=…",
   "expiresAt": "2026-08-30T12:00:00.000Z",
   "routes": { "gateway": false, "direct": "http://my-mac.local:4311" }
@@ -1263,12 +1268,12 @@ in the TUI call the same code. A listed harness is hired with `hire_agent`;
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--tools connected|off]` / `fleet clear`
+### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--tools connected|off] [--peer-messages on|off]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
 which (up to 4,000 characters of free text) — and the budget he sizes the fleet
-to, plus the fleet connected-tool switch. `set` takes any combination of the flags;
+to, plus the fleet connected-tool and peer-message switches. `set` takes any combination of the flags;
 what is left out keeps its value. `clear` restores every default, including tools
 `connected`. `--tools off` stops new standing tool admissions; manual grants keep
 working. A call already past its last asynchronous check can still dispatch after
@@ -1276,6 +1281,15 @@ the change; there is no proven global concurrency or cancellation bound. That is
 chosen contract: the switch stops new calls
 ([ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md), VUH-1585). `--tools connected`
 restores standing access to verified accounts through `clankie_tools` and `clankie_call`.
+
+`--peer-messages off` stops new messages between fleet workers independently of
+connected tools. It hides `list_fleet_seats` and `message_peer` from current worker
+catalogs and the service refuses sends from stale catalogs too. Existing receipts
+remain readable for reconciliation; a message already handed to a native receiver
+cannot be recalled. `--peer-messages on` restores the capability, which defaults
+to on. Workers still need proven native pane/process and matching session identity;
+a fleet bearer alone cannot send. See [worker peer messages](worker-access.md#messages-between-workers)
+and [ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608).
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the
 leadership skill (`lead`) and his prompt use them to aim.
@@ -1308,13 +1322,14 @@ and decides, and a note here can no more widen his reach than a warmer persona
 can. The section carries the swarm size and model mode whenever it renders. With
 no notes and the default budget (`max`, `optimal`) there is no section at all.
 
-JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "tools": "connected" }, "settingsFile": "…", "restart": "clankie restart" }`.
-The TUI `/fleet` command opens the same editor (size, models, connected tools, then notes)
+JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "tools": "connected", "peerMessages": "on" }, "settingsFile": "…", "restart": "clankie restart" }`.
+The TUI `/fleet` command opens the same editor (size, models, connected tools, peer messages, then notes)
 and `/fleet status` prints the same values.
 
 ```bash
 clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
 clankie fleet set --size small --models efficient
+clankie fleet set --peer-messages off
 ```
 
 <a id="runtime-setup"></a>
@@ -2119,7 +2134,7 @@ is detected there, which binds the pane to his own persona rather than a fleet
 contact; a second pane claiming the name stays an ordinary fleet agent and is
 told so on stderr. The pane is un-named again when the session ends.
 
-Every fresh seat starts a new Claude Code session under a recorded id and creates
+Every fresh Claude launch starts a new Claude Code session under a recorded id and creates
 a separate workspace chat through `POST /v1/captain/seat-context`, rooted at the
 launch directory. Multiple launches in the same directory or account each get
 their own chat, transcript, tool context and wake channel. The chat is available
@@ -2185,7 +2200,7 @@ later room message. See [ADR 0218](adr/0218-native-seats-drive-their-attached-co
 The [plugin README](../integrations/claude-plugin/README.md) describes the component
 source and session-only channel identity.
 
-`--harness codex` opens the real Codex TUI on its own app-server thread.
+`clankie codex` opens the real Codex TUI on its own app-server thread.
 Install the [Codex seat plugin](../integrations/codex-plugin/README.md) first.
 The launch plan includes a typed `hook_trust_required` owner step: review the
 plugin in Codex's `/hooks`, then exit and launch the seat again. The launcher never
@@ -2233,7 +2248,9 @@ development-channels dialog but then rejects `server:` as not on the approved
 allowlist. The service's hire path persists the server and passes the dangerous
 flag for a claude seat.
 
-### `mcp --fleet`: fleet connected tools
+<a id="mcp-fleet-fleet-connected-tools"></a>
+
+### `mcp --fleet`: fleet tools and native worker messages
 
 Register `clankie mcp --fleet` in Codex with `env_vars = ["HERDR_PANE_ID",
 "HERDR_SOCKET_PATH"]`, or install the `clankie-worker@clankie` Claude plugin.
@@ -2247,8 +2264,10 @@ A bearer proves only its fleet, with no verified pane or mailbox authority.
 No project grant, native session or workspace proof is needed for these tools.
 Projects retain roles, caps, hiring and tracker binding.
 
-The service lists exactly `clankie_tools` and `clankie_call`; the worker plugin
-adds `message_clankie`. Search with `{query}` for at most 20 names/descriptions,
+The connected-tool service lists `clankie_tools` and `clankie_call`; the shared
+worker bridge adds `message_clankie` and, for a proven native sender while peer
+messages are on, `list_fleet_seats` and `message_peer`. Search connected tools
+with `{query}` for at most 20 names/descriptions,
 or `{names}` for up to 10 input schemas, then call with `{name, arguments}`.
 `message_clankie` reports to the conversation that hired the worker. A
 host-admitted `message_seat` from another conversation adopts that worker, so
@@ -2263,6 +2282,30 @@ last asynchronous check can still reach a provider after tools-off or admission
 loss. The strict refusal guarantee is not met; see
 [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md) and VUH-1585. Manual
 grants keep their existing restrictions.
+
+Use `list_fleet_seats({})` to discover seats in the sender's own fleet, then pass
+the returned recipient `seatId` as `seat` to `message_peer({seat, text})`. The
+bridge obtains the sender and recipient bindings; workers do not supply them.
+Both the Claude worker plugin and `clankie mcp --fleet` use `runSeatChannel` for
+this path. The server requires the caller's proven native pane process and matching
+session, confines recipients to the same fleet and checks their current binding.
+Peer content reaches the existing `message_seat` native channel/session delivery
+path as agent output, never an owner instruction. It records a server audit and
+an agent-role message in Clankie's default transcript. Native channel events carry
+`source: peer`; the exchange does not wake him or create an owner turn.
+
+An uncertain peer send keeps its original receipt. Reconcile that ID through
+`GET /v1/fleet/seats/{paneId}/peer-messages/{id}`; do not issue another POST,
+delete receipt state or switch bridges to replay it. Discovery uses
+`GET /v1/fleet/seats/{paneId}/peers`; new sends use
+`POST /v1/fleet/seats/{paneId}/peer-messages`. These worker routes derive authority
+from the admitted identity, not caller-supplied pane or fleet fields. Receipt reads
+remain available with peer messages off. A lost recipient binding terminates
+reconciliation as `recipient_gone` with outcome `unconfirmed`: delivery stays
+unknown, the original is never resent, and fresh messages are allowed. The service
+keeps full bodies for the latest 100 settled messages and all unresolved originals;
+older settled bodies become exact compact receipts that still prevent ID replay.
+See [worker access](worker-access.md#messages-between-workers).
 
 `doctor.harnessBridges` reports installation, registration and invoking-process
 membership separately. Remote project `eligibility: unsupported` does not mean
@@ -2684,8 +2727,8 @@ The single hosted-device authority policy allows chat, fleet, terminal, model,
 keys, persona and connections. **Restart, reset and deprovision require the
 account page/control plane**, including when attempted through the old device
 relay. The API policy does not inspect shell commands typed under terminal
-control. Local lifecycle, autostart, sockets, `seat`, `mcp` and shell escapes
-refuse in hosted mode.
+control. Local lifecycle, autostart, sockets, native harness commands
+(`claude[N]`, `codex[N]`, `opencode`), `mcp` and shell escapes refuse in hosted mode.
 
 Closing the client leaves accepted work running. `logout` forgets this Mac's
 device credential and wake key and selects This Mac for the next launch;

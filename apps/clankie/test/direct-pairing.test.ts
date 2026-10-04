@@ -120,6 +120,30 @@ describe("direct pairing links", () => {
     const wire = PairingOfferWireSchema.parse((await mint(local, { review: { days: 3 } })).body);
     expect(wire.direct).toBeUndefined();
     expect(wire.deepLink).not.toContain("direct=");
+    expect(wire.localCode).toBeUndefined();
+  });
+
+  it("gives the operator the short same-Mac code beside a gateway-protected link", async () => {
+    const app = await makeApp({
+      pairingOfferPublisher: {
+        publishPairingOffer: () => Promise.resolve(),
+        protectPairingOffer: (offer) => {
+          const deepLink = `clankie://connect?v=1&offer=${offer.offerSecret}#hostId=host-1&ticket=t`;
+          return { version: 1, deepLink, code: deepLink, expiresAt: offer.expiresAt, gateway: true };
+        },
+      },
+    });
+    const wire = PairingOfferWireSchema.parse((await mint(app)).body);
+    expect(wire.code).toBe(wire.deepLink);
+    expect(wire.localCode).toMatch(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/u);
+
+    const anonymous = await app.request("/v1/pairing/offer", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(anonymous.status).toBe(401);
+    expect(JSON.stringify(await anonymous.json())).not.toContain("localCode");
   });
 });
 

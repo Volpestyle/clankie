@@ -1,7 +1,11 @@
 import { closeSync, globSync, openSync, readSync, statSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { redactSensitiveText } from "@clankie/observability";
-import { OPERATOR_SEAT_SUBAGENTS_RECENT_MAX, type OperatorSeatSubagents } from "@clankie/protocol";
+import {
+  OPERATOR_CONVERSATION_REF_MAX,
+  OPERATOR_SEAT_SUBAGENTS_RECENT_MAX,
+  type OperatorSeatSubagents,
+} from "@clankie/protocol";
 import { resolveHerdrSeatTranscriptPath, type HerdrAgentSession } from "./index.ts";
 
 /**
@@ -25,6 +29,8 @@ const SUBAGENT_TOOLS = new Set(["Agent", "Task"]);
 
 interface SubagentCall {
   readonly label: string;
+  readonly startedAt: string | undefined;
+  endedAt: string | undefined;
   /** The assistant message that made the call; a later one means a sync call was abandoned. */
   readonly messageId: string | undefined;
   background: boolean;
@@ -204,6 +210,14 @@ export function readCodexSubagents(session: HerdrAgentSession): OperatorSeatSuba
         label: label(
           [metadata.nickname, metadata.task].filter((value) => typeof value === "string").join(" · "),
         ),
+        startedAt: isoTime(metadata.startedAt),
+        endedAt: done
+          ? isoTime(
+              signal !== undefined && signal.at >= child.state.data.startedAt
+                ? signal.at
+                : child.state.mtimeMs + CODEX_IDLE_MS,
+            )
+          : undefined,
         messageId: undefined,
         background: false,
         done,
@@ -397,21 +411,16 @@ export function parseClaudeSubagents(jsonl: string): OperatorSeatSubagents {
 }
 
 function foldClaudeSubagentLine(calls: Map<string, SubagentCall>, line: string): void {
-  // The notification is plain text inside whichever record carries it
-  // (a queue operation, a user turn); the tags survive JSON escaping.
+  const entry = jsonRecord(line);
+  const at = entry === undefined ? undefined : isoTime(codexTimestamp(entry));
+  // Native background notifications settle at their parent record timestamp.
   if (line.includes("<task-notification>")) {
     for (const match of line.matchAll(
       /<tool-use-id>([^<]{1,200})<\/tool-use-id>[\s\S]*?<status>([a-z_]{1,32})<\/status>/gu,
     )) {
       const call = calls.get(match[1]!);
-      if (call !== undefined && match[2] !== "running") call.done = true;
+      if (call !== undefined && match[2] !== "running") endClaudeCall(call, at);
     }
-  }
-  let entry: unknown;
-  try {
-    entry = JSON.parse(line);
-  } catch {
-    return;
   }
   if (!isRecord(entry) || entry.isSidechain === true) return;
   const message = isRecord(entry.message) ? entry.message : undefined;
@@ -422,7 +431,7 @@ function foldClaudeSubagentLine(calls: Map<string, SubagentCall>, line: string):
     // new message means that call ended without a recorded result (an
     // interrupt, a rewound branch).
     for (const call of calls.values()) {
-      if (!call.done && !call.background && call.messageId !== messageId) call.done = true;
+      if (!call.done && !call.background && call.messageId !== messageId) endClaudeCall(call, at);
     }
     for (const item of content) {
       if (item.type !== "tool_use" || typeof item.id !== "string" || !SUBAGENT_TOOLS.has(String(item.name)))
@@ -430,6 +439,8 @@ function foldClaudeSubagentLine(calls: Map<string, SubagentCall>, line: string):
       const input = isRecord(item.input) ? item.input : {};
       calls.set(item.id, {
         label: label(input.description ?? input.subagent_type),
+        startedAt: at,
+        endedAt: undefined,
         messageId,
         background: false,
         done: false,
@@ -445,19 +456,120 @@ function foldClaudeSubagentLine(calls: Map<string, SubagentCall>, line: string):
     const call = calls.get(String(item.tool_use_id));
     if (call === undefined) continue;
     if (result?.status === "async_launched" || result?.isAsync === true) call.background = true;
-    else call.done = true;
+    else endClaudeCall(call, at);
   }
 }
 
 function summarize(calls: ReadonlyMap<string, SubagentCall>): OperatorSeatSubagents {
-  const all = [...calls.values()];
+  const all = [...calls.entries()];
   return {
-    running: all.filter((call) => !call.done).length,
+    running: all.filter(([, call]) => !call.done).length,
     recent: all
       .slice(-OPERATOR_SEAT_SUBAGENTS_RECENT_MAX)
       .reverse()
-      .map((call) => ({ label: call.label, status: call.done ? "done" : "running" })),
+      .map(([id, call]) => ({
+        id,
+        label: call.label,
+        status: call.done ? "done" : "running",
+        ...(call.startedAt === undefined ? {} : { startedAt: call.startedAt }),
+        ...(!call.done || call.endedAt === undefined ? {} : { endedAt: call.endedAt }),
+      })),
   };
+}
+
+/** Native OpenCode v1 task parts, supplied by the confined registered-profile reader. */
+export function projectOpenCodeSubagents(
+  parentId: string,
+  messages: readonly unknown[],
+  isChild: (id: string) => boolean,
+): OperatorSeatSubagents {
+  const calls = new Map<string, SubagentCall & { childId: string | undefined }>();
+  for (const raw of messages) {
+    const message = openCodeRecord(raw);
+    const info = openCodeRecord(message?.info);
+    if (info?.sessionID !== parentId || !Array.isArray(message?.parts)) continue;
+    const created = openCodeRecord(info.time)?.created;
+    for (const rawPart of message.parts) {
+      const part = openCodeRecord(rawPart);
+      if (!part || part.sessionID !== parentId) continue;
+      if (part.type === "text" && part.synthetic === true && info.role === "user") {
+        const signal = openCodeTaskEnvelope(part.text);
+        if (!signal || signal.status === "running") continue;
+        const endedAt = openCodeTime(created);
+        for (const call of calls.values())
+          if (
+            call.childId === signal.id &&
+            call.background &&
+            !call.done &&
+            (endedAt === undefined ||
+              call.startedAt === undefined ||
+              Date.parse(endedAt) >= Date.parse(call.startedAt))
+          ) {
+            call.done = true;
+            call.endedAt = endedAt;
+          }
+        continue;
+      }
+      if (part.type !== "tool" || part.tool !== "task" || typeof part.callID !== "string") continue;
+      if (part.callID.length === 0 || part.callID.length > OPERATOR_CONVERSATION_REF_MAX) continue;
+      const state = openCodeRecord(part.state);
+      if (!state || !["pending", "running", "completed", "error"].includes(String(state.status))) continue;
+      const input = openCodeRecord(state.input);
+      const metadata = openCodeRecord(state.metadata);
+      const envelope = openCodeTaskEnvelope(state.output);
+      const childId = typeof metadata?.sessionId === "string" ? metadata.sessionId : envelope?.id;
+      if (metadata?.parentSessionId !== undefined && metadata.parentSessionId !== parentId) continue;
+      if (childId !== undefined && !isChild(childId)) continue;
+      const time = openCodeRecord(state.time);
+      const background = metadata?.background === true || envelope?.status === "running";
+      const done =
+        state.status === "error" ||
+        (state.status === "completed" &&
+          (!background || envelope?.status === "completed" || envelope?.status === "error"));
+      calls.set(part.callID, {
+        label: label(
+          [input?.subagent_type, input?.description ?? state.title]
+            .filter((v) => typeof v === "string")
+            .join(": "),
+        ),
+        childId,
+        startedAt: openCodeTime(time?.start ?? part.createdAt),
+        endedAt: done ? openCodeTime(time?.end) : undefined,
+        messageId: undefined,
+        background,
+        done,
+      });
+      if (calls.size > MAX_CALLS) calls.delete(calls.keys().next().value!);
+    }
+  }
+  return summarize(calls);
+}
+
+function openCodeTaskEnvelope(value: unknown): { id: string; status: string } | undefined {
+  if (typeof value !== "string") return undefined;
+  const match = /^<task id="(ses_[A-Za-z0-9]{8,128})" state="(running|completed|error)">\r?\n/u.exec(value);
+  return match ? { id: match[1]!, status: match[2]! } : undefined;
+}
+
+function openCodeTime(value: unknown): string | undefined {
+  return typeof value === "number" && value >= 0 && value <= 8_640_000_000_000_000
+    ? new Date(value).toISOString()
+    : undefined;
+}
+
+function openCodeRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function endClaudeCall(call: SubagentCall, at: string | undefined): void {
+  if (call.done) return;
+  call.done = true;
+  call.endedAt = at;
+}
+
+/** Missing/invalid source timestamps remain unknown, never wall-clock invention. */
+function isoTime(at: number): string | undefined {
+  return at > 0 && Number.isFinite(at) ? new Date(at).toISOString() : undefined;
 }
 
 function label(value: unknown): string {

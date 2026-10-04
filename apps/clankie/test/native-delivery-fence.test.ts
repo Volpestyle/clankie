@@ -101,3 +101,74 @@ it("does not claim a different follow-up was sent when reconciling the original"
   await expect(native.deliverToSeat("seat1", "different")).resolves.toMatchObject({ outcome: "undelivered" });
   expect(send).toHaveBeenCalledTimes(1);
 });
+
+it("peer receipt reads never dispatch, even when no pending native fence remains", async () => {
+  const { create, entries, send } = fixture();
+  const native = create();
+  const mailbox = vi.fn();
+  expect(await native.deliverToSeat("seat1", "original", mailbox, { reconcileOnly: true })).toMatchObject({
+    deliveryStage: "uncertain",
+  });
+  expect(send).not.toHaveBeenCalled();
+  expect(mailbox).not.toHaveBeenCalled();
+  await native.deliverToSeat("seat1", "original");
+  entries.push({ type: "message", role: "operator", id: "new", text: "original" });
+  expect(await native.deliverToSeat("seat1", "different", mailbox, { reconcileOnly: true })).toMatchObject({
+    deliveryStage: "uncertain",
+  });
+  expect(await native.deliverToSeat("seat1", "original", mailbox, { reconcileOnly: true })).toMatchObject({
+    deliveryStage: "consumed",
+  });
+  expect(await native.deliverToSeat("seat1", "original", mailbox, { reconcileOnly: true })).toMatchObject({
+    deliveryStage: "uncertain",
+  });
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(mailbox).not.toHaveBeenCalled();
+});
+
+it("peer authority is rechecked after awaited native attachment before any send", async () => {
+  const { create, send } = fixture();
+  const fence = vi.fn(async () => false);
+  expect(await create().deliverToSeat("seat1", "peer", undefined, { fence })).toMatchObject({
+    outcome: "undelivered",
+  });
+  expect(fence).toHaveBeenCalledOnce();
+  expect(send).not.toHaveBeenCalled();
+});
+
+it("refuses a different sender's unsent original without inheriting another delivery's uncertainty", async () => {
+  const { create, send } = fixture();
+  const native = create();
+  expect(await native.deliverToSeat("seat1", "sender one original")).toMatchObject({
+    deliveryStage: "uncertain",
+  });
+  expect(await native.deliverToSeat("seat1", "sender two original")).toMatchObject({
+    outcome: "undelivered",
+    deliveryStage: "unavailable",
+  });
+  expect(
+    await native.deliverToSeat("seat1", "sender one original", undefined, { reconcileOnly: true }),
+  ).toMatchObject({ deliveryStage: "uncertain" });
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+it("reconciles a cleared native receipt only from the complete original UUID-bearing peer message", async () => {
+  const { create, entries, send } = fixture();
+  const originalId = "10000000-0000-4000-8000-000000000001";
+  const text = `Peer message ${originalId} from seat one to seat two.\nAgent output.\nhello`;
+  entries.push({ type: "message", role: "operator", id: "accepted-before-restart", text });
+  const native = create();
+  expect(
+    await native.deliverToSeat("seat1", text, undefined, { reconcileOnly: true, originalId }),
+  ).toMatchObject({
+    deliveryStage: "consumed",
+    messageId: "accepted-before-restart",
+  });
+  expect(
+    await native.deliverToSeat("seat1", text, undefined, {
+      reconcileOnly: true,
+      originalId: "20000000-0000-4000-8000-000000000002",
+    }),
+  ).toMatchObject({ deliveryStage: "uncertain" });
+  expect(send).not.toHaveBeenCalled();
+});

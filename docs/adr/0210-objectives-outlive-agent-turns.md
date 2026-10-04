@@ -22,10 +22,21 @@ Readers request `includeWork: true` on fleet, roster, list and get operations.
 Without it, responses omit the new work fields so older strict clients keep
 working. The app retries without the selector when an older host refuses it.
 
-Local Codex goals come from its native `goals_1.sqlite`, opened read-only for
+Codex goals come from its native `goals_1.sqlite`, opened read-only for
 the seat's known session ID. This reads metadata, never resumes a thread,
 imports a transcript or starts a model turn. Missing stores, unknown schemas,
-unsupported harnesses and remote seats are unknown. Codex owns goal lifecycle
+and unsupported harnesses are unknown. Linked Codex seats use the registered
+fleet SSH connection and the remote Node SQLite reader against `CODEX_HOME`
+(or the remote user’s `.codex`), selecting only host-observed session IDs.
+Reads are bounded to 48 sessions and five seconds per fleet, cached for ten
+seconds, and shared across concurrent polls. Only complete remote objectives
+of at most 16,384 SQLite characters are transferred; oversized or NUL-containing
+text is unknown, never a raw prefix to redact after truncation. Local reads
+retain the full objective for redaction before bounding the projected text.
+An unavailable store or invalid observation preserves the last known goal with its original native timestamps;
+it never clears the goal or invents a status. Changing a fleet connection or
+native session does not transfer that cached goal to its replacement.
+Codex owns goal lifecycle
 and budgets; Clankie's existing autonomy runtime owns captain goals.
 When a local Codex TUI is Clankie's native head, its goal is projected onto
 his default conversation instead.
@@ -46,7 +57,7 @@ issue numbers alone. The repo's existing tracker remains authoritative.
 
 ```mermaid
 flowchart LR
-  Codex[Native Codex goal store] -->|read only, known local session| Fleet[Fleet goal metadata]
+  Codex[Native Codex goal store] -->|read only, known session; local or SSH| Fleet[Fleet goal metadata]
   Captain[Captain autonomy] --> Fleet
   Agent[Agent in Herdr] -->|work-on, pane and socket| Assignment[Session-scoped assignment]
   Assignment --> Fleet
@@ -61,6 +72,6 @@ completed and budget-limited objectives remain inspectable. Token usage is
 budget consumption, never a completion percentage.
 
 Ordinary tasks require an explicit assignment. Native goal observation currently
-covers local Codex seats; other harnesses can publish assignments through the
+covers local and linked Codex seats; other harnesses can publish assignments through the
 same local CLI. A future Codex storage change can make goal observation unknown
 until the adapter is updated, without breaking fleet discovery.

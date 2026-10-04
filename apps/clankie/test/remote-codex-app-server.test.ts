@@ -203,9 +203,84 @@ describe("replying to a Codex session Clankie did not start on another machine (
     expect(await remoteCodexQueue(posix, shell)("thread-9", "hi")).toBe(false);
     expect(shell.mock.calls[0]![0]).toBe("exec codex 'queue' '--thread' 'thread-9' '--message' 'hi'");
   });
+  it.each(["off", "throws"])(
+    "refuses a %s authority guard after deferred Windows script discovery without queueing",
+    async (mode) => {
+      let lookupStarted!: () => void;
+      const lookingUp = new Promise<void>((resolve) => {
+        lookupStarted = resolve;
+      });
+      let finishLookup!: (script: string) => void;
+      const script = new Promise<string>((resolve) => {
+        finishLookup = resolve;
+      });
+      const shell = vi.fn(async () => {
+        lookupStarted();
+        return script;
+      });
+      let authorized = true;
+      const beforeDispatch = vi.fn(async () => {
+        if (mode === "throws" && !authorized) throw new Error("authority lookup failed");
+        return authorized;
+      });
+      const sending = remoteCodexQueue(windows, shell)("thread", "peer context", beforeDispatch);
+      await lookingUp;
+      expect(beforeDispatch).not.toHaveBeenCalled();
+      authorized = false;
+      finishLookup("C:\\npm\\codex.js\r\n");
+      expect(await sending).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+      expect(beforeDispatch).toHaveBeenCalledOnce();
+      expect(shell).toHaveBeenCalledOnce();
+    },
+  );
 });
 
 describe("external Codex SSH proxy", () => {
+  it("preserves the final authority guard after deferred SSH endpoint discovery", async () => {
+    const beforeDispatch = vi.fn(async () => false);
+    const delivery = vi.fn(async (...args: Parameters<externalCodex.ExternalCodexControl>) => {
+      expect(await args[4]?.()).toBe(false);
+      return {
+        outcome: "undelivered" as const,
+        deliveryStage: "unavailable" as const,
+        detail: "authority off",
+      };
+    });
+    const proxy = vi.spyOn(externalCodex, "codexProxyControl").mockReturnValue(delivery);
+    let finishLookup!: (processes: string) => void;
+    const processes = new Promise<string>((resolve) => {
+      finishLookup = resolve;
+    });
+    const herdr = vi.fn(async () => processes);
+    try {
+      const sending = remoteCodexControl(posix, vi.fn(), herdr, "box/w1:p1")(
+        "thread",
+        "peer context",
+        undefined,
+        undefined,
+        beforeDispatch,
+      );
+      expect(beforeDispatch).not.toHaveBeenCalled();
+      finishLookup(
+        JSON.stringify({
+          result: {
+            process_info: {
+              foreground_processes: [
+                { pid: 123, name: "codex", argv: ["codex", "--remote", "unix:///owned/rpc.sock"] },
+              ],
+            },
+          },
+        }),
+      );
+      expect(await sending).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+      expect(delivery).toHaveBeenCalledWith("thread", "peer context", undefined, undefined, beforeDispatch);
+      expect(proxy.mock.calls[0]?.[1]?.at(-1)).toBe(
+        "exec codex 'app-server' 'proxy' '--sock' '/owned/rpc.sock'",
+      );
+    } finally {
+      proxy.mockRestore();
+    }
+  });
   it.each([posix, windows])("keeps the proxy on fleet $id and preserves bytes", async (fleet) => {
     const delivery = vi.fn(async () => ({ outcome: "unconfirmed" as const, detail: "lost" }));
     const proxy = vi.spyOn(externalCodex, "codexProxyControl").mockReturnValue(delivery);

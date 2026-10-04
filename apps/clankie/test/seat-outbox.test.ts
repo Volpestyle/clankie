@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 function wake(outbox: SeatOutbox, signal?: AbortSignal, content = "wake up") {
   return outbox.deliver({
@@ -21,6 +24,131 @@ function message(outbox: SeatOutbox, content: string) {
     wantsReply: false,
   });
 }
+
+function peerMessage(outbox: SeatOutbox, content: string, recipientBinding?: string) {
+  return outbox.deliver({
+    kind: "message",
+    conversationId: "global-default",
+    source: "peer",
+    content,
+    wantsReply: false,
+    ...(recipientBinding === undefined ? {} : { recipientBinding }),
+  });
+}
+
+it("retains an exact peer channel acknowledgement for read-only reconciliation after restart", async () => {
+  const root = mkdtempSync(join(tmpdir(), "peer-outbox-"));
+  const uncertaintyPath = join(root, "receipts.json");
+  const outbox = new SeatOutbox({ uncertaintyPath });
+  try {
+    const recipientBinding = "a".repeat(64);
+    const poll = outbox.poll(5_000, undefined, recipientBinding);
+    const sending = outbox.deliver({
+      kind: "message",
+      conversationId: "global-default",
+      source: "peer",
+      recipientBinding,
+      content: "Peer message original-id from seat one. Agent output. hello",
+      wantsReply: false,
+    });
+    const [event] = await poll;
+    expect(event?.source).toBe("peer");
+    expect(outbox.receipt(event!.content)).toBeUndefined();
+    expect(outbox.acknowledge(event!.id)).toBe(true);
+    expect(await sending).toMatchObject({ deliveryStage: "delivered" });
+    outbox.close();
+    const restarted = new SeatOutbox({ uncertaintyPath });
+    expect(restarted.receipt(event!.content)).toMatchObject({ outcome: "delivered" });
+    expect(restarted.receipt("different original-id or content")).toBeUndefined();
+    expect(restarted.acknowledge("invented")).toBe(false);
+    expect(await restarted.poll(0)).toEqual([]);
+    restarted.close();
+  } finally {
+    outbox.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it.each([undefined, "replacement-native-binding"])(
+  "refuses a queued peer message when a later poll uses binding %s",
+  async (binding) => {
+    const originalBinding = "original-native-binding";
+    const outbox = new SeatOutbox({ boundGraceMs: 1_000 });
+    try {
+      await outbox.poll(1, undefined, originalBinding);
+      const sending = peerMessage(outbox, "Peer message original UUID. Agent output.", originalBinding);
+      expect(await outbox.poll(0, undefined, binding)).toEqual([]);
+      expect(await sending).toMatchObject({ outcome: "unbound", deliveryStage: "unavailable" });
+      expect(outbox.uncertain()).toBe(false);
+      expect(outbox.receipt("Peer message original UUID. Agent output.")).toBeUndefined();
+      const replacementBinding = "replacement-native-binding";
+      const parked = outbox.poll(5_000, undefined, replacementBinding);
+      const next = peerMessage(outbox, "A new message for this native recipient", replacementBinding);
+      expect((await parked).map((event) => event.content)).toEqual([
+        "A new message for this native recipient",
+      ]);
+      await outbox.poll(0, undefined, replacementBinding);
+      expect(await next).toMatchObject({ outcome: "delivered" });
+    } finally {
+      outbox.close();
+    }
+  },
+);
+
+it("refuses a peer item with no recipient binding even when a native poller is parked", async () => {
+  const outbox = new SeatOutbox();
+  try {
+    const parked = outbox.poll(5_000, undefined, "current-native-binding");
+    const sending = peerMessage(outbox, "Unbound peer context");
+    expect(await parked).toEqual([]);
+    expect(await sending).toMatchObject({ outcome: "unbound", deliveryStage: "unavailable" });
+    expect(outbox.uncertain()).toBe(false);
+  } finally {
+    outbox.close();
+  }
+});
+
+it("a replacement native session cannot implicitly acknowledge the prior recipient's peer event", async () => {
+  const outbox = new SeatOutbox({ boundGraceMs: 30 });
+  const content = "Peer message original UUID. Agent output.";
+  try {
+    const parked = outbox.poll(5_000, undefined, "original-native-binding");
+    const sending = peerMessage(outbox, content, "original-native-binding");
+    expect((await parked).map((event) => event.content)).toEqual([content]);
+    expect(await outbox.poll(0, undefined, "replacement-native-binding")).toEqual([]);
+    expect(outbox.receipt(content)).toBeUndefined();
+    expect(await sending).toMatchObject({ outcome: "unconfirmed", deliveryStage: "uncertain" });
+    expect(outbox.uncertain()).toBe(true);
+    expect(await outbox.poll(0, undefined, "replacement-native-binding")).toEqual([]);
+    expect(outbox.receipt(content)).toBeUndefined();
+    expect(await peerMessage(outbox, "A different original", "replacement-native-binding")).toMatchObject({
+      outcome: "unbound",
+      deliveryStage: "unavailable",
+    });
+    expect(outbox.uncertain()).toBe(true);
+  } finally {
+    outbox.close();
+  }
+});
+
+it("only a matching native poll can implicitly acknowledge an in-flight peer event", async () => {
+  const outbox = new SeatOutbox({ boundGraceMs: 1_000 });
+  try {
+    const parked = outbox.poll(5_000, undefined, "original-native-binding");
+    const sending = peerMessage(outbox, "Original peer event", "original-native-binding");
+    await parked;
+    let result: unknown;
+    void sending.then((value) => {
+      result = value;
+    });
+    await outbox.poll(0, undefined, "replacement-native-binding");
+    expect(result).toBeUndefined();
+    await outbox.poll(0, undefined, "original-native-binding");
+    expect(await sending).toMatchObject({ outcome: "delivered", deliveryStage: "delivered" });
+  } finally {
+    outbox.close();
+  }
+});
 
 describe("seat outbox", () => {
   it("is unbound until a poller parks, then hands queued turns to the poller", async () => {

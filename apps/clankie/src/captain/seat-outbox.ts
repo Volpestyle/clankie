@@ -48,18 +48,22 @@ export interface SeatDeliveryInput {
   readonly content: string;
   /** An escalation holds its run open for the seat's answer; a wake or watch settles once taken. */
   readonly wantsReply: boolean;
+  /** Peer messages may be taken only by the native recipient observed at dispatch. */
+  readonly recipientBinding?: string;
   readonly signal?: AbortSignal;
 }
 
 type PollFinishSource = "wake" | "timeout" | "abort" | "supersede" | "close";
 
 interface ParkedPoller {
+  readonly recipientBinding?: string;
   finish(events: OperatorSeatEvent[], source: PollFinishSource): void;
 }
 
 interface Pending {
   readonly event: OperatorSeatEvent;
   readonly wantsReply: boolean;
+  readonly recipientBinding?: string;
   taken: boolean;
   acknowledged: boolean;
   settled: boolean;
@@ -76,6 +80,7 @@ export class SeatOutbox {
   private readonly replyTimeoutMs: number;
   private readonly now: () => number;
   private readonly fence: DeliveryFence;
+  private readonly delivered: DeliveryFence;
   private readonly active = new Set<string>();
   private lastPollAt: number | undefined;
   private closed = false;
@@ -89,6 +94,9 @@ export class SeatOutbox {
     } = {},
   ) {
     this.fence = new DeliveryFence(options.uncertaintyPath);
+    this.delivered = new DeliveryFence(
+      options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.delivered`,
+    );
     this.boundGraceMs = options.boundGraceMs ?? BOUND_GRACE_MS;
     this.replyTimeoutMs = options.replyTimeoutMs ?? REPLY_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
@@ -96,6 +104,13 @@ export class SeatOutbox {
 
   public uncertain(): boolean {
     return this.fence.entries().some(([id]) => !this.active.has(id));
+  }
+
+  /** Exact acknowledged content, retained for read-only reconciliation after restart. */
+  public receipt(content: string): SeatDelivery | undefined {
+    const fingerprint = deliveryFingerprint(content);
+    const match = this.delivered.entries().find(([, receipt]) => receipt.fingerprint === fingerprint);
+    return match ? { outcome: "delivered", deliveryStage: "delivered" } : undefined;
   }
 
   /** A seat is bound while a poller is parked, or a parked poll resolved within the grace. */
@@ -114,6 +129,12 @@ export class SeatOutbox {
   public deliver(input: SeatDeliveryInput): Promise<SeatDelivery> {
     if (this.closed) return Promise.reject(new SeatLinkInterruptedError());
     const unresolved = this.fence.entries().find(([id]) => !this.active.has(id));
+    if (
+      unresolved !== undefined &&
+      input.source === "peer" &&
+      unresolved[1].fingerprint !== deliveryFingerprint(input.content)
+    )
+      return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
     if (unresolved !== undefined)
       return Promise.resolve({
         outcome: "unconfirmed",
@@ -151,6 +172,7 @@ export class SeatOutbox {
       const pending: Pending = {
         event,
         wantsReply: input.wantsReply,
+        ...(input.recipientBinding === undefined ? {} : { recipientBinding: input.recipientBinding }),
         taken: false,
         acknowledged: false,
         settled: false,
@@ -198,14 +220,15 @@ export class SeatOutbox {
   }
 
   /** The bridge's long poll: ack in-flight turns, then everything queued, or park. */
-  public poll(waitMs: number, signal?: AbortSignal): Promise<OperatorSeatEvent[]> {
+  public poll(waitMs: number, signal?: AbortSignal, recipientBinding?: string): Promise<OperatorSeatEvent[]> {
     if (this.closed) return Promise.resolve([]);
-    this.ackInFlight();
-    const ready = this.take();
+    this.ackInFlight(recipientBinding);
+    const ready = this.take(recipientBinding);
     if (ready.length > 0 || waitMs <= 0 || signal?.aborted === true) return Promise.resolve(ready);
     return new Promise((resolve) => {
       let finished = false;
       const poller: ParkedPoller = {
+        ...(recipientBinding === undefined ? {} : { recipientBinding }),
         finish: (events, source) => {
           if (finished) return;
           finished = true;
@@ -243,7 +266,12 @@ export class SeatOutbox {
   /** Exact bridge receipt, also usable after a timeout or service restart. */
   public acknowledge(eventId: string): boolean {
     const pending = this.inFlight.find((candidate) => candidate.event.id === eventId);
-    if (pending === undefined) return this.fence.reconcile(eventId, eventId);
+    if (pending === undefined) {
+      const original = this.fence.pending(eventId);
+      if (!original) return this.delivered.pending(eventId)?.messageId === eventId;
+      if (!this.delivered.pending(eventId)) this.delivered.begin(eventId, original);
+      return this.fence.reconcile(eventId, eventId);
+    }
     this.ackPending(pending);
     return true;
   }
@@ -266,8 +294,8 @@ export class SeatOutbox {
   }
 
   /** The bridge came back: previous takes are delivered, escalations start their reply window. */
-  private ackInFlight(): void {
-    const acked = this.inFlight.splice(0);
+  private ackInFlight(recipientBinding?: string): void {
+    const acked = this.inFlight.filter((pending) => this.matchesRecipient(pending, recipientBinding));
     for (const pending of acked) this.ackPending(pending);
   }
 
@@ -276,6 +304,11 @@ export class SeatOutbox {
     const index = this.inFlight.indexOf(pending);
     if (index >= 0) this.inFlight.splice(index, 1);
     try {
+      if (!this.delivered.pending(pending.event.id))
+        this.delivered.begin(pending.event.id, {
+          messageId: pending.event.id,
+          fingerprint: deliveryFingerprint(pending.event.content),
+        });
       this.fence.reconcile(pending.event.id, pending.event.id);
     } catch (error) {
       pending.settle({
@@ -295,9 +328,21 @@ export class SeatOutbox {
     pending.timer.unref?.();
   }
 
-  private take(): OperatorSeatEvent[] {
+  private matchesRecipient(pending: Pending, recipientBinding?: string): boolean {
+    return (
+      pending.event.source !== "peer" ||
+      (!!pending.recipientBinding && pending.recipientBinding === recipientBinding)
+    );
+  }
+
+  private take(recipientBinding?: string): OperatorSeatEvent[] {
     const taken = this.queued.splice(0);
+    const events: OperatorSeatEvent[] = [];
     for (const pending of taken) {
+      if (!this.matchesRecipient(pending, recipientBinding)) {
+        pending.settle({ outcome: "unbound" });
+        continue;
+      }
       pending.taken = true;
       if (pending.timer !== undefined) clearTimeout(pending.timer);
       this.inFlight.push(pending);
@@ -312,14 +357,15 @@ export class SeatOutbox {
         this.boundGraceMs,
       );
       pending.timer.unref?.();
+      events.push(pending.event);
     }
-    if (taken.length > 0) this.lastPollAt = this.now();
-    return taken.map((pending) => pending.event);
+    if (events.length > 0) this.lastPollAt = this.now();
+    return events;
   }
 
   private wakePoller(): void {
     const [first] = this.pollers;
     if (first === undefined) return;
-    first.finish(this.take(), "wake");
+    first.finish(this.take(first.recipientBinding), "wake");
   }
 }

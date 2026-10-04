@@ -1,9 +1,14 @@
 /** Native Claude arm readiness. Importing never starts a CLI, account or container. */
 const missing = [
   {
+    code: "claude-vendor-provenance-unavailable",
+    detail:
+      "Selected ELF bytes, their hash and an observed --version string do not establish official Claude provenance. No controller-owned authenticated vendor acquisition/digest route is implemented.",
+  },
+  {
     code: "claude-native-image-and-tui-proof-unavailable",
     detail:
-      "No pinned Claude image/binary and kernel-bound interactive TUI capability issuer exists. Codex capabilities cannot authorize Claude.",
+      "The controller-created image/control and original-lifetime TUI path exists, but actual Linux containment, selected CLI compatibility, owner-visible foreground and descendant-stop acceptance remain unrun. Codex capabilities cannot authorize Claude.",
   },
   {
     code: "claude-provider-account-observer-unavailable",
@@ -23,7 +28,7 @@ const missing = [
   {
     code: "claude-transcript-provenance-collector-unavailable",
     detail:
-      "A protected collection seam exists, but no private native Claude runtime capability binds its executable and live collection boundary yet. Hook/transcript bodies remain claims, never complete accounting.",
+      "A protected collector requires the private controller launch token and fresh native foreground/lifetime checks; actual selected-version collection acceptance remains unrun. Hook/transcript bodies remain claims, never complete accounting.",
   },
 ];
 

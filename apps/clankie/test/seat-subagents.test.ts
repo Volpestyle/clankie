@@ -43,13 +43,39 @@ describe("Claude subagents from the native transcript", () => {
       // t2 was abandoned when the main thread spoke again in m2; t3 runs in the background.
       running: 2,
       recent: [
-        { label: "Write tests", status: "running" },
-        { label: "Build the renderer", status: "running" },
-        { label: "Review the diff", status: "done" },
-        { label: "Map the app", status: "done" },
+        { id: "t4", label: "Write tests", status: "running" },
+        { id: "t3", label: "Build the renderer", status: "running" },
+        { id: "t2", label: "Review the diff", status: "done" },
+        { id: "t1", label: "Map the app", status: "done" },
       ],
     });
     expect(parseClaudeSubagents(journal + notification("t3") + result("t4")).running).toBe(0);
+  });
+
+  it("keeps native call identity and timestamps through foreground and background settlement", () => {
+    const timed = (jsonl: string, timestamp: string) => line({ ...JSON.parse(jsonl), timestamp });
+    const start = "2026-10-04T18:00:00.000Z";
+    const end = "2026-10-04T18:01:00.000Z";
+    const journal = timed(call("m1", "t1", "Explore"), start);
+    const entry = { id: "t1", label: "Explore", status: "running", startedAt: start };
+    expect(parseClaudeSubagents(journal).recent[0]).toEqual(entry);
+    const background = journal + timed(result("t1", { status: "async_launched" }), start);
+    expect(parseClaudeSubagents(background).recent[0]).toEqual(entry);
+    expect(parseClaudeSubagents(background + timed(notification("t1"), end)).recent[0]).toEqual({
+      ...entry,
+      status: "done",
+      endedAt: end,
+    });
+    expect(parseClaudeSubagents(journal + timed(result("t1"), end)).recent[0]).toEqual({
+      ...entry,
+      status: "done",
+      endedAt: end,
+    });
+    expect(parseClaudeSubagents(journal + timed(call("m2", "t2", "Next"), end)).recent[1]).toEqual({
+      ...entry,
+      status: "done",
+      endedAt: end,
+    });
   });
 
   it("ignores other tools, keeps the eight newest and bounds labels", () => {
@@ -73,14 +99,14 @@ describe("Claude subagents from the native transcript", () => {
     const session = { source: "test", kind: "path" as const, value: path };
     expect(readClaudeSubagents(session)).toEqual({
       running: 1,
-      recent: [{ label: "Explore", status: "running" }],
+      recent: [{ id: "t1", label: "Explore", status: "running" }],
     });
     appendFileSync(path, result("t1"));
     expect(readClaudeSubagents(session)?.running).toBe(0);
     expect(readClaudeSubagents({ ...session, value: join(root, "missing.jsonl") })).toBeUndefined();
   });
 
-  it("reads only local Claude/Codex seats the host already has an address for", () => {
+  it("reads only local Claude/Codex seats the host already has an address for", async () => {
     const base = {
       occupantId: "o",
       personaId: "p",
@@ -103,7 +129,7 @@ describe("Claude subagents from the native transcript", () => {
         }) as ObservedFleetSeat,
     );
     const read: string[] = [];
-    const result = withSeatSubagents(
+    const result = await withSeatSubagents(
       seats,
       observed,
       (seat) => seat.seatId !== "roster-only",
@@ -116,13 +142,15 @@ describe("Claude subagents from the native transcript", () => {
     expect(result.map((seat) => seat.subagents?.running)).toEqual([1, undefined, 1, undefined]);
     // An unreadable transcript leaves the count unknown rather than failing the roster.
     expect(
-      withSeatSubagents(
-        seats,
-        observed,
-        () => true,
-        () => {
-          throw new Error("EACCES");
-        },
+      (
+        await withSeatSubagents(
+          seats,
+          observed,
+          () => true,
+          () => {
+            throw new Error("EACCES");
+          },
+        )
       )[0],
     ).not.toHaveProperty("subagents");
   });

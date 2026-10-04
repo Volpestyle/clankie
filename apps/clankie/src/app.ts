@@ -1,4 +1,7 @@
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
+import type { PeerSeatAuthority } from "./captain/peer-seat-messages.ts";
+import { isDeepStrictEqual } from "node:util";
+import { FLEET_PEER_SEATS_PATH, FLEET_PEER_MESSAGES_PATH, FleetPeerMessageSchema } from "@clankie/protocol";
 import { createFleetProjectMembershipRoutes } from "./fleet-project-membership-routes.ts";
 import { createProjectRoutes } from "./project-routes.ts";
 import { createRuntimeUpdateRoutes } from "./runtime-update-routes.ts";
@@ -1700,6 +1703,66 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (auth.lane !== "operator") return { denial: context.json({ error: "lane_forbidden" }, 403) };
     return { paneId: raw };
   };
+
+  /** Peer sender attribution requires a native process proof, never an operator or fleet bearer. */
+  const peerSeatAuthority = async (context: Context): Promise<PeerSeatAuthority | undefined> => {
+    const identity =
+      dependencies.localFleet?.identity(context.req.raw) ??
+      dependencies.fleetLinks?.identity?.(context.req.raw);
+    if (!identity || identity.pane !== context.req.param("paneId") || !(await identity.validate()))
+      return undefined;
+    const proof = await identity.projectProof?.();
+    if (
+      !proof ||
+      proof.nativeSessionPending ||
+      proof.pane !== identity.pane ||
+      proof.fleet !== (identity.fleet ?? "default") ||
+      !(await identity.validate())
+    )
+      return undefined;
+    return {
+      proof,
+      validate: async () => {
+        if (!(await identity.validate())) return false;
+        const fresh = await identity.projectProof?.();
+        return isDeepStrictEqual(fresh, proof) && (await identity.validate());
+      },
+    };
+  };
+  app.get(FLEET_PEER_SEATS_PATH, async (context) => {
+    context.header("cache-control", "no-store");
+    const authority = await peerSeatAuthority(context);
+    if (!authority) return context.json({ error: "native_peer_sender_required" }, 403);
+    const seats = await dependencies.captain.listFleetPeerSeats(authority);
+    return seats ? context.json(seats) : context.json({ error: "peer_messaging_unavailable" }, 403);
+  });
+  app.post(FLEET_PEER_MESSAGES_PATH, bodyLimit({ maxSize: 128 * 1024 }), async (context) => {
+    const authority = await peerSeatAuthority(context);
+    if (!authority) return context.json({ error: "native_peer_sender_required" }, 403);
+    const input = FleetPeerMessageSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!input.success) return context.json({ error: "invalid_peer_message" }, 400);
+    return context.json(await dependencies.captain.sendFleetPeerMessage(authority, input.data));
+  });
+  app.get(`${FLEET_PEER_MESSAGES_PATH}/:id`, async (context) => {
+    context.header("cache-control", "no-store");
+    const authority = await peerSeatAuthority(context);
+    if (!authority) return context.json({ error: "native_peer_sender_required" }, 403);
+    const delivery = FleetSeatMessageDeliverySchema.safeParse({
+      id: context.req.param("id"),
+      binding: context.req.query("binding"),
+    });
+    const fingerprint = context.req.query("fingerprint") ?? "";
+    if (!delivery.success || !/^[a-f0-9]{64}$/u.test(fingerprint))
+      return context.json({ error: "invalid_peer_receipt" }, 400);
+    const receipt = await dependencies.captain.reconcileFleetPeerMessage(
+      authority,
+      delivery.data,
+      fingerprint,
+    );
+    return receipt
+      ? context.json(receipt)
+      : context.json({ error: "unknown_peer_receipt", deliveryStage: "uncertain" }, 404);
+  });
 
   // A fleet seat's mailbox (ADR 0161). Same door as the head outbox — operator
   // lane only, or a linked fleet for its own panes — keyed by the pane the
@@ -4064,7 +4127,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       { offerId: offer.offerId, operatorId: operator.operatorId, expiresAt: offer.expiresAt },
       "pairing offer minted",
     );
-    const wire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    const protectedWire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    const wire =
+      parsed.data.review === undefined ? { ...protectedWire, localCode: offer.code } : protectedWire;
     return context.json(direct === undefined ? wire : withDirectPairingRoute(wire, direct));
   });
 

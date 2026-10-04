@@ -29,7 +29,7 @@ restarts from the tail. Pages re-read 256 KiB before the cursor so tool results 
 Claude's parent chain resolve, and report only entries that changed.
 
 `subagents.ts` derives a seat's native subagents (Claude Code `Agent`/`Task`
-calls and Codex child rollouts) for the
+calls, Codex child rollouts and OpenCode task parts) for the
 fleet roster ([ADR 0208](../../docs/adr/0208-agents-carry-a-role-the-world-reads-it.md)).
 It tails the session incrementally from at most 2 MiB before the end and keeps
 only labels and states, never content. The service calls it only for local seats
@@ -44,3 +44,20 @@ parent status, five minutes of file idleness is a heuristic fallback, not proof
 that a process exited. At most 64 children, 4,096 recent headers (64 KiB each)
 and 32 addressed parent sessions are retained. Partial lines wait for the next
 read; file replacement or truncation restarts the bounded tail.
+
+Recent subagent entries carry optional `id`, `startedAt` and `endedAt` fields
+([VUH-1607](https://linear.app/vuhlp/issue/VUH-1607)). Readers use native call IDs
+(Claude) or child thread UUIDs (Codex) and source timestamps. Running entries
+omit the ending; older entries without these fields still validate. A Codex
+idle ending is estimated at last file write plus five minutes. Missing source
+timestamps remain unknown rather than using the fleet read's wall clock.
+
+OpenCode task projection consumes only the registered local profile's bounded
+v1 records supplied by the service's existing SQLite history reader (1.18.18
+pin). It uses native call IDs, agent type/description labels and task start/end
+times. A background tool result with a running task envelope stays running
+until its synthetic parent completion/error notification. Child references
+must match the parent's direct child in that profile; continuations retain
+distinct call IDs. The read bounds are 500 parent messages, 2,000 parts and
+4 MiB, retaining 64 calls and eight recent entries. No global owner store or
+child transcript is scanned, and no file-idleness completion is inferred.
