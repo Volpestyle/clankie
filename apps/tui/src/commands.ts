@@ -203,36 +203,64 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     }
   }
 
-  commands.push({
-    name: "seat",
-    aliases: [],
-    description: "Review a native operator seat launch and required settings",
-    argumentHint: "[claude|codex|opencode] [--resume]",
-    takesArgument: true,
-    async run(argument, shell): Promise<void> {
-      const [harness = "opencode", ...extra] = argument.trim().split(/\s+/u).filter(Boolean);
-      if (!context.repoRoot) {
-        shell.insertCommandResult("/seat", "Install location unavailable", "error");
-        return;
-      }
-      try {
-        const args = [
-          "--harness",
-          harness,
-          ...extra,
-          ...(conversations?.conversationId ? ["--conversation", conversations.conversationId] : []),
-        ];
-        const plan = await planSeat(parseSeatArgs(args), { repoRoot: context.repoRoot });
-        shell.insertCommandResult(
-          "/seat",
-          `Launch from a terminal: clankie seat ${args.map((value) => JSON.stringify(value)).join(" ")}\n${JSON.stringify(plan, null, 2)}\nOpenCode uses per-launch settings; native permissions remain owner decisions. /skills controls bundled skill selection.`,
-          "success",
-        );
-      } catch (error) {
-        shell.insertCommandResult("/seat", String(error), "error");
-      }
+  async function reviewHarnessLaunch(
+    harness: "claude" | "codex" | "opencode",
+    argument: string,
+    shell: ClankieFaceShell,
+  ): Promise<void> {
+    const extra = splitQuotedArguments(argument);
+    if (!context.repoRoot) {
+      shell.insertCommandResult(`/${harness}`, "Install location unavailable", "error");
+      return;
+    }
+    try {
+      const args = [
+        ...extra,
+        ...(conversations?.conversationId && !extra.includes("--conversation")
+          ? ["--conversation", conversations.conversationId]
+          : []),
+      ];
+      const plan = await planSeat(parseSeatArgs(args, harness), {
+        repoRoot: context.repoRoot,
+        harnessCommand: harness,
+      });
+      shell.insertCommandResult(
+        `/${harness}`,
+        `Launch from a terminal: clankie ${harness} ${args.map((value) => JSON.stringify(value)).join(" ")}\n${JSON.stringify(plan, null, 2)}\nNative permissions remain owner decisions. /skills controls bundled skill selection.`,
+        "success",
+      );
+    } catch (error) {
+      shell.insertCommandResult(`/${harness}`, String(error), "error");
+    }
+  }
+
+  // Keep metadata literal so the public console reference reads the same commands.
+  commands.push(
+    {
+      name: "claude",
+      aliases: [],
+      description: "Review a Clankie launch in claude",
+      argumentHint: "[--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
+      takesArgument: true,
+      run: (argument, shell) => reviewHarnessLaunch("claude", argument, shell),
     },
-  });
+    {
+      name: "codex",
+      aliases: [],
+      description: "Review a Clankie launch in codex",
+      argumentHint: "[--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
+      takesArgument: true,
+      run: (argument, shell) => reviewHarnessLaunch("codex", argument, shell),
+    },
+    {
+      name: "opencode",
+      aliases: [],
+      description: "Review a Clankie launch in opencode",
+      argumentHint: "[--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
+      takesArgument: true,
+      run: (argument, shell) => reviewHarnessLaunch("opencode", argument, shell),
+    },
+  );
 
   commands.push(
     {
@@ -1376,7 +1404,7 @@ function conversationHint(conversation: {
     case "workspace":
       return "workspace";
     case "seat":
-      return "agent thread · legacy seat";
+      return "agent thread · legacy";
     case "persona":
       return "agent thread · availability in /agents";
     case "channel":

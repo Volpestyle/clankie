@@ -52,10 +52,10 @@ clankie claude --dry-run    # print the launch plan as JSON without starting Cla
 clankie claude2           # use your claude2 shell alias/function for another account
 ```
 
-`clankie seat` is also supported. Numbered Claude commands load your interactive
+Numbered Claude commands load your interactive
 `$SHELL` to resolve account aliases and functions.
 
-`clankie seat` needs Claude Code on `PATH` and a TTY. It projects this plugin into
+`clankie claude` needs Claude Code on `PATH` and a TTY. It projects this plugin into
 a fresh private directory, linking the same identity, hooks and MCP config with
 only skills included by `skills.opinionated` and `skills.exclude`. A bundled skill
 whose name is already installed in the Claude profile's own `skills/` is left
@@ -114,7 +114,7 @@ to ordinary Claude sessions too. The launcher only changes session settings.
 
 ```bash
 claude plugin disable clankie@clankie  # if previously installed
-clankie seat --dry-run                # projected plugin, selected skills, channel: true
+clankie claude --dry-run                # projected plugin, selected skills, channel: true
 ```
 
 In the session, `/mcp` lists the `clankie` server, `/clankie:this-machine`
@@ -200,7 +200,7 @@ bank, not the harness.
 
 | Symptom                                    | Fix                                                                                        |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| He answers as Claude Code                  | The seat was not launched by `clankie seat`, which enables the plugin for its session      |
+| He answers as Claude Code                  | The seat was not launched by `clankie claude`, which enables the plugin for its session    |
 | Every Claude Code session answers as him   | The plugin is enabled at user scope; `claude plugin disable clankie@clankie`               |
 | `/mcp` shows `clankie` failed              | The service is down or the operator credential is missing: `clankie status`                |
 | No persona or memory card at session start | `clankie` is not on the hook's `PATH`; `pnpm cli:install` symlinks it into `~/.local/bin`  |

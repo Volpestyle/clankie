@@ -40,7 +40,11 @@ and compaction. Clankie adds durable identity, memory, the connections around
 him, and the authority each caller carries. Optional
 [Claude](https://github.com/Volpestyle/clankie/blob/main/integrations/claude-plugin/README.md)
 and [Codex operator seats](https://github.com/Volpestyle/clankie/blob/main/integrations/codex-plugin/README.md)
-use the same service through their native harnesses. Their setup, hook trust,
+`clankie claude` and `clankie codex`, along with `clankie opencode`,
+use the same service through their native harnesses. All three support
+`--resume`, `--conversation ID`, `--dry-run`, and `--plugin-dir PATH`.
+Numbered Claude commands use the owner’s shell account command; `clankie codex2`
+selects the registered Codex account labelled `codex2`. Their setup, hook trust,
 delivery, and continuation limits are documented separately.
 Each fresh native launch gets its own workspace chat, including simultaneous
 launches in the same directory. Resume keeps that chat; an explicit conversation

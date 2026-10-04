@@ -1999,14 +1999,27 @@ control remains available; normal agent messages do not use it. See
 
 <a id="seat-commands"></a>
 
-### `claude[N]` and `seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
+### `claude[N] | codex[N] | opencode [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
 
-Sit in Claude Code as Clankie ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
+Open Clankie in the selected native harness ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
 `clankie claude` opens this seat with `claude`; `clankie claude2` uses your
-`claude2` account command. Numbered commands are resolved through your interactive
+`claude2` account command. Numbered Claude commands are resolved through your interactive
 `$SHELL`, including shell aliases and functions. The same seat flags work with
-either command. Each numbered command keeps its own resume record. `clankie seat` remains available, including its Codex harness.
-Needs a TTY and the selected Claude command available. The launcher projects the bundled plugin
+either command. Each numbered command keeps its own resume record. `clankie codex` and `clankie opencode` open the corresponding native harness with the same flags.
+
+`clankie codex2` selects the registered account labelled exactly `codex2`:
+`clankie accounts codex add /absolute/CODEX_HOME --label codex2` registers it.
+The number is part of the label, never an account-list position. Unknown labels
+fail without selecting another account. The launcher captures the canonical home
+for native discovery, the app-server and TUI. Numbered commands keep separate
+resume records and refuse to resume after their label is rebound to another home.
+Plain `clankie codex` retains the current `CODEX_HOME` behavior. OpenCode has no
+numbered account command.
+For numbered accounts, set `CODEX_HOME` to that registered home in the environment
+of native plugin installation commands and the Codex session used to review
+`/plugins` and `/hooks`. Setup under a different home does not prepare this account.
+
+Claude launches need a TTY and the selected Claude command available. The launcher projects the bundled plugin
 (or `--plugin-dir` source) into a private launch directory with only the selected
 skills. Identity, hooks, and MCP are retained. It passes the permission allowlist
 for `clankie` commands, disables an older installed `clankie@clankie` for this
@@ -2101,7 +2114,7 @@ conversation="…" event_id="…">`; that polling is what binds the seat as his
 head, and with no bridge polling the same turns run the pi operator lane. A
 `reply` tool answers an escalation by `event_id`; the reply lands in the
 escalating conversation as his own message. Claude Code loads the channel
-only when `clankie seat` passes its development flag; without it the tools
+only when `clankie claude` passes its development flag; without it the tools
 still work without consuming events, leaving those turns with the service.
 
 ### `mcp --seat`
@@ -2342,9 +2355,12 @@ receiver remain unavailable.
 
 ### Native seat transcript sync
 
-`clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The `clankie seat` launcher
-sets `CLANKIE_SEAT_SESSION_ID` and its selected `CLANKIE_CONVERSATION_ID`; unlaunched
-plugin use and hooks for another session are ignored. The plugin invokes sync at
+`clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The
+`clankie claude`, `clankie codex`, and `clankie opencode` launchers set their selected
+`CLANKIE_CONVERSATION_ID`. Claude supplies `CLANKIE_SEAT_SESSION_ID`; Codex’s trusted
+hook supplies it from the captured native binding. OpenCode sends transcripts
+through its per-launch bridge. Unlaunched plugin use and hooks for another session
+are ignored. The plugin invokes sync at
 session start/end, prompt submission, stop/failure and before compaction. Claude
 and Codex also upload on asynchronous `PostToolUse` hooks, throttled to one
 attempt per two seconds. Progress appears as tools finish; a long tool or a
@@ -2591,11 +2607,11 @@ goals. Native goal state remains separate from turn activity.
 
 ### OpenCode operator seat
 
-`clankie seat --harness opencode --conversation ID --dry-run` reviews the native
+`clankie opencode --conversation ID --dry-run` reviews the native
 launch, installed version, skill selection and required owner steps. Remove
 `--dry-run` to launch; `--resume` uses the exact recorded session and chat.
 Without `--conversation ID`, each fresh launch creates a separate workspace
-chat; dry-run creates none. `/seat opencode`
+chat; dry-run creates none. `/opencode`
 in the console reviews the same plan. Installation, per-launch settings,
 removal, native delivery semantics and current verification limits are in the
 [OpenCode seat guide](../integrations/opencode-plugin/README.md).
