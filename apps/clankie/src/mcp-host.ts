@@ -23,6 +23,14 @@
  * - **Untrusted text.** A server's own tool descriptions become prompt text, so
  *   they are length-capped here rather than trusted to be reasonable.
  */
+import {
+  captureConversationAuthority,
+  captureNativeSeatAuthority,
+  type ConversationAuthority,
+  type ConversationOwner,
+  type LinearRecipient,
+  type WorkerWriteAuthority,
+} from "./captain/conversation-owner.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -43,6 +51,7 @@ import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
 import { compactLinearWrite } from "./linear-write-receipt.ts";
+import type { ProjectProcessProof } from "./project-process-proof.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -104,6 +113,10 @@ export interface McpHost {
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
     /** Live authority check run after the host's own awaits, immediately before the provider call. */
     readonly fence?: () => Promise<void>;
+    /** Host-stamped turn attribution; it grants no provider tools. */
+    readonly conversationAuthority?: ConversationAuthority;
+    /** Host-only socket/controller proof for native author attribution; never a grant. */
+    readonly nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>;
   }): Promise<McpCallResult>;
   close(): Promise<void>;
 }
@@ -154,14 +167,23 @@ export interface McpHostOptions {
   /** Test seam for the two app-attributed GraphQL mutations. */
   readonly linearFetch?: typeof fetch;
   /** Sees every settled call, for side channels that must know what he wrote. */
+  readonly conversationForWorker?: (principalId: string) => Promise<ConversationAuthority | undefined>;
+  /** Fresh author/owner proof captured at call entry, before connected-provider awaits. */
+  readonly writeAuthorityForWorker?: (
+    principalId: string,
+    nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>,
+  ) => Promise<WorkerWriteAuthority | undefined>;
   readonly observeCall?: (call: {
     readonly server: string;
     readonly tool: string;
     readonly content: string;
+    readonly arguments: Record<string, unknown>;
+    readonly owner?: ConversationOwner;
+    readonly recipient?: LinearRecipient;
     readonly isError: boolean;
     readonly account?: ProviderAccount;
     readonly worker?: { grantId: string; principalId: string; workId: string };
-  }) => void;
+  }) => unknown;
 }
 
 /** The part of an MCP client this host uses, so tests can supply a fake. */
@@ -451,6 +473,26 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     },
 
     async call(input) {
+      input = { ...input, arguments: structuredClone(input.arguments) };
+      const providedSource = input.conversationAuthority
+        ? captureConversationAuthority(input.conversationAuthority)
+        : undefined;
+      const workerProof =
+        input.delegation && options.writeAuthorityForWorker
+          ? await options
+              .writeAuthorityForWorker(input.delegation.principalId, input.nativeWriteProof)
+              .catch(() => undefined)
+          : undefined;
+      const workerSource =
+        workerProof?.conversationAuthority ??
+        (!providedSource && input.delegation && !options.writeAuthorityForWorker
+          ? await options.conversationForWorker?.(input.delegation.principalId).catch(() => undefined)
+          : undefined);
+      const admittedSource =
+        providedSource ?? (workerSource ? captureConversationAuthority(workerSource) : undefined);
+      const admittedNativeSource = workerProof?.nativeRecipientAuthority
+        ? captureNativeSeatAuthority(workerProof.nativeRecipientAuthority)
+        : undefined;
       const now = Date.now();
       const server = (await activeServers()).find((entry) => entry.id === input.server);
       if (server === undefined) {
@@ -486,11 +528,37 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         const workerPost =
           server.id === "linear" && server.credential === "linear" && isLinearWorkerTool(input.tool);
         const credential = workerPost ? await options.credentials.get("linear") : undefined;
-        // The caller's fence may await; the server's own config check comes last.
-        if (input.fence) {
-          await input.fence();
-          await assertCurrent(server, state);
-        }
+        const source = admittedSource;
+        // Attribution is optional: losing an owning conversation does not revoke
+        // independently admitted connected-account tools.
+        let authority: ConversationAuthority | undefined;
+        let recipient: LinearRecipient | undefined;
+        const refreshAttribution = async () => {
+          authority = undefined;
+          recipient = undefined;
+          try {
+            if (source && source.current() && (await source.authorize()) && source.current())
+              authority = captureConversationAuthority(source);
+          } catch {
+            /* Unavailable attribution does not revoke an independent provider grant. */
+          }
+          try {
+            if (
+              admittedNativeSource &&
+              admittedNativeSource.current() &&
+              (await admittedNativeSource.authorize()) &&
+              admittedNativeSource.current()
+            )
+              recipient = captureNativeSeatAuthority(admittedNativeSource).recipient;
+          } catch {
+            /* Never manufacture a native recipient when proof is unavailable. */
+          }
+          recipient ??= authority ? { kind: "conversation", owner: authority.owner } : undefined;
+        };
+        await refreshAttribution();
+        // Attribution may await; provider authority is checked at the final boundary.
+        await input.fence?.();
+        await assertCurrent(server, state);
         const result = workerPost
           ? await publishLinearWorker({
               tool: input.tool,
@@ -498,6 +566,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               credential,
               author: options.linearAuthor ?? (async () => undefined),
               beforeWrite: async () => {
+                await refreshAttribution();
                 await input.fence?.();
                 await assertCurrent(server, state!);
               },
@@ -522,10 +591,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           "mcp tool called",
         );
         try {
-          options.observeCall?.({
+          await options.observeCall?.({
             server: server.id,
             tool: input.tool,
             content: result.content,
+            arguments: input.arguments,
+            ...(authority ? { owner: authority.owner } : {}),
+            ...(recipient ? { recipient } : {}),
             isError: result.isError,
             ...(connectedAccount === undefined ? {} : { account: connectedAccount.account }),
             ...(input.delegation === undefined

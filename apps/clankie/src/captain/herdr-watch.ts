@@ -971,10 +971,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     seatId: string,
     text: string,
     uncontrolled?: () => Promise<FleetSeatDelivery>,
+    guard?: () => Promise<void>,
+    stableReceiptKey?: string,
   ): Promise<FleetSeatDelivery> {
-    if (this.closed)
+    if (this.closed) {
+      if (stableReceiptKey) return { outcome: "offline", detail: "Native delivery service is closed." };
+      await guard?.();
       return uncontrolled?.() ?? { outcome: "offline", detail: "Native hire service is closed." };
-    return this.seatControl.deliverToSeat(seatId, text, uncontrolled);
+    }
+    return this.seatControl.deliverToSeat(seatId, text, uncontrolled, guard, stableReceiptKey);
   }
 
   /** Only fresh host-observed native proof selects a worker's leading conversation. */

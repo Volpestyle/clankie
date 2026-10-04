@@ -22,6 +22,50 @@ export const ConversationOwnerSchema = z
   .strict();
 export type ConversationOwner = z.infer<typeof ConversationOwnerSchema>;
 
+/** Host-observed author identity. A pane label alone never identifies a recipient. */
+export const NativeSeatRecipientSchema = z
+  .object({
+    kind: z.literal("native"),
+    paneId: z.string().min(1).max(256),
+    seatId: z.string().min(1).max(256),
+    occupantId: z.string().min(1).max(512),
+    binding: z.string().regex(/^[a-f0-9]{64}$/u),
+    owner: ConversationOwnerSchema.optional(),
+  })
+  .strict();
+export type NativeSeatRecipient = z.infer<typeof NativeSeatRecipientSchema>;
+
+export const LinearRecipientSchema = z.union([
+  NativeSeatRecipientSchema,
+  z.object({ kind: z.literal("conversation"), owner: ConversationOwnerSchema }).strict(),
+]);
+export type LinearRecipient = z.infer<typeof LinearRecipientSchema>;
+
+export interface NativeSeatAuthority {
+  readonly recipient: NativeSeatRecipient;
+  readonly current: () => boolean;
+  readonly authorize: () => Promise<boolean>;
+}
+
+/** Attribution only: these proofs grant no connected account or machine tools. */
+export interface WorkerWriteAuthority {
+  readonly conversationAuthority?: ConversationAuthority;
+  readonly nativeRecipientAuthority?: NativeSeatAuthority;
+}
+
+export function captureNativeSeatAuthority(source: NativeSeatAuthority): NativeSeatAuthority {
+  const recipient = NativeSeatRecipientSchema.parse(source.recipient);
+  if (recipient.owner) {
+    if (recipient.owner.discord) Object.freeze(recipient.owner.discord);
+    Object.freeze(recipient.owner);
+  }
+  return Object.freeze({
+    recipient: Object.freeze(recipient),
+    current: source.current,
+    authorize: source.authorize,
+  });
+}
+
 /** A live admitted turn. Persist only owner; refresh authority before each later wake. */
 export interface ConversationAuthority {
   readonly owner: ConversationOwner;

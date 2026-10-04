@@ -140,7 +140,13 @@ describe("mcp host", () => {
     });
     await host.call({ lane: "operator", server: "tracker", tool: "create_comment", arguments: {} });
     expect(seen).toEqual([
-      { server: "tracker", tool: "create_comment", content: "ran create_comment", isError: false },
+      {
+        server: "tracker",
+        tool: "create_comment",
+        arguments: {},
+        content: "ran create_comment",
+        isError: false,
+      },
     ]);
   });
 

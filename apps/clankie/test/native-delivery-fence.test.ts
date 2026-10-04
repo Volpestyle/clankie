@@ -101,3 +101,67 @@ it("does not claim a different follow-up was sent when reconciling the original"
   await expect(native.deliverToSeat("seat1", "different")).resolves.toMatchObject({ outcome: "undelivered" });
   expect(send).toHaveBeenCalledTimes(1);
 });
+
+it("retains explicit stable native completions across restart and refuses changed content for the same ID", async () => {
+  const { create, send } = fixture();
+  send.mockResolvedValue({ outcome: "accepted", messageId: "accepted-native", state: "queued" });
+  const guard = async () => {};
+  expect(
+    await create().deliverToSeat("seat1", "approval", undefined, guard, "linear:original-author:event"),
+  ).toMatchObject({ outcome: "delivered", messageId: "accepted-native" });
+  const restarted = create();
+  expect(
+    await restarted.deliverToSeat("seat1", "approval", undefined, guard, "linear:original-author:event"),
+  ).toMatchObject({ outcome: "delivered", messageId: "accepted-native" });
+  expect(
+    await restarted.deliverToSeat(
+      "seat1",
+      "changed approval",
+      undefined,
+      guard,
+      "linear:original-author:event",
+    ),
+  ).toMatchObject({ outcome: "undelivered" });
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+it("keeps a reconciled stable delivery receipt even when the retry supplied conflicting content", async () => {
+  const { create, send, entries } = fixture();
+  const guard = async () => {};
+  await create().deliverToSeat("seat1", "approval", undefined, guard, "linear:event");
+  entries.push({ type: "message", role: "operator", id: "native-approval", text: "approval" });
+  const restarted = create();
+  expect(await restarted.deliverToSeat("seat1", "changed", undefined, guard, "linear:event")).toMatchObject({
+    outcome: "undelivered",
+  });
+  expect(await restarted.deliverToSeat("seat1", "approval", undefined, guard, "linear:event")).toMatchObject({
+    outcome: "delivered",
+    messageId: "native-approval",
+  });
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+it("linearizes concurrent stable retries before sending to the native channel", async () => {
+  const { create, send } = fixture();
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  send.mockImplementation(async () => {
+    await pending;
+    return { outcome: "accepted", messageId: "once", state: "started" };
+  });
+  const native = create();
+  const guard = async () => {};
+  const first = native.deliverToSeat("seat1", "approval", undefined, guard, "linear:event");
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+  expect(await native.deliverToSeat("seat1", "approval", undefined, guard, "linear:event")).toMatchObject({
+    outcome: "unconfirmed",
+  });
+  release();
+  expect(await first).toMatchObject({ outcome: "delivered" });
+  expect(await native.deliverToSeat("seat1", "approval", undefined, guard, "linear:event")).toMatchObject({
+    outcome: "delivered",
+  });
+  expect(send).toHaveBeenCalledTimes(1);
+});

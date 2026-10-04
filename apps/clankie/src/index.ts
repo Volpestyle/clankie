@@ -105,7 +105,7 @@ import {
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
 import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
-import { LinearWriteReceipts } from "./linear-webhook.ts";
+import { LinearWriteReceipts, linearWriteIssue } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { LinearNotifications } from "./linear-notifications.ts";
 import { createMcpHost } from "./mcp-host.ts";
@@ -530,7 +530,16 @@ const mcpHost = createMcpHost({
   credentials: operatorCredentialStore,
   settings: settingsStore,
   logger,
-  observeCall: (call) => linearWrites.record(call, new Date()),
+  writeAuthorityForWorker: (principalId, nativeWriteProof) =>
+    captain.fleetWriteAuthority(principalId, nativeWriteProof),
+  observeCall: (call) => {
+    const now = new Date();
+    linearWrites.record(call, now);
+    const issue = linearWriteIssue(call);
+    if (issue && call.owner) captain.recordLinearWorkOwner(issue, call.owner, now.getTime());
+    else if (issue && call.recipient?.kind === "native")
+      captain.recordLinearNativeWorkOwner(issue, call.recipient, now.getTime());
+  },
   linearAuthor: async (personaId) => {
     const result = await captain.serveOperatorConversation({ op: "personas", schemaVersion: 1 });
     const persona =
@@ -883,6 +892,9 @@ const linearNotifications = new LinearNotifications({
   following: linearFollowing,
   wakeRules: async () => (await settingsStore.load()).linearWebhook.wake,
   attribute: (notification, organizationId) => linearAttribution.attribute(notification, organizationId),
+  resolveIssue: (notification, organizationId) => linearAttribution.issue(notification, organizationId),
+  resolveReplyRecipient: (notification, organizationId) =>
+    linearAttribution.replyRecipient(notification, organizationId),
   receive: (activity, following) => captain.receiveLinearActivity(activity, following),
   onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
 });
@@ -1090,7 +1102,23 @@ const clankie = await createClankieApp({
       return credential?.type === "api" ? credential.key : undefined;
     },
     writes: linearWrites,
-    recordActivity: (activity) => linearAttribution.record(activity),
+    recordActivity: (activity) => {
+      linearAttribution.record(activity);
+      if (activity.issueId && activity.organizationId && activity.conversationOwner)
+        captain.recordLinearWorkOwner(
+          { issueId: activity.issueId, organizationId: activity.organizationId },
+          activity.conversationOwner,
+          activity.conversationOwnerRecordedAt,
+          true,
+        );
+      else if (activity.issueId && activity.organizationId && activity.writeRecipient?.kind === "native")
+        captain.recordLinearNativeWorkOwner(
+          { issueId: activity.issueId, organizationId: activity.organizationId },
+          activity.writeRecipient,
+          activity.writeRecipientRecordedAt,
+          true,
+        );
+    },
     requestNotificationPoll: () => linearNotifications.requestPoll(),
     // Unverified identity leaves webhook history passive.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,

@@ -308,9 +308,9 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "linear",
       aliases: [],
-      description: "Configure Linear following and wake rules, or read activity",
+      description: "Configure Linear following, issue ownership and activity handoffs",
       takesArgument: true,
-      argumentHint: "[status|follow on/off|wake show/set|inbox read|work list]",
+      argumentHint: "[status|follow on/off|wake show/set|inbox read/ack/handoff|work list/bind/unbind]",
       async run(argument, shell): Promise<void> {
         if (!argument.trim()) {
           if (!context.linearFollowMenu) throw new Error("Linear settings menu is unavailable");

@@ -3,6 +3,16 @@
 Status: accepted (James, 2026-09-08, operator conversation). Amended by
 [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) (headlines name a comment's parent; replies to his posts are routed).
 
+## Amendment — work ownership, 2026-10-04
+
+[ADR 0218's Linear extension](0218-native-seats-drive-their-attached-conversation.md)
+supersedes the inert-binding and fixed-operator-destination amendments below.
+The existing ownership journal again routes eligible notifications: admitted
+writes, issue-scoped native hires and explicit claims record the work's
+conversation; unowned/removed owners use `linear-inbox`. Signed attribution and
+ADR 0214 wake rules remain prerequisites. Inbox handoff shares durable state,
+not transcripts; selecting an owner never widens its tools or room grants.
+
 ## Amendment — 2026-09-30
 
 Legacy issue binding mutations are retired. The CLI rejects `work bind` and

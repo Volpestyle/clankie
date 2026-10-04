@@ -8,6 +8,7 @@ import { splitFleetQualified } from "../herdr-fleet.ts";
 import { codexControlEndpoint, codexProcess, resolveCodexHome, resolveCodexSessionId } from "./codex-seat.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
+import { occupantIdForHerdrSession } from "./herdr-census.ts";
 
 /** Native control is shared by messages and watches; the adapters own its lifetime. */
 export function createFleetSeatControl(
@@ -43,14 +44,19 @@ export function createFleetSeatControl(
   const deliverCodexQueue = async (
     agent: HerdrAgentSnapshot,
     text: string,
+    begin: () => void,
+    guard?: () => Promise<void>,
   ): Promise<FleetSeatDelivery | undefined> => {
     const remote = splitFleetQualified(agent.paneId)?.fleet;
     if (remote !== undefined) {
       // That machine's Herdr reports the session; its own Codex queues the message.
       if (remoteCodexQueue === undefined || agent.session?.kind !== "id") return undefined;
+      await guard?.();
+      begin();
       try {
         const native = await remoteCodexControl?.(remote, agent.paneId)?.(agent.session.value, text);
         if (native !== undefined) return native;
+        await guard?.();
         if (await remoteCodexQueue(remote, agent.session.value, text)) return queued();
         return {
           outcome: "unconfirmed",
@@ -85,10 +91,13 @@ export function createFleetSeatControl(
       // A daemon TUI may not own a rollout; Herdr's exact session binding suffices.
     }
     if (sessionId === undefined) return undefined;
+    await guard?.();
+    begin();
     try {
       const native =
         endpoint === null ? undefined : await runner.codexControl?.(sessionId, text, home, endpoint);
       if (native !== undefined) return native;
+      await guard?.();
       if (await codexQueue(sessionId, text, home)) return queued();
       return {
         outcome: "unconfirmed",
@@ -106,11 +115,14 @@ export function createFleetSeatControl(
     clear: () => void,
     /** A bound mailbox can work even while terminal discovery is unavailable. */
     uncontrolled?: () => Promise<FleetSeatDelivery>,
+    guard?: () => Promise<void>,
+    stableReceipt?: boolean,
   ): Promise<FleetSeatDelivery> => {
     const control = current === undefined ? undefined : await attach(current);
     // A chosen channel is the sole delivery attempt. Uncertain delivery must
     // never be replayed through a queue, mailbox or terminal.
     if (control !== undefined) {
+      await guard?.();
       begin();
       try {
         const delivery = await control.send(text);
@@ -126,12 +138,15 @@ export function createFleetSeatControl(
       }
     }
     if (isMessageableSeat(current) && current.agent === "codex") {
-      begin();
-      const delivery = await deliverCodexQueue(current, text);
+      const delivery = await deliverCodexQueue(current, text, begin, guard);
       if (delivery !== undefined) return delivery;
       clear();
     }
-    if (uncontrolled !== undefined) return uncontrolled();
+    if (uncontrolled !== undefined) {
+      await guard?.();
+      if (stableReceipt) begin();
+      return uncontrolled();
+    }
     return isMessageableSeat(current)
       ? {
           outcome: "undelivered",
@@ -145,8 +160,36 @@ export function createFleetSeatControl(
       seatId: string,
       text: string,
       uncontrolled?: () => Promise<FleetSeatDelivery>,
+      guard?: () => Promise<void>,
+      stableReceiptKey?: string,
     ): Promise<FleetSeatDelivery> {
       const agent = await runner.resolveTerminal(seatId).catch(() => undefined);
+      const key = stableReceiptKey ?? seatId;
+      const completed = stableReceiptKey ? fence.completed(key) : undefined;
+      const occupantId = agent?.session === undefined ? undefined : occupantIdForHerdrSession(agent.session);
+      if (completed) {
+        if (
+          completed.fingerprint !== deliveryFingerprint(text) ||
+          completed.paneId !== agent?.paneId ||
+          completed.occupantId !== occupantId
+        )
+          return {
+            outcome: "undelivered",
+            deliveryStage: "unavailable",
+            detail: "Stable delivery receipt does not match its original native author and content.",
+          };
+        return {
+          outcome: "delivered",
+          ...(completed.completed!.messageId === undefined
+            ? {}
+            : { messageId: completed.completed!.messageId }),
+          ...(completed.completed!.state === undefined ? {} : { state: completed.completed!.state }),
+          ...(completed.completed!.deliveryStage === undefined
+            ? {}
+            : { deliveryStage: completed.completed!.deliveryStage }),
+          detail: "Original native delivery was already confirmed; no message was sent again.",
+        };
+      }
       const session = agent?.session;
       const sessionId =
         session === undefined
@@ -154,7 +197,10 @@ export function createFleetSeatControl(
           : session.kind === "id"
             ? session.value
             : basename(session.value, ".jsonl");
-      const pending = fence.pending(seatId);
+      const pending =
+        fence.pending(key) ??
+        fence.pending(seatId) ??
+        fence.entries().find(([, receipt]) => receipt.seatId === seatId)?.[1];
       if (pending !== undefined) {
         // Only a newly observed, complete operator message in the original session
         // can reconcile a lost receipt. Inspection never sends a replacement.
@@ -164,6 +210,7 @@ export function createFleetSeatControl(
           sessionId !== undefined &&
           sessionId === pending.sessionId &&
           agent.paneId === pending.paneId &&
+          (pending.occupantId === undefined || pending.occupantId === occupantId) &&
           pending.beforeIds !== undefined
             ? await runner.transcript?.(agent).catch(() => undefined)
             : undefined;
@@ -174,7 +221,29 @@ export function createFleetSeatControl(
             !pending.beforeIds?.includes(entry.id) &&
             deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
         );
-        if (matched !== undefined && fence.reconcile(seatId, pending.messageId)) {
+        const pendingKey = fence.entries().find(([, receipt]) => receipt === pending)?.[0] ?? key;
+        if (matched !== undefined && pending.seatId) {
+          fence.complete(pendingKey, pending.messageId, {
+            messageId: matched.id,
+            state: "started",
+            deliveryStage: "consumed",
+          });
+          if (pending.fingerprint !== deliveryFingerprint(text))
+            return {
+              outcome: "undelivered",
+              deliveryStage: "unavailable",
+              detail: "Stable delivery ID already belongs to different content; nothing was sent.",
+            };
+          return {
+            outcome: "delivered",
+            deliveryStage: "consumed",
+            messageId: matched.id,
+            state: "started",
+            detail:
+              "Original uncertain native delivery was found in its exact session; no message was sent again.",
+          };
+        }
+        if (matched !== undefined && !stableReceiptKey && fence.reconcile(pendingKey, pending.messageId)) {
           if (pending.fingerprint !== deliveryFingerprint(text))
             return {
               outcome: "undelivered",
@@ -202,7 +271,11 @@ export function createFleetSeatControl(
       const transcript =
         agent === undefined ? undefined : await runner.transcript?.(agent).catch(() => undefined);
       // Recheck after asynchronous inspection so concurrent callers cannot both dispatch.
-      if (fence.pending(seatId) !== undefined)
+      if (
+        fence.pending(key) !== undefined ||
+        fence.pending(seatId) !== undefined ||
+        fence.entries().some(([, receipt]) => receipt.seatId === seatId)
+      )
         return {
           outcome: "unconfirmed",
           deliveryStage: "uncertain",
@@ -210,21 +283,41 @@ export function createFleetSeatControl(
         };
       const receiptData = {
         fingerprint: deliveryFingerprint(text),
+        ...(stableReceiptKey === undefined ? {} : { seatId }),
+        ...(occupantId === undefined ? {} : { occupantId }),
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(agent === undefined ? {} : { paneId: agent.paneId }),
         ...(transcript === undefined ? {} : { beforeIds: transcript.entries.map((entry) => entry.id) }),
       };
       let receipt: ReturnType<DeliveryFence["begin"]> | undefined;
+      let ownsActiveDelivery = false;
       const begin = () => {
-        receipt = fence.begin(seatId, receiptData);
+        receipt = fence.begin(key, receiptData);
+        active.add(seatId);
+        ownsActiveDelivery = true;
       };
       const clear = () => {
-        if (receipt !== undefined) fence.reconcile(seatId, receipt.messageId);
+        if (receipt !== undefined) fence.reconcile(key, receipt.messageId);
         receipt = undefined;
       };
-      active.add(seatId);
       try {
-        const result = await dispatch(agent, text, begin, clear, uncontrolled);
+        const result = await dispatch(
+          agent,
+          text,
+          begin,
+          clear,
+          uncontrolled,
+          guard,
+          stableReceiptKey !== undefined,
+        );
+        if (stableReceiptKey && receipt && result.outcome === "delivered") {
+          fence.complete(key, receipt.messageId, {
+            ...(result.messageId === undefined ? {} : { messageId: result.messageId }),
+            ...(result.state === undefined ? {} : { state: result.state }),
+            deliveryStage: fleetDeliveryStage(result),
+          });
+          receipt = undefined;
+        }
         if (result.outcome !== "unconfirmed") clear();
         return { ...result, deliveryStage: fleetDeliveryStage(result) };
       } catch (error) {
@@ -236,7 +329,7 @@ export function createFleetSeatControl(
           detail: String(error),
         };
       } finally {
-        active.delete(seatId);
+        if (ownsActiveDelivery) active.delete(seatId);
       }
     },
   };

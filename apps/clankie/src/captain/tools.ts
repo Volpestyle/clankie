@@ -689,6 +689,15 @@ function hireAgentTool(
       "its pane: reconcile before retrying. Follow up with message_seat and watch the returned seatId with " +
       "herdr_watch.",
     parameters: Type.Object({
+      linearIssue: Type.Optional(
+        Type.Object(
+          { organizationId: Type.String({ format: "uuid" }), issueId: Type.String({ format: "uuid" }) },
+          {
+            description:
+              "Canonical Linear issue this hire works on. The admitted hiring conversation owns its later events.",
+          },
+        ),
+      ),
       harness: StringEnum(OPERATOR_SEAT_HARNESSES),
       resume: Type.Optional(
         Type.String({
@@ -767,12 +776,14 @@ function hireAgentTool(
       if (available?.() === false)
         return json({ outcome: "failed", reason: "herdr_unreachable", deliveryStage: "unavailable" });
       const authority = captureConversationAuthority(turn.conversationAuthority);
+      const assignment = structuredClone(params);
       await assertConversationAuthority(authority);
-      const { brief, ...seat } = params as typeof params & { brief?: string };
+      const { brief, linearIssue, ...seat } = assignment as typeof params & { brief?: string };
       const result = await hire(
         SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }),
         brief,
         authority,
+        linearIssue,
       );
       if (result.outcome !== "spawned" || brief === undefined || message === undefined)
         return json({ ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) });
@@ -1594,7 +1605,11 @@ const MCP_TOOL_SEARCH = "mcp_tool_search";
  * registering them all active would tax every "hey clankie" in a voice channel
  * for capabilities that turn never uses.
  */
-export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): InlineExtension {
+export function mcpExtension(
+  deps: CaptainDeps,
+  lane: CaptainSessionLaneV2,
+  turn?: TurnContext,
+): InlineExtension {
   return {
     name: "captain-mcp",
     hidden: true,
@@ -1617,6 +1632,7 @@ export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): Inl
               server: tool.server,
               tool: tool.name,
               arguments: (params ?? {}) as Record<string, unknown>,
+              ...(turn?.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
             });
             // A server's own error is the model's to react to, so it is raised
             // rather than returned as a successful-looking payload.

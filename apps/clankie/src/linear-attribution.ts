@@ -1,12 +1,21 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
-import type { LinearActivityEvent } from "./linear-webhook.ts";
+import {
+  linearActivityIssueId,
+  linearActivityUpdateParent,
+  LinearReplyRecipientSchema,
+  type LinearActivityEvent,
+  type LinearReplyRecipient,
+} from "./linear-webhook.ts";
 
 const EntrySchema = z.object({
   eventId: z.string(),
   organizationId: z.string(),
   resource: z.string(),
+  issueId: z.string().uuid().optional(),
+  parent: LinearReplyRecipientSchema.pick({ parentType: true, parentId: true }).optional(),
+  replyRecipient: LinearReplyRecipientSchema.optional(),
   comment: z.string().optional(),
   type: z.string(),
   action: z.string(),
@@ -25,16 +34,44 @@ const EntrySchema = z.object({
 type Entry = z.infer<typeof EntrySchema>;
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 2_000;
+const STATUS_REPLY_NOTIFICATIONS = [
+  "projectUpdateNewComment",
+  "projectUpdateCommentMention",
+  "initiativeUpdateNewComment",
+  "initiativeUpdateCommentMention",
+];
 
-function subject(raw: string | undefined): { resource: string; comment?: string } | undefined {
+function subject(raw: string | undefined):
+  | {
+      resource: string;
+      comment?: string;
+      update?: { type: "ProjectUpdate" | "InitiativeUpdate"; id: string };
+    }
+  | undefined {
   if (!raw) return;
   try {
     const url = new URL(raw);
     if (url.hostname !== "linear.app" || url.protocol !== "https:") return;
     // Issue slugs may change; identifiers and comment anchors do not.
     const issue = /^(.*\/issue\/[^/]+)/u.exec(url.pathname)?.[1];
-    const comment = /^#comment-(.+)$/u.exec(url.hash)?.[1];
-    return { resource: issue ?? url.pathname.replace(/\/$/u, ""), ...(comment ? { comment } : {}) };
+    const comment = /(?:^#|&)comment-([^&]+)/u.exec(url.hash)?.[1];
+    const update = /(?:^#|&)(project|initiative)-update-([^&]+)/u.exec(url.hash);
+    const path = /\/(?:project|initiative)\//u.test(url.pathname)
+      ? url.pathname.replace(/\/(?:activity|updates)\/?$/u, "")
+      : url.pathname;
+    const resource = issue ?? path.replace(/\/$/u, "");
+    return {
+      resource,
+      ...(comment ? { comment } : {}),
+      ...(update
+        ? {
+            update: {
+              type: update[1] === "project" ? ("ProjectUpdate" as const) : ("InitiativeUpdate" as const),
+              id: update[2]!,
+            },
+          }
+        : {}),
+    };
   } catch {
     return;
   }
@@ -69,10 +106,28 @@ export class LinearAttributionJournal {
       !Number.isFinite(at)
     )
       return;
+    const issueId = linearActivityIssueId(activity);
+    const parent =
+      linearActivityUpdateParent(activity) ??
+      ((activity.type === "ProjectUpdate" || activity.type === "InitiativeUpdate") &&
+      z.string().uuid().safeParse(activity.data.id).success
+        ? { parentType: activity.type, parentId: (activity.data.id as string).toLowerCase() }
+        : undefined);
+    const replyRecipient = activity.replyRecipient;
+    const provenRecipient =
+      parent &&
+      replyRecipient?.parentType === parent.parentType &&
+      replyRecipient.parentId === parent.parentId &&
+      z.string().uuid().safeParse(activity.data.id).success
+        ? replyRecipient
+        : undefined;
     const entry = EntrySchema.parse({
       eventId: activity.eventId,
       organizationId: activity.organizationId,
       ...target,
+      ...(issueId === undefined ? {} : { issueId }),
+      ...(parent ? { parent } : {}),
+      ...(provenRecipient ? { replyRecipient: provenRecipient } : {}),
       ...(activity.type === "Comment" && typeof activity.data.id === "string"
         ? { comment: activity.data.id }
         : {}),
@@ -103,19 +158,65 @@ export class LinearAttributionJournal {
     this.entries = retained;
   }
 
+  /** Resolve an issue independently of actor timing, using only retained signed resource evidence. */
+  issue(notification: { url?: string | undefined }, organizationId: string): string | undefined {
+    const target = subject(notification.url);
+    if (!target) return;
+    const ids = this.entries.flatMap((entry) =>
+      entry.organizationId === organizationId &&
+      entry.resource === target.resource &&
+      entry.issueId !== undefined
+        ? [entry.issueId.toLowerCase()]
+        : [],
+    );
+    return ids.length && ids.every((id) => id === ids[0]) ? ids[0] : undefined;
+  }
+
   attribute(
     notification: { type: string; createdAt: string; url?: string | undefined },
     organizationId: string,
   ): Entry["actor"] {
+    const candidates = this.candidates(notification, organizationId);
+    const first = candidates[0]?.actor;
+    // Never choose the nearest actor when simultaneous events disagree or lack identity.
+    if (first && candidates.every((entry) => JSON.stringify(entry.actor) === JSON.stringify(first)))
+      return first;
+  }
+
+  /** Notification fragments are aliases of exact signed comment/parent UUIDs, never ownership proof. */
+  replyRecipient(
+    notification: { type: string; createdAt: string; url?: string | undefined },
+    organizationId: string,
+  ): LinearReplyRecipient | undefined {
+    if (!STATUS_REPLY_NOTIFICATIONS.includes(notification.type)) return;
+    const candidates = this.candidates(notification, organizationId);
+    const first = candidates[0]?.replyRecipient;
+    if (first && candidates.every((entry) => JSON.stringify(entry.replyRecipient) === JSON.stringify(first)))
+      return first;
+  }
+
+  private candidates(
+    notification: { type: string; createdAt: string; url?: string | undefined },
+    organizationId: string,
+  ): Entry[] {
     const target = subject(notification.url);
-    if (!target) return;
+    if (!target) return [];
     const at = Date.parse(notification.createdAt);
-    const commentType = ["issueNewComment", "issueCommentMention"].includes(notification.type);
-    const candidates = this.entries.filter((entry) => {
+    const commentType = ["issueNewComment", "issueCommentMention", ...STATUS_REPLY_NOTIFICATIONS].includes(
+      notification.type,
+    );
+    return this.entries.filter((entry) => {
       if (entry.organizationId !== organizationId || entry.resource !== target.resource) return false;
       // Use the action timestamp, never delivery time or notification updatedAt/readAt.
       if (entry.at > at + 1_000 || entry.at < at - 5_000) return false;
-      if (target.comment && entry.comment !== target.comment) return false;
+      if (target.comment && !aliasMatches(entry.comment, target.comment, target.update !== undefined))
+        return false;
+      if (
+        target.update &&
+        (entry.parent?.parentType !== target.update.type ||
+          !aliasMatches(entry.parent.parentId, target.update.id, true))
+      )
+        return false;
       if (commentType && (entry.type !== "Comment" || entry.action !== "create")) return false;
       if (notification.type.startsWith("issue") && !commentType && entry.type !== "Issue") return false;
       if (notification.type === "issueStatusChanged" && !entry.changed.includes("stateId")) return false;
@@ -127,9 +228,17 @@ export class LinearAttributionJournal {
         return false;
       return true;
     });
-    const first = candidates[0]?.actor;
-    // Never choose the nearest actor when simultaneous events disagree or lack identity.
-    if (first && candidates.every((entry) => JSON.stringify(entry.actor) === JSON.stringify(first)))
-      return first;
   }
+}
+
+function aliasMatches(canonical: string | undefined, alias: string, abbreviated: boolean): boolean {
+  if (!abbreviated) return canonical === alias;
+  if (!canonical || !z.string().uuid().safeParse(canonical).success) return false;
+  const normalized = alias.toLowerCase();
+  return (
+    (normalized.length === 8 &&
+      /^[a-f0-9]{8}$/u.test(normalized) &&
+      canonical.toLowerCase().startsWith(normalized)) ||
+    canonical.toLowerCase() === normalized
+  );
 }

@@ -4,6 +4,13 @@ import { dirname } from "node:path";
 import type { ProviderAccount } from "@clankie/credential-broker";
 import { z } from "zod";
 import { canonicalJson } from "@clankie/play";
+import {
+  ConversationOwnerSchema,
+  LinearRecipientSchema,
+  NativeSeatRecipientSchema,
+  type ConversationOwner,
+  type LinearRecipient,
+} from "./captain/conversation-owner.ts";
 
 // Signed Linear activity supplies context, never operator instructions.
 // Verify the raw bytes before parsing: serialization changes the signature.
@@ -50,6 +57,16 @@ export interface LinearActivityEvent {
   readonly actorId?: string | undefined;
   readonly actorType?: string | undefined;
   readonly organizationId?: string | undefined;
+  /** Canonical issue UUID from signed resource data or its retained signed URL mapping. */
+  readonly issueId?: string | undefined;
+  /** Host admission retained by an exact write receipt, never a provider-supplied owner. */
+  readonly conversationOwner?: ConversationOwner | undefined;
+  /** When the host admitted this saved revision; delayed echoes cannot renew ownership. */
+  readonly conversationOwnerRecordedAt?: number | undefined;
+  readonly writeRecipient?: LinearRecipient | undefined;
+  readonly writeRecipientRecordedAt?: number | undefined;
+  /** Exact parent update's host-stamped author recipient, correlated from a retained write. */
+  readonly replyRecipient?: LinearReplyRecipient | undefined;
   readonly worker?: { grantId: string; principalId: string; workId: string } | undefined;
   /** Set when another actor comments on content his verified account posted (ADR 0191). */
   readonly replyTo?: LinearReplyTo | undefined;
@@ -69,6 +86,16 @@ export interface LinearReplyTo {
   readonly worker?: { grantId: string; principalId: string; workId: string } | undefined;
 }
 
+export const LinearReplyRecipientSchema = z
+  .object({
+    parentType: z.enum(["ProjectUpdate", "InitiativeUpdate"]),
+    parentId: z.string().uuid(),
+    recipient: LinearRecipientSchema,
+    recordedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+export type LinearReplyRecipient = z.infer<typeof LinearReplyRecipientSchema>;
+
 export interface LinearWebhookHeaders {
   readonly signature: string | undefined;
   readonly delivery: string | undefined;
@@ -82,6 +109,7 @@ const WRITE_TYPES: Record<string, string> = {
   comment: "Comment",
   project: "Project",
   project_update: "ProjectUpdate",
+  initiative_update: "InitiativeUpdate",
   document: "Document",
 };
 const REVISION_FIELDS = [
@@ -115,6 +143,8 @@ const WriteReceiptSchema = z
       .partialRecord(z.enum(REVISION_FIELDS), z.string().regex(/^[a-f0-9]{64}$/u))
       .refine((fields) => Object.keys(fields).length > 0),
     worker: WorkerProvenanceSchema.optional(),
+    owner: ConversationOwnerSchema.optional(),
+    recipient: LinearRecipientSchema.optional(),
     personaId: z.string().min(1).max(256).optional(),
   })
   .strict();
@@ -123,6 +153,67 @@ const ReturnedRevisionSchema = z.looseObject({
   id: z.string().uuid(),
   updatedAt: z.string().datetime({ offset: true }),
 });
+
+/** Canonical resource identity only; display identifiers and URL slugs cannot supply UUID proof. */
+export function linearActivityIssueId(
+  activity: Pick<LinearActivityEvent, "type" | "data">,
+): string | undefined {
+  if (activity.type === "Issue") return consistentUuid([activity.data.id]);
+  if (activity.type === "Comment")
+    return consistentUuid([activity.data.issueId, record(activity.data.issue).id]);
+}
+
+/** A signed comment's full parent UUID, never a title or abbreviated URL fragment. */
+export function linearActivityUpdateParent(
+  activity: Pick<LinearActivityEvent, "type" | "data">,
+): Pick<LinearReplyRecipient, "parentType" | "parentId"> | undefined {
+  if (activity.type !== "Comment") return;
+  const projectValues = [activity.data.projectUpdateId, record(activity.data.projectUpdate).id];
+  const initiativeValues = [activity.data.initiativeUpdateId, record(activity.data.initiativeUpdate).id];
+  const projectPresent = projectValues.some((value) => value !== undefined && value !== null);
+  const initiativePresent = initiativeValues.some((value) => value !== undefined && value !== null);
+  if (projectPresent === initiativePresent) return;
+  const parentId = consistentUuid(projectPresent ? projectValues : initiativeValues);
+  if (parentId) return { parentType: projectPresent ? "ProjectUpdate" : "InitiativeUpdate", parentId };
+}
+
+/** The exact issue addressed by a successful structured write in the connected Linear workspace. */
+export function linearWriteIssue(call: {
+  readonly server: string;
+  readonly tool: string;
+  readonly arguments: Record<string, unknown>;
+  readonly content: string;
+  readonly isError: boolean;
+  readonly account?: ProviderAccount | undefined;
+}): { organizationId: string; issueId: string } | undefined {
+  const type = /^(?:create|update|save)_(?:worker_)?(issue|comment)$/u.exec(call.tool)?.[1];
+  if (call.server !== "linear" || call.isError || !type || call.account?.provider !== "linear") return;
+  const organizationId = consistentUuid([call.account.workspaceId]);
+  if (organizationId === undefined) return;
+  let result: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(call.content);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+    result = parsed as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  if (result.success === false || result.ok === false) return;
+  const issue = record(result.issue);
+  const issueId =
+    type === "issue"
+      ? consistentUuid([result.uuid, result.id])
+      : consistentUuid([result.issueId, issue.uuid, issue.id, call.arguments.issueId]);
+  return issueId === undefined ? undefined : { organizationId, issueId };
+}
+
+function consistentUuid(values: readonly unknown[]): string | undefined {
+  const ids = values.flatMap((value) => {
+    const parsed = z.string().uuid().safeParse(value);
+    return parsed.success ? [parsed.data.toLowerCase()] : [];
+  });
+  return ids.length && ids.every((id) => id === ids[0]) ? ids[0] : undefined;
+}
 
 function isWorkerPersonaResult(
   tool: string,
@@ -161,19 +252,42 @@ export class LinearWriteReceipts {
       readonly tool: string;
       readonly content: string;
       readonly isError: boolean;
+      readonly arguments?: Record<string, unknown> | undefined;
       readonly account?: ProviderAccount | undefined;
       readonly worker?: WriteReceipt["worker"];
+      readonly owner?: ConversationOwner | undefined;
+      readonly recipient?: LinearRecipient | undefined;
     },
     now: Date,
   ): void {
     const match = /^(?:create|update|save)_(.+)$/u.exec(call.tool);
-    const type = match && WRITE_TYPES[match[1]!.replace(/^worker_/u, "")];
-    if (call.server !== "linear" || call.isError || !type || call.account?.provider !== "linear") return;
+    const resource = match?.[1]?.replace(/^worker_/u, "");
+    let type = resource && WRITE_TYPES[resource];
+    if (
+      call.server !== "linear" ||
+      call.isError ||
+      (!type && resource !== "status_update") ||
+      call.account?.provider !== "linear"
+    )
+      return;
     let result: z.infer<typeof ReturnedRevisionSchema>;
     try {
       result = ReturnedRevisionSchema.parse(JSON.parse(call.content));
     } catch {
       return; // An ambiguous or unstructured response cannot prove a particular echo.
+    }
+    if (resource === "status_update") {
+      const kind = result.type ?? call.arguments?.type;
+      type = kind === "project" ? "ProjectUpdate" : kind === "initiative" ? "InitiativeUpdate" : undefined;
+      if (
+        !type ||
+        (result.type !== undefined &&
+          call.arguments?.type !== undefined &&
+          call.arguments.type !== result.type) ||
+        result.success === false ||
+        result.ok === false
+      )
+        return;
     }
     const fields = Object.fromEntries(
       REVISION_FIELDS.filter(
@@ -193,6 +307,8 @@ export class LinearWriteReceipts {
       updatedAt: new Date(result.updatedAt).toISOString(),
       recordedAt: now.getTime(),
       ...(call.worker ? { worker: call.worker } : {}),
+      ...(call.owner ? { owner: call.owner } : {}),
+      ...(call.recipient ? { recipient: call.recipient } : {}),
       ...(isWorkerPersonaResult(call.tool, result) ? { personaId: result.personaId } : {}),
     });
     const next = this.written.filter((entry) => now.getTime() - entry.recordedAt <= WRITE_TTL_MS);
@@ -248,6 +364,33 @@ export class LinearWriteReceipts {
       ),
     );
   }
+
+  /** Recipient identity is independent of actor provenance: ambiguity stays in the inbox. */
+  public recipient(
+    organizationId: string | undefined,
+    type: string,
+    id: string,
+    now: Date,
+  ): { recipient: LinearRecipient; recordedAt: number } | undefined {
+    const canonicalId = consistentUuid([id]);
+    if (!canonicalId) return;
+    const matches = this.written.filter(
+      (entry) =>
+        now.getTime() >= entry.recordedAt &&
+        now.getTime() - entry.recordedAt <= WRITE_TTL_MS &&
+        entry.organizationId === organizationId &&
+        entry.type === type &&
+        entry.id === canonicalId,
+    );
+    if (!consistent(matches)) return;
+    const recipients = matches.map(
+      (entry) =>
+        entry.recipient ?? (entry.owner ? { kind: "conversation" as const, owner: entry.owner } : undefined),
+    );
+    const first = recipients[0];
+    if (!first || !recipients.every((item) => JSON.stringify(item) === JSON.stringify(first))) return;
+    return { recipient: first, recordedAt: Math.min(...matches.map((entry) => entry.recordedAt)) };
+  }
 }
 
 // Repeated responses with conflicting provenance are not proof of authorship.
@@ -259,8 +402,20 @@ function consistent(matches: readonly WriteReceipt[]): WriteReceipt | undefined 
         entry.connectionId === matches[0]!.connectionId &&
         JSON.stringify(entry.worker) === JSON.stringify(matches[0]!.worker),
     )
-  )
-    return matches[0];
+  ) {
+    const first = matches[0]!;
+    const sameOwner = matches.every((entry) => JSON.stringify(entry.owner) === JSON.stringify(first.owner));
+    const sameRecipient = matches.every(
+      (entry) => JSON.stringify(entry.recipient) === JSON.stringify(first.recipient),
+    );
+    // Route ambiguity cannot change existing authorship or echo suppression.
+    const { owner: _owner, recipient: _recipient, ...provenance } = first;
+    return {
+      ...provenance,
+      ...(sameOwner && first.owner ? { owner: first.owner } : {}),
+      ...(sameRecipient && first.recipient ? { recipient: first.recipient } : {}),
+    };
+  }
 }
 
 function signatureMatches(rawBody: Uint8Array, secret: string, presentedHex: string): boolean {
@@ -304,7 +459,8 @@ export function classifyLinearDelivery(input: {
   const receipt = input.writes?.match(payload, now);
 
   const { webhookTimestamp: _sentAt, ...event } = payload;
-  const activity: LinearActivityEvent = {
+  const issueId = linearActivityIssueId({ type: payload.type, data: payload.data ?? {} });
+  let activity: LinearActivityEvent = {
     eventId: createHash("sha256").update(canonicalJson(event)).digest("hex"),
     deliveryId: headers.delivery,
     type: payload.type,
@@ -312,6 +468,13 @@ export function classifyLinearDelivery(input: {
     actorId: payload.actor?.id ?? undefined,
     actorType: payload.actor?.type ?? undefined,
     organizationId: payload.organizationId,
+    ...(issueId === undefined ? {} : { issueId }),
+    ...(receipt?.owner
+      ? { conversationOwner: receipt.owner, conversationOwnerRecordedAt: receipt.recordedAt }
+      : {}),
+    ...(receipt?.recipient
+      ? { writeRecipient: receipt.recipient, writeRecipientRecordedAt: receipt.recordedAt }
+      : {}),
     ...(receipt?.worker ? { worker: receipt.worker } : {}),
     actorName: payload.actor?.name ?? undefined,
     actorEmail: payload.actor?.email ?? undefined,
@@ -320,6 +483,27 @@ export function classifyLinearDelivery(input: {
     updatedFrom: payload.updatedFrom,
     data: payload.data ?? {},
   };
+  const parent = linearActivityUpdateParent(activity);
+  if (parent && activity.action === "create" && z.string().uuid().safeParse(activity.data.id).success) {
+    const author = input.writes?.author(activity.organizationId, parent.parentType, parent.parentId, now);
+    const recipient = input.writes?.recipient(
+      activity.organizationId,
+      parent.parentType,
+      parent.parentId,
+      now,
+    );
+    if (author && author.actorId !== activity.actorId && recipient)
+      activity = {
+        ...activity,
+        replyTo: {
+          type: parent.parentType,
+          id: parent.parentId,
+          ...(author.worker ? { worker: author.worker } : {}),
+          ...(author.personaId ? { personaId: author.personaId } : {}),
+        },
+        replyRecipient: { ...parent, ...recipient },
+      };
+  }
   input.recordActivity?.(activity);
   if (receipt && !receipt.worker) return { kind: "ignored", reason: "self_echo" };
   return { kind: "activity", activity };
@@ -355,13 +539,16 @@ const text = (value: unknown): string | undefined =>
 /** What the event is about: a comment names its parent, anything else itself. */
 function linearSubject(type: string, data: Record<string, unknown>): string | undefined {
   const issue = record(data.issue);
-  const update = type === "ProjectUpdate" ? data : record(data.projectUpdate);
+  const update =
+    type === "ProjectUpdate" || type === "InitiativeUpdate"
+      ? data
+      : record(data.projectUpdate ?? data.initiativeUpdate);
   const document = record(data.document ?? record(data.documentContent).document);
   const named = (entity: Record<string, unknown>) =>
     [entity.identifier, entity.title].filter((value): value is string => text(value) !== undefined).join(" ");
   if (Object.keys(issue).length) return named(issue);
   if (Object.keys(update).length)
-    return [text(record(update.project).name), "update", text(update.id)?.slice(0, 8)]
+    return [text(record(update.project ?? update.initiative).name), "update", text(update.id)?.slice(0, 8)]
       .filter(Boolean)
       .join(" ");
   if (Object.keys(document).length) return text(document.title);
@@ -382,10 +569,16 @@ export function linearReplyTo(
   if (activity.type !== "Comment" || activity.action !== "create") return;
   const data = activity.data;
   const update = record(data.projectUpdate);
+  const initiativeUpdate = record(data.initiativeUpdate);
   const document = record(data.document ?? record(data.documentContent).document);
   const parents = [
     { type: "Comment", id: data.parentId, authorId: record(data.parent).userId },
     { type: "ProjectUpdate", id: data.projectUpdateId ?? update.id, authorId: update.userId },
+    {
+      type: "InitiativeUpdate",
+      id: data.initiativeUpdateId ?? initiativeUpdate.id,
+      authorId: initiativeUpdate.userId,
+    },
     { type: "Document", id: data.documentId ?? document.id, authorId: document.creatorId },
     { type: "Issue", id: data.issueId ?? record(data.issue).id, authorId: record(data.issue).creatorId },
   ];
@@ -441,3 +634,14 @@ export const LinearWorkOwnerSchema = z
   })
   .strict();
 export type LinearWorkOwner = z.infer<typeof LinearWorkOwnerSchema>;
+
+/** Native ownership is admitted by the host, never an API caller's claim. */
+export const LinearNativeWorkOwnerSchema = z
+  .object({
+    organizationId: z.string().uuid(),
+    issueId: z.string().uuid(),
+    nativeRecipient: NativeSeatRecipientSchema,
+  })
+  .strict();
+const LinearWorkOwnershipSchema = z.union([LinearWorkOwnerSchema, LinearNativeWorkOwnerSchema]);
+export type LinearWorkOwnership = z.infer<typeof LinearWorkOwnershipSchema>;

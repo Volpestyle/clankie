@@ -216,6 +216,7 @@ import { createLaneMcpEndpoint } from "./lane-mcp.ts";
 import {
   type LinearActivityEvent,
   type LinearWriteReceipts,
+  LinearWorkOwnerSchema,
   classifyLinearDelivery,
   linearReplyTo,
 } from "./linear-webhook.ts";
@@ -3722,6 +3723,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   });
 
+  app.post("/v1/linear/inbox/handoff", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const input = z
+      .object({ cursor: z.string().regex(/^\d{12}$/u) })
+      .strict()
+      .safeParse(await readJson(context.req.raw));
+    if (!input.success) return context.json({ error: "invalid_linear_handoff" }, 400);
+    if (!(await dependencies.captain.handoffLinearActivity(input.data.cursor)))
+      return context.json({ error: "linear_handoff_refused" }, 409);
+    return context.json({ schemaVersion: 1, handedOff: input.data.cursor });
+  });
+
   // Work items in the repo's own convention (ADR 0191). The operator bearer is
   // a local caller: the CLI, the captain, or a hire on this machine. It may name
   // a repo path, which registers it for the app to read later.
@@ -3771,7 +3787,29 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     if (context.req.method === "GET")
       return context.json({ owners: dependencies.captain.linearWorkOwners() });
-    return context.json({ error: "linear_work_bindings_retired" }, 410);
+    if (context.req.method === "DELETE") {
+      const input = LinearWorkOwnerSchema.pick({ organizationId: true, issueId: true }).safeParse(
+        await readJson(context.req.raw),
+      );
+      if (!input.success) return context.json({ error: "invalid_linear_work_owner" }, 400);
+      return context.json({
+        schemaVersion: 1,
+        unbound: dependencies.captain.unbindLinearWorkOwner(input.data.organizationId, input.data.issueId),
+      });
+    }
+    const binding = LinearWorkOwnerSchema.safeParse(await readJson(context.req.raw));
+    if (!binding.success) return context.json({ error: "invalid_linear_work_owner" }, 400);
+    const identity = operatorBodyIdentity(binding.data.conversationId, context.req.raw);
+    if (identity === undefined || !identity.current() || !(await identity.authorize("browser", "effect")))
+      return context.json({ error: "linear_work_owner_refused" }, 409);
+    const source = {
+      owner: { conversationId: binding.data.conversationId },
+      current: identity.current,
+      authorize: () => identity.authorize("browser", "effect"),
+    };
+    if (!(await dependencies.captain.bindLinearWorkOwner(binding.data, source)))
+      return context.json({ error: "linear_work_owner_refused" }, 409);
+    return context.json({ schemaVersion: 1, bound: binding.data });
   });
 
   app.on(["GET", "PUT"], "/v1/linear/wake", async (context) => {
@@ -3837,7 +3875,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       schemaVersion: 1 as const,
       ...linearFollowStatus(current.linearWebhook, secretPresent),
       conversationId: LINEAR_INBOX_CONVERSATION_ID,
-      wakeConversationId: "global-default",
+      wakeConversationId: LINEAR_INBOX_CONVERSATION_ID,
+      wakeRouting: "work-owner",
     });
   });
 

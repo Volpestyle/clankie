@@ -33,11 +33,20 @@ import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { z } from "zod";
 import {
+  ConversationOwnerSchema,
+  NativeSeatRecipientSchema,
+  type ConversationOwner,
+  type NativeSeatRecipient,
+} from "./conversation-owner.ts";
+import {
   LinearWorkOwnerSchema,
+  LinearNativeWorkOwnerSchema,
   linearActivityPrompt,
+  linearActivityIssueId,
   LINEAR_REPLY_MARK,
   type LinearActivityEvent,
   type LinearWorkOwner,
+  type LinearWorkOwnership,
 } from "../linear-webhook.ts";
 import {
   openSync,
@@ -249,6 +258,19 @@ interface ConversationMeta {
   linearWakePending?: { previous: string; cursor: string; runId?: string };
   /** Trimmed deliveries remain deduplicated through the provider retry window. */
   linearSeen?: Record<string, number>;
+  /** Host-stamped issue identity and original route proof in the existing inbox journal. */
+  linearAdmissions?: Record<
+    string,
+    {
+      owner: ConversationOwner;
+      nativeRecipient?: NativeSeatRecipient;
+      organizationId?: string;
+      issueId?: string;
+      handedOff?: boolean;
+      handoffOf?: string;
+      delivered?: boolean;
+    }
+  >;
   /** Harness-native messages already folded into this durable persona thread. */
   seatTranscript?: SeatTranscriptCheckpoint;
   roomTranscripts?: Record<string, SeatTranscriptCheckpoint>;
@@ -535,7 +557,13 @@ export class ConversationStore {
   private readonly runCounts = new Map<string, number>();
   /** A Linear hook turn accepted and not yet started; later deliveries ride it. */
   private readonly linearHookQueued = new Set<string>();
-  private linearOwners: LinearWorkOwner[] = [];
+  private linearOwners: ((
+    | LinearWorkOwnership
+    | { organizationId: string; issueId: string; unboundAt: number }
+  ) & {
+    owner?: ConversationOwner | undefined;
+    claimedAt?: number | undefined;
+  })[] = [];
   /** Internal turns whose `invoke()` has begun and not yet settled — not merely queued. */
   private readonly internalRuns = new Map<string, number>();
   private readonly activeInvocations = new Map<string, number>();
@@ -572,6 +600,24 @@ export class ConversationStore {
   /** Native seat binding is owned by captain; no native question continuation. */
   public questionEligible: (id: string) => boolean = () => true;
   public projectOnboarding: ReturnType<typeof projectOnboarding> | undefined;
+  /** Rooms retain their existing Discord admission and reply runner. */
+  public linearRoomRunner:
+    | ((
+        owner: ConversationOwner,
+        prompt: string,
+        guard: () => Promise<void>,
+        owners: readonly ConversationOwner[],
+      ) => Promise<void>)
+    | undefined;
+  public linearNativeRunner:
+    | ((
+        recipient: NativeSeatRecipient,
+        content: string,
+        eventId: string,
+        guard: () => Promise<void>,
+      ) => Promise<FleetSeatDelivery>)
+    | undefined;
+  public linearFollowing: (() => Promise<boolean>) | undefined;
 
   public constructor(
     root: string,
@@ -673,7 +719,23 @@ export class ConversationStore {
     this.ensureDefaultGlobalConversation();
     try {
       this.linearOwners = z
-        .array(LinearWorkOwnerSchema)
+        .array(
+          z.union([
+            LinearWorkOwnerSchema.extend({
+              owner: ConversationOwnerSchema.optional(),
+              claimedAt: z.number().nonnegative().optional(),
+            }),
+            LinearNativeWorkOwnerSchema.extend({ claimedAt: z.number().nonnegative().optional() }),
+            z
+              .object({
+                organizationId: z.string().uuid(),
+                issueId: z.string().uuid(),
+                unboundAt: z.number().nonnegative(),
+                claimedAt: z.number().nonnegative(),
+              })
+              .strict(),
+          ]),
+        )
         .parse(JSON.parse(readFileSync(join(root, "linear-work.json"), "utf8")));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -1137,19 +1199,167 @@ export class ConversationStore {
     return id;
   }
 
-  public linearWorkOwners(): readonly LinearWorkOwner[] {
-    return this.linearOwners;
+  public linearWorkOwners(): readonly LinearWorkOwnership[] {
+    return this.linearOwners.filter(
+      (item): item is LinearWorkOwnership & { owner?: ConversationOwner; claimedAt?: number } =>
+        !("unboundAt" in item),
+    );
+  }
+
+  public bindLinearWorkOwner(
+    binding: LinearWorkOwner,
+    owner: ConversationOwner,
+    claimedAt = Date.now(),
+    replayed = false,
+  ): boolean {
+    const checked = LinearWorkOwnerSchema.parse({
+      ...binding,
+      organizationId: binding.organizationId.toLowerCase(),
+      issueId: binding.issueId.toLowerCase(),
+    });
+    const proof = ConversationOwnerSchema.parse(owner);
+    if (!Number.isFinite(claimedAt) || claimedAt < 0) return false;
+    const prior = this.linearOwners.find(
+      (item) =>
+        item.organizationId.toLowerCase() === checked.organizationId &&
+        item.issueId.toLowerCase() === checked.issueId,
+    );
+    if (
+      (prior?.claimedAt ?? 0) > claimedAt ||
+      (replayed && prior?.claimedAt === claimedAt && JSON.stringify(prior.owner) !== JSON.stringify(proof))
+    )
+      return false;
+    const meta = this.metas.get(checked.conversationId);
+    if (
+      !meta ||
+      proof.conversationId !== checked.conversationId ||
+      (!this.runsCaptainTurns(checked.conversationId) && (meta.scope.kind !== "room" || !proof.discord))
+    )
+      return false;
+    const next = this.linearOwners.filter(
+      (item) =>
+        item.organizationId.toLowerCase() !== checked.organizationId ||
+        item.issueId.toLowerCase() !== checked.issueId,
+    );
+    next.push({ ...checked, owner: proof, claimedAt });
+    this.saveLinearOwners(next);
+    return true;
+  }
+
+  public bindLinearNativeWorkOwner(
+    issue: Pick<LinearWorkOwner, "organizationId" | "issueId">,
+    nativeRecipient: NativeSeatRecipient,
+    claimedAt = Date.now(),
+    replayed = false,
+  ): boolean {
+    const nextOwner = LinearNativeWorkOwnerSchema.parse({
+      organizationId: issue.organizationId.toLowerCase(),
+      issueId: issue.issueId.toLowerCase(),
+      nativeRecipient,
+    });
+    if (!Number.isFinite(claimedAt) || claimedAt < 0) return false;
+    const prior = this.linearOwners.find(
+      (item) =>
+        item.organizationId.toLowerCase() === nextOwner.organizationId &&
+        item.issueId.toLowerCase() === nextOwner.issueId,
+    );
+    if (
+      (prior?.claimedAt ?? 0) > claimedAt ||
+      (replayed &&
+        prior?.claimedAt === claimedAt &&
+        JSON.stringify(prior) !== JSON.stringify({ ...nextOwner, claimedAt }))
+    )
+      return false;
+    this.saveLinearOwners([
+      ...this.linearOwners.filter(
+        (item) =>
+          item.organizationId.toLowerCase() !== nextOwner.organizationId ||
+          item.issueId.toLowerCase() !== nextOwner.issueId,
+      ),
+      { ...nextOwner, claimedAt },
+    ]);
+    return true;
+  }
+
+  public unbindLinearWorkOwner(organizationId: string, issueId: string): boolean {
+    const organization = organizationId.toLowerCase(),
+      issue = issueId.toLowerCase();
+    const prior = this.linearOwners.find(
+      (item) => item.organizationId.toLowerCase() === organization && item.issueId.toLowerCase() === issue,
+    );
+    const next = this.linearOwners.filter(
+      (item) =>
+        item.organizationId.toLowerCase() !== organizationId.toLowerCase() ||
+        item.issueId.toLowerCase() !== issueId.toLowerCase(),
+    );
+    const now = Date.now();
+    next.push({ organizationId: organization, issueId: issue, unboundAt: now, claimedAt: now });
+    this.saveLinearOwners(next);
+    return prior !== undefined && !("unboundAt" in prior);
+  }
+
+  private saveLinearOwners(next: typeof this.linearOwners): void {
+    const path = join(this.root, "linear-work.json");
+    writeFileSync(path + ".tmp", JSON.stringify(next), { mode: 0o600 });
+    renameSync(path + ".tmp", path);
+    this.linearOwners = next;
+  }
+
+  private linearOwner(organizationId?: string, issueId?: string): ConversationOwner {
+    const binding = this.linearOwners.find(
+      (item) =>
+        item.organizationId.toLowerCase() === organizationId?.toLowerCase() &&
+        item.issueId.toLowerCase() === issueId?.toLowerCase(),
+    );
+    return binding && "conversationId" in binding && this.metas.has(binding.conversationId)
+      ? (binding.owner ?? { conversationId: binding.conversationId })
+      : { conversationId: this.linearInboxConversationId() };
+  }
+
+  private linearNativeOwner(organizationId?: string, issueId?: string): NativeSeatRecipient | undefined {
+    const binding = this.linearOwners.find(
+      (item) =>
+        item.organizationId.toLowerCase() === organizationId?.toLowerCase() &&
+        item.issueId.toLowerCase() === issueId?.toLowerCase(),
+    );
+    return binding && "nativeRecipient" in binding ? binding.nativeRecipient : undefined;
+  }
+
+  private linearAdmission(event: OperatorConversationStreamEvent & { type: "message" }): ConversationOwner {
+    const proof = this.metas.get(this.linearInboxConversationId())?.linearAdmissions?.[event.cursor]?.owner;
+    const id = proof?.conversationId ?? event.linear?.conversationId ?? this.linearInboxConversationId();
+    return this.metas.has(id)
+      ? (proof ?? { conversationId: id })
+      : { conversationId: this.linearInboxConversationId() };
   }
 
   public receiveLinearActivity(input: string | LinearActivityEvent, following: boolean): boolean {
     const message = typeof input === "string" ? input : linearActivityPrompt(input);
     const id = this.linearInboxConversationId();
+    const issueId =
+      typeof input === "string"
+        ? undefined
+        : (input.issueId ?? (input.notification === true ? undefined : linearActivityIssueId(input)));
+    const organizationId = typeof input === "string" ? undefined : input.organizationId;
+    const reply = typeof input === "string" ? undefined : input.replyRecipient?.recipient;
+    const nativeRecipient =
+      reply?.kind === "native"
+        ? NativeSeatRecipientSchema.parse(reply)
+        : reply
+          ? undefined
+          : this.linearNativeOwner(organizationId, issueId);
+    const owner =
+      nativeRecipient || (reply?.kind === "conversation" && !this.metas.has(reply.owner.conversationId))
+        ? { conversationId: this.linearInboxConversationId() }
+        : reply?.kind === "conversation"
+          ? ConversationOwnerSchema.parse(reply.owner)
+          : this.linearOwner(organizationId, issueId);
     const source =
       typeof input !== "string" && input.eventId
         ? {
             eventId: input.eventId,
             notification: input.notification === true,
-            conversationId: input.notification === true ? this.defaultGlobalConversationId() : id,
+            conversationId: owner.conversationId,
           }
         : undefined;
     const meta = this.metas.get(id)!;
@@ -1160,10 +1370,24 @@ export class ConversationStore {
       ) ||
         (meta.linearSeen?.[source.eventId] ?? 0) > Date.now() - 7 * 24 * 60 * 60 * 1000)
     ) {
+      // The original admission wins. A passive duplicate never acquires a wake.
       if (following) this.resumeLinearActivity();
       return false;
     }
     meta.revision += 1;
+    const cursor = String(this.eventSequence(meta) + 1).padStart(CURSOR_WIDTH, "0");
+    if (source) {
+      meta.linearAdmissions ??= {};
+      meta.linearAdmissions[cursor] = {
+        owner,
+        ...(nativeRecipient ? { nativeRecipient } : {}),
+        ...(organizationId ? { organizationId } : {}),
+        ...(issueId ? { issueId } : {}),
+      };
+      // Commit the route before its eligible journal row becomes recoverable.
+      // A failed append leaves an inert proof, never an event with lost authority.
+      this.saveMeta(meta);
+    }
     this.append(meta, {
       type: "message",
       role: "external",
@@ -1173,47 +1397,207 @@ export class ConversationStore {
     });
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
-    if (following) this.queueLinearActivity(this.defaultGlobalConversationId());
+    if (following && (typeof input === "string" || input.notification === true)) {
+      if (nativeRecipient) this.queueLinearNativeActivity(cursor);
+      else this.queueLinearActivity(owner.conversationId);
+    }
+    return true;
+  }
+
+  public handoffLinearActivity(cursor: string): boolean {
+    const meta = this.metas.get(this.linearInboxConversationId())!;
+    const event = this.readEvents(meta.conversationId).find((item) => item.cursor === cursor);
+    if (
+      event?.type !== "message" ||
+      !event.linear ||
+      this.linearAdmission(event).conversationId !== meta.conversationId
+    )
+      return false;
+    const admission = meta.linearAdmissions?.[cursor];
+    if (!admission || admission.nativeRecipient) return false;
+    if (
+      Object.entries(meta.linearAdmissions ?? {}).some(
+        ([derived, proof]) =>
+          proof.handoffOf === cursor &&
+          this.readEvents(meta.conversationId).some(
+            (item) => item.cursor === derived && item.type === "message" && item.linear,
+          ),
+      )
+    )
+      return false;
+    const owner = this.linearOwner(admission.organizationId, admission.issueId);
+    const nativeRecipient = this.linearNativeOwner(admission.organizationId, admission.issueId);
+    if (owner.conversationId === meta.conversationId && !nativeRecipient) return false;
+    if (admission.handedOff) return false;
+    // A handoff is a new explicit admission, with a stable derived ID. Its new
+    // cursor can wake an owner that has already read later provider events.
+    const eventId = createHash("sha256")
+      .update(
+        `linear-handoff:${event.linear.eventId}:${nativeRecipient ? JSON.stringify(nativeRecipient) : owner.conversationId}`,
+      )
+      .digest("hex");
+    const existing = this.readEvents(meta.conversationId).find(
+      (item) => item.type === "message" && item.linear?.eventId === eventId,
+    );
+    if (existing) return false;
+    const nextCursor = String(this.eventSequence(meta) + 1).padStart(CURSOR_WIDTH, "0");
+    meta.revision += 1;
+    meta.linearAdmissions![nextCursor] = {
+      ...admission,
+      owner,
+      ...(nativeRecipient ? { nativeRecipient } : {}),
+      handedOff: false,
+      handoffOf: cursor,
+      delivered: false,
+    };
+    this.saveMeta(meta);
+    this.append(meta, {
+      type: "message",
+      role: "external",
+      text: event.text,
+      streaming: false,
+      linear: { ...event.linear, eventId, conversationId: owner.conversationId },
+    });
+    admission.handedOff = true;
+    this.saveMeta(meta);
+    if (event.linear.following && event.linear.notification === true) {
+      if (nativeRecipient) this.queueLinearNativeActivity(nextCursor);
+      else this.queueLinearActivity(owner.conversationId);
+    }
     return true;
   }
 
   private queueLinearActivity(id: string): void {
     if (this.linearHookQueued.has(id) || !this.metas.has(id)) return;
     this.linearHookQueued.add(id);
-    const result = this.submitInternal(id, "Linear activity arrived.", "hook");
+    const meta = this.metas.get(id)!;
+    const runner: ConversationRunner =
+      meta.scope.kind === "room"
+        ? async (_id, _message, _publish, context) => {
+            if (this.linearFollowing && !(await this.linearFollowing())) return;
+            const events = this.freshLinearEvents(id);
+            if (!events.length || !this.linearRoomRunner) return;
+            const owners = events.map((event) => this.linearAdmission(event));
+            const owner = owners[0]!;
+            if (!owner.discord) throw new Error("Linear room ownership lacks original route authority");
+            const prompt = this.linearWakePrompt(id, context.runId);
+            if (!prompt) return;
+            await this.linearRoomRunner(
+              owner,
+              prompt,
+              async () => {
+                if (context.signal.aborted || !this.metas.has(id))
+                  throw new Error("Linear conversation admission changed");
+              },
+              owners,
+            );
+          }
+        : this.runner;
+    const result = this.enqueue(meta, "Linear activity arrived.", undefined, false, runner, {
+      origin: "hook",
+    });
     if (result.status !== "accepted") {
       this.linearHookQueued.delete(id);
       throw new Error("Linear activity was not accepted");
     }
   }
 
-  /** Resume only deliveries accepted with following on, not passive backlog. */
+  private freshLinearEvents(id: string) {
+    const meta = this.metas.get(id)!;
+    return this.readEvents(this.linearInboxConversationId()).filter(
+      (event): event is OperatorConversationStreamEvent & { type: "message" } =>
+        event.type === "message" &&
+        event.role === "external" &&
+        event.linear?.following === true &&
+        event.linear.notification === true &&
+        this.metas.get(this.linearInboxConversationId())?.linearAdmissions?.[event.cursor]
+          ?.nativeRecipient === undefined &&
+        this.metas.get(this.linearInboxConversationId())?.linearAdmissions?.[event.cursor]?.delivered !==
+          true &&
+        this.linearAdmission(event).conversationId === id &&
+        event.cursor > (meta.linearWokeCursor ?? ZERO_CURSOR),
+    );
+  }
+
+  /** Resume only original eligible admissions, never passive backlog. */
   public resumeLinearActivity(): void {
     const events = this.readEvents(this.linearInboxConversationId());
-    for (const owner of new Set(
-      events.flatMap((event) =>
+    for (const event of events) {
+      const admission = this.metas.get(this.linearInboxConversationId())?.linearAdmissions?.[event.cursor];
+      if (
         event.type === "message" &&
         event.linear?.following &&
-        event.linear.conversationId === this.defaultGlobalConversationId() &&
-        event.linear.notification === true
-          ? [event.linear.conversationId]
+        event.linear.notification === true &&
+        admission?.nativeRecipient &&
+        !admission.delivered
+      )
+        this.queueLinearNativeActivity(event.cursor);
+    }
+    const destinations = new Set(
+      events.flatMap((event) =>
+        event.type === "message" && event.linear?.following && event.linear.notification === true
+          ? [this.linearAdmission(event).conversationId]
           : [],
       ),
-    )) {
-      const meta = this.metas.get(owner);
-      if (
-        meta &&
-        events.some(
-          (event) =>
-            event.type === "message" &&
-            event.linear?.following &&
-            event.linear.notification === true &&
-            event.linear.conversationId === owner &&
-            event.cursor > (meta.linearWokeCursor ?? ZERO_CURSOR),
+    );
+    for (const id of destinations) if (this.freshLinearEvents(id).length) this.queueLinearActivity(id);
+  }
+
+  private queueLinearNativeActivity(cursor: string): void {
+    const meta = this.metas.get(this.linearInboxConversationId())!;
+    const event = this.readEvents(meta.conversationId).find((item) => item.cursor === cursor);
+    const admission = meta.linearAdmissions?.[cursor];
+    if (event?.type !== "message" || !event.linear || !admission?.nativeRecipient || admission.delivered)
+      return;
+    const key = `native:${event.linear.eventId}`;
+    if (this.linearHookQueued.has(key)) return;
+    this.linearHookQueued.add(key);
+    const recipient = NativeSeatRecipientSchema.parse(admission.nativeRecipient);
+    const runner: ConversationRunner = async (_id, _message, _publish, context) => {
+      if (this.linearFollowing && !(await this.linearFollowing())) return;
+      const guard = async () => {
+        if (this.linearFollowing && !(await this.linearFollowing()))
+          throw new Error("Linear following was disabled before native delivery");
+        const admissionAge = Date.now() - Date.parse(event.occurredAt);
+        if (!Number.isFinite(admissionAge) || admissionAge < 0 || admissionAge >= 7 * 24 * 60 * 60 * 1000)
+          throw new Error(
+            "Linear native admission exceeds retained receipt history; reconcile its original delivery before another attempt",
+          );
+        if (
+          context.signal.aborted ||
+          this.metas.get(meta.conversationId) !== meta ||
+          meta.linearAdmissions?.[cursor] !== admission ||
+          admission.delivered ||
+          JSON.stringify(admission.nativeRecipient) !== JSON.stringify(recipient)
         )
-      )
-        this.queueLinearActivity(owner);
+          throw new Error("Linear native admission changed");
+      };
+      await guard();
+      if (!this.linearNativeRunner) throw new Error("Linear native delivery is unavailable");
+      const outcome = await this.linearNativeRunner(recipient, event.text, event.linear!.eventId, guard);
+      if (outcome.outcome !== "delivered")
+        throw new Error(`Linear native delivery ${outcome.outcome}: ${outcome.detail}`);
+      admission.delivered = true;
+      this.saveMeta(meta);
+    };
+    // Native delivery uses the inbox's existing durable run and receipt, without
+    // taking its model turn or advancing a conversation's Linear wake cursor.
+    const result = this.enqueue(
+      meta,
+      "Linear activity arrived for its native author.",
+      undefined,
+      false,
+      runner,
+      { origin: "input" },
+    );
+    if (result.status !== "accepted") {
+      this.linearHookQueued.delete(key);
+      throw new Error("Linear native activity was not accepted");
     }
+    void this.runs.get(result.runId)?.then(
+      () => this.linearHookQueued.delete(key),
+      () => this.linearHookQueued.delete(key),
+    );
   }
 
   /**
@@ -1221,17 +1605,9 @@ export class ConversationStore {
    * wake, then nothing until more arrive. How to read deeper lives in his
    * standing instructions, not here. `undefined` when there is nothing new.
    */
-  public linearWakePrompt(id = this.defaultGlobalConversationId(), runId?: string): string | undefined {
+  public linearWakePrompt(id = this.linearInboxConversationId(), runId?: string): string | undefined {
     const meta = this.metas.get(id)!;
-    const fresh = this.readEvents(this.linearInboxConversationId()).filter(
-      (event): event is OperatorConversationStreamEvent & { type: "message" } =>
-        event.type === "message" &&
-        event.role === "external" &&
-        (event.linear
-          ? event.linear.following && event.linear.conversationId === id && event.linear.notification === true
-          : false) &&
-        event.cursor > (meta.linearWokeCursor ?? ZERO_CURSOR),
-    );
+    const fresh = this.freshLinearEvents(id);
     if (fresh.length === 0) return undefined;
     meta.linearWakePending = {
       previous: meta.linearWokeCursor ?? ZERO_CURSOR,
@@ -1282,7 +1658,7 @@ export class ConversationStore {
       (event): event is OperatorConversationStreamEvent & { type: "message" } =>
         event.type === "message" &&
         event.role === "external" &&
-        (id === LINEAR_INBOX_CONVERSATION_ID || event.linear?.conversationId === id),
+        (id === LINEAR_INBOX_CONVERSATION_ID || this.linearAdmission(event).conversationId === id),
     );
     const unreadCount = external.filter((event) => event.cursor > readCursor).length;
     const before = options.before;
@@ -1351,7 +1727,7 @@ export class ConversationStore {
           event.type === "message" &&
           event.role === "external" &&
           (conversationId === LINEAR_INBOX_CONVERSATION_ID ||
-            event.linear?.conversationId === conversationId),
+            this.linearAdmission(event).conversationId === conversationId),
       )
     )
       return false;
@@ -2944,6 +3320,20 @@ export class ConversationStore {
         );
         if (provenance.origin === "hook" && meta.linearWakePending) {
           if (cancelled) meta.linearWokeCursor = meta.linearWakePending.previous;
+          else {
+            const inbox = this.metas.get(this.linearInboxConversationId())!;
+            for (const event of this.readEvents(inbox.conversationId))
+              if (
+                event.type === "message" &&
+                event.cursor > meta.linearWakePending.previous &&
+                event.cursor <= meta.linearWakePending.cursor &&
+                this.linearAdmission(event).conversationId === conversationId
+              ) {
+                const admission = inbox.linearAdmissions?.[event.cursor];
+                if (admission && !admission.nativeRecipient) admission.delivered = true;
+              }
+            this.saveMeta(inbox);
+          }
           delete meta.linearWakePending;
         }
         if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "waiting";
@@ -3181,12 +3571,18 @@ export class ConversationStore {
           event.type === "message" &&
           event.role === "external" &&
           (() => {
-            const owner = event.linear && this.metas.get(event.linear.conversationId);
+            const owner = event.linear && this.metas.get(this.linearAdmission(event).conversationId);
             const read = [meta.linearReadCursor ?? ZERO_CURSOR, owner?.linearReadCursor ?? ZERO_CURSOR]
               .sort()
               .at(-1)!;
             const woke = owner?.linearWakePending?.previous ?? owner?.linearWokeCursor ?? ZERO_CURSOR;
-            return event.cursor > read || (event.linear?.following === true && event.cursor > woke);
+            const admission = meta.linearAdmissions?.[event.cursor];
+            const pending =
+              event.linear?.following === true &&
+              event.linear.notification === true &&
+              admission?.delivered !== true &&
+              (admission?.nativeRecipient !== undefined || event.cursor > woke);
+            return event.cursor > read || pending;
           })(),
       );
       if (firstUnread >= 0) trimCount = Math.min(trimCount, firstUnread);
@@ -3202,6 +3598,7 @@ export class ConversationStore {
       for (const event of dropped)
         if (event.type === "message" && event.linear && Date.parse(event.occurredAt) > cutoff)
           meta.linearSeen[event.linear.eventId] = Date.parse(event.occurredAt);
+      for (const event of dropped) delete meta.linearAdmissions?.[event.cursor];
       this.saveMeta(meta);
     }
     meta.retainedFromCursor = dropped[dropped.length - 1]?.cursor ?? meta.retainedFromCursor ?? ZERO_CURSOR;

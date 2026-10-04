@@ -80,7 +80,7 @@ describe("clankie workdir", () => {
 });
 
 describe("clankie linear", () => {
-  it("reads legacy bindings and scoped inboxes without sending retired mutations", async () => {
+  it("reads bindings and scoped inboxes while refusing obsolete positional mutation syntax", async () => {
     const calls: Array<{ path: string; method: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
       expect(new Headers(init.headers).get("authorization")).toBe("Bearer fixture");
@@ -98,9 +98,9 @@ describe("clankie linear", () => {
       await runLinearCommand(["inbox", "ack", "000000000042", "--conversation", "project"], options);
       await expect(
         runLinearCommand(["work", "bind", "org", "issue", "project", "--from", "previous"], options),
-      ).rejects.toThrow("bindings are retired");
+      ).rejects.toThrow("Usage:");
       await expect(runLinearCommand(["work", "unbind", "org", "issue", "project"], options)).rejects.toThrow(
-        "bindings are retired",
+        "Usage:",
       );
       expect(calls).toEqual([
         { path: "/v1/linear/work", method: "GET", body: undefined },
@@ -123,7 +123,8 @@ describe("clankie linear", () => {
     expect(await runLinearCommand([], options)).toMatchObject({
       following: false,
       conversationId: "linear-inbox",
-      wakeConversationId: "global-default",
+      wakeConversationId: "linear-inbox",
+      wakeRouting: "work-owner",
     });
     expect(await runLinearCommand(["follow", "on"], options)).toMatchObject({
       ok: false,

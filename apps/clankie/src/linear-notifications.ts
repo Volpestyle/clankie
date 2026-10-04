@@ -30,6 +30,8 @@ interface LinearNotificationOptions {
   following(): Promise<boolean>;
   wakeRules(): Promise<LinearWakeSettings>;
   attribute: LinearAttributionJournal["attribute"];
+  resolveIssue?: LinearAttributionJournal["issue"] | undefined;
+  resolveReplyRecipient?: LinearAttributionJournal["replyRecipient"] | undefined;
   receive(activity: LinearActivityEvent, following: boolean): unknown;
   onError(): void;
   now?: () => Date;
@@ -174,6 +176,8 @@ export class LinearNotifications {
     for (const item of notifications.reverse()) {
       if (item.createdAt === since && ids.includes(item.id)) continue;
       const actor = this.options.attribute(item, own.account.workspaceId);
+      const issueId = this.options.resolveIssue?.(item, own.account.workspaceId);
+      const replyRecipient = this.options.resolveReplyRecipient?.(item, own.account.workspaceId);
       this.options.receive(
         {
           eventId: createHash("sha256").update(`linear-notification:${account}:${item.id}`).digest("hex"),
@@ -187,6 +191,10 @@ export class LinearNotifications {
           actorEmail: actor?.email,
           worker: actor?.worker,
           organizationId: own.account.workspaceId,
+          ...(issueId === undefined ? {} : { issueId }),
+          ...(replyRecipient
+            ? { replyRecipient, replyTo: { type: replyRecipient.parentType, id: replyRecipient.parentId } }
+            : {}),
           createdAt: item.createdAt,
           url: item.url,
           updatedFrom: undefined,

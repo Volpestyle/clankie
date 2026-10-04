@@ -85,8 +85,9 @@ export async function buildLaneToolBank(
     tools.push(browserLaneTool(deps, turn, tool, lane === "operator" || turn.shell === true));
   }
   const services = await deps.mcp.catalog(lane);
-  for (const tool of services) if (tool.initial) tools.push(mcpLaneTool(deps, lane, tool));
-  if (services.some((tool) => !tool.initial)) tools.push(...serviceDirectoryTools(deps, lane, services));
+  for (const tool of services) if (tool.initial) tools.push(mcpLaneTool(deps, lane, tool, turn));
+  if (services.some((tool) => !tool.initial))
+    tools.push(...serviceDirectoryTools(deps, lane, services, turn));
   return { lane, tools };
 }
 
@@ -102,6 +103,7 @@ function serviceDirectoryTools(
   deps: CaptainDeps,
   lane: CaptainSessionLaneV2,
   catalog: readonly McpToolDescriptor[],
+  turn: TurnContext,
 ): LaneTool[] {
   const byName = new Map(catalog.map((tool) => [tool.qualifiedName, tool]));
   const servers = [...new Set(catalog.map((tool) => tool.server))].join(", ");
@@ -189,7 +191,7 @@ function serviceDirectoryTools(
           input !== null && typeof input === "object" && !Array.isArray(input)
             ? (input as Record<string, unknown>)
             : {};
-        return await mcpLaneTool(deps, lane, tool).call(callArgs);
+        return await mcpLaneTool(deps, lane, tool, turn).call(callArgs);
       },
     },
   ];
@@ -294,13 +296,24 @@ function browserLaneTool(
 }
 
 /** A connected service's tool, named as the captain registers it: `<server>_<tool>`. */
-function mcpLaneTool(deps: CaptainDeps, lane: CaptainSessionLaneV2, tool: McpToolDescriptor): LaneTool {
+function mcpLaneTool(
+  deps: CaptainDeps,
+  lane: CaptainSessionLaneV2,
+  tool: McpToolDescriptor,
+  turn: TurnContext,
+): LaneTool {
   return {
     name: tool.qualifiedName,
     description: tool.description,
     inputSchema: tool.inputSchema,
     async call(args) {
-      const result = await deps.mcp.call({ lane, server: tool.server, tool: tool.name, arguments: args });
+      const result = await deps.mcp.call({
+        lane,
+        server: tool.server,
+        tool: tool.name,
+        arguments: args,
+        ...(turn.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
+      });
       if (result.outcome === "ok" && result.isError) {
         return {
           content: [{ type: "text", text: result.content || `${tool.qualifiedName} failed` }],

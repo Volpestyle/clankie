@@ -133,7 +133,7 @@ async function fixture() {
       },
     });
   };
-  return { captain, id, journal, send, agent, autonomous };
+  return { captain, id, journal, send, agent, autonomous, root };
 }
 
 it("the attached project receives worker reports, watches, self wakes and escalations without Pi or global leakage", async () => {
@@ -235,4 +235,43 @@ it("a definite native refusal resumes the project service runner once", async ()
   expect(fake.prompts).toHaveLength(1);
   expect(fake.prompts[0]).toContain("Resume after the seat left");
   expect(await captain.pollSeatEvents(0, undefined, id)).toEqual([]);
+});
+
+it("a followed owned Linear notification reaches the attached project exactly once across a provider retry", async () => {
+  const { captain, id, root } = await fixture();
+  await new SettingsStore(join(root, "settings.json")).update((value) => ({
+    ...value,
+    linearWebhook: { ...value.linearWebhook, following: true },
+  }));
+  const organizationId = randomUUID();
+  const issueId = randomUUID();
+  expect(captain.recordLinearWorkOwner({ organizationId, issueId }, { conversationId: id })).toBe(true);
+  const poll = captain.pollSeatEvents(10000, undefined, id);
+  const activity = {
+    eventId: "1".repeat(64),
+    notification: true,
+    issueId,
+    organizationId,
+    deliveryId: undefined,
+    type: "Notification",
+    action: "issueNewComment",
+    actorName: "James",
+    actorEmail: undefined,
+    createdAt: new Date().toISOString(),
+    url: undefined,
+    data: { title: "Review the issue" },
+    updatedFrom: undefined,
+  };
+  expect(captain.receiveLinearActivity(activity, true)).toBe(true);
+  const [event] = await poll;
+  expect(event).toMatchObject({
+    kind: "wake",
+    conversationId: id,
+    content: expect.stringContaining("Review the issue"),
+  });
+  expect(fake.prompts).toEqual([]);
+  await captain.acknowledgeSeatEvent(event!.id, id);
+  expect(captain.receiveLinearActivity(activity, true)).toBe(false);
+  expect(await captain.pollSeatEvents(0, undefined, id)).toEqual([]);
+  expect(fake.prompts).toEqual([]);
 });
