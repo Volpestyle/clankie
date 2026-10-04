@@ -1,5 +1,6 @@
 /** Modified from yuniko Minecraft MCP 240c8cec: owned lifecycle, handles, interruption and packet evidence. */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { connect } from "node:net";
 import {
   MinecraftActionRequestSchema,
   MinecraftSessionRefSchema,
@@ -55,7 +56,12 @@ const interrupted = () => new Error("Minecraft action interrupted");
 const bare = (item: string) => item.replace(/^minecraft:/u, "");
 
 export class MinecraftMotor {
-  private readonly options: { createBot?: typeof mineflayer.createBot; viewer?: boolean };
+  private readonly options: {
+    createBot?: typeof mineflayer.createBot;
+    viewer?: boolean;
+    isHosted?: (endpoint: Endpoint) => boolean;
+    hostedLogin?: (endpoint: Endpoint) => Promise<string | null>;
+  };
   private connection: Connection | null = null;
   private actions = new Map<string, Work>();
   private active: Work | null = null;
@@ -64,7 +70,14 @@ export class MinecraftMotor {
   private events: MotorEvent[] = [];
   private readonly actionContext = new AsyncLocalStorage<Work>();
 
-  constructor(options: { createBot?: typeof mineflayer.createBot; viewer?: boolean } = {}) {
+  constructor(
+    options: {
+      createBot?: typeof mineflayer.createBot;
+      viewer?: boolean;
+      isHosted?: (endpoint: Endpoint) => boolean;
+      hostedLogin?: (endpoint: Endpoint) => Promise<string | null>;
+    } = {},
+  ) {
     this.options = options;
   }
 
@@ -100,9 +113,26 @@ export class MinecraftMotor {
     this.actions.clear();
     this.events = [];
     this.sequence = 0;
+    const hosted = this.options.isHosted?.(endpoint) === true;
     let bot: Bot;
     try {
-      bot = (this.options.createBot ?? mineflayer.createBot)({ ...endpoint, hideErrors: true });
+      bot = (this.options.createBot ?? mineflayer.createBot)({
+        ...endpoint,
+        hideErrors: true,
+        ...(hosted
+          ? {
+              connect(client) {
+                const socket = connect(endpoint.port, "127.0.0.1");
+                socket.once("connect", () =>
+                  socket.write(
+                    `PROXY TCP4 127.0.0.1 127.0.0.1 ${socket.localPort ?? 40001} ${endpoint.port}\r\n`,
+                  ),
+                );
+                client.setSocket(socket);
+              },
+            }
+          : {}),
+      });
     } catch {
       throw new Error("Minecraft bot setup failed");
     }
@@ -128,7 +158,7 @@ export class MinecraftMotor {
       write(name, packet);
     };
     const current = () => this.connection === connection;
-    bot.once("spawn", () => {
+    const activate = () => {
       if (!current() || connection.status.phase !== "connecting") return;
       const movements = new Movements(bot);
       movements.canDig = false;
@@ -150,6 +180,40 @@ export class MinecraftMotor {
             if (current()) this.emit("viewer", { available: false });
           });
       }
+    };
+    let loginSecret: string | null = null;
+    bot.once("spawn", () => {
+      if (!hosted) {
+        activate();
+        return;
+      }
+      const timeout = setTimeout(() => {
+        if (connection.status.phase === "connecting") bot.quit();
+      }, 10000);
+      const authenticated = (message: string) => {
+        if (message === "Successful login!") {
+          clearTimeout(timeout);
+          bot.off("messagestr", authenticated);
+          activate();
+        }
+      };
+      bot.on("messagestr", authenticated);
+      bot.once("end", () => {
+        clearTimeout(timeout);
+        bot.off("messagestr", authenticated);
+        loginSecret = null;
+      });
+      void this.options
+        .hostedLogin?.(endpoint)
+        .then((secret) => {
+          if (!secret || !current() || connection.status.phase !== "connecting") {
+            bot.quit();
+            return;
+          }
+          loginSecret = secret;
+          bot.chat(`/login ${secret}`);
+        })
+        .catch(() => bot.quit());
     });
     bot.once("end", () => {
       if (!current()) return;
@@ -166,7 +230,8 @@ export class MinecraftMotor {
     // Socket errors alone are not confirmed disconnect, and no endpoint is echoed to the caller.
     bot.on("error", () => {});
     bot.on("chat", (player, text) => {
-      if (current()) this.emit("chat", { player: player.slice(0, 64), text: text.slice(0, 256) });
+      if (current() && (!loginSecret || !text.includes(loginSecret)))
+        this.emit("chat", { player: player.slice(0, 64), text: text.slice(0, 256) });
     });
     bot.on("playerJoined", (player) => {
       if (current()) this.emit("player_join", { player: player.username.slice(0, 64) });
