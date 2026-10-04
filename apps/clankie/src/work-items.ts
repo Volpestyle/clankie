@@ -9,6 +9,7 @@ import {
   WorkConventionSchema,
   WorkEvidenceSchema,
   WorkItemStatusSchema,
+  WorkLinearLabelSchema,
   type WorkConvention,
   type WorkItem,
   type WorkRepo,
@@ -51,6 +52,7 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       githubRepo: z.string().min(1).max(200).optional(),
       linearTeam: z.string().min(1).max(64).optional(),
       linearProject: z.string().min(1).max(200).optional(),
+      linearLabel: WorkLinearLabelSchema.optional(),
       decisions: z.string().min(1).max(256).optional(),
       note: z.string().max(1000).optional(),
     })
@@ -400,6 +402,17 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
               decidedBy: "owner",
               decidedAt: clock().toISOString(),
               ...(request.note === undefined ? {} : { note: request.note }),
+            });
+          }
+          if (request.linearLabel !== undefined) {
+            if (convention.backend !== "linear" || convention.linear === undefined)
+              throw new WorkRequestError(
+                "invalid",
+                "A Linear board label requires a linear convention with a team",
+              );
+            convention = WorkConventionSchema.parse({
+              ...convention,
+              linear: { ...convention.linear, label: request.linearLabel },
             });
           }
           await writeConvention(entry.path, convention);

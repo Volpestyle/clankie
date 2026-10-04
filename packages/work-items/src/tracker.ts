@@ -73,6 +73,7 @@ export function backendFor(root: string, convention: WorkConvention, deps: Track
       return createLinearBackend({
         team: convention.linear.team,
         ...(convention.linear.project === undefined ? {} : { project: convention.linear.project }),
+        ...(convention.linear.label === undefined ? {} : { label: convention.linear.label }),
         call: deps.linear,
       });
   }

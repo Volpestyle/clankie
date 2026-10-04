@@ -36,6 +36,18 @@ label an item with a role name (`designer`, `builder`, …) to put it on that
 role's station in the owner's world. Criterion numbers are 1-based. Clankie himself has the same contract as the `work_items`
 and `work_item_write` tools.
 
+When the owner's Linear convention uses an existing repo label, record it with
+`clankie work init --backend linear --linear-team KEY --linear-project NAME
+--linear-label LABEL` (the project is optional), or `linearLabel` on
+`work_item_write` action `init`. This saves `linear.label` in the convention.
+The board then includes only issues with that label; `list --label designer`
+intersects it with the role, status and owner filters. New items carry the saved
+label. Omitting the saved label keeps the existing team/project-wide board;
+direct `show ID` reads are unchanged. Choose an existing label under the owner's
+authorization; the command never creates labels or selects another account.
+Edits and attachments keep existing labels and uploaded media; an ambiguous
+Evidence heading is refused rather than replaced.
+
 ## Rules
 
 For an existing project's team settings, `clankie project list` returns the

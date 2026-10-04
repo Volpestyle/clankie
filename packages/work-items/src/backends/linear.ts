@@ -8,7 +8,7 @@ import {
   type WorkBackend,
   type WorkItemPatch,
 } from "../backend.ts";
-import { parseBody, patchBody } from "../format.ts";
+import { parseBody, patchBody, renderEvidence } from "../format.ts";
 
 /**
  * The repo's Linear team, through the Linear account already connected to
@@ -119,6 +119,7 @@ export function descriptionPatch(
 export function createLinearBackend(options: {
   readonly team: string;
   readonly project?: string;
+  readonly label?: string;
   readonly call: LinearToolCall;
 }): WorkBackend {
   let statuses: Promise<LinearStatus[]> | undefined;
@@ -174,6 +175,7 @@ export function createLinearBackend(options: {
     kind: "linear",
     async list(filter) {
       const limit = Math.min(filter?.limit ?? 100, 250);
+      const { label, ...itemFilter } = filter ?? {};
       const items: WorkItem[] = [];
       const cursors = new Set<string>();
       let cursor: string | undefined;
@@ -181,14 +183,24 @@ export function createLinearBackend(options: {
         const result = (await options.call("list_issues", {
           team: options.team,
           ...(options.project === undefined ? {} : { project: options.project }),
+          ...(options.label === undefined ? {} : { label: options.label }),
           limit: Math.min(PAGE_SIZE, limit - items.length),
           ...(cursor === undefined ? {} : { cursor }),
           fields: FIELDS,
         })) as { issues?: LinearIssue[]; hasNextPage?: boolean; cursor?: string } | LinearIssue[];
         const issues = Array.isArray(result) ? result : (result.issues ?? []);
         for (const issue of issues) {
+          // Match the ad-hoc role against provider labels before the item's
+          // bounded display projection. The saved repo label filters each page.
+          if (
+            label !== undefined &&
+            !linearLabelNames(issue).some(
+              (name) => typeof name === "string" && name.trim().toLowerCase() === label.trim().toLowerCase(),
+            )
+          )
+            continue;
           const item = toItem(issue);
-          if (matchesFilter(item, filter)) items.push(item);
+          if (matchesFilter(item, itemFilter)) items.push(item);
           if (items.length === limit) return items;
         }
         if (Array.isArray(result) || result.hasNextPage !== true) break;
@@ -216,6 +228,7 @@ export function createLinearBackend(options: {
       const created = await save({
         team: options.team,
         ...(options.project === undefined ? {} : { project: options.project }),
+        ...(options.label === undefined ? {} : { labels: [options.label] }),
         title: draft.title,
         description,
         ...(draft.status === undefined ? {} : { state: pickLinearState(await teamStatuses(), draft.status) }),
@@ -246,6 +259,29 @@ export function createLinearBackend(options: {
     async attach(id, evidence) {
       const issue = await fetchIssue(id);
       const current = toItem(issue);
+      const before = issue.description ?? "";
+      if (/uploads\.linear\.app/u.test(before)) {
+        // Insert the new evidence beside the heading; never serialize the
+        // existing upload nodes into a replacement Evidence section.
+        const headings: string[] = [];
+        let fence = false;
+        for (const line of before.replace(/\r\n?/gu, "\n").split("\n")) {
+          if (/^\s*(```|~~~)/u.test(line)) fence = !fence;
+          else if (!fence && /^##\s+evidence\s*$/iu.test(line)) headings.push(line);
+        }
+        const heading = headings[0];
+        if (headings.length > 1 || (heading !== undefined && before.split(heading).length !== 2))
+          throw new Error("Cannot attach evidence: the Evidence heading is ambiguous");
+        const text = renderEvidence([evidence]).join("\n");
+        await save({
+          id: issue.identifier ?? issue.id,
+          patch:
+            heading === undefined
+              ? [{ op: "append", text: `\n\n## Evidence\n\n${text}` }]
+              : [{ op: "replace", old_string: heading, new_string: `${heading}\n\n${text}` }],
+        });
+        return toItem(await fetchIssue(id));
+      }
       await saveDescription(
         issue,
         patchBody(issue.description ?? "", { evidence: [...current.evidence, evidence] }),

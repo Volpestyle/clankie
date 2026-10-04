@@ -881,9 +881,14 @@ and every assignment brief tells a hire to use it.
   than one tracker or only a single `TODO.md`. Answer it once with `work init`.
 - `clankie work init` records what discovery found; `work init --backend
 default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
-[--linear-team KEY] [--linear-project NAME] [--note TEXT]` records the owner's
+[--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--note TEXT]` records the owner's
   choice. The answer is written to `.clankie/tracking.json` in the repo; nothing
   else is added to a repo that tracks work elsewhere.
+  `--linear-label` saves an existing Linear label as `linear.label`, scoping
+  this repo's board within its team/project and adding the label to new items.
+  It requires a Linear convention with a team; blank, multiline or over-64-character
+  labels are refused. Omit it to keep the team/project-wide board. The HTTP init
+  parameter and `work_item_write` init parameter are `linearLabel`.
 - `clankie work repos` lists the repos registered on this machine. A repo is
   registered the first time a local command names it; only registered repos are
   readable from a paired device.
@@ -894,6 +899,9 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   `labels` from the backend: Linear labels, GitHub labels (without the
   `status: …` labels this backend writes), or a Markdown item's `labels:` front
   matter (`[a, b]`, `a, b`, or a YAML block list).
+  On a scoped Linear board, `--label` intersects the saved repo label along
+  with status/owner filters; it does not replace the scope. `show ID` remains
+  a direct known-item read. Board scope does not grant or restrict tool authority.
 - `clankie work create TITLE [--summary S] [--owner NAME] [--criterion C]...
 [--status S]`.
 - `clankie work update ID [--status S] [--owner NAME | --no-owner] [--title T]

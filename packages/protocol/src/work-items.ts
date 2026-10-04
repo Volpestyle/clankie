@@ -46,6 +46,7 @@ export type WorkEvidence = z.infer<typeof WorkEvidenceSchema>;
 export const WORK_ITEM_LABEL_MAX = 64;
 export const WORK_ITEM_LABELS_MAX = 20;
 export const WorkItemLabelSchema = z.string().max(WORK_ITEM_LABEL_MAX);
+export const WorkLinearLabelSchema = TextSchema(WORK_ITEM_LABEL_MAX);
 
 export const WorkItemSchema = z
   .object({
@@ -72,7 +73,7 @@ export const WorkItemSchema = z
 export type WorkItem = z.infer<typeof WorkItemSchema>;
 
 /** The recorded answer to "where does this repo track work", written to `.clankie/tracking.json`. */
-export const WorkConventionSchema = z
+const WorkConventionFieldsSchema = z
   .object({
     schemaVersion: z.literal(1),
     backend: WorkBackendKindSchema,
@@ -83,11 +84,12 @@ export const WorkConventionSchema = z
       .object({ repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/u) })
       .strict()
       .optional(),
-    /** `linear` only: the team key, and optionally the project items belong to. */
+    /** `linear` only: the team key, optional project, and existing repo-board label. */
     linear: z
       .object({
         team: z.string().trim().min(1).max(64),
         project: z.string().trim().min(1).max(200).optional(),
+        label: WorkLinearLabelSchema.optional(),
       })
       .strict()
       .optional(),
@@ -98,6 +100,10 @@ export const WorkConventionSchema = z
     note: z.string().max(1000).optional(),
   })
   .strict();
+export const WorkConventionSchema = WorkConventionFieldsSchema.refine(
+  (convention) => convention.linear?.label === undefined || convention.backend === "linear",
+  { message: "A Linear board label requires the linear backend", path: ["linear", "label"] },
+);
 export type WorkConvention = z.infer<typeof WorkConventionSchema>;
 
 export const WorkSignalSchema = z
@@ -106,7 +112,7 @@ export const WorkSignalSchema = z
     /** What was found and where, in words an owner can check. */
     detail: z.string().max(500),
     /** A backend this signal could hold items in; absent for decision-only signals. */
-    suggests: WorkConventionSchema.omit({ decidedBy: true, decidedAt: true, schemaVersion: true })
+    suggests: WorkConventionFieldsSchema.omit({ decidedBy: true, decidedAt: true, schemaVersion: true })
       .partial({ backend: true })
       .optional(),
   })
