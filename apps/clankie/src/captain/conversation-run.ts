@@ -1,4 +1,4 @@
-/** Healthy work has no duration cap; preparation and execution cannot stay silent forever. */
+/** Healthy work has no duration cap; idle preparation and execution cannot stay silent forever. */
 export const CONVERSATION_RUN_STALL_MS = 5 * 60_000;
 
 export class ConversationRunStalledError extends Error {
@@ -39,6 +39,7 @@ export class ConversationServiceRun {
   private phase = "service preparation";
   private closed = false;
   private readonly cleanup = new Set<() => void>();
+  private readonly executingTools = new Set<string>();
 
   public constructor(signal?: AbortSignal) {
     this.signal =
@@ -51,10 +52,22 @@ export class ConversationServiceRun {
     if (this.closed || this.signal.aborted) return;
     this.phase = phase;
     if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    // Tools own their execution deadlines; silence while one runs is not an idle turn.
+    if (this.executingTools.size > 0) return;
     this.timer = setTimeout(() => {
       this.cancellation.abort(new ConversationRunStalledError(this.phase));
     }, CONVERSATION_RUN_STALL_MS);
     this.timer.unref?.();
+  }
+
+  public observe(event: { readonly type: string; readonly toolCallId?: string }): void {
+    if (this.closed || this.signal.aborted) return;
+    if (event.toolCallId !== undefined) {
+      if (event.type === "tool_execution_start") this.executingTools.add(event.toolCallId);
+      else if (event.type === "tool_execution_end") this.executingTools.delete(event.toolCallId);
+    }
+    this.progress(`Pi ${event.type}`);
   }
 
   public wait<T>(phase: string, work: Promise<T>): Promise<T> {

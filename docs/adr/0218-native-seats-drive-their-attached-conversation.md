@@ -95,8 +95,12 @@ deterministic checks.
 
 A service reservation cannot hold attachment and later turns indefinitely.
 A five-minute inactivity watchdog covers cold preparation from the reservation
-through Pi execution. Host-observed preparation progress and Pi events renew it;
-healthy work has no total duration cap. Queued runs do not consume this timeout
+through Pi execution. Host-observed preparation progress and Pi events renew it.
+The watchdog is suspended while one or more Pi tools execute; each tool retains
+its own timeout and cancellation behavior. A full five-minute idle window resumes
+after the last tool ends. Before execution starts, or with no active tool and no
+preparation or streamed progress, inactivity still times out after five minutes.
+Healthy work has no total duration cap. Queued runs do not consume this timeout
 while waiting. Question authority and hook checks before driver selection, and
 native attachment preparation before dispatch, are bounded too.
 

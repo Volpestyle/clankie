@@ -1823,8 +1823,12 @@ captain credential are required.
 
 Service preparation and execution have a five-minute inactivity watchdog,
 including cold startup before a Pi session exists. Host-observed preparation
-progress and Pi events renew it; healthy work has no total duration cap, and
-queued runs do not consume the timeout while waiting. A stalled stored run fails
+progress and Pi events renew it. The watchdog is suspended while one or more Pi
+tools execute; tools retain their own timeout and cancellation behavior. A full
+five-minute idle window resumes after the last tool ends. Before execution starts,
+or with no active tool and no preparation or streamed progress, inactivity still
+times out after five minutes. Healthy work has no total duration cap, and queued
+runs do not consume the timeout while waiting. A stalled stored run fails
 with `conversation_turn_stalled`; the service log names its conversation, run ID
 and stalled phase. The host releases its admission so later inputs can proceed, but its
 original receipt remains and the request is never replayed. Earlier effects may

@@ -371,6 +371,92 @@ describe("runOneShotDiscordTurn", () => {
 const STALL_TICK = 5_000;
 
 describe("runTurnWithStallWatchdog", () => {
+  function toolFixture(signal?: AbortSignal) {
+    const abort = vi.fn(async () => {});
+    const unsubscribe = vi.fn();
+    let emit!: (event: { type: string; toolCallId?: string }) => void;
+    let finish!: () => void;
+    const stallMs = 30_000;
+    const outcome = runTurnWithStallWatchdog(
+      {
+        abort,
+        subscribe: (listener) => {
+          emit = (event) => listener(event as never);
+          return unsubscribe;
+        },
+      },
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+      { stallMs, ...(signal === undefined ? {} : { signal }) },
+    );
+    return { abort, unsubscribe, emit, finish, stallMs, outcome };
+  }
+
+  it("does not abort a silent native tool until it ends and the full idle window expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = toolFixture();
+      f.emit({ type: "tool_execution_start", toolCallId: "native-browser-task" });
+      await vi.advanceTimersByTimeAsync(f.stallMs * 3);
+      expect(f.abort).not.toHaveBeenCalled();
+      f.emit({ type: "message_update" });
+      await vi.advanceTimersByTimeAsync(f.stallMs * 2);
+      expect(f.abort).not.toHaveBeenCalled();
+      f.emit({ type: "tool_execution_end", toolCallId: "native-browser-task" });
+      await vi.advanceTimersByTimeAsync(f.stallMs - 1);
+      expect(f.abort).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(f.outcome).resolves.toEqual({ completed: false });
+      expect(f.abort).toHaveBeenCalledOnce();
+      expect(f.unsubscribe).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("overlapping native tools and repeated starts cannot prematurely rearm the room watchdog", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = toolFixture();
+      f.emit({ type: "tool_execution_start", toolCallId: "tool-one" });
+      f.emit({ type: "tool_execution_start", toolCallId: "tool-one" });
+      f.emit({ type: "tool_execution_start", toolCallId: "tool-two" });
+      f.emit({ type: "tool_execution_end", toolCallId: "tool-one" });
+      f.emit({ type: "tool_execution_end", toolCallId: "tool-one" });
+      f.emit({ type: "tool_execution_end", toolCallId: "unrelated-tool" });
+      await vi.advanceTimersByTimeAsync(f.stallMs * 3);
+      expect(f.abort).not.toHaveBeenCalled();
+      f.emit({ type: "tool_execution_end", toolCallId: "tool-two" });
+      await vi.advanceTimersByTimeAsync(f.stallMs - 1);
+      expect(f.abort).not.toHaveBeenCalled();
+      f.finish();
+      await expect(f.outcome).resolves.toEqual({ completed: true, value: undefined });
+      expect(f.unsubscribe).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancellation still releases the room watchdog while a native tool remains in flight", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const f = toolFixture(controller.signal);
+      f.emit({ type: "tool_execution_start", toolCallId: "silent-tool" });
+      await vi.advanceTimersByTimeAsync(f.stallMs * 2);
+      const reason = new Error("operator cancelled native tool");
+      const failed = expect(f.outcome).rejects.toBe(reason);
+      controller.abort(reason);
+      await failed;
+      expect(f.unsubscribe).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("carries a completed value through", async () => {
     const outcome = await runTurnWithStallWatchdog(
       { abort: () => Promise.resolve(), subscribe: () => () => undefined },

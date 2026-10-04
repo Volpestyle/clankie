@@ -8,6 +8,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
+import { CONVERSATION_RUN_STALL_MS } from "../src/captain/conversation-run.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import * as fleetRunner from "../src/captain/herdr-fleet-runner.ts";
 
@@ -294,6 +295,54 @@ it("Pi progress keeps an operator turn alive beyond the inactivity deadline", as
     expect(journal.read(id).filter((event) => event.type === "turn" && event.phase !== "accepted")).toEqual(
       [],
     );
+    release();
+    await vi.waitFor(() =>
+      expect(journal.read(id)).toContainEqual(expect.objectContaining({ type: "turn", phase: "completed" })),
+    );
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    release();
+    await captain.close();
+  }
+});
+
+it("a silent in-flight tool keeps an operator turn alive beyond the inactivity deadline", async () => {
+  const { captain, id, journal, send } = await fixture();
+  let entered!: () => void;
+  const running = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fake.beforePrompt = async () => {
+    entered();
+    await gate;
+  };
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.useFakeTimers();
+  try {
+    await send("Run a long check with output redirected");
+    await running;
+    fake.emit({
+      type: "tool_execution_start",
+      toolCallId: "silent-check",
+      toolName: "bash",
+      args: { command: "pnpm check > log 2>&1" },
+    });
+    await vi.advanceTimersByTimeAsync(CONVERSATION_RUN_STALL_MS + 8 * 60_000);
+    expect(journal.read(id).filter((event) => event.type === "turn" && event.phase !== "accepted")).toEqual(
+      [],
+    );
+    expect(fake.dispose).not.toHaveBeenCalled();
+    fake.emit({
+      type: "tool_execution_end",
+      toolCallId: "silent-check",
+      toolName: "bash",
+      result: { content: [], details: {} },
+      isError: false,
+    });
     release();
     await vi.waitFor(() =>
       expect(journal.read(id)).toContainEqual(expect.objectContaining({ type: "turn", phase: "completed" })),

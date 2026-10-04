@@ -835,8 +835,9 @@ export async function runDurableTurn(
  *
  * The session's own event stream is the liveness signal: a token, a tool call,
  * a retry — anything at all — is proof the turn is still a turn, and resets the
- * clock. Nothing here caps total duration, because the length of an answer is
- * the length of the work behind it.
+ * clock. An executing tool keeps the turn alive until it ends, with its own
+ * timeout and cancellation. Nothing here caps total duration, because the
+ * length of an answer is the length of the work behind it.
  *
  * Every Discord turn goes through here, one-shot and durable alike. A durable
  * lane had no backstop at all before, which was survivable only while text was
@@ -852,12 +853,13 @@ export async function runTurnWithStallWatchdog<T>(
   const stallMs = options.stallMs ?? DISCORD_TURN_STALL_MS;
   const cancellation = new AbortController();
   let lastSignAtMs = now();
-  const unsubscribe = session.subscribe(() => {
-    lastSignAtMs = now();
-  });
+  const executingTools = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let renew = (): void => {};
   const stalled = new Promise<false>((resolve) => {
     const tick = (): void => {
+      timer = undefined;
+      if (executingTools.size > 0) return;
       const quietFor = now() - lastSignAtMs;
       if (quietFor >= stallMs) {
         resolve(false);
@@ -867,7 +869,16 @@ export async function runTurnWithStallWatchdog<T>(
       timer = setTimeout(tick, Math.min(STALL_TICK_MS, stallMs - quietFor));
       timer.unref?.();
     };
+    renew = tick;
     tick();
+  });
+  const unsubscribe = session.subscribe((event) => {
+    lastSignAtMs = now();
+    if (event.type === "tool_execution_start") executingTools.add(event.toolCallId);
+    else if (event.type === "tool_execution_end") executingTools.delete(event.toolCallId);
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    renew();
   });
   try {
     const work = start(cancellation.signal).then((value) => ({ value }));
@@ -1945,7 +1956,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           const drafts = createDraftPacer((text) => {
             if (!run.signal.aborted) context.draft(text);
           });
-          const unsubscribeProgress = lane.session.subscribe((event) => run.progress(`Pi ${event.type}`));
+          const unsubscribeProgress = lane.session.subscribe((event) => run.observe(event));
           const unsubscribe = live
             ? () => undefined
             : lane.session.subscribe((event) => {
@@ -3022,7 +3033,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           if (!normalized.durable) lane.session.dispose();
         };
         run.signal.addEventListener("abort", onAbort, { once: true });
-        const unsubscribe = lane.session.subscribe((event) => run.progress(`Pi ${event.type}`));
+        const unsubscribe = lane.session.subscribe((event) => run.observe(event));
         try {
           return await waitForConversationRun(
             runDiscordTurn(lane, normalized, deliveryId, toolProgressEnabled, origin, run),

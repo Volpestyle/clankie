@@ -103,8 +103,8 @@ The reply carries the turn's last screenshot or generated image with it — and
 when that artifact cannot be resolved, the words still post and say the picture
 did not — while replying with the silence sentinel sends nothing: silence is a
 real answer. Healthy Pi turns have no total duration cap — looking something
-up properly is work, not a fault — but a Discord Pi turn that emits no event for
-five minutes is a dead stream, so the stall watchdog aborts its pi session and
+up properly is work, not a fault — but a Discord Pi turn with no executing tool
+and no event for five minutes is a dead stream, so the stall watchdog aborts its pi session and
 settles it as `captain_turn_stalled`. While someone waits on a slow requested
 turn, he can post one short `send_text_update` message to the channel ("hang on,
 pulling the bracket up") without ending it; work he elects to do on his own
@@ -171,7 +171,12 @@ their arming conversation. See
 
 A five-minute service inactivity watchdog starts at reservation and includes
 cold preparation, before a Pi session exists. Host-observed preparation progress
-and Pi events renew it; queued runs do not consume the timeout while waiting.
+and Pi events renew it. The watchdog is suspended while one or more Pi tools
+execute; tools retain their own timeout and cancellation behavior. A full
+five-minute idle window resumes after the last tool ends. Before execution starts,
+or with no active tool and no preparation or streamed progress, inactivity still
+times out after five minutes. Healthy work has no total duration cap; queued runs
+do not consume the timeout while waiting.
 Question authority and hook checks before driver selection, and native attachment
 preparation before dispatch, are also bounded. On a stall, the host aborts and evicts the exact
 cached startup/session, prevents late completion from prompting or publishing,

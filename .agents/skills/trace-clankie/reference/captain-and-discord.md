@@ -68,8 +68,12 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
 
 - **An `accepted` receipt establishes admission, not execution or liveness.**
   The input may be queued, preparing, executing or awaiting native delivery.
-  Service preparation and execution fail after five minutes without host-observed
-  preparation progress or Pi events; queued runs do not consume that timeout.
+  With no active Pi tools, service preparation and execution fail after five
+  minutes without host-observed preparation progress or Pi events. The watchdog
+  is suspended while one or more Pi tools execute; tools retain their own timeout
+  and cancellation behavior. A full five-minute idle window resumes after the
+  last tool ends. Pre-start inactivity remains bounded, and queued runs do not
+  consume that timeout while waiting.
   For `conversation_turn_stalled`, match the run ID to the service log's
   conversation and stalled phase. Healthy runs have no total duration cap.
   Discord Pi stream stalls use `captain_turn_stalled`; native acknowledgments

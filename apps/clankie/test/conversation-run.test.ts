@@ -47,6 +47,63 @@ it("observed progress keeps healthy execution alive beyond five minutes", async 
   expect(vi.getTimerCount()).toBe(0);
 });
 
+it("a silent in-flight tool can exceed five minutes and gets a full idle window after completion", async () => {
+  vi.useFakeTimers();
+  const run = new ConversationServiceRun();
+  const dependency = deferred<void>();
+  const failure = expect(run.wait("Pi turn", dependency.promise)).rejects.toBeInstanceOf(
+    ConversationRunStalledError,
+  );
+  run.observe({ type: "tool_execution_start", toolCallId: "long-browser-task" });
+  await vi.advanceTimersByTimeAsync(CONVERSATION_RUN_STALL_MS * 2);
+  expect(run.signal.aborted).toBe(false);
+  run.progress("Pi message update while the tool is active");
+  await vi.advanceTimersByTimeAsync(CONVERSATION_RUN_STALL_MS * 2);
+  expect(run.signal.aborted).toBe(false);
+  run.observe({ type: "tool_execution_end", toolCallId: "long-browser-task" });
+  await vi.advanceTimersByTimeAsync(CONVERSATION_RUN_STALL_MS - 1);
+  expect(run.signal.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  await failure;
+  run.close();
+});
+
+it("overlapping tool IDs and duplicate starts keep the deadline suspended until the final tool ends", async () => {
+  vi.useFakeTimers();
+  const run = new ConversationServiceRun();
+  const dependency = deferred<void>();
+  const failure = expect(run.wait("Pi turn", dependency.promise)).rejects.toBeInstanceOf(
+    ConversationRunStalledError,
+  );
+  run.observe({ type: "tool_execution_start", toolCallId: "tool-one" });
+  run.observe({ type: "tool_execution_start", toolCallId: "tool-one" });
+  run.observe({ type: "tool_execution_start", toolCallId: "tool-two" });
+  run.observe({ type: "tool_execution_end", toolCallId: "tool-one" });
+  run.observe({ type: "tool_execution_end", toolCallId: "unknown-tool" });
+  await vi.advanceTimersByTimeAsync(CONVERSATION_RUN_STALL_MS * 3);
+  expect(run.signal.aborted).toBe(false);
+  run.observe({ type: "tool_execution_end", toolCallId: "tool-two" });
+  await vi.advanceTimersByTimeAsync(CONVERSATION_RUN_STALL_MS);
+  await failure;
+  run.close();
+});
+
+it("operator cancellation abandons an in-flight tool without waiting for it to end", async () => {
+  vi.useFakeTimers();
+  const controller = new AbortController();
+  const run = new ConversationServiceRun(controller.signal);
+  const dependency = deferred<void>();
+  const reason = new Error("operator cancelled long tool");
+  const failure = expect(run.wait("Pi turn", dependency.promise)).rejects.toBe(reason);
+  run.observe({ type: "tool_execution_start", toolCallId: "silent-tool" });
+  await vi.advanceTimersByTimeAsync(CONVERSATION_RUN_STALL_MS * 2);
+  controller.abort(reason);
+  await failure;
+  run.observe({ type: "tool_execution_end", toolCallId: "silent-tool" });
+  run.close();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it("a once-active execution stalls five minutes after its final progress event", async () => {
   vi.useFakeTimers();
   const run = new ConversationServiceRun();
