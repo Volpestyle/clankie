@@ -6,6 +6,25 @@ export const WORKER_OPENCODE_VERSION = "1.18.18";
 const sessionPattern = /^ses_[A-Za-z0-9]{8,128}$/u;
 const messagePattern = /^msg_[A-Za-z0-9]{8,128}$/u;
 const MAX_TEXT = 128 * 1024;
+const plainRecord = (value) =>
+  value !== null &&
+  typeof value === "object" &&
+  [Object.prototype, null].includes(Object.getPrototypeOf(value));
+function nativeStatus(value, absent = false) {
+  if (absent) return "idle";
+  if (!plainRecord(value)) throw new Error("Malformed native session status");
+  if (value.type === "idle" || value.type === "busy") return value.type;
+  if (
+    value.type === "retry" &&
+    Number.isSafeInteger(value.attempt) &&
+    value.attempt >= 0 &&
+    typeof value.message === "string" &&
+    Number.isSafeInteger(value.next) &&
+    value.next >= 0
+  )
+    return "retry";
+  throw new Error("Malformed native session status");
+}
 
 export function createOpenCodeWorkerRuntime(api, controller) {
   let sessionId;
@@ -88,7 +107,7 @@ export function createOpenCodeWorkerRuntime(api, controller) {
     if (selected.data?.id !== sessionId) throw new Error("Native session lookup disagrees with the TUI");
     const statuses = await api.client.session.status({}, options());
     bound(before);
-    if (!statuses.data || typeof statuses.data !== "object") throw new Error("Native status unavailable");
+    if (!plainRecord(statuses.data)) throw new Error("Native status unavailable");
     const permissions = await api.client.permission.list({}, options());
     bound(before);
     const questions = await api.client.question.list({}, options());
@@ -102,7 +121,7 @@ export function createOpenCodeWorkerRuntime(api, controller) {
       api.state.session.question(sessionId).length > 0;
     // Native SessionStatus removes idle entries. An absent entry in a successful
     // complete status response is idle; a missing/error response is unavailable.
-    const status = statuses.data[sessionId]?.type ?? "idle";
+    const status = nativeStatus(statuses.data[sessionId], !Object.hasOwn(statuses.data, sessionId));
     return {
       generation: before,
       state: held ? "blocked" : status === "idle" ? "idle" : "working",
@@ -237,10 +256,11 @@ export function createOpenCodeWorkerRuntime(api, controller) {
         claimed = true;
         bound(initial.generation);
         // Local owner decisions can arrive while the durable claim is written.
+        const localStatus = api.state.session.status(sessionId);
         if (
           api.state.session.permission(sessionId).length ||
           api.state.session.question(sessionId).length ||
-          ![undefined, "idle"].includes(api.state.session.status(sessionId)?.type)
+          nativeStatus(localStatus, localStatus === undefined) !== "idle"
         )
           throw new Error("An owner decision arrived before dispatch");
         attempted = true;

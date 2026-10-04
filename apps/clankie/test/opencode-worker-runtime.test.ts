@@ -366,3 +366,42 @@ test("native status lookup failure and concurrent sends cannot become an idle su
   expect((await first).outcome).toBe("accepted");
   expect(f.api.client.session.promptAsync).toHaveBeenCalledOnce();
 });
+
+test.each([
+  [],
+  null,
+  { [sessionId]: {} },
+  { [sessionId]: { type: null } },
+  { [sessionId]: { type: "future" } },
+  { [sessionId]: { type: "retry" } },
+])("malformed native status %j never becomes idle or submits", async (data) => {
+  const f = fixture();
+  await f.initialize();
+  f.api.client.session.status.mockResolvedValue({ data } as never);
+  expect((await f.send()).outcome).toBe("unavailable");
+  expect(f.controller.claim).not.toHaveBeenCalled();
+  expect(f.api.client.session.promptAsync).not.toHaveBeenCalled();
+});
+
+test.each([{}, { type: null }, { type: "future" }, { type: "retry" }])(
+  "malformed local status %j after claim prevents submission",
+  async (status) => {
+    const f = fixture();
+    await f.initialize();
+    f.api.state.session.status = () => status as never;
+    expect((await f.send()).outcome).toBe("unavailable");
+    expect(f.api.client.session.promptAsync).not.toHaveBeenCalled();
+    expect(f.controller.receipt).toHaveBeenCalledWith({ sessionId, messageId, outcome: "not-sent" });
+  },
+);
+
+test("native absent idle entry is accepted; valid retry is working", async () => {
+  const f = fixture();
+  await f.initialize();
+  f.api.client.session.status.mockResolvedValue({ data: {} });
+  expect((await f.send()).outcome).toBe("accepted");
+  f.api.client.session.status.mockResolvedValue({
+    data: { [sessionId]: { type: "retry", attempt: 1, message: "waiting", next: 1234 } },
+  } as never);
+  expect(await f.runtime.status()).toBe("working");
+});

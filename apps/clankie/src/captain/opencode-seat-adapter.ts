@@ -5,6 +5,7 @@ import { access, mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from 
 import { delimiter, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import type {
   HarnessSeatAdapter,
   PreparedSeatLaunch,
@@ -41,6 +42,47 @@ export interface OpenCodeSeatDeps {
   readonly timeoutMs?: number;
 }
 
+/** --version imports native modules with filesystem initialization; isolate all paths. */
+export async function probeOpenCodeVersion(
+  executable: string,
+  run: (
+    file: string,
+    args: readonly string[],
+    options: { env: NodeJS.ProcessEnv; cwd: string; timeout: number; maxBuffer: number },
+  ) => Promise<{ stdout: string }> = (file, args, options) => exec(file, [...args], options),
+): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "clankie-opencode-version-"));
+  try {
+    const result = await run(executable, ["--version"], {
+      cwd: directory,
+      timeout: 5_000,
+      maxBuffer: 4096,
+      env: {
+        PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+        HOME: directory,
+        TMPDIR: directory,
+        XDG_DATA_HOME: join(directory, "data"),
+        XDG_CONFIG_HOME: join(directory, "config"),
+        XDG_CACHE_HOME: join(directory, "cache"),
+        XDG_STATE_HOME: join(directory, "state"),
+        OPENCODE_DB: join(directory, "version.db"),
+        OPENCODE_CONFIG_DIR: join(directory, "config"),
+        OPENCODE_CONFIG_CONTENT: "{}",
+        OPENCODE_PURE: "1",
+      },
+    });
+    const version = result.stdout.trim();
+    if (version !== OPENCODE_WORKER_VERSION) throw new Error("Unsupported native OpenCode version");
+    return version;
+  } catch {
+    throw new Error(
+      `Native OpenCode worker requires exactly ${OPENCODE_WORKER_VERSION}; isolated version check unavailable`,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 async function discover(launch: SeatLaunch): Promise<{ executable: string; version: string }> {
   if (process.platform !== "darwin") throw new Error("Native OpenCode workers currently require macOS");
   const env = { ...process.env, ...launch.env };
@@ -63,17 +105,7 @@ async function discover(launch: SeatLaunch): Promise<{ executable: string; versi
     const header = bytes.toString();
     if (header === "#!")
       throw new Error("OpenCode native executable is required; script launchers are not proven");
-    const result = await exec(executable, ["--version"], {
-      env,
-      cwd: launch.cwd,
-      timeout: 5_000,
-      maxBuffer: 4096,
-    });
-    const version = result.stdout.trim();
-    if (version !== OPENCODE_WORKER_VERSION)
-      throw new Error(
-        `Native OpenCode worker API requires exactly ${OPENCODE_WORKER_VERSION}; selected ${version}`,
-      );
+    const version = await probeOpenCodeVersion(executable);
     return { executable, version };
   }
   throw new Error("Native OpenCode executable unavailable");
@@ -120,21 +152,33 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
       let view: SeatView | undefined;
       let started = false;
       let disposed = false;
+      let ownedControl: SeatControl | undefined;
+      let cleanup: Promise<void> | undefined;
+      let disposal: Promise<void> | undefined;
       const onAbort = () => {
-        void dispose();
+        void dispose().catch(() => {});
       };
-      const dispose = async () => {
-        signal?.removeEventListener("abort", onAbort);
-        if (disposed) return;
+      const retireConfig = () => {
+        if (cleanup) return cleanup;
         disposed = true;
-        if (ref) controls.delete(ref.sessionId);
-        await controller?.close();
-        await rm(directory, { recursive: true, force: true });
+        signal?.removeEventListener("abort", onAbort);
+        if (ref && controls.get(ref.sessionId) === ownedControl) controls.delete(ref.sessionId);
+        cleanup = rm(directory, { recursive: true, force: true });
+        return cleanup;
       };
+      const dispose = () =>
+        (disposal ??= (async () => {
+          try {
+            await controller?.close();
+          } finally {
+            await retireConfig();
+          }
+        })());
       try {
         controller = await (deps.controller ?? createOpenCodeController)({
           receiptsPath: join(launchRoot, "receipts.json"),
           fence,
+          onRetire: retireConfig,
           ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
         });
         const env = { ...process.env, ...launch.env };
@@ -187,11 +231,16 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
             expected.paneId !== ref.paneId
           )
             throw new Error("Original OpenCode controller/ref unavailable");
-          await native.request("status");
-          await view.guard?.();
-          const proof = await root.proof(ref.sessionId);
-          await native.request("status");
-          return proof;
+          try {
+            await native.request("status");
+            await view.guard?.();
+            const proof = await root.proof(ref.sessionId);
+            await native.request("status");
+            return proof;
+          } catch (error) {
+            await dispose().catch(() => {});
+            throw error;
+          }
         };
         signal?.throwIfAborted();
         signal?.addEventListener("abort", onAbort, { once: true });
@@ -269,6 +318,7 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                     await root!.report(selectedRef.sessionId, state);
                     return state;
                   } catch {
+                    await dispose().catch(() => {});
                     return "offline";
                   }
                 },
@@ -362,6 +412,8 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                 },
                 close: dispose,
               };
+              if (disposed) throw new Error("Native controller retired during binding");
+              ownedControl = control;
               controls.set(ref.sessionId, control);
               if (launch.brief) {
                 const delivery = await control.send(launch.brief);

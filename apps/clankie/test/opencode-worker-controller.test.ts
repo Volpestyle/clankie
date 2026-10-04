@@ -17,12 +17,16 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture(path?: string) {
+async function fixture(path?: string, onRetire?: () => void | Promise<void>) {
   const directory = await mkdtemp(join(tmpdir(), "opencode-controller-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const receiptsPath = path ?? join(directory, "receipts.json");
-  const controller = await createOpenCodeController({ receiptsPath, timeoutMs: 100 });
-  cleanups.push(() => controller.close());
+  const controller = await createOpenCodeController({
+    receiptsPath,
+    timeoutMs: 100,
+    ...(onRetire ? { onRetire } : {}),
+  });
+  cleanups.push(() => controller.close().catch(() => {}));
   const check = vi.fn(async () => true);
   const guard = vi.fn(async () => {});
   controller.bind(check, guard);
@@ -82,7 +86,7 @@ test("nonce is routing only: wrong token or unproved kernel peer cannot establis
   f.check.mockResolvedValue(false);
   const unproved = await native(f.controller);
   await expect(f.controller.request("status", undefined, 50)).rejects.toThrow("unavailable");
-  expect(unproved.peer.readyState).not.toBe(WebSocket.OPEN);
+  await vi.waitFor(() => expect(unproved.peer.readyState).not.toBe(WebSocket.OPEN));
   expect(f.guard).not.toHaveBeenCalled();
 });
 
@@ -180,4 +184,50 @@ test("timeout retires the generation and cannot authorize a late request or anot
   await expect(f.controller.request("status", undefined, 20)).rejects.toThrow("unavailable");
   await expect(f.controller.request("status", undefined, 20)).rejects.toThrow("unavailable");
   await expect(native(f.controller)).rejects.toThrow();
+});
+
+test.each(["peer-loss", "proof-revoked"])(
+  "%s retires one listener and calls cleanup once, preserving uncertain claim",
+  async (mode) => {
+    const retired = vi.fn(async () => {});
+    const f = await fixture(undefined, retired);
+    const n = await native(f.controller);
+    f.controller.select(sessionId);
+    n.handle(async () => {
+      await n.callback("claim", { sessionId, messageId, text });
+      if (mode === "peer-loss") n.peer.close();
+      else f.check.mockResolvedValue(false);
+      return { outcome: "unconfirmed", messageId };
+    });
+    await expect(f.controller.request("send", { messageId, text })).rejects.toThrow();
+    await vi.waitFor(() => expect(retired).toHaveBeenCalledOnce());
+    await expect(fetch(f.controller.endpoint.replace("ws:", "http:"))).rejects.toThrow();
+    await f.controller.close();
+    await f.controller.close();
+    expect(retired).toHaveBeenCalledOnce();
+    const cold = await fixture(f.receiptsPath);
+    cold.controller.select(sessionId);
+    expect(cold.controller.pending()).toMatchObject({ messageId });
+  },
+);
+
+test("pending-admission close and cleanup rejection retire owned resources without unhandled promises", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-pending-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const onRetire = vi.fn(async () => {
+    throw new Error("fixture cleanup failure");
+  });
+  const controller = await createOpenCodeController({
+    receiptsPath: join(directory, "receipts.json"),
+    timeoutMs: 30,
+    onRetire,
+  });
+  cleanups.push(() => controller.close().catch(() => {}));
+  const n = await native(controller);
+  n.peer.close();
+  await vi.waitFor(() => expect(onRetire).toHaveBeenCalledOnce());
+  await expect(fetch(controller.endpoint.replace("ws:", "http:"))).rejects.toThrow();
+  await expect(controller.close()).rejects.toThrow("fixture cleanup failure");
+  await expect(controller.close()).rejects.toThrow("fixture cleanup failure");
+  expect(onRetire).toHaveBeenCalledOnce();
 });

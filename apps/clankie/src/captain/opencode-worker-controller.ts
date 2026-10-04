@@ -44,6 +44,7 @@ export async function createOpenCodeController(input: {
   readonly receiptsPath: string;
   readonly fence?: DeliveryFence;
   readonly timeoutMs?: number;
+  readonly onRetire?: () => void | Promise<void>;
 }): Promise<OpenCodeController> {
   const token = randomBytes(32).toString("hex");
   const fence = input.fence ?? new DeliveryFence(input.receiptsPath);
@@ -55,6 +56,12 @@ export async function createOpenCodeController(input: {
     maxPayload: 1024 * 1024,
     handleProtocols: () => "clankie-native-worker",
   });
+  const transports = new Set<Socket>();
+  server.on("connection", (socket) => {
+    transports.add(socket);
+    socket.once("close", () => transports.delete(socket));
+  });
+  let retirement: Promise<void> | undefined;
   let peer: WebSocket | undefined;
   let transport: Socket | undefined;
   let check: ((socket: Socket) => Promise<boolean>) | undefined;
@@ -71,7 +78,8 @@ export async function createOpenCodeController(input: {
   >();
   const waiters = new Set<() => void>();
   const unavailable = () => new Error("Original OpenCode native controller unavailable; no automatic retry");
-  const retire = () => {
+  const retire = (): Promise<void> => {
+    if (retirement) return retirement;
     retired = true;
     for (const waiter of pending.values()) {
       clearTimeout(waiter.timer);
@@ -80,6 +88,24 @@ export async function createOpenCodeController(input: {
     pending.clear();
     for (const wake of waiters) wake();
     waiters.clear();
+    // Publish the promise before closing sockets, whose synchronous listeners
+    // can request retirement again. Only owned transports/config are retired.
+    retirement = Promise.resolve().then(async () => {
+      for (const connection of websocket.clients) connection.terminate();
+      for (const socket of transports) socket.destroy();
+      await Promise.all([
+        new Promise<void>((resolve) => websocket.close(() => resolve())),
+        new Promise<void>((resolve) => server.close(() => resolve())),
+      ]);
+      await input.onRetire?.();
+    });
+    // Event-driven retirement has no awaiting caller; retain the rejection for
+    // explicit close while preventing an unhandled promise rejection.
+    void retirement.catch(() => {});
+    return retirement;
+  };
+  const retireFromEvent = () => {
+    void retire();
   };
   const current = async () => {
     try {
@@ -91,8 +117,7 @@ export async function createOpenCodeController(input: {
       if (retired || original !== peer || original.readyState !== WebSocket.OPEN || !(await check(transport)))
         throw unavailable();
     } catch {
-      retire();
-      peer?.close();
+      void retire();
       throw unavailable();
     }
   };
@@ -102,7 +127,7 @@ export async function createOpenCodeController(input: {
     try {
       frame = Frame.parse(JSON.parse(raw.toString()));
     } catch {
-      original?.close();
+      void retire();
       return;
     }
     if (!frame.method) {
@@ -172,16 +197,18 @@ export async function createOpenCodeController(input: {
     candidate = true;
     websocket.handleUpgrade(request, socket, head, (connected) => {
       const nativeSocket = socket as Socket;
+      connected.once("close", retireFromEvent);
+      connected.once("error", retireFromEvent);
       const deadline = Date.now() + (input.timeoutMs ?? 20_000);
       const admit = async () => {
         while (!check && !retired && connected.readyState === WebSocket.OPEN && Date.now() < deadline)
           await new Promise((resolve) => setTimeout(resolve, 25));
         if (retired || !check || !(await check(nativeSocket))) {
           candidate = false;
-          connected.close();
+          void retire();
           return;
         }
-        if (connected.readyState !== WebSocket.OPEN || acceptedOnce) {
+        if (retired || connected.readyState !== WebSocket.OPEN || acceptedOnce) {
           candidate = false;
           connected.close();
           return;
@@ -192,14 +219,14 @@ export async function createOpenCodeController(input: {
         connected.on("message", (data) => {
           void handle(Buffer.from(data as Buffer));
         });
-        connected.on("close", retire);
-        connected.on("error", retire);
+        connected.on("close", retireFromEvent);
+        connected.on("error", retireFromEvent);
         for (const wake of waiters) wake();
         waiters.clear();
       };
       void admit().catch(() => {
         candidate = false;
-        connected.close();
+        void retire();
       });
     });
   });
@@ -218,7 +245,7 @@ export async function createOpenCodeController(input: {
       guard = admit;
     },
     select(id) {
-      if (sessionId || !SessionId.safeParse(id).success) throw unavailable();
+      if (retired || sessionId || !SessionId.safeParse(id).success) throw unavailable();
       sessionId = id;
     },
     pending: () => (sessionId ? fence.pending(sessionId) : undefined),
@@ -257,8 +284,7 @@ export async function createOpenCodeController(input: {
           const timer = setTimeout(
             () => {
               pending.delete(id);
-              retire();
-              peer?.close();
+              void retire();
               reject(unavailable());
             },
             Math.max(1, deadline - Date.now()),
@@ -268,6 +294,7 @@ export async function createOpenCodeController(input: {
             if (error) {
               clearTimeout(timer);
               pending.delete(id);
+              void retire();
               reject(unavailable());
             }
           });
@@ -283,11 +310,6 @@ export async function createOpenCodeController(input: {
       if (!sessionId || lastAcknowledgment !== id || !fence.reconcile(sessionId, id)) throw unavailable();
       lastAcknowledgment = undefined;
     },
-    async close() {
-      retire();
-      for (const connection of websocket.clients) connection.terminate();
-      websocket.close();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    },
+    close: retire,
   };
 }

@@ -259,3 +259,35 @@ test("physical close is unavailable without native conditional ownership; origin
   expect(f.runner.closePane).not.toHaveBeenCalled();
   expect(f.prepared.dispose).not.toHaveBeenCalled();
 });
+
+test.each(["same", "replacement", "no-control", "moved"])(
+  "prepared close denial survives restart and %s without owning the new occupant",
+  async (mode) => {
+    const f = await fixture();
+    await f.hire();
+    f.store.close();
+    const current = {
+      ...f.agent,
+      ...(mode === "replacement" ? { agent: "claude", terminalId: "new-terminal" } : {}),
+      ...(mode === "moved" ? { paneId: "w2:p4" } : {}),
+    };
+    f.runner.resolveTerminal.mockResolvedValue(current);
+    const restored = new HerdrWatchStore(f.path, {
+      runner: f.runner,
+      ...(mode === "no-control" ? {} : { seatAdapters: [f.adapter] }),
+    });
+    try {
+      expect(await restored.closeSeat(f.agent.terminalId)).toBe(false);
+      expect(f.runner.closePane).not.toHaveBeenCalled();
+      expect(f.prepared.dispose).not.toHaveBeenCalled();
+    } finally {
+      restored.close();
+    }
+  },
+);
+
+test("legacy unmanaged OpenCode retains existing explicit close behavior", async () => {
+  const f = await fixture(); // No prepared allocation was made.
+  expect(await f.store.closeSeat(f.agent.terminalId)).toBe(true);
+  expect(f.runner.closePane).toHaveBeenCalledWith(f.agent.paneId);
+});

@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SeatLaunch, SeatProcessIdentity, SeatView } from "@clankie/agent-hosts";
 import { afterEach, expect, test, vi } from "vitest";
-import { createOpenCodeSeatAdapter } from "../src/captain/opencode-seat-adapter.ts";
+import { createOpenCodeSeatAdapter, probeOpenCodeVersion } from "../src/captain/opencode-seat-adapter.ts";
+import { WebSocket } from "ws";
+import { DeliveryFence } from "../src/captain/delivery-fence.ts";
+import { createOpenCodeController } from "../src/captain/opencode-worker-controller.ts";
 import type { OpenCodeController } from "../src/captain/opencode-worker-controller.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 
@@ -202,15 +205,129 @@ test("unavailable before dispatch is not falsely uncertain; accepted delivery re
     deliveryStage: "unavailable",
   });
   expect(f.controller.request.mock.calls.some(([method]) => method === "send")).toBe(false);
-  expect(await started.control.send("accepted")).toMatchObject({
+  expect(await started.control.send("cannot recover retired identity")).toMatchObject({ outcome: "offline" });
+  expect(await f.adapter.attach(f.ref)).toBeUndefined();
+  const next = await fixture();
+  const live = await next.adapter.prepare!(next.launch);
+  cleanups.push(() => live.dispose());
+  const ready = await live.start(next.view);
+  if (ready.outcome !== "started") throw new Error("fixture start");
+  expect(await ready.control.send("accepted")).toMatchObject({
     outcome: "accepted",
     deliveryStage: "consumed",
   });
-  expect(f.controller.acknowledge).toHaveBeenCalledOnce();
-  f.uncertain();
-  expect(await started.control.send("never resent")).toMatchObject({
+  expect(next.controller.acknowledge).toHaveBeenCalledOnce();
+  next.uncertain();
+  expect(await ready.control.send("never resent")).toMatchObject({
     outcome: "unconfirmed",
     messageId: "msg_originalUncertain",
   });
-  expect(f.controller.request.mock.calls.filter(([method]) => method === "send")).toHaveLength(1);
+  expect(next.controller.request.mock.calls.filter(([method]) => method === "send")).toHaveLength(1);
 });
+
+test.each([false, true])(
+  "version imports are isolated from all owner data/config and cleaned (failure=%s)",
+  async (fails) => {
+    let scratch = "";
+    const run = vi.fn(
+      async (_file: string, _args: readonly string[], options: { env: NodeJS.ProcessEnv; cwd: string }) => {
+        scratch = options.cwd;
+        expect(options.env.HOME).toBe(scratch);
+        expect(options.env.OPENCODE_DB).toBe(join(scratch, "version.db"));
+        expect(options.env.OPENCODE_CONFIG_CONTENT).toBe("{}");
+        expect(options.env.OPENCODE_PURE).toBe("1");
+        expect(Object.keys(options.env).sort()).toEqual(
+          [
+            "HOME",
+            "OPENCODE_CONFIG_CONTENT",
+            "OPENCODE_CONFIG_DIR",
+            "OPENCODE_DB",
+            "OPENCODE_PURE",
+            "PATH",
+            "TMPDIR",
+            "XDG_CACHE_HOME",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+          ].sort(),
+        );
+        if (fails) throw new Error("native import failed");
+        return { stdout: "1.18.18\n" };
+      },
+    );
+    if (fails)
+      await expect(probeOpenCodeVersion("/selected/opencode", run)).rejects.toThrow(
+        "isolated version check unavailable",
+      );
+    else expect(await probeOpenCodeVersion("/selected/opencode", run)).toBe("1.18.18");
+    expect(run).toHaveBeenCalledOnce();
+    await expect(readdir(scratch)).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
+
+test.each(["peer-loss", "proof-revoked"])(
+  "successful adapter retirement on %s evicts exact control/config, closes listener and preserves native data/receipt",
+  async (mode) => {
+    const f = await fixture();
+    let controller!: OpenCodeController;
+    const adapter = createOpenCodeSeatAdapter({
+      repoRoot: f.directory,
+      stateDir: f.directory,
+      native: f.native,
+      discover: f.discovery,
+      controller: async (options) => {
+        controller = await createOpenCodeController(options);
+        return controller;
+      },
+      timeoutMs: 1000,
+    });
+    const prepared = await adapter.prepare!(f.launch);
+    cleanups.push(() => prepared.dispose());
+    const peer = new WebSocket(controller.endpoint, ["clankie-native-worker", controller.token]);
+    cleanups.push(async () => peer.terminate());
+    const pending = new Map<string, () => void>();
+    peer.on("message", (raw) => {
+      void (async () => {
+        const frame = JSON.parse(raw.toString());
+        if (!frame.method) {
+          pending.get(frame.id)?.();
+          return;
+        }
+        let result: unknown = "idle";
+        if (frame.method === "initialize") result = { sessionId, version: "1.18.18" };
+        if (frame.method === "send") {
+          const id = "claim-callback";
+          await new Promise<void>((resolve) => {
+            pending.set(id, resolve);
+            peer.send(JSON.stringify({ id, method: "claim", input: { sessionId, ...frame.input } }));
+          });
+          if (mode === "peer-loss") {
+            peer.close();
+            return;
+          }
+          f.root.check.mockResolvedValue(false);
+          result = { outcome: "unconfirmed", messageId: frame.input.messageId, detail: "fixture revocation" };
+        }
+        peer.send(JSON.stringify({ id: frame.id, result }));
+      })();
+    });
+    const started = await prepared.start(f.view);
+    expect(started.outcome).toBe("started");
+    if (started.outcome !== "started") throw new Error("fixture start");
+    expect(await adapter.attach(f.ref)).toBe(started.control);
+    const result = await started.control.send("original uncertain delivery");
+    expect(result.outcome).toBe("unconfirmed");
+    await vi.waitFor(async () => {
+      await expect(readFile(prepared.env!.OPENCODE_TUI_CONFIG!)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+    expect(await adapter.attach(f.ref)).toBeUndefined();
+    await expect(fetch(controller.endpoint.replace("ws:", "http:"))).rejects.toThrow();
+    const cold = new DeliveryFence(join(f.directory, "opencode-workers", "receipts.json"));
+    expect(cold.pending(sessionId)).toMatchObject({ messageId: (result as { messageId: string }).messageId });
+    expect(f.native.capture).toHaveBeenCalledOnce();
+    expect(f.view.run).not.toHaveBeenCalled();
+    expect(f.view.start).not.toHaveBeenCalled();
+    await prepared.dispose();
+    await prepared.dispose();
+  },
+);

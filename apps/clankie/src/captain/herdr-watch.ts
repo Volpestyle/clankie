@@ -103,6 +103,10 @@ const PersistedHerdrWatchesSchema = z
   .object({
     schemaVersion: z.literal(1),
     watches: z.array(HerdrWatchRecordSchema),
+    /** Deny-only history of prepared allocations; never ownership or admission. */
+    preparedPanes: z
+      .array(z.object({ paneId: z.string().min(1), terminalId: z.string().min(1).optional() }).strict())
+      .optional(),
   })
   .strict();
 
@@ -1704,6 +1708,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     let control: SeatControlMode | undefined;
     let startAttempted = nativePrepared !== undefined;
     try {
+      if (nativePrepared) {
+        this.state.preparedPanes ??= [];
+        if (!this.state.preparedPanes.some((entry) => entry.paneId === paneId)) {
+          this.state.preparedPanes.push({ paneId });
+          this.save();
+        }
+      }
       if (projectAllocation) this.projectHires.pane(projectAllocation, paneId);
       if (authority !== undefined)
         this.hireOwners.bind(paneId, authority.owner, undefined, authority.intentId);
@@ -1791,6 +1802,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
               nativeSessionId(current) === ref.sessionId;
             if (!matches(agent)) throw new Error("Native hire binding does not match the live session");
             const nativeProof = await nativePrepared?.verify(ref);
+            if (nativePrepared) {
+              const allocated = this.state.preparedPanes?.find((entry) => entry.paneId === paneId);
+              if (!allocated) throw new Error("Prepared native allocation record unavailable");
+              allocated.terminalId = agent.terminalId;
+              this.save();
+            }
             await this.observeHireIdentity(receiptKey, agent, input, authority, true, nativeProof);
             const currentToolNames = await this.expectedHireTools(input);
             await checkExpectedTools();
@@ -2032,7 +2049,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // Prepared OpenCode control cannot authorize closing a potentially
       // replaced process from a previous snapshot. Preserve the pane/control;
       // exact-session native interrupt remains available.
-      if (current.agent === "opencode") return false;
+      if (
+        this.state.preparedPanes?.some(
+          (entry) =>
+            entry.paneId === current.paneId ||
+            entry.terminalId === seatId ||
+            entry.terminalId === current.terminalId,
+        )
+      )
+        return false;
+      if (this.stateUnreadable && current.agent === "opencode") return false;
       // End programmatic control first, so nothing outlives its pane.
       const control = await this.seatControl.attach(current);
       await guard?.();

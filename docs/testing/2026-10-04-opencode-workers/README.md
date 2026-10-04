@@ -35,7 +35,10 @@ birth time. The public macOS libproc ABI helper validates the struct and exact
 return lengths; the original socket and root are rechecked around admission
 awaits. A secret in the private launch config routes the connection but cannot
 substitute for those observations. Loss or replacement retires control; there is
-no reconnect or process adoption. The first project-hire observation stores the
+no reconnect or process adoption. Retirement closes the owned listener and all owned sockets, evicts only the
+matching adapter control, and removes only temporary launch config. Uncertain
+delivery records survive. Cleanup is one-shot; late admission and repeated close
+cannot reactivate it. The first project-hire observation stores the
 actual verified lifetime so later metadata cannot retroactively prove a hire.
 
 Only the first awaited TUI plugin initialization may create and navigate to a
@@ -62,10 +65,14 @@ interrupt targets only the selected session and never answers an owner decision.
   can coalesce intermediate A→B→A changes. Snapshot checks are not an atomic
   transaction with server acceptance; exact session IDs prevent retargeting and
   detected post-dispatch changes produce uncertainty.
-- Physical pane close is unavailable for OpenCode: the selected Herdr API has
+- Physical pane close is unavailable for controller-prepared OpenCode: the selected Herdr API has
   only `pane_id`, without a root-lifetime compare-and-close condition. Clankie
   preserves the pane/controller rather than closing a possible replacement.
-  Native exact-session interrupt remains available. Controller disposal itself
+  Native exact-session interrupt remains available. A deny-only record in the
+  existing watch state retains the allocated pane and original terminal across
+  replacement/restart; it never grants authority. Unmanaged legacy close behavior
+  is unchanged where no prepared-launch fact exists. An unknown allocation has
+  no proven pane address and is never closed as compensation. Controller disposal
   neither terminates the native process nor deletes its history.
 - Restart does not restore live control. Durable unresolved delivery claims
   survive; a saved session label cannot authorize reattachment or resend.
@@ -76,7 +83,9 @@ interrupt targets only the selected session and never answers an owner decision.
 - Native executable discovery is PATH-based and requires a direct executable;
   script wrappers, other operating systems and unsupported versions fail closed.
   The Python/libproc helper is a required macOS dependency, not emulated on
-  another platform.
+  another platform. Even `--version` imports modules that initialize native
+  filesystem paths, so capability discovery uses a disposable cwd/HOME/XDG/DB/
+  config/temp environment without inherited owner configuration or credentials.
 
 ## Verification and primary source
 
