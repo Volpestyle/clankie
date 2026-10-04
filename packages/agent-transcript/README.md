@@ -29,8 +29,18 @@ restarts from the tail. Pages re-read 256 KiB before the cursor so tool results 
 Claude's parent chain resolve, and report only entries that changed.
 
 `subagents.ts` derives a seat's native subagents (Claude Code `Agent`/`Task`
-calls, including background calls closed by their `<task-notification>`) for the
+calls and Codex child rollouts) for the
 fleet roster ([ADR 0208](../../docs/adr/0208-agents-carry-a-role-the-world-reads-it.md)).
 It tails the session incrementally from at most 2 MiB before the end and keeps
 only labels and states, never content. The service calls it only for local seats
 it already has an address for (ADR 0188).
+
+Codex labels combine nickname and task path from `session_meta`. Only direct
+children in the parent's own Codex home are read. Parent `FINAL_ANSWER`
+envelopes, targeted wait/close results and `list_agents` statuses settle them
+on the next read; generic wait acknowledgements do not. Successful followup
+and newer child `task_started` records reset completion. Without a current
+parent status, five minutes of file idleness is a heuristic fallback, not proof
+that a process exited. At most 64 children, 4,096 recent headers (64 KiB each)
+and 32 addressed parent sessions are retained. Partial lines wait for the next
+read; file replacement or truncation restarts the bounded tail.

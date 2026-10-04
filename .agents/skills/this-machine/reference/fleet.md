@@ -49,7 +49,11 @@ designer" (1–24 letters, digits, spaces, hyphens). The owner's world places th
 agent at that station and reads its backlog from work items labelled with the
 role. Prefer a role already in use (`clankie agents roles`) over a near-duplicate.
 `clankie agents role NAME "ROLE"|none` changes it later. Fleet seats you hired or opened report native
-Claude subagents as `subagents`; absent means unknown (ADR 0208).
+Claude and Codex subagents as `subagents`; absent means unknown (ADR 0208).
+Codex entries combine nickname and task path. Parent collection/status records
+settle children on the next fleet read; without a current parent status, five
+minutes of file idleness is a fallback and may misclassify a quiet running tool.
+Remote and unaddressed seats remain unknown.
 
 Project role settings override requested harness, model and effort at hire.
 Use the role already configured for the intended project. `projectId`, when
