@@ -952,7 +952,7 @@ function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinit
         "Every finished result gets inspectable evidence: a screenshot or video for anything visible; test output, " +
         "numbers and commit links otherwise, each captioned with what it proves and what is sample data. " +
         "action=init records the repo's convention once (backend, plus directory, githubRepo or linearTeam/" +
-        "linearProject); omit backend to record what discovery found. Criteria numbers for check/uncheck are 1-based.",
+        "linearProject and optional linearLabel for an existing repo-board label); omit backend to record what discovery found. Criteria numbers for check/uncheck are 1-based.",
       parameters: Type.Object({
         action: StringEnum(["create", "update", "attach", "init"]),
         repo,
@@ -976,6 +976,13 @@ function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinit
         githubRepo: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
         linearTeam: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
         linearProject: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+        linearLabel: Type.Optional(
+          Type.String({
+            minLength: 1,
+            maxLength: 64,
+            description: "Existing Linear label to scope this repo's board and new items.",
+          }),
+        ),
       }),
       execute: async (_id, params) => {
         const target = params.repo ?? "workspace";
@@ -988,6 +995,7 @@ function workItemTools(work: NonNullable<CaptainDeps["workItems"]>): ToolDefinit
             ...(params.githubRepo === undefined ? {} : { githubRepo: params.githubRepo }),
             ...(params.linearTeam === undefined ? {} : { linearTeam: params.linearTeam }),
             ...(params.linearProject === undefined ? {} : { linearProject: params.linearProject }),
+            ...(params.linearLabel === undefined ? {} : { linearLabel: params.linearLabel }),
           });
         if (params.action === "create") {
           if (params.title === undefined) return json({ error: "create needs a title" });

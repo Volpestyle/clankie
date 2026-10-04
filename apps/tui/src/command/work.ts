@@ -6,7 +6,7 @@ import { commandHost } from "./io.ts";
 
 const WORK_USAGE = [
   "Usage: clankie work [status|discover] | repos | init [--backend default|markdown|github|linear] [--directory D]",
-  "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--note TEXT]",
+  "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--note TEXT]",
   "  | list [--status S,S] [--owner O] [--label L] | show ID | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S]",
   "  | update ID [--status S] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
   "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
@@ -65,6 +65,8 @@ const numbers = (parsed: Parsed, flag: string) =>
 export function workRequest(args: readonly string[], repo: string): Record<string, unknown> {
   const parsed = parseWorkArgs(args);
   const [verb = "status", ...rest] = parsed.positional;
+  if (parsed.flags.has("--linear-label") && verb !== "init")
+    throw new Error("--linear-label only applies to init");
   const status = one(parsed, "--status");
   switch (verb) {
     case "status":
@@ -83,6 +85,9 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
         ...(one(parsed, "--linear-project") === undefined
           ? {}
           : { linearProject: one(parsed, "--linear-project") }),
+        ...(one(parsed, "--linear-label") === undefined
+          ? {}
+          : { linearLabel: one(parsed, "--linear-label") }),
         ...(one(parsed, "--note") === undefined ? {} : { note: one(parsed, "--note") }),
       };
     case "list":
