@@ -7,6 +7,7 @@ import {
   WakeErrorCodeSchema,
   WakeRequestSchema,
   WakeResponseSchema,
+  requestDeviceWake,
   wakeSigningInput,
 } from "../src/wake.ts";
 
@@ -15,6 +16,35 @@ const deviceId = "dev_0123456789";
 const challenge = `1790000000000.${"A".repeat(22)}.${"b".repeat(43)}`;
 
 describe("wake contract", () => {
+  it("projects additive wake answers while still rejecting malformed challenges", async () => {
+    let valid = true;
+    const fetchImpl: typeof fetch = async (url, init) => {
+      expect(new Headers(init?.headers).has("authorization")).toBe(false);
+      if (String(url).endsWith("/challenge")) {
+        return Response.json({
+          challenge: valid ? challenge : "invalid",
+          expiresAtMs: 1790000000000,
+          added: true,
+        });
+      }
+      expect(JSON.parse(String(init?.body))).toEqual({ deviceId, challenge, signature: "fixture-signature" });
+      return Response.json({ state: "waking", retryAfterMs: 5000, added: true });
+    };
+    const input = {
+      baseUrl: "https://fixture.invalid",
+      hostId,
+      deviceId,
+      sign: async (message: string) => {
+        expect(message).toBe(wakeSigningInput(hostId, deviceId, challenge));
+        return "fixture-signature";
+      },
+      fetchImpl,
+    };
+    await expect(requestDeviceWake(input)).resolves.toEqual({ state: "waking", retryAfterMs: 5000 });
+    valid = false;
+    await expect(requestDeviceWake(input)).rejects.toThrow();
+  });
+
   it("carries a real P-256 x963 public key and raw r‖s signature at their exact widths", () => {
     const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
     const point = publicKey.export({ format: "jwk" });

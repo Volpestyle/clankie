@@ -11,6 +11,7 @@ import {
   type OperatorPresenceSnapshot,
 } from "./presence.ts";
 export * from "./presence.ts";
+export * from "./response.ts";
 import {
   ProjectProposalLocatorSchema,
   ProjectProposalTargetSchema,

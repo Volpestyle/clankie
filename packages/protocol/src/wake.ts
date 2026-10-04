@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseProtocolResponse } from "./response.ts";
 
 /**
  * Node-free contract for waking a sleeping hosted body (VUH-1066). The device
@@ -89,9 +90,13 @@ export async function requestDeviceWake(input: {
       );
     return result;
   }
-  const { challenge } = WakeChallengeResponseSchema.parse(await post(GATEWAY_WAKE_CHALLENGE_PATH, {}));
+  const { challenge } = parseProtocolResponse(
+    WakeChallengeResponseSchema,
+    await post(GATEWAY_WAKE_CHALLENGE_PATH, {}),
+  );
   const signature = await input.sign(wakeSigningInput(input.hostId, input.deviceId, challenge));
-  return WakeResponseSchema.parse(
+  return parseProtocolResponse(
+    WakeResponseSchema,
     await post(GATEWAY_WAKE_PATH, { deviceId: input.deviceId, challenge, signature }),
   );
 }

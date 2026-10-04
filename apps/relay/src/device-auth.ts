@@ -1,4 +1,8 @@
-import { DeviceSelfResponseSchema, type DeviceSelfResponse } from "../../../packages/protocol/src/index.ts";
+import {
+  DeviceSelfResponseSchema,
+  parseProtocolResponse,
+  type DeviceSelfResponse,
+} from "../../../packages/protocol/src/index.ts";
 
 export type RelayDeviceAuthDenial = "invalid" | "expired" | "revoked" | "unavailable";
 
@@ -49,7 +53,10 @@ export class ControlPlaneDeviceAuthorizer implements RelayDeviceAuthorizer {
       return { authorized: false, denial };
     }
     try {
-      return { authorized: true, device: DeviceSelfResponseSchema.parse(await response.json()) };
+      return {
+        authorized: true,
+        device: parseProtocolResponse(DeviceSelfResponseSchema, await response.json()),
+      };
     } catch {
       return { authorized: false, denial: "unavailable" };
     }
