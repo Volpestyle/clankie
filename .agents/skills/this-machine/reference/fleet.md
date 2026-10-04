@@ -213,6 +213,16 @@ harness history on demand through replay/tail; viewing one does not call Clankie
 or copy its transcript into his event log. Explicit sends and native messages are
 host-owned communications.
 
+Native subagent tray history is read-only. `subagent_replay` takes the parent's
+existing seat/persona `conversationId` plus `subagents.recent[].id` inside its
+`replay` request; it needs the chat grant and returns the ordinary normalized
+replay page. Claude IDs are parent task-call IDs, Codex IDs are child thread
+UUIDs, and OpenCode IDs are task-call IDs. The server resolves them through the
+addressed local parent; never use labels or list positions as addresses. Missing
+IDs on older hosts remain display-only. Missing native locators and remote child
+history report unavailable. Reading a child does not create, resume or steer a
+conversation.
+
 ## Chats, agents, rooms, and history
 
 In the TUI, `/chats` means personal/workspace chats with Clankie; `/agents`

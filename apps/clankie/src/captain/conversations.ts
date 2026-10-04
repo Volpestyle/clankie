@@ -122,6 +122,7 @@ type ConversationServiceRequest = Exclude<
   | { op: "roster" }
   | { op: "fleet" }
   | { op: "presence" }
+  | { op: "subagent_replay" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }
   | { op: "state_work" }

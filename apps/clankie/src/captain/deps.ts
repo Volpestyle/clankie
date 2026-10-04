@@ -87,7 +87,7 @@ export interface CaptainDeps {
   readonly rivals?: RivalsClient;
   /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */
   readonly agentSessions?: Pick<AgentSessions, "list" | "read"> &
-    Partial<Pick<AgentSessions, "resolve" | "subagents">>;
+    Partial<Pick<AgentSessions, "resolve" | "subagents" | "readSubagent">>;
   /** Work items in each repo's own tracking convention (ADR 0191). */
   readonly workItems?: Pick<WorkItemsService, "handle">;
   /** Tools on his connected MCP servers. The lane is passed on every call. */

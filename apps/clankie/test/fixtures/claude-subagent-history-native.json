@@ -1,0 +1,102 @@
+{
+  "provenance": {
+    "nativeVersion": "2.1.285",
+    "inspected": "~/.claude/projects/-Users-james-dev-clankie/<parent>.jsonl and <parent>/subagents/agent-<agentId>.jsonl",
+    "sanitized": "Prompt, result and response replaced; minimal native fields retained; child chain shortened to two records."
+  },
+  "parentId": "ffc3a18d-0e7a-402e-b2ab-258cb67ff36b",
+  "agentId": "a233e4a0333a6c4d5",
+  "callId": "toolu_01L6AzjULKpDzH9qs5Zs4izW",
+  "parent": [
+    {
+      "type": "assistant",
+      "isSidechain": false,
+      "uuid": "c10fefa0-6cd3-4c82-9b43-01eeaeee5f5a",
+      "parentUuid": null,
+      "timestamp": "2026-09-30T14:15:11.737Z",
+      "sessionId": "ffc3a18d-0e7a-402e-b2ab-258cb67ff36b",
+      "version": "2.1.285",
+      "message": {
+        "id": "msg_fixtureCall",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01L6AzjULKpDzH9qs5Zs4izW",
+            "name": "Agent",
+            "input": {
+              "description": "Inspect fixture",
+              "subagent_type": "general",
+              "prompt": "Fixture prompt"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "isSidechain": false,
+      "uuid": "9173328f-ce84-4c3e-8259-1cb239787241",
+      "parentUuid": "c10fefa0-6cd3-4c82-9b43-01eeaeee5f5a",
+      "timestamp": "2026-09-30T14:15:45.213Z",
+      "sessionId": "ffc3a18d-0e7a-402e-b2ab-258cb67ff36b",
+      "version": "2.1.285",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01L6AzjULKpDzH9qs5Zs4izW",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fixture background launched"
+              }
+            ]
+          }
+        ]
+      },
+      "toolUseResult": {
+        "isAsync": true,
+        "status": "async_launched",
+        "agentId": "a233e4a0333a6c4d5"
+      }
+    }
+  ],
+  "child": [
+    {
+      "type": "user",
+      "isSidechain": true,
+      "agentId": "a233e4a0333a6c4d5",
+      "sessionId": "ffc3a18d-0e7a-402e-b2ab-258cb67ff36b",
+      "version": "2.1.285",
+      "timestamp": "2026-09-30T14:15:45.179Z",
+      "uuid": "1224f990-d97a-467d-882f-8c4546ad19d9",
+      "parentUuid": null,
+      "message": {
+        "role": "user",
+        "content": "Fixture child prompt"
+      }
+    },
+    {
+      "type": "assistant",
+      "isSidechain": true,
+      "agentId": "a233e4a0333a6c4d5",
+      "sessionId": "ffc3a18d-0e7a-402e-b2ab-258cb67ff36b",
+      "version": "2.1.285",
+      "timestamp": "2026-09-30T14:16:15.084Z",
+      "uuid": "b45321a7-fa07-4b73-a504-b93747753681",
+      "parentUuid": "1224f990-d97a-467d-882f-8c4546ad19d9",
+      "message": {
+        "id": "msg_011CfZmNEWoMQBtKZk7RyJg5",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Fixture child answer"
+          }
+        ]
+      }
+    }
+  ]
+}
