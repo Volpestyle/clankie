@@ -471,7 +471,8 @@ export async function runHostedConsole() {
       ),
   ];
   let disconnected = false;
-  const shell = new ClankieFaceShell({
+  const shell: ClankieFaceShell = new ClankieFaceShell({
+    onLoadOlderHistory: () => prompt.loadOlderHistory(createOperatorConversationShellSink(shell)),
     commands,
     cwd: process.cwd(),
     allowLocalShell: false,
@@ -508,14 +509,18 @@ export async function runHostedConsole() {
     onExit: stopObservation,
   });
   transport.subscribe(() => shell.refreshStatusView());
-  shell.start();
-  shell.insertMarkdown(
-    notice
-      ? `Hosted Clankie unavailable: ${notice}. Use /reconnect.`
-      : "Connected to your hosted Clankie. /conversation selects a retained conversation; /settings manages this connection. Closing this console leaves work running.",
-  );
+  let historyReady = false;
   if (selection.conversationId) {
-    await prompt.restoreHistory(createOperatorConversationShellSink(shell));
+    try {
+      historyReady = await prompt.restoreHistory(createOperatorConversationShellSink(shell));
+      if (!historyReady) notice = "The selected conversation history is no longer available";
+    } catch (error) {
+      notice = `Conversation restore unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+  shell.start();
+  if (notice) shell.insertMarkdown(`Hosted Clankie unavailable: ${notice}. Use /reconnect.`);
+  if (historyReady) {
     observe();
   }
 }

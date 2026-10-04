@@ -105,7 +105,35 @@ export interface FaceShellCommand {
   run(argument: string, shell: ClankieFaceShell): Promise<void> | void;
 }
 
+/** Native wheel, page, prompt-navigation and scrollbar scrolling share this boundary. */
+class ConversationScrollView extends ScrollView {
+  private readonly older: () => void;
+  constructor(component: Component, older: () => void, options: ConstructorParameters<typeof ScrollView>[1]) {
+    super(component, options);
+    this.older = older;
+  }
+
+  override scrollBy(lines: number): number {
+    const remaining = super.scrollBy(lines);
+    if (lines < 0 && this.scrollTop <= this.viewportHeight) this.older();
+    return remaining;
+  }
+
+  override scrollTo(top: number, options?: { disableFollow?: boolean }): void {
+    const previous = this.scrollTop;
+    super.scrollTo(top, options);
+    if (top < previous && this.scrollTop <= this.viewportHeight) this.older();
+  }
+
+  override scrollToStart(): void {
+    super.scrollToStart();
+    this.older();
+  }
+}
+
 export interface FaceShellOptions {
+  /** Fetch one older conversation window when the owner scrolls towards its start. */
+  readonly onLoadOlderHistory?: () => Promise<void>;
   readonly liveAgents?: () => readonly LiveAgent[];
   readonly onOpenLiveAgent?: (agent: LiveAgent) => Promise<void>;
   readonly onLeaveLiveAgent?: () => Promise<void>;
@@ -260,6 +288,8 @@ export class ClankieFaceShell {
   private readonly document = new Container();
   private readonly chat = new Container();
   private readonly transcriptScrollView: ScrollView;
+  private historyGeneration = 0;
+  private historyLoading = false;
   private readonly statusContainer = new Container();
   private readonly editor: Editor;
   private readonly pendingPrompts: ClankiePendingPrompts;
@@ -359,7 +389,7 @@ export class ClankieFaceShell {
       this.theme.capabilities,
       this.headerVisibleState,
     );
-    this.transcriptScrollView = new ScrollView(this.document, {
+    this.transcriptScrollView = new ConversationScrollView(this.document, () => this.loadOlderHistory(), {
       follow: "end",
       overscroll: "chain",
       primary: true,
@@ -707,12 +737,64 @@ export class ClankieFaceShell {
   }
 
   clearTranscript(): void {
+    this.historyGeneration += 1;
+    this.historyLoading = false;
     this.setPendingPrompts([]);
     this.chat.clear();
     this.liveAssistantBlock = undefined;
     this.activeToolBlocks.clear();
     this.expandableBlocks.clear();
+    this.transcriptScrollView.scrollToEnd();
     this.tui.requestRender();
+  }
+
+  /** Render a page in one synchronous transaction; prepends keep the visible rows in place. */
+  renderHistory(position: "replace" | "prepend", render: () => void): void {
+    if (position === "replace") {
+      this.clearTranscript();
+      render();
+      this.transcriptScrollView.scrollToEnd();
+      return;
+    }
+    const previous = this.captureTranscript();
+    const scroll = this.transcriptScrollView;
+    const top = scroll.scrollTop;
+    const following = scroll.isFollowingEnd;
+    const width = scroll.getContentWidth(this.tui.terminal.columns);
+    this.chat.clear();
+    this.liveAssistantBlock = undefined;
+    this.activeToolBlocks.clear();
+    this.expandableBlocks.clear();
+    render();
+    if (this.chat.children.length > 0 && previous.children.length > 0) this.chat.addChild(new Spacer(1));
+    const addedRows = this.chat.render(width).length;
+    for (const child of previous.children) this.chat.addChild(child);
+    for (const [id, block] of previous.activeToolBlocks) this.activeToolBlocks.set(id, block);
+    for (const [block, state] of previous.expandableBlocks) this.expandableBlocks.set(block, state);
+    this.liveAssistantBlock = previous.liveAssistantBlock;
+    // ScrollView clamps against its last layout. Update its measured extent
+    // before restoring the anchor, without emitting an intermediate frame.
+    scroll.updateLayout(this.document.render(width).length, scroll.viewportHeight, () =>
+      this.requestRender(),
+    );
+    if (following) scroll.scrollToEnd();
+    else scroll.scrollTo(top + addedRows, { disableFollow: true });
+    this.requestRender();
+  }
+
+  private loadOlderHistory(): void {
+    if (this.historyLoading || !this.options.onLoadOlderHistory) return;
+    const generation = this.historyGeneration;
+    this.historyLoading = true;
+    void this.options
+      .onLoadOlderHistory()
+      .catch((error: unknown) => {
+        if (generation === this.historyGeneration)
+          this.refreshStatus(`Older history unavailable: ${formatError(error)}`);
+      })
+      .finally(() => {
+        if (generation === this.historyGeneration) this.historyLoading = false;
+      });
   }
 
   /** True while an ephemeral `/btw` fork exists, whichever thread is on screen. */
@@ -772,6 +854,8 @@ export class ClankieFaceShell {
   }
 
   private restoreTranscript(snapshot: ClankieTranscriptSnapshot): void {
+    this.historyGeneration += 1;
+    this.historyLoading = false;
     this.chat.clear();
     for (const child of snapshot.children) this.chat.addChild(child);
     this.activeToolBlocks.clear();

@@ -398,6 +398,8 @@ export interface PendingOperatorPrompt {
 }
 
 export interface OperatorConversationEventSink {
+  /** Commit a history page synchronously, separately from the live tail. */
+  history?(events: readonly OperatorConversationStreamEvent[], position: "replace" | "prepend"): void;
   pending?(prompts: readonly PendingOperatorPrompt[]): void;
   event(event: OperatorConversationStreamEvent): void;
   recovery(recovery: OperatorConversationRecovery): void;
@@ -433,6 +435,14 @@ export class OperatorConversationPromptSession {
   private readonly tails: OperatorConversationTailStore;
   private readonly herdrPaneId: () => string | undefined;
   private readonly restores = new Map<string, Promise<boolean>>();
+  private readonly history = new Map<
+    string,
+    {
+      before: string;
+      hasOlder: boolean;
+      loading?: Promise<void>;
+    }
+  >();
   /** One tail observes the original turn and every input admitted alongside it. */
   private activeRun: ObservedPromptRuns | undefined;
 
@@ -453,45 +463,83 @@ export class OperatorConversationPromptSession {
     await this.tails.initialize();
   }
 
-  /** Replays only unread durable history, persisting every rendered boundary. */
+  /** Replays unread durable history, persisting each rendered page boundary. */
   public async restore(sink: OperatorConversationEventSink): Promise<boolean> {
     const conversationId = this.requiredConversationId();
     return await this.restoreConversation(conversationId, sink);
   }
 
-  /**
-   * Rebuilds an empty transcript from the newest turns, not the whole log: an
-   * agent opened mid-run lands on what it is doing now. The live tail then
-   * resumes from that window's newest event.
-   */
+  /** Open at the latest retained window, then tail precisely after that snapshot. */
   public async restoreHistory(sink: OperatorConversationEventSink): Promise<boolean> {
     const conversationId = this.requiredConversationId();
     const active = this.restores.get(conversationId);
-    if (active !== undefined) return await active;
-    const run = this.restoreRecentHistory(conversationId, sink).finally(() => {
-      this.restores.delete(conversationId);
-    });
+    const run = Promise.resolve(active)
+      .then(() => this.restoreLatest(conversationId, sink))
+      .finally(() => {
+        if (this.restores.get(conversationId) === run) this.restores.delete(conversationId);
+      });
     this.restores.set(conversationId, run);
     return await run;
   }
 
-  private async restoreRecentHistory(
-    conversationId: string,
-    sink: OperatorConversationEventSink,
-  ): Promise<boolean> {
+  private async restoreLatest(conversationId: string, sink: OperatorConversationEventSink): Promise<boolean> {
     const page = await this.client.replay({
       schemaVersion: 1,
       conversationId,
       surfaceClientId: this.tails.surfaceClientId,
       direction: "backward",
       turnLimit: RECENT_HISTORY_TURNS,
+      limit: 500,
     });
-    // An unknown or reset conversation has no window; the forward path owns recovery.
-    if (page.status === "recover") return await this.restoreConversationNow(conversationId, sink, true);
-    if (page.hasOlder === true) sink.olderHistory?.();
-    for (const event of page.events) sink.event(event);
+    if (page.status === "recover") {
+      sink.recovery(page);
+      return false;
+    }
+    if (this.selection.conversationId !== conversationId) return false;
+    if (sink.history) sink.history(page.events, "replace");
+    else for (const event of page.events) sink.event(event);
+    sink.live(page.live);
+    this.history.set(conversationId, {
+      before: page.previousCursor ?? page.events[0]?.cursor ?? page.retainedFromCursor,
+      hasOlder: page.hasOlder ?? false,
+    });
+    // Never use safeCursor here: a forward-compatible host can expose events
+    // beyond the returned window. Only the rendered boundary belongs to us.
     await this.tails.writeCursor(conversationId, page.nextCursor);
     return true;
+  }
+
+  /** Older pages never move the forward cursor or replay a stale live draft. */
+  public async loadOlderHistory(sink: OperatorConversationEventSink): Promise<void> {
+    const conversationId = this.requiredConversationId();
+    const history = this.history.get(conversationId);
+    if (history === undefined || !history.hasOlder) return;
+    if (history.loading) return await history.loading;
+    history.loading = (async () => {
+      const page = await this.client.replay({
+        schemaVersion: 1,
+        conversationId,
+        surfaceClientId: this.tails.surfaceClientId,
+        direction: "backward",
+        cursor: history.before,
+        turnLimit: RECENT_HISTORY_TURNS,
+        limit: 500,
+      });
+      if (this.selection.conversationId !== conversationId || this.history.get(conversationId) !== history)
+        return;
+      if (page.status === "recover") {
+        history.hasOlder = false;
+        sink.recovery(page);
+        return;
+      }
+      if (sink.history) sink.history(page.events, "prepend");
+      else for (const event of page.events) sink.event(event);
+      history.before = page.previousCursor ?? page.events[0]?.cursor ?? page.retainedFromCursor;
+      history.hasOlder = page.hasOlder ?? false;
+    })().finally(() => {
+      delete history.loading;
+    });
+    await history.loading;
   }
 
   /** Keep the selected conversation live while the console is otherwise idle. */
@@ -504,12 +552,11 @@ export class OperatorConversationPromptSession {
   private async restoreConversation(
     conversationId: string,
     sink: OperatorConversationEventSink,
-    fromBeginning = false,
   ): Promise<boolean> {
     const active = this.restores.get(conversationId);
     if (active !== undefined) return await active;
-    const run = this.restoreConversationNow(conversationId, sink, fromBeginning).finally(() => {
-      this.restores.delete(conversationId);
+    const run = this.restoreConversationNow(conversationId, sink).finally(() => {
+      if (this.restores.get(conversationId) === run) this.restores.delete(conversationId);
     });
     this.restores.set(conversationId, run);
     return await run;
@@ -518,9 +565,8 @@ export class OperatorConversationPromptSession {
   private async restoreConversationNow(
     conversationId: string,
     sink: OperatorConversationEventSink,
-    fromBeginning: boolean,
   ): Promise<boolean> {
-    let cursor = fromBeginning ? undefined : this.tails.cursor(conversationId);
+    let cursor = this.tails.cursor(conversationId);
     for (;;) {
       const page = await this.client.replay({
         schemaVersion: 1,

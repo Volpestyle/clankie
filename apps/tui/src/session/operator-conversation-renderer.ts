@@ -12,6 +12,7 @@ import type { OperatorConversationEventSink, PendingOperatorPrompt } from "./ope
  * executions); everything else renders as a markdown notice.
  */
 export interface OperatorConversationRenderTarget {
+  renderHistory?(position: "replace" | "prepend", render: () => void): void;
   endToolGroup?(): void;
   setPendingPrompts?(prompts: readonly PendingOperatorPrompt[]): void;
   insertUserMessage(text: string): void;
@@ -107,6 +108,8 @@ export interface OperatorConversationShellSinkOptions {
    */
   readonly localEchoText?: string;
   readonly onContextUsage?: (usage: OperatorConversationContextUsage) => void;
+  /** Backfilled content must not overwrite current status or context usage. */
+  readonly historical?: boolean;
 }
 
 export function createOperatorConversationShellSink(
@@ -117,11 +120,24 @@ export function createOperatorConversationShellSink(
   let pendingEcho = options.localEchoText?.trim();
   const activeToolMessages = new Map<string, string>();
   return {
+    history(events, position): void {
+      const render = () => {
+        const historySink = createOperatorConversationShellSink(shell, {
+          ...options,
+          historical: position === "prepend",
+        });
+        for (const event of events) historySink.event(event);
+      };
+      if (shell.renderHistory) shell.renderHistory(position, render);
+      else render();
+    },
     pending(prompts): void {
       shell.setPendingPrompts?.(prompts);
     },
     event(event): void {
-      if (event.type === "activity" && activeToolMessages.size === 0) {
+      if (options.historical) {
+        // Historical pages only contribute transcript blocks.
+      } else if (event.type === "activity" && activeToolMessages.size === 0) {
         shell.setTurnLoaderMessage?.(activityLoaderMessage(event.phase));
       } else if (event.type === "tool") {
         if (event.phase === "started") {
@@ -168,9 +184,9 @@ export function createOperatorConversationShellSink(
           shell.endToolGroup?.();
           shell.clearLiveAssistant();
         }
-        shell.refreshStatus(`conversation turn ${event.phase}`);
+        if (!options.historical) shell.refreshStatus(`conversation turn ${event.phase}`);
       }
-      if (event.type === "context") options.onContextUsage?.(event.usage);
+      if (event.type === "context" && !options.historical) options.onContextUsage?.(event.usage);
     },
     live(draft): void {
       if (draft === undefined) {

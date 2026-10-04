@@ -79,6 +79,10 @@ fresh conversation in the current workspace. Tools run in the selected
 conversation's workspace, not the directory of the launching terminal
 ([ADR 0111](../../docs/adr/0111-a-console-process-starts-one-conversation.md)).
 
+Opening or switching conversations starts at the latest messages. Older history
+loads in bounded pages when you scroll up, keeping the visible text in place.
+The live tail continues independently while those pages load.
+
 `/cd <path>` moves to the newest retained conversation for another project,
 opening its first on first visit; `/cd` alone names the current one. The
 console's own `!` shell escape, path completion, footer, and `/status` follow the

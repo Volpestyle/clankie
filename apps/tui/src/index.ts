@@ -521,8 +521,9 @@ const commands = [
   ...buildMemoryCommands(operatorClient === undefined ? {} : { client: operatorClient }),
 ];
 
-const shell = new ClankieFaceShell({
+const shell: ClankieFaceShell = new ClankieFaceShell({
   commands,
+  onLoadOlderHistory: () => conversationPrompt.loadOlderHistory(conversationShellSink()),
   onHerdrJump: jumpToFleetAgent,
   liveAgents: () => herdrRoster.snapshot().liveAgents ?? [],
   expandedAgent: () => expandedAgent?.name,
@@ -751,6 +752,19 @@ process.on("unhandledRejection", (reason) => {
   handleFatalError("unhandledRejection", reason);
 });
 
+// Prepare the bounded latest window before the terminal's first frame. There
+// is no replay animation, and the tail resumes at that exact snapshot below.
+let initialHistoryReady = false;
+if (conversationSelection.conversationId !== undefined) {
+  try {
+    initialHistoryReady = await conversationPrompt.restoreHistory(conversationShellSink());
+    if (!initialHistoryReady) {
+      conversationNotice = "The selected conversation history is no longer available";
+    }
+  } catch (error) {
+    conversationNotice = `Conversation restore unavailable: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
 shell.start();
 if (seatEnv !== undefined && seatPaneId !== undefined) {
   void reportHerdrMetadata({
@@ -786,37 +800,29 @@ herdrRoster.start(() => {
 presence.start(() => {
   shell.refreshStatusView();
 });
-shell.insertMarkdown(
-  [
-    "**Notice**",
-    "",
-    conversationSelection.conversationId === undefined
-      ? "Clankie is unavailable. Direct `clankie` startup normally launches him; check the Clankie log."
-      : "Connected to Clankie. Plain prompts continue in the current conversation.",
-    ...(conversationSelection.conversationId === undefined
-      ? []
-      : [`Conversation: ${currentConversationTitle ?? "current"} · /conversation to list or switch.`]),
-    ...(conversationNotice === undefined ? [] : [conversationNotice]),
-    "Type a prompt, or /setup for what he can do. /status and /board show what's running.",
-  ].join("\n"),
-);
+if (conversationNotice !== undefined || conversationSelection.conversationId === undefined)
+  shell.insertMarkdown(
+    [
+      "**Notice**",
+      "",
+      conversationSelection.conversationId === undefined
+        ? "Clankie is unavailable. Direct `clankie` startup normally launches him; check the Clankie log."
+        : "Connected to Clankie. Plain prompts continue in the current conversation.",
+      ...(conversationSelection.conversationId === undefined
+        ? []
+        : [`Conversation: ${currentConversationTitle ?? "current"} · /conversation to list or switch.`]),
+      ...(conversationNotice === undefined ? [] : [conversationNotice]),
+      "Type a prompt, or /setup for what he can do. /status and /board show what's running.",
+    ].join("\n"),
+  );
 shell.refreshStatus("ready");
 // A fresh install opens on the one thing it needs; a ready one is left alone.
 // Setup writes only local config and the broker, so it does not wait on the service.
 void readCaptainReadiness(services)
   .then((readiness) => (readiness.ready ? undefined : runFirstSetup(shell, setupServices)))
   .catch(() => undefined);
-if (conversationSelection.conversationId !== undefined) {
-  void conversationPrompt
-    .restoreHistory(conversationShellSink())
-    .then((restored) => {
-      if (restored) startConversationObservation();
-    })
-    .catch((error: unknown) => {
-      const detail = error instanceof Error ? error.message : "Unknown restore error";
-      shell.insertMarkdown(`**Conversation restore unavailable**\n\n${detail}. No prompt was sent.`);
-      shell.refreshStatus("conversation restore unavailable");
-    });
+if (initialHistoryReady) {
+  startConversationObservation();
 }
 void loadConfig({ env: process.env, cwd: repoRoot })
   .then(({ config }) => {

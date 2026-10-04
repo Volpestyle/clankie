@@ -11,6 +11,10 @@ which mode you want. The transcript shows messages and tool work above the
 editor; `/` opens command suggestions and `Ctrl+/` opens the workbench.
 An ordinary terminal works; Herdr is optional for viewing the built-in workers.
 
+Opening or switching conversations starts at the latest messages. Scroll up to
+load older retained history in pages. The text you are reading stays in place,
+and live messages continue to arrive while older pages load.
+
 The local console uses the service's [HTTP API](/api/). Hosted mode uses the
 paired-device transport and supports a smaller command set; see
 [connection modes](/cli/#local-and-hosted-connection-modes). The tables below
