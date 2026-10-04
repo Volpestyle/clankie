@@ -255,8 +255,10 @@ it("sends the head of an oversized tool detail and keeps cursors on the whole en
     entries: [{ type: "tool", id: "t1", toolCallId: "call", name: "bash", phase: "completed", detail }],
   });
   const page = await nativeConversationPage(conversation, make(long), "idle", request);
+  if (page.status !== "page") throw new Error("expected a page");
   const tool = page.events.find((event) => event.type === "tool");
   expect(tool?.type === "tool" ? tool.detail : undefined).toBe(`${"x".repeat(4_096)}\n… (trimmed)`);
   const other = await nativeConversationPage(conversation, make(`${long}y`), "idle", request);
+  if (other.status !== "page") throw new Error("expected a page");
   expect(other.events.find((event) => event.type === "tool")?.cursor).not.toBe(tool?.cursor);
 });
