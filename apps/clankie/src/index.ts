@@ -1054,6 +1054,7 @@ const clankie = await createClankieApp({
     },
   },
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
+  seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   localFleet,
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   accounts: createAccounts({

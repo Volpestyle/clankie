@@ -276,13 +276,29 @@ sessions and recheck their captured source before acceptance. Social sessions
 cannot gain the tool through a later permission change. Accepted host operations
 may finish or roll back after the original turn/service exits.
 
-Supported `clankie mcp` operator bridges reinitialize an explicitly expired
-session, advertise a refreshed tool list, and let the same attached seat read the
-result. An uncertain mutation is never replayed; its next request establishes a
-new session. Fleet bridges retain their existing exact-link refresh and durable
-receipt rules. Already-loaded older bridges missing those protocols need their
-MCP process refreshed; no server-generated delivery ID or automatic resend hides
-that incompatibility. The native seat need not be restarted for a supported bridge.
+Supported `clankie mcp` operator bridges reinitialize after an explicit
+`unknown_session` rejection before tool admission and retry that rejected request
+once. Concurrent requests share the new session; reconnect drains old HTTP clients
+without closing another pending call. The refreshed tool list lets the same
+attached seat inspect the result.
+
+Protected `message_seat` and `hire_agent` calls receive a `deliveryId` or `hireId`
+before dispatch, carried in MCP `_meta["clankie/seat-call"]`. The service persists
+the scoped receipt before the native effect. A lost result returns typed
+uncertainty with that original ID; reconnect never replays the pending action.
+Use the read-only `reconcile_seat_call({deliveryId})` or
+`reconcile_seat_call({hireId})` in the owning operator conversation to inspect its
+original receipt, without sending again or launching a replacement. A settled
+call receipt returns the original tool result, not proof of task completion. The
+journal keeps the latest 1,000 settled result bodies; older IDs remain
+non-replayable and report an expired result, while uncertain originals remain
+retained. Receipts survive restart within these retention bounds. See
+[ADR 0207](adr/0207-work-records-and-native-agent-delivery.md#mcp-reconnect-and-native-call-receipts-vuh-1638).
+
+Fleet bridges retain their separate exact-link refresh and durable receipt rules.
+Already-loaded older operator bridges need their MCP process refreshed to gain
+these protocols; refreshing only the fleet mailbox is insufficient. The native
+seat need not be restarted for a supported bridge.
 
 ### `restart [service]`
 
