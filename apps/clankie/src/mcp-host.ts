@@ -102,6 +102,8 @@ export interface McpHost {
     /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
     readonly resultMode?: "model" | "data";
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
+    /** Live authority check run after the host's own awaits, immediately before the provider call. */
+    readonly fence?: () => Promise<void>;
   }): Promise<McpCallResult>;
   close(): Promise<void>;
 }
@@ -476,13 +478,17 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         const workerPost =
           server.id === "linear" && server.credential === "linear" && isLinearWorkerTool(input.tool);
         const credential = workerPost ? await options.credentials.get("linear") : undefined;
+        await input.fence?.();
         const result = workerPost
           ? await publishLinearWorker({
               tool: input.tool,
               args: input.arguments,
               credential,
               author: options.linearAuthor ?? (async () => undefined),
-              beforeWrite: () => assertCurrent(server, state!),
+              beforeWrite: async () => {
+                await assertCurrent(server, state!);
+                await input.fence?.();
+              },
               ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
             })
           : await client.callTool(input.tool, input.arguments);

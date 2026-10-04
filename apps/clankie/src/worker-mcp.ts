@@ -548,6 +548,16 @@ export class WorkerMcp {
             principalId: current.grant.principalId,
             workId: current.grant.missionId,
           },
+          // The host awaits credentials and connections after these checks; recheck
+          // fleet authority at its last moment before the provider call.
+          ...(authorityNow.fleet === undefined
+            ? {}
+            : {
+                fence: async () => {
+                  if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
+                  if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
+                },
+              }),
         });
         return {
           content: [{ type: "text", text: result.outcome === "ok" ? result.content : result.detail }],
