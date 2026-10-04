@@ -32,6 +32,16 @@ export interface ModelKeysPort {
 }
 
 /** The CLI's config, broker, Pi runtime and models.dev fill, with a write-only wire projection. */
+/**
+ * The model library names a few providers for its own migrations; Clankie
+ * shows the owner what they signed in to. Its "openai-codex" is the Codex
+ * subscription Clankie runs on, not a legacy path.
+ */
+const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = { "openai-codex": "OpenAI Codex" };
+export function providerDisplayName(provider: { readonly id: string; readonly name: string }): string {
+  return PROVIDER_DISPLAY_NAMES[provider.id] ?? provider.name;
+}
+
 export function createModelKeys(options: {
   store: CredentialStore;
   env?: NodeJS.ProcessEnv;
@@ -129,7 +139,7 @@ export function createModelKeys(options: {
         providers: state.providers
           .map((provider) => ({
             id: provider.id,
-            name: provider.name,
+            name: providerDisplayName(provider),
             acceptsApiKey: provider.auth.apiKey !== undefined,
             keyConfigured: credentials[provider.id]?.type === "api",
             models: piModelsFor(state.models, provider.id, state).map(({ id, name }) => ({ id, name })),
@@ -146,7 +156,7 @@ export function createModelKeys(options: {
               credentials[provider.id]?.type === "oauth" &&
               modelCredentialAllowed(provider.id, credentials[provider.id], { env }),
           )
-          .map((provider) => ({ providerId: provider.id, name: provider.name }))
+          .map((provider) => ({ providerId: provider.id, name: providerDisplayName(provider) }))
           .sort((a, b) => a.name.localeCompare(b.name)),
       };
     },

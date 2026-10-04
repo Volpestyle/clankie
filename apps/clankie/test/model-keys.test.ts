@@ -10,7 +10,7 @@ import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS, type DeviceGrantSet } from "@cla
 import { ModelKeysResponseSchema } from "@clankie/protocol/model-keys";
 import { bodyTelemetryFromEnv } from "@clankie/observability/body-telemetry";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { createModelKeys } from "../src/model-keys.ts";
+import { createModelKeys, providerDisplayName } from "../src/model-keys.ts";
 import { applyHostedModelPolicy } from "../src/hosted-body.ts";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -495,4 +495,9 @@ it("keeps subscription APIs honest and rejects token-shaped keys before provider
   expect((await local.subscriptions?.())?.subscriptions.map((entry) => entry.providerId)).toContain(
     "openai-codex",
   );
+});
+
+it("shows the Codex subscription by its own name, not the model library's legacy label", () => {
+  expect(providerDisplayName({ id: "openai-codex", name: "OpenAI Codex (legacy)" })).toBe("OpenAI Codex");
+  expect(providerDisplayName({ id: "anthropic", name: "Anthropic" })).toBe("Anthropic");
 });
