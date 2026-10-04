@@ -2595,6 +2595,49 @@ this optional metadata returns a clear unsupported error. See
 [Discord settings](discord-rooms.md) for revision checks and the preferred
 `DISCORD_MANAGED_GUILD_ID` environment name.
 
+### `discord setup`
+
+Read the same four filled sentences and check results as TUI `/discord`, using
+the host’s wording and computer name. Server, room and people names come from
+the connected account’s directory. Lists can be partial; missing names remain
+unavailable. Account connection and selected-room visibility use directory
+evidence. Send Messages, Manage Channels, Manage Webhooks, computer authority
+and test posts remain **not checked** until the shared active-check work lands
+([VUH-1642](https://linear.app/vuhlp/issue/VUH-1642)). Reading or changing setup
+never posts to Discord.
+
+```sh
+clankie discord setup choices home
+clankie discord setup home --server Studio
+clankie discord setup choices talk
+clankie discord setup talk --channel general --channel dev
+clankie discord setup computer --access me
+clankie discord setup computer --access people --person James
+clankie discord setup computer --access servers --server Studio
+clankie discord setup computer --access nobody
+clankie discord setup team --server Studio --visible on
+clankie discord setup team --visible off
+```
+
+`choices home|talk|computer|team` returns names and numbered choices such as
+`@1`. Use a full displayed name or numbered choice when names repeat; an
+ambiguous name fails before writing. Repeated `--channel`, `--person` or
+`--server` flags select several entries where appropriate. Computer access is
+always its own explicit selection: picking a social server, rooms or the team
+never changes machine grants. `me` requires the owner configured under
+Advanced. Picking people replaces server grants; picking servers grants every
+admitted human in those servers and replaces individual grants. `nobody`
+clears all three machine-grant lists.
+
+Each sentence saves through the authenticated host API in one revision-fenced
+write. A stale edit fails rather than overwriting someone else’s change.
+Hiding the team preserves its selected server. Raw fields remain under TUI
+`/discord` → **Advanced**; `discord set/clear` remains the local raw-field
+writer. Hosted consoles and CLI use their existing encrypted transport for
+sentence setup and host Advanced fields. Raw local fields and local credentials
+are not written through a hosted connection. Stored body settings retain their
+existing restart requirement; a successful save does not assert live application.
+
 ### `discord transcripts [--cursor CURSOR] [--limit N]`
 
 Read the private retained voice log through the authenticated service API.
@@ -2629,9 +2672,10 @@ values.
 | Activity               | `activity-application-id-gba`, `activity-tunnel-name`, `activity-tunnel-hostname`                                                                                                                                     |
 
 `active-body` is `bot` or `user_session`. These commands never accept Discord
-tokens and do not perform the lab-user ToS opt-in. The TUI `/discord` modal uses
-this writer for non-secret fields; its existing secret and opt-in flows stay on
-the credential broker and service HTTP catalog.
+tokens and do not perform the lab-user ToS opt-in. The main TUI `/discord` flow
+uses the shared host definition and revision-fenced API writer. Advanced keeps
+the existing local credential and opt-in flows on the broker and service HTTP
+catalog; its raw field editor uses host revision checks.
 
 ### External native agent chats
 

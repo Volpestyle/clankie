@@ -5,6 +5,13 @@ Status: accepted foundation for VUH-1622, VUH-1624 and VUH-1625 (2026-10-04).
 The public protocol owns the four Discord sentence parts, picker kinds, help
 text, check kinds, choice labels and Advanced field groups. The app, console
 and hosted dashboard consume this definition rather than authoring variants.
+Optional bindings also define picker server scopes, room kinds, enablement and
+the independent computer-access fields. `@clankie/api-client` supplies a shared
+sentence projection and revision-fenced writer; the TUI and CLI use it directly
+(VUH-1628). All blanks in one sentence save atomically. Directory member entries
+are scoped by server before deduplication, since one person can occur in more
+than one guild. Additive binding metadata is covered by an old-shape-client
+integration regression against the new loopback host.
 The optional `setup` member on settings snapshots exposes it through the API;
 `clankie discord definition` reads the same snapshot. The host supplies its
 machine name; a hosted body says “his cloud computer”. A screen never substitutes
@@ -13,7 +20,9 @@ its own device for the computer Clankie can use.
 Only the computer-access sentence offers machine grants. Server/room presets
 must not change `systemActorUserIds`, `systemActorGuildIds` or
 `systemActorChannelIds`. This foundation supplies display/check definitions;
-rendering sentences and performing setup checks remain their surface issues.
+rendering belongs to the shared client projection. Active permission/test-post
+checks are deferred to VUH-1642; surfaces show evidence-backed directory checks
+and label the rest “not checked”. A real test post needs explicit owner action.
 Existing settings writes keep strict input validation, authenticated operator
 authority and the revision fence. Additive response metadata is optional and
 read through the tolerant response parser (ADR 0016); an integration regression

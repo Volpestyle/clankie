@@ -1,12 +1,15 @@
 import { z } from "zod";
 import { DiscordSettingsSchema } from "./discord-settings.ts";
 import type { DiscordSettings } from "./discord-settings.ts";
+import { DiscordDirectoryEntrySchema, type DiscordDirectoryEntry } from "./discord-directory.ts";
 export type DiscordField = {
   key: keyof DiscordSettings;
   label: string;
   help?: string;
   kind: "boolean" | "ids" | "text" | "number" | "choice";
   choices?: readonly string[];
+  /** Directory kinds accepted by this field when a sentence picks rooms. */
+  directoryKinds?: readonly DiscordDirectoryEntry["kind"][];
 };
 export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly DiscordField[] }[] = [
   {
@@ -75,7 +78,7 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
     fields: [
       { key: "voiceEnabled", label: "Voice enabled", kind: "boolean" },
       { key: "voiceGuildIds", label: "Voice server IDs", kind: "ids" },
-      { key: "voiceChannelIds", label: "Voice channel IDs", kind: "ids" },
+      { key: "voiceChannelIds", label: "Voice channel IDs", kind: "ids", directoryKinds: ["voice", "stage"] },
       { key: "voiceChannelId", label: "Default voice channel ID", kind: "text" },
       {
         key: "voiceJoinPolicy",
@@ -110,7 +113,12 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
       { key: "userSessionGuildIds", label: "User account server IDs", kind: "ids" },
       { key: "userSessionChannelIds", label: "User account channel IDs", kind: "ids" },
       { key: "userSessionVoiceEnabled", label: "User account speech enabled", kind: "boolean" },
-      { key: "userSessionVoiceChannelIds", label: "User account voice channel IDs", kind: "ids" },
+      {
+        key: "userSessionVoiceChannelIds",
+        label: "User account voice channel IDs",
+        kind: "ids",
+        directoryKinds: ["voice", "stage"],
+      },
       {
         key: "userSessionDmPolicy",
         label: "User account direct message policy",
@@ -140,6 +148,22 @@ export const DISCORD_CHOICE_LABELS: Readonly<Record<string, string>> = {
   guild_members: "Server members",
   explicit: "Ask each person",
   presence: "People in the call",
+  team_visible: "show up",
+  team_hidden: "stay hidden",
+  no_server: "no selected server",
+  unavailable_server: "an unavailable server",
+  all_rooms: "all permitted rooms",
+  no_rooms: "no selected rooms",
+  unavailable_room: "an unavailable room",
+  unavailable_person: "an unavailable person",
+  account: "Discord account",
+  view_channel: "View Channel",
+  send_messages: "Send Messages",
+  computer_access: "Computer access",
+  manage_channels: "Manage Channels",
+  manage_webhooks: "Manage Webhooks",
+  test_post: "Test post",
+  partial_directory: "Some choices may be missing from the connected account’s list.",
 };
 
 const SettingKey = z.enum(
@@ -154,6 +178,20 @@ const SentencePart = z.discriminatedUnion("kind", [
       picker: PickerKind,
       fields: z.array(SettingKey),
       placeholder: z.string(),
+      /** Settings that scope a room/person picker to the selected social servers. */
+      serverFields: z.array(SettingKey).optional(),
+      /** Additive bindings: surfaces apply these instead of maintaining field mappings. */
+      enables: z
+        .array(
+          z
+            .object({ field: SettingKey, kinds: z.array(DiscordDirectoryEntrySchema.shape.kind).optional() })
+            .strict(),
+        )
+        .optional(),
+      accessFields: z
+        .object({ people: SettingKey, servers: SettingKey, channels: SettingKey })
+        .strict()
+        .optional(),
     })
     .strict(),
   z.object({ kind: z.literal("machine") }).strict(),
@@ -212,6 +250,12 @@ export const DISCORD_SETUP_SENTENCES: readonly DiscordSetupSentence[] = [
           "userSessionVoiceChannelIds",
         ],
         placeholder: "#general, #dev",
+        serverFields: ["ingressGuildIds", "presenceGuildIds", "voiceGuildIds", "userSessionGuildIds"],
+        enables: [
+          { field: "textIngressEnabled" },
+          { field: "voiceEnabled", kinds: ["voice", "stage"] },
+          { field: "userSessionVoiceEnabled", kinds: ["voice", "stage"] },
+        ],
       },
       { kind: "text", text: "." },
     ],
@@ -226,6 +270,12 @@ export const DISCORD_SETUP_SENTENCES: readonly DiscordSetupSentence[] = [
         picker: "computer_access",
         fields: ["systemActorUserIds", "systemActorGuildIds", "systemActorChannelIds"],
         placeholder: "Only me",
+        serverFields: ["guildId", "ingressGuildIds", "userSessionGuildIds"],
+        accessFields: {
+          people: "systemActorUserIds",
+          servers: "systemActorGuildIds",
+          channels: "systemActorChannelIds",
+        },
       },
       { kind: "text", text: " can ask him to use " },
       { kind: "machine" },
@@ -260,6 +310,7 @@ const DiscordFieldSchema = z
     help: z.string().optional(),
     kind: z.enum(["boolean", "ids", "text", "number", "choice"]),
     choices: z.array(z.string()).optional(),
+    directoryKinds: z.array(DiscordDirectoryEntrySchema.shape.kind).optional(),
   })
   .strict();
 export const DiscordSetupDefinitionSchema = z

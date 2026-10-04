@@ -121,6 +121,7 @@ index). Configure through the headless CLI:
 | Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                                |
 | Discord picker directory              | `clankie discord directory [servers                                                                    | channels | roles | people] --server ID` (omit server for servers; inspect state/reason before claiming coverage) |
 | Shared Discord settings definition    | `clankie discord definition` (host wording, picker/check kinds, Advanced fields; no credentials)       |
+| Discord sentence setup                | `clankie discord setup`, `… choices SENTENCE`, `… SENTENCE` with named choices (see `docs/cli.md`)     |
 | Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                                    |
 | Desktop expressions / quiet hours     | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`    |
 | Minecraft profiles and play           | `clankie minecraft configure`, `profiles`, `status`, `join PROFILE`, `leave`; load `minecraft`         |

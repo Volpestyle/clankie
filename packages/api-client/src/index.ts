@@ -1,4 +1,5 @@
 import { parseProtocolResponse, safeParseProtocolResponse } from "@clankie/protocol";
+export * from "./discord-setup.ts";
 import {
   DISCORD_DIRECTORY_PATH,
   DiscordDirectoryRequestSchema,

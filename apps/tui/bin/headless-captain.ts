@@ -136,16 +136,23 @@ export async function runHeadlessCaptainCommand(
       (await new SettingsStore(defaultSettingsPath(env)).load()).client?.mode === "hosted" &&
       !["help", "--help", "-h"].includes(command ?? "")
     ) {
-      if (HOSTED_LOCAL_ONLY.has(command ?? "") || operatorHarness(command) !== undefined)
+      const discordHttp =
+        command === "discord" &&
+        ["setup", "definition", "directory", "rooms", "guide", "call"].includes(rest[0] ?? "");
+      if ((HOSTED_LOCAL_ONLY.has(command ?? "") && !discordHttp) || operatorHarness(command) !== undefined)
         throw new Error(`${command} is managed by the hosted service; no local action was taken.`);
       const transport = await hostedTransportFor(env);
       // These existing commands are HTTP-only. The transport replaces their local
       // bearer inside the envelope; no Mac credential is read or transmitted.
-      if (["conversations", "conversation", "send"].includes(command ?? ""))
+      if (["conversations", "conversation", "send"].includes(command ?? "") || discordHttp)
         return runHeadlessCaptainCommand(args, {
           ...options,
           ...transport,
-          env: { ...env, CLANKIE_CAPTAIN_TOKEN: "hosted-device-transport" },
+          env: {
+            ...env,
+            CLANKIE_CAPTAIN_TOKEN: "hosted-device-transport",
+            CLANKIE_OPERATOR_TOKEN: "hosted-device-transport",
+          },
         });
       outputJson(stdout, await hostedCommand(args, transport));
       return 0;
