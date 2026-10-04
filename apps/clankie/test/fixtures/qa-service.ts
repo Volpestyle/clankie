@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { createClankieApp } from "../../src/app.ts";
+import { FileCredentialStore } from "@clankie/credential-broker";
+import { createCredentialBackedOperatorAuthenticator } from "../../src/operator-auth.ts";
 import { createStubCaptain } from "../../src/captain/port.ts";
 
 /** Real loopback HTTP and durable device state, with no model or operator configuration. */
@@ -11,18 +13,20 @@ export async function createQaService() {
   const root = await mkdtemp(join(tmpdir(), "clankie-qa-"));
   const operatorToken = randomBytes(24).toString("hex");
   const deviceSessionKey = randomBytes(32);
+  const eventLogPath = join(root, "events.jsonl");
   let now = Date.parse("2026-09-01T12:00:00Z");
   const boot = () =>
     createClankieApp({
       captain: createStubCaptain(),
       deviceSessionKey,
-      eventLogPath: join(root, "events.jsonl"),
+      eventLogPath,
       clock: () => new Date(now),
       hostDisplayName: "QA host",
-      authenticateOperator: async (request) =>
-        request.headers.get("authorization") === `Bearer ${operatorToken}`
-          ? { operatorId: "qa-operator" }
-          : undefined,
+      authenticateOperator: createCredentialBackedOperatorAuthenticator({
+        env: { CLANKIE_OPERATOR_TOKEN: operatorToken },
+        store: new FileCredentialStore(join(root, "credentials.json")),
+        identity: { operatorId: "qa-operator" },
+      }),
     });
   let service: Awaited<ReturnType<typeof createClankieApp>>;
   try {
@@ -47,6 +51,7 @@ export async function createQaService() {
   const baseUrl = `http://127.0.0.1:${address.port}`;
   return {
     baseUrl,
+    eventLogPath,
     now: () => now,
     advance: (milliseconds: number) => {
       now += milliseconds;

@@ -5298,7 +5298,10 @@ export const PairingOfferWireSchema = z.object({
   version: z.literal(1),
   deepLink: z.string().min(1),
   code: z.string().min(1),
-  /** Existing single-use short code for same-Mac direct pairing; absent on review offers. */
+  /**
+   * The already-minted one-time code, exposed only by authenticated ordinary
+   * operator offers. Absent on review offers; direct pairing is a client choice.
+   */
   localCode: z
     .string()
     .regex(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/u)
