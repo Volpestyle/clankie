@@ -640,7 +640,12 @@ remains broker-owned; it is never a CLI flag.
 The consumer accepts signed `create`, `update`, and `remove` activity from any
 resource type and actor. A verified, matching revision of Clankie's own MCP write
 is dropped at ingress; matching delegated-worker updates retain their provenance
-and enter the inbox. Ambiguous events remain visible. A wake carries
+and enter the inbox. For issue writes, a response with a display-label `id` such
+as `VUH-1641` uses its returned `uuid` for receipt identity. A UUID-valued `id`
+is valid too; any supplied `uuid` must be valid and agree with it. Missing or
+conflicting UUID proof never suppresses activity. Workspace, actor, resource type,
+`updatedAt` and saved-field matching still apply to the exact revision.
+Ambiguous events remain visible under the existing wake rules. A wake carries
 one headline per new event; the stored message carries the resource, action,
 author, URL, data and previous values as bounded untrusted context.
 Shared-account agent posts are not attributed to the human. Clankie decides
