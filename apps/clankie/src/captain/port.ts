@@ -78,7 +78,12 @@ export type HireSeat = (
  * is how he follows up with one (VUH-1373). `seat` is the seatId,
  * personaId, or conversationId `hire_agent` returned.
  */
-export type MessageSeat = (seat: string, message: string) => Promise<SeatMessageResult>;
+export type MessageSeat = (
+  seat: string,
+  message: string,
+  /** Host-captured leading conversation; never a worker-selected route. */
+  authority?: ConversationAuthority,
+) => Promise<SeatMessageResult>;
 type SeatMessageResult = { readonly deliveryStage?: DeliveryStage } & (
   | (Extract<FleetSeatDelivery, { outcome: "delivered" }> & {
       readonly seatId: string;

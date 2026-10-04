@@ -150,11 +150,24 @@ persisting a second world projection
 
 ### Native operator seats
 
-Each fresh Claude or Codex launch creates a separate workspace chat at its launch
+Each fresh Claude, Codex or OpenCode launch creates a separate workspace chat at its launch
 directory. Multiple native seats keep separate transcripts, tools and outboxes,
 even in the same directory or account. `--resume` retains the last seat's binding;
 `--conversation ID` selects an existing chat, including `global-default` for the
 shared global head. Dry runs create no conversation.
+
+A seat can also select a canonical Discord room. Its live conversation channel
+receives worker reports, escalations, wakes, watches and room turns through the
+existing outbox. A shared admission fence keeps a service turn already started
+with its runner and pins taken or uncertain native deliveries; only definite
+pre-acceptance refusal permits fallback. New inputs use the service runner when
+the seat leaves. Room replies retain their original actor, route and mouth lease;
+the cached room MCP bank has social authority without generic operator body
+access. Worker ownership uses the persisted hire proof and changes when another
+conversation admits `message_seat`. Reports use that lead, with the default chat
+as fallback only when the lead conversation is gone. Explicit watches retain
+their arming conversation. See
+[ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md).
 
 `clankie codex` selects the [Codex plugin](../integrations/codex-plugin/README.md).
 Its trusted native hooks add the shared identity, service context and memory card,
@@ -218,8 +231,9 @@ and `turns/`; the existing native-transcript projection folds context, messages,
 and tools into the same replay/tail API used by the TUI and CLI. One room groups
 its social, trusted, and one-shot session histories without merging their model
 contexts or authority. Source checkpoints prevent duplicate replay after restart.
-These records are read-only from operator surfaces: only the authenticated
-Discord transport submits room turns. See
+Ordinary operator sends and resets remain read-only for these records. An
+attached native seat can execute admitted room turns and return correlated replies
+through the existing Discord transport. See
 [ADR 0176](adr/0176-every-room-is-an-inspectable-conversation.md).
 
 Conversations are files under `~/.clankie/captain/`. Each settled operator or

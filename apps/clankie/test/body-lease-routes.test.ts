@@ -32,6 +32,8 @@ async function fixture() {
   );
   const captain = createStubCaptain();
   captain.seatContext = (id) => (id === "a" || id === "b" ? { conversationId: id, cwd: root } : undefined);
+  captain.validateConversationOwner = async (owner) =>
+    owner.conversationId === "a" || owner.conversationId === "b";
   const app = await createClankieApp({
     captain,
     authenticateOperator: async (request) =>
@@ -122,6 +124,25 @@ it("ordinary release verifies actual stop and cannot use a stale token", async (
   expect(result).toEqual({ outcome: "rejected", reason: "recovery_required" });
   expect(confirmStopped).toHaveBeenCalledTimes(1);
   expect(store.status("voice")?.conversationId).toBe("a");
+});
+
+it("an attachable room context does not grant generic operator body authority", async () => {
+  const { post, call, captain, store } = await fixture();
+  captain.seatContext = (id) => (id === "room-attached" ? { conversationId: id, cwd: "/tmp" } : undefined);
+  const result = await (
+    await post(
+      "/v1/browser/call",
+      {
+        schemaVersion: 1,
+        tool: "browser_use_read",
+        arguments: {},
+      },
+      "room-attached",
+    )
+  ).json();
+  expect(result).toMatchObject({ result: { outcome: "rejected", reason: "not_authorized" } });
+  expect(call).not.toHaveBeenCalled();
+  expect(store.status("browser")).toBeUndefined();
 });
 
 it("retains the browser claim when close is refused", async () => {

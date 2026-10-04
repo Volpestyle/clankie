@@ -520,6 +520,9 @@ gatewayUnsubscribes.push(
           authorIsBot,
           mentionsBot: message.mentionsSelf,
           body: message.content,
+          ...(message.guildId === undefined && message.authorDisplayName !== undefined
+            ? { room: { peerName: message.authorDisplayName.slice(0, 100) } }
+            : {}),
           attachments: selection.attachments,
           attachmentsOmitted: selection.omitted,
         });

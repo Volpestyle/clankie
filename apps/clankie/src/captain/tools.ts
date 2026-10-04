@@ -219,7 +219,7 @@ export function captainTools(
       : []),
     ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
     messageSeat !== undefined
-      ? [messageSeatTool(messageSeat)]
+      ? [messageSeatTool(messageSeat, turn)]
       : []),
     ...(turn.publishFile !== undefined
       ? [
@@ -792,7 +792,7 @@ function hireAgentTool(
 
 const SEAT_MESSAGE_MAX = 32_768;
 
-function messageSeatTool(message: MessageSeat): ToolDefinition {
+function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinition {
   return defineTool({
     name: "message_seat",
     label: "Message a hired seat",
@@ -803,6 +803,7 @@ function messageSeatTool(message: MessageSeat): ToolDefinition {
       "message up), unconfirmed, undelivered, seat_offline, unknown_seat. Delivery uses the harness " +
       "channel or session API and never types into the owner's terminal draft. A steered receipt means " +
       "guidance reached the active turn, not an after-turn queue. deliveryStage reports stored, delivered, consumed or responded; native queue acceptance is consumed, never model-seen. Uncertain blocks every retry until the original receipt is reconciled. " +
+      "This conversation adopts the seat as its lead; its future message_clankie reports return here. " +
       "Linked agents can initiate messages with message_clankie.",
     parameters: Type.Object({
       seat: Type.String({ minLength: 1, maxLength: 200 }),
@@ -812,7 +813,9 @@ function messageSeatTool(message: MessageSeat): ToolDefinition {
     // A watch wake is an internal turn, and answering the seat it woke for is
     // the point of it, so unlike hiring this is not held back from one.
     execute: async (_id, params) => {
-      const result = await message(params.seat, params.message);
+      const authority = captureConversationAuthority(turn.conversationAuthority);
+      await assertConversationAuthority(authority);
+      const result = await message(params.seat, params.message, authority);
       return json({ ...result, deliveryStage: fleetDeliveryStage(result) });
     },
   });

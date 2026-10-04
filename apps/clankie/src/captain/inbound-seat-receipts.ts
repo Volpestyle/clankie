@@ -1,6 +1,6 @@
 import type { FleetSeatMessageDelivery, FleetSeatMessageReceipt } from "@clankie/protocol";
 import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
-import type { ConversationStore } from "./conversations.ts";
+import type { ConversationRunner, ConversationStore } from "./conversations.ts";
 
 /** A guard around conversation acceptance, never a replay queue. */
 export class InboundSeatReceipts {
@@ -89,6 +89,10 @@ export class InboundSeatReceipts {
     delivery: FleetSeatMessageDelivery,
     text: string,
     message: string,
+    /** Resolved by the host before acceptance, never supplied by the worker. */
+    conversationId = "global-default",
+    /** An admitted room route keeps its authority and existing reply mouth. */
+    runner?: ConversationRunner,
   ): FleetSeatMessageReceipt {
     const fingerprint = deliveryFingerprint(text);
     const previous = this.reconcile(paneId, delivery, fingerprint);
@@ -111,13 +115,18 @@ export class InboundSeatReceipts {
         sessionId: delivery.binding,
         paneId,
       });
-      this.conversations.submitInbound(message, {
-        deliveryId: delivery.id,
-        binding: delivery.binding,
-        fingerprint,
-        paneId,
-        text,
-      });
+      this.conversations.submitInbound(
+        message,
+        {
+          deliveryId: delivery.id,
+          binding: delivery.binding,
+          fingerprint,
+          paneId,
+          text,
+        },
+        conversationId,
+        runner,
+      );
       return this.reconcile(paneId, delivery, fingerprint);
     } catch {
       return previous;

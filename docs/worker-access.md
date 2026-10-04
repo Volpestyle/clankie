@@ -7,6 +7,14 @@ the native worker plugin separately. Manual grants keep their selected direct to
 [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md) supersedes the
 project-tool gate in ADR 0216. Projects still own roles, caps, hiring and tracker binding.
 
+Worker reports use the service's persisted hiring or adopting conversation,
+including fleet-qualified remote seats. `message_seat` from another admitted
+conversation adopts the worker under that lead. `message_clankie` cannot choose
+a target or turn agent output into an owner instruction. A removed lead makes
+reports fall back to `global-default`; a retained room still requires its current
+actor and route grants. Existing receipt IDs prevent rerouting or replaying an
+already accepted report.
+
 Load the shipped `clankie` skill to discover the current catalog, verify the
 connected actor, read the issue and decisions, and perform the authorized change.
 Tool access does not authorize every outward action. `linear-issues` carries the

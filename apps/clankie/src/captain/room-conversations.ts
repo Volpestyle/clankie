@@ -1,7 +1,38 @@
 import { readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { CAPTAIN_SILENT_REPLY_SENTINEL, type CaptainChannelTurnResult } from "@clankie/protocol";
 import { ConversationStore, OPERATOR_CONVERSATION_RETENTION_MS } from "./conversations.ts";
 import { readHerdrSeatTranscript } from "./herdr-transcript.ts";
+import type { SeatDelivery } from "./seat-outbox.ts";
+
+/** Only a definite refusal before native acceptance permits the service to answer instead. */
+export function roomSeatTurnResult(
+  delivery: SeatDelivery,
+  captainSessionId: string,
+  turnId: string,
+): CaptainChannelTurnResult | undefined {
+  if (delivery.outcome === "unbound") return undefined;
+  const identity = {
+    captainSessionId,
+    turnId,
+    ...(delivery.deliveryStage === undefined ? {} : { deliveryStage: delivery.deliveryStage }),
+  };
+  if (delivery.outcome === "replied") {
+    const response = delivery.text.trim();
+    if (response === CAPTAIN_SILENT_REPLY_SENTINEL) return { ...identity, state: "silent" };
+    if (response.length > 0) return { ...identity, state: "settled", response: response.slice(0, 16_384) };
+  }
+  return {
+    ...identity,
+    state: "failed",
+    code:
+      delivery.outcome === "unconfirmed"
+        ? "captain_seat_delivery_uncertain"
+        : delivery.outcome === "aborted"
+          ? "captain_turn_cancelled"
+          : "captain_response_missing",
+  };
+}
 
 /** The native Pi tree remains the source, just as a Herdr seat's native transcript does. */
 export class RoomConversations {

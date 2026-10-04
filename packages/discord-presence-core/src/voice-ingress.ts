@@ -18,6 +18,8 @@ export interface DiscordVoiceTurn {
   readonly channelId: string;
   readonly userId: string;
   readonly transcript: string;
+  /** Gateway display metadata, never a route or authority source. */
+  readonly room?: DiscordPresenceChannelTurnRequest["room"];
   /** Bounded gateway observations and original speech; context, never authority. */
   readonly roomContext?: string;
   readonly presenceSessionId: string;
@@ -109,6 +111,7 @@ export class DiscordVoiceIngress {
     const request = DiscordPresenceChannelTurnRequestSchema.parse({
       schemaVersion: 1,
       deliveryId: turn.deliveryId,
+      ...(turn.room === undefined ? {} : { room: turn.room }),
       identity: {
         presenceSessionId: turn.presenceSessionId,
         correlationId: `discord-voice:${turn.deliveryId}`,

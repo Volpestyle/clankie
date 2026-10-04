@@ -79,7 +79,7 @@ Use `clankie skills opinionated off` or `/skills` to change the selection.
 `--dry-run` shows the plugin projection and catalog; start a fresh session when
 changing conditions because resumed history can contain previously loaded skills.
 
-`--conversation ID` resolves an existing global/workspace conversation through
+`--conversation ID` resolves an existing global/workspace or Discord room conversation through
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and
 binds the prompt, MCP tools and channel to that conversation. The selected
 workspace must exist on the native host. `--resume` retains the binding and
