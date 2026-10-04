@@ -53,7 +53,11 @@ The selected chat can also be a Discord room. While the seat's channel is live,
 worker reports, room turns, wakes and watches reach that seat; new inputs return
 to the built-in agent after it leaves. Each channel or DM remains a separate
 conversation with its existing permissions. Workers report to the conversation
-that hired or subsequently adopted them, as resolved by the service.
+that hired or subsequently adopted them, as resolved by the service. Without
+adoption, the actual Herdr parent receives the report through its attached
+conversation or native channel. If no eligible parent exists, the default
+conversation gets an explicitly tagged report and doctor/roster name the lead
+pane needing a bridge. This grants no tools or room permissions.
 
 ## History, memory, and goals
 

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -20,6 +21,8 @@ import {
   discoverConvention,
   readConvention,
   resolveTracker,
+  backendFor,
+  type WorkItemPatch,
   writeConvention,
   type CommandRunner,
   githubRestApi,
@@ -31,6 +34,20 @@ import type { McpHost } from "./mcp-host.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
 import { WORK_REPO_LIST_MAX } from "@clankie/protocol/work-items";
 import { createProjectWorkReader } from "./project-work-items.ts";
+import {
+  WorkItemWriteRequestSchema,
+  WorkItemWriteReceiptRequestSchema,
+  type WorkItemWriteRequest,
+  type WorkItemWriteReceipt,
+  type WorkItemWriteReceiptRequest,
+} from "@clankie/protocol/work-item-write";
+import { WorkWriteReceipts } from "./work-write-receipts.ts";
+import {
+  prepareWorkWriteTarget,
+  type WorkWriteAuthority,
+  type WorkProjectFence,
+} from "./work-write-target.ts";
+import { deliveryFingerprint } from "./captain/delivery-fence.ts";
 
 /**
  * The work-item layer every agent and the app go through (ADR 0191). It owns
@@ -106,6 +123,12 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
     .strict(),
 ]);
 export type WorkRequest = z.infer<typeof WorkRequestSchema>;
+/** Owner HTTP commands stay separate from the existing agent tool schema. */
+export const WorkHttpRequestSchema = z.union([
+  WorkRequestSchema,
+  z.object({ action: z.literal("write"), request: WorkItemWriteRequestSchema }).strict(),
+  z.object({ action: z.literal("write_receipt"), request: WorkItemWriteReceiptRequestSchema }).strict(),
+]);
 
 const RegistrySchema = z.object({
   repos: z.array(z.object({ id: z.string(), path: z.string(), name: z.string() }).strict()).max(50),
@@ -113,12 +136,13 @@ const RegistrySchema = z.object({
 
 export interface WorkItemsServiceOptions {
   readonly projects?: () => Promise<ProjectsSettings>;
+  readonly projectsFence?: () => Promise<WorkProjectFence>;
   readonly localMachineId?: string;
   /** Where the registry of readable repos lives. */
   readonly stateDirectory: string;
   /** The captain's working directory, always readable as `workspace`. */
   readonly workspace?: () => string | undefined;
-  readonly mcpHost?: Pick<McpHost, "call">;
+  readonly mcpHost?: Pick<McpHost, "call"> & Partial<Pick<McpHost, "account">>;
   /**
    * The body's GitHub account connection token (ADR 0196). When present it is
    * used instead of `gh`; a hosted body has no `gh` login to fall back on.
@@ -201,6 +225,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       ? createProjectWorkReader({ projects: options.projects, localMachineId: options.localMachineId })
       : undefined;
   const registryPath = join(options.stateDirectory, "work-repos.json");
+  const writeReceipts = new WorkWriteReceipts(join(options.stateDirectory, "work-write-receipts.json"));
+  const writeLocks = new Map<string, Promise<unknown>>();
   const run = options.run ?? defaultRun;
   const clock = options.clock ?? (() => new Date());
 
@@ -313,7 +339,243 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     }
   };
 
+  const authorizeWrite = async (authority: WorkWriteAuthority) => {
+    if (!authority.current() || !(await authority.authorize()) || !authority.current())
+      throw new Error("Owner authority expired or was revoked. Read the work again.");
+  };
+  const prepareWrite = async (repoId: string, authority: WorkWriteAuthority) => {
+    await authorizeWrite(authority);
+    return prepareWorkWriteTarget({
+      repoId,
+      ...(options.localMachineId === undefined ? {} : { localMachineId: options.localMachineId }),
+      ...(options.projectsFence === undefined ? {} : { projectsFence: options.projectsFence }),
+      locate: async () => {
+        const entry = await locate(repoId, false);
+        const registry = () => {
+          try {
+            return readFileSync(registryPath, "utf8");
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+            throw error;
+          }
+        };
+        const saved = registry();
+        const workspace = options.workspace?.();
+        // Close the await between registry lookup and capturing its generation.
+        if (!(await known()).some((repo) => repo.id === repoId && repo.path === entry.path))
+          throw new Error("Saved work repository changed.");
+        return {
+          path: entry.path,
+          assertCurrent: () => {
+            if (registry() !== saved || options.workspace?.() !== workspace)
+              throw new Error("Saved work repository changed.");
+          },
+        };
+      },
+    });
+  };
+  const receipt = (
+    requestId: string,
+    outcome: WorkItemWriteReceipt["outcome"],
+    message: string,
+  ): WorkItemWriteReceipt => ({ requestId, outcome, message });
+  const accountBinding = async (kind: WorkConvention["backend"]) => {
+    if (kind === "linear") {
+      if (!options.mcpHost?.account) throw new Error("Connected Linear account cannot be checked.");
+      return (await options.mcpHost.account("linear", "operator")).binding;
+    }
+    if (kind === "github") {
+      const token = await options.githubToken?.();
+      // Owner writes use the connected account. An ambient gh login is not a bound account.
+      if (!token) throw new Error("Connect GitHub to write work from a device.");
+      return deliveryFingerprint(token);
+    }
+    return "files";
+  };
+  const writeScope = async (request: WorkItemWriteReceiptRequest, authority: WorkWriteAuthority) => {
+    const target = await prepareWrite(request.repoId, authority);
+    const account = await accountBinding(target.convention.backend);
+    await authorizeWrite(authority);
+    target.assertCurrent();
+    return {
+      target,
+      account,
+      scope: {
+        owner: authority.principal,
+        repoId: request.repoId,
+        itemId: request.itemId,
+        binding: deliveryFingerprint(JSON.stringify([target.binding, account])),
+      },
+    };
+  };
+  const handleOwnerWrite = async (
+    request: WorkItemWriteRequest,
+    authority: WorkWriteAuthority,
+  ): Promise<WorkItemWriteReceipt> => {
+    const key = JSON.stringify([request.repoId, request.itemId]);
+    const operation = async (): Promise<WorkItemWriteReceipt> => {
+      let begun = false;
+      let dispatched = false;
+      let confirmed = false;
+      try {
+        const { target, account, scope } = await writeScope(request, authority);
+        const previous = writeReceipts.begin(request.requestId, scope, request.command);
+        if (previous) return previous;
+        begun = true;
+        const beforeWrite = () => {
+          if (!authority.current()) throw new Error("Owner authority expired or was revoked.");
+          target.assertCurrent();
+        };
+        const fence = async () => {
+          await authorizeWrite(authority);
+          beforeWrite();
+          return beforeWrite;
+        };
+        const onDispatch = () => {
+          dispatched = true;
+        };
+        const effectConfirmed = () => {
+          confirmed = true;
+        };
+        const dependencies = await deps(target.path);
+        // No inferred backend or gh fallback on the owner-authorized path.
+        const writeDeps: { -readonly [K in keyof TrackerDeps]: TrackerDeps[K] } = {
+          ...dependencies,
+          scopedWrites: true,
+          beforeWrite,
+          effectConfirmed,
+          ...(target.convention.backend === "default" || target.convention.backend === "markdown"
+            ? { onDispatch }
+            : {}),
+        };
+        if (target.convention.backend === "linear") {
+          writeDeps.linear = async (tool, args) => {
+            const writing = tool === "save_issue";
+            if (!options.mcpHost) throw new Error("Linear is unavailable.");
+            if ((await options.mcpHost.account!("linear", "operator")).binding !== account)
+              throw new Error("Connected Linear account changed.");
+            const result = await options.mcpHost.call({
+              lane: "operator",
+              server: "linear",
+              tool,
+              arguments: args,
+              resultMode: "data",
+              fence,
+              ...(writing ? { onDispatch, onSettled: effectConfirmed } : {}),
+            });
+            if (result.outcome !== "ok") {
+              if (writing) dispatched = result.possiblyDispatched === true;
+              throw new Error("Connected provider did not return a settled result.");
+            }
+            if (result.isError) throw new Error("Connected provider refused the write.");
+            return result.content.trim() ? (JSON.parse(result.content) as unknown) : undefined;
+          };
+        }
+        if (target.convention.backend === "github") {
+          const api = dependencies.github;
+          if (!api) throw new Error("GitHub is unavailable.");
+          writeDeps.github = {
+            ...api,
+            request: async (method, path, body) => {
+              if (method !== "GET") {
+                await authorizeWrite(authority);
+                if ((await accountBinding("github")) !== account)
+                  throw new Error("Connected GitHub account changed.");
+                beforeWrite();
+                onDispatch();
+              }
+              return api.request(method, path, body);
+            },
+          };
+          delete writeDeps.gh;
+        }
+        // Files have no credential await; authorization is renewed before preparation and checked at rename.
+        await authorizeWrite(authority);
+        beforeWrite();
+        const backend = backendFor(target.path, target.convention, writeDeps);
+        const command = request.command;
+        let patch: WorkItemPatch;
+        switch (command.action) {
+          case "assign":
+            patch = { owner: command.owner };
+            break;
+          case "add_label":
+            patch = { addLabels: [command.label] };
+            break;
+          case "remove_label":
+            patch = { removeLabels: [command.label] };
+            break;
+          case "add_dependency":
+            if (command.id === request.itemId) throw new Error("An item cannot block itself.");
+            patch = { addDependsOn: [command.id] };
+            break;
+        }
+        const item = await backend.update(request.itemId, patch);
+        return writeReceipts.settle(request.requestId, {
+          ...receipt(request.requestId, "applied", "Work item updated."),
+          item,
+        });
+      } catch (error) {
+        const result = confirmed
+          ? receipt(
+              request.requestId,
+              "applied",
+              "The tracker accepted the write. Refresh the item to read its current state.",
+            )
+          : dispatched
+            ? receipt(
+                request.requestId,
+                "uncertain",
+                "The write may have happened. Read this receipt and the tracker; this request will never be replayed.",
+              )
+            : receipt(
+                request.requestId,
+                "refused",
+                error instanceof Error &&
+                  (error.name === "WorkItemScopeError" ||
+                    /^(Owner authority|Saved work|Connected .* account|An item cannot|No work item|Work item .*outside|Role label|This project|Project work|Connect GitHub)/u.test(
+                      error.message,
+                    ))
+                  ? error.message
+                  : "This saved work tracker cannot accept the write. Read the work again and check its connection.",
+              );
+        if (!begun) return result;
+        try {
+          return writeReceipts.settle(request.requestId, result);
+        } catch {
+          return receipt(
+            request.requestId,
+            "uncertain",
+            "The receipt could not be settled. The write may have happened; inspect the tracker and never resend it.",
+          );
+        }
+      }
+    };
+    const pending = (writeLocks.get(key) ?? Promise.resolve()).then(operation, operation);
+    writeLocks.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      if (writeLocks.get(key) === pending) writeLocks.delete(key);
+    }
+  };
   return {
+    handleOwnerWrite,
+    async readOwnerReceipt(
+      request: WorkItemWriteReceiptRequest,
+      authority: WorkWriteAuthority,
+    ): Promise<WorkItemWriteReceipt> {
+      try {
+        const { scope } = await writeScope(request, authority);
+        return writeReceipts.read(request.requestId, scope);
+      } catch {
+        return receipt(
+          request.requestId,
+          "refused",
+          "No receipt is available for this owner and current work tracker.",
+        );
+      }
+    },
     async handle(request: WorkRequest, local: boolean): Promise<WorkResult> {
       if (request.action === "repos") {
         const repos = [

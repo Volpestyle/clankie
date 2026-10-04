@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/Volpestyle/skills",
-  "revision": "4c30a34967f275ab3068fe0ee07c2cde5a5b9571",
+  "revision": "7946e1e2779e677858aeffc590fddb5f8c826f0e",
   "license": "MIT",
   "skills": {
     "c": "agent/c",
@@ -12,5 +12,7 @@
     "shared-checkout": "agent/shared-checkout",
     "solution-space": "agent/solution-space"
   },
-  "localChanges": []
+  "localChanges": [
+    "agent/lead/SKILL.md and agent/lead/reference/operations.md: document ADR 0218/VUH-1615 unadopted worker parent routing, fallback diagnostics and existing native receipt boundaries."
+  ]
 }

@@ -12,7 +12,7 @@ import {
   discordBotInviteUrl,
   resolveGuildList,
   resolveIdList,
-  runDiscordWizard,
+  runDiscordAdvancedWizard,
 } from "../src/discord-commands.ts";
 
 describe("stored credential display", () => {
@@ -113,7 +113,7 @@ describe("managed server in /discord", () => {
       readText: async () => texts.shift(),
       renderLine: () => undefined,
     } as unknown as SetupFlow;
-    await runDiscordWizard(
+    await runDiscordAdvancedWizard(
       { setupFlow: flow, insertCommandResult: () => undefined } as unknown as ClankieFaceShell,
       {
         settings,

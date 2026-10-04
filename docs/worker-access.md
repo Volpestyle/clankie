@@ -362,3 +362,18 @@ Owner API clients read `GET /v1/operator/projects` for the current settings and
 revision, then call `POST /v1/operator/projects/remove-workspace` with
 `projectId`, `workspaceId` and `expectedRevision`. A stale revision, tracker
 reference, changed owner authority or concurrent settings edit refuses removal.
+
+## Owner-authorized work-item gestures
+
+Workers keep using `clankie work` for the repo’s recorded tracker. Paired devices
+with `terminalControl` can assign work metadata, add or remove a role label,
+and append a blocker through the narrow `work_item_write` operator operation.
+This authority stays with the original owner identity through the relay;
+worker or execution credentials cannot substitute for it. The CLI equivalents
+are `clankie work write` and `clankie work receipt`, documented in
+[the CLI guide](cli.md).
+
+Retain the returned `requestId`. After an uncertain result, read the receipt
+and tracker; never resend the change with a new ID. Receipt reads and repeated
+IDs never dispatch a mutation. The journal checks owner, source item, saved
+tracker and connected-account scope before returning an original result.

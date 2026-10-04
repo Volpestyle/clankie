@@ -2,6 +2,9 @@
 
 Repeatable CI and local checks: [quality gates](quality-gates.md).
 
+James-triggered trust and delivery checks: [manual failure scenarios](manual-failure-scenarios.md).
+These scenarios are outside CI, `pnpm check` and release gates.
+
 Dated verification and evaluation records live here when the evidence is useful
 beyond a single CI run.
 

@@ -92,6 +92,30 @@ round trip per seat. The projection is bounded to 64 recent children per parent,
 32 parent sessions, 4,096 recent rollout headers and 64 KiB per header. Older
 children or parent completion records outside these windows are not guaranteed.
 
+The app can select a recent entry with a native `id` as a tray subject
+(VUH-1532/1533). `subagent_replay` reads it through the parent's existing
+seat/persona conversation and the chat grant. It returns the ordinary normalized
+replay page without creating a child conversation or granting send, resume or
+terminal control. Count-only entries from older hosts remain display-only.
+Unknown optional response fields are discarded by the client's tolerant reader;
+known fields and requests retain strict validation.
+
+The same native readers resolve the selected child. Claude maps the parent call
+ID through its matching `toolUseResult.agentId`, then checks the derived nested
+child journal's parent and agent IDs. A call without that recorded locator is
+unavailable; ordinary parent reads still exclude sidechains. Codex reuses the
+roster's direct-child header discovery and checks both headers before each byte
+read. OpenCode resolves the task call inside the same registered profile and
+checks its direct-child database relation again after reading. Labels and list
+positions never select files. Parent changes, foreign cursors and escaped paths
+refuse instead of reading another child. A remembered native source allows
+history after a parent pane closes. Remote child history remains unsupported.
+
+Expanded trays lazily read a bounded native window (up to 500 entries and the
+existing 4 MiB file/database cap), page within it and refresh while the child is
+running. Collapsing stops those reads. Missing source history has a read-only
+unavailable explanation, never a writable fallback.
+
 **A work item may carry `labels`** from its backend: Linear labels, GitHub
 labels (minus the `status: …` labels the GitHub backend writes), or Markdown
 `labels:` front matter. Listing accepts one `label` filter, matched

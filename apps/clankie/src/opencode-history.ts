@@ -56,6 +56,8 @@ export interface OpenCodeHistorySource {
 }
 export interface OpenCodeHistorySnapshot {
   readonly subagents?: OperatorSeatSubagents;
+  /** Selected parent task locator; never supplied by a client or registered as a root. */
+  readonly subagent?: { readonly id: string; readonly sessionId?: string };
   readonly source: OpenCodeHistorySource;
   readonly title: string;
   readonly modifiedAt: string;
@@ -190,6 +192,7 @@ export async function readOpenCodeHistory(
     readonly after?: string;
     readonly metadataOnly?: boolean;
     readonly subagentsOnly?: boolean;
+    readonly childCallId?: string;
   } = {},
 ): Promise<OpenCodeHistorySnapshot> {
   const after = cursor(options.after);
@@ -386,18 +389,36 @@ export async function readOpenCodeHistory(
           );
     if (Buffer.byteLength(JSON.stringify(entries)) > MAX_BYTES)
       refuse("projected native history exceeds bound");
-    result = {
-      ...(options.subagentsOnly
-        ? {
-            subagents: projectOpenCodeSubagents(source.sessionId, taskMessages, (id) => {
-              SessionId.parse(id);
-              const child = db
+    const children = new Map<string, string | undefined>();
+    const subagents = options.subagentsOnly
+      ? projectOpenCodeSubagents(
+          source.sessionId,
+          taskMessages,
+          (id) => {
+            SessionId.parse(id);
+            return (
+              db
                 .prepare("SELECT 1 FROM session WHERE id=? AND parent_id=? AND directory=? AND version=?")
-                .get(id, source.sessionId, source.workingDirectory, source.version);
-              return child !== undefined;
-            }),
+                .get(id, source.sessionId, source.workingDirectory, source.version) !== undefined
+            );
+          },
+          (callId, childId) => {
+            children.set(callId, childId);
+            if (children.size > 64) children.delete(children.keys().next().value!);
+          },
+        )
+      : undefined;
+    const selectedChild = options.childCallId === undefined ? undefined : children.get(options.childCallId);
+    result = {
+      ...(options.childCallId !== undefined && children.has(options.childCallId)
+        ? {
+            subagent: {
+              id: options.childCallId,
+              ...(selectedChild === undefined ? {} : { sessionId: selectedChild }),
+            },
           }
         : {}),
+      ...(subagents === undefined ? {} : { subagents }),
       source,
       title: session.title,
       modifiedAt: new Date(session.time_updated).toISOString(),

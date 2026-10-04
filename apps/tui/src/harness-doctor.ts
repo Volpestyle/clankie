@@ -7,6 +7,78 @@ import type { ExecFileImpl } from "./install-doctor.ts";
 
 const json = async (path: string) => JSON.parse(await readFile(path, "utf8"));
 
+interface CensusPane {
+  paneId: string;
+  terminalId?: string;
+  parentPaneId?: string;
+  harness?: string;
+}
+
+interface ParentLeadObservation {
+  paneId: string;
+  terminalId?: string;
+  harness?: string;
+  children: readonly { paneId: string; terminalId?: string }[];
+  bridgeStatus: "live-process" | "missing" | "pane-mismatch" | "unobserved";
+  detail: string;
+  remediation?: string;
+}
+
+function parentLeadObservations(
+  census: readonly CensusPane[],
+  live: Awaited<ReturnType<typeof inspectLiveHarnessBridges>>,
+): ParentLeadObservation[] {
+  const parents = new Map<string, { paneId: string; terminalId?: string }[]>();
+  for (const child of census) {
+    if (!child.parentPaneId || !["claude", "codex"].includes(child.harness ?? "")) continue;
+    const children = parents.get(child.parentPaneId) ?? [];
+    children.push({
+      paneId: child.paneId,
+      ...(child.terminalId === undefined ? {} : { terminalId: child.terminalId }),
+    });
+    parents.set(child.parentPaneId, children);
+  }
+  return [...parents].map(([paneId, children]) => {
+    const parent = census.find((pane) => pane.paneId === paneId);
+    const observation = live.panes.find((pane) => pane.paneId === paneId);
+    const operator = observation?.operatorBridge;
+    const bridgeStatus =
+      observation?.status === "live-process" || operator?.status === "live-process"
+        ? ("live-process" as const)
+        : observation?.status === "pane-mismatch" || operator?.status === "pane-mismatch"
+          ? ("pane-mismatch" as const)
+          : observation?.status === "missing" && operator === undefined
+            ? ("missing" as const)
+            : ("unobserved" as const);
+    const label = `Lead pane ${paneId} parenting ${children.map((child) => child.paneId).join(", ")}`;
+    const detail =
+      bridgeStatus === "live-process"
+        ? `${label} has an observed matching Clankie bridge process. Native catalog, delivery and parent report routing remain unverified.`
+        : parent === undefined
+          ? `${label} is absent from the current agent census; its bridge remains unobserved.`
+          : bridgeStatus === "missing"
+            ? `${label} has no observed Clankie bridge for its live native harness. This does not prove that its profile lacks an installation.`
+            : bridgeStatus === "pane-mismatch"
+              ? `${label}'s observed bridge has no matching pane/socket ownership.`
+              : `${label}'s native bridge could not be observed${parent.harness ? ` (census harness: ${parent.harness})` : " (census harness unknown)"}.`;
+    return {
+      paneId,
+      ...(parent?.terminalId === undefined ? {} : { terminalId: parent.terminalId }),
+      ...(parent?.harness === undefined ? {} : { harness: parent.harness }),
+      children,
+      bridgeStatus,
+      detail,
+      ...(bridgeStatus === "live-process"
+        ? {}
+        : {
+            remediation:
+              `${label} has ${bridgeStatus === "missing" ? "no observed Clankie bridge" : "no verified matching Clankie bridge process"}. ` +
+              "Inspect that parent's foreground native harness and source-owned bridge profile; install/enable or resume its bridge as needed, then verify its native tool catalog and parent report routing. Preserve the native session and reconcile uncertain reports before retrying.",
+          }),
+    };
+  });
+}
+
 /** Registration is separate from live membership: neither a config entry nor a pane ID grants tools. */
 export async function inspectHarnessBridges(
   env: NodeJS.ProcessEnv,
@@ -44,10 +116,13 @@ export async function inspectHarnessBridges(
         /* stale install */
       }
     }
-  let linkedSession: Awaited<ReturnType<typeof inspectLiveHarnessBridges>> = {
+  let linkedSession: Awaited<ReturnType<typeof inspectLiveHarnessBridges>> & {
+    parentLeads?: readonly ParentLeadObservation[];
+  } = {
     state: "no-link",
     panes: [],
     unownedBridges: [],
+    parentLeads: [],
   };
   const local = {
     platform: process.platform,
@@ -97,10 +172,20 @@ export async function inspectHarnessBridges(
             )
           ).stdout;
         const list = JSON.parse(await run("herdr", ["agent", "list"]));
-        const panes = (list.result?.agents ?? []).flatMap((agent: { pane_id?: string; agent?: string }) =>
-          typeof agent.pane_id === "string" && typeof agent.agent === "string"
-            ? [{ paneId: agent.pane_id, harness: agent.agent }]
-            : [],
+        const census: CensusPane[] = (list.result?.agents ?? []).flatMap(
+          (agent: { pane_id?: string; terminal_id?: string; parent_pane_id?: string; agent?: string }) =>
+            typeof agent.pane_id === "string"
+              ? [
+                  {
+                    paneId: agent.pane_id,
+                    ...(typeof agent.terminal_id === "string" ? { terminalId: agent.terminal_id } : {}),
+                    ...(typeof agent.parent_pane_id === "string"
+                      ? { parentPaneId: agent.parent_pane_id }
+                      : {}),
+                    ...(typeof agent.agent === "string" ? { harness: agent.agent } : {}),
+                  },
+                ]
+              : [],
         );
         let runtimePid: number | undefined;
         try {
@@ -116,14 +201,17 @@ export async function inspectHarnessBridges(
         } catch {
           // No running runtime identity: bridge presence remains observable, age remains unknown.
         }
-        linkedSession = await inspectLiveHarnessBridges({
+        const live = await inspectLiveHarnessBridges({
           socket: link.socket,
-          panes,
+          panes: census.flatMap((pane) =>
+            pane.harness === undefined ? [] : [{ paneId: pane.paneId, harness: pane.harness }],
+          ),
           run,
           ...(runtimePid === undefined ? {} : { runtimePid }),
         });
+        linkedSession = { ...live, parentLeads: parentLeadObservations(census, live) };
       } catch {
-        linkedSession = { state: "unavailable", panes: [], unownedBridges: [] };
+        linkedSession = { state: "unavailable", panes: [], unownedBridges: [], parentLeads: [] };
       }
       if (!env.HERDR_PANE_ID || env.HERDR_SOCKET_PATH !== link.socket) {
         local.membership = "not-in-session";
@@ -177,6 +265,9 @@ export async function inspectHarnessBridges(
     localFleet: local,
     linkedSession,
     remediation: [
+      ...(linkedSession.parentLeads ?? []).flatMap((lead) =>
+        lead.remediation === undefined ? [] : [lead.remediation],
+      ),
       ...(!codexRegistered
         ? [
             "Register clankie mcp --fleet through the source that owns Codex configSource; preserve generated configuration symlinks.",

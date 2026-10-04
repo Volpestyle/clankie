@@ -702,7 +702,11 @@ paths:
       description: >-
         One contract over Linear, GitHub issues, the repo's own Markdown directory, or
         .clankie/work/ (ADR 0191). `action` is repos, discover, init, list, show, create,
-        update or attach. A path names and registers a local repo; registered repos are
+        update, attach, write or write_receipt. The two narrow owner operations take
+        request {repoId,itemId,requestId,command}; receipt reads omit command. The
+        command assigns work-metadata owner, adds/removes a role label or appends a
+        blocker. Their applied/refused/uncertain receipt always carries the UUID;
+        repeated IDs and receipt reads never replay a write. A path names and registers a local repo; registered repos are
         readable from paired devices through the work_repos and work_items operator ops.
         list takes optional status, owner and label (case-insensitive) filters; items carry
         the backend's labels (ADR 0208).
@@ -1585,7 +1589,7 @@ paths:
       summary: Operator conversation contract
       description: |
         One route, discriminated `op`: `list`, `roster`, `get`, `create`,
-        `fork`, `close`, `send`, `cancel`, `replay`, `tail`, `autonomy`,
+        `fork`, `close`, `send`, `cancel`, `replay`, `subagent_replay`, `tail`, `autonomy`,
         `terminal_tail`. The TUI and relay both speak this. Seat scopes
         identify Herdr direct-send/projection threads. `cancel` interrupts one
         accepted run: the captain aborts the live model turn and the durable
@@ -1625,8 +1629,26 @@ paths:
         keep their casing and compare case-insensitively. `roles` returns the
         built-ins, then custom roles in use, as `{ role, builtIn, count }`. Fleet seats may
         carry `subagents` (running count and up to eight recent labels) for
-        local Claude seats that were hired or whose chat is open; absent means
-        unknown. `work_items` takes an optional case-insensitive `label`.
+        local Claude, Codex and registered OpenCode seats that were hired or
+        whose chat is open. Recent entries optionally carry native `id`,
+        `startedAt` and `endedAt`; absent means unknown.
+        `work_items` takes an optional case-insensitive `label`; items may
+        carry optional backend-native parent metadata. `work_item_write` requires
+        the original owner with terminalControl and request {repoId,itemId,
+        requestId UUID,command}. Commands assign work-metadata owner, add/remove
+        a role label, or append a dependency. `work_item_write_receipt` takes
+        repoId,itemId,requestId and reads the original scoped result. Both return
+        an accepted envelope with receipt {requestId,outcome:applied|refused|uncertain,
+        message,item?}. Repeated IDs and receipt reads never replay a write.
+        `subagent_replay` takes `replay` with the parent's existing seat/persona
+        `conversationId`, a native `subagentId`, `surfaceClientId` and the ordinary
+        replay paging options. It needs only the chat grant and returns
+        `subagentId` plus the ordinary normalized replay result. It reads a
+        bounded local child window through the parent's native source without
+        creating a conversation or granting send, resume or terminal control.
+        Missing locators, changed parents and remote children return typed
+        recovery. Older hosts may reject this operation while their fleet
+        remains readable.
         `replay` optionally takes `direction: backward`, `turnLimit` (1..40,
         default 20) and `limit` (1..500, default 500 for backward). Omit `cursor`
         to open the newest window; pass the page's `previousCursor` as the next

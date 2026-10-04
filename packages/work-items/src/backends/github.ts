@@ -2,11 +2,14 @@ import { WorkItemSchema, type WorkItem, type WorkItemStatus } from "@clankie/pro
 import {
   matchesFilter,
   patchCriteria,
+  patchDependsOn,
+  patchLabels,
   touchesCriteria,
   WorkItemNotFoundError,
   workItemLabels,
   type WorkBackend,
   type WorkItemPatch,
+  type WorkWriteCallbacks,
 } from "../backend.ts";
 import { parseBody, patchBody } from "../format.ts";
 
@@ -121,11 +124,17 @@ function labelNames(issue: Issue): string[] {
     .filter((name) => name.length > 0);
 }
 
+function labelStatus(name: string): "in_review" | "in_progress" | undefined {
+  const value = name.toLowerCase();
+  if (/\bin[ -]?review\b/u.test(value)) return "in_review";
+  if (/\bin[ -]?progress\b|\bdoing\b|\bwip\b/u.test(value)) return "in_progress";
+}
+
 function statusOf(issue: Issue): WorkItemStatus {
   if (issue.state === "closed") return issue.state_reason === "not_planned" ? "canceled" : "done";
-  const names = labelNames(issue).map((name) => name.toLowerCase());
-  if (names.some((name) => /\bin[ -]?review\b/u.test(name))) return "in_review";
-  if (names.some((name) => /\bin[ -]?progress\b|\bdoing\b|\bwip\b/u.test(name))) return "in_progress";
+  const statuses = labelNames(issue).map(labelStatus);
+  if (statuses.includes("in_review")) return "in_review";
+  if (statuses.includes("in_progress")) return "in_progress";
   return "todo";
 }
 
@@ -136,11 +145,21 @@ function numberOf(id: string): number {
 }
 
 export function createGithubBackend(
-  options: { readonly repo: string } & ({ readonly gh: GhRunner } | { readonly api: GithubApi }),
+  options: { readonly repo: string; readonly scopedWrites?: boolean } & WorkWriteCallbacks &
+    ({ readonly gh: GhRunner } | { readonly api: GithubApi }),
 ): WorkBackend {
   const base = `repos/${options.repo}/issues`;
   const github = "api" in options ? options.api : ghCliApi(options.gh);
-  const api = (method: string, path: string, body?: unknown) => github.request(method, path, body);
+  const api = async (method: string, path: string, body?: unknown) => {
+    const mutation = method !== "GET";
+    if (mutation) {
+      options.beforeWrite?.();
+      options.onDispatch?.();
+    }
+    const result = await github.request(method, path, body);
+    if (mutation) options.effectConfirmed?.();
+    return result;
+  };
 
   const toItem = (issue: Issue, parent?: string): WorkItem => {
     const parsed = parseBody(issue.body ?? "");
@@ -241,26 +260,36 @@ export function createGithubBackend(
       })) as Issue;
       if (status === "done" || status === "canceled")
         issue = (await api("PATCH", `${base}/${String(issue.number)}`, statusFields(issue, status))) as Issue;
-      return toItem(issue);
+      return readItem(issue);
     },
     async update(id, patch: WorkItemPatch) {
       const issue = await fetchIssue(id);
       const current = toItem(issue);
-      const bodyChanged =
-        touchesCriteria(patch) || patch.owner !== undefined || patch.dependsOn !== undefined;
+      if (
+        options.scopedWrites &&
+        [...(patch.addLabels ?? []), ...(patch.removeLabels ?? [])].some(
+          (name) => labelStatus(name) !== undefined,
+        )
+      )
+        throw new Error("Role labels cannot change GitHub status labels");
+      const dependsChanged = patch.dependsOn !== undefined || patch.addDependsOn !== undefined;
+      const labelsChanged = patch.addLabels !== undefined || patch.removeLabels !== undefined;
+      const labels = patchLabels(labelNames(issue), patch);
+      const bodyChanged = touchesCriteria(patch) || patch.owner !== undefined || dependsChanged;
       const body = bodyChanged
         ? patchBody(issue.body ?? "", {
             ...(touchesCriteria(patch) ? { criteria: patchCriteria(current.criteria, patch) } : {}),
             ...(patch.owner === undefined ? {} : { owner: patch.owner }),
-            ...(patch.dependsOn === undefined ? {} : { dependsOn: patch.dependsOn }),
+            ...(dependsChanged ? { dependsOn: patchDependsOn(current.dependsOn, patch) } : {}),
           })
         : undefined;
       const updated = (await api("PATCH", `${base}/${String(issue.number)}`, {
         ...(patch.title === undefined ? {} : { title: patch.title }),
         ...(body === undefined ? {} : { body }),
-        ...(patch.status === undefined ? {} : statusFields(issue, patch.status)),
+        ...(labelsChanged ? { labels } : {}),
+        ...(patch.status === undefined ? {} : statusFields({ ...issue, labels }, patch.status)),
       })) as Issue;
-      return toItem(updated);
+      return readItem(updated);
     },
     async attach(id, evidence) {
       const issue = await fetchIssue(id);
@@ -268,7 +297,7 @@ export function createGithubBackend(
       const updated = (await api("PATCH", `${base}/${String(issue.number)}`, {
         body: patchBody(issue.body ?? "", { evidence: [...current.evidence, evidence] }),
       })) as Issue;
-      return toItem(updated);
+      return readItem(updated);
     },
   };
 }

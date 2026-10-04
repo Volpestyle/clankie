@@ -5,6 +5,11 @@ description: Use when validating a Clankie capability across a service, credenti
 
 # Verify Clankie
 
+For James-triggered trust and delivery checks, use the
+[manual failure scenarios](../../../docs/testing/manual-failure-scenarios.md).
+Running them or an eval requires his explicit trigger; neither belongs in CI,
+`pnpm check` or a release gate. Missing proof stays open.
+
 Match the evidence to the claim. Call a capability working only after exercising
 the public path with the real dependency named in the claim. Isolated client
 logic does not prove that the service boots, decodes, accepts a request or

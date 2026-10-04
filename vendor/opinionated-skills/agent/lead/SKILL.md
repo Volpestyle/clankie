@@ -31,7 +31,11 @@ A brief or evidence file is useful context when needed, not a delivery channel.
 
 The hiring conversation owns the worker. A host-admitted `message_seat` from
 another conversation adopts it, routing future reports and hire completion there.
-The worker cannot choose a different destination. An attached native operator
+Without persisted adoption, reports follow the actual census parent/launcher
+to its attached conversation or existing native channel. With no eligible parent,
+the default conversation receives a tagged `unadopted` report; doctor/roster name
+the parent pane and missing bridge. Explicit adoption wins; names and tabs confer
+no ownership. The worker cannot choose a different destination. An attached native operator
 seat drives its selected conversation; selecting `global-default` does not select
 other rooms. Missing or uncertain native control needs inspection of the original
 receipt, never a second dispatch path. See [native operations](reference/operations.md).
@@ -116,11 +120,20 @@ Another pane for that project/deliverable is refused while starting, live or
 uncertain; message the existing worker, never invent a different key to bypass it.
 `panes` permits independently owned slices to have separate authorized hires.
 
-`new-tab` is normal placement. `split` requires a verified native lead pane in
-the target fleet; it never chooses another client's focused pane. Registered
-local account labels select existing profiles, not login, grants or global
-instructions. Remote account overrides are unsupported. Inspect the current
-schema on older installs; do not assume new profile fields are present.
+New hires use one workspace per repository in the selected fleet; linked
+worktrees share that repository identity. `new-tab` is normal placement: one
+solo worker per tab, named `Name · role`.
+
+For a shared workflow, pass an explicit named `pipeline`. Its first member
+creates the tab; later stages use `split` with the same pipeline to join it.
+A role's or fleet's `split` preference still needs the per-hire pipeline.
+Existing tabs must carry matching repo and pipeline metadata on every pane;
+unmarked or ambiguous tabs refuse. Never substitute the lead or focused pane.
+Prepared native initial-command hires cannot split an existing pipeline.
+
+Registered local account labels select existing profiles, not login, grants or
+global instructions. Remote account overrides are unsupported. Inspect the
+current schema on older installs; do not assume new profile fields are present.
 
 ## Inspect enough to decide
 

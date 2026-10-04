@@ -20,5 +20,6 @@ schema boundaries. They do not claim live app rendering or remote tracker writes
 The old client schema is the unmodified
 `packages/protocol/src/work-items.ts` from commit `8d982a93`, frozen in
 `packages/protocol/test/fixtures/work-items-8d982a93.ts`. Compatibility uses the
-production `parseProtocolResponse` reader against that schema, not a reconstructed
-old shape.
+unmodified production `parseProtocolResponse` reader from that commit, frozen
+in `packages/protocol/test/fixtures/response-8d982a93.ts`, against that schema.
+Neither the old schema nor its reader is reconstructed.

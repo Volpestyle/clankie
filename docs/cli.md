@@ -887,7 +887,7 @@ Environment overrides still win: check `effectiveVoice` before restarting.
 This command is local-only; hosted mode refuses it. See the
 [voice operating guide](../apps/discord-bridge/README.md) for verification limits.
 
-### `work [status]` / `work init` / `work list|show|create|update|close|attach`
+### `work [status]` / `work init` / `work list|show|create|update|close|attach|write|receipt`
 
 Tracks work where the repo already does ([ADR 0191](adr/0191-work-is-tracked-where-the-repo-tracks-it.md)):
 its Linear team (through the Linear account connected to Clankie), its GitHub
@@ -931,6 +931,35 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
 - `clankie work close ID [--canceled]` sets `done` (or `canceled`).
 - `clankie work attach ID --url URL --caption TEXT [--kind image|video|log|link]`
   appends evidence; the kind is inferred from the URL when omitted.
+
+`clankie work write ID --owner NAME|--no-owner|--add-label ROLE|--remove-label
+ROLE|--add-blocker ID [--request-id UUID]` performs exactly one owner-authorized
+change to an existing item. `--owner` sets its work metadata, not a provider user
+assignee. The CLI allocates an ID before dispatch when omitted; retain that ID
+from the JSON result. `clankie work receipt ID --request-id UUID` reads the
+original result. Both accept a registered or project repository ID in `--repo`;
+a local path resolves to an already registered repository. Use `work status`
+to register it before writing. Project references require their local saved
+tracker workspace. GitHub writes require its connected account.
+
+The JSON result includes `requestId`, `outcome` (`applied`, `refused`,
+`uncertain`), a plain `message`, and optionally the refreshed `item`. Repeating
+an ID reads its receipt after checking the original owner, item, binding and
+command; it never writes again. If the response is lost, inspect the receipt
+and tracker rather than sending the same change with a new ID. Labels and
+blockers merge into freshly read state, preserving unrelated labels and
+prerequisites. GitHub status labels are reserved. `parent` is optional read
+metadata, separate from blockers.
+
+Paired devices with `terminalControl` use the owner-preserving operator ops
+`work_item_write` (`request: {repoId, itemId, requestId, command}`) and
+`work_item_write_receipt` (`repoId`, `itemId`, `requestId`). Commands are
+`{action:"assign", owner:NAME|null}`, `{action:"add_label", label:ROLE}`,
+`{action:"remove_label", label:ROLE}`, or `{action:"add_dependency", id:ID}`.
+The host checks owner authority again at publication and audits each write;
+chat and execution credentials cannot authorize it. Local HTTP uses
+`POST /v1/work` with `{action:"write", request:...}` or
+`{action:"write_receipt", request:...}` and the operator bearer.
 
 Statuses are `todo`, `in_progress`, `in_review`, `done` and `canceled`,
 projected onto each backend's own states. A recorded backend that cannot be
@@ -2550,6 +2579,22 @@ choose the destination. Worker reports fall back to `global-default` when that
 conversation has been removed; a retained room with revoked grants is refused.
 Local and fleet-qualified remote workers follow the same persisted ownership
 proof and delivery receipts.
+Without persisted adoption, the host reads the actual census parent/launcher
+edge and routes to that exact native lead or its attached conversation. Explicit
+adoption wins; tabs, titles and report text establish no ownership. The parent
+needs an exact-session native mailbox, authenticated hook or existing harness
+control/queue path. A room still needs its original Discord admission and grants.
+If no eligible parent exists, the report falls back to `global-default` with
+`workerReportRouting.source: "unadopted"` on its durable accepted turn and a
+reason (`no_parent`, `parent_unavailable`, `parent_unlinked`, or `owner_removed`).
+The fleet roster exposes the same diagnostic and parent pane/seat when known.
+An authority or occupant mismatch is `source: "refused"` with
+`reason: "authority_unavailable"`; it does not admit a default fallback.
+`clankie doctor` includes `linkedSession.parentLeads` and names lead panes whose
+bridges are missing or unobserved, including their child panes. These process
+observations do not prove native delivery or grant tools. Reconcile the original
+report ID after uncertainty; restarting or adopting a worker never resends an
+already accepted report to another conversation.
 `clankie fleet set --tools off` stops new standing tool admissions. Each call
 rechecks live admission, account binding and settings, but a call already past its
 last asynchronous check can still reach a provider after tools-off or admission
@@ -2703,6 +2748,49 @@ this optional metadata returns a clear unsupported error. See
 [Discord settings](discord-rooms.md) for revision checks and the preferred
 `DISCORD_MANAGED_GUILD_ID` environment name.
 
+### `discord setup`
+
+Read the same four filled sentences and check results as TUI `/discord`, using
+the host’s wording and computer name. Server, room and people names come from
+the connected account’s directory. Lists can be partial; missing names remain
+unavailable. Account connection and selected-room visibility use directory
+evidence. Send Messages, Manage Channels, Manage Webhooks, computer authority
+and test posts remain **not checked** until the shared active-check work lands
+([VUH-1642](https://linear.app/vuhlp/issue/VUH-1642)). Reading or changing setup
+never posts to Discord.
+
+```sh
+clankie discord setup choices home
+clankie discord setup home --server Studio
+clankie discord setup choices talk
+clankie discord setup talk --channel general --channel dev
+clankie discord setup computer --access me
+clankie discord setup computer --access people --person James
+clankie discord setup computer --access servers --server Studio
+clankie discord setup computer --access nobody
+clankie discord setup team --server Studio --visible on
+clankie discord setup team --visible off
+```
+
+`choices home|talk|computer|team` returns names and numbered choices such as
+`@1`. Use a full displayed name or numbered choice when names repeat; an
+ambiguous name fails before writing. Repeated `--channel`, `--person` or
+`--server` flags select several entries where appropriate. Computer access is
+always its own explicit selection: picking a social server, rooms or the team
+never changes machine grants. `me` requires the owner configured under
+Advanced. Picking people replaces server grants; picking servers grants every
+admitted human in those servers and replaces individual grants. `nobody`
+clears all three machine-grant lists.
+
+Each sentence saves through the authenticated host API in one revision-fenced
+write. A stale edit fails rather than overwriting someone else’s change.
+Hiding the team preserves its selected server. Raw fields remain under TUI
+`/discord` → **Advanced**; `discord set/clear` remains the local raw-field
+writer. Hosted consoles and CLI use their existing encrypted transport for
+sentence setup and host Advanced fields. Raw local fields and local credentials
+are not written through a hosted connection. Stored body settings retain their
+existing restart requirement; a successful save does not assert live application.
+
 ### `discord transcripts [--cursor CURSOR] [--limit N]`
 
 Read the private retained voice log through the authenticated service API.
@@ -2737,9 +2825,10 @@ values.
 | Activity               | `activity-application-id-gba`, `activity-tunnel-name`, `activity-tunnel-hostname`                                                                                                                                     |
 
 `active-body` is `bot` or `user_session`. These commands never accept Discord
-tokens and do not perform the lab-user ToS opt-in. The TUI `/discord` modal uses
-this writer for non-secret fields; its existing secret and opt-in flows stay on
-the credential broker and service HTTP catalog.
+tokens and do not perform the lab-user ToS opt-in. The main TUI `/discord` flow
+uses the shared host definition and revision-fenced API writer. Advanced keeps
+the existing local credential and opt-in flows on the broker and service HTTP
+catalog; its raw field editor uses host revision checks.
 
 ### External native agent chats
 
@@ -2750,6 +2839,8 @@ including messages, tools, typing state and contained images. Native cursors are
 opaque; clients follow the returned recovery cursor after a session or history
 change. The host persists the source locator, not a second native transcript.
 Explicit app sends and native messages remain durable host communications.
+An unadopted worker report can create its linked native parent's seat thread to
+retain the report's delivery receipt; discovery alone still creates no thread.
 Clankie can inspect panes and arm completion watches independently of chat views.
 See [the native chat decision](adr/0188-native-agent-chats-read-their-own-history.md).
 

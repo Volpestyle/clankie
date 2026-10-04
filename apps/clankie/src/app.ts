@@ -1,5 +1,11 @@
 import { registerComputerRoutes } from "./computer-http.ts";
 import { ISSUE_METRICS_PATH, IssueMetricsQuerySchema } from "@clankie/protocol";
+import type { WorkWriteAuthority } from "./work-write-target.ts";
+import type {
+  WorkItemWriteRequest,
+  WorkItemWriteReceiptRequest,
+  WorkItemWriteReceipt,
+} from "@clankie/protocol/work-item-write";
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
 import type { PeerSeatAuthority } from "./captain/peer-seat-messages.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -233,7 +239,7 @@ import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./m
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 import type { DeliveredFileStore } from "./delivered-files.ts";
-import { WorkRequestError, WorkRequestSchema, type WorkItemsService } from "./work-items.ts";
+import { WorkRequestError, WorkHttpRequestSchema, type WorkItemsService } from "./work-items.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
 
@@ -3918,10 +3924,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     if (dependencies.workItems === undefined) return context.json({ error: "work_items_unavailable" }, 503);
-    const input = WorkRequestSchema.safeParse(await readJson(context.req.raw));
+    const input = WorkHttpRequestSchema.safeParse(await readJson(context.req.raw));
     if (!input.success)
       return context.json({ error: "invalid_work_request", detail: input.error.issues[0]?.message }, 400);
     try {
+      if (input.data.action === "write" || input.data.action === "write_receipt") {
+        const owner = await workOwnerAuthority(context.req.raw);
+        return context.json(await serveWorkWrite(input.data.request, owner, input.data.action === "write"));
+      }
       return context.json(await dependencies.workItems.handle(input.data, true));
     } catch (error) {
       if (error instanceof WorkRequestError) {
@@ -4234,6 +4244,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       "pairing offer minted",
     );
     const protectedWire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    // Preserve encrypted/default links and the existing single-use redemption;
+    // only this authenticated ordinary operator response exposes the short code.
     const wire =
       parsed.data.review === undefined ? { ...protectedWire, localCode: offer.code } : protectedWire;
     return context.json(direct === undefined ? wire : withDirectPairingRoute(wire, direct));
@@ -4612,9 +4624,105 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     };
   };
 
+  const workOwnerAuthority = async (request: Request): Promise<WorkWriteAuthority | undefined> => {
+    const owner = await questionOwnerAuthority(request);
+    if (!owner) return undefined;
+    const original = hostedOriginalRequests.get(request);
+    const deviceRequest = original ?? request;
+    let expiresAt = Number.POSITIVE_INFINITY;
+    if (owner.principal.kind === "device") {
+      const device = await authenticateDevice(deviceRequest);
+      if (device === "unavailable" || "denied" in device || device.deviceId !== owner.principal.id)
+        return undefined;
+      expiresAt = Date.parse(device.sessionExpiresAt);
+    }
+    const current = () =>
+      !request.signal.aborted &&
+      !deviceRequest.signal.aborted &&
+      clock().getTime() < expiresAt &&
+      owner.current();
+    return {
+      principal: owner.principal,
+      current,
+      authorize: async () => current() && (await owner.authorize()) && current(),
+    };
+  };
+  const serveWorkWrite = async (
+    request: WorkItemWriteRequest | WorkItemWriteReceiptRequest,
+    authority: WorkWriteAuthority | undefined,
+    write: boolean,
+  ): Promise<WorkItemWriteReceipt> => {
+    if (!authority)
+      return {
+        requestId: request.requestId,
+        outcome: "refused",
+        message: "An owner with terminal control must authorize this work-item write.",
+      };
+    if (!dependencies.workItems)
+      return {
+        requestId: request.requestId,
+        outcome: "refused",
+        message: "Work tracking is not running on this host.",
+      };
+    const audit = {
+      principal: authority.principal,
+      repoId: request.repoId,
+      itemId: request.itemId,
+      requestId: request.requestId,
+    };
+    if (write) {
+      try {
+        recordEvent("work.item.write.requested", `work:${request.repoId}`, clock().toISOString(), {
+          ...audit,
+          action: (request as WorkItemWriteRequest).command.action,
+        });
+      } catch {
+        return {
+          requestId: request.requestId,
+          outcome: "refused",
+          message: "The write could not be audited. Nothing was dispatched.",
+        };
+      }
+    }
+    const result = write
+      ? await dependencies.workItems.handleOwnerWrite(request as WorkItemWriteRequest, authority)
+      : await dependencies.workItems.readOwnerReceipt(request, authority);
+    if (write) {
+      try {
+        recordEvent("work.item.write.resolved", `work:${request.repoId}`, clock().toISOString(), {
+          ...audit,
+          outcome: result.outcome,
+        });
+      } catch {
+        logger.warn(
+          { event: "work.item.write.audit_failed", requestId: request.requestId, outcome: result.outcome },
+          "Work write settled in its durable receipt; outcome audit append failed",
+        );
+      }
+    }
+    return result;
+  };
+
   app.post(OPERATOR_CONVERSATION_DISPATCH_PATH, async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     const owner = await questionOwnerAuthority(context.req.raw);
+    const body = await readJson(context.req.raw);
+    const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
+    // Narrow work refusals are typed receipts, so a device can render the reason
+    // without confusing known non-dispatch with transport uncertainty.
+    if (
+      parsed.success &&
+      (parsed.data.op === "work_item_write" || parsed.data.op === "work_item_write_receipt")
+    ) {
+      const authority = await workOwnerAuthority(context.req.raw);
+      const request = parsed.data.op === "work_item_write" ? parsed.data.request : parsed.data;
+      return context.json({
+        op: parsed.data.op,
+        schemaVersion: 1,
+        outcome: "accepted",
+        receipt: await serveWorkWrite(request, authority, parsed.data.op === "work_item_write"),
+      });
+    }
     if (!owner && (!captain || captain === "unavailable"))
       return context.json(
         {
@@ -4623,8 +4731,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         },
         captain === "unavailable" ? 503 : 401,
       );
-    const body = await readJson(context.req.raw);
-    const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
     const questionOp =
       parsed.data.op === "project_proposal_get" ||
@@ -4674,7 +4780,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }
     }
     // Work items are read here, beside the registry that decides which repos a
-    // device may name (ADR 0191). A device never writes one.
+    // device may name (ADR 0191). Owner writes use the separate journaled route above.
     if (parsed.data.op === "work_repos") {
       const result =
         dependencies.workItems === undefined

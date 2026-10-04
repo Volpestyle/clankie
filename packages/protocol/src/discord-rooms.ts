@@ -86,6 +86,7 @@ export const DiscordSettingsSnapshotSchema = z
     setup: DiscordSetupSnapshotSchema.optional(),
   })
   .strict();
+export type DiscordSettingsSnapshot = z.infer<typeof DiscordSettingsSnapshotSchema>;
 export const DiscordSettingsUpdateSchema = z
   .object({
     expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),

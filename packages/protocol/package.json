@@ -12,6 +12,7 @@
     "./wake": "./src/wake.ts",
     "./host-power": "./src/host-power.ts",
     "./work-items": "./src/work-items.ts",
+    "./work-item-write": "./src/work-item-write.ts",
     "./app-telemetry": "./src/app-telemetry.ts",
     "./discord-ingress": "./src/discord-ingress.ts",
     "./discord-ingress-crypto": "./src/discord-ingress-crypto.ts",

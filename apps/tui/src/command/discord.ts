@@ -1,4 +1,5 @@
 import { ClankieApiClient } from "@clankie/api-client";
+import { runDiscordSetupCommand } from "./discord-setup.ts";
 import { DISCORD_SETTING_GROUPS } from "@clankie/protocol";
 import { DiscordDirectoryRequestSchema, type DiscordDirectorySnapshot } from "@clankie/protocol";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
@@ -27,6 +28,7 @@ const DISCORD_USAGE = [
   "Usage: clankie discord [status]",
   "       clankie discord rooms",
   "       clankie discord definition",
+  "       clankie discord setup [choices home|talk|computer|team] [--server NAME | --channel NAME | --access nobody|me|people|servers | --visible on|off]",
   "       clankie discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]",
   "       clankie discord guide CONVERSATION_ID TEXT|--clear",
   "       clankie discord transcripts [--cursor CURSOR] [--limit N]",
@@ -245,6 +247,7 @@ export async function runDiscordCommand(
   | DiscordRoomVoiceStatus
   | DiscordSetupSnapshot
   | DiscordDirectorySnapshot
+  | Awaited<ReturnType<typeof runDiscordSetupCommand>>
 > {
   const verb = args[0];
   if (
@@ -252,6 +255,7 @@ export async function runDiscordCommand(
     verb === "guide" ||
     verb === "call" ||
     verb === "definition" ||
+    verb === "setup" ||
     verb === "directory"
   ) {
     let directoryQuery;
@@ -281,6 +285,7 @@ export async function runDiscordCommand(
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     });
     if (directoryQuery) return client.discordDirectory(directoryQuery);
+    if (verb === "setup") return runDiscordSetupCommand(args.slice(1), client);
     if (verb === "definition") {
       const snapshot = await client.discordSettings();
       if (!snapshot.setup)

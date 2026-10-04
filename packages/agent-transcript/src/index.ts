@@ -256,10 +256,19 @@ export function parseHerdrSeatTranscript(
   agent: string,
   jsonl: string,
   includeChannelPrompts = false,
+  claudeAgentId?: string,
 ): HerdrTranscriptEntry[] {
   const records = parseRecords(jsonl);
   if (tailableAgent(agent)) return flatEntries(agent, records, freshState());
-  if (agent === "claude") return claudeEntries(records, includeChannelPrompts);
+  if (agent === "claude")
+    return claudeEntries(
+      claudeAgentId === undefined
+        ? records
+        : records
+            .filter((entry) => entry.agentId === claudeAgentId && entry.isSidechain === true)
+            .map((entry) => ({ ...entry, isSidechain: false })),
+      includeChannelPrompts,
+    );
   if (agent === "pi") return piEntries(records);
   return [];
 }

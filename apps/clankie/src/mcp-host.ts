@@ -104,7 +104,12 @@ export const MINECRAFT_BODY_ACCESS = Symbol("minecraft-body-access");
 
 type McpCallResult =
   | { readonly outcome: "ok"; readonly content: string; readonly isError: boolean }
-  | { readonly outcome: "refused"; readonly reason: McpRefusalReason; readonly detail: string };
+  | {
+      readonly outcome: "refused";
+      readonly reason: McpRefusalReason;
+      readonly detail: string;
+      readonly possiblyDispatched?: boolean;
+    };
 
 export interface McpHost {
   account(server: string, lane: CaptainSessionLaneV2): Promise<{ account: ProviderAccount; binding: string }>;
@@ -134,6 +139,9 @@ export interface McpHost {
     readonly conversationAuthority?: ConversationAuthority;
     /** Host-only socket/controller proof for native author attribution; never a grant. */
     readonly nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>;
+    /** Internal receipt hooks; never caller/model arguments. */
+    readonly onDispatch?: () => void;
+    readonly onSettled?: () => void;
   }): Promise<McpCallResult>;
   close(): Promise<void>;
 }
@@ -617,6 +625,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           try {
             if (closed || states.get(server.id) !== state) throw new Error(`${server.id} connection changed`);
             current?.();
+            input.onDispatch?.();
           } catch (error) {
             throw new DispatchRefused(error instanceof Error ? error.message : "MCP dispatch refused");
           }
@@ -642,6 +651,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                 ? client.callTool(input.tool, input.arguments)
                 : client.callTool(input.tool, input.arguments, input.timeoutMs),
             );
+        if (!result.isError) input.onSettled?.();
         options.logger.info(
           {
             event: "mcp.host.call",
@@ -693,6 +703,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           return {
             outcome: "refused",
             reason: "result_too_large",
+            possiblyDispatched: true,
             detail: `MCP ${server.id}/${input.tool} result exceeds ${MAX_DATA_RESULT_BYTES} bytes; request a smaller page or fewer fields`,
           };
         }
@@ -719,6 +730,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         return {
           outcome: "refused",
           reason: "server_unavailable",
+          possiblyDispatched: dispatched && !(error instanceof DispatchRefused),
           detail: error instanceof Error ? error.message.slice(0, 500) : "mcp_call_failed",
         };
       }
@@ -866,7 +878,15 @@ async function createTransport(
       fetch: async (url, init) => {
         const headers = new Headers(init?.headers);
         if (providerId !== undefined) {
-          headers.set("authorization", `Bearer ${await selectedBearer()}`);
+          try {
+            headers.set("authorization", `Bearer ${await selectedBearer()}`);
+          } catch (error) {
+            if (dispatchFence.getStore())
+              throw new DispatchRefused(
+                error instanceof Error ? error.message : "Connected credential changed",
+              );
+            throw error;
+          }
         }
         dispatchFence.getStore()?.();
         return fetch(url, { ...init, headers });

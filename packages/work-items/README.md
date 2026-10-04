@@ -20,8 +20,38 @@ Work items in the repo's own tracking convention ([ADR 0191](../../docs/adr/0191
   their other sections and order.
 
 The service (`apps/clankie/src/work-items.ts`) owns which repos a paired device
-may read; `clankie work` and the captain's `work_items` tools are its callers.
+may read or write; `clankie work` and the captain's `work_items` tools are its callers.
 The wire shapes live in `@clankie/protocol/work-items`.
+
+`update` accepts `addLabels`, `removeLabels` and `addDependsOn` deltas. Each
+backend reads the item afresh and merges against its complete native metadata;
+the 20-label `WorkItem.labels` display projection never supplies a replacement
+label set. Existing labels keep their names and order, removals win, and repeated
+additions are ignored case-insensitively. Dependencies merge with existing
+prerequisites. `owner` is the shared body/front-matter work owner, including
+`null` to clear it; it does not reassign the tracker issue's native assignee.
+An update prepares all changes before one provider mutation or atomic file rename.
+Its returned item retains the backend's parent metadata.
+
+`scopedWrites: true` opts into the owner-device write boundary. Linear resolves
+the recorded team/project through connected reads and compares canonical UUIDs
+with the fresh item's `teamId`/`projectId`; display names alone never prove scope.
+GitHub issues stay in the recorded repository, and scoped label deltas cannot
+manipulate labels recognized by its status parser, including `doing`/`wip` aliases.
+Files reject symlinked work paths, including
+parents and items, and reobserve the destination immediately before publication.
+Existing generic agent backends keep their unrestricted behavior unless this
+option is enabled.
+
+Backend options and `TrackerDeps` expose synchronous `beforeWrite`, `onDispatch`
+and `effectConfirmed` callbacks. Files run the final fence after temporary-file
+IO and before rename. Successful provider writes report confirmation before
+follow-up reads, so a failed parent/result read cannot erase proof of the effect.
+When a connected adapter awaits credential or admission checks, the service
+places its final fence and dispatch observation at that adapter's actual send
+boundary; it does not infer dispatch from an earlier backend callback. These
+hooks are service-owned authority and receipt integration, not caller-supplied
+permissions or an automatic retry path.
 
 Linear lists use cursor pages of at most 50 issues, stopping at the requested
 number of matching items (default 100, maximum 250) or the final page. Missing

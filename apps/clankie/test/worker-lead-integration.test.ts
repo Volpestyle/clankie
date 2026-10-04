@@ -16,7 +16,6 @@ import {
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
-import * as census from "../src/captain/herdr-census.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 
 const fixtures: Array<{ root: string; captain: ReturnType<typeof createCaptain> }> = [];
@@ -80,20 +79,6 @@ async function fixture(options: { gone?: boolean; room?: boolean; denied?: boole
     messageId: "native-message",
   });
   vi.spyOn(HerdrWatchStore.prototype, "awaitPickup").mockResolvedValue("working");
-  vi.spyOn(census, "readFleet").mockResolvedValue({
-    seats: [
-      {
-        seatId: agent.terminalId,
-        paneId: agent.paneId,
-        occupantId: occupantIdForHerdrSession(agent.session!),
-        subject: "worker",
-        harness: "codex",
-        status: "working",
-        title: "Noor",
-        workingDirectory: root,
-      },
-    ],
-  });
   const runner: HerdrWatchRunner = {
     get: async () => agent,
     resolveTerminal: async () => agent,
@@ -116,14 +101,28 @@ async function fixture(options: { gone?: boolean; room?: boolean; denied?: boole
     agent: "codex",
     agent_status: "working",
     title: "Noor",
-    agent_session: agent.session,
+    agent_session: { ...agent.session! },
     cwd: root,
   };
-  const remoteRun = vi.fn(async (args: readonly string[]) =>
-    JSON.stringify({
-      result: args[0] === "pane" && args[1] === "list" ? { panes: [wireAgent] } : { agent: wireAgent },
-    }),
-  );
+  const censusAgent = structuredClone(wireAgent);
+  // Raw Herdr replies exercise the real census and session binding. Mocking
+  // readFleet can omit session metadata and mask sender-binding faults.
+  const herdrResponse = (args: readonly string[]) => {
+    let result: unknown;
+    if (args[0] === "agent" && args[1] === "list") result = { agents: [censusAgent] };
+    else if (args[0] === "agent" && args[1] === "get") result = { agent: wireAgent };
+    else if (args[0] === "pane" && args[1] === "list") result = { panes: [wireAgent] };
+    else if (args[0] === "workspace" && args[1] === "list") result = { workspaces: [] };
+    else if (args[0] === "api" && args[1] === "snapshot")
+      result = { snapshot: { workspaces: [], tabs: [], panes: [wireAgent] } };
+    else throw new Error(`Unexpected external Herdr command: ${args.join(" ")}`);
+    return JSON.stringify({ result });
+  };
+  const remoteRun = vi.fn(async (args: readonly string[]) => herdrResponse(args));
+  const censusRun = vi.fn(async (_command: string, args: readonly string[]) => ({
+    stdout: herdrResponse(args),
+    stderr: "",
+  }));
   const deps = {
     herdrAvailable: () => !options.remote,
     embodiment: {},
@@ -147,6 +146,7 @@ async function fixture(options: { gone?: boolean; room?: boolean; denied?: boole
       stateDir: root,
       workingDirectory: root,
       nativeHerdrRunner: runner,
+      nativeCensusRunner: censusRun,
       settings,
       discordEnvironment: {},
       seatAdapters: [],
@@ -155,7 +155,20 @@ async function fixture(options: { gone?: boolean; room?: boolean; denied?: boole
     return captain;
   };
   const captain = open();
-  return { root, captain, agent, leads, room, owner, execute, route, open, remoteRun };
+  return {
+    root,
+    captain,
+    agent,
+    leads,
+    room,
+    owner,
+    execute,
+    route,
+    open,
+    remoteRun,
+    censusRun,
+    censusAgent,
+  };
 }
 
 async function delivery(captain: ReturnType<typeof createCaptain>, paneId: string) {
@@ -213,6 +226,47 @@ it.each([false, true])(
     await projectWorkerReport(f.captain, event!);
     expect(await global).toEqual([]);
     if (remote) expect(f.remoteRun).toHaveBeenCalled();
+  },
+);
+
+it.each([false, true])(
+  "a hired %s remote reporter whose raw census session changed refuses before acceptance",
+  async (remote) => {
+    const f = await fixture({ remote });
+    const receipt = await delivery(f.captain, f.agent.paneId);
+    const lead = f.captain.pollSeatEvents(200, undefined, f.leads[0]);
+    const global = f.captain.pollSeatEvents(200, undefined, "global-default");
+    // The authenticated get/pane observation still names the original worker,
+    // but the next external agent/list observes a replacement in that pane.
+    f.censusAgent.agent_session.value = "replacement-native-session";
+    expect(
+      await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Replaced reporter", receipt),
+    ).toMatchObject({ received: false, deliveryStage: "unavailable" });
+    expect(await lead).toEqual([]);
+    expect(await global).toEqual([]);
+    expect(f.execute).not.toHaveBeenCalled();
+    const persisted = JSON.parse(
+      readFileSync(join(f.root, "conversations", f.leads[0]!, "meta.json"), "utf8"),
+    );
+    expect(persisted.inboundAcceptances?.[receipt.id]).toBeUndefined();
+    if (remote) expect(f.remoteRun).toHaveBeenCalledWith(["agent", "list"]);
+    else expect(f.censusRun).toHaveBeenCalledWith("herdr", ["agent", "list"]);
+
+    // A known pre-send refusal does not poison the delivery ID. Exact matching
+    // external proof can accept it once without replaying it into another lead.
+    f.censusAgent.agent_session.value = f.agent.session!.value;
+    const poll = f.captain.pollSeatEvents(2000, undefined, f.leads[0]);
+    expect(
+      await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Replaced reporter", receipt),
+    ).toMatchObject({ received: true, deliveryStage: "stored" });
+    const [event] = await poll;
+    expect(event).toMatchObject({ conversationId: f.leads[0], kind: "message" });
+    await f.captain.acknowledgeSeatEvent(event!.id, f.leads[0]);
+    expect(
+      await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Replaced reporter", receipt),
+    ).toMatchObject({ received: true, deliveryStage: "stored" });
+    expect(await f.captain.pollSeatEvents(0, undefined, f.leads[0])).toEqual([]);
+    expect(await f.captain.pollSeatEvents(0, undefined, "global-default")).toEqual([]);
   },
 );
 
