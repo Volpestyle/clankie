@@ -4362,6 +4362,7 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
   }).strict(),
   DiscordCaptainActionContextSchema.extend({
     action: z.literal("watch_start"),
+    surface: z.enum(["gba_emulator", "minecraft"]).optional(),
     guildId: z.string().min(1).max(128),
   }).strict(),
   DiscordCaptainActionContextSchema.extend({
@@ -4386,7 +4387,7 @@ export type DiscordCaptainActionResult = z.infer<typeof DiscordCaptainActionResu
  * catalog: the executor maps a surface to its configured Discord application id
  * so a model can never name an arbitrary application to launch.
  */
-export const DiscordActivitySurfaceSchema = z.enum(["gba_emulator"]);
+export const DiscordActivitySurfaceSchema = z.enum(["gba_emulator", "minecraft"]);
 export type DiscordActivitySurface = z.infer<typeof DiscordActivitySurfaceSchema>;
 
 export const DiscordPresenceActionRiskClassSchema = z.enum([
