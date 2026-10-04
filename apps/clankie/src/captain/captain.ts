@@ -18,6 +18,7 @@ import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
 import { deliveryFingerprint } from "./delivery-fence.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
+import { createRemoteCodexGoals } from "./remote-codex-goals.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
@@ -2243,6 +2244,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   let seatSubagents = "";
+  const withRemoteGoals = createRemoteCodexGoals({ shell: (fleet) => deps.fleets?.shell?.(fleet) });
   let seatWork = "";
   let captainGoals = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
@@ -2273,16 +2275,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     const seats = options.nativeCensusRunner
       ? personas.reconcile(fleet.seats)
-      : withSeatWork(
-          withSeatSubagents(
-            personas.reconcile(fleet.seats),
+      : await withRemoteGoals(
+          withSeatWork(
+            withSeatSubagents(
+              personas.reconcile(fleet.seats),
+              fleet.seats,
+              (seat) =>
+                conversations.conversationIdForPersona(seat.personaId) !== undefined ||
+                conversations.conversationIdForSeat(seat.seatId) !== undefined,
+            ),
             fleet.seats,
-            (seat) =>
-              conversations.conversationIdForPersona(seat.personaId) !== undefined ||
-              conversations.conversationIdForSeat(seat.seatId) !== undefined,
+            agentWork,
           ),
           fleet.seats,
-          agentWork,
+          remoteFleets,
         );
     const nextWork = JSON.stringify(seats.map((seat) => [seat.goal, seat.assignment]));
     if (seatWork !== nextWork) {
