@@ -481,6 +481,7 @@ export interface ClankieAppDependencies {
   personaImages?: PersonaImageSource;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
   discordEnvironment?: NodeJS.ProcessEnv;
+  discordDirectory?: import("./discord-room-routes.ts").DiscordRoomRoutesOptions["directory"];
   roomObservations?: DiscordRoomObservations;
   roomVoice?: DiscordRoomVoice;
   settings?: {
@@ -521,8 +522,8 @@ export interface ClankieAppDependencies {
     ): Promise<boolean>;
   };
   /**
-   * Computer-use harnesses on this machine (ADR 0199). Absent on a hosted body,
-   * which has no owner desktop; the route then answers an empty list.
+   * Configured computer-use harnesses here and on Windows fleets (ADR 0199).
+   * Absent on a hosted body; the route then answers an empty list.
    */
   computerUseHarnesses?: { refresh(): Promise<readonly ComputerUseHarness[]> };
   rivals?: RivalsClient;
@@ -1016,6 +1017,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     app.route(
       "/",
       createDiscordRoomRoutes({
+        machineName: dependencies.hostedBody ? "his cloud computer" : hostDisplayName,
+        environment: dependencies.discordEnvironment ?? process.env,
+        ...(dependencies.discordDirectory ? { directory: dependencies.discordDirectory } : {}),
         authorize: authorizeRoom,
         captain: dependencies.captain,
         observations: dependencies.roomObservations,

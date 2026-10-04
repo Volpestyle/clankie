@@ -26,6 +26,8 @@ import {
   mentionsDiscordBot,
 } from "./text-inbox.ts";
 import { createServer } from "node:http";
+import { tryHandleDiscordDirectoryRequest } from "@clankie/discord-presence-core";
+import { readBotDiscordDirectory } from "./directory.ts";
 import {
   ChannelType,
   Client,
@@ -1853,6 +1855,13 @@ const deliverMinecraftLoginCode = createMinecraftLoginCodeDelivery({
 });
 const musicServer = createServer((request, response) => {
   const url = request.url ?? "/";
+  if (
+    tryHandleDiscordDirectoryRequest(request, response, {
+      token: bridgeToken,
+      read: (query) => readBotDiscordDirectory(client, query, !shuttingDown && client.isReady()),
+    })
+  )
+    return;
   if (request.method === "GET" && (url === "/" || url === "/health")) {
     const health = discordBridgeHealth({
       discordReady: client.isReady(),

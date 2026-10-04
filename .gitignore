@@ -28,6 +28,7 @@ coverage/
 ios/Pods/
 macos/Pods/
 .pnpm-store/
+/.local/
 .codebase-index/
 build/
 .gradle/

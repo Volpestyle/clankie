@@ -51,7 +51,18 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 const root = ${JSON.stringify(root)};
 fs.appendFileSync(root + "/calls", JSON.stringify(args) + "\\n");
-if (args[0] === "agent" && args[1] === "start") { ${start} }
+// This temp directory is not a Git worktree. Keep Herdr's real error shape
+// so hire placement uses its exact cwd identity before native startup.
+if (args[0] === "worktree" && args[1] === "list") {
+  console.error(JSON.stringify({error:{code:"not_git_worktree",message:"not a Git worktree"}}));
+  process.exitCode = 1;
+}
+else if (args[0] === "api" && args[1] === "snapshot") console.log(JSON.stringify({result:{snapshot:{
+  workspaces:[{workspace_id:"w1",label:"Fixture",number:1}],
+  tabs:[{tab_id:"w1:t1",workspace_id:"w1",label:"Fixture"}],
+  panes:[{pane_id:"w1:p0",workspace_id:"w1",tab_id:"w1:t1",cwd:root}]
+}}}));
+else if (args[0] === "agent" && args[1] === "start") { ${start} }
 else if (args[0] === "tab") console.log(JSON.stringify({result:{root_pane:{pane_id:"w1:p1"}}}));
 else if (args[0] === "agent" && args[1] === "get") console.log(JSON.stringify({result:{agent:{
   pane_id:"w1:p1", terminal_id:"term_pi", agent:"pi", agent_status:"idle",

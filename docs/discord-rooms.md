@@ -56,8 +56,29 @@ through the relay and recheck grants after awaited work.
 Discord settings object. Writes require actual operator authority. The hosted
 operator bridge still requires `mintedBy=hosted-account-operator` and
 `terminalControl`; `steer` does not grant settings access. The canonical schema
-lives in protocol and is reexported by settings. All 37 fields are editable under
+lives in protocol and is reexported by settings. All canonical fields are editable under
 TUI `/discord` → **All Discord settings** and existing `clankie discord set/clear`.
+The optional `setup` member contains the shared four-sentence definition, picker
+kinds, help, check kinds, Advanced groups and choice labels from protocol's
+`discord-setup.ts`. `machineName` comes from the host (its name when self-hosted,
+“his cloud computer” when hosted). It does not depend on the device opening
+settings. `clankie discord definition` reads the same metadata with operator
+authentication. Check kinds describe which checks a surface should present;
+this foundation does not claim that an invite, permission check or test post ran.
+Clients read responses through `parseProtocolResponse`; strict settings writes
+retain `expectedRevision` and never accept display metadata or unknown fields.
+Computer access remains a separate explicit choice, never a server/room preset.
+The team's server (`swarmGuildId`) and optional visibility (`teamVisible`) have
+separate pickers. Omission of `teamVisible` means visible; old-client writes
+preserve a stored gate. VUH-1626 owns reversible suspension without deleting
+room webhooks.
+
+`DISCORD_MANAGED_GUILD_ID` is the preferred environment spelling. The old
+`DISCORD_SWARM_GUILD_ID` is accepted as a compatibility alias, with the preferred
+name winning when both are set. The persisted/wire key `swarmGuildId` stays
+compatible with older clients. A legacy shell override still wins over stored
+settings; exporting settings emits the preferred name.
+
 Credentials remain in the credential broker. Environment overrides and settings
 that require a body restart retain their existing behavior; changing a stored
 field does not claim the running body already applied it.
@@ -70,3 +91,35 @@ output never count as an answered room turn. Unattributed/ambient outputs and
 unobservable outcomes remain unknown; there is no inferred voice missed counter.
 Voice control nonces and lease references are host-only and never returned by
 room snapshots. No endpoint acquires a second body or bypasses recovery.
+
+## Discord directory for settings pickers
+
+`GET /v1/discord/directory?kind=servers` lists servers the connected account
+can see. `kind=channels|roles|people` requires `guildId`. Entries carry their
+IDs, display names and kinds; `limit` defaults to 100 (maximum 200), and
+`nextCursor` becomes the next request's `after`. Sort order is Discord ID order,
+so rename/reordering does not move a cursor. Results describe a live cache;
+refreshing is appropriate after membership or permissions change.
+
+`clankie discord directory` and `clankie discord directory channels --server ID`
+read the same authenticated API. Use `roles` or `people` for those pickers.
+The active official-bot or user-session body supplies its own gateway view over
+its existing loopback control server using its brokered bridge bearer. The API
+reuses room Observe authorization, retains the original paired bearer through
+the relay, and rechecks authority and active body before returning data.
+
+`state` distinguishes `connected`, `disconnected`, `partial`, and `unavailable`;
+`reason` explains an incomplete or unavailable read. An empty connected server
+list means the account is in no known servers. A disconnected or failed read
+never masquerades as that result. Cached people are explicitly partial: no new
+privileged member intent or member enumeration is requested. Channels are
+partial because archived threads are not enumerated; the user-session cache
+also omits threads rather than guessing membership. Missing permission evidence
+omits the affected channel and reports `permissions_unknown`.
+
+Bot channels use discord.js permission calculation plus private-thread
+membership. User-session channels use the account's delivered roles, own
+membership and [Discord’s documented overwrite order](https://docs.discord.com/developers/topics/permissions#permission-overwrites), with BigInt permission
+flags. Hidden channel IDs and names are omitted. The directory never falls back
+to the other account, reads stored Discord credentials, posts a message, joins a
+server, or grants computer access. Names remain untrusted display text.

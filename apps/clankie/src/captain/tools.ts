@@ -686,7 +686,7 @@ function hireAgentTool(
     description:
       "Hire a fleet seat: Herdr opens a pane in the working directory, starts the harness there, and the seat " +
       "lands watched and messageable as a persona — never a bare `herdr agent start`. " +
-      "Explicit hire fields (the owner's words) win over the project role, then fleet.hire defaults. Omit fields to inherit. Friendly model names are checked against the registry; retired/unknown models refuse. Subagent model/effort travel in the native brief. native-first requires a stable deliverable key and refuses another pane for it; use the worker's native subagents. Placement is new-tab or split beside a verified native lead pane. For an override across model families, specify the matching harness (for example claude / Opus) and clear incompatible child settings with subagents:null. Typed " +
+      "Explicit hire fields (the owner's words) win over the project role, then fleet.hire defaults. Omit fields to inherit. Friendly model names are checked against the registry; retired/unknown models refuse. Subagent model/effort travel in the native brief. native-first requires a stable deliverable key and refuses another pane for it; use the worker's native subagents. Placement targets the repo workspace. new-tab gives each worker a Name · role tab; split requires an explicit pipeline name and joins that workflow tab, creating it for its first member. Never rearrange existing panes. For an override across model families, specify the matching harness (for example claude / Opus) and clear incompatible child settings with subagents:null. Typed " +
       "outcomes: unknown_directory, harness_unavailable (no wired flag for what you asked), not_ready (rejected " +
       "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, " +
       "at_capacity (close or reuse a hired agent). brief is its first prompt (codex needs one) and is delivered " +
@@ -755,6 +755,14 @@ function hireAgentTool(
       ),
       delegation: Type.Optional(StringEnum(["native-first", "panes"])),
       placement: Type.Optional(StringEnum(["new-tab", "split"])),
+      pipeline: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "Deliberate shared workflow tab, e.g. VUH-1550 design → implement → review. Required for split; omit for solo workers. First member opens the named tab; later members use split.",
+        }),
+      ),
       deliverable: Type.Optional(
         Type.String({
           minLength: 1,

@@ -1,6 +1,13 @@
 import { ClankieApiClient } from "@clankie/api-client";
+import { DISCORD_SETTING_GROUPS } from "@clankie/protocol";
+import { DiscordDirectoryRequestSchema, type DiscordDirectorySnapshot } from "@clankie/protocol";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
-import type { DiscordRoomStatus, DiscordRoomGuidance, DiscordRoomVoiceStatus } from "@clankie/protocol";
+import type {
+  DiscordRoomStatus,
+  DiscordRoomGuidance,
+  DiscordRoomVoiceStatus,
+  DiscordSetupSnapshot,
+} from "@clankie/protocol";
 import { parseArgs } from "node:util";
 import { resolveCaptainCredential, type CredentialStore } from "@clankie/credential-broker";
 import { DiscordVoiceTranscriptCursorSchema, type DiscordVoiceTranscriptPage } from "@clankie/protocol";
@@ -19,6 +26,8 @@ import {
 const DISCORD_USAGE = [
   "Usage: clankie discord [status]",
   "       clankie discord rooms",
+  "       clankie discord definition",
+  "       clankie discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]",
   "       clankie discord guide CONVERSATION_ID TEXT|--clear",
   "       clankie discord transcripts [--cursor CURSOR] [--limit N]",
   "       clankie discord set --field value [--field value ...]",
@@ -74,7 +83,7 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     `command server: ${settings.guildId ?? "— (commands register globally)"}`,
     // Separate from the command server on purpose: this is the one server he
     // controls, and the only one his agents can be given rooms in.
-    `swarm home: ${settings.swarmGuildId ?? "— (no server he may make rooms in)"}`,
+    `managed server: ${settings.swarmGuildId ?? "— (no server he may make rooms in)"}`,
     showList("ambient roles", settings.ambientRoleIds),
     showList("ambient users", settings.ambientUserIds),
     showList("approval roles", settings.approvalRoleIds),
@@ -171,7 +180,12 @@ export function parseDiscordSettingValue(
           .map((value) => value.trim())
           .filter(Boolean);
   }
-  if (typeof example === "boolean") {
+  if (
+    typeof example === "boolean" ||
+    DISCORD_SETTING_GROUPS.some((group) =>
+      group.fields.some((entry) => entry.key === field && entry.kind === "boolean"),
+    )
+  ) {
     if (["true", "on", "enabled"].includes(raw)) return true;
     if (["false", "off", "disabled"].includes(raw)) return false;
     throw new Error(`${field} must be on or off.`);
@@ -229,9 +243,33 @@ export async function runDiscordCommand(
   | { rooms: DiscordRoomStatus[] }
   | DiscordRoomGuidance
   | DiscordRoomVoiceStatus
+  | DiscordSetupSnapshot
+  | DiscordDirectorySnapshot
 > {
   const verb = args[0];
-  if (verb === "rooms" || verb === "guide" || verb === "call") {
+  if (
+    verb === "rooms" ||
+    verb === "guide" ||
+    verb === "call" ||
+    verb === "definition" ||
+    verb === "directory"
+  ) {
+    let directoryQuery;
+    if (verb === "directory") {
+      const { values, positionals } = parseArgs({
+        args: args.slice(1),
+        allowPositionals: true,
+        options: { server: { type: "string" }, limit: { type: "string" }, after: { type: "string" } },
+      });
+      if (positionals.length > 1) throw new Error(DISCORD_USAGE);
+      directoryQuery = DiscordDirectoryRequestSchema.parse({
+        kind: positionals[0] ?? "servers",
+        ...(values.server ? { guildId: values.server } : {}),
+        ...(values.limit ? { limit: values.limit } : {}),
+        ...(values.after ? { after: values.after } : {}),
+      });
+    }
+    if (verb === "definition" && args.length !== 1) throw new Error(DISCORD_USAGE);
     const credential = await resolveOperatorCredential({
       env: options.env ?? process.env,
       ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
@@ -242,6 +280,13 @@ export async function runDiscordCommand(
       operatorToken: credential.token,
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     });
+    if (directoryQuery) return client.discordDirectory(directoryQuery);
+    if (verb === "definition") {
+      const snapshot = await client.discordSettings();
+      if (!snapshot.setup)
+        throw new Error("This host does not provide the shared Discord settings definition yet.");
+      return snapshot.setup;
+    }
     if (verb === "call") {
       if (args.length === 1) return client.discordRoomVoice();
       const action = args[1];

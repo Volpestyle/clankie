@@ -40,6 +40,7 @@ async function fixture() {
     agent_status: "idle",
     cwd: root,
     terminal_title: "OC | native-integration",
+    label: "Native command",
     name: undefined as string | undefined,
     agent_session: undefined as { source: string; kind: string; value: string } | undefined,
   };
@@ -150,6 +151,8 @@ async function fixture() {
     request: async (_binding, method, input) => {
       const params = input as Record<string, unknown>;
       if (method === "layout.apply") {
+        expect(params.workspace_id).toBe("w1");
+        expect(params.tab_label).toBe("Oriana Vale · tester");
         const command = params.root as { env: Record<string, string> };
         const config = JSON.parse(await readFile(command.env.OPENCODE_TUI_CONFIG!, "utf8"));
         database = command.env.OPENCODE_DB!;
@@ -193,8 +196,33 @@ async function fixture() {
       return JSON.stringify({ result: { agents: present ? [pane, unrelated] : [unrelated] } });
     if (args[0] === "agent" && args[1] === "get" && present)
       return JSON.stringify({ result: { agent: pane } });
+    if (args[0] === "worktree" && args[1] === "list") {
+      expect(args).toEqual(["worktree", "list", "--cwd", root]);
+      // The fixture directory has no Git identity, as real Herdr reports it.
+      throw new Error(JSON.stringify({ error: { code: "not_git_worktree", message: "not a Git worktree" } }));
+    }
     if (args[0] === "api" && args[1] === "snapshot")
-      return JSON.stringify({ result: { snapshot: { workspaces: [] } } });
+      return JSON.stringify({
+        result: {
+          snapshot: {
+            workspaces: [{ workspace_id: "w1", label: "Fixture", number: 1 }],
+            tabs: [
+              { tab_id: "w1:t1", workspace_id: "w1", label: "Owner task" },
+              ...(present ? [{ tab_id: "w1:t2", workspace_id: "w1", label: "Oriana Vale · tester" }] : []),
+            ],
+            panes: [
+              { ...unrelated, workspace_id: "w1", tab_id: "w1:t1" },
+              ...(present ? [{ ...pane, workspace_id: "w1", tab_id: "w1:t2" }] : []),
+            ],
+          },
+        },
+      });
+    if (args[0] === "pane" && args[1] === "rename") {
+      expect(present).toBe(true);
+      expect(args[2]).toBe(pane.pane_id);
+      pane.label = args[3]!;
+      return JSON.stringify({ result: { pane: { ...pane } } });
+    }
     if (args[0] === "pane" && args[1] === "close") {
       physicalCloses++;
       throw new Error("Unconditional pane close forbidden");
@@ -344,6 +372,7 @@ test("native prepared hire survives real census/roster reconciliation and exits 
   const f = await fixture();
   const expected = f.hired.seat;
   expect(f.pane.name).toBeDefined();
+  expect(f.pane.label).toBe("Oriana Vale · tester");
   for (const title of ["OC | native-integration", "OC | Changed native task title"]) {
     f.pane.terminal_title = title;
     const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });

@@ -77,6 +77,16 @@ file per item keeps parallel agents from conflicting, and history lives in git
 and pull requests. IDs are random (`W-` plus six characters), so two agents
 creating items at once cannot collide.
 
+**Parent metadata.** An item may state its backend-native `parent` ID
+([VUH-1593](https://linear.app/vuhlp/issue/VUH-1593)): Linear's parent issue,
+GitHub's sub-issue parent, or scalar `parent:` front matter in Markdown.
+Same-repo GitHub parents use `#42`; a parent in another repo uses
+`owner/repo#42`, so an unrelated local issue cannot become its parent.
+Hierarchy is separate from `dependsOn`. Items without a recorded parent still
+validate. This is read metadata; the unified write contract does not mutate
+parent relationships. An older client's response reader can omit the additive
+field while keeping its known fields strict.
+
 **Evidence stays out of git.** An evidence entry is a link with a kind
 (`image`, `video`, `log`, `link`) and a caption saying what it proves. Large
 media belongs in an artifact store (delivered files, a Linear upload, a

@@ -20,9 +20,9 @@ export function createChannelProjection(
     readonly fetch?: typeof fetch;
     /** Trusted runtime that holds the bot token; absent leaves the manual webhook. */
     readonly provision?: ChannelProjection["provision"];
-    /** Same runtime, listing the swarm home's rooms so one can be picked. */
+    /** Same runtime, listing the managed server's rooms so one can be picked. */
     readonly rooms?: ChannelProjection["rooms"];
-    /** Which guild the swarm home is, so a pasted webhook can be held to it. */
+    /** Which guild the managed server is, so a pasted webhook can be held to it. */
     readonly swarmGuildId?: ChannelProjection["swarmGuildId"];
   } = {},
 ): ChannelProjection {

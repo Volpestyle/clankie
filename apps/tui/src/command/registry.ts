@@ -104,7 +104,7 @@ const HEADLESS_COMMAND_HELP = [
       "  conversations questions ID [--request UUID]",
       "  conversations answer|cancel-question ID REQUEST --incarnation UUID --revision N [--option UUID | --text TEXT | --stdin]",
       "                [--discord provision [--room ROOM_ID] | --discord off | --webhook-stdin] | --json-stdin",
-      "                           Agent channels and their swarm-home Discord rooms (JSON)",
+      "                           Agent channels and their managed-server Discord rooms (JSON)",
     ],
   },
   {
@@ -391,6 +391,14 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  discord [status]         Read non-secret Discord identifiers and body selection"],
   },
   { nouns: ["discord"], lines: ["  discord set --field value […] | clear --field […]"] },
+  {
+    nouns: ["discord"],
+    lines: ["  discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]"],
+  },
+  {
+    nouns: ["discord"],
+    lines: ["  discord definition       Read the shared Discord sentences, pickers and Advanced fields"],
+  },
   {
     nouns: ["discord"],
     lines: ["  discord transcripts [--cursor CURSOR] [--limit N]  Read private retained voice text"],

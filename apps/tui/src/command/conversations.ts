@@ -235,7 +235,7 @@ async function runChannelAction(
       if (values.room !== undefined) {
         const found = (await client.discordRooms?.())?.find((item) => item.channelId === values.room);
         if (found === undefined)
-          throw new Error("That room is not in the swarm home; see clankie conversations rooms.");
+          throw new Error("That room is not in the managed server; see clankie conversations rooms.");
         room = { kind: found.kind, channelId: found.channelId };
       }
       discord = { kind: "provision", ...(room === undefined ? {} : { room }) };

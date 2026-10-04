@@ -84,9 +84,9 @@ async function fixture() {
     resolveTerminal: vi.fn(async () => live),
     wait: vi.fn(async () => live),
     runInPane: vi.fn(async () => undefined),
-    createTab: vi.fn(async ({ label }: { label: string }) => {
+    createTab: vi.fn(async ({ label, paneLabel }: { label: string; paneLabel?: string }) => {
       const { session: _session, ...shell } = live;
-      panes = [{ ...shell, agent: "shell", title: label }];
+      panes = [{ ...shell, agent: "shell", title: paneLabel ?? label }];
       return live.paneId;
     }),
     startAgent: vi.fn(async () => undefined),
