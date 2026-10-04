@@ -104,6 +104,14 @@ failure still stops that ID through the existing container lifecycle. Cancellati
 while creation is pending prevents a later start; cancellation during cleanup also
 prevents accepting a completed report. An ambiguous create response authorizes
 neither name-based cleanup nor another create attempt.
+When activation is already pending, cancellation waits for the existing bounded
+start operation to settle before stopping the exact ID. A pre-activation inspection
+cannot earn a final stopped receipt while that operation may still activate the
+container. Cancellation during the subsequent verifier wait still stops promptly.
+If activation rejects, its outcome remains unconfirmed: a lost start reply cannot
+prove the daemon will not activate later. The record preserves the observed stop
+receipt separately, but overall cleanup remains unconfirmed; no retry or recreation
+is authorized.
 
 `official-verification/container-stop.json` records the exact ID, stop outcome,
 cancellation and completion/report error separately. Stop uncertainty takes

@@ -267,9 +267,11 @@ export class TerminalBenchBridge {
       "/bin/bash",
       "/tests/test.sh",
     ];
-    let cancelledStop;
+    let cancelledStop,
+      starting = false,
+      activationUnconfirmed = false;
     const cancel = () => {
-      if (container.id) {
+      if (container.id && !starting) {
         cancelledStop ??= container.stop("official verification cancelled");
         void cancelledStop.catch(() => {});
       }
@@ -283,7 +285,17 @@ export class TerminalBenchBridge {
         cpus: 2,
       });
       signal?.throwIfAborted();
-      await container.start();
+      // Do not latch a stopped receipt while the bounded start command can still activate.
+      starting = true;
+      try {
+        await container.start();
+      } catch (error) {
+        // A lost start reply cannot prove that the daemon will not activate later.
+        activationUnconfirmed = true;
+        throw error;
+      } finally {
+        starting = false;
+      }
       signal?.throwIfAborted();
       const exitCode = await this.command(["wait", container.id], {
         timeout: this.#staged.taskId === "html-js-filter" ? 1_800_000 : 300_000,
@@ -320,11 +332,17 @@ export class TerminalBenchBridge {
     } finally {
       signal?.removeEventListener("abort", cancel);
       if (container.id) {
+        let stopError = activationUnconfirmed
+          ? Error("Official verifier activation outcome unconfirmed")
+          : undefined;
         try {
           stopReceipt = await (cancelledStop ?? container.stop("official verification settled"));
         } catch (error) {
+          stopError = error instanceof Error ? error : Error(String(error));
+        }
+        if (stopError) {
           stopFailure = Object.assign(
-            Error("Official verifier container stop unconfirmed", { cause: error }),
+            Error("Official verifier container stop unconfirmed", { cause: stopError }),
             {
               code: "terminal-bench-stop-unconfirmed",
               containerId: container.id,
@@ -344,6 +362,8 @@ export class TerminalBenchBridge {
             JSON.stringify({
               containerId: container.id,
               stop: stopReceipt ?? { confirmed: false },
+              activationUnconfirmed,
+              verifierStopConfirmed: stopReceipt?.stopped === true && !stopFailure,
               cancelled: signal?.aborted === true,
               completionError: completionError?.message ?? null,
               stopError: stopFailure?.cause instanceof Error ? stopFailure.cause.message : null,
