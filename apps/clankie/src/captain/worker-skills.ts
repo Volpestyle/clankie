@@ -67,7 +67,7 @@ export async function workerSkills(
         let config = await readFile(destination, "utf8");
         const hooks = await realpath(join(codexHome, "hooks.json")).catch(() => undefined);
         const keyed = new Set(
-          [...config.matchAll(/hooks\.state\."([^"]*\/hooks\.json):/gu)].map((match) => match[1]!),
+          [...config.matchAll(/"?hooks"?\."?state"?\."([^"]*\/hooks\.json):/gu)].map((match) => match[1]!),
         );
         keyed.add(join(codexHome, "hooks.json"));
         for (const path of keyed) {

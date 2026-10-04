@@ -57,13 +57,14 @@ describe("hired worker skill discovery", () => {
     const other = join(root, "elsewhere", "hooks.json");
     await writeFile(
       join(second, "config.toml"),
-      `[hooks.state."${join(primary, "hooks.json")}:session_start:0:0"]\ntrusted_hash = "sha256:shared"\n` +
+      // Codex writes these keys quoted.
+      `["hooks"."state"."${join(primary, "hooks.json")}:session_start:0:0"]\ntrusted_hash = "sha256:shared"\n` +
         `[hooks.state."${other}:session_start:0:0"]\ntrusted_hash = "sha256:other"\n`,
     );
     const overlay = (await workerSkills("codex", root, root, second)).env!.CODEX_HOME!;
     const config = await readFile(join(overlay, "config.toml"), "utf8");
     expect(config).toContain(
-      `[hooks.state."${join(overlay, "hooks.json")}:session_start:0:0"]\ntrusted_hash = "sha256:shared"`,
+      `["hooks"."state"."${join(overlay, "hooks.json")}:session_start:0:0"]\ntrusted_hash = "sha256:shared"`,
     );
     // A hooks file that is not the copied one keeps its own key and stays unreviewed here.
     expect(config).toContain(`[hooks.state."${other}:session_start:0:0"]`);
