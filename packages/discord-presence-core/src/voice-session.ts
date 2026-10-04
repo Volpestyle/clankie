@@ -2176,7 +2176,8 @@ export class DiscordVoiceSession {
       return;
     }
     if (generation !== this.sessionGeneration) return;
-    let port: VoiceConversationPort;
+    let port: VoiceConversationPort | undefined;
+    let opening = true;
     try {
       port = await this.options.realtime.openConversation({
         instructions: briefing.instructions,
@@ -2210,7 +2211,7 @@ export class DiscordVoiceSession {
           else pcm.fill(0);
         },
         onFunctionCall: (call) => {
-          if (generation === this.sessionGeneration && this.conversation === port && port.isOpen)
+          if (generation === this.sessionGeneration && this.conversation === port && port?.isOpen)
             this.handleFunctionCall(call, guildId, channelId);
         },
         onResponseStarted: (attempt) => {
@@ -2238,7 +2239,11 @@ export class DiscordVoiceSession {
           // prefix, so the failure receipt is what distinguishes either case
           // from silence or a cleanly settled response. Boundary messages are
           // already sanitized one-liners; the code keeps them machine-readable.
-          if (generation !== this.sessionGeneration) return;
+          if (
+            generation !== this.sessionGeneration ||
+            (port === undefined ? !opening : this.conversation !== port)
+          )
+            return;
           // A generic realtime error carries no delivery identity. The typed
           // abandonment callback owns failure attribution; a delayed old error
           // must not acquire whichever pending response happens to be next.
@@ -2278,6 +2283,8 @@ export class DiscordVoiceSession {
         code: "voice_conversation_open_failed",
       });
       return;
+    } finally {
+      opening = false;
     }
     if (generation !== this.sessionGeneration) {
       try {

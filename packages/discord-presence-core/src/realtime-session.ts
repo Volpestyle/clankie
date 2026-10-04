@@ -489,6 +489,7 @@ abstract class RealtimeSessionCore {
       this.closeWith("socket");
     });
     init.socket.onError(() => {
+      if (this.closed) return;
       // The transport error object is deliberately not inspected, logged, or
       // rethrown: it can carry connection detail, and the key must never
       // reach error text.

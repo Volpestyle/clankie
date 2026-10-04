@@ -986,3 +986,11 @@ it.each(["openai", "xai"] as const)(
     session.close();
   },
 );
+
+it("ignores transport errors after the realtime session has closed", async () => {
+  const { session, socket, events } = await openConversation();
+  session.close();
+  socket.emitError(new Error("stale transport detail"));
+  expect(events.errors).toEqual([]);
+  expect(events.closes).toEqual(["closed"]);
+});

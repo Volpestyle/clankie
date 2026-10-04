@@ -411,6 +411,7 @@ function askClankie(callId: string, argumentsJson: string): RealtimeFunctionCall
 }
 
 interface HarnessOptions {
+  readonly onEvidence?: (event: DiscordVoiceEvidence) => void;
   readonly narrationMinIntervalMs?: number;
   readonly floorOverrides?: Partial<VoiceFloorOptions>;
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
@@ -496,6 +497,7 @@ function buildHarness(options: HarnessOptions = {}) {
       // invariant — the schema is the reviewer here.
       DiscordVoiceEvidenceSchema.parse(event);
       evidence.push(event);
+      options.onEvidence?.(event);
       return Promise.resolve();
     },
     clock: () => clock.now,
@@ -4397,6 +4399,7 @@ class VoiceRecoverySocket implements RealtimeSocket {
   closed = false;
   private receive: ((data: string) => void) | undefined;
   private closing: (() => void) | undefined;
+  private transportError: ((error: unknown) => void) | undefined;
   send(data: string | Uint8Array): void {
     if (typeof data !== "string") throw new Error("Expected a JSON frame");
     this.sent.push(JSON.parse(data) as Record<string, unknown>);
@@ -4407,7 +4410,12 @@ class VoiceRecoverySocket implements RealtimeSocket {
   onClose(handler: () => void): void {
     this.closing = handler;
   }
-  onError(_handler: (error: unknown) => void): void {}
+  onError(handler: (error: unknown) => void): void {
+    this.transportError = handler;
+  }
+  failTransport(): void {
+    this.transportError?.(new Error("late fixture transport error"));
+  }
   close(): void {
     if (!this.closed) {
       this.closed = true;
@@ -4433,7 +4441,8 @@ it.each([
 ])(
   "retires failed Alice delivery before Bob output (external=$external, pre-created=$beforeCreated, partial=$partial, ambiguous-xai=$ambiguousXai)",
   async ({ external, beforeCreated, partial, ambiguousXai }) => {
-    const h = await joinedHarness();
+    let onEvidence = (_event: DiscordVoiceEvidence) => {};
+    const h = await joinedHarness({ onEvidence: (event) => onEvidence(event) });
     await h.consent(ALICE);
     await h.consent(BOB);
     const sockets: { tts: boolean; socket: VoiceRecoverySocket }[] = [];
@@ -4489,7 +4498,10 @@ it.each([
       await flush();
       expect(h.vox.audio).toHaveLength(1);
     }
-    if (!beforeCreated && !partial && !ambiguousXai) await h.say(BOB, "clankie answer Bob instead");
+    if (!partial && !ambiguousXai) await h.say(BOB, "clankie answer Bob instead");
+    const queuedBeforeClose = beforeCreated
+      ? h.ofType("model_response").find((event) => event.phase === "requested" && event.userId === BOB)
+      : undefined;
     a.emit({ type: "error", error: { type: "server_error" } });
     if (ambiguousXai) {
       a.emit({
@@ -4508,12 +4520,36 @@ it.each([
     }
     if (beforeCreated || ambiguousXai) {
       expect(a.closed).toBe(true);
+      expect(a.creates()).toHaveLength(1);
+      if (beforeCreated) {
+        expect(queuedBeforeClose).toBeDefined();
+        expect(
+          h
+            .ofType("model_response")
+            .filter((event) => event.deliveryId === queuedBeforeClose!.deliveryId)
+            .map((event) => event.phase),
+        ).toEqual(["requested"]);
+      }
       expect(opensAfterError).toBe(external ? 2 : 1);
       // The closed socket's late created/done cannot acquire the next offer.
       a.emit({ type: "response.created", response: { id: "late-A" } });
       a.emit({ type: "response.done", response: { id: "late-A", status: "completed" } });
       expect(sockets).toHaveLength(opensAfterError);
+      // B's port is installed, its pending exists, but responseGuard/start has
+      // not run yet. A late transport error must not label B or emit evidence.
+      let beforeDispatchErrorDelta: number | undefined;
+      onEvidence = (event) => {
+        if (event.type !== "model_response" || event.phase !== "requested" || event.userId !== BOB) return;
+        const count = h.ofType("failed").length;
+        a.failTransport();
+        beforeDispatchErrorDelta = h.ofType("failed").length - count;
+      };
       await h.say(BOB, "clankie answer Bob now");
+      onEvidence = () => {};
+      expect(beforeDispatchErrorDelta).toBe(0);
+      const afterDispatchErrors = h.ofType("failed").length;
+      a.failTransport();
+      expect(h.ofType("failed")).toHaveLength(afterDispatchErrors);
     } else {
       expect(a.closed).toBe(false);
       expect(a.creates()).toHaveLength(2);
@@ -4522,9 +4558,10 @@ it.each([
     const b = sockets.filter((entry) => !entry.tts).at(-1)!.socket;
     const requestB = h
       .ofType("model_response")
-      .find((event) => event.phase === "requested" && event.userId === BOB)!;
+      .findLast((event) => event.phase === "requested" && event.userId === BOB)!;
     expect(requestB).toBeDefined();
     expect(requestB.deliveryId).not.toBe(requestA.deliveryId);
+    if (queuedBeforeClose !== undefined) expect(requestB.deliveryId).not.toBe(queuedBeforeClose.deliveryId);
     const lateDone = {
       type: "response.done",
       response: { id: "response-A", status: "completed", usage: { input_tokens: 100, output_tokens: 200 } },
@@ -4623,3 +4660,24 @@ it.each(["membership", "narration"] as const)(
     await h.session.leave("fixture_done");
   },
 );
+
+it("reports legitimate opening errors but ignores errors from the replaced conversation port", async () => {
+  const h = await joinedHarness();
+  await h.consent(ALICE);
+  const open = h.ports.openConversation;
+  h.ports.openConversation = (input) => {
+    input.onError("legitimate opening error");
+    return open(input);
+  };
+  await h.say(ALICE, "hey clankie first offer");
+  const old = h.conversation();
+  expect(h.ofType("failed").filter((event) => event.stage === "speech_synthesis")).toHaveLength(1);
+  old.lose("error");
+  await h.say(ALICE, "clankie a new offer");
+  expect(h.conversation()).not.toBe(old);
+  expect(h.ofType("failed").filter((event) => event.stage === "speech_synthesis")).toHaveLength(2);
+  const failures = h.ofType("failed").length;
+  old.input.onError("stale port error");
+  expect(h.ofType("failed")).toHaveLength(failures);
+  await h.session.leave("fixture_done");
+});
