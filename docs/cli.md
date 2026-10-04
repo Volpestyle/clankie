@@ -2003,7 +2003,7 @@ control remains available; normal agent messages do not use it. See
 
 Open Clankie in the selected native harness ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
 `clankie claude` opens this seat with `claude`; `clankie claude2` uses your
-`claude2` account command. Numbered commands are resolved through your interactive
+`claude2` account command. Numbered Claude commands are resolved through your interactive
 `$SHELL`, including shell aliases and functions. The same seat flags work with
 either command. Each numbered command keeps its own resume record. `clankie codex` and `clankie opencode` open the corresponding native harness with the same flags.
 
@@ -2019,7 +2019,7 @@ For numbered accounts, set `CODEX_HOME` to that registered home in the environme
 of native plugin installation commands and the Codex session used to review
 `/plugins` and `/hooks`. Setup under a different home does not prepare this account.
 
-Needs a TTY and the selected Claude command available. The launcher projects the bundled plugin
+Claude launches need a TTY and the selected Claude command available. The launcher projects the bundled plugin
 (or `--plugin-dir` source) into a private launch directory with only the selected
 skills. Identity, hooks, and MCP are retained. It passes the permission allowlist
 for `clankie` commands, disables an older installed `clankie@clankie` for this
