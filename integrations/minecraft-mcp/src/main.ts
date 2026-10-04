@@ -215,7 +215,6 @@ server.registerTool(
     inputSchema: z.strictObject({ settings: HostConfigurationPatchSchema }),
   },
   async ({ settings }) => {
-    await tunnel.stop();
     const configuration = await host.configure(settings);
     await currentTunnel();
     return result(configuration);
@@ -239,7 +238,14 @@ server.registerTool(
     inputSchema: z.strictObject({ operation: z.enum(["start", "stop", "restart"]) }),
   },
   async ({ operation }) => {
-    if (operation === "stop" || operation === "restart") await motor.close();
+    if (operation === "stop" || operation === "restart") {
+      try {
+        await motor.close();
+      } catch {
+        await host.stop();
+        throw new Error("Minecraft bot shutdown unconfirmed; hosted server stopped");
+      }
+    }
     const status = await host[operation]();
     if (operation !== "stop") await (await currentTunnel()).start();
     return result({ ...status, tunnel: tunnel.status() });
@@ -293,10 +299,20 @@ let closing = false;
 const shutdown = () => {
   if (closing) return;
   closing = true;
-  void motor
-    .close()
-    .then(() => tunnel.stop())
-    .then(() => host.stop())
+  void (async () => {
+    try {
+      await motor.close();
+    } finally {
+      try {
+        await tunnel.stop();
+      } finally {
+        await host.stop();
+      }
+    }
+  })()
+    .catch(() => {
+      process.exitCode = 1;
+    })
     .finally(() => server.close());
 };
 process.on("SIGTERM", shutdown);

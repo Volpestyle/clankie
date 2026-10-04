@@ -507,7 +507,11 @@ export class MinecraftHost implements MinecraftHostingPort {
       clearInterval(this.watchdog);
       this.watchdog = null;
     }
-    await this.options.onUnavailable?.();
+    try {
+      await this.options.onUnavailable?.();
+    } catch {
+      this.state.failure = "tunnel_stop_unconfirmed";
+    }
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -651,7 +655,9 @@ export class MinecraftHost implements MinecraftHostingPort {
       }, this.options.codeTtlMs ?? 300000);
       timer.unref();
       this.codes.set(key, { provider, expiresAt: Date.now() + (this.options.codeTtlMs ?? 300000), timer });
-      return { username: name, classification: "nonpremium", providerId: provider };
+      return { username: name, classification: "nonpremium" as const, providerId: provider };
+    }).catch(() => {
+      throw new Error("Minecraft enrollment provisioning failed safely");
     });
   }
   admin(input: unknown): Promise<{ command: HostAdmin; outcome: string; players?: string[] }> {
