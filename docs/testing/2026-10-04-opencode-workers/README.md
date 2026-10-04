@@ -1,7 +1,34 @@
 # Native OpenCode worker control checkpoint
 
-VUH-1555, 2026-10-04. This is a source and deterministic-fixture checkpoint, not
-live OpenCode acceptance. The selected API is OpenCode **1.18.18**, upstream
+## VUH-1640 lifecycle follow-up
+
+Prepared hires now register their chosen stable Herdr name through the existing
+`agent.rename` path after native session binding. Later census uses that same
+subject instead of creating a persona from the pane's native title.
+
+`opencode-fleet-lifecycle.integration.test.ts` crosses the real hire, prepared
+host, WebSocket controller, native worker runtime, dedicated SQLite history,
+census, persona/conversation stores and roster. Only OS/Herdr and injected native
+SDK boundaries use fixtures derived from the pinned live format. It varies native
+titles, reads a running then completed child without opening another chat, keeps
+an unrelated seat unaddressed, confirms native exit even when its reply drops,
+and refuses a switched session. A runtime test also refuses an observed A→B→A
+route change during exit authorization.
+
+A separate private-service native E2E used OpenCode 1.18.18 and the existing
+`openai/gpt-6.1-sol` provider. All 19 fleet reads retained Oriana Vale's hire
+persona and conversation despite the distinct native `OC | oriana-vale-6303`
+title. A task child reported running then done with its call ID and source
+timestamps, without opening another chat. `close_seat` returned `closed: true`;
+the owned pane disappeared without physical-close fallback. The private service
+was stopped and the shared discovery descriptor remained byte-identical. Native
+title variation and owner-switch races were exercised in the integration
+fixtures; the live check did not synthesize those races.
+
+## Original VUH-1555 checkpoint
+
+VUH-1555, 2026-10-04. The original source and deterministic-fixture checkpoint
+below predates live OpenCode acceptance. The selected API is OpenCode **1.18.18**, upstream
 commit `4643e65ad6334de3e4e68dedc201d5fbb828c9fe`. Other versions are refused.
 No OpenCode process, provider request, model turn, owner database or remote
 fleet was used for these checks.
@@ -66,10 +93,14 @@ interrupt targets only the selected session and never answers an owner decision.
   can coalesce intermediate A→B→A changes. Snapshot checks are not an atomic
   transaction with server acceptance; exact session IDs prevent retargeting and
   detected post-dispatch changes produce uncertainty.
-- Physical pane close is unavailable for controller-prepared OpenCode: the selected Herdr API has
-  only `pane_id`, without a root-lifetime compare-and-close condition. Clankie
-  preserves the pane/controller rather than closing a possible replacement.
-  Native exact-session interrupt remains available. A deny-only record in the
+- Physical pane close remains unavailable for controller-prepared OpenCode: the
+  selected Herdr API has only `pane_id`, without a root-lifetime compare-and-close
+  condition. An owned live worker can exit itself through the original
+  process-bound TUI's `app.exit` command. Controller authorization and the native
+  route generation are checked before dispatch; `closed: true` requires the
+  original terminal to disappear. A dropped exit reply is observed, never retried.
+  Cold, replaced or switched sessions retain refusal. Native exact-session
+  interrupt remains available. A deny-only record in the
   existing watch state retains the allocated pane and original terminal across
   replacement/restart; it never grants authority. Unmanaged legacy close behavior
   is unchanged where no prepared-launch fact exists. An unknown allocation has

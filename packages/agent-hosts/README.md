@@ -114,7 +114,12 @@ the separate `worker-tui.mjs` and `worker-server.mjs` entries. OpenCode 1.18.18
 loads the TUI entry's default `{ id, tui }` object; named exports alone do not
 initialize its session. The prepared host observes the fresh pane with
 `pane.get` before native TUI detection, then requires the exact bound harness
-and session while retaining the process, socket and allocation fences. Worker
+and session while retaining the process, socket and allocation fences. After
+binding, it registers the hire's stable Herdr name so census preserves its
+persona and conversation through native title changes. Owned live workers close
+through their original TUI's `app.exit` command; success requires the original
+terminal to disappear. Cold, replaced or switched sessions cannot use this
+control, and there is no unconditional physical pane-close fallback. Worker
 history comes only from its registered profile, not an owner-wide store. See
 the [subagent verification](../../docs/testing/2026-10-04-opencode-subagents/README.md)
 and the

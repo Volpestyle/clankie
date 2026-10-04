@@ -63,6 +63,10 @@ completion/error notification. Reads retain the native history adapter's
 1.18.18 pin and registered-profile boundary: at most 500 parent messages,
 2,000 parts, 4 MiB and 64 task calls. Owner-wide stores and v2-only histories
 are not read, and file idleness does not settle an OpenCode task.
+Local OpenCode hires preserve the chosen persona and conversation across native
+title changes. `close_seat` asks an owned live worker's original TUI to exit and
+reports success after its terminal disappears. A switched, replaced or cold
+session refuses this control; inspect it rather than retrying physical closure.
 
 Project hire profiles resolve explicit owner-authorized fields before role
 preferences, then `fleet.hire` defaults. Omit launch fields to inherit and inspect

@@ -2386,10 +2386,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     try {
       const current = await this.runner.resolveTerminal(seatId);
       if (current === undefined) return false;
-      // Herdr pane.close has no compare-and-close lifetime/occupant condition.
-      // Prepared OpenCode control cannot authorize closing a potentially
-      // replaced process from a previous snapshot. Preserve the pane/control;
-      // exact-session native interrupt remains available.
+      // pane.close has no lifetime condition. A prepared native TUI can exit
+      // itself through its original process-bound controller; Herdr removes
+      // its command pane on process exit. Never fall back to physical close.
       if (
         this.state.preparedPanes?.some(
           (entry) =>
@@ -2397,8 +2396,23 @@ export class HerdrWatchStore implements HerdrWatchPort {
             entry.terminalId === seatId ||
             entry.terminalId === current.terminalId,
         )
-      )
+      ) {
+        const control = await this.seatControl.attach(current);
+        if (!control?.verify || !control.exit) return false;
+        await control.verify();
+        await guard?.();
+        // A lost reply may follow the native exit. Observe; do not retry.
+        await control.exit(guard).catch(() => undefined);
+        const deadline = Date.now() + SPAWN_SESSION_WAIT_MS;
+        do {
+          if ((await this.runner.resolveTerminal(seatId)) === undefined) {
+            await control.close().catch(() => undefined);
+            return true;
+          }
+          await delay(SPAWN_SESSION_POLL_MS);
+        } while (Date.now() < deadline);
         return false;
+      }
       if (this.stateUnreadable && current.agent === "opencode") return false;
       // End programmatic control first, so nothing outlives its pane.
       const control = await this.seatControl.attach(current);

@@ -302,7 +302,7 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                 throw new Error("Exact resume mismatch");
               ref = { harness: "opencode", paneId: view.paneId, sessionId: initialized.sessionId };
               native.select(ref.sessionId);
-              await root.report(ref.sessionId, "idle");
+              await root.report(ref.sessionId, "idle", view.name);
               // The plugin initializer has now returned; wait only for native
               // synchronization, never issue a bootstrap model prompt.
               const deadline = Date.now() + (deps.timeoutMs ?? 20_000);
@@ -426,6 +426,13 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                   } catch {
                     return false;
                   }
+                },
+                async exit(beforeExit) {
+                  await verify(selectedRef);
+                  await native.request("exit", undefined, 5000, async () => {
+                    await beforeExit?.();
+                    return true;
+                  });
                 },
                 close: dispose,
               };

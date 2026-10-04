@@ -305,6 +305,16 @@ export function createOpenCodeWorkerRuntime(api, controller) {
       bound(initial.generation);
       return result.data === true;
     },
+    async exit() {
+      const initial = await snapshot();
+      if (typeof api.keymap?.dispatchCommand !== "function")
+        throw new Error("Native TUI exit command unavailable");
+      await controller.authorize("exit");
+      bound(initial.generation);
+      // This TUI exits itself. No PID signal, terminal input or conditional
+      // pane.close workaround can reach a different pane occupant.
+      return api.keymap.dispatchCommand("app.exit");
+    },
     close() {
       retired = true;
       stopRoute();

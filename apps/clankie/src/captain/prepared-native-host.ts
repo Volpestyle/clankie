@@ -54,7 +54,11 @@ export interface PreparedNativeRoot {
   readonly terminalId: string;
   check(socket: Socket): Promise<boolean>;
   proof(session: PreparedNativeSession): Promise<SeatProcessIdentity>;
-  report(session: PreparedNativeSession, state: "idle" | "working" | "blocked" | "unknown"): Promise<void>;
+  report(
+    session: PreparedNativeSession,
+    state: "idle" | "working" | "blocked" | "unknown",
+    name?: string,
+  ): Promise<void>;
 }
 
 /** Narrow local control transport. No generic method or caller-selected socket is exposed. */
@@ -219,7 +223,7 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
             return false;
           }
         },
-        async report(value, state) {
+        async report(value, state, name) {
           const session = descriptor(value);
           await current();
           if (reportedSession !== undefined && JSON.stringify(reportedSession) !== JSON.stringify(session))
@@ -235,6 +239,12 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
           });
           reportedSession = session;
           await current();
+          if (name !== undefined) {
+            // Prepared argv bypasses agent.start, which normally registers the
+            // stable Herdr name used by hire adoption and later census.
+            await request(original, "agent.rename", { target: paneId, name });
+            await current();
+          }
         },
         async proof(value) {
           const session = descriptor(value);
