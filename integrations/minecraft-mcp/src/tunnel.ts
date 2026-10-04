@@ -309,6 +309,8 @@ export class MinecraftTunnel {
     }
     if (!ownedId) {
       if (!allowCreate) throw new Error("playit-tunnel-unsafe");
+      // Persist uncertainty before external creation: an interrupted request must never allocate twice.
+      await writeFile(ownedPath, "allocation-pending\n", { mode: 0o600, flag: "wx" });
       const created = z.object({ id: z.uuid() }).parse(
         await this.request(
           "/v1/tunnels/create",
@@ -338,6 +340,16 @@ export class MinecraftTunnel {
       ownedId = created.id;
       await writeFile(`${ownedPath}.new`, `${ownedId}\n`, { mode: 0o600, flag: "wx" });
       await rename(`${ownedPath}.new`, ownedPath);
+      data = RunData.parse(await this.request("/v1/agents/rundata", {}, secret));
+    }
+    // Allocation can be temporarily pending; retry the owned ID, never allocate twice.
+    for (
+      let attempt = 0;
+      allowCreate && !data.tunnels.some((entry) => entry.id === ownedId) && attempt < 10;
+      attempt++
+    ) {
+      if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
+      await new Promise<void>((resolve) => setTimeout(resolve, 1000));
       data = RunData.parse(await this.request("/v1/agents/rundata", {}, secret));
     }
     if (data.tunnels.some((entry) => entry.id !== ownedId && entry.disabled_reason === null)) {

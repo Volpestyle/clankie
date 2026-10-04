@@ -143,6 +143,19 @@ describe("Minecraft playit tunnel", () => {
     expect(await f.host.stop()).toEqual({ phase: "stopped" });
     await expect(stat(secretPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
+  test("a pending allocation is polled without allocating another tunnel", async () => {
+    const f = await fixture();
+    let lists = 0;
+    f.api.mockImplementation(async (path) => {
+      if (path === "/v1/tunnels/create") return { id: tunnelId };
+      if (path === "/v1/agents/rundata")
+        return { agent_id: agentId, tunnels: ++lists >= 3 ? [f.tunnelData] : [] };
+      throw new Error("unexpected API path");
+    });
+    expect((await f.host.start()).phase).toBe("running");
+    expect(f.api.mock.calls.filter(([path]) => path === "/v1/tunnels/create")).toHaveLength(1);
+    await f.host.stop();
+  });
   test("crash retry checks auth again and never duplicates allocation", async () => {
     const f = await fixture({ owned: true });
     await f.host.start();
@@ -211,6 +224,17 @@ describe("Minecraft playit tunnel", () => {
     f.children[0]?.emit("exit", 0);
     vi.useRealTimers();
     await vi.waitFor(() => expect(f.host.status().phase).toBe("stopped"));
+  });
+  test("an uncertain allocation never dispatches another external create", async () => {
+    const f = await fixture();
+    f.api.mockImplementation(async (path) => {
+      if (path === "/v1/agents/rundata") return { agent_id: agentId, tunnels: [] };
+      throw new Error("allocation response lost");
+    });
+    expect((await f.host.start()).phase).toBe("failed");
+    expect((await f.host.start()).error).toBe("playit-tunnel-unsafe");
+    expect(f.api.mock.calls.filter(([path]) => path === "/v1/tunnels/create")).toHaveLength(1);
+    expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe("allocation-pending\n");
   });
   test("remote failure containing secrets is sanitized", async () => {
     const f = await fixture();
