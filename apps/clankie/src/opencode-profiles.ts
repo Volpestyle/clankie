@@ -151,6 +151,35 @@ export class OpenCodeProfiles {
     await readOpenCodeHistory(source, join(await this.root(), source.profileId), { metadataOnly: true });
     return source;
   }
+  /** Read a task's direct child inside its registered parent's dedicated native profile. */
+  public async readSubagent(
+    parentId: string,
+    callId: string,
+    options: { tail?: number; after?: string } = {},
+  ) {
+    if (!callId || callId.length > 256) throw new AgentSessionRequestError("Invalid subagent identity");
+    const source = await this.resolve(parentId);
+    const root = join(await this.root(), source.profileId);
+    const locate = async () => {
+      const parent = await readOpenCodeHistory(source, root, {
+        tail: 500,
+        subagentsOnly: true,
+        childCallId: callId,
+      });
+      if (!parent.subagent) throw new AgentSessionRequestError("No matching parent task call", 404);
+      if (!parent.subagent.sessionId)
+        throw new AgentSessionRequestError("Native child locator unavailable", 409);
+      return parent.subagent.sessionId;
+    };
+    const childId = await locate();
+    const page = await readOpenCodeHistory({ ...source, sessionId: childId }, root, options);
+    if (
+      (await locate()) !== childId ||
+      JSON.stringify(await this.resolve(parentId)) !== JSON.stringify(source)
+    )
+      throw new AgentSessionRequestError("Native child source changed during read", 409);
+    return page;
+  }
   public async read(
     sessionId: string,
     options: { tail?: number; after?: string; subagentsOnly?: boolean } = {},

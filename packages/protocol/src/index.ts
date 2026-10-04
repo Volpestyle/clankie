@@ -1843,6 +1843,12 @@ export const ReplayOperatorConversationRequestSchema = z
   .strict();
 export type ReplayOperatorConversationRequest = z.infer<typeof ReplayOperatorConversationRequestSchema>;
 
+/** A native child is read through its already-addressed parent, never a new chat. */
+export const ReplayOperatorSubagentRequestSchema = ReplayOperatorConversationRequestSchema.extend({
+  subagentId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+}).strict();
+export type ReplayOperatorSubagentRequest = z.infer<typeof ReplayOperatorSubagentRequestSchema>;
+
 /**
  * The captain's answer as it is being typed — a volatile view, never a durable
  * event ([ADR 0141](../../../docs/adr/0141-the-console-watches-him-type.md)).
@@ -2701,6 +2707,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       replay: ReplayOperatorConversationRequestSchema,
     })
     .strict(),
+  z
+    .object({
+      op: z.literal("subagent_replay"),
+      schemaVersion: z.literal(1),
+      replay: ReplayOperatorSubagentRequestSchema,
+    })
+    .strict(),
   // `tail` shares the replay request/result shape (per-surface cursor + typed
   // recovery). The transport long-polls it; the client exposes it as an async
   // iterable via `OperatorConversationTailClient`.
@@ -3077,6 +3090,14 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("subagent_replay"),
+      schemaVersion: z.literal(1),
+      subagentId: ReplayOperatorSubagentRequestSchema.shape.subagentId,
+      result: ReplayOperatorConversationResultSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("tail"),
       schemaVersion: z.literal(1),
       result: ReplayOperatorConversationResultSchema,
@@ -3441,6 +3462,11 @@ export interface OperatorConversationServiceClient {
   }>;
   close(conversationId: string): Promise<boolean>;
   replay(request: ReplayOperatorConversationRequest): Promise<ReplayOperatorConversationResult>;
+  /** Read-only native child history; absent on older clients/hosts. */
+  readSubagent?(
+    request: ReplayOperatorSubagentRequest,
+    signal?: AbortSignal,
+  ): Promise<ReplayOperatorConversationResult>;
   /**
    * Yields durable events, then a single `recovery` item and STOPS if the server
    * returns a typed recovery outcome. The caller inspects the recovery and, if it
@@ -3733,6 +3759,14 @@ export function createOperatorConversationServiceClient(
     async replay(request) {
       const result = await dispatch({ op: "replay", schemaVersion: 1, replay: request });
       if (result.op !== "replay") throw new Error(`Unexpected ${result.op} result for replay`);
+      return result.result;
+    },
+    async readSubagent(request, signal) {
+      const result = await dispatch({ op: "subagent_replay", schemaVersion: 1, replay: request }, signal);
+      if (result.op !== "subagent_replay" || result.subagentId !== request.subagentId)
+        throw new Error("Unexpected subagent history result");
+      if (result.result.conversationId !== request.conversationId)
+        throw new Error("Subagent history belongs to another parent");
       return result.result;
     },
     async *tail(request, signal) {

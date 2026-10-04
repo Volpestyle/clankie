@@ -191,6 +191,8 @@ export async function readAgentSession(
      * browsing, where they are not conversation.
      */
     readonly channelPrompts?: boolean;
+    /** Only a server-resolved Claude child; ordinary parent sidechains remain excluded. */
+    readonly claudeAgentId?: string;
   } = {},
 ): Promise<AgentSessionPage> {
   const session = `${host.id}:${sessionIdFromPath(file)}`;
@@ -203,7 +205,7 @@ export async function readAgentSession(
   if (cursor !== undefined && cursor.s !== session)
     throw new AgentSessionRequestError("Transcript cursor belongs to another session");
   if (cursor !== undefined) {
-    const page = await readAfter(host, file, cursor, options.channelPrompts === true);
+    const page = await readAfter(host, file, cursor, options.channelPrompts === true, options.claudeAgentId);
     if (page !== undefined) return page;
   }
   const page = await readTail(
@@ -211,6 +213,7 @@ export async function readAgentSession(
     file,
     options.tail ?? AGENT_SESSION_TAIL_DEFAULT,
     options.channelPrompts === true,
+    options.claudeAgentId,
   );
   return cursor === undefined ? page : { ...page, reset: true };
 }
@@ -268,6 +271,7 @@ async function readTail(
   file: AgentSessionFile,
   tail: number,
   channelPrompts = false,
+  claudeAgentId?: string,
 ): Promise<AgentSessionPage> {
   const session = `${host.id}:${sessionIdFromPath(file)}`;
   let window = WINDOW_BYTES;
@@ -290,7 +294,9 @@ async function readTail(
     const start = from === 0 ? 0 : bytes.indexOf(0x0a) + 1;
     const end = bytes.lastIndexOf(0x0a) + 1;
     const entries =
-      (from === 0 || start > 0) && end > start ? parse(file, bytes.subarray(start, end), channelPrompts) : [];
+      (from === 0 || start > 0) && end > start
+        ? parse(file, bytes.subarray(start, end), channelPrompts, claudeAgentId)
+        : [];
     const exhausted = from === 0 || window >= MAX_WINDOW_BYTES;
     if (entries.length >= tail || exhausted) {
       return {
@@ -309,6 +315,7 @@ async function readAfter(
   file: AgentSessionFile,
   cursor: Cursor,
   channelPrompts = false,
+  claudeAgentId?: string,
 ): Promise<AgentSessionPage | undefined> {
   const offset = cursor.o;
   const from = Math.max(0, offset - OVERLAP_BYTES);
@@ -332,8 +339,10 @@ async function readAfter(
   const fresh = end > offset - from ? bytes.subarray(offset - from, end) : Buffer.alloc(0);
   // Compare whole entries, not ids: a record can resolve after the cursor, such
   // as a tool whose result lands later, and that change is news.
-  const seen = new Set(parse(file, context, channelPrompts).map((entry) => JSON.stringify(entry)));
-  const entries = parse(file, Buffer.concat([context, fresh]), channelPrompts).filter(
+  const seen = new Set(
+    parse(file, context, channelPrompts, claudeAgentId).map((entry) => JSON.stringify(entry)),
+  );
+  const entries = parse(file, Buffer.concat([context, fresh]), channelPrompts, claudeAgentId).filter(
     (entry) => !seen.has(JSON.stringify(entry)),
   );
   return {
@@ -347,15 +356,21 @@ async function readAfter(
   };
 }
 
-function parse(file: AgentSessionFile, bytes: Buffer, channelPrompts = false): AgentSessionEntry[] {
+function parse(
+  file: AgentSessionFile,
+  bytes: Buffer,
+  channelPrompts = false,
+  claudeAgentId?: string,
+): AgentSessionEntry[] {
   if (bytes.length === 0) return [];
-  return parseHerdrSeatTranscript(file.harness, bytes.toString("utf8"), channelPrompts).map((entry) =>
-    entry.type === "viewed_image"
-      ? {
-          type: "viewed_image",
-          id: entry.id,
-          ...(entry.occurredAt ? { occurredAt: entry.occurredAt } : {}),
-        }
-      : entry,
+  return parseHerdrSeatTranscript(file.harness, bytes.toString("utf8"), channelPrompts, claudeAgentId).map(
+    (entry) =>
+      entry.type === "viewed_image"
+        ? {
+            type: "viewed_image",
+            id: entry.id,
+            ...(entry.occurredAt ? { occurredAt: entry.occurredAt } : {}),
+          }
+        : entry,
   );
 }

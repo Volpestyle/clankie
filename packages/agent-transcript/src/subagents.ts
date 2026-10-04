@@ -1,5 +1,14 @@
-import { closeSync, globSync, openSync, readSync, statSync } from "node:fs";
-import { dirname, join, posix } from "node:path";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  globSync,
+  openSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
+import { dirname, join, posix, relative, isAbsolute } from "node:path";
 import { redactSensitiveText } from "@clankie/observability";
 import {
   OPERATOR_CONVERSATION_REF_MAX,
@@ -7,6 +16,13 @@ import {
   type OperatorSeatSubagents,
 } from "@clankie/protocol";
 import { resolveHerdrSeatTranscriptPath, type HerdrAgentSession } from "./index.ts";
+import {
+  AgentSessionRequestError,
+  readAgentSession,
+  type AgentSessionFile,
+  type AgentSessionPage,
+  type AgentTranscriptHost,
+} from "./sessions.ts";
 
 /**
  * The subagents a Claude Code session started inside its own TUI (ADR 0208),
@@ -28,6 +44,8 @@ const LABEL_MAX = 120;
 const SUBAGENT_TOOLS = new Set(["Agent", "Task"]);
 
 interface SubagentCall {
+  /** Native child file identity from the matching parent result, never the tool call ID. */
+  agentId?: string;
   readonly label: string;
   readonly startedAt: string | undefined;
   endedAt: string | undefined;
@@ -162,21 +180,7 @@ export function readCodexSubagents(session: HerdrAgentSession): OperatorSeatSuba
   if (journal === undefined) return undefined;
   const parent = codexMetadata(journal.path);
   if (parent === undefined) return undefined;
-  const boundary = journal.path.lastIndexOf("/sessions/");
-  const root = boundary < 0 ? dirname(journal.path) : journal.path.slice(0, boundary + "/sessions".length);
-  const children = globSync("**/rollout-*.jsonl", { cwd: root })
-    .sort()
-    .reverse()
-    .slice(0, MAX_HEADERS)
-    .flatMap((relative) => {
-      const path = join(root, relative);
-      try {
-        const metadata = codexMetadata(path);
-        return metadata?.parentId === parent.id ? [{ path, metadata }] : [];
-      } catch {
-        return [];
-      }
-    })
+  const children = codexChildren(journal.path, parent)
     .sort((a, b) => a.metadata.startedAt - b.metadata.startedAt)
     .slice(-MAX_CALLS);
   const calls = new Map<string, SubagentCall>();
@@ -230,11 +234,12 @@ export function readCodexSubagents(session: HerdrAgentSession): OperatorSeatSuba
 }
 
 /** Discovery parses and retains only metadata; bytes after the first newline are ignored. */
-function codexMetadata(path: string): CodexMetadata | undefined {
+function codexMetadata(path: string, fresh = false): CodexMetadata | undefined {
   const stats = statSync(path, { throwIfNoEntry: false });
   if (stats === undefined) return undefined;
   const cached = headers.get(path);
   if (
+    !fresh &&
     cached?.device === stats.dev &&
     cached.inode === stats.ino &&
     stats.size >= cached.size &&
@@ -455,6 +460,8 @@ function foldClaudeSubagentLine(calls: Map<string, SubagentCall>, line: string):
     if (item.type !== "tool_result") continue;
     const call = calls.get(String(item.tool_use_id));
     if (call === undefined) continue;
+    if (typeof result?.agentId === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(result.agentId))
+      call.agentId = result.agentId;
     if (result?.status === "async_launched" || result?.isAsync === true) call.background = true;
     else endClaudeCall(call, at);
   }
@@ -482,6 +489,7 @@ export function projectOpenCodeSubagents(
   parentId: string,
   messages: readonly unknown[],
   isChild: (id: string) => boolean,
+  onChild?: (callId: string, childId: string | undefined) => void,
 ): OperatorSeatSubagents {
   const calls = new Map<string, SubagentCall & { childId: string | undefined }>();
   for (const raw of messages) {
@@ -520,6 +528,7 @@ export function projectOpenCodeSubagents(
       const childId = typeof metadata?.sessionId === "string" ? metadata.sessionId : envelope?.id;
       if (metadata?.parentSessionId !== undefined && metadata.parentSessionId !== parentId) continue;
       if (childId !== undefined && !isChild(childId)) continue;
+      onChild?.(part.callID, childId);
       const time = openCodeRecord(state.time);
       const background = metadata?.background === true || envelope?.status === "running";
       const done =
@@ -595,8 +604,10 @@ function completeLines(path: string, from: number, to: number): { lines: string[
 function readRange(path: string, from: number, to: number): Buffer {
   if (to <= from) return Buffer.alloc(0);
   const buffer = Buffer.allocUnsafe(to - from);
-  const fd = openSync(path, "r");
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
+    if (!fstatSync(fd).isFile())
+      throw new AgentSessionRequestError("Native transcript is not a regular file", 409);
     return buffer.subarray(0, Math.max(0, readSync(fd, buffer, 0, buffer.length, from)));
   } finally {
     closeSync(fd);
@@ -605,4 +616,157 @@ function readRange(path: string, from: number, to: number): Buffer {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** On-demand child history under one already-addressed local parent. No native control authority. */
+export async function readNativeSubagentSession(
+  harness: "claude" | "codex",
+  parent: HerdrAgentSession,
+  childId: string,
+  options: { tail?: number; after?: string } = {},
+): Promise<AgentSessionPage> {
+  if (!childId || childId.length > OPERATOR_CONVERSATION_REF_MAX)
+    throw new AgentSessionRequestError("Invalid subagent identity");
+  const selected = resolveNativeChild(harness, parent, childId);
+  const assertSelected = () => {
+    const fresh = resolveNativeChild(harness, parent, childId);
+    if (
+      fresh.path !== selected.path ||
+      fresh.agentId !== selected.agentId ||
+      fresh.parentIdentity !== selected.parentIdentity ||
+      fresh.childIdentity !== selected.childIdentity
+    )
+      throw new AgentSessionRequestError("Subagent parent source changed during read", 409);
+    return fresh;
+  };
+  const host: AgentTranscriptHost = {
+    id: "local",
+    async list() {
+      return [selected.file];
+    },
+    async readBytes(path, from, maxBytes) {
+      if (path !== selected.path) throw new AgentSessionRequestError("Foreign child source", 409);
+      const fresh = assertSelected();
+      const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      let bytes: Buffer;
+      try {
+        const stat = fstatSync(fd);
+        if (`${stat.dev}:${stat.ino}` !== fresh.childIdentity || !stat.isFile())
+          throw new AgentSessionRequestError("Native child file changed during read", 409);
+        bytes = Buffer.alloc(Math.max(0, Math.min(maxBytes, stat.size - from)));
+        bytes = bytes.subarray(0, readSync(fd, bytes, 0, bytes.length, from));
+      } finally {
+        closeSync(fd);
+      }
+      assertSelected();
+      return { bytes, size: fresh.file.size };
+    },
+  };
+  const page = await readAgentSession(host, selected.file, {
+    ...options,
+    ...(selected.agentId === undefined ? {} : { claudeAgentId: selected.agentId }),
+  });
+  assertSelected();
+  return page;
+}
+
+function resolveNativeChild(harness: "claude" | "codex", parent: HerdrAgentSession, childId: string) {
+  const supplied = resolveHerdrSeatTranscriptPath(harness, parent);
+  if (supplied === undefined) throw new AgentSessionRequestError("Parent native transcript unavailable", 404);
+  const parentPath = realpathSync(supplied);
+  const parentStat = statSync(parentPath);
+  if (!parentStat.isFile()) throw new AgentSessionRequestError("Invalid parent native source", 409);
+  let path: string | undefined;
+  let root: string;
+  let agentId: string | undefined;
+  if (harness === "claude") {
+    const calls = new Map<string, SubagentCall>();
+    const parentBytes = readRange(
+      parentPath,
+      Math.max(0, parentStat.size - COLD_READ_BYTES),
+      parentStat.size,
+    );
+    for (const line of parentBytes.toString("utf8").split("\n")) foldClaudeSubagentLine(calls, line);
+    const call = calls.get(childId);
+    if (call === undefined) throw new AgentSessionRequestError("No matching parent subagent call", 404);
+    agentId = call.agentId;
+    if (agentId === undefined)
+      throw new AgentSessionRequestError("Native child locator is not available yet", 409);
+    root = join(parentPath.replace(/\.jsonl$/u, ""), "subagents");
+    path = join(root, `agent-${agentId}.jsonl`);
+    if (statSync(path, { throwIfNoEntry: false }) === undefined)
+      throw new AgentSessionRequestError("Native child transcript unavailable", 404);
+    confinedChild(root, path);
+    const prefix = readRange(path, 0, HEADER_BYTES);
+    const newline = prefix.indexOf(0x0a);
+    const header = newline < 0 ? undefined : jsonRecord(prefix.toString("utf8", 0, newline));
+    const parentId = parentPath
+      .split("/")
+      .at(-1)!
+      .replace(/\.jsonl$/u, "");
+    if (header?.agentId !== agentId || header.isSidechain !== true || header.sessionId !== parentId)
+      throw new AgentSessionRequestError("Native child header does not match its parent", 409);
+  } else {
+    if (!UUID.test(childId)) throw new AgentSessionRequestError("Invalid native child thread identity");
+    const metadata = codexMetadata(parentPath, true);
+    if (metadata === undefined) throw new AgentSessionRequestError("Parent native header unavailable", 409);
+    root = codexRoot(parentPath);
+    const matches = codexChildren(parentPath, metadata)
+      .filter((child) => child.metadata.id === childId)
+      .filter((child) => {
+        const fresh = codexMetadata(child.path, true);
+        return fresh?.id === childId && fresh.parentId === metadata.id;
+      })
+      .map((child) => child.path);
+    if (matches.length !== 1)
+      throw new AgentSessionRequestError(
+        matches.length ? "Ambiguous native child transcript" : "No matching native child transcript",
+        matches.length ? 409 : 404,
+      );
+    path = matches[0]!;
+  }
+  const canonicalChild = confinedChild(root, path);
+  const stat = statSync(canonicalChild);
+  if (!stat.isFile()) throw new AgentSessionRequestError("Native child is not a regular transcript", 409);
+  const file: AgentSessionFile = { harness, path: canonicalChild, size: stat.size, mtimeMs: stat.mtimeMs };
+  return {
+    path: canonicalChild,
+    file,
+    agentId,
+    parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
+    childIdentity: `${stat.dev}:${stat.ino}`,
+  };
+}
+
+function confinedChild(root: string, path: string): string {
+  const canonicalRoot = realpathSync(root);
+  const canonicalChild = realpathSync(path);
+  const rel = relative(canonicalRoot, canonicalChild);
+  if (canonicalChild !== path || !rel || rel === ".." || rel.startsWith("../") || isAbsolute(rel))
+    throw new AgentSessionRequestError("Native child source escaped its parent", 409);
+  return canonicalChild;
+}
+
+function codexRoot(parentPath: string): string {
+  const boundary = parentPath.lastIndexOf("/sessions/");
+  return boundary < 0 ? dirname(parentPath) : parentPath.slice(0, boundary + "/sessions".length);
+}
+
+/** The same bounded header discovery serves roster projection and on-demand child history. */
+function codexChildren(parentPath: string, parent: CodexMetadata) {
+  const root = codexRoot(realpathSync(parentPath));
+  return globSync("**/rollout-*.jsonl", { cwd: root })
+    .sort()
+    .reverse()
+    .slice(0, MAX_HEADERS)
+    .flatMap((relative) => {
+      const path = join(root, relative);
+      try {
+        confinedChild(root, path);
+        const metadata = codexMetadata(path);
+        return metadata?.parentId === parent.id ? [{ path, metadata }] : [];
+      } catch {
+        return [];
+      }
+    });
 }

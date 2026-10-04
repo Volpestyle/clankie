@@ -4070,6 +4070,87 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         throw new Error("Connections are served by the authenticated app boundary");
       if (request.op === "work_repos" || request.op === "work_items")
         throw new Error("Work items are served by the authenticated app boundary");
+      if (request.op === "subagent_replay") {
+        const input = request.replay;
+        const unavailable = (
+          message: string,
+          code: "unknown_conversation" | "run_conflict" = "run_conflict",
+        ) => ({
+          op: "subagent_replay" as const,
+          schemaVersion: 1 as const,
+          subagentId: input.subagentId,
+          result: {
+            schemaVersion: 1 as const,
+            status: "recover" as const,
+            conversationId: input.conversationId,
+            code,
+            recoverable: false,
+            resetCursor: "0",
+            message,
+          },
+        });
+        const conversation = conversations.conversation(input.conversationId);
+        const scope = conversation?.scope;
+        if (!conversation || (scope?.kind !== "seat" && scope?.kind !== "persona"))
+          return unavailable(
+            "Open this agent's conversation before reading its subagents.",
+            "unknown_conversation",
+          );
+        if (!deps.agentSessions?.readSubagent)
+          return unavailable("This subagent's transcript is unavailable.");
+        await refreshFleet();
+        const previous = conversations.nativeSource(input.conversationId);
+        const seatId =
+          scope.kind === "seat" ? scope.seatId : (seatByPersona.get(scope.personaId) ?? previous?.terminalId);
+        if (!seatId || splitFleetQualified(seatId))
+          return unavailable("This subagent's transcript is unavailable.");
+        const live = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+        const parent = live ?? previous;
+        const key = (value: HerdrAgentSnapshot | undefined) =>
+          value?.session === undefined
+            ? undefined
+            : JSON.stringify([value.agent, value.terminalId, value.session]);
+        if (
+          !parent?.session ||
+          !["claude", "codex", "opencode"].includes(parent.agent) ||
+          (previous?.session && live && key(previous) !== key(live))
+        )
+          return unavailable("The parent agent changed. Select its subagent again.");
+        try {
+          const page = await deps.agentSessions.readSubagent(
+            parent.agent as "claude" | "codex" | "opencode",
+            parent.session,
+            input.subagentId,
+            { tail: 500 },
+          );
+          const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+          const fresh = conversations.conversation(input.conversationId);
+          if (
+            !fresh ||
+            JSON.stringify(fresh.scope) !== JSON.stringify(scope) ||
+            (current && key(current) !== key(parent))
+          )
+            return unavailable("The parent agent changed. Select its subagent again.");
+          conversations.rememberNativeSource(input.conversationId, parent);
+          return {
+            op: "subagent_replay",
+            schemaVersion: 1,
+            subagentId: input.subagentId,
+            result: await nativeConversationPage(
+              conversation,
+              {
+                sessionKey: `subagent:${page.session.ref}`,
+                entries: page.entries.filter((entry) => entry.type !== "viewed_image"),
+              },
+              "idle",
+              input,
+            ),
+          };
+        } catch {
+          // Locator errors never expose host paths or fall back to another child.
+          return unavailable("This subagent's transcript is unavailable.");
+        }
+      }
       if (request.op === "replay" || request.op === "tail" || request.op === "react") {
         const input =
           request.op === "replay"

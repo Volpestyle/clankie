@@ -704,7 +704,7 @@ function logFields(
     request.op === "close_seat" ||
     request.op === "react"
       ? request
-      : request.op === "replay"
+      : request.op === "replay" || request.op === "subagent_replay"
         ? request.replay
         : request.op === "tail"
           ? request.tail
@@ -716,7 +716,7 @@ function logFields(
   const resultStatus =
     result?.op === "send"
       ? result.result.status
-      : result?.op === "replay" || result?.op === "tail"
+      : result?.op === "replay" || result?.op === "subagent_replay" || result?.op === "tail"
         ? result.result.status
         : result?.op === "terminal_tail"
           ? result.result.status

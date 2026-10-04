@@ -1585,7 +1585,7 @@ paths:
       summary: Operator conversation contract
       description: |
         One route, discriminated `op`: `list`, `roster`, `get`, `create`,
-        `fork`, `close`, `send`, `cancel`, `replay`, `tail`, `autonomy`,
+        `fork`, `close`, `send`, `cancel`, `replay`, `subagent_replay`, `tail`, `autonomy`,
         `terminal_tail`. The TUI and relay both speak this. Seat scopes
         identify Herdr direct-send/projection threads. `cancel` interrupts one
         accepted run: the captain aborts the live model turn and the durable
@@ -1625,8 +1625,19 @@ paths:
         keep their casing and compare case-insensitively. `roles` returns the
         built-ins, then custom roles in use, as `{ role, builtIn, count }`. Fleet seats may
         carry `subagents` (running count and up to eight recent labels) for
-        local Claude seats that were hired or whose chat is open; absent means
-        unknown. `work_items` takes an optional case-insensitive `label`.
+        local Claude, Codex and registered OpenCode seats that were hired or
+        whose chat is open. Recent entries optionally carry native `id`,
+        `startedAt` and `endedAt`; absent means unknown.
+        `work_items` takes an optional case-insensitive `label`.
+        `subagent_replay` takes `replay` with the parent's existing seat/persona
+        `conversationId`, a native `subagentId`, `surfaceClientId` and the ordinary
+        replay paging options. It needs only the chat grant and returns
+        `subagentId` plus the ordinary normalized replay result. It reads a
+        bounded local child window through the parent's native source without
+        creating a conversation or granting send, resume or terminal control.
+        Missing locators, changed parents and remote children return typed
+        recovery. Older hosts may reject this operation while their fleet
+        remains readable.
         `replay` optionally takes `direction: backward`, `turnLimit` (1..40,
         default 20) and `limit` (1..500, default 500 for backward). Omit `cursor`
         to open the newest window; pass the page's `previousCursor` as the next

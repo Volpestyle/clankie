@@ -61,3 +61,14 @@ must match the parent's direct child in that profile; continuations retain
 distinct call IDs. The read bounds are 500 parent messages, 2,000 parts and
 4 MiB, retaining 64 calls and eight recent entries. No global owner store or
 child transcript is scanned, and no file-idleness completion is inferred.
+
+On explicit child selection, `readNativeSubagentSession` resolves a local Claude
+call ID or Codex child UUID through its already-addressed parent. Claude uses a
+matching native result's `agentId` and the derived nested child path; its header
+must name that parent and agent. Only this selected-child mode includes
+sidechains. Codex shares the roster's bounded direct-child header discovery.
+Both retain ordinary redaction, cursor isolation and the 4 MiB window cap, with
+source checks before each byte read. Missing locators, changed sources and
+escaped paths refuse. The service resolves OpenCode task call IDs within the
+same registered profile, rechecking the parent task and database relation after
+reading. None of these readers register, resume or send to the child.

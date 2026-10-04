@@ -7,6 +7,8 @@ import {
   listAgentSessions,
   parseAgentSessionRef,
   readAgentSession,
+  readNativeSubagentSession,
+  type HerdrAgentSession,
   type AgentSessionFile,
   type AgentSessionPage,
   type AgentSessionSummary,
@@ -59,6 +61,13 @@ export interface AgentSessions {
     errors: { host: string; error: string }[];
   }>;
   read(ref: string, options?: { tail?: number; after?: string }): Promise<AgentSessionPage>;
+  /** On-demand direct child of an already-addressed local parent; no control or resume authority. */
+  readSubagent?(
+    harness: "claude" | "codex" | "opencode",
+    parent: HerdrAgentSession,
+    childId: string,
+    options?: { tail?: number; after?: string },
+  ): Promise<AgentSessionPage>;
   /** Native OpenCode projection for an already-addressed local seat, never discovery. */
   subagents?(ref: string): Promise<OperatorSeatSubagents | undefined>;
   resolve(ref: string): Promise<SavedAgentSession>;
@@ -98,6 +107,20 @@ export function createAgentSessions(
       .then((next) => next.agentHosts.connections);
   };
   return {
+    async readSubagent(harness, parent, childId, options = {}) {
+      if (harness !== "opencode") return readNativeSubagentSession(harness, parent, childId, options);
+      if (parent.kind !== "id" || !native)
+        throw new AgentSessionRequestError("Registered native OpenCode parent unavailable", 409);
+      const value = await native.readSubagent(parent.value, childId, options);
+      const { modifiedAt: _modified, ...summary } = nativeSummary(value);
+      return {
+        session: summary,
+        entries: value.entries,
+        cursor: value.cursor,
+        ...(value.reset ? { reset: true as const } : {}),
+        ...(value.truncated ? { truncated: true as const } : {}),
+      };
+    },
     async subagents(ref) {
       const { host: hostId, session } = parseAgentSessionRef(ref);
       if (hostId !== "local" || !session.startsWith("ses_") || !native) return undefined;
