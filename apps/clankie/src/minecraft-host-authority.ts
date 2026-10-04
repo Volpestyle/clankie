@@ -2,7 +2,7 @@ import type { DiscordSettings } from "@clankie/settings";
 import type { BodyConversationIdentity } from "./body-lease-router.ts";
 import type { ConversationOwner } from "./captain/conversation-owner.ts";
 
-export class MinecraftHostAuthorityError extends Error {
+class MinecraftHostAuthorityError extends Error {
   readonly code = "minecraft_host_not_authorized";
   constructor() {
     super("minecraft_host_not_authorized");
