@@ -23,6 +23,8 @@ import type {
   CaptainSessionLaneV2,
   CaptainTurnMedia,
   CaptainTurnSettledMetrics,
+  IssueMetricsQuery,
+  IssueMetricsReport,
   DiscordChannelProjectionMessage,
   DiscordChannelProjectionMessageResult,
   DiscordPresenceChannelTurnRequest,
@@ -182,6 +184,7 @@ export interface CaptainPort {
     readonly limit?: number;
     readonly runId?: string;
   }): Promise<readonly CaptainTurnSettledMetrics[]>;
+  readIssueMetrics(query: IssueMetricsQuery): Promise<IssueMetricsReport>;
   /** Prompt fragment describing the voice lane, for the realtime voice briefing. */
   voiceLaneInstructions(): string;
   /**
@@ -354,6 +357,9 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     },
     observeLanes: async () => [],
     readTurnMetrics: async () => [],
+    readIssueMetrics: async () => {
+      throw new Error("Issue metrics unavailable");
+    },
     voiceLaneInstructions: () => "You are in a voice room.",
     syncSeatTranscript: () => true,
     seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),

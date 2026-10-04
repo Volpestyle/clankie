@@ -1,3 +1,4 @@
+import { readIssueMetrics } from "./issue-metrics.ts";
 import { DesktopExpressions } from "./desktop.ts";
 import { projectPresence, pollPresence, captainIsThinking } from "./presence.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
@@ -4199,6 +4200,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     async readTurnMetrics(query: TurnMetricsQuery) {
       return turnSettled.read(query);
     },
+
+    readIssueMetrics: (query) => readIssueMetrics(options.stateDir, query),
 
     voiceLaneInstructions(): string {
       return (

@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { DeliveryStageSchema } from "@clankie/protocol";
 
-const ReceiptSchema = z
+export const ReceiptSchema = z
   .object({
     messageId: z.string().min(1),
     fingerprint: z.string(),

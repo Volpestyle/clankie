@@ -1794,6 +1794,45 @@ paths:
         "409":
           description: Conflicting command or unavailable pane
 
+  /v1/captain/issue-metrics:
+    get:
+      tags: [Captain, Operator]
+      operationId: getIssueMetrics
+      summary: Observed issue and worker tokens, elapsed time, checks and reviews
+      description: |
+        Read-only projection of retained exact local native bindings, native
+        transcripts, settled turn metrics, seat ledger edges and unresolved hire
+        receipts. Unknown totals are null and partial/unsupported sources are
+        explicit in coverage. No transcript, command or credential is returned.
+        Window selects approval time or latest unfinished observation; totals
+        cover the selected episode. Passed seat edges never establish approval.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - in: query
+          name: issue
+          schema: { type: string, pattern: "^[A-Z][A-Z0-9]*-[0-9]+$" }
+        - in: query
+          name: worker
+          description: Exact worker label, terminal ID or native session reference.
+          schema: { type: string, minLength: 1, maxLength: 200 }
+        - in: query
+          name: since
+          description: ISO timestamp; defaults to 24 hours before until.
+          schema: { type: string, format: date-time }
+        - in: query
+          name: until
+          description: Exclusive ISO end; defaults to now. Maximum window 366 days.
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: schemaVersion, window, issues, workers and coverage.
+        "400":
+          description: Invalid filter or time window.
+        "401":
+          description: Operator authentication required.
+        "503":
+          description: Operator authentication unavailable.
+
   /v1/captain/turn-metrics:
     get:
       tags: [Captain, Operator]

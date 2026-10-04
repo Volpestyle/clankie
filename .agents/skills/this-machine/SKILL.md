@@ -43,6 +43,14 @@ state or a successful workspace focus as a delivery receipt or model-seen proof;
 messages still use native delivery and unconfirmed sends must not be retried
 blindly.
 
+For accepted-issue cost evidence, use `clankie metrics --issue ISSUE --since ISO
+--until ISO` or `clankie metrics --issues --worker LABEL`. The operator route
+projects retained native history and existing ledgers. Report its `coverage`
+alongside token, wall-time, check and rework totals: parent native usage is
+partial, elapsed time includes waits, and a passed seat edge is not approval.
+Unknowns remain null; never turn missing history into a zero-cost claim. See
+`docs/cli.md` under `repoRoot` for window and attribution rules.
+
 ## Three cards
 
 | Question                          | Card             |

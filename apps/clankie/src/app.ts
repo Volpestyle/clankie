@@ -1,4 +1,5 @@
 import { registerComputerRoutes } from "./computer-http.ts";
+import { ISSUE_METRICS_PATH, IssueMetricsQuerySchema } from "@clankie/protocol";
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
 import type { PeerSeatAuthority } from "./captain/peer-seat-messages.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -4776,6 +4777,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json(await dependencies.captain.evaluatorCommand(parsed.data));
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
+  app.get(ISSUE_METRICS_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = IssueMetricsQuerySchema.safeParse(context.req.query());
+    if (!parsed.success) return context.json({ error: "invalid_metrics_query" }, 400);
+    try {
+      return context.json(await dependencies.captain.readIssueMetrics(parsed.data));
+    } catch (error) {
+      if (error instanceof RangeError) return context.json({ error: error.message }, 400);
+      throw error;
     }
   });
 
