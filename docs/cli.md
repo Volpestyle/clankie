@@ -2330,10 +2330,29 @@ Until then the hire reports unavailable control with `consent_required` and the
 owner's fix. It does not launch a second worker or type the brief into the pane.
 Nothing accepts the development-channel warning on the owner's behalf.
 
+Local OpenCode workers use `hire_agent` with `harness: "opencode"` on macOS
+and a direct native **1.18.18** executable. Optional models use `provider/model`;
+`effort` requires an explicit model and a variant it supports. Account, skill,
+Chrome and extra-argv overrides are unavailable. The same native TUI stays in
+Herdr; its original process/socket, cwd and displayed session are checked before
+SDKv2 delivery. Owner questions and permissions hold sends. Native queue
+acceptance does not prove attention or completion, and uncertain delivery is
+never retried.
+
+Registered dedicated worker SQLite history supports `clankie agents list` and
+`clankie agents read`. `clankie agents resume … --conversation ID` needs the same
+live controller and hiring conversation; saved metadata cannot start another
+process. Remote control, general profile discovery, restart reattachment and
+new-process resume remain unavailable. Exact-session interrupt is supported.
+`close_seat` asks an owned live worker's original TUI to exit and succeeds only
+after its terminal disappears. Cold, replaced or switched sessions refuse;
+there is no unconditional physical pane-close fallback. See the
+[worker checkpoint and live limits](testing/2026-10-04-opencode-workers/README.md).
+
 Every hire logs its selected lane and reason. The result carries `control.mode`:
-`channel` for the Claude worker channel, `adapter` for Codex, `terminal` for an
-unbriefed native launch, or `unavailable` with `control.reason` explaining missing
-structured control. Registered remote fleets do not change the control lane of a
+`channel` for the Claude worker channel, `adapter` for Codex or OpenCode,
+`terminal` for an unbriefed native launch, or `unavailable` with `control.reason`
+explaining missing structured control. Registered remote fleets do not change the control lane of a
 local hire. Native questions remain visible in the pane; approvals and
 folder-trust prompts remain owner decisions.
 
