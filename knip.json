@@ -36,7 +36,9 @@
         "integrations/claude-plugin/worker/bin/harness-install.d.mts",
         "integrations/claude-plugin/worker/bin/harness-status.d.mts",
         "integrations/claude-plugin/worker/bin/native-codex.d.mts",
-        "integrations/claude-plugin/worker/bin/skill-bundle.d.mts"
+        "integrations/claude-plugin/worker/bin/skill-bundle.d.mts",
+        "integrations/opencode-plugin/worker-tui.mjs",
+        "integrations/opencode-plugin/worker-server.mjs"
       ],
       "paths": {
         "/clankie/*": ["./*"]
@@ -57,6 +59,7 @@
     "docs/testing/2026-09-20-delivered-files-live/flows/build-workbook.mjs": ["unlisted"],
     "scripts/evals/lead-coding-tools.mjs": ["unlisted"],
     "scripts/evals/lead-controller.mjs": ["unlisted"],
-    "scripts/evals/lead-model-runtime.mjs": ["unlisted"]
+    "scripts/evals/lead-model-runtime.mjs": ["unlisted"],
+    "integrations/opencode-plugin/worker-tui.mjs": ["unlisted"]
   }
 }

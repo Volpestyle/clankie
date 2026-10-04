@@ -91,6 +91,7 @@ import { createEmailPort } from "./email.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
+import { createOpenCodeNativeHost } from "./captain/opencode-native-host.ts";
 import { createProjectWorkspaceResolver } from "./project-membership.ts";
 import {
   createRemoteProjectObserver,
@@ -827,6 +828,10 @@ const captain = createCaptain(
       remoteCodexSeats.register(launch, proofFleetLinks?.lifetime(launch.fleet) ?? (() => false)),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
+    openCodeNative: createOpenCodeNativeHost({
+      binding: localFleetBinding,
+      processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
+    }),
     repoRoot,
     ...(startupSettings.captain.workingDirectory === undefined
       ? {}

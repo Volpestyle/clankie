@@ -21,6 +21,8 @@ import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
+import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
+import type { createOpenCodeNativeHost } from "./opencode-native-host.ts";
 import {
   createRemoteCodexSeatAdapter,
   remoteCodexQueue,
@@ -566,6 +568,7 @@ export interface CaptainOptions {
   readonly evalSessionBoundary?: EvalSessionBoundary;
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
+  readonly openCodeNative?: ReturnType<typeof createOpenCodeNativeHost>;
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
   readonly projectHireIdentity?: (
     fleet: string,
@@ -940,7 +943,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     })),
   ];
   const herdrRunner = routeHerdrFleets(
-    options.nativeHerdrRunner ?? createHerdrWatchRunner(deps.herdrAvailable),
+    options.nativeHerdrRunner ??
+      createHerdrWatchRunner(deps.herdrAvailable, undefined, options.openCodeNative?.createCommandTab),
     async () =>
       new Map([
         ...(await refreshFleets()).map((fleet) => {
@@ -1121,6 +1125,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
       ),
       claudeWorkerSeats,
+      ...(options.openCodeNative === undefined
+        ? []
+        : [
+            createOpenCodeSeatAdapter({
+              repoRoot: options.repoRoot,
+              stateDir: options.stateDir,
+              native: options.openCodeNative,
+            }),
+          ]),
     ],
     // Remote seats get native channels too (VUH-1527): Codex its own app-server
     // over the fleet's ssh, Claude the worker plugin over the fleet's link.
