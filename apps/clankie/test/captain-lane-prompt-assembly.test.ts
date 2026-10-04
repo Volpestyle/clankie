@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { describe, expect, it } from "vitest";
-import { assembleLanePrompt } from "../src/captain/captain.ts";
+import { assembleLanePrompt, instructionsForHarness } from "../src/captain/captain.ts";
 
 const settings = ClankieSettingsSchema.parse({
   schemaVersion: 1,
@@ -108,5 +108,18 @@ describe("lane prompt assembly", () => {
     expect(prompt.endsWith("## The model you are running on\nstub")).toBe(true);
     // A section that was asked for but has nothing to say leaves no gap.
     expect(assembleLanePrompt("operator", true, settings, ["persona", "model"])).not.toMatch(/\n\n$/u);
+  });
+});
+
+describe("project instructions for a harness", () => {
+  const files = [{ path: "/home/AGENTS.md" }, { path: "/home/CLAUDE.md" }, { path: "/home/repo/AGENTS.md" }];
+  const exists = (path: string) => path === "/home/CLAUDE.md";
+
+  it("passes every file when no harness is named", () => {
+    expect(instructionsForHarness(files, undefined, exists)).toEqual(files);
+  });
+
+  it("leaves Claude the AGENTS.md it cannot read and drops what it already loads", () => {
+    expect(instructionsForHarness(files, "claude", exists)).toEqual([{ path: "/home/repo/AGENTS.md" }]);
   });
 });

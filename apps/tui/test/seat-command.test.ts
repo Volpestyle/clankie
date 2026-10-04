@@ -115,6 +115,19 @@ describe("clankie seat", () => {
     });
   });
 
+  it("leaves out bundled skills the owner already installs for Claude Code", async () => {
+    const env = await stateEnv();
+    await mkdir(join(env.CLAUDE_CONFIG_DIR!, "skills", "lead"), { recursive: true });
+    await writeFile(join(env.CLAUDE_CONFIG_DIR!, "skills", "lead", "SKILL.md"), "---\nname: lead\n---\n");
+    const plan = await planSeat(
+      { resume: false, dryRun: true },
+      { repoRoot, env, execFileImpl: fakeExec({ plugins: [{ id: SEAT_PLUGIN_ID, enabled: true }] }) },
+    );
+    const names = await readdir(join(plan.plugin.path, "skills"));
+    expect(names).not.toContain("lead");
+    expect(names).toContain("this-machine");
+  });
+
   it("refuses without Claude Code on PATH", async () => {
     const env = await stateEnv();
     await expect(

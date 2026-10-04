@@ -1780,7 +1780,7 @@ path on the Mac. Files share the conversation's retention and are removed when
 that conversation resets, closes, or ages out. See
 [ADR 0174](adr/0174-finished-files-belong-to-conversations.md).
 
-### `prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model]`
+### `prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model] [--conversation ID] [--harness claude]`
 
 The system prompt that lane's session starts from, printed verbatim as plain
 text. The intended consumer is a seat launcher in another harness, which reads
@@ -1803,6 +1803,13 @@ Sections default to the five a session is built with, joined by one blank line:
 
 A seat that carries the identity some other way asks for the rest:
 `clankie prompt --sections persona,reach,address`.
+
+With a selected conversation (`--conversation` or `CLANKIE_CONVERSATION_ID`),
+the prompt ends with that workspace's project instructions. `--harness claude`
+leaves out what Claude Code loads itself: every `CLAUDE.md`, and any `AGENTS.md`
+with a `CLAUDE.md` beside it. An `AGENTS.md` that stands alone is kept, since
+Claude Code never reads it. The Claude seat's hook also leaves out `fleet`: the
+lead skills read it from `clankie fleet status` when they need it.
 
 ### `memory [status] | search <terms...> | retain|release|forget <episodeId> | correct <episodeId> --summary TEXT`
 

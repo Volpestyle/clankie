@@ -38,6 +38,9 @@ import type { LinearActivityEvent, LinearWorkOwner } from "../linear-webhook.ts"
 export const CAPTAIN_PROMPT_SECTIONS = ["identity", "persona", "reach", "fleet", "address", "model"] as const;
 export type CaptainPromptSection = (typeof CAPTAIN_PROMPT_SECTIONS)[number];
 
+/** A seat harness that loads some project instruction files itself. */
+export type PromptHarness = "claude";
+
 /**
  * One authored tool as a harness that is not pi sees it: a name, a description,
  * the raw JSON Schema pi validates against, and a call. The captain's registry
@@ -161,6 +164,8 @@ export interface CaptainPort {
     readonly lane: CaptainSessionLaneV2;
     readonly sections?: readonly CaptainPromptSection[];
     readonly conversationId?: string;
+    /** The seat's harness, so instructions it already loads natively are left out. */
+    readonly harness?: PromptHarness;
   }): Promise<string>;
   /** The memory card that lane's next run would inject, filtered the same way. */
   laneMemoryCard(lane: CaptainSessionLaneV2): Promise<string>;

@@ -302,7 +302,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["prompt"],
     lines: [
-      "  prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model]",
+      "  prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model] [--harness claude]",
       "                           The system prompt that lane's session starts from (plain text)",
     ],
   },

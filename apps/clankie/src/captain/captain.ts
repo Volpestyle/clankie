@@ -162,7 +162,7 @@ import { LaneLog, laneKey } from "./lane-log.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime, type RoutedSelection } from "./model.ts";
 import { captainRoutingExtension } from "./routing.ts";
 import { captainRequestExtension, promptCacheSalt } from "./request-budget.ts";
-import type { CaptainPort, CaptainPromptSection, HireSeat, MessageSeat } from "./port.ts";
+import type { CaptainPort, CaptainPromptSection, HireSeat, MessageSeat, PromptHarness } from "./port.ts";
 import { buildLaneToolBank, laneAuthoredTools } from "./lane-tools.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
@@ -317,6 +317,23 @@ export function captainMemoryExtension(memory: CaptainDeps["memory"], lane: Capt
       });
     },
   } satisfies InlineExtension;
+}
+
+/**
+ * The project instruction files a seat still needs from the service. Claude
+ * Code reads every CLAUDE.md on its own path but never AGENTS.md, so a Claude
+ * seat drops the CLAUDE.md files and any AGENTS.md beside one, and keeps an
+ * AGENTS.md that stands alone. Without a harness, every file passes.
+ */
+export function instructionsForHarness<T extends { readonly path: string }>(
+  files: readonly T[],
+  harness: PromptHarness | undefined,
+  exists: (path: string) => boolean = existsSync,
+): readonly T[] {
+  if (harness === undefined) return files;
+  return files.filter(
+    (file) => basename(file.path) !== "CLAUDE.md" && !exists(join(dirname(file.path), "CLAUDE.md")),
+  );
 }
 
 /** The sections a pi session is built with; the model card is refreshed per run instead. */
@@ -3511,7 +3528,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         transcript.activity,
       ),
 
-    async lanePrompt({ lane, sections = SESSION_PROMPT_SECTIONS, conversationId }) {
+    async lanePrompt({ lane, sections = SESSION_PROMPT_SECTIONS, conversationId, harness }) {
       const currentSettings = await settings();
       // The model card is per run in pi, so it is only assembled when asked for;
       // a selection that cannot be resolved leaves the section out, as the
@@ -3531,7 +3548,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (conversationId === undefined) return prompt;
       const binding = lane === "operator" ? seatContext(conversationId) : undefined;
       if (binding === undefined) throw new Error("Unknown captain conversation");
-      const files = await projectInstructions(binding.cwd);
+      const files = instructionsForHarness(await projectInstructions(binding.cwd), harness);
       return [
         prompt,
         `# Selected conversation\n${binding.conversationId}\nWorkspace: ${binding.cwd}`,

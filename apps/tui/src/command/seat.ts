@@ -12,6 +12,7 @@ import { bundledSkills, projectSkillPlugin, SettingsStore, defaultSettingsPath }
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { readHerdrBinding } from "../session/herdr-connection.ts";
@@ -219,6 +220,23 @@ function herdrFailureText(caught: unknown): string {
   return caught instanceof Error ? caught.message : String(caught);
 }
 
+/**
+ * Skills the owner already installs for Claude Code, by name, win over the
+ * bundled copies, so the seat lists each skill once. Only plain `claude` is
+ * checked: a numbered command's alias may point at another profile we cannot see.
+ */
+function withoutUserSkills<T extends { readonly name: string; readonly included: boolean }>(
+  skills: readonly T[],
+  command: string,
+  env: NodeJS.ProcessEnv,
+): T[] {
+  if (command !== "claude") return [...skills];
+  const root = join(env.CLAUDE_CONFIG_DIR?.trim() || join(env.HOME ?? homedir(), ".claude"), "skills");
+  return skills.map((skill) =>
+    skill.included && existsSync(join(root, skill.name, "SKILL.md")) ? { ...skill, included: false } : skill,
+  );
+}
+
 export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): Promise<SeatPlan> {
   if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
     throw new Error(SEAT_USAGE);
@@ -254,7 +272,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     );
   }
   const selection = (await new SettingsStore(defaultSettingsPath(env)).load()).skills;
-  const skills = bundledSkills(options.repoRoot, selection);
+  const skills = withoutUserSkills(bundledSkills(options.repoRoot, selection), command, env);
   const plugin: SeatPlan["plugin"] = {
     source: "plugin-dir",
     path: await projectSkillPlugin(source, join(clankieStateHome(env), "clankie"), skills),

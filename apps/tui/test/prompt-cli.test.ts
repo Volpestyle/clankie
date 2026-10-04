@@ -253,3 +253,12 @@ it("carries a seat's selected project to the prompt service and allows explicit 
   await runPromptCommand(["--conversation", "project-b"], opts);
   expect(requests.map((r) => r.url.searchParams.get("conversationId"))).toEqual(["project-a", "project-b"]);
 });
+
+it("names the seat's harness only when asked, and refuses an unknown one", async () => {
+  const { fetchImpl, requests } = recorder("prompt");
+  const opts = options(fetchImpl, []);
+  await runPromptCommand([], opts);
+  await runPromptCommand(["--harness", "claude"], opts);
+  expect(requests.map((r) => r.url.searchParams.get("harness"))).toEqual([null, "claude"]);
+  await expect(runPromptCommand(["--harness", "vim"], opts)).rejects.toThrow("Usage: clankie prompt");
+});

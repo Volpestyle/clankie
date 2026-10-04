@@ -282,6 +282,7 @@ const CaptainLanePromptQuerySchema = z
   .object({
     lane: CaptainSessionLaneV2Schema.optional(),
     conversationId: z.string().trim().min(1).max(256).optional(),
+    harness: z.enum(["claude"]).optional(),
     sections: z
       .string()
       .transform((raw) =>
@@ -1552,6 +1553,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         lane,
         ...(sections === undefined ? {} : { sections }),
         ...(query.data.conversationId === undefined ? {} : { conversationId: binding.conversationId! }),
+        ...(query.data.harness === undefined ? {} : { harness: query.data.harness }),
       }),
     );
   });
