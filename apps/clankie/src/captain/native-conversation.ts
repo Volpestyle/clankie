@@ -16,9 +16,11 @@ import type { HerdrSeatTranscript } from "./herdr-transcript.ts";
  * at its 16 KB cap a page of them is mostly bytes nobody reads. The page sends
  * the head of it; cursors still hash the whole entry, so they stay stable.
  */
-export const NATIVE_TOOL_DETAIL_MAX = 4_096;
+const NATIVE_TOOL_DETAIL_MAX = 4_096;
 const trimDetail = (detail: string): string =>
-  detail.length <= NATIVE_TOOL_DETAIL_MAX ? detail : `${detail.slice(0, NATIVE_TOOL_DETAIL_MAX)}\n… (trimmed)`;
+  detail.length <= NATIVE_TOOL_DETAIL_MAX
+    ? detail
+    : `${detail.slice(0, NATIVE_TOOL_DETAIL_MAX)}\n… (trimmed)`;
 
 /** A read-through view. Native history never enters Clankie's durable event log. */
 export async function nativeConversationPage(

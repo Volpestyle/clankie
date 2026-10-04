@@ -25,8 +25,16 @@ test("finds a Claude session under a named config home, not only ~/.claude", asy
   vi.stubEnv("CLAUDE_CONFIG_DIR", "");
   await mkdir(join(home, ".claude", "projects"), { recursive: true });
   const named = await session(home, ".claude-james", "1640b841-f338-48c6-ba05-946fb70241a3");
-  expect(resolveHerdrSeatTranscriptPath("claude", { source: "herdr:claude", kind: "id", value: "1640b841-f338-48c6-ba05-946fb70241a3" })).toBe(named);
-  expect(resolveHerdrSeatTranscriptPath("claude", { source: "herdr:claude", kind: "id", value: "missing" })).toBeUndefined();
+  expect(
+    resolveHerdrSeatTranscriptPath("claude", {
+      source: "herdr:claude",
+      kind: "id",
+      value: "1640b841-f338-48c6-ba05-946fb70241a3",
+    }),
+  ).toBe(named);
+  expect(
+    resolveHerdrSeatTranscriptPath("claude", { source: "herdr:claude", kind: "id", value: "missing" }),
+  ).toBeUndefined();
 });
 
 test("honors CLAUDE_CONFIG_DIR outside the home directory", async () => {
@@ -35,5 +43,7 @@ test("honors CLAUDE_CONFIG_DIR outside the home directory", async () => {
   vi.stubEnv("HOME", join(home, "empty-home"));
   const file = await session(home, "custom-config", "2a0e");
   vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, "custom-config"));
-  expect(resolveHerdrSeatTranscriptPath("claude", { source: "herdr:claude", kind: "id", value: "2a0e" })).toBe(file);
+  expect(
+    resolveHerdrSeatTranscriptPath("claude", { source: "herdr:claude", kind: "id", value: "2a0e" }),
+  ).toBe(file);
 });
