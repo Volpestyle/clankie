@@ -31,7 +31,11 @@ A brief or evidence file is useful context when needed, not a delivery channel.
 
 The hiring conversation owns the worker. A host-admitted `message_seat` from
 another conversation adopts it, routing future reports and hire completion there.
-The worker cannot choose a different destination. An attached native operator
+Without persisted adoption, reports follow the actual census parent/launcher
+to its attached conversation or existing native channel. With no eligible parent,
+the default conversation receives a tagged `unadopted` report; doctor/roster name
+the parent pane and missing bridge. Explicit adoption wins; names and tabs confer
+no ownership. The worker cannot choose a different destination. An attached native operator
 seat drives its selected conversation; selecting `global-default` does not select
 other rooms. Missing or uncertain native control needs inspection of the original
 receipt, never a second dispatch path. See [native operations](reference/operations.md).

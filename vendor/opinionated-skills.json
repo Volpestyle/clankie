@@ -12,5 +12,7 @@
     "shared-checkout": "agent/shared-checkout",
     "solution-space": "agent/solution-space"
   },
-  "localChanges": []
+  "localChanges": [
+    "agent/lead/SKILL.md and agent/lead/reference/operations.md: document ADR 0218/VUH-1615 unadopted worker parent routing, fallback diagnostics and existing native receipt boundaries."
+  ]
 }

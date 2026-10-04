@@ -32,7 +32,7 @@ import {
   ConversationServiceRun,
   waitForConversationRun,
 } from "./conversation-run.ts";
-import { fleetDeliveryStage, type DeliveryStage } from "@clankie/protocol";
+import { fleetDeliveryStage, WorkerReportRoutingSchema, type DeliveryStage } from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
@@ -235,6 +235,7 @@ const InboundAcceptanceSchema = z
     message: z.string(),
     runId: z.string(),
     acceptedCursor: z.string(),
+    workerReportRouting: WorkerReportRoutingSchema.optional(),
   })
   .strict();
 type InboundAcceptance = z.infer<typeof InboundAcceptanceSchema>;
@@ -1906,6 +1907,53 @@ export class ConversationStore {
     return this.metas.get(conversationId)?.nativeSource;
   }
 
+  /** Reuse the current persona thread after legacy seat-scope migration. */
+  public nativeConversationForSeat(source: HerdrAgentSnapshot): OperatorConversation | undefined {
+    const matches = [...this.metas.values()].filter((meta) => {
+      if (meta.scope.kind === "seat") return meta.scope.seatId === source.terminalId;
+      if (meta.scope.kind !== "persona") return false;
+      if (this.seatForPersona?.(meta.scope.personaId) === source.terminalId) return true;
+      const native = meta.nativeSource;
+      return (
+        native?.paneId === source.paneId &&
+        native.terminalId === source.terminalId &&
+        JSON.stringify(native.session) === JSON.stringify(source.session)
+      );
+    });
+    if (matches.length > 1) throw new Error("Native lead has ambiguous existing conversation threads");
+    return matches[0] === undefined ? undefined : publicConversation(matches[0]);
+  }
+
+  /** Existing authenticated transcript attachment, never a pane/title guess. */
+  public attachedConversationForNative(source: HerdrAgentSnapshot): string | undefined {
+    if (!source.session) return undefined;
+    const sessionId =
+      source.session.kind === "id"
+        ? source.session.value
+        : source.session.value
+            .split(/[\\/]/u)
+            .at(-1)
+            ?.replace(/\.jsonl$/u, "");
+    const matches = [...this.metas.values()].filter((meta) => {
+      if (meta.scope.kind !== "global" && meta.scope.kind !== "workspace" && meta.scope.kind !== "room")
+        return false;
+      const native = meta.nativeSource;
+      if (
+        native &&
+        (native.paneId !== source.paneId ||
+          native.terminalId !== source.terminalId ||
+          JSON.stringify(native.session) !== JSON.stringify(source.session))
+      )
+        return false;
+      return (
+        native !== undefined ||
+        (sessionId !== undefined && meta.nativeSeatSessions?.[sessionId] === "current")
+      );
+    });
+    if (matches.length > 1) throw new Error("Native parent has ambiguous conversation attachment");
+    return matches[0]?.conversationId;
+  }
+
   public rememberNativeSource(conversationId: string, source: HerdrAgentSnapshot): void {
     const meta = this.metas.get(conversationId);
     if (meta === undefined || JSON.stringify(meta.nativeSource) === JSON.stringify(source)) return;
@@ -2363,13 +2411,17 @@ export class ConversationStore {
     receipt: Omit<InboundAcceptance, "message" | "runId" | "acceptedCursor">,
     /** The service resolves this target; inbound worker content cannot select it. */
     conversationId = "global-default",
-    /** A room's frozen owner keeps its Discord admission and reply path. */
-    roomRunner?: ConversationRunner,
+    /** Host-selected room/native runner; clients cannot select execution authority. */
+    admittedRunner?: ConversationRunner,
   ): SubmitOperatorConversationTurnResult {
     const meta = this.metas.get(conversationId);
     if (!meta) throw new Error(`Unknown conversation ${conversationId}`);
-    const runner = meta.scope.kind === "room" ? roomRunner : this.runner;
-    if (runner === undefined || (!this.runsCaptainTurns(conversationId) && meta.scope.kind !== "room"))
+    const native = meta.scope.kind === "seat" || meta.scope.kind === "persona";
+    const runner = meta.scope.kind === "room" || native ? admittedRunner : this.runner;
+    if (
+      runner === undefined ||
+      (!this.runsCaptainTurns(conversationId) && meta.scope.kind !== "room" && !native)
+    )
       throw new ConversationRefusedError("This conversation cannot accept inbound worker messages.");
     return this.enqueue(meta, message, undefined, false, runner, {
       origin: "message",
@@ -3287,7 +3339,16 @@ export class ConversationStore {
           : { attachments: provenance.attachments.map((attachment) => attachment.file) }),
       });
     }
-    this.append(meta, { type: "turn", runId, phase: "accepted" });
+    this.append(meta, {
+      type: "turn",
+      runId,
+      phase: "accepted",
+      ...(provenance.inboundReceipt?.workerReportRouting === undefined
+        ? {}
+        : {
+            workerReportRouting: provenance.inboundReceipt.workerReportRouting,
+          }),
+    });
 
     const conversationId = meta.conversationId;
     this.runCounts.set(conversationId, (this.runCounts.get(conversationId) ?? 0) + 1);

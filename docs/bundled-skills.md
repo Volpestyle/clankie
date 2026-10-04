@@ -170,8 +170,9 @@ repository, and export the listed directories plus `LICENSE` with `git archive`.
 Preserve the source-relative paths under `vendor/opinionated-skills/` and the
 relative links from `.agents/skills` and the Claude plugin. Never snapshot an
 uncommitted working tree. Reapply any recorded `localChanges` before replacing the shipped snapshot.
-The current list is empty: the consolidated lead, native delivery and landing
-helper fixes are all in the pinned upstream source. Update the manifest revision in the same change and
+The consolidated lead, native delivery and landing helper fixes are in the pinned
+upstream source. The current local changes add ADR 0218/VUH-1615 unadopted worker
+parent routing and receipt diagnostics to the lead skill. Update the manifest revision in the same change and
 review the export for personal accounts, private material and out-of-root links.
 Release assembly dereferences these links, including the worker plugin, so an
 installed body needs no sibling checkout. The vendored prose is excluded from

@@ -48,7 +48,7 @@ export interface SeatDeliveryInput {
   readonly content: string;
   /** An escalation holds its run open for the seat's answer; a wake or watch settles once taken. */
   readonly wantsReply: boolean;
-  /** Peer messages may be taken only by the native recipient observed at dispatch. */
+  /** A supplied native binding pins every source to its original recipient. */
   readonly recipientBinding?: string;
   readonly signal?: AbortSignal;
 }
@@ -83,6 +83,7 @@ export class SeatOutbox {
   private readonly delivered: DeliveryFence;
   private readonly active = new Set<string>();
   private lastPollAt: number | undefined;
+  private lastPollBinding: string | undefined;
   private closed = false;
 
   public constructor(
@@ -116,6 +117,15 @@ export class SeatOutbox {
   /** A seat is bound while a poller is parked, or a parked poll resolved within the grace. */
   public bound(): boolean {
     return !this.closed && (this.pollers.size > 0 || this.remainingGraceMs() > 0);
+  }
+
+  /** Routing observation only: the existing poll carries the native binding. */
+  public boundTo(binding: string): boolean {
+    return (
+      !this.closed &&
+      ([...this.pollers].some((poller) => poller.recipientBinding === binding) ||
+        (this.remainingGraceMs() > 0 && this.lastPollBinding === binding))
+    );
   }
 
   /**
@@ -155,7 +165,11 @@ export class SeatOutbox {
         content: input.content,
         createdAt: new Date(this.now()).toISOString(),
       };
-      this.fence.begin(event.id, { messageId: event.id, fingerprint: deliveryFingerprint(input.content) });
+      this.fence.begin(event.id, {
+        messageId: event.id,
+        fingerprint: deliveryFingerprint(input.content),
+        ...(input.recipientBinding === undefined ? {} : { sessionId: input.recipientBinding }),
+      });
       this.active.add(event.id);
       const onAbort = (): void =>
         pending.settle(
@@ -235,7 +249,10 @@ export class SeatOutbox {
           clearTimeout(timer);
           signal?.removeEventListener("abort", onAbort);
           this.pollers.delete(poller);
-          if (source === "timeout" || source === "wake") this.lastPollAt = this.now();
+          if (source === "timeout" || source === "wake") {
+            this.lastPollAt = this.now();
+            this.lastPollBinding = recipientBinding;
+          }
           resolve(events);
         },
       };
@@ -264,14 +281,22 @@ export class SeatOutbox {
   }
 
   /** Exact bridge receipt, also usable after a timeout or service restart. */
-  public acknowledge(eventId: string): boolean {
+  public acknowledge(eventId: string, recipientBinding?: string): boolean {
     const pending = this.inFlight.find((candidate) => candidate.event.id === eventId);
     if (pending === undefined) {
       const original = this.fence.pending(eventId);
-      if (!original) return this.delivered.pending(eventId)?.messageId === eventId;
+      if (!original) {
+        const delivered = this.delivered.pending(eventId);
+        return (
+          delivered?.messageId === eventId &&
+          (delivered.sessionId === undefined || delivered.sessionId === recipientBinding)
+        );
+      }
+      if (original.sessionId !== undefined && original.sessionId !== recipientBinding) return false;
       if (!this.delivered.pending(eventId)) this.delivered.begin(eventId, original);
       return this.fence.reconcile(eventId, eventId);
     }
+    if (!this.matchesRecipient(pending, recipientBinding)) return false;
     this.ackPending(pending);
     return true;
   }
@@ -308,6 +333,7 @@ export class SeatOutbox {
         this.delivered.begin(pending.event.id, {
           messageId: pending.event.id,
           fingerprint: deliveryFingerprint(pending.event.content),
+          ...(pending.recipientBinding === undefined ? {} : { sessionId: pending.recipientBinding }),
         });
       this.fence.reconcile(pending.event.id, pending.event.id);
     } catch (error) {
@@ -329,10 +355,9 @@ export class SeatOutbox {
   }
 
   private matchesRecipient(pending: Pending, recipientBinding?: string): boolean {
-    return (
-      pending.event.source !== "peer" ||
-      (!!pending.recipientBinding && pending.recipientBinding === recipientBinding)
-    );
+    return pending.recipientBinding === undefined
+      ? pending.event.source !== "peer"
+      : pending.recipientBinding === recipientBinding;
   }
 
   private take(recipientBinding?: string): OperatorSeatEvent[] {

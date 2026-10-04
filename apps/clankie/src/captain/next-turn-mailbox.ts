@@ -61,6 +61,12 @@ export class NextTurnMailbox {
     }
   }
 
+  /** A host-authenticated hook observed this exact native recipient recently. */
+  observed(seat: string, binding: string): boolean {
+    const inbox = this.inboxes[seat];
+    return !this.unreadable && inbox?.binding === binding && inbox.expiresAt > this.now();
+  }
+
   observe(seat: string, binding: string, receiver = binding): void {
     if (this.unreadable) return;
     const old = this.inboxes[seat];

@@ -24,7 +24,13 @@ its evidence; inspect native history only for a gap or contradictory result.
 Hires and their completion route to the admitting conversation. Another
 conversation's host-admitted `message_seat` adopts the worker and its hire harvest.
 Explicit watches keep their arming conversation. Worker reports cannot select a
-lead. Native operator seats receive the selected conversation's reports, wakes
+lead. Unadopted reports use the actual census parent/launcher's attached
+conversation or existing native channel; explicit adoption takes precedence.
+Otherwise `global-default` receives a report with an `unadopted` routing reason.
+Inspect roster `workerReportRouting` and doctor `linkedSession.parentLeads` for
+the exact lead pane lacking a bridge. Process observations grant no tools and
+prove no delivery; reconcile an uncertain original ID rather than resending.
+Native operator seats receive the selected conversation's reports, wakes
 and watches while attached; attachment adds no room or machine grants.
 
 ## Connected tools and peers

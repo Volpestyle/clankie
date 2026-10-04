@@ -109,8 +109,17 @@ Workers' `message_clankie` reports reach the conversation that hired them.
 Messaging a worker with `message_seat` adopts it under the sending conversation;
 its reports and completion watches then follow that lead. The service resolves
 this persisted route, including remote fleet seats; the worker never chooses it.
-Only a removed lead conversation makes worker reports fall back to
-`global-default`; revoked room grants remain a refusal.
+Without persisted adoption, the host uses the exact census parent/launcher pane
+and native occupant to reach its attached conversation or existing native
+channel. Explicit adoption wins. With no eligible parent (or a removed adopted
+conversation), `global-default` receives a report tagged `unadopted` with its
+reason and parent pane when known. Read `workerReportRouting` on the roster and
+durable accepted turn; `clankie doctor` names parent panes lacking an observed
+bridge in `linkedSession.parentLeads`. Names, tabs and report text prove no
+ownership, and bridge process observations prove neither tools nor delivery.
+Revoked room grants or missing original room proof remain a refusal. Reconcile
+the original receipt after uncertainty; adoption, detach and restart never
+redirect an accepted report ID.
 
 Native projection carries these reports as `kind="message"`, framed as
 untrusted agent output, never an instruction from the owner. Completion harvests

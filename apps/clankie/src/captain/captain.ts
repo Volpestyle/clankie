@@ -33,7 +33,7 @@ import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
 import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { deliveryFingerprint } from "./delivery-fence.ts";
-import { hireDeliveryStage } from "@clankie/protocol";
+import { hireDeliveryStage, type WorkerReportRouting } from "@clankie/protocol";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { createRemoteCodexGoals } from "./remote-codex-goals.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
@@ -110,6 +110,7 @@ import {
   ConversationStore,
   LINEAR_INBOX_CONVERSATION_ID,
   type ConversationTurnContext,
+  type ConversationRunner,
   type OwnerAttachmentHost,
 } from "./conversations.ts";
 import { materializeOwnerAttachments, modelImagesForOwnerAttachments } from "../owner-attachments.ts";
@@ -2624,15 +2625,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const withRemoteGoals = createRemoteCodexGoals({ shell: (fleet) => deps.fleets?.shell?.(fleet) });
   let seatWork = "";
   let captainGoals = "";
-  async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
-    await personas.ready(settingsStore);
+  /** Admission reads this fresh census; cached roster/bridge cards confer no authority. */
+  async function observeFleet() {
     const binding = await deps.runtimes?.configuredBinding("default");
-    const fleet = await readFleet({
+    return readFleet({
       ...(options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner, summaries: {} } : {}),
       fleets: await censusFleets(),
       localAvailable: deps.herdrAvailable?.() !== false,
       ...(binding ? { herdrSession: binding.session, bridgeSocket: binding.socketPath } : {}),
     });
+  }
+
+  async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
+    await personas.ready(settingsStore);
+    const fleet = await observeFleet();
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
     const goalList = await conversations.serve({ op: "list", schemaVersion: 1 });
@@ -2690,7 +2696,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // so a move has to hire under the same one (ADR 0164).
     seatSubjects.clear();
     for (const observed of fleet.seats) seatSubjects.set(observed.seatId, observed.subject);
-    const parents = parentSeatIds(liveEdgeSeats);
+    const parents = parentSeatIds([...liveEdgeSeats, ...(fleet.head === undefined ? [] : [fleet.head])]);
     const names = new Map(
       personas.all(seats, () => undefined).map((persona) => [persona.personaId, persona.name]),
     );
@@ -2705,22 +2711,38 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       herdrWatches.trackSeat(seat.seatId);
     }
     liveSeats = seats;
-    return seats.map((seat) => {
-      // A lapsed stance simply is not here, so no surface has to reason about
-      // how old the thing it is drawing is (ADR 0148).
-      const stance = stances.read(seat.seatId);
-      // The ledger is the authority for what a seat has earned; the room reads
-      // this and never keeps a score of its own (app ADR 0030).
-      const lastOutcome = seatLedger.lastOutcome(seat.seatId);
-      const parentSeatId = parents.get(seat.seatId);
-      return {
-        ...seat,
-        conversationId: conversations.conversationIdForPersona(seat.personaId),
-        ...(stance === undefined ? {} : { stance }),
-        ...(lastOutcome === undefined ? {} : { lastOutcome }),
-        ...(parentSeatId === undefined ? {} : { parentSeatId }),
-      };
-    });
+    return Promise.all(
+      seats.map(async (seat) => {
+        // A lapsed stance simply is not here, so no surface has to reason about
+        // how old the thing it is drawing is (ADR 0148).
+        const stance = stances.read(seat.seatId);
+        // The ledger is the authority for what a seat has earned; the room reads
+        // this and never keeps a score of its own (app ADR 0030).
+        const lastOutcome = seatLedger.lastOutcome(seat.seatId);
+        const parentSeatId = parents.get(seat.seatId);
+        const observed = fleet.seats.find((entry) => entry.seatId === seat.seatId);
+        let workerReportRouting: WorkerReportRouting | undefined;
+        if (observed) {
+          try {
+            workerReportRouting = (await workerReportRoute(observedAgent(observed), fleet)).diagnostic;
+          } catch {
+            workerReportRouting = {
+              source: "refused",
+              reason: "authority_unavailable",
+              ...(observed.parentPaneId === undefined ? {} : { leadPaneId: observed.parentPaneId }),
+            };
+          }
+        }
+        return {
+          ...seat,
+          conversationId: conversations.conversationIdForPersona(seat.personaId),
+          ...(stance === undefined ? {} : { stance }),
+          ...(lastOutcome === undefined ? {} : { lastOutcome }),
+          ...(parentSeatId === undefined ? {} : { parentSeatId }),
+          ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
+        };
+      }),
+    );
   }
 
   /** Read every fleet-owned record against one stable Herdr change cursor. */
@@ -3467,6 +3489,143 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   function inboundBinding(agent: HerdrAgentSnapshot | undefined): string | undefined {
     if (!agent?.session || agent.agent === "shell" || agent.agent === "unknown") return undefined;
     return deliveryFingerprint(JSON.stringify([agent.paneId, agent.terminalId, agent.agent, agent.session]));
+  }
+
+  function observedAgent(
+    seat:
+      | NonNullable<Awaited<ReturnType<typeof observeFleet>>["head"]>
+      | Awaited<ReturnType<typeof observeFleet>>["seats"][number],
+  ): HerdrAgentSnapshot {
+    return {
+      paneId: seat.paneId,
+      terminalId: seat.seatId,
+      agent: seat.harness,
+      status: seat.status,
+      title: "title" in seat ? seat.title : "",
+      ...(seat.session === undefined ? {} : { session: seat.session }),
+    };
+  }
+
+  /** Shared report/roster projection. Only receiveFleetSeatMessage admits it. */
+  async function workerReportRoute(
+    agent: HerdrAgentSnapshot,
+    fleet: Awaited<ReturnType<typeof observeFleet>>,
+  ): Promise<{
+    owner: ConversationOwner;
+    diagnostic: WorkerReportRouting;
+    parent?: NativeSeatRecipient;
+    native?: NativeSeatRecipient;
+  }> {
+    const defaultId = conversations.defaultGlobalConversationId();
+    const child = fleet.seats.find((seat) => seat.paneId === agent.paneId);
+    if (child && inboundBinding(observedAgent(child)) !== inboundBinding(agent))
+      throw new Error("Reporting native occupant changed in the census");
+    const adopted = herdrWatches.nativeOwner(agent);
+    if (adopted) {
+      if (conversations.conversation(adopted.conversationId))
+        return {
+          owner: ConversationOwnerSchema.parse(adopted),
+          diagnostic: { source: "adoption", conversationId: adopted.conversationId },
+        };
+      return {
+        owner: { conversationId: defaultId },
+        diagnostic: {
+          source: "unadopted",
+          reason: "owner_removed",
+          conversationId: defaultId,
+        },
+      };
+    }
+    const pane = child?.parentPaneId;
+    const parent =
+      pane === undefined
+        ? undefined
+        : (fleet.seats.find((seat) => seat.paneId === pane) ??
+          (fleet.head?.paneId === pane ? fleet.head : undefined));
+    const fallback = (reason: NonNullable<WorkerReportRouting["reason"]>) => ({
+      owner: { conversationId: defaultId },
+      diagnostic: {
+        source: "unadopted" as const,
+        reason,
+        conversationId: defaultId,
+        ...(pane === undefined ? {} : { leadPaneId: pane }),
+        ...(parent === undefined ? {} : { leadSeatId: parent.seatId }),
+      },
+    });
+    if (!child) return fallback("parent_unavailable");
+    if (pane === undefined) return fallback("no_parent");
+    if (!parent?.session || parent.paneId === agent.paneId) return fallback("parent_unavailable");
+    const source = observedAgent(parent);
+    const binding = inboundBinding(source);
+    if (!binding) return fallback("parent_unavailable");
+    const parentOwner = herdrWatches.nativeOwner(source);
+    if (parentOwner?.discord !== undefined && !(await validateConversationOwner(parentOwner)))
+      throw new Error("Original parent room authority is unavailable");
+    const recipient: NativeSeatRecipient = {
+      kind: "native",
+      paneId: parent.paneId,
+      seatId: parent.seatId,
+      occupantId: occupantIdForHerdrSession(parent.session),
+      binding,
+      ...(parentOwner === undefined ? {} : { owner: parentOwner }),
+    };
+    const attached = conversations.attachedConversationForNative(source);
+    if (attached !== undefined && !conversations.nativeSource(attached)) {
+      const sessionId = (session: NonNullable<HerdrAgentSnapshot["session"]>) =>
+        session.kind === "id"
+          ? session.value
+          : session.value
+              .split(/[\\/]/u)
+              .at(-1)
+              ?.replace(/\.jsonl$/u, "");
+      const occupants = [...fleet.seats, ...(fleet.head === undefined ? [] : [fleet.head])].filter(
+        (seat) => seat.session !== undefined && sessionId(seat.session) === sessionId(parent.session!),
+      );
+      if (occupants.length !== 1)
+        throw new Error("Parent native-session attachment is ambiguous across fleets");
+    }
+    if (
+      attached !== undefined &&
+      conversations.conversation(attached)?.scope.kind === "room" &&
+      (parentOwner?.conversationId !== attached || parentOwner.discord === undefined)
+    )
+      throw new Error("Parent room attachment lacks original Discord authority");
+    if (
+      attached !== undefined &&
+      (seatOutboxes.get(attached)?.bound() || seatOutboxes.get(attached)?.uncertain())
+    ) {
+      return {
+        owner: parentOwner?.conversationId === attached ? parentOwner : { conversationId: attached },
+        parent: recipient,
+        diagnostic: {
+          source: "parent",
+          leadPaneId: pane,
+          leadSeatId: parent.seatId,
+          conversationId: attached,
+        },
+      };
+    }
+    const linked =
+      fleetMailboxes.get(parent.seatId)?.boundTo(binding) ||
+      nextTurnMailboxes.observed(parent.seatId, binding) ||
+      (await herdrWatches.nativeRouteAvailable(source));
+    if (!linked) return fallback("parent_unlinked");
+    const nativeConversation = conversations.nativeConversationForSeat(source);
+    return {
+      owner: { conversationId: defaultId },
+      parent: recipient,
+      native: recipient,
+      diagnostic: {
+        source: "parent",
+        leadPaneId: pane,
+        leadSeatId: parent.seatId,
+        ...(nativeConversation === undefined
+          ? {}
+          : {
+              conversationId: nativeConversation.conversationId,
+            }),
+      },
+    };
   }
 
   async function nativeRecipientCurrent(recipient: NativeSeatRecipient): Promise<boolean> {
@@ -4416,19 +4575,145 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const previous = inboundReceipts.reconcile(agent.paneId, delivery, deliveryFingerprint(text));
       if (previous.received) return previous;
       let owner: ConversationOwner | undefined;
+      let route: Awaited<ReturnType<typeof workerReportRoute>>;
+      let originalCensus: Awaited<ReturnType<typeof observeFleet>>;
       try {
         owner = herdrWatches.nativeOwner(agent);
+        originalCensus = await observeFleet();
+        route = await workerReportRoute(agent, originalCensus);
       } catch {
         return inboundReceipts.refuse(agent.paneId, delivery, text);
       }
-      const target: ConversationOwner =
-        owner && conversations.conversation(owner.conversationId)
-          ? ConversationOwnerSchema.parse(owner)
-          : { conversationId: conversations.defaultGlobalConversationId() };
-      if (!(await validateConversationOwner(target)))
+      const proof = (value: typeof route) =>
+        JSON.stringify([
+          value.owner,
+          value.parent,
+          value.native,
+          value.diagnostic.source,
+          value.diagnostic.reason,
+          value.diagnostic.leadPaneId,
+          value.diagnostic.leadSeatId,
+        ]);
+      const originalProof = proof(route);
+      const censusProof = (fleet: typeof originalCensus) => {
+        const child = fleet.seats.find((seat) => seat.paneId === agent.paneId);
+        const pane = child?.parentPaneId;
+        const parent =
+          fleet.seats.find((seat) => seat.paneId === pane) ??
+          (fleet.head?.paneId === pane ? fleet.head : undefined);
+        return JSON.stringify([
+          child === undefined ? null : inboundBinding(observedAgent(child)),
+          ...(route.diagnostic.source === "adoption" || route.diagnostic.reason === "owner_removed"
+            ? []
+            : [pane, parent === undefined ? null : inboundBinding(observedAgent(parent))]),
+        ]);
+      };
+      const originalCensusProof = censusProof(originalCensus);
+      if (route.parent && !(await nativeRecipientCurrent(route.parent)))
         return inboundReceipts.refuse(agent.paneId, delivery, text);
-      // Adoption may have happened while route authority was refreshed. Refuse
-      // before persistence; an accepted ID always keeps its original route.
+      let target = route.owner;
+      let runner: ConversationRunner | undefined;
+      if (route.native) {
+        const recipient = route.native;
+        const original = await herdrRunner.get(recipient.paneId).catch(() => undefined);
+        if (!original || inboundBinding(original) !== recipient.binding)
+          return inboundReceipts.refuse(agent.paneId, delivery, text);
+        const existing = conversations.nativeConversationForSeat(original);
+        const created =
+          existing === undefined
+            ? await conversations.serve({
+                op: "create",
+                schemaVersion: 1,
+                scope: { kind: "seat", seatId: recipient.seatId },
+                title: `Native lead ${recipient.paneId}`,
+              })
+            : { op: "create" as const, conversation: existing };
+        if (created.op !== "create") return inboundReceipts.refuse(agent.paneId, delivery, text);
+        target = { conversationId: created.conversation.conversationId };
+        conversations.rememberNativeSource(target.conversationId, original);
+        runner = async (_id, prompt, _publish, context) => {
+          const guard = async () => {
+            if (context.signal.aborted) throw new Error("Worker report was cancelled");
+            const fleet = await observeFleet();
+            const current =
+              fleet.seats.find((seat) => seat.paneId === recipient.paneId) ??
+              (fleet.head?.paneId === recipient.paneId ? fleet.head : undefined);
+            if (
+              !current ||
+              inboundBinding(observedAgent(current)) !== recipient.binding ||
+              !(await nativeRecipientCurrent(recipient))
+            )
+              throw new Error("Original worker-report lead is unavailable");
+          };
+          const result = await deliverToSeat(
+            recipient.seatId,
+            `Worker report ${delivery.id}\n${prompt}`,
+            {
+              conversationId: target.conversationId,
+              source: "worker-report",
+            },
+            {
+              guard,
+              recipientBinding: recipient.binding,
+              stableReceiptKey: `worker-report:${deliveryFingerprint(JSON.stringify([delivery.id, recipient]))}`,
+            },
+          );
+          context.deliveryReceipt?.(result.deliveryStage ?? "unavailable");
+          if (result.outcome !== "delivered")
+            throw new Error(result.detail ?? "Worker report native delivery is unavailable");
+        };
+      } else {
+        if (!(await validateConversationOwner(target)))
+          return inboundReceipts.refuse(agent.paneId, delivery, text);
+        if (target.discord !== undefined)
+          runner = async (_id, prompt) => {
+            if (!(await runDiscordWatchTurn(target, prompt, undefined, "machine", true, "message")))
+              throw new Error("Worker report room authority is unavailable");
+          };
+      }
+      // Refresh actual census ancestry and both occupants across every await,
+      // then recheck explicit adoption synchronously at the persistence boundary.
+      try {
+        const current = await herdrRunner.get(paneId);
+        if (
+          inboundBinding(current) !== delivery.binding ||
+          proof(await workerReportRoute(current, await observeFleet())) !== originalProof
+        )
+          return inboundReceipts.refuse(agent.paneId, delivery, text);
+      } catch {
+        return inboundReceipts.refuse(agent.paneId, delivery, text);
+      }
+      // Native control discovery above can await OS work. Finish with a fresh
+      // census and synchronous ownership checks before persisting acceptance.
+      const finalCensus = await observeFleet();
+      if (censusProof(finalCensus) !== originalCensusProof)
+        return inboundReceipts.refuse(agent.paneId, delivery, text);
+      if (route.parent) {
+        const parent =
+          finalCensus.seats.find((seat) => seat.paneId === route.parent!.paneId) ??
+          (finalCensus.head?.paneId === route.parent.paneId ? finalCensus.head : undefined);
+        if (!parent) return inboundReceipts.refuse(agent.paneId, delivery, text);
+        try {
+          const source = observedAgent(parent);
+          if (JSON.stringify(herdrWatches.nativeOwner(source)) !== JSON.stringify(route.parent.owner))
+            return inboundReceipts.refuse(agent.paneId, delivery, text);
+          const attached = conversations.attachedConversationForNative(source);
+          if (
+            (!route.native && attached !== target.conversationId) ||
+            (route.native &&
+              attached !== undefined &&
+              (seatOutboxes.get(attached)?.bound() || seatOutboxes.get(attached)?.uncertain()))
+          )
+            return inboundReceipts.refuse(agent.paneId, delivery, text);
+          if (
+            route.native &&
+            conversations.nativeConversationForSeat(source)?.conversationId !== target.conversationId
+          )
+            return inboundReceipts.refuse(agent.paneId, delivery, text);
+        } catch {
+          return inboundReceipts.refuse(agent.paneId, delivery, text);
+        }
+      }
       let currentOwner: ConversationOwner | undefined;
       try {
         currentOwner = herdrWatches.nativeOwner(agent);
@@ -4437,18 +4722,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       if (JSON.stringify(currentOwner) !== JSON.stringify(owner))
         return inboundReceipts.refuse(agent.paneId, delivery, text);
+      const framedMessage =
+        route.diagnostic.source === "unadopted"
+          ? `Host routing: unadopted worker (${route.diagnostic.reason})${
+              route.diagnostic.leadPaneId === undefined
+                ? ""
+                : `; observed lead pane ${route.diagnostic.leadPaneId}`
+            }.\n\n${message}`
+          : message;
       return inboundReceipts.accept(
         agent.paneId,
         delivery,
         text,
-        message,
+        framedMessage,
         target.conversationId,
-        target.discord === undefined
-          ? undefined
-          : async (_id, prompt) => {
-              if (!(await runDiscordWatchTurn(target, prompt, undefined, "machine", true, "message")))
-                throw new Error("Worker report room authority is unavailable");
-            },
+        runner,
+        {
+          ...route.diagnostic,
+          conversationId: target.conversationId,
+        },
       );
     },
 
@@ -4466,13 +4758,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     async acknowledgeFleetSeatEvent(paneId, eventId) {
       const seatId = await herdrWatches.seatIdForPane(paneId);
+      const native = await herdrRunner.get(paneId).catch(() => undefined);
       return (
         seatId !== undefined &&
         fleetSeatMailbox(
           fleetMailboxes,
           seatId,
           join(options.stateDir, "delivery-receipts", "fleet"),
-        ).acknowledge(eventId)
+        ).acknowledge(eventId, native?.terminalId === seatId ? inboundBinding(native) : undefined)
       );
     },
 
