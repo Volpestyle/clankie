@@ -2809,7 +2809,15 @@ function claudeReply(transcript: string): string | undefined {
   const lines = stripVTControlCharacters(transcript).replace(/\r\n?/gu, "\n").split("\n");
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const match = /^\s*※\s*recap:\s*(.+?)\s*$/iu.exec(lines[index] ?? "");
-    if (match?.[1]) return match[1];
+    if (!match?.[1]) continue;
+    // Claude wraps a long recap onto lines indented by two spaces; they are
+    // the rest of it. Its "(disable recaps in /config)" hint is not.
+    const parts = [match[1]];
+    for (let next = index + 1; next < lines.length && /^ {2}\S/u.test(lines[next] ?? ""); next += 1) {
+      parts.push((lines[next] ?? "").trim());
+    }
+    const recap = parts.join(" ").replace(/\s*\(disable recaps in \/config\)\s*$/iu, "").trim();
+    return recap.length === 0 ? undefined : recap;
   }
   return undefined;
 }

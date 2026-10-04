@@ -1203,6 +1203,20 @@ describe("seat reply distillation", () => {
     expect(distillHerdrSeatReply("claude", "⏺ raw Claude scrollback")).toBeUndefined();
   });
 
+  it("keeps a Claude recap that wraps onto indented lines, without its config hint", () => {
+    const pane = [
+      "※ recap: I'm leading `w3Z:p2` through the Clankie Linear projects; fleet tools (VUH-1585) is done and working on your PC. Next, tell me",
+      "  whether the review agent lands its own changes or whether I review and land them. (disable recaps in",
+      "  /config)",
+      "                                                       new task? /clear to save 572.1k tokens · ◎ /goal active (12h)",
+      "──────────────────────────── Clankie ─",
+      "❯",
+    ].join("\n");
+    expect(distillHerdrSeatReply("claude", pane)).toBe(
+      "I'm leading `w3Z:p2` through the Clankie Linear projects; fleet tools (VUH-1585) is done and working on your PC. Next, tell me whether the review agent lands its own changes or whether I review and land them.",
+    );
+  });
+
   it("bounds a recognized reply to the public conversation limit", () => {
     const reply = distillHerdrSeatReply("claude", `※ recap: ${"x".repeat(20_000)}`);
     expect(reply).toHaveLength(OPERATOR_CONVERSATION_TEXT_MAX);
