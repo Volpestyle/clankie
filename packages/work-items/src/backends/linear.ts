@@ -22,6 +22,9 @@ export type LinearToolCall = (tool: string, args: Record<string, unknown>) => Pr
 interface LinearIssue {
   readonly id: string;
   readonly identifier?: string;
+  readonly parentId?: string | null;
+  /** A nested parent from a GraphQL-shaped issue read. */
+  readonly parent?: { readonly identifier?: string; readonly id?: string } | null;
   readonly title: string;
   readonly description?: string | null;
   readonly status?: string | { readonly name?: string; readonly type?: string };
@@ -47,7 +50,7 @@ interface LinearStatus {
   readonly type: string;
 }
 
-const FIELDS = ["title", "description", "status", "statusType", "url", "updatedAt", "labels"];
+const FIELDS = ["title", "description", "status", "statusType", "url", "updatedAt", "labels", "parentId"];
 const PAGE_SIZE = 50;
 
 class LinearPaginationError extends Error {
@@ -130,8 +133,10 @@ export function createLinearBackend(options: {
 
   const toItem = (issue: LinearIssue): WorkItem => {
     const parsed = parseBody(issue.description ?? "");
+    const parent = issue.parent?.identifier ?? issue.parentId ?? issue.parent?.id;
     return WorkItemSchema.parse({
       id: issue.identifier ?? issue.id,
+      ...(parent == null ? {} : { parent }),
       title: issue.title.slice(0, 200),
       status: linearStatusOf(statusType(issue), statusName(issue)),
       ...(parsed.owner === undefined ? {} : { owner: parsed.owner }),
