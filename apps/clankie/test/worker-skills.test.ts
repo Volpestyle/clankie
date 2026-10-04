@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -42,6 +42,31 @@ describe("hired worker skill discovery", () => {
     );
     await writeFile(join(overlay, "config.toml"), "worker changes\n");
     expect(await readFile(join(home, "config.toml"), "utf8")).toBe(config);
+  });
+
+  it("carries hook trust keyed by another account home that shares the same hooks file", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "worker-skills-")));
+    roots.push(root);
+    const shared = join(root, "dotfiles");
+    const primary = join(root, "primary");
+    const second = join(root, "second");
+    for (const dir of [shared, primary, join(second, "sessions")]) await mkdir(dir, { recursive: true });
+    await writeFile(join(shared, "hooks.json"), "{}\n");
+    await symlink(join(shared, "hooks.json"), join(primary, "hooks.json"));
+    await symlink(join(shared, "hooks.json"), join(second, "hooks.json"));
+    const other = join(root, "elsewhere", "hooks.json");
+    await writeFile(
+      join(second, "config.toml"),
+      `[hooks.state."${join(primary, "hooks.json")}:session_start:0:0"]\ntrusted_hash = "sha256:shared"\n` +
+        `[hooks.state."${other}:session_start:0:0"]\ntrusted_hash = "sha256:other"\n`,
+    );
+    const overlay = (await workerSkills("codex", root, root, second)).env!.CODEX_HOME!;
+    const config = await readFile(join(overlay, "config.toml"), "utf8");
+    expect(config).toContain(
+      `[hooks.state."${join(overlay, "hooks.json")}:session_start:0:0"]\ntrusted_hash = "sha256:shared"`,
+    );
+    // A hooks file that is not the copied one keeps its own key and stays unreviewed here.
+    expect(config).toContain(`[hooks.state."${other}:session_start:0:0"]`);
   });
 
   it.each([

@@ -62,11 +62,21 @@ export async function workerSkills(
         // Hook trust is keyed by hooks.json's location. Carry the owner's
         // existing hash to the identical copied file, never invent a hash or
         // bypass review of an untrusted/changed hook.
-        const config = await readFile(destination, "utf8");
-        await writeFile(
-          destination,
-          config.replaceAll(`${join(codexHome, "hooks.json")}:`, `${join(overlay, "hooks.json")}:`),
+        // Accounts can share one config whose keys name another home's
+        // hooks.json, so match by the file the copy came from.
+        let config = await readFile(destination, "utf8");
+        const hooks = await realpath(join(codexHome, "hooks.json")).catch(() => undefined);
+        const keyed = new Set(
+          [...config.matchAll(/hooks\.state\."([^"]*\/hooks\.json):/gu)].map((match) => match[1]!),
         );
+        keyed.add(join(codexHome, "hooks.json"));
+        for (const path of keyed) {
+          const same =
+            path === join(codexHome, "hooks.json") ||
+            (hooks !== undefined && (await realpath(path).catch(() => undefined)) === hooks);
+          if (same) config = config.replaceAll(`${path}:`, `${join(overlay, "hooks.json")}:`);
+        }
+        await writeFile(destination, config);
       }
     } else {
       await symlink(source, destination);
