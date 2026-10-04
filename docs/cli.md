@@ -1997,6 +1997,53 @@ to make room. `correct` replaces the note while preserving its source and date.
 exposes the same controls in the console. See [Memory](memory.md) for lane
 privacy and migration behavior.
 
+### `metrics --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]`
+
+Per-issue and per-worker measurements from the service's existing records,
+through the operator-only `GET /v1/captain/issue-metrics` route. `--issue` or
+`--worker` also selects this mode. Worker matches an exact label, terminal ID,
+or retained native session reference. `--since` and `--until` are ISO timestamps;
+the default window is the last 24 hours, with an exclusive end and a maximum
+of 366 days. The window selects approval time for accepted episodes, or the
+latest observation for unfinished episodes; totals cover the whole selected
+episode. Turn-mode `--run` / `--limit` cannot be combined with issue mode.
+
+```sh
+clankie metrics --issue VUH-1608 --since 2026-10-04T00:00:00Z --until 2026-10-05T00:00:00Z
+clankie metrics --issues --worker Noor
+```
+
+The JSON `report` contains `issues`, `workers`, `window`, and explicit `coverage`:
+
+- `reportedTokens` sums provider-reported native worker responses, including
+  cached input. Codex response IDs and Claude message IDs are deduplicated;
+  cumulative Codex token-count events are not added again. Native child sessions
+  and legacy/missing usage are not inferred. Unknown totals are `null`.
+- `wallTimeMs` is elapsed time from the owner's assignment to an explicit
+  approval in native user messages, including waits. The issue value is the
+  envelope across its observed workers; worker totals can overlap.
+- `fullCheckRuns` counts recognized worker `pnpm check` invocations in native
+  tool command records (shell and literal Python subprocess forms). Lead batch
+  checks and unrecognized wrappers are outside this partial count.
+- `reviewRounds` counts explicit fix requests and approvals; `reworkRounds`
+  counts fix requests. Native prompt wording is the evidence, not Linear's Done
+  status. Unrecognized wording remains unknown.
+- `leadReportedTokens` separately sums settled report-handling turns whose
+  retained inbound acceptance names exactly one issue. Mixed/ambiguous inbound issue references
+  are excluded; other work in a turn’s context is unknown. This is not all lead
+  work on that issue.
+- Worker `seatSettlements` and `unresolvedHireReceipt` expose ledger edges and
+  pending receipts. A passed/ship edge is never issue acceptance; missing
+  receipts do not establish historical delivery.
+
+Only retained exact local native bindings can be read. Missing, remote,
+unreadable, or over-64-MiB sources appear in `coverage.warnings`. Reads also have
+a 256-MiB total request budget, with skipped sources reported. There is no
+fuzzy pane attribution or new metrics ledger. Known totals are partial when
+other sources are unavailable. No transcript, command, tool output, or
+credential appears in the response. This read neither launches checks nor
+queries models. Include the report and its coverage in an issue handoff.
+
 ### `metrics [--run ID] [--limit N]`
 
 Recent settled captain turns, newest first, from the durable

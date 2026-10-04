@@ -150,6 +150,7 @@ export type CaptainLaneListing = z.infer<typeof CaptainLaneListingSchema>;
 
 /** The operator route that lists recent settled turns. */
 export const CAPTAIN_TURN_METRICS_PATH = "/v1/captain/turn-metrics";
+export * from "./issue-metrics.ts";
 export const CAPTAIN_TURN_METRICS_LIMIT_DEFAULT = 20;
 export const CAPTAIN_TURN_METRICS_LIMIT_MAX = 100;
 

@@ -32,7 +32,7 @@ const SEAT_LEDGER_TYPE = "captain.seat.ledger" as const;
  * out rather than as a run with a nullable result, so there is no row that can
  * say a run settled without saying into what.
  */
-const SeatLedgerRowSchema = z
+export const SeatLedgerRowSchema = z
   .object({
     schemaVersion: z.literal(1),
     type: z.literal(SEAT_LEDGER_TYPE),

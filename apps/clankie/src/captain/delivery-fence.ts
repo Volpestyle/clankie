@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 
-const ReceiptSchema = z
+export const ReceiptSchema = z
   .object({
     messageId: z.string().min(1),
     fingerprint: z.string(),

@@ -1,4 +1,11 @@
 import {
+  ISSUE_METRICS_PATH,
+  IssueMetricsQuerySchema,
+  IssueMetricsReportSchema,
+  type IssueMetricsQuery,
+  type IssueMetricsReport,
+} from "@clankie/protocol";
+import {
   DISCORD_VOICE_OUTPUT_GUARD_PATH,
   DISCORD_ROOM_VOICE_PATH,
   DiscordRoomVoiceCommandSchema,
@@ -509,6 +516,18 @@ export class ClankieApiClient {
 
   public inspectMemory(): Promise<OperatorMemoryCatalog> {
     return this.request("/v1/memory", { headers: this.operatorHeaders() });
+  }
+
+  public async readIssueMetrics(query: IssueMetricsQuery = {}): Promise<IssueMetricsReport> {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(IssueMetricsQuerySchema.parse(query)))
+      if (value !== undefined) search.set(key, value);
+    const suffix = search.size === 0 ? "" : `?${search.toString()}`;
+    return IssueMetricsReportSchema.parse(
+      await this.request<unknown>(`${ISSUE_METRICS_PATH}${suffix}`, {
+        headers: this.operatorHeaders(),
+      }),
+    );
   }
 
   /** Recent settled captain turns, newest first. Counters only — no transcript. */
