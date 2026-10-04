@@ -4411,6 +4411,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
     const questionOp =
+      parsed.data.op === "project_proposal_get" ||
+      parsed.data.op === "project_proposal_confirm" ||
       parsed.data.op === "input_get" ||
       parsed.data.op === "input_answer" ||
       parsed.data.op === "input_cancel";

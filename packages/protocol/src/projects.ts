@@ -237,6 +237,54 @@ export const CreateProjectSettingsSchema = z
   .strict();
 export type CreateProjectSettings = z.infer<typeof CreateProjectSettingsSchema>;
 
+/** Proposal data is untrusted; only the separate owner confirmation can apply it. */
+export const ProjectProposalDraftSchema = CreateProjectSettingsSchema.omit({
+  workspacePath: true,
+  expectedRevision: true,
+})
+  .extend({
+    prompt: z.string().trim().min(1).max(2000),
+    evidence: z.array(z.string().max(500)).max(8).default([]),
+  })
+  .strict();
+export type ProjectProposalDraft = z.infer<typeof ProjectProposalDraftSchema>;
+export const ProjectProposalLocatorSchema = z
+  .object({
+    conversationId: z.string().min(1).max(256),
+    incarnationId: z.string().uuid(),
+    requestId: z.string().uuid(),
+  })
+  .strict();
+export type ProjectProposalLocator = z.infer<typeof ProjectProposalLocatorSchema>;
+export const ProjectProposalTargetSchema = ProjectProposalLocatorSchema.extend({
+  expectedRevision: z.number().int().nonnegative(),
+  proposalId: z.string().uuid(),
+  artifactSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  expectedProjectsRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
+export type ProjectProposalTarget = z.infer<typeof ProjectProposalTargetSchema>;
+export const ProjectProposalResultSchema = z
+  .object({
+    status: z.enum(["pending", "committing", "created", "uncertain", "refused"]),
+    reason: z.string().max(100).optional(),
+    proposal: z
+      .object({
+        target: ProjectProposalTargetSchema,
+        command: CreateProjectSettingsSchema,
+        project: ProjectSchema,
+        effectiveRoles: z.array(ProjectRoleSchema).max(256),
+        evidence: z.array(z.string().max(500)).max(8),
+      })
+      .strict()
+      .optional(),
+    receipt: z
+      .object({ projectId: ProjectIdSchema, projectsRevision: z.string().regex(/^[a-f0-9]{64}$/u) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type ProjectProposalResult = z.infer<typeof ProjectProposalResultSchema>;
+
 /** Omitted fields stay unchanged; null removes an optional limit or tracker binding. */
 export const UpdateProjectSettingsSchema = z
   .object({

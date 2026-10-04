@@ -270,6 +270,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       return true;
     }
     const questionOp =
+      serviceRequest.op === "project_proposal_get" ||
+      serviceRequest.op === "project_proposal_confirm" ||
       serviceRequest.op === "input_get" ||
       serviceRequest.op === "input_answer" ||
       serviceRequest.op === "input_cancel";
@@ -357,7 +359,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       }
       const dispatch = () =>
         ownerRoute &&
-        (serviceRequest.op === "input_get" ||
+        (serviceRequest.op === "project_proposal_get" ||
+          serviceRequest.op === "project_proposal_confirm" ||
+          serviceRequest.op === "input_get" ||
           serviceRequest.op === "input_answer" ||
           serviceRequest.op === "input_cancel" ||
           serviceRequest.op === "send")

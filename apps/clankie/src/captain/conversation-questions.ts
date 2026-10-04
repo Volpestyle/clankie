@@ -1,3 +1,4 @@
+import { ProjectCreationSchema } from "./project-onboarding.ts";
 import { realpathSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -65,6 +66,7 @@ export function sameQuestionWorkspace(path: string, binding: QuestionWorkspace):
 const RecordSchema = z
   .object({
     question: ConversationQuestionSchema,
+    projectCreation: ProjectCreationSchema.optional(),
     issuer: z.object({ kind: z.enum(["operator", "device"]), id: z.string().min(1).max(256) }).strict(),
     workspace: BindingSchema,
     responder: z
@@ -76,6 +78,17 @@ const RecordSchema = z
   .strict()
   .superRefine((r, ctx) => {
     const q = r.question;
+    const artifact = r.projectCreation?.immutable;
+    if (
+      artifact &&
+      (artifact.requestId !== q.requestId ||
+        artifact.incarnationId !== q.incarnationId ||
+        artifact.conversationId !== q.conversationId ||
+        artifact.originRunId !== q.originRunId ||
+        JSON.stringify(artifact.workspace) !== JSON.stringify(r.workspace) ||
+        artifact.command.workspacePath !== r.workspace.path)
+    )
+      ctx.addIssue({ code: "custom", message: "Project proposal lost question binding" });
     if (
       q.workspace !== r.workspace.path ||
       (q.kind === "text" ? q.options.length !== 0 || !q.allowFreeform : q.options.length < 2) ||
@@ -168,7 +181,7 @@ export async function questionWorkspaceContext(
       projectsRevision(await load()) !== revision
     )
       throw new Error("changed context");
-    return `Host workspace context: ${JSON.stringify({ workspace: binding.path, project: matches.size ? [...matches][0] : "unassigned", projectsRevision: revision })}. Preference questions do not authorize configuration.`;
+    return `Host workspace context: ${JSON.stringify({ workspace: binding.path, project: matches.size ? [...matches][0] : "unassigned", projectsRevision: revision, projectProposalAvailable: matches.size === 0 })}. Preference questions do not authorize configuration.`;
   } catch {
     return "Host workspace project context: unknown. Preference questions do not authorize configuration.";
   }

@@ -1,4 +1,17 @@
 import {
+  ProjectProposalDraftSchema,
+  ProjectProposalTargetSchema,
+  type ProjectProposalDraft,
+  type ProjectProposalResult,
+} from "@clankie/protocol/projects";
+import { projectsRevision, ProjectTrackerUnavailable } from "@clankie/settings";
+import {
+  ProjectCreationSchema,
+  proposalHash,
+  proposalResult,
+  type projectOnboarding,
+} from "./project-onboarding.ts";
+import {
   authorizeQuestion,
   QuestionDraftSchema,
   QuestionStateSchema,
@@ -550,6 +563,7 @@ export class ConversationStore {
   private readonly corruptQuestions = new Set<string>();
   /** Native seat binding is owned by captain; no native question continuation. */
   public questionEligible: (id: string) => boolean = () => true;
+  public projectOnboarding: ReturnType<typeof projectOnboarding> | undefined;
 
   public constructor(
     root: string,
@@ -755,6 +769,13 @@ export class ConversationStore {
     authority?: QuestionAuthority,
   ): Promise<ConversationServiceResult> {
     switch (request.op) {
+      case "project_proposal_get":
+      case "project_proposal_confirm":
+        return {
+          op: request.op,
+          schemaVersion: 1,
+          result: await this.projectProposalOperation(request, authority),
+        };
       case "input_get":
       case "input_answer":
       case "input_cancel":
@@ -2666,6 +2687,8 @@ export class ConversationStore {
       inboundReceipt?: Omit<InboundAcceptance, "message" | "runId" | "acceptedCursor">;
     } = {},
   ): SubmitOperatorConversationTurnResult {
+    if (provenance.questionAnswer?.record.projectCreation?.claim)
+      throw new Error("project_confirmation_consumed");
     const workspace = workspaceOf(meta.scope);
     const safeCursor = this.lastCursor(meta);
     const questionBefore = provenance.questionAnswer ? structuredClone(meta) : undefined;
@@ -3175,6 +3198,7 @@ export class ConversationStore {
     conversationId: string,
     draft: QuestionDraft,
     context: ConversationTurnContext,
+    projectDraft?: ProjectProposalDraft,
   ): Promise<ConversationQuestionResult> {
     const input = QuestionDraftSchema.parse(draft);
     await authorizeQuestion(context.ownerAuthority);
@@ -3210,15 +3234,78 @@ export class ConversationStore {
     this.assertQuestionContext(meta, record);
     const existing = meta.questions!.records.find((r) => r.question.status === "pending");
     if (existing) return this.questionResult(meta, existing, "ready", "already_pending");
+    if (meta.questions!.records.some((r) => r.projectCreation?.status === "committing"))
+      throw new Error("project_confirmation_consumed");
+    if (projectDraft) {
+      const onboarding = this.projectOnboarding;
+      if (!onboarding) throw new Error("project_onboarding_unavailable");
+      const revision = meta.revision;
+      const parsed = ProjectProposalDraftSchema.parse(projectDraft);
+      const { prompt: _prompt, evidence, ...policy } = parsed;
+      const settings = await onboarding.load();
+      const command = {
+        ...policy,
+        workspacePath: record.workspace.path,
+        expectedRevision: projectsRevision(settings.projects),
+      };
+      let prepared: Awaited<ReturnType<typeof onboarding.prepare>>;
+      try {
+        prepared = await onboarding.prepare(command);
+      } catch (error) {
+        return this.questionResult(
+          meta,
+          undefined,
+          "refused",
+          error instanceof ProjectTrackerUnavailable
+            ? "project_tracker_unavailable"
+            : "project_proposal_conflict",
+        );
+      }
+      await authorizeQuestion(context.ownerAuthority);
+      this.assertQuestionContext(meta, record);
+      if (
+        meta.revision !== revision ||
+        context.signal.aborted ||
+        context.questionCurrent?.() === false ||
+        this.runControllers.get(context.runId)?.conversationId !== conversationId ||
+        meta.questions!.records.some(
+          (r) => r.question.status === "pending" || r.projectCreation?.status === "committing",
+        )
+      )
+        throw new Error("project_proposal_context_changed");
+      const immutable = {
+        version: 1 as const,
+        proposalId: randomUUID(),
+        requestId: record.question.requestId,
+        incarnationId: record.question.incarnationId,
+        conversationId,
+        originRunId: context.runId,
+        workspace: record.workspace,
+        command,
+        ...prepared,
+        evidence,
+      };
+      record.projectCreation = ProjectCreationSchema.parse({
+        immutable,
+        artifactSha256: proposalHash(immutable),
+        status: "pending",
+      });
+    }
     const previous = meta.questions;
-    meta.questions = {
+    const next = {
       ...previous!,
       records: [...previous!.records.filter((r) => r.question.status !== "pending").slice(-32), record],
     };
+    // Pure validation before publishing the in-memory slot: bounded-state refusal has no IO.
+    if (projectDraft) QuestionStateSchema.parse(next);
+    meta.questions = next;
     try {
       this.saveQuestionMeta(meta);
     } catch (error) {
-      if (!(error instanceof QuestionCommitError && error.committed)) meta.questions = previous!;
+      // Project artifacts retain their slot after ANY uncertain writer outcome. No issuer
+      // closure is installed on failure, so neither an in-process nor cold retry can CREATE.
+      if (!projectDraft && !(error instanceof QuestionCommitError && error.committed))
+        meta.questions = previous!;
       throw error;
     }
     this.questionIssuers.set(record.question.requestId, context.ownerAuthority!);
@@ -3230,6 +3317,143 @@ export class ConversationStore {
       options: input.options.map((o) => o.label),
     });
     return this.questionResult(meta, record, "ready");
+  }
+
+  public async proposeProjectCreate(
+    conversationId: string,
+    draft: ProjectProposalDraft,
+    context: ConversationTurnContext,
+  ): Promise<ConversationQuestionResult> {
+    const parsed = ProjectProposalDraftSchema.parse(draft);
+    return this.requestQuestion(
+      conversationId,
+      QuestionDraftSchema.parse({ kind: "text", prompt: parsed.prompt }),
+      context,
+      parsed,
+    );
+  }
+
+  private async projectProposalOperation(
+    request: Extract<ConversationServiceRequest, { op: "project_proposal_get" | "project_proposal_confirm" }>,
+    authority: QuestionAuthority | undefined,
+  ): Promise<ProjectProposalResult> {
+    await authorizeQuestion(authority);
+    const meta = this.metas.get(request.conversationId);
+    if (!meta) return { status: "refused", reason: "unknown_conversation" };
+    this.validQuestionState(meta);
+    const record = meta.questions?.records.find((r) => r.question.requestId === request.requestId);
+    const creation = record?.projectCreation;
+    const sameRecord = () =>
+      this.metas.get(request.conversationId) === meta &&
+      meta.questions?.incarnationId === request.incarnationId &&
+      meta.questions.records.find((r) => r.question.requestId === request.requestId) === record &&
+      record?.projectCreation === creation;
+    if (!record || !creation || !sameRecord()) return { status: "refused", reason: "stale_proposal" };
+    const originalPrincipal = () =>
+      authority?.principal.kind === record.issuer.kind && authority.principal.id === record.issuer.id;
+    if (!originalPrincipal()) throw new Error("question_owner_unavailable");
+    const target =
+      request.op === "project_proposal_confirm"
+        ? ProjectProposalTargetSchema.parse({
+            conversationId: request.conversationId,
+            incarnationId: request.incarnationId,
+            requestId: request.requestId,
+            expectedRevision: request.expectedRevision,
+            proposalId: request.proposalId,
+            artifactSha256: request.artifactSha256,
+            expectedProjectsRevision: request.expectedProjectsRevision,
+          })
+        : undefined;
+    const exactTarget = () =>
+      !target ||
+      proposalHash(target) === proposalHash(proposalResult(creation, meta.revision).proposal!.target);
+    // Consumed receipts deliberately outlive the original request/JWT closure.
+    if (creation.claim || creation.status !== "pending") {
+      await authorizeQuestion(authority);
+      if (!sameRecord() || !originalPrincipal() || !exactTarget())
+        return { status: "refused", reason: "stale_proposal" };
+      return proposalResult(creation, meta.revision);
+    }
+    const issuer = this.questionIssuers.get(record.question.requestId);
+    const revision = meta.revision;
+    const assertCurrent = () => {
+      this.assertQuestionContext(meta, record);
+      if (
+        !sameRecord() ||
+        !originalPrincipal() ||
+        record.question.status !== "pending" ||
+        meta.revision !== revision ||
+        this.questionIssuers.get(record.question.requestId) !== issuer ||
+        !exactTarget()
+      )
+        throw new Error("project_proposal_context_changed");
+    };
+    const guard = async () => {
+      assertCurrent();
+      await authorizeQuestion(issuer);
+      assertCurrent();
+      await authorizeQuestion(authority);
+      assertCurrent();
+    };
+    try {
+      await guard();
+    } catch {
+      return { status: "refused", reason: "owner_context_lost" };
+    }
+    if (!target) return proposalResult(creation, meta.revision);
+    // Another caller may have claimed while this caller was awaiting authorization.
+    if (creation.claim) return proposalResult(creation, meta.revision);
+    if (!this.projectOnboarding) return { status: "refused", reason: "project_onboarding_unavailable" };
+    creation.claim = target;
+    creation.status = "committing";
+    try {
+      this.saveQuestionMeta(meta);
+    } catch {
+      // A throwing rename does not prove no OS effect. Consume every ambiguous claim write;
+      // a cold pending record without its live issuer also cannot restart this mutation.
+      creation.status = "uncertain";
+      return { ...proposalResult(creation, meta.revision), reason: "claim_persistence_unavailable" };
+    }
+    try {
+      const result = await this.projectOnboarding.apply(creation, guard);
+      await guard();
+      creation.status = "created";
+      creation.receipt = {
+        projectId: creation.immutable.command.projectId,
+        projectsRevision: result.revision,
+      };
+      record.question.status = "cancelled";
+      record.question.reason = "project_created";
+      record.question.resolvedAt = new Date().toISOString();
+      meta.revision += 1;
+      this.saveQuestionMeta(meta);
+      this.questionIssuers.delete(record.question.requestId);
+      this.publishQuestionResolution(meta, record);
+      return proposalResult(creation, meta.revision);
+    } catch {
+      // A generic settings/receipt error may follow rename. Never replay or claim no write.
+      if (
+        sameRecord() &&
+        ((record.question.status === "pending" && meta.revision === revision) ||
+          (creation.status === "created" && record.question.reason === "project_created"))
+      ) {
+        creation.status = "uncertain";
+        delete creation.receipt;
+        try {
+          this.saveQuestionMeta(meta);
+        } catch {
+          /* durable committing is already consumed */
+        }
+      }
+      if (!sameRecord()) return { status: "uncertain", reason: "receipt_context_lost" };
+      // Do not report an unpersisted success receipt from the catch path.
+      return {
+        ...proposalResult(creation, meta.revision),
+        status: "uncertain",
+        receipt: undefined,
+        reason: "confirmation_uncertain",
+      };
+    }
   }
 
   private questionResult(
@@ -3333,6 +3557,8 @@ export class ConversationStore {
       return this.questionResult(meta, record, "ready", record ? undefined : "unknown_request");
     if (!record || request.incarnationId !== meta.questions?.incarnationId)
       return this.questionResult(meta, undefined, "refused", "stale_request");
+    if (record.projectCreation?.claim)
+      return this.questionResult(meta, record, "refused", "project_confirmation_consumed");
     // Authenticated duplicate reconciliation precedes revision checks, never enqueue.
     if (record.question.status !== "pending") {
       if (

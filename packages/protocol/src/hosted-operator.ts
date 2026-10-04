@@ -23,6 +23,8 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "replay",
         "tail",
         "send",
+        "project_proposal_get",
+        "project_proposal_confirm",
         "input_get",
         "input_answer",
         "input_cancel",

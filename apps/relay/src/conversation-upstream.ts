@@ -39,7 +39,15 @@ export function createCaptainConversationDispatch(
 
 export type DeviceConversationRequest = Extract<
   OperatorConversationServiceRequest,
-  { op: "send" | "input_get" | "input_answer" | "input_cancel" }
+  {
+    op:
+      | "send"
+      | "input_get"
+      | "input_answer"
+      | "input_cancel"
+      | "project_proposal_get"
+      | "project_proposal_confirm";
+  }
 >;
 export type DeviceConversationDispatch = (
   request: DeviceConversationRequest,
@@ -66,7 +74,16 @@ export function createDeviceConversationDispatch(options: {
     throw new Error("Device conversation URL must be a direct control-plane origin");
   const fetcher = options.fetch ?? globalThis.fetch;
   return async (request, authority, signal) => {
-    if (!["send", "input_get", "input_answer", "input_cancel"].includes(request.op))
+    if (
+      ![
+        "send",
+        "input_get",
+        "input_answer",
+        "input_cancel",
+        "project_proposal_get",
+        "project_proposal_confirm",
+      ].includes(request.op)
+    )
       throw new Error("Unsupported device conversation operation");
     const hosted = authority.controlScope === "hosted";
     const requestSignal = dispatchSignal(signal);
