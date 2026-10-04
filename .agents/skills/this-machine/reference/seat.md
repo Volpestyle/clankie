@@ -98,6 +98,13 @@ this persisted route, including remote fleet seats; the worker never chooses it.
 Only a removed lead conversation makes worker reports fall back to
 `global-default`; revoked room grants remain a refusal.
 
+Native projection carries these reports as `kind="message"`, framed as
+untrusted agent output, never an instruction from the owner. Completion harvests
+stay `kind="watch"`; self-wakes stay `kind="wake"`. The tag changes neither
+the retained owner route nor receipt semantics. A room-owned worker message
+still needs the existing `reply` with its `event_id` to return a correlated answer
+through that room's original actor, route and mouth checks.
+
 For shared Linear tools, inspect `clankie access linear`; verify an API-key
 or OAuth connection with `clankie access linear verify` and check the intended automation identity.
 Admitted fleet members discover connected tools with `clankie_tools` and invoke
@@ -142,3 +149,13 @@ are process-local: if `reply` reports that its target is gone, that answer was
 not sent. Check the conversation and seat before sending again; never infer
 that restart, transport acknowledgment, or queue consumption means the model
 finished, and never automatically replay an uncertain request.
+
+Doctor and the roster keep bridge transport presence separate from process age.
+An observed bridge that started before the running service reports
+`older-than-runtime`: “seat bridge older than runtime; restart the seat”.
+`current` means its observed start is at least as recent as the service's;
+unavailable runtime/process timing remains `unknown`. Optional `bridgeStartedAt`
+and `runtimeStartedAt` are timestamps, not build identities. Age alone establishes neither obsolete
+code nor delivery, and also changes after a same-build service restart. Doctor
+observes operator and worker bridges separately; operator presence never grants
+worker tools. Reconcile uncertain dispatch before another attempt.

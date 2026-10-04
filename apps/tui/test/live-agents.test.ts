@@ -275,3 +275,135 @@ it("flags a missing bridge and reveals the entire selected fix within narrow wid
       .replace(/\s+/gu, " "),
   ).toContain("codex --no-daemon resume");
 });
+
+it("shows an older operator bridge separately from a healthy worker and reveals the seat restart fix", () => {
+  const worker = agent("older-seat");
+  const agents = [
+    {
+      ...worker,
+      seat: {
+        ...worker.seat,
+        harnessBridge: {
+          status: "live-process" as const,
+          detail: "Worker transport observed",
+          freshness: "current" as const,
+          operatorBridge: {
+            status: "live-process" as const,
+            detail: "Operator transport observed; channel polling unverified",
+            freshness: "older-than-runtime" as const,
+            remediation:
+              "Seat bridge older than runtime; restart the seat. Process age is not obsolete-build proof.",
+          },
+        },
+      },
+    },
+  ];
+  const strip = new LiveAgentStrip(() => agents, theme);
+  expect(plain(strip.render(150))).toContain("seat bridge older than runtime");
+  const picker = new LiveAgentPicker(() => agents, strip, theme, {
+    maxHeight: () => 30,
+    onOpen: () => {},
+    onClose: () => {},
+    onRender: () => {},
+  });
+  const narrow = picker.render(40);
+  expect(narrow.every((row) => visibleWidth(row) <= 40)).toBe(true);
+  expect(
+    plain(narrow)
+      .replace(/[│\n]/gu, " ")
+      .replace(/\s+/gu, " "),
+  ).toContain("restart the seat");
+  const unknown: LiveAgent = {
+    ...agents[0]!,
+    seat: {
+      ...agents[0]!.seat,
+      harnessBridge: {
+        ...agents[0]!.seat.harnessBridge,
+        operatorBridge: { ...agents[0]!.seat.harnessBridge.operatorBridge, freshness: "unknown" },
+      },
+    },
+  };
+  expect(plain(new LiveAgentStrip(() => [unknown], theme).render(150))).not.toContain("older than runtime");
+});
+
+it.each(["current", "unknown"] as const)(
+  "keeps %s worker and operator timings from producing a restart hint",
+  (freshness) => {
+    const worker = agent("no-age-warning");
+    const agents: LiveAgent[] = [
+      {
+        ...worker,
+        seat: {
+          ...worker.seat,
+          harnessBridge: {
+            status: "live-process",
+            detail: "Worker transport observed; delivery unverified",
+            freshness,
+            operatorBridge: {
+              status: "live-process",
+              detail: "Operator transport observed; polling unverified",
+              freshness,
+            },
+          },
+        },
+      },
+    ];
+    const strip = new LiveAgentStrip(() => agents, theme);
+    const picker = new LiveAgentPicker(() => agents, strip, theme, {
+      maxHeight: () => 30,
+      onOpen: () => {},
+      onClose: () => {},
+      onRender: () => {},
+    });
+    for (const rows of [strip.render(150), picker.render(150)]) {
+      expect(plain(rows)).not.toContain("older than runtime");
+      expect(plain(rows)).not.toContain("restart the seat");
+      expect(plain(rows)).not.toContain("Fix:");
+    }
+  },
+);
+
+it.each(["worker", "both"])("shows the seat restart action when %s bridge processes are older", (older) => {
+  const worker = agent("old-worker");
+  const agents: LiveAgent[] = [
+    {
+      ...worker,
+      seat: {
+        ...worker.seat,
+        harnessBridge: {
+          status: "live-process",
+          detail: "Worker transport observed; delivery unverified",
+          freshness: "older-than-runtime",
+          remediation: "Worker seat bridge older than runtime; restart the seat to reload its bridge.",
+          operatorBridge: {
+            status: "live-process",
+            detail: "Operator transport observed; polling unverified",
+            freshness: older === "both" ? "older-than-runtime" : "current",
+            ...(older === "both"
+              ? {
+                  remediation:
+                    "Operator seat bridge older than runtime; restart the seat to reload its bridge.",
+                }
+              : {}),
+          },
+        },
+      },
+    },
+  ];
+  const strip = new LiveAgentStrip(() => agents, theme);
+  expect(plain(strip.render(150))).toContain("seat bridge older than runtime");
+  expect(plain(strip.render(150))).not.toContain("bridge missing");
+  const picker = new LiveAgentPicker(() => agents, strip, theme, {
+    maxHeight: () => 30,
+    onOpen: () => {},
+    onClose: () => {},
+    onRender: () => {},
+  });
+  const rows = picker.render(40);
+  expect(rows.every((row) => visibleWidth(row) <= 40)).toBe(true);
+  const text = plain(rows)
+    .replace(/[│\n]/gu, " ")
+    .replace(/\s+/gu, " ");
+  expect(text).toContain("restart the seat to reload its bridge");
+  expect(text).toContain(`${older === "both" ? "Operator" : "Worker"} seat bridge older than runtime`);
+});

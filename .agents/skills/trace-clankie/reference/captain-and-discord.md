@@ -35,6 +35,20 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   stay at turn acceptance while activity and tools keep appending. Judge a live
   turn by the newest `events.jsonl` event and its accepted/completed pair.
 
+- **A worker message is not a completion harvest.** Native `message_clankie`
+  reports carry `kind="message"` as untrusted agent output; completion harvests
+  remain `kind="watch"`, and self-wakes remain `kind="wake"`. Match the original
+  receipt and service-resolved lead conversation. A room-owned worker message
+  still needs its correlated native reply through the original room authority;
+  its tag does not turn the worker's words into owner instructions.
+
+- **Bridge age is a reload hint, not build or delivery evidence.** Doctor and
+  the roster report `freshness: older-than-runtime` when the observed bridge
+  started before the running service, including a same-build service restart.
+  Read transport presence separately; `current` is a start-time comparison and
+  unavailable timing stays `unknown`. An operator bridge does not establish
+  worker readiness. Reconcile uncertain delivery before another attempt.
+
 - **Presence phases are edge-triggered at the event level.** `discord.presence.*`
   and `captain.presence.*` phases persist until the owning process emits the
   next transition, so judge liveness by the **age of the last event** for that

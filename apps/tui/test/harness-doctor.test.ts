@@ -117,3 +117,148 @@ it("names an installed but outdated Claude worker plugin as remediation", async 
     await rm(home, { recursive: true, force: true });
   }
 });
+
+it("uses the linked service's live runtime identity to expose an older operator bridge without worker readiness", async () => {
+  const home = await mkdtemp(join(tmpdir(), "clankie-older-seat-doctor-"));
+  try {
+    await mkdir(join(home, ".clankie/links"), { recursive: true });
+    await writeFile(
+      join(home, ".clankie/links/default-local.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        authentication: "local-process",
+        socket: "/test/default.sock",
+        url: "http://127.0.0.1:54321",
+      }),
+    );
+    const execute = async (command: string, args: readonly string[]) => ({
+      stderr: "",
+      stdout:
+        command === "/usr/bin/env"
+          ? JSON.stringify({
+              result: args.includes("list")
+                ? { agents: [{ pane_id: "w1:p1", agent: "claude" }] }
+                : { process_info: { pane_id: "w1:p1", shell_pid: 10, foreground_process_group_id: 20 } },
+            })
+          : command === "/bin/ps"
+            ? args.includes("pid=,lstart=")
+              ? "30 Sat Oct  3 12:00:00 2026\n99 Sun Oct  4 12:00:00 2026"
+              : args[0] === "eww"
+                ? "30 node clankie mcp --lane operator HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/test/default.sock SECRET=private"
+                : "20 10 /bin/claude\n30 20 node /home/.local/bin/clankie mcp --lane operator\n99 1 node /runtime/apps/clankie/src/index.ts"
+            : "{}",
+    });
+    const seen: string[] = [];
+    const probe: typeof fetch = async (url, options) => {
+      seen.push(String(url));
+      expect(new Headers(options?.headers).has("authorization")).toBe(false);
+      return Response.json({ ok: true, service: "clankie", runtime: { pid: 99 } });
+    };
+    const report = await inspectHarnessBridges({ HOME: home }, execute, probe);
+    if (process.platform === "darwin") {
+      expect(seen).toEqual(["http://127.0.0.1:54321/health"]);
+      expect(report.linkedSession.panes[0]).toMatchObject({
+        status: "missing",
+        operatorBridge: {
+          status: "live-process",
+          freshness: "older-than-runtime",
+          remediation: expect.stringContaining("restart the seat"),
+        },
+      });
+      for (const unproven of [
+        { ok: true, service: "other", runtime: { pid: 99 } },
+        { ok: true, service: "clankie", runtime: { pid: "99" } },
+        { ok: false, service: "clankie", runtime: { pid: 99 } },
+      ]) {
+        const unknown = await inspectHarnessBridges({ HOME: home }, execute, async () =>
+          Response.json(unproven),
+        );
+        expect(unknown.linkedSession.panes[0]?.operatorBridge?.freshness).toBe("unknown");
+      }
+    }
+    expect(JSON.stringify(report)).not.toContain("private");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+it.runIf(process.platform === "darwin").each([
+  { name: "missing runtime identity", probe: async () => Response.json({ ok: true, service: "clankie" }) },
+  { name: "offline runtime", probe: async () => new Response(null, { status: 503 }) },
+  {
+    name: "failed lookup",
+    probe: async () => {
+      throw new Error("service unavailable");
+    },
+  },
+  { name: "malformed JSON", probe: async () => new Response("not json") },
+  {
+    name: "wrong service",
+    probe: async () => Response.json({ ok: true, service: "other", runtime: { pid: 99 } }),
+  },
+  {
+    name: "unhealthy runtime",
+    probe: async () => Response.json({ ok: false, service: "clankie", runtime: { pid: 99 } }),
+  },
+  {
+    name: "string PID",
+    probe: async () => Response.json({ ok: true, service: "clankie", runtime: { pid: "99" } }),
+  },
+  {
+    name: "fractional PID",
+    probe: async () => Response.json({ ok: true, service: "clankie", runtime: { pid: 99.5 } }),
+  },
+  {
+    name: "invalid PID",
+    probe: async () => Response.json({ ok: true, service: "clankie", runtime: { pid: 1 } }),
+  },
+])("keeps both live bridge ages unknown for $name", async ({ probe }) => {
+  const home = await mkdtemp(join(tmpdir(), "clankie-unknown-age-doctor-"));
+  try {
+    await mkdir(join(home, ".clankie/links"), { recursive: true });
+    await writeFile(
+      join(home, ".clankie/links/default-local.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        authentication: "local-process",
+        socket: "/test/default.sock",
+        url: "http://127.0.0.1:54321",
+      }),
+    );
+    const execute = async (command: string, args: readonly string[]) => ({
+      stderr: "",
+      stdout:
+        command === "/usr/bin/env"
+          ? JSON.stringify({
+              result: args.includes("list")
+                ? { agents: [{ pane_id: "w1:p1", agent: "claude" }] }
+                : { process_info: { pane_id: "w1:p1", shell_pid: 10, foreground_process_group_id: 20 } },
+            })
+          : command === "/bin/ps"
+            ? args.includes("pid=,lstart=")
+              ? "30 Sat Oct  3 12:00:00 2026\n31 Sat Oct  3 12:00:00 2026\n99 Sun Oct  4 12:00:00 2026"
+              : args[0] === "eww"
+                ? [30, 31]
+                    .map((pid) => `${pid} node HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/test/default.sock`)
+                    .join("\n")
+                : "20 10 /bin/claude\n30 20 node /release/apps/tui/bin/clankie.js mcp --fleet\n31 20 node /release/apps/tui/bin/clankie.js mcp --lane operator\n99 1 node /runtime/apps/clankie/src/index.ts"
+            : "{}",
+    });
+    const report = await inspectHarnessBridges({ HOME: home }, execute, probe);
+    const worker = report.linkedSession.panes[0];
+    expect(worker).toMatchObject({
+      status: "live-process",
+      freshness: "unknown",
+      operatorBridge: { status: "live-process", freshness: "unknown" },
+    });
+    for (const observation of [worker, worker?.operatorBridge]) {
+      expect(observation?.bridgeStartedAt).toBeUndefined();
+      expect(observation?.runtimeStartedAt).toBeUndefined();
+      expect(observation?.remediation).toBeUndefined();
+    }
+    expect(JSON.stringify(report.linkedSession)).not.toContain("older-than-runtime");
+    expect(JSON.stringify(report.linkedSession)).not.toContain("restart the seat");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

@@ -1527,12 +1527,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const herdr = dependencies.herdrRuntime?.();
     const doorway = dependencies.publicGatewayDoorway?.();
     const power = dependencies.hostPower?.();
+    let runtime;
+    try {
+      const identity = z
+        .object({
+          pid: z.number().int().safe().min(2),
+          commit: z.string().regex(/^[a-f0-9]{40}$/iu),
+          root: z.string().min(1).max(4096),
+          instanceId: z.string().uuid(),
+        })
+        .safeParse(dependencies.runtimeUpdater?.status().runtime);
+      if (identity.success) runtime = identity.data;
+    } catch {
+      // Optional boot identity must not turn updater diagnostics into liveness failure.
+    }
     return context.json({
       ok: true,
       service: "clankie",
       ...(herdr === undefined ? {} : { herdr }),
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
+      ...(runtime === undefined ? {} : { runtime }),
     });
   });
 

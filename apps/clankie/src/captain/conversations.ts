@@ -307,11 +307,11 @@ export interface ConversationTurnContext {
   readonly internal?: true;
   /**
    * What queued an internal turn: a goal continuation, a due self-wake, a
-   * settled herdr watch, or a signed inbound hook. A hook is its own origin
-   * rather than another wake because the turn it opens is about something that
-   * happened outside this machine, and the prompt says so.
+   * settled herdr watch, an authenticated worker message, or a signed inbound
+   * hook. A hook is its own origin rather than another wake because its turn
+   * concerns something outside this machine, and the prompt says so.
    */
-  readonly origin?: "goal" | "wake" | "watch" | "hook" | "input";
+  readonly origin?: "goal" | "wake" | "watch" | "message" | "hook" | "input";
   /** The surface a human send arrived from, as it named itself. */
   readonly surfaceClientId?: string;
   /** Side conversations inherit a Pi branch but never continue their parent's active task. */
@@ -1978,7 +1978,7 @@ export class ConversationStore {
     if (runner === undefined || (!this.runsCaptainTurns(conversationId) && meta.scope.kind !== "room"))
       throw new ConversationRefusedError("This conversation cannot accept inbound worker messages.");
     return this.enqueue(meta, message, undefined, false, runner, {
-      origin: "watch",
+      origin: "message",
       inboundReceipt: receipt,
     });
   }

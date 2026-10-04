@@ -101,7 +101,26 @@ export async function inspectHarnessBridges(
             ? [{ paneId: agent.pane_id, harness: agent.agent }]
             : [],
         );
-        linkedSession = await inspectLiveHarnessBridges({ socket: link.socket, panes, run });
+        let runtimePid: number | undefined;
+        try {
+          const response = await fetchImpl(`${link.url}/health`, { signal: AbortSignal.timeout(5_000) });
+          const health = response.ok ? await response.json() : undefined;
+          if (
+            health?.ok === true &&
+            health.service === "clankie" &&
+            Number.isSafeInteger(health.runtime?.pid) &&
+            health.runtime.pid > 1
+          )
+            runtimePid = health.runtime.pid;
+        } catch {
+          // No running runtime identity: bridge presence remains observable, age remains unknown.
+        }
+        linkedSession = await inspectLiveHarnessBridges({
+          socket: link.socket,
+          panes,
+          run,
+          ...(runtimePid === undefined ? {} : { runtimePid }),
+        });
       } catch {
         linkedSession = { state: "unavailable", panes: [], unownedBridges: [] };
       }

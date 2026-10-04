@@ -149,7 +149,7 @@ it("the attached project receives worker reports, watches, self wakes and escala
   });
   const [worker] = await poll;
   expect(worker).toMatchObject({
-    kind: "watch",
+    kind: "message",
     conversationId: id,
     content: expect.stringContaining("Completed the work"),
   });
