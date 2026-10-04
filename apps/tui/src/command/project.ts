@@ -7,6 +7,8 @@ import {
   SettingsStore,
   defaultSettingsPath,
   projectsRevision,
+  assertProjectWorkspacePath,
+  assertProjectWorkspaceAvailable,
   removeProjectWorkspace,
 } from "@clankie/settings";
 import { ProjectSchema } from "@clankie/protocol/projects";
@@ -49,11 +51,7 @@ export async function runProjectCommand(
   )
     throw new Error(USAGE);
   const paths = platform === "windows" ? win32 : posix;
-  const { isAbsolute, normalize, relative, sep } = paths;
-  const contains = (parent: string, child: string) => {
-    const path = relative(parent, child);
-    return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
-  };
+  const { isAbsolute, normalize } = paths;
   const env = options.env ?? process.env;
   const credential = await inspectOperatorCredential({
     env,
@@ -106,12 +104,8 @@ export async function runProjectCommand(
     };
   }
 
-  if (
-    !isAbsolute(path) ||
-    normalize(path) !== path ||
-    path.includes("\0") ||
-    (machineId === "local" && ((await realpath(path)) !== path || !(await stat(path)).isDirectory()))
-  )
+  assertProjectWorkspacePath({ path, platform: platform === "windows" ? "windows" : "posix" });
+  if (machineId === "local" && ((await realpath(path)) !== path || !(await stat(path)).isDirectory()))
     throw new Error("Use the directory's absolute canonical path with its exact spelling");
   let project = ProjectSchema.parse({
     id: args[1],
@@ -139,14 +133,7 @@ export async function runProjectCommand(
           )
           .map((workspace) => workspace.path),
       );
-      for (const saved of current.projects.projects)
-        for (const workspace of [...saved.workspaces, ...saved.worktreeRoots])
-          if (
-            workspace.machineId === machineId &&
-            workspace.platform === project.workspaces[0]!.platform &&
-            (contains(workspace.path, path) || contains(path, workspace.path))
-          )
-            throw new Error(`This workspace overlaps project ${saved.id}; approve a separate directory`);
+      assertProjectWorkspaceAvailable(current.projects, project.workspaces[0]!);
       const existing = current.projects.projects.find((saved) => saved.id === project.id);
       if (existing) {
         const workspace = project.workspaces[0]!;
