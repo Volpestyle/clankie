@@ -61,11 +61,11 @@ describe("clankie fleet", () => {
   it("opens the editor on what is already configured and saves what comes back", async () => {
     const { settings, read } = stubStore({
       ...emptySettings(),
-      fleet: { notes: "codex is the workhorse.", size: "large", models: "optimal" },
+      fleet: { notes: "codex is the workhorse.", size: "large", models: "optimal", tools: "connected" },
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
     const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
-    const picks = ["small", "efficient"];
+    const picks = ["small", "efficient", "off"];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
@@ -82,12 +82,17 @@ describe("clankie fleet", () => {
 
     await buildFleetCommands({ settings })[0]!.run("", { setupFlow: flow } as unknown as ClankieFaceShell);
 
-    expect(selects).toMatchObject([{ currentValue: "large" }, { currentValue: "optimal" }]);
+    expect(selects).toMatchObject([
+      { currentValue: "large" },
+      { currentValue: "optimal" },
+      { currentValue: "connected" },
+    ]);
     expect(prompts).toMatchObject([{ defaultValue: "codex is the workhorse.", multiline: true }]);
     expect(read().fleet).toEqual({
       notes: "claude when it needs skills.",
       size: "small",
       models: "efficient",
+      tools: "off",
     });
   });
 });
@@ -98,10 +103,25 @@ describe("clankie fleet", () => {
  * value it cannot store, and that `clear` puts the no-limit default back.
  */
 describe("clankie fleet budget", () => {
+  it("applies the tool kill switch independently and rejects unsupported or repeated values", async () => {
+    const { settings, read } = stubStore();
+    await runFleetCommand(["set", "--notes", "keep me", "--size", "small"], { settings });
+    const off = await runFleetCommand(["set", "--tools", "off"], { settings });
+    expect(off.fleet).toEqual({ notes: "keep me", size: "small", models: "optimal", tools: "off" });
+    expect(formatFleetLines(off.fleet).join("\n")).toContain("fleet tool access disabled");
+    await expect(runFleetCommand(["set", "--tools", "all"], { settings })).rejects.toThrow(
+      "--tools must be connected or off",
+    );
+    await expect(
+      runFleetCommand(["set", "--tools", "off", "--tools", "connected"], { settings }),
+    ).rejects.toThrow("Usage");
+    expect(read().fleet.tools).toBe("off");
+    expect((await runFleetCommand(["clear"], { settings })).fleet.tools).toBe("connected");
+  });
   it("defaults to maximum bandwidth with the strongest models", async () => {
     const { settings } = stubStore();
     const status = await runFleetCommand(["status"], { settings });
-    expect(status.fleet).toMatchObject({ size: "max", models: "optimal" });
+    expect(status.fleet).toMatchObject({ size: "max", models: "optimal", tools: "connected" });
     const lines = formatFleetLines(status.fleet).join("\n");
     expect(lines).toContain("swarm size: max");
     expect(lines).toContain("No ceiling");
@@ -112,13 +132,24 @@ describe("clankie fleet budget", () => {
     const { settings, read } = stubStore();
     await runFleetCommand(["set", "--notes", "codex is the workhorse."], { settings });
     const set = await runFleetCommand(["set", "--size", "solo", "--models", "efficient"], { settings });
-    expect(set.fleet).toEqual({ notes: "codex is the workhorse.", size: "solo", models: "efficient" });
+    expect(set.fleet).toEqual({
+      notes: "codex is the workhorse.",
+      size: "solo",
+      models: "efficient",
+      tools: "connected",
+    });
     await runFleetCommand(["set", "--models", "optimal"], { settings });
-    expect(read().fleet).toEqual({ notes: "codex is the workhorse.", size: "solo", models: "optimal" });
+    expect(read().fleet).toEqual({
+      notes: "codex is the workhorse.",
+      size: "solo",
+      models: "optimal",
+      tools: "connected",
+    });
     expect((await runFleetCommand(["clear"], { settings })).fleet).toEqual({
       notes: "",
       size: "max",
       models: "optimal",
+      tools: "connected",
     });
   });
 
@@ -135,6 +166,6 @@ describe("clankie fleet budget", () => {
     );
     await expect(runFleetCommand(["set", "--size"], { settings })).rejects.toThrow(/Usage/u);
     await expect(runFleetCommand(["set"], { settings })).rejects.toThrow(/Usage/u);
-    expect(read().fleet).toEqual({ notes: "", size: "max", models: "optimal" });
+    expect(read().fleet).toEqual({ notes: "", size: "max", models: "optimal", tools: "connected" });
   });
 });

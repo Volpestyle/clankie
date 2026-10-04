@@ -1,4 +1,5 @@
 import { ProjectIdSchema, type ProjectsSettings } from "@clankie/protocol/projects";
+import type { FleetSettings } from "@clankie/settings";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
@@ -59,7 +60,36 @@ type WorkerAuthorization = {
   records: GrantRecord[];
   expiresAt: number;
   grantId?: string;
+  /** Standing fleet records are synthesized from the current connected catalog, never persisted. */
+  fleet?: string;
+  validateFleet?(): boolean | Promise<boolean>;
 };
+const FleetSearchSchema = z
+  .object({
+    query: z.string().max(500).optional(),
+    names: z.array(z.string().min(1).max(256)).min(1).max(10).optional(),
+  })
+  .strict();
+const FleetCallSchema = z
+  .object({
+    name: z.string().min(1).max(256),
+    arguments: z.record(z.string(), z.json()),
+  })
+  .strict();
+const FLEET_TOOLS = [
+  {
+    name: "clankie_tools",
+    description:
+      "Search connected tools with query (up to 20 names and one-line descriptions), or request full input schemas with names (up to 10). Discover a tool's schema before calling it.",
+    inputSchema: z.toJSONSchema(FleetSearchSchema) as { type: "object" },
+  },
+  {
+    name: "clankie_call",
+    description:
+      "Call a connected tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Calls use Clankie's verified connected account.",
+    inputSchema: z.toJSONSchema(FleetCallSchema) as { type: "object" },
+  },
+];
 const uuid = z.string().uuid();
 const KEY_ID = "clankie_worker_mcp_signing";
 
@@ -71,7 +101,7 @@ export class WorkerMcp {
     credentials: CredentialStore;
     host: McpHost;
     projects?(): Promise<ProjectsSettings>;
-    membership?(identity: LocalFleetIdentity): Promise<{ projectId: string; occupantId: string } | undefined>;
+    fleetTools?(): Promise<FleetSettings["tools"]>;
   };
   private readonly sessions = new Map<
     string,
@@ -151,7 +181,7 @@ export class WorkerMcp {
   async issue(input: z.input<typeof WorkerGrantRequestSchema>) {
     if ("fleet" in input)
       throw new Error(
-        "Fleet grants are retired. Use clankie access project NAME SERVER, then revoke the old grant with clankie access revoke ID.",
+        "Fleet grants are retired. Admitted fleet members use connected tools; inspect clankie fleet status and revoke old records with clankie access revoke ID.",
       );
     const request = WorkerGrantRequestSchema.parse(input);
     if (request.project !== undefined) {
@@ -299,71 +329,81 @@ export class WorkerMcp {
       return await this.handleAuthorized(new Request(request, { headers }), async (token) => {
         const current = this.localRequests.get(token);
         if (!current || !(await current.validate())) throw new Error("Local fleet membership unavailable");
-        return this.projectAuthorization(current);
+        return this.fleetAuthorization(current.fleet ?? "default", () => current.validate(), current.pane);
       });
     } finally {
       this.localRequests.delete(proof);
     }
   }
 
-  /** A link and every grant are checked afresh for each request and each tool call. */
+  /** A bearer link admits its fleet, without claiming a verified pane or native occupant. */
   async handleFleet(fleet: string, request: Request, linked: (token: string) => boolean): Promise<Response> {
     return this.handleAuthorized(request, async (token) => {
       if (!linked(token)) throw new Error("Not this fleet's link");
-      throw new Error(
-        `Project tools need verified agent identity on ${fleet}; this fleet link alone cannot prove it.`,
-      );
+      return this.fleetAuthorization(fleet, () => linked(token));
     });
   }
 
   /** Read-only startup expectation. This never authorizes a request or creates an identity. */
-  async expectedProjectToolNames(projectId: string): Promise<readonly string[]> {
-    const records = (await this.list()).filter(
-      (record) =>
-        record.fleet === undefined &&
-        record.project === projectId &&
-        record.revokedAt === undefined &&
-        record.grant.principalId === `project:${projectId}` &&
-        record.grant.missionId === `project:${projectId}`,
-    );
-    if (!records.length) return [];
-    for (const record of records) await this.checkBinding(record);
-    const catalog = await this.options.host.catalog("operator");
-    const names = new Set<string>();
-    for (const record of records)
-      for (const rule of record.tools) {
-        const tool = catalog.find((tool) => tool.server === record.server && tool.name === rule.name);
-        if (!tool) throw new Error("A project-granted tool is unavailable in the current catalog");
-        names.add(tool.qualifiedName);
-      }
-    return [...names].sort();
+  async expectedProjectToolNames(_projectId: string): Promise<readonly string[]> {
+    return (await this.fleetToolsEnabled()) ? FLEET_TOOLS.map((tool) => tool.name) : [];
   }
 
-  private async projectAuthorization(identity: LocalFleetIdentity): Promise<WorkerAuthorization> {
-    const membership = await this.options.membership?.(identity);
-    if (!membership) throw new Error("This agent does not have a verified project.");
+  private async fleetToolsEnabled(): Promise<boolean> {
+    return (await this.options.fleetTools?.()) !== "off";
+  }
+
+  private async fleetAuthorization(
+    fleet: string,
+    validateFleet: NonNullable<WorkerAuthorization["validateFleet"]>,
+    pane?: string,
+  ): Promise<WorkerAuthorization> {
+    FleetIdSchema.parse(fleet);
+    const principalId = `fleet:${fleet}:pane:${pane ?? "unverified"}`;
+    const expiresAt = Math.floor(Date.now() / 1000) + 900;
     const records: GrantRecord[] = [];
-    for (const record of await this.list()) {
-      if (
-        record.fleet !== undefined ||
-        record.project !== membership.projectId ||
-        record.revokedAt !== undefined ||
-        record.grant.principalId !== `project:${membership.projectId}` ||
-        record.grant.missionId !== `project:${membership.projectId}`
-      )
-        continue;
-      try {
-        await this.checkBinding(record);
-        records.push(record);
-      } catch {
-        /* Unavailable grants confer no tools. */
+    if (await this.fleetToolsEnabled()) {
+      const catalog = await this.options.host.catalog("operator");
+      for (const server of new Set(catalog.map((tool) => tool.server))) {
+        try {
+          const { account, binding } = await this.options.host.account(server, "operator");
+          const tools = catalog
+            .filter(
+              (tool) => tool.server === server && !(server === "linear" && isLinearWorkerTool(tool.name)),
+            )
+            .map((tool) => ({ name: tool.name, arguments: {}, forbiddenArguments: [] }));
+          if (!tools.length) continue;
+          records.push({
+            server,
+            lane: "operator",
+            tools,
+            account,
+            grant: {
+              version: 1,
+              grantId: randomUUID(),
+              principalId,
+              missionId: `fleet:${fleet}`,
+              profileHash: binding,
+              capabilities: tools.map((tool) => tool.name),
+              resources: [server],
+              obligations: [],
+              issuedAt: expiresAt - 900,
+              expiresAt,
+              nonce: randomUUID(),
+            },
+          });
+        } catch {
+          // One unverified/unavailable account never removes the other servers.
+        }
       }
     }
     return {
-      key: JSON.stringify(["project", membership.projectId, membership.occupantId]),
-      principalId: `project:${membership.projectId}:pane:${identity.pane}`,
+      key: JSON.stringify(pane === undefined ? ["fleet", fleet] : ["fleet", fleet, pane]),
+      principalId,
       records,
-      expiresAt: Math.floor(Date.now() / 1000) + 900,
+      expiresAt,
+      fleet,
+      validateFleet,
     };
   }
 
@@ -407,12 +447,13 @@ export class WorkerMcp {
       { name: "clankie-worker", version: "1" },
       {
         capabilities: { tools: { listChanged: true } },
-        instructions: `Delegated connected tools for worker ${authority.principalId}. Only explicit, live grants confer access. You remain a worker; this is not Clankie's operator seat.`,
+        instructions: `Connected tools for worker ${authority.principalId}. Fleet members discover tools with clankie_tools and invoke them with clankie_call; manual grants expose their selected tools directly. You remain a worker; this is not Clankie's operator seat.`,
       },
     );
     server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
       const current = await authenticate(extra.authInfo?.token ?? "");
       if (current.key !== authority.key) throw new Error("Worker session changed");
+      if (current.fleet !== undefined) return { tools: (await this.fleetToolsEnabled()) ? FLEET_TOOLS : [] };
       const catalog = current.records.length ? await this.options.host.catalog("operator") : [];
       return {
         tools: catalog
@@ -433,23 +474,69 @@ export class WorkerMcp {
       try {
         const authorityNow = await authenticate(extra.authInfo?.token ?? "");
         if (authorityNow.key !== authority.key) throw new Error("Worker session changed");
-        const args = call.params.arguments ?? {};
+        let name = call.params.name;
+        let args = call.params.arguments ?? {};
+        if (authorityNow.fleet !== undefined) {
+          if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
+          if (name === "clankie_tools") {
+            const search = FleetSearchSchema.parse(args);
+            const catalog = (await this.options.host.catalog("operator")).filter((tool) =>
+              authorityNow.records.some(
+                (record) =>
+                  record.server === tool.server && record.tools.some((rule) => rule.name === tool.name),
+              ),
+            );
+            const terms = (search.query ?? "").toLowerCase().split(/\s+/u).filter(Boolean);
+            const text = search.names
+              ? JSON.stringify(
+                  catalog
+                    .filter((tool) => search.names!.includes(tool.qualifiedName))
+                    .map((tool) => ({
+                      name: tool.qualifiedName,
+                      description: tool.description,
+                      inputSchema: tool.inputSchema,
+                    })),
+                )
+              : catalog
+                  .filter((tool) =>
+                    terms.every((term) =>
+                      `${tool.qualifiedName} ${tool.description ?? ""}`.toLowerCase().includes(term),
+                    ),
+                  )
+                  .slice(0, 20)
+                  .map(
+                    (tool) =>
+                      `${tool.qualifiedName} — ${(tool.description ?? "").replace(/\s+/gu, " ").trim()}`,
+                  )
+                  .join("\n");
+            return { content: [{ type: "text", text }], isError: false };
+          }
+          if (name !== "clankie_call") throw new Error("Use clankie_call for connected tools");
+          const invocation = FleetCallSchema.parse(args);
+          name = invocation.name;
+          args = invocation.arguments;
+        }
         const current = authorityNow.records.find((record) =>
           record.tools.some(
             (rule) =>
-              `${record.server}_${rule.name}` === call.params.name &&
+              `${record.server}_${rule.name}` === name &&
               rule.forbiddenArguments.every((key) => !Object.hasOwn(args, key)) &&
               Object.entries(rule.arguments).every(([key, value]) => isDeepStrictEqual(args[key], value)),
           ),
         );
         if (!current) throw new Error("Tool or arguments are not granted");
-        const rule = current.tools.find((rule) => `${current.server}_${rule.name}` === call.params.name)!;
-        // Membership proof can perform OS I/O. Re-read durable authority after that work,
-        // immediately before the external dispatch; the host also fences account/config use.
+        const rule = current.tools.find((rule) => `${current.server}_${rule.name}` === name)!;
+        // Manual authority stays durable; fleet authority comes from live admission and
+        // the current catalog. Both retain the host's final account/config fence.
         await this.checkBinding(current);
-        const latest = await this.read(current.grant.grantId);
-        if (latest.revokedAt !== undefined || !isDeepStrictEqual(latest, current))
-          throw new Error("Worker grant revoked or changed");
+        if (authorityNow.fleet === undefined) {
+          const latest = await this.read(current.grant.grantId);
+          if (latest.revokedAt !== undefined || !isDeepStrictEqual(latest, current))
+            throw new Error("Worker grant revoked or changed");
+        } else {
+          if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
+          if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
+        }
         const result = await this.options.host.call({
           lane: current.lane,
           server: current.server,

@@ -91,7 +91,7 @@ import { createEmailPort } from "./email.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
-import { createProjectMembershipResolver, createProjectWorkspaceResolver } from "./project-membership.ts";
+import { createProjectWorkspaceResolver } from "./project-membership.ts";
 import {
   createRemoteProjectObserver,
   createRemoteWorkspaceCanonical,
@@ -895,13 +895,7 @@ const workerMcp = new WorkerMcp({
   credentials: operatorCredentialStore,
   host: mcpHost,
   projects: async () => (await settingsStore.load()).projects,
-  membership: createProjectMembershipResolver({
-    settings: async () => (await settingsStore.load()).projects,
-    hire: (proof) => captain.lookupProjectHire(proof),
-    remoteCanonical,
-    worktreeRoot: projectWorktreeRoot,
-    gitWorktree: projectGitWorktree,
-  }),
+  fleetTools: async () => (await settingsStore.load()).fleet.tools,
 });
 
 const clankie = await createClankieApp({

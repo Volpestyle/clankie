@@ -1,6 +1,9 @@
 # ADR 0216: Projects own agent roles and tool policy
 
 Status: accepted for engineering (2026-10-03; VUH-1535 root source review).
+Fleet tool gating is superseded by [ADR 0217](0217-fleet-membership-gets-connected-tools.md)
+(2026-10-04); the membership/tool-cutover text below preserves the historical decision.
+Project roles, caps, hiring and tracker binding remain current.
 Deterministic foundation evidence covers schema, migration and compatibility; live
 project hiring and grant enforcement remain the subsequent issue boundaries below.
 

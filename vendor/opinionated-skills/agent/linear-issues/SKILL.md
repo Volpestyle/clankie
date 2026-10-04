@@ -15,7 +15,8 @@ Team-specific facts — which labels exist, what the workflow states are, who
 owns deploys — live in that team's own skill.
 
 In a confirmed Clankie fleet, load the shipped `clankie` skill for connected
-account identity, project-granted tools and worker posting routes. Its route
+account identity, connected tools through the fleet bridge and worker posting
+routes. Its route
 takes precedence over the generic connector examples here; this skill keeps the
 Linear editing and writing rules.
 

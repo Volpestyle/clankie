@@ -1183,13 +1183,18 @@ browser is unaffected. JSON is the `browser status` shape with
 in the TUI call the same code. A listed harness is hired with `hire_agent`;
 `chrome: true` starts claude with `--chrome`.
 
-### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE]` / `fleet clear`
+<a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
+
+### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--tools connected|off]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
 which (up to 4,000 characters of free text) — and the budget he sizes the fleet
-to. `set` takes any combination of the three flags; what is left out keeps its
-value. `clear` returns all three to their defaults.
+to, plus the fleet connected-tool switch. `set` takes any combination of the flags;
+what is left out keeps its value. `clear` restores every default, including tools
+`connected`. `--tools off` immediately removes connected tools from fleet panes and
+refuses calls; manual grants keep working. `--tools connected` restores standing
+access to verified accounts through `clankie_tools` and `clankie_call`.
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the
 leadership skill (`lead`) and his prompt use them to aim.
@@ -1222,8 +1227,8 @@ and decides, and a note here can no more widen his reach than a warmer persona
 can. The section carries the swarm size and model mode whenever it renders. With
 no notes and the default budget (`max`, `optimal`) there is no section at all.
 
-JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal" }, "settingsFile": "…", "restart": "clankie restart captain" }`.
-The TUI `/fleet` command opens the same editor (size, then models, then notes)
+JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "tools": "connected" }, "settingsFile": "…", "restart": "clankie restart" }`.
+The TUI `/fleet` command opens the same editor (size, models, connected tools, then notes)
 and `/fleet status` prints the same values.
 
 ```bash
@@ -2116,51 +2121,32 @@ development-channels dialog but then rejects `server:` as not on the approved
 allowlist. The service's hire path persists the server and passes the dangerous
 flag for a claude seat.
 
-### `mcp --fleet`: local owner-granted tools
+### `mcp --fleet`: fleet connected tools
 
 Register `clankie mcp --fleet` in Codex with `env_vars = ["HERDR_PANE_ID",
 "HERDR_SOCKET_PATH"]`, or install the `clankie-worker@clankie` Claude plugin.
-Generated or symlinked Codex configuration belongs to its source manager: inspect
-`doctor.harnessBridges.codex.configSource` and change that source, never append to
-or replace the runtime symlink. Hired local Codex seats receive a launch-only
-registration even when their selected account uses another `CODEX_HOME`.
+Preserve generated/symlinked harness configuration: inspect
+`doctor.harnessBridges.codex.configSource` and edit its owning source.
 
-On macOS, a separate loopback listener verifies the actual TCP client's process
-against the live pane in Clankie's connected local Herdr session. The pane ID is
-a hint, not a credential. Private hired Codex app-servers use the service's live
-process-to-pane registry. Shared Codex daemon MCP processes cannot prove which
-pane owns them: exit and restart the pane's Codex under the existing
-`daemon_auto_start=false` configuration. Windows SSH fleets use a trusted relay
-on the configured fleet connection. Its accepted socket, native executable,
-process ancestry and kernel current-directory handle prove each remote pane;
-register Windows workspaces with the fleet's machine ID. The discovery file
-contains no bearer. Lost SSH, ambiguous identity and a claimed other pane deny
-access. Other remote platforms and non-macOS local process proof remain unsupported.
+Admitted fleet panes receive every connected MCP tool whose account is verified,
+except persona-bound Linear worker-publishing tools. Admission uses the pinned
+local Herdr socket, a live remote relay stream, or a remote fleet link bearer.
+A bearer proves only its fleet, with no verified pane or mailbox authority.
+No project grant, native session or workspace proof is needed for these tools.
+Projects retain roles, caps, hiring and tracker binding.
 
-The owner grants a saved project through `clankie access project PROJECT linear
---tool get_issue` (repeat `--tool` for the needed tools). `clankie access list`
-inspects grants and `clankie access revoke ID` revokes them. Every list and call
-checks the connected account and current native occupant: actual host-recorded
-hire assignment first, otherwise the agent process's canonical cwd inside the
-approved project workspace. Ambiguous or stale membership denies access. Local
-workspaces use the service machine ID `local`; a fleet token or pane claim alone
-confers no project tools. The foreground native harness process must be
-proven; service-owned private Codex app-servers additionally require their exact
-registered process lifetime/native thread and actual hire assignment. Shared
-daemons, unregistered detached processes and wrappers without the installed native executable or exact retained Node-script
-argv currently lack that proof. Mailbox membership alone is insufficient.
+The service lists exactly `clankie_tools` and `clankie_call`; the worker plugin
+adds `message_clankie`. Search with `{query}` for at most 20 names/descriptions,
+or `{names}` for up to 10 input schemas, then call with `{name, arguments}`.
+`clankie fleet set --tools off` immediately removes fleet tools and refuses calls.
+Each call rechecks live admission, account binding and the setting before effects.
+Manual grants keep their existing restrictions.
 
-Project grants persist until revoked. MCP sessions bind to the exact project and
-occupant and expire after 15 minutes idle. No bearer or provider credential is
-written to the local discovery file. Old fleet grants confer no tools; explicit
-owner reissue and retirement steps, including owner-pane cutover, are in
-[worker access](worker-access.md).
-
-`doctor.harnessBridges` separates Claude installation/enabling, Codex registration
-and its config source, shared-daemon ancestry, and the invoking process's live
-local membership probe. A successful probe does not imply a grant exists. Run
-`access list` to inspect owner grants. Installer output offers the explicit
-harness registration commands; it never enables a plugin or grants tools itself.
+`doctor.harnessBridges` reports installation, registration and invoking-process
+membership separately. Remote project `eligibility: unsupported` does not mean
+fleet tools are denied; `nativeTools: not-verified` still requires an actual native
+catalog/call check. MCP sessions bind to fleet/pane (fleet only for bearer links)
+and expire after 15 minutes idle. See [worker access](worker-access.md).
 
 ### `project add NAME --workspace PATH`
 
@@ -2172,7 +2158,7 @@ while preserving its name, roles, caps, tracker, grants and assignments. Duplica
 or nested-overlapping local workspaces are rejected across all projects, including
 the same project. Appended workspace IDs are derived deterministically from the
 machine, platform and canonical path. It creates no roles, assignments or tool
-grants. Use `access project` separately to grant selected tools.
+grants. Fleet connected-tool access is independent of these project approvals.
 
 ### `access` and `mcp --grant FILE`
 
@@ -2182,9 +2168,9 @@ manage individual worker grants. The private file feeds `clankie mcp --grant FIL
 which serves only granted tools and loads no operator bearer or seat channel.
 Tokens expire after at most 15 minutes and require explicit reissue.
 
-`access project NAME SERVER [--tool NAME]...` grants the saved project's verified
-agents connected tools until revoked, with no bearer delivery. `access fleet`
-is retired and explains the explicit project reissue/revoke commands.
+`access project NAME SERVER [--tool NAME]...` retains legacy project-grant records
+with no bearer delivery; they no longer gate fleet tools. `access fleet` remains
+retired. Use `fleet set --tools off` to disable standing fleet tools.
 `/access` exposes status, verification and revocation; issue from the terminal.
 See [worker access](worker-access.md) for restrictions and account bindings.
 

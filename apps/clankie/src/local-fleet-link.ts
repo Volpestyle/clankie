@@ -7,6 +7,7 @@ import type { HerdrBinding } from "@clankie/protocol";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 
 export interface LocalFleetIdentity {
+  readonly fleet?: string;
   readonly pane: string;
   validate(): Promise<boolean>;
   projectProof?(): Promise<ProjectProcessProof | undefined>;
@@ -46,8 +47,9 @@ export class LocalFleetLink {
       if (seat && decodeURIComponent(seat[1]!) !== pane)
         return Response.json({ error: "local_pane_required" }, { status: 403 });
       const identity = {
+        fleet: "default",
         pane,
-        validate: async () => this.open && this.options.prove(env.incoming.socket, pane),
+        validate: async () => this.open && (await this.options.prove(env.incoming.socket, pane)) && this.open,
         projectProof: async () =>
           this.open ? this.options.projectProof?.(env.incoming.socket, pane) : undefined,
       };

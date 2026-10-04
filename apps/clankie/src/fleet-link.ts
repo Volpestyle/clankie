@@ -25,7 +25,8 @@ import {
  * existing reverse forward carries replies and fresh observation commands.
  * A one-use relay nonce binds that return channel and never leaves relay memory.
  * Discovery contains only the fleet, Herdr socket and loopback URL, not a bearer.
- * Legacy POSIX link tokens identify a machine but confer no project/mailbox authority.
+ * Legacy POSIX link tokens admit their fleet's connected tools, with no verified
+ * pane, project or mailbox authority.
  */
 
 /** The only paths the link listener answers (seat routes and the fleet's granted tools); everything else is 404. */
@@ -351,6 +352,7 @@ export class FleetLinks {
         // Share only simultaneous reads; every later tool/membership check observes afresh.
         let pending: Promise<ProjectProcessProof | undefined> | undefined;
         const identity: LocalFleetIdentity = {
+          fleet,
           pane,
           validate: async () =>
             stream.alive() && this.links.get(fleet) === link && link.status().state === "ready",
@@ -378,6 +380,7 @@ export class FleetLinks {
   authenticate(token: string): string | undefined {
     const presented = Buffer.from(token);
     for (const link of this.links.values()) {
+      if (link.status().state !== "ready") continue;
       const expected = Buffer.from(link.token);
       if (expected.length === presented.length && timingSafeEqual(expected, presented)) return link.fleet.id;
     }

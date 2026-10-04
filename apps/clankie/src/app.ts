@@ -1346,7 +1346,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? dependencies.workerMcp.handle(context.req.raw)
       : context.json({ error: "worker_mcp_unavailable" }, 503),
   );
-  // Only an observed local socket or authenticated SSH relay stream proves an agent.
+  // Local/relay admission proves a pane. A bearer link admits its fleet's tools
+  // without claiming a pane; it still confers no native project or mailbox proof.
   app.all("/v1/fleet/mcp", async (context) => {
     const identity =
       dependencies.localFleet?.identity(context.req.raw) ??
@@ -1382,7 +1383,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
               ...record,
               status: "retired",
               detail:
-                "This fleet grant no longer gives tools. Reissue selected tools with clankie access project NAME SERVER, then revoke this old grant.",
+                "This fleet grant no longer gives tools. Admitted fleet members use connected tools independently; inspect clankie fleet status and explicitly revoke this old record.",
             },
       ),
     ),
@@ -1394,7 +1395,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         {
           error: "fleet_grants_retired",
           detail:
-            "Fleet grants are retired. Use clankie access project NAME SERVER, then clankie access revoke ID for each old grant.",
+            "Fleet grants are retired. Admitted fleet members use connected tools; inspect clankie fleet status and revoke old records with clankie access revoke ID.",
         },
         400,
       );

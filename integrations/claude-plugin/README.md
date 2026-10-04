@@ -291,7 +291,7 @@ native session proof; installation alone supplies neither.
 
 ### Working beside Clankie
 
-The `clankie` skill teaches native fleet agents how to use project-granted tools,
+The `clankie` skill teaches native fleet agents how to use fleet connected tools through the two-tool bridge,
 check their connected actor, inspect conversations and sessions, and interpret
 delivery receipts. Its authored source is `.agents/skills/clankie/SKILL.md`.
 The operator Claude plugin links it; `worker-skills` links the canonical catalog.

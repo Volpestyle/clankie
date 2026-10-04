@@ -86,6 +86,7 @@ it("unsupported and missing native proof never reuse inventory cwd or infer tool
   expect((await f.run()).panes[0]).not.toHaveProperty("cwd");
   f.options.supportedHarnesses = ["claude"];
   expect((await f.run()).panes[0]).toMatchObject({ eligibility: "unsupported" });
+  expect((await f.run()).panes[0]!.reason).toContain("does not deny fleet tools");
 });
 it.each(["occupant", "settings", "hire", "failure"])("fences final %s changes", async (kind) => {
   const f = fixture();

@@ -67,11 +67,11 @@ Load `lead` for leadership and the fleet reference for native delivery.
 
 For shared Linear tools, inspect `clankie access linear`; verify an API-key
 or OAuth connection with `clankie access linear verify` and check the intended automation identity.
-Use `clankie access project PROJECT SERVER [--tool NAME]...` to grant connected
-service tools to verified agents of that project until revoked. Actual native
-hire assignments take precedence; otherwise the agent's actual cwd must be in
-an approved project workspace. Old fleet grants no longer confer tools, and
-remote links alone cannot prove project membership. For an individual
+Admitted fleet members discover connected tools with `clankie_tools` and invoke
+qualified names with `clankie_call`. The setting `fleet.tools` defaults to
+`connected`; `clankie fleet set --tools off` disables this access immediately.
+Projects keep hiring, roles, caps and tracker policy, independently of tools.
+Unverified accounts and persona-bound worker publishing are excluded. For an individual
 manual grant, `clankie access issue REQUEST.json --out GRANT.json` creates a
 private file for `clankie mcp --grant FILE`; tokens last at most 15 minutes.
 Use `access list` and `access revoke ID` to inspect or revoke.
@@ -82,7 +82,7 @@ Worker publishing grants must pin the exact `personaId`. Read
 
 The worker bridge gives its first `tools/list` up to 20 seconds to retry with
 backoff while native pane membership settles, including any stalled HTTP lookup.
-Proof and live grants must succeed before it advertises connected tools; otherwise
+Fleet admission and the connected-tools setting must permit discovery; otherwise
 only `message_clankie` remains. Later lists and every call still check current
 access. Codex currently keeps its initial catalog despite
 `notifications/tools/list_changed`; after an access change, an owner may need to

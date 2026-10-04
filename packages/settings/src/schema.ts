@@ -398,6 +398,8 @@ export const FleetSettingsSchema = z
     notes: z.string().max(4_000).default(""),
     size: z.enum(FLEET_SIZES).default("max"),
     models: z.enum(FLEET_MODEL_MODES).default("optimal"),
+    /** Fleet admission grants connected tools unless the owner turns this off. */
+    tools: z.enum(["connected", "off"]).default("connected"),
   })
   .strict();
 export type FleetSettings = z.infer<typeof FleetSettingsSchema>;

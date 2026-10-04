@@ -7,7 +7,7 @@ import {
   type FleetModelMode,
   type FleetSize,
 } from "@clankie/settings";
-import { fleetStatus, fleetUpdate, formatFleetLines } from "./command/fleet.ts";
+import { fleetStatus, fleetUpdate, formatFleetLines, runFleetCommand } from "./command/fleet.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface FleetCommandServices {
@@ -15,7 +15,7 @@ export interface FleetCommandServices {
 }
 
 /**
- * `/fleet` edits **who Clankie reaches for**, not what he may do.
+ * `/fleet` edits who Clankie reaches for and the connected-tool kill switch.
  *
  * The routing notes are free text on purpose: a role enum only covers the
  * situations someone enumerated, and the useful ones are conditional. The swarm
@@ -38,10 +38,10 @@ export function buildFleetCommands(services: FleetCommandServices): FaceShellCom
           return;
         }
         if (verb === "clear") {
-          await fleetUpdate({ notes: "", size: "max", models: "optimal" }, { settings: services.settings });
+          await runFleetCommand(["clear"], { settings: services.settings });
           shell.insertCommandResult(
             "/fleet clear",
-            "Cleared. Swarm size max, models optimal, and he picks a harness per job with nothing from you.",
+            "Cleared. Swarm size max, models optimal, fleet tools connected, and he picks a harness per job with nothing from you.",
             "success",
           );
           return;
@@ -94,6 +94,25 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       allowBack: true,
     });
     if (models === undefined || !isFleetModelMode(models)) return;
+    const tools = await flow.readSelect({
+      message: "Fleet — access to connected tools",
+      options: [
+        {
+          value: "connected",
+          label: "connected",
+          description: "Every admitted fleet pane gets tools from verified connected accounts.",
+        },
+        {
+          value: "off",
+          label: "off",
+          description: "Disable connected tools for all fleet panes; manual grants keep working.",
+        },
+      ],
+      initialValue: current.tools,
+      currentValue: current.tools,
+      allowBack: true,
+    });
+    if (tools !== "connected" && tools !== "off") return;
     const notes = await flow.readText({
       message: "Fleet — which agents you want on what, and when (empty: he decides)",
       defaultValue: current.notes,
@@ -103,8 +122,11 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       validate: (value: string) => (value.length > 4_000 ? "Keep it under 4000 characters." : undefined),
     });
     if (notes === undefined) return;
-    await fleetUpdate({ size, models, notes: notes.trim() }, { settings: services.settings });
-    flow.renderLine("Saved. Run `clankie restart` to apply it.", "success");
+    await fleetUpdate({ size, models, tools, notes: notes.trim() }, { settings: services.settings });
+    flow.renderLine(
+      "Saved. Fleet tool access applies immediately. Run `clankie restart` to apply routing preferences.",
+      "success",
+    );
   } finally {
     flow.end();
   }

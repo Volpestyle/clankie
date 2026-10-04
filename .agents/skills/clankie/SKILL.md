@@ -1,6 +1,6 @@
 ---
 name: clankie
-description: "Work beside Clankie in his confirmed Herdr fleets: project-granted Linear tools, conversations and Discord, GitHub, native agent sessions and machines. Covers actor identity, owner-approved outward actions, workspace and tool grants, and honest reply delivery. Use when Clankie is named or this is his registered fleet; Herdr alone is not enough."
+description: "Work beside Clankie in his confirmed Herdr fleets: connected tools through the fleet two-tool bridge, conversations and Discord, GitHub, native agent sessions and machines. Covers actor identity, owner-approved outward actions, workspace and tool grants, and honest reply delivery. Use when Clankie is named or this is his registered fleet; Herdr alone is not enough."
 ---
 
 # Working beside Clankie
@@ -26,9 +26,9 @@ On a host with the owner-authorized CLI, these bounded reads explain a gap:
   working reply channel. `doctor --machine NAME` inspects one remote machine.
 - `clankie connections`: identify the intended machine/session and connected
   account. A healthy SSH link is transport health, not a native tool-call result.
-- `clankie access list`: inspect the applicable project grant, selected tools,
-  connected actor, expiry and revocation. Never paste private grant files,
-  bearers or broker data into a conversation.
+- `clankie fleet status`: inspect `fleet.tools` (`connected` or `off`).
+- `clankie access linear` and `access list`: inspect the connected actor and
+  manual/legacy grants. Never paste grant files, bearers or broker data.
 
 These CLI reads require the installed service's access; a worker plugin does not
 confer operator CLI authority. If unavailable, report the exact native catalog
@@ -38,7 +38,10 @@ link instead of assuming the Mac service lives there.
 
 ## Linear: read, then perform the authorized change
 
-Use Clankie's granted `linear_*` tools. A useful first read is
+Fleet tools expose `clankie_tools` and `clankie_call`. Search with `{query}` for
+up to 20 qualified names/descriptions, then `{names}` for up to 10 schemas. Invoke
+with `clankie_call({name, arguments})`. Manual grants may expose direct names.
+Use Clankie's connected `linear_*` tools. A useful first read is
 `linear_get_issue({id: "TEAM-123", includeRelations: true})`, followed by
 `linear_list_comments({issueId: "TEAM-123"})` for current decisions. Read the
 parent when it sets scope; newer owner direction can supersede a stale issue.
@@ -47,11 +50,14 @@ Paginate when the response says more exists. For identity,
 it with the intended workspace/account and connection record. Names and portraits
 alone are not identity proof.
 
-Verified project membership and an owner-issued tool grant determine the catalog.
-Folder membership does not grant all Linear tools, and a tool grant is not
-permission for every possible write. Request only the missing operation and
-scope needed. If tools are absent, give the lead the actual cwd, machine/session,
-catalog and refusal. Never substitute a harness's independent Linear connector.
+Fleet admission grants every tool from verified connected accounts while
+`fleet.tools` is `connected`; no project, native session or workspace proof is
+needed for tools. Bearer links prove only the fleet, not a pane or mailbox.
+Linear worker-publishing tools requiring an exact `personaId` remain excluded.
+Project roles, caps, hiring and tracker binding are separate. Tool access is not
+permission for every write. If tools are absent, report the machine/session,
+catalog and refusal so the lead can inspect admission, the setting and account.
+Never substitute a harness's independent Linear connector.
 
 Before an authorized write, load `linear-issues` for read-before-write, labels,
 media and editorial rules. Read the record again immediately before updating it.
@@ -119,9 +125,9 @@ stay bare. Machine, fleet/session, pane and native occupant are distinct. Keep
 remote cwd and workspace policy on the remote machine. Do not close or restart
 other agents as a diagnostic step. Existing leads retain their assignments.
 
-For GitHub, inspect available tools and authenticated repository identity before
-an authorized write. A connected GitHub account does not imply your worker has
-GitHub tools; Linear grants do not grant GitHub. If no appropriate route is
+For GitHub, discover its tools through the fleet bridge and inspect authenticated
+repository identity before an authorized write. A verified connected MCP account
+contributes its tools while fleet tools are on. If no appropriate route is
 exposed, ask the lead to perform or delegate the operation. Do not substitute a
 personal `gh` account without establishing its authority and destination.
 Drafting, publishing and merging a PR have distinct effects; stay within the
@@ -129,11 +135,11 @@ owner's requested action.
 
 ## Keep authority narrow and receipts honest
 
-Only the owner or an explicitly authorized operator grants tools or approves
-workspaces. Request the smallest tool set, argument scope and lifetime covering
-the task. Project grants last until revoked; ask the responsible owner to revoke
-a temporary grant when done. Do not revoke another worker's shared grant.
-Manual grant files are private and expire; expiration requires explicit reissue.
+Only the owner or an explicitly authorized operator changes fleet tool settings
+or approves workspaces. Standing fleet tools use the current verified accounts;
+`fleet set --tools off` or disconnecting a fleet removes that access. Manual grants
+keep their exact argument restrictions, expiry and durable revocation. Do not
+revoke another worker's grant; private manual files require explicit reissue after expiry.
 
 Workspace membership uses the current native process's canonical cwd on its own
 machine. An approved linked-worktree root is bound to an approved repository and
@@ -167,9 +173,9 @@ The owner-managed configuration may still point to the legacy Node worker bridge
 with `HERDR_PANE_ID` and `HERDR_SOCKET_PATH` forwarding. Inspect that source and
 let the owner verify any migration; never replace its generated configuration.
 
-A ready remote link and owner project grant are intermediate results. Fresh PC
-Claude/Codex native acceptance is still pending at this rollout checkpoint: the
-intended agent must list and call a granted tool after its authorized restart,
+A ready remote link is an intermediate result. Fresh PC Claude/Codex native
+acceptance requires the intended agent to list `clankie_tools`, `clankie_call`
+and `message_clankie`, then read an issue through `clankie_call` after cutover,
 and its reply needs its own delivery evidence. Until that happens, report the
 observed gap and use the lead's existing read/report route. Refresh the checkpoint
 from actual native results; do not carry an old limitation forward as a fact.

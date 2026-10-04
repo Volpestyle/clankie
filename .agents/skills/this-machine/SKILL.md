@@ -177,13 +177,15 @@ stores remain unknown. Goal state and busy/idle turn status are independent.
 `doctor.harnessBridges` reports the worker bridge separately from the operator
 seat: Claude plugin installation/enabling, Codex registration and generated config
 source, and live local process membership. Use `clankie mcp --fleet` for the
-owner-granted tools. Missing tools do not authorize an operator-lane fallback or
-another account's Linear connector. Ask the lead/owner to inspect `access list`
-and grant only the needed tools with `access project PROJECT SERVER --tool NAME`.
-Project tools require a verified native hire or actual cwd inside an approved
-project workspace. A fleet link or persona role alone is insufficient. Old fleet
-grants are retired without automatic reissue. Project grants persist until revoked; `access revoke ID` removes them from running
-sessions too. Local discovery carries no bearer. Outward-facing sends still need
+fleet connected tools. Admitted panes reach verified accounts through exactly
+`clankie_tools` and `clankie_call`; the worker plugin adds `message_clankie`.
+Search qualified names/descriptions, request selected schemas, then call with
+`{name, arguments}`. `clankie fleet set --tools off` disables fleet tools immediately.
+Missing tools do not authorize an operator lane or another Linear connector.
+Ask the lead to inspect link admission, `fleet status` and the connected account.
+Project grants, cwd and native sessions do not gate fleet tools. Projects keep
+roles, caps, hiring and tracker binding. Local discovery carries no bearer.
+Outward-facing sends still need
 the owner's instruction; the connection identity remains Clankie's connected
 account. A shared Codex app-server daemon cannot prove its pane; restart Codex in
 the pane under the existing daemon-disabled config, then check doctor again.
@@ -228,15 +230,15 @@ Remove only the enrollment with `clankie project remove-worktree-root NAME
 --worktree-root ROOT` and the same machine/platform flags. Remove root enrollments
 before their repo workspace. Neither command deletes filesystem content.
 
-### Windows fleet project tools
+### Windows fleet tools and native proof
 
-A configured Windows fleet uses a service-owned SSH relay to prove each native
-Claude/Codex bridge's accepted socket, process lifetime, ancestry to its live
-Herdr pane, installed executable and actual kernel cwd. The link discovery file
-contains no agent bearer. Register workspaces with that fleet's machine ID;
-`pc` and `kh2` registrations do not substitute for one another. A lost SSH link,
-shared daemon, unknown process or claimed other pane denies project tools and
-mailbox reads. The same project grants and revocation checks apply remotely.
+A configured Windows fleet uses a service-owned SSH relay to admit its live
+stream and pane for connected tools. Legacy fleet bearers also admit tools,
+without proving a pane or mailbox. Loss of the fleet connection denies tools.
+Native project, hire and mailbox proof still observes process lifetime, ancestry,
+installed executable and actual cwd. Register project workspaces with the fleet's
+machine ID; `pc` and `kh2` do not substitute for one another. Native proof does
+not gate tools once transport admission succeeds.
 See [the trust contract](../../../docs/remote-process-proof.md). Missing native
 catalog access still needs a real owner-run pane acceptance check after deployment;
 a host observer or isolated relay smoke test does not establish that acceptance.
@@ -265,6 +267,7 @@ lifetime to one live native pane/thread. They require the exact worker bridge
 shipped with the service; a stale, redirected or changed installation refuses
 before the first brief. The owner can update it with `clankie herdr prepare
 FLEET_ID`. Hiring does not rewrite the remote profile. The first brief waits for
-the assigned project's granted catalog, and changed project/grant/account state
-prevents dispatch. An unbound server or an arbitrary detached daemon grants no
-authority. An uncertain hire is not permission to retry or type into its pane.
+`clankie_tools` and `clankie_call` while fleet tools are on (neither while off),
+plus `message_clankie`. Changed native project/admission state still prevents hire
+dispatch; account checks apply when a provider tool is called. An unbound server
+confers no native hire or mailbox authority. An uncertain hire is not permission to retry or type into its pane.
