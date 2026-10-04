@@ -41,7 +41,11 @@ export function createFleetSeatControl(
     const session = agent.session;
     if (adapter === undefined || session === undefined) return undefined;
     // Codex rollout names include a timestamp before the native thread UUID.
-    const sessionId = nativeSessionId(agent) ?? basename(session.value, ".jsonl");
+    const sessionId =
+      adapter.harness === "pi"
+        ? nativeSessionId(agent)
+        : (nativeSessionId(agent) ?? basename(session.value, ".jsonl"));
+    if (sessionId === undefined) return undefined;
     return adapter
       .attach({ harness: adapter.harness, sessionId, paneId: agent.paneId })
       .catch(() => undefined);
@@ -249,10 +253,13 @@ export function createFleetSeatControl(
         };
       }
       const session = agent?.session;
+      const pi = agent?.agent === "pi" || session?.source === "herdr:pi";
       const sessionId =
         agent === undefined || session === undefined
           ? undefined
-          : (nativeSessionId(agent) ?? basename(session.value, ".jsonl"));
+          : pi && agent !== undefined
+            ? nativeSessionId(agent)
+            : (nativeSessionId(agent) ?? basename(session.value, ".jsonl"));
       const pending =
         fence.pending(key) ??
         fence.pending(seatId) ??
@@ -287,6 +294,12 @@ export function createFleetSeatControl(
           sessionId === pending.sessionId &&
           agent.paneId === pending.paneId &&
           (pending.occupantId === undefined || pending.occupantId === occupantId) &&
+          (!(pi || pending.nativeSessionPath !== undefined) ||
+            (pi &&
+              session?.source === "herdr:pi" &&
+              session.kind === "path" &&
+              session.value === pending.nativeSessionPath &&
+              pending.nativeMessageId !== undefined)) &&
           pending.beforeIds !== undefined
             ? await runner.transcript?.(agent).catch(() => undefined)
             : undefined;
@@ -294,6 +307,8 @@ export function createFleetSeatControl(
           (entry) =>
             entry.type === "message" &&
             entry.role === "operator" &&
+            (!(pi || pending.nativeSessionPath !== undefined) ||
+              entry.nativeRequestId === pending.nativeMessageId) &&
             !pending.beforeIds?.includes(entry.id) &&
             deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
         );
@@ -397,6 +412,9 @@ export function createFleetSeatControl(
         ...(occupantId === undefined ? {} : { occupantId }),
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(agent === undefined ? {} : { paneId: agent.paneId }),
+        ...(pi && session?.source === "herdr:pi" && session.kind === "path"
+          ? { nativeSessionPath: session.value }
+          : {}),
         ...(transcript === undefined ? {} : { beforeIds: transcript.entries.map((entry) => entry.id) }),
       };
       let receipt: ReturnType<DeliveryFence["begin"]> | undefined;
@@ -428,6 +446,8 @@ export function createFleetSeatControl(
           });
           receipt = undefined;
         }
+        if (pi && result.outcome === "unconfirmed" && result.messageId !== undefined && receipt !== undefined)
+          fence.update(key, receipt.messageId, { nativeMessageId: result.messageId });
         if (result.outcome !== "unconfirmed") clear();
         // Automatic peer/native delivery retains its existing unavailable receipt
         // when authority changes. An explicit app mode refusal reports rejected.

@@ -116,6 +116,7 @@ import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
 import { createGrokNativeHost } from "./captain/grok-native-host.ts";
 import { createOpenCodeNativeHost } from "./captain/opencode-native-host.ts";
+import { createPreparedNativeHost } from "./captain/prepared-native-host.ts";
 import { createProjectWorkspaceResolver } from "./project-membership.ts";
 import {
   createRemoteProjectObserver,
@@ -1028,6 +1029,11 @@ const captain = createCaptain(
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
     grokNative,
     openCodeNative: createOpenCodeNativeHost({
+      binding: localFleetBinding,
+      processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
+    }),
+    piNative: createPreparedNativeHost({
+      harness: "pi",
       binding: localFleetBinding,
       processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
     }),

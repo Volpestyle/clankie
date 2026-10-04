@@ -141,6 +141,7 @@ import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts"
 import { savedSessionFleet } from "./native-session-resume.ts";
 import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
+import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { PaneTidy } from "./pane-tidy.ts";
 import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
@@ -261,7 +262,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       createHerdrWatchRunner(
         deps.herdrAvailable,
         undefined,
-        (options.openCodeNative ?? options.grokNative)?.createCommandTab,
+        (options.openCodeNative ?? options.grokNative ?? options.piNative)?.createCommandTab,
         {
           localCodexBinding: () => deps.runtimes?.configuredBinding("default") ?? Promise.resolve(undefined),
         },
@@ -487,6 +488,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               repoRoot: options.repoRoot,
               stateDir: options.stateDir,
               native: options.openCodeNative,
+            }),
+          ]),
+      ...(options.piNative === undefined
+        ? []
+        : [
+            createPiSeatAdapter({
+              repoRoot: options.repoRoot,
+              stateDir: options.stateDir,
+              native: options.piNative,
             }),
           ]),
     ],

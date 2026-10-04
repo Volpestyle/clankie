@@ -33,6 +33,8 @@ export interface HerdrTranscriptMessage {
   readonly role: "operator" | "agent";
   /** Internal channel delivery identity; never rendered as operator chat. */
   readonly internal?: true;
+  /** Native Pi custom-message correlation, never inferred from visible text. */
+  readonly nativeRequestId?: string;
   readonly text: string;
   readonly occurredAt?: string | undefined;
 }
@@ -621,10 +623,39 @@ function claudePrompt(
 }
 
 function piEntries(entries: readonly Record<string, unknown>[]): HerdrTranscriptEntry[] {
-  const chain = activeChain(entries, "id", "parentId", (entry) => entry.type === "message");
+  const header = entries.find((entry) => entry.type === "session");
+  const sessionId = header?.version === 3 ? header.id : undefined;
+  const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu;
+  const chain = activeChain(
+    entries,
+    "id",
+    "parentId",
+    (entry) => entry.type === "message" || entry.type === "custom_message",
+  );
   const toolNames = new Map<string, string>();
   return dedupeTools(
     chain.flatMap<HerdrTranscriptEntry>((entry, entryIndex) => {
+      // Pi's native extension messages carry semantic details outside their
+      // visible content. Render the native text without exposing receipt IDs.
+      if (entry.type === "custom_message") {
+        if (entry.display !== true) return [];
+        const details = record(entry.details);
+        const nativeRequestId =
+          entry.customType === "clankie-worker-message" &&
+          typeof sessionId === "string" &&
+          uuid.test(sessionId) &&
+          details?.sessionId === sessionId &&
+          typeof details.requestId === "string" &&
+          uuid.test(details.requestId)
+            ? details.requestId
+            : undefined;
+        return transcriptMessage(
+          `pi:${string(entry.id) ?? String(entryIndex)}`,
+          "operator",
+          messageText(entry.content),
+          timestamp(entry),
+        ).map((message) => ({ ...message, ...(nativeRequestId === undefined ? {} : { nativeRequestId }) }));
+      }
       const message = record(entry.message);
       if (message === undefined) return [];
       const nativeId = string(entry.id) ?? String(entryIndex);
