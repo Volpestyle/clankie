@@ -95,6 +95,8 @@ const HEADLESS_COMMAND_HELP = [
       "  conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
       "                           Inspect every conversation, including Discord tools (JSON)",
       "  conversations channels | rooms | channel [ID] [--title T] [--member PERSONA_ID]...",
+      "  conversations questions ID [--request UUID]",
+      "  conversations answer|cancel-question ID REQUEST --incarnation UUID --revision N [--option UUID | --text TEXT | --stdin]",
       "                [--discord provision [--room ROOM_ID] | --discord off | --webhook-stdin] | --json-stdin",
       "                           Agent channels and their swarm-home Discord rooms (JSON)",
     ],

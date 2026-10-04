@@ -1,3 +1,4 @@
+import { questionConsoleCommand } from "./question-commands.ts";
 import { runUpdateCommand } from "./command/update.ts";
 import { buildHostedConnectionCommands } from "./hosted-console.ts";
 import { gatewayStatus } from "./command/gateway.ts";
@@ -129,7 +130,16 @@ const captainRouteClient = createCaptainRouteClient({
   ...(callerHerdrSocket ? { herdrSocketPath: callerHerdrSocket } : {}),
   ...(captainRouteToken === undefined ? {} : { captainToken: captainRouteToken }),
 });
-const conversationClient = createCaptainOperatorConversationClient(captainRouteClient);
+const conversationClient = createCaptainOperatorConversationClient(
+  captainRouteClient,
+  operatorCredential
+    ? createCaptainRouteClient({
+        host: serviceUrl,
+        captainToken: operatorCredential.token,
+        ...(callerHerdrSocket ? { herdrSocketPath: callerHerdrSocket } : {}),
+      })
+    : undefined,
+);
 const herdrRoster = new HerdrRoster(conversationClient);
 const herdrOptions = {
   repoRoot,
@@ -226,7 +236,12 @@ try {
   conversationNotice = `conversation selection unavailable: ${error instanceof Error ? error.message : String(error)}`;
 }
 
+const questionCommand = questionConsoleCommand(
+  conversationClient,
+  () => conversationSelection.conversationId,
+);
 const conversationsContext = {
+  question: questionCommand,
   designateHead: async (headConversationId: string | null) => {
     const conversationId = conversationSelection.conversationId;
     if (operatorClient === undefined || conversationId === undefined)

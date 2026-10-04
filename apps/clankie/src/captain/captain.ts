@@ -1,3 +1,9 @@
+import {
+  authorizeQuestion,
+  questionWorkspaceContext,
+  sameQuestionWorkspace,
+  type QuestionAuthority,
+} from "./conversation-questions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
@@ -1633,6 +1639,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // A queued turn may start after close releases the preceding seat waiter.
       // It must not see an empty outbox and fall through into a fresh Pi turn.
       shutdown.signal.throwIfAborted();
+      if (context.inputAnswer) {
+        await authorizeQuestion(context.ownerAuthority);
+        if (!conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
+      }
       // Turning follow off also drops activity still queued behind a live turn.
       if (
         context.origin === "hook" &&
@@ -1741,6 +1751,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         current: bodyIdentity.current,
         authorize: bodyIdentity.authorize,
       };
+      lane.capture.requestQuestion =
+        context.ownerAuthority && context.questionBinding
+          ? (draft) =>
+              conversations.requestQuestion(conversationId, draft, {
+                ...context,
+                questionCurrent: bodyIdentity.current,
+              })
+          : undefined;
       lane.capture.room = roomKey("operator", conversationId);
       lane.capture.targetId = conversationId;
       lane.capture.publishFile = (input) => conversations.publishFile({ conversationId, ...input });
@@ -1882,6 +1900,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           context.attachments === undefined
             ? undefined
             : await modelImagesForOwnerAttachments(context.attachments);
+        const workspaceNote =
+          context.ownerAuthority && context.questionBinding
+            ? await questionWorkspaceContext(cwd, async () => (await settings()).projects)
+            : "";
+        if (context.ownerAuthority && context.questionBinding) {
+          await authorizeQuestion(context.ownerAuthority);
+          if (!conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
+        }
         const prompt = resolveOperatorPrompt(
           attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
           invocableSkills(lane.session.resourceLoader.getSkills().skills, lane.quietSkills),
@@ -1904,12 +1930,39 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }
         // The resource loader disables discovered extensions and prompt templates;
         // exact, loaded operator skills are the only input allowed to reach Pi expansion.
-        const role = await runDurableTurn(lane, prompt.prompt, attached?.images ?? [], {
-          expandPromptTemplates: prompt.skillName !== undefined,
-          // runDurableTurn rechecks immediately before prompt/steer, including
-          // after waiting for another invocation or its startup reservation.
-          signal: AbortSignal.any([context.signal, shutdown.signal]),
-        });
+        const role = await runDurableTurn(
+          lane,
+          [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
+          attached?.images ?? [],
+          {
+            expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,
+            ...(context.inputAnswer
+              ? {
+                  // Existing admission reservation rechecks immediately before prompt().
+                  preparePrompt: async () => {
+                    await authorizeQuestion(context.ownerAuthority);
+                    return () => {
+                      if (
+                        !bodyIdentity.current() ||
+                        !context.ownerAuthority!.current() ||
+                        !conversations.questionEligible(conversationId) ||
+                        !context.questionBinding ||
+                        !sameQuestionWorkspace(cwd, context.questionBinding.workspace)
+                      )
+                        throw new Error("question_context_lost");
+                      return [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n");
+                    };
+                  },
+                  onAbsorbed: () => {
+                    throw new Error("question_continuation_busy");
+                  },
+                }
+              : {}),
+            // runDurableTurn rechecks immediately before prompt/steer, including
+            // after waiting for another invocation or its startup reservation.
+            signal: AbortSignal.any([context.signal, shutdown.signal]),
+          },
+        );
         if (role === "absorbed") return;
         const text = lane.lastAssistantText.trim();
         await laneLog.append("operator", conversationId, {
@@ -2020,6 +2073,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     workingDirectory,
     ownerAttachmentHost(),
   );
+  conversations.questionEligible = (id) =>
+    !conversations.nativeSource(id) && !seatOutboxes.get(id)?.bound() && !seatOutboxes.get(id)?.uncertain();
 
   /**
    * Owner uploads and their way into a seat (ADR 0209). A seat receives files
@@ -3063,6 +3118,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     async serveOperatorConversation(
       request: OperatorConversationServiceRequest,
+      authority?: QuestionAuthority,
     ): Promise<OperatorConversationServiceResult> {
       await personas.ready(settingsStore);
       if (
@@ -3470,7 +3526,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           }
         }
       }
-      const result = await conversations.serve(request);
+      const result = await conversations.serve(request, authority);
       if (request.op === "create" && request.scope.kind === "seat") {
         herdrWatches.trackSeat(request.scope.seatId);
       } else if (request.op === "create" && request.scope.kind === "persona") {
@@ -3513,6 +3569,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       return result;
     },
+
+    invalidateQuestionPrincipal: (deviceId) => conversations.invalidateQuestionPrincipal(deviceId),
 
     async observeLanes(): Promise<readonly ObservableCaptainLane[]> {
       return laneLog.list();
@@ -3634,6 +3692,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     pollSeatEvents(waitMs, signal, conversationId) {
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
+      conversations.cancelPendingQuestion(binding.conversationId, "native_seat_takeover");
       const events = seatOutbox(binding.conversationId).poll(waitMs, signal);
       return events;
     },

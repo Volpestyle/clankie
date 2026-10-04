@@ -1,3 +1,4 @@
+import type { QuestionAuthority } from "./conversation-questions.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import type { ProjectHireAssignment, ProjectHireProcessProof } from "./project-hires.ts";
 import type { ConversationOwner, ConversationAuthority } from "./conversation-owner.ts";
@@ -139,7 +140,9 @@ export interface CaptainPort {
   /** Callable operator service for conversations and read-only terminal tails. */
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
+    authority?: QuestionAuthority,
   ): Promise<OperatorConversationServiceResult>;
+  invalidateQuestionPrincipal?(deviceId: string): void;
   /** Lane transcript snapshots for the TUI lanes view. */
   observeLanes(): Promise<readonly ObservableCaptainLane[]>;
   /**

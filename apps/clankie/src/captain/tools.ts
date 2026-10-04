@@ -1,3 +1,5 @@
+import type { QuestionDraft } from "./conversation-questions.ts";
+import type { ConversationQuestionResult } from "@clankie/protocol";
 import {
   captureConversationAuthority,
   assertConversationAuthority,
@@ -55,6 +57,7 @@ import { WorkRequestSchema } from "../work-items.ts";
  * (which scopes every room-keyed read and write a tool makes).
  */
 export interface TurnContext {
+  requestQuestion?: ((draft: QuestionDraft) => Promise<ConversationQuestionResult>) | undefined;
   /** Host-only immutable conversation ownership and current admission authority. */
   conversationAuthority?: ConversationAuthority | undefined;
   /** Immutable host binding for this turn; never populated from tool arguments. */

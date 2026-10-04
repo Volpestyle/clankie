@@ -85,9 +85,14 @@ export function createCaptainRouteClient(input: {
  */
 export function createCaptainOperatorConversationClient(
   fetcher: CaptainRouteFetcher,
+  ownerFetcher?: CaptainRouteFetcher,
 ): OperatorConversationClient {
   const dispatch: OperatorConversationServiceDispatch = async (request, signal) => {
-    const response = await fetcher.fetch(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+    const transport =
+      ownerFetcher && ["send", "input_get", "input_answer", "input_cancel"].includes(request.op)
+        ? ownerFetcher
+        : fetcher;
+    const response = await transport.fetch(OPERATOR_CONVERSATION_DISPATCH_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request),

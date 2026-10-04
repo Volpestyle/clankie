@@ -11,6 +11,8 @@ import {
 } from "../session/operator-conversations.ts";
 import {
   UpsertOperatorChannelSchema,
+  ConversationQuestionTargetSchema,
+  ConversationQuestionAnswerSchema,
   type OperatorConversationServiceClient,
   type UpsertOperatorChannel,
 } from "@clankie/protocol";
@@ -41,6 +43,8 @@ export async function runConversationsCommand(
     readonly stdin?: AsyncIterable<unknown> & { readonly isTTY?: boolean };
   },
 ): Promise<number> {
+  if (["questions", "answer", "cancel-question"].includes(args[0] ?? ""))
+    return runQuestionAction(args, options);
   if (args[0] === "head") {
     if (args.length !== 3 || !args[1] || !args[2]) throw new Error(USAGE);
     const env = options.env ?? process.env;
@@ -241,4 +245,71 @@ async function runChannelAction(
   }
   outputJson(stdout, await client.channel(request));
   return 0;
+}
+
+async function runQuestionAction(
+  args: readonly string[],
+  options: ConversationsCommandOptions,
+): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: {
+      request: { type: "string" },
+      incarnation: { type: "string" },
+      revision: { type: "string" },
+      option: { type: "string" },
+      text: { type: "string" },
+      stdin: { type: "boolean" },
+    },
+  });
+  const [action, conversationId, requestId] = positionals;
+  if (!conversationId || positionals.length > 3)
+    throw new Error("Question action requires an exact conversation ID");
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  if (!credential) throw new Error("Owner operator credential required for preference questions");
+  const client = createCaptainOperatorConversationClient(
+    createCaptainRouteClient({
+      host: commandHost({ ...options, env }),
+      captainToken: credential.token,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    }),
+  );
+  let result;
+  if (action === "questions") {
+    if (requestId || Object.keys(values).some((k) => k !== "request"))
+      throw new Error("Usage: conversations questions ID [--request UUID]");
+    result = await client.inputGet!(conversationId, values.request);
+  } else {
+    const target = ConversationQuestionTargetSchema.parse({
+      conversationId,
+      requestId,
+      incarnationId: values.incarnation,
+      expectedRevision: values.revision === undefined ? undefined : Number(values.revision),
+    });
+    if (action === "cancel-question") {
+      if (values.option !== undefined || values.text !== undefined || values.stdin || values.request)
+        throw new Error("Cancel takes a request, incarnation and revision only");
+      result = await client.inputCancel!(target);
+    } else {
+      if (
+        [values.option !== undefined, values.text !== undefined, values.stdin === true].filter(Boolean)
+          .length !== 1 ||
+        values.request
+      )
+        throw new Error("Answer needs exactly one of --option UUID, --text TEXT, or --stdin");
+      const answer = ConversationQuestionAnswerSchema.parse(
+        values.option !== undefined
+          ? { kind: "choice", optionId: values.option }
+          : { kind: "text", text: values.stdin ? await readStdin(options, "answer text") : values.text },
+      );
+      result = await client.inputAnswer!({ ...target, answer });
+    }
+  }
+  outputJson(options.stdout ?? process.stdout, result);
+  return result.status === "ready" || result.status === "resolved" ? 0 : 1;
 }
