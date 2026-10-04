@@ -373,6 +373,34 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/devices",
+      {
+        access: "Operator or paired device bearer",
+        purpose: "List the owner's paired devices for Settings → Devices.",
+      },
+    ],
+    [
+      "POST /v1/devices/:id/revoke",
+      {
+        access: "Operator, or a paired device holding terminal control",
+        purpose: "Revoke one paired device, including the caller itself.",
+      },
+    ],
+    [
+      "GET /v1/captain/readiness",
+      {
+        access: "Operator or paired device bearer",
+        purpose: "Say whether Clankie can answer and, if not, the secret-free setup reason.",
+      },
+    ],
+    [
+      "GET /v1/devices/self/diagnostics-default",
+      {
+        access: "Operator or paired device bearer",
+        purpose: "Read the account's diagnostics default the device inherits; no other settings.",
+      },
+    ],
+    [
       "POST /v1/devices/self/session/refresh",
       {
         access: "Device bearer",
