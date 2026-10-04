@@ -87,3 +87,25 @@ it("refuses before dispatch when guard fails", async () => {
   ).toEqual({ outcome: "refused" });
   expect(fetcher).not.toHaveBeenCalled();
 });
+it("accepts hostname-only SRV invites and rejects private endpoints or invalid ports", async () => {
+  const execute = vi.fn(async () => ({ ok: true, message: "posted" }));
+  const invite = createMinecraftHostInvite({ discordActions: { execute }, guard: async () => {} });
+  const status = { phase: "running", authReady: true, version: "1.21.4" };
+  expect(await invite(identity, { ...status, tunnel: { publicAddress: "world.playit.gg" } })).toEqual({
+    outcome: "delivered",
+  });
+  for (const publicAddress of [
+    "localhost",
+    "127.0.0.1:25565",
+    "10.0.0.1",
+    "192.168.1.1",
+    "172.16.0.1:25565",
+    "host.local",
+    "world.playit.gg:0",
+    "world.playit.gg:65536",
+    "bad..playit.gg",
+  ]) {
+    expect(await invite(identity, { ...status, tunnel: { publicAddress } })).toEqual({ outcome: "refused" });
+  }
+  expect(execute).toHaveBeenCalledTimes(1);
+});

@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import { z } from "zod";
 import type { BodyConversationIdentity } from "./body-lease-router.ts";
 import { ConversationOwnerSchema, type ConversationOwner } from "./captain/conversation-owner.ts";
@@ -85,10 +86,33 @@ const Status = z.object({
     publicAddress: z
       .string()
       .max(260)
-      .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?:\d{1,5}$/u)
+      .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?(?::\d{1,5})?$/u)
       .refine((address) => {
-        const port = Number(address.split(":").at(-1));
-        return port > 0 && port <= 65535;
+        const [host = "", port] = address.toLowerCase().split(":");
+        if (port !== undefined && (Number(port) < 1 || Number(port) > 65535)) return false;
+        if (isIP(host) === 4) {
+          const [first = 0, second = 0] = host.split(".").map(Number);
+          return (
+            first !== 0 &&
+            first !== 10 &&
+            first !== 127 &&
+            first < 224 &&
+            !(first === 169 && second === 254) &&
+            !(first === 172 && second >= 16 && second <= 31) &&
+            !(first === 192 && second === 168) &&
+            !(first === 100 && second >= 64 && second <= 127)
+          );
+        }
+        if (
+          /^[0-9.]+$/u.test(host) ||
+          !host.includes(".") ||
+          /(?:^|\.)(?:localhost|local|internal)$/u.test(host)
+        )
+          return false;
+        return (
+          host.length <= 253 &&
+          host.split(".").every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(label))
+        );
       }),
   }),
 });
