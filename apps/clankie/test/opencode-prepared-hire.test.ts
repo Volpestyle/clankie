@@ -21,6 +21,7 @@ import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -154,7 +155,7 @@ test("actual prepared hire preserves the first process proof without old tool re
   const f = await fixture();
   expect(await f.hire()).toMatchObject({ outcome: "spawned", control: { mode: "adapter" } });
   expect(f.runner.createTab).toHaveBeenCalledWith(
-    expect.objectContaining({ command: f.prepared.command, env: f.prepared.env }),
+    expect.objectContaining({ command: f.prepared.command, env: expect.objectContaining(f.prepared.env) }),
   );
   expect(f.prepared.verify).toHaveBeenCalled();
   expect(f.brief).toHaveBeenCalledOnce();
@@ -179,6 +180,19 @@ test("actual prepared hire preserves the first process proof without old tool re
   } finally {
     restored.close();
   }
+});
+
+test("local prepared hires carry the service's absolute discovery state through adapter and pane creation", async () => {
+  const f = await fixture();
+  vi.stubEnv("CLANKIE_STATE", " .local/private-service ");
+  const expected = join(process.cwd(), ".local/private-service");
+  expect(await f.hire()).toMatchObject({ outcome: "spawned" });
+  expect(f.adapter.prepare).toHaveBeenCalledWith(
+    expect.objectContaining({ env: expect.objectContaining({ CLANKIE_STATE: expected }) }),
+  );
+  expect(f.runner.createTab).toHaveBeenCalledWith(
+    expect.objectContaining({ env: expect.objectContaining({ CLANKIE_STATE: expected }) }),
+  );
 });
 
 test.each([

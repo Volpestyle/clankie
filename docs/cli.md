@@ -126,6 +126,12 @@ The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
 Always JSON, always exit 0. `ok` means the card was produced. Missing optional
 tools are facts in `remediations`, not failures.
 
+Local fleet discovery uses `<CLANKIE_STATE>/links`, defaulting to
+`~/.clankie/links`. Local hires carry the service's absolute state path, including
+into the Codex MCP bridge. Doctor and native workers select that same directory;
+an explicit private state directory never falls back to shared discovery.
+SSH fleets keep their own machine's discovery directory.
+
 `harnessBridges.linkedSession` checks Claude/Codex panes in the discovered local
 Herdr session, even when doctor runs outside that session. On macOS it joins the
 live foreground harness and bridge ancestry (or the exact dedicated Codex

@@ -22,10 +22,10 @@ function normalSocket(path) {
  * The link for the Herdr session this pane is in, when this machine has one;
  * including Clankie’s own local fleet. One machine can host several of
  * his fleets, one per Herdr session, so the pane's own HERDR_SOCKET_PATH
- * chooses among ~/.clankie/links/*.json.
+ * chooses among <CLANKIE_STATE or ~/.clankie>/links/*.json.
  */
-export function readLink(socket = process.env.HERDR_SOCKET_PATH) {
-  const dir = join(homedir(), ".clankie", "links");
+export function readLink(socket = process.env.HERDR_SOCKET_PATH, env = process.env) {
+  const dir = join(env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"), "links");
   let links = [];
   try {
     links = readdirSync(dir)
@@ -55,9 +55,11 @@ export function readLink(socket = process.env.HERDR_SOCKET_PATH) {
 }
 
 /** Whether this machine has any link at all: it is in one of his fleets. */
-export function hasLinks() {
+export function hasLinks(env = process.env) {
   try {
-    return readdirSync(join(homedir(), ".clankie", "links")).some((name) => name.endsWith(".json"));
+    return readdirSync(join(env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"), "links")).some((name) =>
+      name.endsWith(".json"),
+    );
   } catch {
     return false;
   }

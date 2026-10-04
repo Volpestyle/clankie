@@ -54,7 +54,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual, stripVTControlCharacters } from "node:util";
 import { redactSensitiveText } from "@clankie/observability";
 import {
@@ -1960,6 +1960,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
         throw new Error(
           "Split placement requires a verified lead pane in the target fleet. Choose new-tab or hire from that native lead conversation.",
         );
+      // External Herdr panes inherit the server's environment, not this
+      // service's. Carry its discovery namespace explicitly for local hires.
+      // Trusted preallocation owns its complete environment; SSH fleets use
+      // their own machine's state and must never receive this local path.
+      if (prepared === undefined && remote === undefined) {
+        skillLaunch = {
+          ...skillLaunch,
+          env: {
+            ...skillLaunch.env,
+            CLANKIE_STATE: resolve(process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie")),
+          },
+        };
+      }
       await this.nativeLaunchPolicy?.admit({
         seat: structuredClone(input),
         phase: "launch",

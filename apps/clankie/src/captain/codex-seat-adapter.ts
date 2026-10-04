@@ -181,7 +181,7 @@ export function createCodexSeatAdapter(
               "mcp_servers.clankie.enabled=true",
               'mcp_servers.clankie.command="clankie"',
               'mcp_servers.clankie.args=["mcp","--fleet"]',
-              'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH"]',
+              'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
             );
           await view.guard?.();
           seat = await (options.start ?? startCodexAppServerSeat)({
