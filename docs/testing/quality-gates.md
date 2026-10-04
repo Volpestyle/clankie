@@ -27,6 +27,25 @@ and native builds run at release time or on an explicit manual run.
 
 ## Isolation and reproducibility
 
+The shared `vitest.config.ts` setup gives each test file a fresh temporary HOME
+and XDG directories before its imports. It overrides `CLANKIE_SETTINGS_FILE`
+and `CLANKIE_CREDENTIALS_FILE`, selecting the file credential backend even on
+macOS, and removes inherited Clankie, Discord, Herdr and provider-key overrides.
+Node children inherit the same fixture paths. Cleanup removes the temporary
+directory after the file finishes; tests supply their own synthetic overrides
+when exercising configuration or authentication.
+
+The isolation regression launches focused Vitest fixtures against populated,
+empty and missing synthetic owner configs. A preload trap rejects filesystem
+access to those paths and the original owner config paths, and rejects Keychain
+commands, including in child processes. It also checks that fixture settings
+and credentials can be read and written normally.
+
+Live store access is an explicit manual opt-in: `CLANKIE_TEST_LIVE_STORES=1`
+disables the shared isolation. The existing Keychain smoke test separately
+requires `CLANKIE_KEYCHAIN_TESTS=1`; injected fake Keychain runners remain ordinary
+tests. Never enable either flag for an ordinary check or CI run.
+
 `apps/clankie/test/fixtures/qa-service.ts` binds an OS-assigned loopback port,
 uses a fixed injectable clock, a generated test-only signing key and bearer,
 and a disposable event log. Restart reconstructs the production app from that
