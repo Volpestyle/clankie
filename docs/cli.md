@@ -126,6 +126,40 @@ The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
 Always JSON, always exit 0. `ok` means the card was produced. Missing optional
 tools are facts in `remediations`, not failures.
 
+`harnessBridges.linkedSession` checks Claude/Codex panes in the discovered local
+Herdr session, even when doctor runs outside that session. On macOS it joins the
+live foreground harness and bridge ancestry (or the exact dedicated Codex
+`--remote`/`--listen` socket) with the bridge process's `HERDR_PANE_ID` and
+`HERDR_SOCKET_PATH`. It returns only those identity facts, never the full process
+environment. The roster carries the same observation in each seat's
+`harnessBridge`; the console flags missing/mismatched bridges and shows the
+selected pane's full fix when focused with `Ctrl+G`. Roster polls reuse these
+bounded process observations for up to five seconds; doctor takes a fresh sample.
+
+- `live-process`: the pane has a matching live bridge process. This does not
+  verify the native tool catalog, a successful call, or reply delivery.
+- `missing`: a live native harness has no observed descendant or dedicated
+  socket-matched bridge. For Claude, install/enable `clankie-worker@clankie` in
+  that pane's actual profile and restart/resume it. For Codex, check its
+  source-owned bridge registration and resume with
+  `codex --no-daemon resume <SESSION>`.
+- `pane-mismatch`: the observed bridge claims another pane/socket. Check its
+  source-owned registration and resume Codex in its own pane with
+  `codex --no-daemon resume <SESSION>`. If a shared daemon is observed, save
+  affected sessions and run `codex app-server daemon stop` first. Keep
+  `daemon_auto_start=false` in the owning configuration source.
+- `unobserved`: foreground process or environment facts are unavailable; this
+  is not evidence of a missing bridge. Non-macOS host observation is currently
+  unsupported; remote fleet native bridge acceptance remains a separate check.
+
+`linkedSession.unownedBridges` names bridges on the linked socket without an
+observed native owner. A bridge descending from an actual
+`app-server-daemon` executable reports its inherited `claimedPane` and the daemon
+stop/resume fix. A daemon's claim alone never assigns its sessions to that pane.
+Hand-started `claude`/`claude2` sessions must list `message_clankie`,
+`clankie_tools`, and `clankie_call` after the profile fix; installation alone does
+not establish acceptance.
+
 ```json
 {
   "ok": true,

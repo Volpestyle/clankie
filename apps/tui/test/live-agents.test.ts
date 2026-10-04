@@ -79,3 +79,18 @@ it("routes focus, expand, Escape and workspace without sending keys or interrupt
   await vi.waitFor(() => expect(leave).toHaveBeenCalledOnce());
   expect(interrupt).not.toHaveBeenCalled();
 });
+
+it("flags a missing bridge and reveals the entire selected fix within narrow widths", () => {
+  const worker = agent("gap");
+  worker.seat.harnessBridge = {
+    status: "missing",
+    detail: "No bridge process",
+    remediation: "Save sessions; codex app-server daemon stop; codex --no-daemon resume <SESSION>",
+  };
+  const strip = new LiveAgentStrip(() => [worker]);
+  expect(strip.render(120).join("\n")).toContain("bridge missing");
+  strip.focused = true;
+  const narrow = strip.render(40);
+  expect(narrow.every((row) => visibleWidth(row) <= 40)).toBe(true);
+  expect(narrow.join(" ")).toContain("codex --no-daemon resume");
+});

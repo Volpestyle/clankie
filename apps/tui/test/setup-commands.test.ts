@@ -47,6 +47,7 @@ const report: InstallDoctorReport = {
   commands: { codex: { present: true }, claude: { present: false } },
   herdrPlugin: { bundled: false },
   harnessBridges: {
+    linkedSession: { state: "no-link", panes: [], unownedBridges: [] },
     profiles: {
       machine: { platform: "darwin", home: "/home" },
       claude: [],

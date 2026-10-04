@@ -915,8 +915,21 @@ export const OperatorSeatSubagentsSchema = z
   .strict();
 export type OperatorSeatSubagents = z.infer<typeof OperatorSeatSubagentsSchema>;
 
+const OperatorHarnessBridgeSchema = z
+  .object({
+    status: z.enum(["live-process", "missing", "pane-mismatch", "unobserved"]),
+    detail: z.string().max(1024),
+    remediation: z.string().max(1024).optional(),
+    bridgePid: z.number().int().positive().optional(),
+    claimedPane: z.string().max(128).optional(),
+    sharedDaemon: z.boolean().optional(),
+  })
+  .strict();
+
 export const OperatorFleetSeatSchema = z
   .object({
+    /** Host-observed bridge facts, not tool or message delivery acceptance. */
+    harnessBridge: OperatorHarnessBridgeSchema.optional(),
     account: OperatorCodexAccountSchema.optional(),
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     /** Harness-session identity; stable when the same agent moves panes. */

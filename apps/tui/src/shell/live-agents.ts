@@ -1,4 +1,9 @@
-import { stripTerminalSequences, truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import {
+  stripTerminalSequences,
+  truncateToWidth,
+  wrapTextWithAnsi,
+  type Component,
+} from "@earendil-works/pi-tui";
 import type { LiveAgent } from "../observation/herdr-roster.ts";
 
 /** A bounded dock window; selection is a qualified seat identity, never a row or bare pane. */
@@ -32,13 +37,22 @@ export class LiveAgentStrip implements Component {
     const start = Math.max(0, index - 2);
     const rows = agents.slice(start, start + 3);
     const clean = (text: string) => stripTerminalSequences(text).replace(/[\r\n\t]/gu, " ");
+    const remediation = selected?.seat.harnessBridge?.remediation;
     return [
       `Agents · ${agents.length} · ${this.focused ? "↑↓ select · enter look inside · esc back" : "ctrl+g look inside"}${agents.length > 3 ? ` · ${start + 1}–${start + rows.length}/${agents.length}` : ""}`,
       ...rows.map(({ name, seat }) => {
         const machine = seat.machine ?? seat.fleet;
+        const bridge = seat.harnessBridge;
+        const warning =
+          bridge && bridge.status !== "live-process" && bridge.status !== "unobserved"
+            ? ` · bridge ${bridge.status}: ${bridge.remediation ?? bridge.detail}`
+            : "";
         const step = seat.stance?.note || seat.title || seat.summary || "step unavailable";
-        return `${this.focused && seat.seatId === selected?.seat.seatId ? "›" : "·"} ${clean(name)} · ${clean(seat.harness)} · ${clean(seat.status)}${machine && machine !== "local" ? ` · ${clean(machine)}` : ""} · ${clean(step)}`;
+        return `${this.focused && seat.seatId === selected?.seat.seatId ? "›" : "·"} ${clean(name)} · ${clean(seat.harness)} · ${clean(seat.status)}${machine && machine !== "local" ? ` · ${clean(machine)}` : ""}${clean(warning)} · ${clean(step)}`;
       }),
+      ...(this.focused && remediation
+        ? wrapTextWithAnsi(`Fix: ${clean(remediation)}`, Math.max(1, width))
+        : []),
     ].map((line) => truncateToWidth(line, Math.max(1, width), "…"));
   }
 }

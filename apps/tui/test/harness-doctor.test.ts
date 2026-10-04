@@ -34,20 +34,28 @@ it("reports harness registration, generated config source, and live membership s
         url: "http://127.0.0.1:54321",
       }),
     );
-    const execute = async (command: string) => ({
+    const execute = async (command: string, args: readonly string[]) => ({
       stderr: "",
       stdout:
-        command === "codex"
+        command === "/usr/bin/env"
           ? JSON.stringify({
-              enabled: true,
-              transport: {
-                command: "clankie",
-                args: ["mcp", "--fleet"],
-                env_vars: ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"],
-                env: { SECRET: "never-report-me" },
-              },
+              result: args.includes("list")
+                ? { agents: [{ pane_id: "w1:p1", agent: "claude" }] }
+                : { process_info: { pane_id: "w1:p1", shell_pid: 10, foreground_process_group_id: 20 } },
             })
-          : `${process.pid} 1 /app-server-daemon/bin/codex`,
+          : command === "/bin/ps"
+            ? "20 10 /bin/claude"
+            : command === "codex"
+              ? JSON.stringify({
+                  enabled: true,
+                  transport: {
+                    command: "clankie",
+                    args: ["mcp", "--fleet"],
+                    env_vars: ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"],
+                    env: { SECRET: "never-report-me" },
+                  },
+                })
+              : `${process.pid} 1 /app-server-daemon/bin/codex`,
     });
     const env = { HOME: home, HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "/test/default.sock" };
     const probe: typeof fetch = async (_url, options) => {
@@ -57,6 +65,17 @@ it("reports harness registration, generated config source, and live membership s
     const report = await inspectHarnessBridges(env, execute, probe);
     expect(report.codex).toMatchObject({ registered: true, configSource: await realpath(source) });
     expect(report.claude).toEqual({ installed: true, enabled: true });
+    if (process.platform === "darwin")
+      expect(report.linkedSession.panes[0]).toMatchObject({
+        paneId: "w1:p1",
+        status: "missing",
+        remediation: expect.stringContaining("clankie-worker@clankie"),
+      });
+    const outside = await inspectHarnessBridges({ HOME: home }, execute, probe);
+    expect(outside.localFleet.membership).toBe(
+      process.platform === "darwin" ? "not-in-session" : "unsupported",
+    );
+    expect(outside.linkedSession.panes).toEqual(report.linkedSession.panes);
     expect(report.localFleet.sharedDaemon).toBe(true);
     expect(report.localFleet.membership).toBe(process.platform === "darwin" ? "verified" : "unsupported");
     expect(JSON.stringify(report)).not.toContain("never-report-me");

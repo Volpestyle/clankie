@@ -2336,7 +2336,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ...(options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner, summaries: {} } : {}),
       fleets: await censusFleets(),
       localAvailable: deps.herdrAvailable?.() !== false,
-      ...(binding ? { herdrSession: binding.session } : {}),
+      ...(binding ? { herdrSession: binding.session, bridgeSocket: binding.socketPath } : {}),
     });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
@@ -2368,7 +2368,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           fleet.seats,
           agentWork,
         );
-    const nextWork = JSON.stringify(seats.map((seat) => [seat.goal, seat.assignment]));
+    const nextWork = JSON.stringify(seats.map((seat) => [seat.goal, seat.assignment, seat.harnessBridge]));
     if (seatWork !== nextWork) {
       seatWork = nextWork;
       fleetChanges.touch();
