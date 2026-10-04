@@ -11,6 +11,7 @@ import {
   OperatorConversationIdSchema,
   OperatorConversationServiceResultSchema,
   OperatorSurfaceClientIdSchema,
+  parseProtocolResponse,
   type OperatorConversation,
   type OperatorConversationLiveDraft,
   type OperatorConversationRecovery,
@@ -114,7 +115,7 @@ export function createCaptainOperatorConversationClient(
       throw new Error(`Operator conversation dispatch failed with status ${response.status}`);
     }
     try {
-      return OperatorConversationServiceResultSchema.parse(await response.json());
+      return parseProtocolResponse(OperatorConversationServiceResultSchema, await response.json());
     } catch (error) {
       throw new OperatorConversationClientError(
         "Clankie conversation response failed schema validation",

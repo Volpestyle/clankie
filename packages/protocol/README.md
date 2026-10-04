@@ -19,6 +19,22 @@ identifiers stable, validate at trust boundaries, and coordinate incompatible
 changes with every consumer. A legacy field such as `missionId` or a
 `captain.*` identifier is a compatibility name, not current product terminology.
 
+Client JSON response boundaries use `parseProtocolResponse(schema, value)` or
+`safeParseProtocolResponse` from the root export. These readers discard unknown
+object keys at every reported level, then validate the known shape using the
+original schema. Optional host additions therefore remain readable by an older
+client of the same wire version. Known values, bounds, versions and discriminators
+still fail validation when invalid. Dynamic record keys and declared catchall
+data remain intact. Use ordinary strict schema parsing for requests, persisted
+state and authenticated encryption envelopes; response tolerance grants no
+authority and never changes those schemas.
+
+VUH-1635 exposed this distinction when new subagent metadata made an older
+app reject an entire successful fleet response. Existing installed clients
+with strict response parsing need new bundled JavaScript to gain tolerance.
+Omitting new optional fields at the host's device boundary can mitigate them,
+but withholds that metadata until those clients update or negotiate a view.
+
 [Architecture](../../docs/architecture.md) explains the service boundaries.
 [OpenAPI](../../apps/clankie/openapi.yaml) catalogs HTTP operations.
 The [public network reference](https://docs.clankie.bot/network/) renders the

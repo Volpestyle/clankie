@@ -1,3 +1,4 @@
+import { parseProtocolResponse, safeParseProtocolResponse } from "@clankie/protocol";
 import {
   DISCORD_VOICE_OUTPUT_GUARD_PATH,
   DISCORD_ROOM_VOICE_PATH,
@@ -167,7 +168,7 @@ export class ClankieApiClient {
       } catch {
         /* Preserve the original HTTP error. */
       }
-      const lease = BodyLeaseResultSchema.safeParse(parsed);
+      const lease = safeParseProtocolResponse(BodyLeaseResultSchema, parsed);
       const error = new Error(`Clankie API ${response.status}: ${text}`);
       if (lease.success) Object.assign(error, { bodyLease: lease.data });
       throw error;
@@ -177,7 +178,8 @@ export class ClankieApiClient {
   }
 
   public async getHerdrBinding(connection?: string): Promise<HerdrBinding> {
-    return HerdrBindingSchema.parse(
+    return parseProtocolResponse(
+      HerdrBindingSchema,
       await this.request(
         HERDR_BINDING_PATH + (connection ? `?connection=${encodeURIComponent(connection)}` : ""),
         {
@@ -205,7 +207,8 @@ export class ClankieApiClient {
     // Voice already has its own floor and latency budget. Only text turns can
     // spend minutes working while their bridge waits for a final response.
     if (request.trigger.kind === "voice_event") {
-      return CaptainChannelTurnResultSchema.parse(
+      return parseProtocolResponse(
+        CaptainChannelTurnResultSchema,
         await this.request<unknown>(path, {
           method: "POST",
           headers: this.captainHeaders(),
@@ -235,7 +238,7 @@ export class ClankieApiClient {
         result = await response.json();
       }
     }
-    return CaptainChannelTurnResultSchema.parse(result);
+    return parseProtocolResponse(CaptainChannelTurnResultSchema, result);
   }
 
   /**
@@ -252,7 +255,7 @@ export class ClankieApiClient {
       headers: this.captainHeaders(),
       body: JSON.stringify(request),
     });
-    return DiscordChannelProjectionMessageResultSchema.parse(result);
+    return parseProtocolResponse(DiscordChannelProjectionMessageResultSchema, result);
   }
 
   /**
@@ -260,7 +263,8 @@ export class ClankieApiClient {
    * Bot credentials stay behind the credential broker used by the trusted presence runtime module.
    */
   public async setConversationHead(input: ConversationHeadRequest): Promise<OperatorConversation> {
-    return OperatorConversationSchema.parse(
+    return parseProtocolResponse(
+      OperatorConversationSchema,
       await this.request(CONVERSATION_HEAD_PATH, {
         method: "POST",
         headers: this.operatorHeaders(),
@@ -285,9 +289,10 @@ export class ClankieApiClient {
         headers: this.captainHeaders(),
         body: JSON.stringify(BodyVoiceLeaseRequestSchema.parse(input)),
       });
-      return BodyLeaseResultSchema.parse(result);
+      return parseProtocolResponse(BodyLeaseResultSchema, result);
     } catch (error) {
-      const result = BodyLeaseResultSchema.safeParse(
+      const result = safeParseProtocolResponse(
+        BodyLeaseResultSchema,
         error !== null && typeof error === "object" && "bodyLease" in error ? error.bodyLease : undefined,
       );
       if (result.success) return result.data;
@@ -316,7 +321,7 @@ export class ClankieApiClient {
     if (result !== null && typeof result === "object" && "error" in result) {
       throw new Error(String((result as { error: unknown }).error));
     }
-    return DiscordPresenceWriteResultSchema.parse(result);
+    return parseProtocolResponse(DiscordPresenceWriteResultSchema, result);
   }
 
   /** Publishes a bridge-owned gateway/voice phase transition to the service. */
@@ -332,12 +337,14 @@ export class ClankieApiClient {
     });
   }
   public async discordRoomVoice() {
-    return DiscordRoomVoiceStatusSchema.parse(
+    return parseProtocolResponse(
+      DiscordRoomVoiceStatusSchema,
       await this.request(DISCORD_ROOM_VOICE_PATH, { headers: this.operatorHeaders() }),
     );
   }
   public async controlDiscordRoomVoice(input: unknown) {
-    return DiscordRoomVoiceStatusSchema.parse(
+    return parseProtocolResponse(
+      DiscordRoomVoiceStatusSchema,
       await this.request(DISCORD_ROOM_VOICE_PATH, {
         method: "POST",
         headers: this.operatorHeaders(),
@@ -353,7 +360,8 @@ export class ClankieApiClient {
     });
   }
   public async discordRooms() {
-    return DiscordRoomsSnapshotSchema.parse(
+    return parseProtocolResponse(
+      DiscordRoomsSnapshotSchema,
       await this.request(DISCORD_ROOMS_PATH, { headers: this.operatorHeaders() }),
     );
   }
@@ -362,7 +370,8 @@ export class ClankieApiClient {
     text?: string;
     expectedRevision: number;
   }) {
-    return DiscordRoomGuidanceSchema.parse(
+    return parseProtocolResponse(
+      DiscordRoomGuidanceSchema,
       await this.request(DISCORD_ROOM_GUIDANCE_PATH, {
         method: "POST",
         headers: this.operatorHeaders(),
@@ -371,12 +380,14 @@ export class ClankieApiClient {
     );
   }
   public async discordSettings() {
-    return DiscordSettingsSnapshotSchema.parse(
+    return parseProtocolResponse(
+      DiscordSettingsSnapshotSchema,
       await this.request(DISCORD_SETTINGS_PATH, { headers: this.operatorHeaders() }),
     );
   }
   public async updateDiscordSettings(input: unknown) {
-    return DiscordSettingsSnapshotSchema.parse(
+    return parseProtocolResponse(
+      DiscordSettingsSnapshotSchema,
       await this.request(DISCORD_SETTINGS_PATH, {
         method: "POST",
         headers: this.operatorHeaders(),
@@ -399,7 +410,7 @@ export class ClankieApiClient {
     });
     return {
       accepted: result.accepted,
-      session: DiscordPresenceSessionRecordSchema.parse(result.session),
+      session: parseProtocolResponse(DiscordPresenceSessionRecordSchema, result.session),
     };
   }
 
@@ -416,7 +427,7 @@ export class ClankieApiClient {
     });
     return result.optIn === null || result.optIn === undefined
       ? undefined
-      : DiscordUserSessionOptInSchema.parse(result.optIn);
+      : parseProtocolResponse(DiscordUserSessionOptInSchema, result.optIn);
   }
 
   public async recordDiscordUserSessionOptIn(
@@ -428,7 +439,7 @@ export class ClankieApiClient {
       headers: this.operatorHeaders(),
       body: JSON.stringify(body),
     });
-    return DiscordUserSessionOptInSchema.parse(result.optIn);
+    return parseProtocolResponse(DiscordUserSessionOptInSchema, result.optIn);
   }
 
   public async revokeDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined> {
@@ -438,7 +449,7 @@ export class ClankieApiClient {
     });
     return result.optIn === null || result.optIn === undefined
       ? undefined
-      : DiscordUserSessionOptInSchema.parse(result.optIn);
+      : parseProtocolResponse(DiscordUserSessionOptInSchema, result.optIn);
   }
 
   public async reportDiscordStreamWatch(report: DiscordStreamWatchReport): Promise<void> {
@@ -481,7 +492,7 @@ export class ClankieApiClient {
 
   public fetchPlayStill(): Promise<PlayStillRead> {
     return this.request(PLAY_STILL_PATH, { headers: this.activityReadHeaders() }).then((body) =>
-      PlayStillReadSchema.parse(body),
+      parseProtocolResponse(PlayStillReadSchema, body),
     );
   }
 
@@ -522,7 +533,7 @@ export class ClankieApiClient {
     const body = await this.request<unknown>(`${CAPTAIN_TURN_METRICS_PATH}${suffix}`, {
       headers: this.operatorHeaders(),
     });
-    return CaptainTurnMetricsPageSchema.parse(body);
+    return parseProtocolResponse(CaptainTurnMetricsPageSchema, body);
   }
 
   public updateDiscordPersonMemoryFact(
@@ -566,7 +577,7 @@ export class ClankieApiClient {
     const body = await this.request<unknown>("/v1/embodiment/sessions/live/activity", {
       headers: this.activityReadHeaders(),
     });
-    return ActivityObservationReadSchema.parse(body);
+    return parseProtocolResponse(ActivityObservationReadSchema, body);
   }
 
   private captainHeaders(): Record<string, string> {
