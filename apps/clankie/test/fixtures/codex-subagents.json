@@ -1,0 +1,64 @@
+{
+  "parent": {
+    "timestamp": "2026-10-04T17:15:35.546Z",
+    "type": "session_meta",
+    "payload": {
+      "id": "01a107e9-f3b1-7181-ad0e-744661b18964",
+      "timestamp": "2026-10-04T17:15:35.249Z",
+      "cli_version": "0.160.0",
+      "thread_source": "user"
+    }
+  },
+  "child": {
+    "timestamp": "2026-10-04T17:18:56.368Z",
+    "type": "session_meta",
+    "payload": {
+      "session_id": "01a107e9-f3b1-7181-ad0e-744661b18964",
+      "id": "01a107ed-051f-7283-887c-2939399a0ca3",
+      "parent_thread_id": "01a107e9-f3b1-7181-ad0e-744661b18964",
+      "timestamp": "2026-10-04T17:18:56.324Z",
+      "source": {
+        "subagent": {
+          "thread_spawn": {
+            "parent_thread_id": "01a107e9-f3b1-7181-ad0e-744661b18964",
+            "depth": 1,
+            "agent_path": "/root/wave1_adr",
+            "agent_nickname": "Herschel",
+            "agent_role": "worker"
+          }
+        }
+      },
+      "thread_source": "subagent",
+      "agent_nickname": "Herschel",
+      "agent_path": "/root/wave1_adr"
+    }
+  },
+  "taskStarted": {
+    "timestamp": "2026-10-04T17:18:56.369Z",
+    "ordinal": 2,
+    "type": "event_msg",
+    "payload": {
+      "type": "task_started",
+      "turn_id": "01a107d6-ad9d-7752-9e36-696b9722f500",
+      "root_turn_id": "01a107d6-ad9d-7752-9e36-696b9722f500",
+      "started_at": 1791132872,
+      "model_context_window": 258400,
+      "collaboration_mode_kind": "default"
+    }
+  },
+  "collected": {
+    "timestamp": "2026-10-04T17:23:58.239Z",
+    "type": "response_item",
+    "payload": {
+      "type": "agent_message",
+      "author": "/root/wave1_adr",
+      "recipient": "/root",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/wave1_adr\nPayload:\n"
+        }
+      ]
+    }
+  }
+}
