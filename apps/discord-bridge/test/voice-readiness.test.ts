@@ -269,6 +269,7 @@ class FakeProbeSocket implements RealtimeSocket {
   private readonly messageHandlers: ((data: string) => void)[] = [];
   private readonly closeHandlers: (() => void)[] = [];
   private readonly routeCapability: boolean;
+  private nextResponseId = 0;
 
   public constructor(routeCapability = true) {
     this.routeCapability = routeCapability;
@@ -279,25 +280,36 @@ class FakeProbeSocket implements RealtimeSocket {
     this.sent.push(data);
     const frame = JSON.parse(data) as { type?: string };
     if (frame.type === "response.create") {
+      const responseId = `resp_${++this.nextResponseId}`;
+      const item = {
+        id: `item_${this.nextResponseId}`,
+        type: "function_call",
+        status: "completed",
+        call_id: `call_${this.nextResponseId}`,
+        name: "ask_clankie",
+        arguments: '{"request":"look up the current weather in Chicago"}',
+      };
       queueMicrotask(() => {
+        this.serverEvent({ type: "response.created", response: { id: responseId, status: "in_progress" } });
         if (this.routeCapability) {
           this.serverEvent({
-            type: "response.output_item.done",
-            item: {
-              type: "function_call",
-              call_id: "call_1",
-              name: "ask_clankie",
-              arguments: '{"request":"look up the current weather in Chicago"}',
-            },
+            type: "response.function_call_arguments.done",
+            response_id: responseId,
+            item_id: item.id,
+            call_id: item.call_id,
+            name: item.name,
+            arguments: item.arguments,
           });
           this.serverEvent({
-            type: "response.function_call_arguments.done",
-            call_id: "call_1",
-            name: "ask_clankie",
-            arguments: '{"request":"look up the current weather in Chicago"}',
+            type: "response.output_item.done",
+            response_id: responseId,
+            item,
           });
         }
-        this.serverEvent({ type: "response.done", response: { id: "resp_1", status: "completed" } });
+        this.serverEvent({
+          type: "response.done",
+          response: { id: responseId, status: "completed", output: this.routeCapability ? [item] : [] },
+        });
       });
     }
   }
