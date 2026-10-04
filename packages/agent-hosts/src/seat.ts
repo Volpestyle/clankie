@@ -234,6 +234,9 @@ export interface SeatControl {
   settled(signal?: AbortSignal): Promise<SeatEvent>;
   /** Interrupt the running turn. False when there is nothing to interrupt or no control. */
   interrupt(): Promise<boolean>;
+  /** Request this original native TUI's own exit. The caller confirms pane
+   * disappearance; a disconnected reply can follow a successful exit. */
+  exit?(beforeExit?: () => Promise<void>): Promise<void>;
   /** End programmatic control gracefully. Closing the pane stays the caller's job. */
   close(): Promise<void>;
 }

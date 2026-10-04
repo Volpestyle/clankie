@@ -13,7 +13,7 @@ export interface OpenCodeNativeRoot {
   readonly terminalId: string;
   check(socket: Socket): Promise<boolean>;
   proof(sessionId: string): Promise<SeatProcessIdentity>;
-  report(sessionId: string, state: "idle" | "working" | "blocked" | "unknown"): Promise<void>;
+  report(sessionId: string, state: "idle" | "working" | "blocked" | "unknown", name?: string): Promise<void>;
 }
 
 const descriptor = (value: string): PreparedNativeSession => ({
@@ -33,7 +33,7 @@ export function createOpenCodeNativeHost(input: Omit<PreparedNativeHostOptions, 
         paneId: root.paneId,
         terminalId: root.terminalId,
         check: root.check,
-        report: (id, state) => root.report(descriptor(id), state),
+        report: (id, state, name) => root.report(descriptor(id), state, name),
         proof: (id) => root.proof(descriptor(id)),
       };
     },
