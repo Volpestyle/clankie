@@ -497,18 +497,26 @@ export class WorkerMcp {
                       inputSchema: tool.inputSchema,
                     })),
                 )
-              : catalog
-                  .filter((tool) =>
-                    terms.every((term) =>
-                      `${tool.qualifiedName} ${tool.description ?? ""}`.toLowerCase().includes(term),
-                    ),
-                  )
-                  .slice(0, 20)
-                  .map(
-                    (tool) =>
-                      `${tool.qualifiedName} — ${(tool.description ?? "").replace(/\s+/gu, " ").trim()}`,
-                  )
-                  .join("\n");
+              : (() => {
+                  // Rank by how many query words a tool matches: agents write
+                  // several words ("linear issue create"), and requiring all of
+                  // them in one tool returned nothing.
+                  const ranked = catalog
+                    .map((tool) => {
+                      const haystack = `${tool.qualifiedName} ${tool.description ?? ""}`.toLowerCase();
+                      return { tool, hits: terms.filter((term) => haystack.includes(term)).length };
+                    })
+                    .filter(({ hits }) => terms.length === 0 || hits > 0)
+                    .sort((a, b) => b.hits - a.hits)
+                    .slice(0, 20)
+                    .map(
+                      ({ tool }) =>
+                        `${tool.qualifiedName} — ${(tool.description ?? "").replace(/\s+/gu, " ").trim()}`,
+                    );
+                  return ranked.length > 0 || catalog.length === 0
+                    ? ranked.join("\n")
+                    : "No connected tool matches those words. Try one word, such as a service name.";
+                })();
             return { content: [{ type: "text", text }], isError: false };
           }
           if (name !== "clankie_call") throw new Error("Use clankie_call for connected tools");
