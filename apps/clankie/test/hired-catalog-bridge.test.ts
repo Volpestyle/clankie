@@ -13,6 +13,11 @@ async function bridge(expected: string | undefined, catalog: (cursor?: string) =
     let bytes = "";
     request.on("data", (chunk) => (bytes += String(chunk)));
     request.on("end", () => {
+      if (request.url !== "/v1/fleet/mcp") {
+        response.writeHead(404);
+        response.end("{}");
+        return;
+      }
       const rpc = JSON.parse(bytes);
       response.setHeader("content-type", "application/json");
       response.setHeader("mcp-session-id", "fixture");

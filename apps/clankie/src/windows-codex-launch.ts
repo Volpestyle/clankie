@@ -80,6 +80,7 @@ export async function windowsCodexBridge(): Promise<WindowsCodexBridge> {
     "bin/seat-channel.mjs",
     "bin/link.mjs",
     "bin/inbound-receipt.mjs",
+    "bin/peer-receipt.mjs",
   ];
   const files: Record<string, string> = {};
   let version: string | undefined;
@@ -106,12 +107,12 @@ if($nodes.Count -ne 1){throw 'Unique installed native Node unavailable'}
 $bridgeNode=$nodes[0]
 $bridgeEntry=Join-Path $bridgeRoot 'bin\\fleet-mcp.mjs'
 ${pinned ? `if($bridgeRoot -cne ${powershellLiteral(pinned.root)} -or $bridgeNode -cne ${powershellLiteral(pinned.node)} -or $bridgeEntry -cne ${powershellLiteral(pinned.entry)}){throw 'Worker bridge installation changed'}` : ""}
-${Object.entries(expected.files)
-  .map(
-    ([path, hash]) => `$module=Join-Path $bridgeRoot ${powershellLiteral(path.replaceAll("/", "\\"))}
-if([ClankieCodexLaunch]::Canonical($module) -cne $module -or (Get-FileHash -LiteralPath $module -Algorithm SHA256).Hash.ToLowerInvariant() -cne ${powershellLiteral(hash)}){throw 'Worker bridge is stale or redirected; owner preparation required'}`,
-  )
-  .join("\n")}
+foreach($expected in (@{${Object.entries(expected.files)
+    .map(([path, hash]) => `${powershellLiteral(path.replaceAll("/", "\\"))}=${powershellLiteral(hash)}`)
+    .join(";")}}).GetEnumerator()){
+ $module=Join-Path $bridgeRoot $expected.Key
+ if([ClankieCodexLaunch]::Canonical($module) -cne $module -or (Get-FileHash -LiteralPath $module -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected.Value){throw 'Worker bridge is stale or redirected; owner preparation required'}
+}
 foreach($manifest in @('.claude-plugin\\plugin.json','.codex-plugin\\plugin.json')){
  if((Get-Content -Raw -LiteralPath (Join-Path $bridgeRoot $manifest) | ConvertFrom-Json).version -cne ${powershellLiteral(expected.version)}){throw 'Worker bridge version is stale; owner preparation required'}
 }

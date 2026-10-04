@@ -576,7 +576,12 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
       revoked = true;
       const before = service.seen.length;
       expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(["message_clankie"]);
-      expect(service.seen.slice(before)).toHaveLength(1);
+      expect(
+        service.seen
+          .slice(before)
+          .map((request) => request.path)
+          .sort(),
+      ).toEqual(["/v1/fleet/mcp", "/v1/fleet/seats/w8%3Ap3/peers"]);
     },
   );
 

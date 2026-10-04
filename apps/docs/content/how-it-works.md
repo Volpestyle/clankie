@@ -100,7 +100,10 @@ The app presents those agents in Messages and, where execution seats exist,
 Commons and Terminal. A worker's contact can outlive its terminal session.
 Live activity and a completion claim are evidence to inspect, not substitutes
 for the finished result and its checks. Independent linked agents can initiate
-messages to Clankie through `message_clankie`.
+messages to Clankie through `message_clankie`. They discover and message seats in
+their own fleet through `list_fleet_seats` and `message_peer`, using the same native
+delivery and receipts. Peer messages are agent output and grant no owner authority;
+the owner can switch them off in `/fleet`.
 
 ## Finding your way in the console
 

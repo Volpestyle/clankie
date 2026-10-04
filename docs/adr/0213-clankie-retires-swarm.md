@@ -126,3 +126,82 @@ continues to use its owner-readable session link token; neither path exports the
 operator bearer or connected provider credentials. The local listener forwards
 only worker MCP and exact-pane mailbox/hook/message routes. Tool execution
 continues through the credential broker and the existing live fleet-grant checks.
+
+## Direct peer messages (VUH-1608)
+
+The native delivery path now covers worker-to-worker messages inside one fleet.
+Workers should not need Clankie to relay each question, blocker or useful result.
+This extends native seat messaging; it introduces no coordinator, task ownership
+system or restored Swarm transport.
+
+The Claude worker plugin's `seat-channel.mjs` and `clankie mcp --fleet` share
+`runSeatChannel`. Their worker catalog exposes `list_fleet_seats({})` and
+`message_peer({seat, text})` when the service proves a native sender and the
+owner's `fleet.peerMessages` setting is `on` (the default). Discovery returns the
+sender's own fleet and exact recipient seat/binding records. The caller passes
+the returned `seatId` as `seat`; the bridge obtains the current sender and
+recipient bindings for the server to check.
+
+The service owns the boundary, on both local and remote paths:
+
+- The sender must have a proven native pane process and matching native session.
+  A claimed pane ID, environment variable, plugin installation or legacy fleet
+  bearer alone is insufficient. The broader connected-tool admission in
+  [ADR 0217](0217-fleet-membership-gets-connected-tools.md) does not grant this
+  stronger seat identity.
+- Recipients belong to the sender's own fleet and must retain the exact current
+  binding from discovery. A later pane occupant cannot inherit the old address.
+- Sending reuses `message_seat` native harness channel/session delivery, receipts
+  and refusal states. It never writes terminal keys. An uncertain native handoff
+  stays associated with its original native receipt and is never resent.
+- Message framing identifies the proven worker as agent output, never an owner
+  instruction or new authority. The service records an audit with sender,
+  recipient and native receipt provenance, plus an agent-role message in Clankie's
+  default transcript. Native channel events carry `source: peer`. It does not change worker-to-Clankie
+  inbound routing, wake Clankie or invent an operator turn.
+
+```mermaid
+flowchart LR
+  W[Native worker bridge] -->|discover or send| P[Prove pane process and session]
+  P --> F[Check own fleet and exact recipient binding]
+  F --> K[Check owner peer-message switch]
+  K -->|on| D[Existing message_seat native delivery]
+  K -->|off| R[Refuse new send]
+  D --> A[Audit and agent-role default transcript]
+  D --> C[Original peer and native receipts]
+  W -->|read original receipt| C
+```
+
+Worker HTTP discovery is `GET /v1/fleet/seats/{paneId}/peers`; send is
+`POST /v1/fleet/seats/{paneId}/peer-messages`; reconciliation is
+`GET /v1/fleet/seats/{paneId}/peer-messages/{id}`. The admitted identity, not
+request fields, establishes the sender and scope of each receipt read. An
+uncertain bridge request keeps its original ID across bridge replacement and
+reconciles by reading; missing acknowledgment never authorizes another POST.
+
+When an uncertain original's recipient is no longer bound, reconciliation
+settles it to `recipient_gone` with outcome `unconfirmed`: the native handoff's
+outcome remains unknown, the original is never resent, and it no longer blocks
+the sender from a fresh message. This terminal state survives restart and cannot
+be promoted by a concurrent late native observation. The bridge clears the exact
+original claim only for this stage/outcome pair; a different follow-up in that
+same call remains unsent.
+
+The receipt journal retains full bodies for the latest 100 settled messages and
+all uncertain originals. Older settled records become compact receipts containing
+the original identity, scope and result. Those receipts remain queryable and
+prevent replay of old IDs; body pruning never deletes uncertainty or authorizes
+another dispatch. Pruning commits only after the journal is persisted successfully.
+
+The owner controls this separately from connected tools through
+`clankie fleet set --peer-messages off|on` and the `/fleet` editor. `off` hides
+both peer tools and refuses new sends server-side, including stale calls. Receipt
+reads and reconciliation remain allowed while off. A message already dispatched
+to the native receiver cannot be recalled. Workers do not gain permission to
+change the switch, broaden fleet scope or promote another agent's text into an
+owner instruction.
+
+Deterministic server and bridge tests cover authority, fleet isolation, stale
+bindings, the switch and uncertain receipt reconciliation. The live PC check with
+two KH2 panes follows landing and re-pin; those tests are not evidence that the
+installed native PC path worked.

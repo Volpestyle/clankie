@@ -2514,6 +2514,65 @@ export const FLEET_SEAT_MESSAGES_PATH = "/v1/fleet/seats/:paneId/messages";
 export function fleetSeatMessagesPath(paneId: string): string {
   return `/v1/fleet/seats/${encodeURIComponent(paneId)}/messages`;
 }
+/** Peer messages carry no operator authority and never cross a fleet boundary. */
+export const FleetPeerSeatSchema = z
+  .object({
+    seatId: z.string().min(1).max(200),
+    paneId: z.string().min(1).max(200),
+    binding: z.string().regex(/^[a-f0-9]{64}$/u),
+    harness: z.string().min(1).max(80),
+    title: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
+  })
+  .strict();
+export const FleetPeerSeatsSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    fleet: z.string().min(1).max(64),
+    sender: FleetPeerSeatSchema,
+    seats: z.array(FleetPeerSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+  })
+  .strict();
+export type FleetPeerSeats = z.infer<typeof FleetPeerSeatsSchema>;
+export const FleetPeerMessageSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    seatId: z.string().min(1).max(200),
+    recipientBinding: z.string().regex(/^[a-f0-9]{64}$/u),
+    text: z.string().trim().min(1).max(32_768),
+    delivery: FleetSeatMessageDeliverySchema,
+  })
+  .strict();
+export type FleetPeerMessage = z.infer<typeof FleetPeerMessageSchema>;
+export const FleetPeerReceiptSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    deliveryId: z.string().uuid(),
+    binding: z.string().regex(/^[a-f0-9]{64}$/u),
+    seatId: z.string().min(1).max(200),
+    recipientBinding: z.string().regex(/^[a-f0-9]{64}$/u),
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+    deliveryStage: z.enum([
+      "stored",
+      "delivered",
+      "consumed",
+      "uncertain",
+      "recipient_gone",
+      "rejected",
+      "unavailable",
+    ]),
+    outcome: z.enum(["delivered", "unconfirmed", "undelivered", "offline"]),
+    detail: z.string().optional(),
+    messageId: z.string().optional(),
+    state: z.enum(["queued", "started", "steered"]).optional(),
+  })
+  .strict()
+  .refine((receipt) => receipt.deliveryStage !== "recipient_gone" || receipt.outcome === "unconfirmed", {
+    path: ["outcome"],
+    message: "A recipient-gone receipt retains an unknown delivery outcome",
+  });
+export type FleetPeerReceipt = z.infer<typeof FleetPeerReceiptSchema>;
+export const FLEET_PEER_SEATS_PATH = "/v1/fleet/seats/:paneId/peers";
+export const FLEET_PEER_MESSAGES_PATH = "/v1/fleet/seats/:paneId/peer-messages";
 /**
  * The link a machine on an ssh fleet uses to reach Clankie (VUH-1527): his
  * service through a reverse ssh forward on that machine's loopback, and a

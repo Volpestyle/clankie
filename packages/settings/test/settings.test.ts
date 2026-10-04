@@ -6,6 +6,7 @@ import {
   CaptainSettingsSchema,
   DiscordSettingsSchema,
   EmailSettingsSchema,
+  FleetSettingsSchema,
   GameplaySettingsSchema,
   HerdrSettingsSchema,
   McpServerSchema,
@@ -30,6 +31,16 @@ async function tempStore(): Promise<SettingsStore> {
 }
 
 describe("settings store", () => {
+  it("defaults existing fleet settings to peer messages on and persists the owner's off switch", async () => {
+    const store = await tempStore();
+    await writeFile(store.path, JSON.stringify({ schemaVersion: 1, fleet: { tools: "off" } }));
+    expect((await store.load()).fleet).toMatchObject({ tools: "off", peerMessages: "on" });
+    await store.update((current) => ({ ...current, fleet: { ...current.fleet, peerMessages: "off" } }));
+    expect((await store.load()).fleet).toMatchObject({ tools: "off", peerMessages: "off" });
+    expect(() => FleetSettingsSchema.parse({ peerMessages: true })).toThrow();
+    expect(() => FleetSettingsSchema.parse({ peerMessages: "connected" })).toThrow();
+  });
+
   it("loads retired coordinator settings without losing native execution grants", async () => {
     const store = await tempStore();
     await writeFile(

@@ -10,6 +10,7 @@ import { SeatOutbox } from "./seat-outbox.ts";
 export interface FleetSeatMessageContext {
   readonly conversationId: string;
   readonly source: string;
+  readonly recipientBinding?: string;
 }
 
 export type FleetSeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
@@ -130,6 +131,7 @@ export async function deliverFleetSeatMessage(
       source: context.source,
       content: message,
       wantsReply: false,
+      ...(context.recipientBinding === undefined ? {} : { recipientBinding: context.recipientBinding }),
     });
     if (delivery.outcome === "delivered" || delivery.outcome === "replied")
       return { outcome: "delivered", deliveryStage: headSeatDeliveryStage(delivery.outcome) };

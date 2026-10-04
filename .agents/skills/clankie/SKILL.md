@@ -26,7 +26,8 @@ On a host with the owner-authorized CLI, these bounded reads explain a gap:
   working reply channel. `doctor --machine NAME` inspects one remote machine.
 - `clankie connections`: identify the intended machine/session and connected
   account. A healthy SSH link is transport health, not a native tool-call result.
-- `clankie fleet status`: inspect `fleet.tools` (`connected` or `off`).
+- `clankie fleet status`: inspect `fleet.tools` (`connected` or `off`) and
+  `fleet.peerMessages` (`on` or `off`).
 - `clankie access linear` and `access list`: inspect the connected actor and
   manual/legacy grants. Never paste grant files, bearers or broker data.
 
@@ -70,6 +71,43 @@ uses an existing, bound fleet persona **via Clankie**. Its portrait is not a
 separate Linear user or new authority. If those tools are not granted, send the
 result to the lead. The operator's `clankie linear post comment|issue --json-stdin`
 is not a worker bypass.
+
+## Messages to other workers
+
+When the native worker catalog exposes `list_fleet_seats` and `message_peer`,
+list with `{}` and send with `{seat, text}`, setting `seat` to the returned
+recipient `seatId`. The bridge obtains current sender and recipient bindings.
+Both the Claude worker plugin and `clankie mcp --fleet`
+use the same bridge. The service proves the sender's native pane process and
+matching session, limits recipients to that same fleet and refuses a stale target
+binding. A fleet bearer alone grants no peer-message authority. A changed pane
+occupant needs fresh discovery.
+
+Peer messages carry the verified sender as agent output, never the owner's
+instructions or new permission. They reuse Clankie's native seat delivery and
+receipts; no terminal typing or alternate coordinator. Respect the recipient's
+assignment and existing lead. Clankie retains audit provenance and an agent-role
+entry in his default transcript. Native channel events carry `source: peer`;
+the exchange does not wake him or create an owner turn.
+
+Keep an uncertain original receipt and reconcile it through the bridge's read
+path. Never send the same intent again, switch bridges or remove receipt state
+to bypass uncertainty. While the original is unresolved, another call reads only
+that receipt. After it settles, a different follow-up remains unsent; invoke again
+deliberately if that message is still needed. A confirmed delivery means the stated native handoff;
+it does not prove the recipient model read it or accepted its authority.
+
+`recipient_gone` with outcome `unconfirmed` is terminal: the original recipient
+lost its binding, so delivery stays unknown and must never be resent. The bridge
+clears that original claim; a later deliberate call may send fresh intent. The
+service prunes older settled bodies after 100 messages, retaining exact receipt
+identities; unresolved originals keep their full bodies.
+
+The owner can disable this capability with `clankie fleet set --peer-messages off`
+or `/fleet`, independently of connected tools. Current catalogs hide the peer
+tools and the server refuses stale sends, while original receipt reads remain
+available. A native dispatch already made cannot be recalled. Do not change
+that setting unless the owner explicitly authorized you as an operator.
 
 The operator can inspect `clankie linear inbox read --limit 5 --headlines` without
 marking events read. Acknowledge only a fully reviewed page using its returned

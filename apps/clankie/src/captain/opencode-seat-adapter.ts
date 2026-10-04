@@ -349,7 +349,12 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                     await verify(selectedRef);
                     attempted = true;
                     const result = Delivery.parse(
-                      await native.request("send", { messageId, text }, options?.timeoutMs),
+                      await native.request(
+                        "send",
+                        { messageId, text },
+                        options?.timeoutMs,
+                        options?.beforeDispatch,
+                      ),
                     );
                     if (result.outcome === "unavailable")
                       return { outcome: "offline", detail: result.detail, deliveryStage: "unavailable" };

@@ -61,11 +61,17 @@ describe("clankie fleet", () => {
   it("opens the editor on what is already configured and saves what comes back", async () => {
     const { settings, read } = stubStore({
       ...emptySettings(),
-      fleet: { notes: "codex is the workhorse.", size: "large", models: "optimal", tools: "connected" },
+      fleet: {
+        notes: "codex is the workhorse.",
+        size: "large",
+        models: "optimal",
+        tools: "connected",
+        peerMessages: "on",
+      },
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
     const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
-    const picks = ["small", "efficient", "off"];
+    const picks = ["small", "efficient", "off", "off"];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
@@ -86,6 +92,7 @@ describe("clankie fleet", () => {
       { currentValue: "large" },
       { currentValue: "optimal" },
       { currentValue: "connected" },
+      { currentValue: "on" },
     ]);
     expect(prompts).toMatchObject([{ defaultValue: "codex is the workhorse.", multiline: true }]);
     expect(read().fleet).toEqual({
@@ -93,6 +100,7 @@ describe("clankie fleet", () => {
       size: "small",
       models: "efficient",
       tools: "off",
+      peerMessages: "off",
     });
   });
 });
@@ -107,7 +115,13 @@ describe("clankie fleet budget", () => {
     const { settings, read } = stubStore();
     await runFleetCommand(["set", "--notes", "keep me", "--size", "small"], { settings });
     const off = await runFleetCommand(["set", "--tools", "off"], { settings });
-    expect(off.fleet).toEqual({ notes: "keep me", size: "small", models: "optimal", tools: "off" });
+    expect(off.fleet).toEqual({
+      notes: "keep me",
+      size: "small",
+      models: "optimal",
+      tools: "off",
+      peerMessages: "on",
+    });
     expect(formatFleetLines(off.fleet).join("\n")).toContain("fleet tool access disabled");
     await expect(runFleetCommand(["set", "--tools", "all"], { settings })).rejects.toThrow(
       "--tools must be connected or off",
@@ -121,7 +135,12 @@ describe("clankie fleet budget", () => {
   it("defaults to maximum bandwidth with the strongest models", async () => {
     const { settings } = stubStore();
     const status = await runFleetCommand(["status"], { settings });
-    expect(status.fleet).toMatchObject({ size: "max", models: "optimal", tools: "connected" });
+    expect(status.fleet).toMatchObject({
+      size: "max",
+      models: "optimal",
+      tools: "connected",
+      peerMessages: "on",
+    });
     const lines = formatFleetLines(status.fleet).join("\n");
     expect(lines).toContain("swarm size: max");
     expect(lines).toContain("No ceiling");
@@ -137,6 +156,7 @@ describe("clankie fleet budget", () => {
       size: "solo",
       models: "efficient",
       tools: "connected",
+      peerMessages: "on",
     });
     await runFleetCommand(["set", "--models", "optimal"], { settings });
     expect(read().fleet).toEqual({
@@ -144,12 +164,14 @@ describe("clankie fleet budget", () => {
       size: "solo",
       models: "optimal",
       tools: "connected",
+      peerMessages: "on",
     });
     expect((await runFleetCommand(["clear"], { settings })).fleet).toEqual({
       notes: "",
       size: "max",
       models: "optimal",
       tools: "connected",
+      peerMessages: "on",
     });
   });
 
@@ -166,6 +188,46 @@ describe("clankie fleet budget", () => {
     );
     await expect(runFleetCommand(["set", "--size"], { settings })).rejects.toThrow(/Usage/u);
     await expect(runFleetCommand(["set"], { settings })).rejects.toThrow(/Usage/u);
-    expect(read().fleet).toEqual({ notes: "", size: "max", models: "optimal", tools: "connected" });
+    expect(read().fleet).toEqual({
+      notes: "",
+      size: "max",
+      models: "optimal",
+      tools: "connected",
+      peerMessages: "on",
+    });
+  });
+});
+
+describe("clankie fleet peer messages", () => {
+  it("changes peer messages independently, reports the switch and clears back to on", async () => {
+    const { settings, read } = stubStore();
+    await runFleetCommand(["set", "--tools", "off", "--notes", "keep me"], { settings });
+    const off = await runFleetCommand(["set", "--peer-messages", "off"], { settings });
+    expect(off.fleet).toEqual({
+      notes: "keep me",
+      size: "max",
+      models: "optimal",
+      tools: "off",
+      peerMessages: "off",
+    });
+    expect(formatFleetLines(off.fleet).join("\n")).toContain(
+      "peer messages: off — new messages between fleet workers disabled",
+    );
+    await runFleetCommand(["set", "--peer-messages", "on"], { settings });
+    expect(read().fleet).toMatchObject({ tools: "off", peerMessages: "on" });
+    await runFleetCommand(["set", "--peer-messages", "off"], { settings });
+    expect((await runFleetCommand(["clear"], { settings })).fleet.peerMessages).toBe("on");
+  });
+
+  it("rejects unsupported, repeated and missing peer-message values without changing the setting", async () => {
+    const { settings, read } = stubStore();
+    await expect(runFleetCommand(["set", "--peer-messages", "connected"], { settings })).rejects.toThrow(
+      "--peer-messages must be on or off",
+    );
+    await expect(
+      runFleetCommand(["set", "--peer-messages", "off", "--peer-messages", "on"], { settings }),
+    ).rejects.toThrow("Usage");
+    await expect(runFleetCommand(["set", "--peer-messages"], { settings })).rejects.toThrow("Usage");
+    expect(read().fleet.peerMessages).toBe("on");
   });
 });

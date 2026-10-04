@@ -8,6 +8,7 @@ import type {
 import type { ConversationOwner, ConversationAuthority } from "./conversation-owner.ts";
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
+import type { PeerSeatAuthority } from "./peer-seat-messages.ts";
 import type {
   DeliveryStage,
   EvaluatorCommand,
@@ -23,6 +24,9 @@ import type {
   FleetSeatHook,
   FleetSeatMessageDelivery,
   FleetSeatMessageReceipt,
+  FleetPeerMessage,
+  FleetPeerReceipt,
+  FleetPeerSeats,
   ObservableCaptainLane,
   OperatorConversation,
   OperatorConversationServiceRequest,
@@ -238,6 +242,13 @@ export interface CaptainPort {
     text: string,
     delivery?: FleetSeatMessageDelivery,
   ): Promise<boolean | FleetSeatMessageReceipt>;
+  listFleetPeerSeats(authority: PeerSeatAuthority): Promise<FleetPeerSeats | undefined>;
+  sendFleetPeerMessage(authority: PeerSeatAuthority, input: FleetPeerMessage): Promise<FleetPeerReceipt>;
+  reconcileFleetPeerMessage(
+    authority: PeerSeatAuthority,
+    delivery: FleetSeatMessageDelivery,
+    fingerprint: string,
+  ): Promise<FleetPeerReceipt | undefined>;
   /** The seat's answer to an escalation; false when nothing waits on that id. */
   replySeatEvent(eventId: string, text: string, conversationId?: string): Promise<boolean>;
   /**
@@ -334,6 +345,11 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       fingerprint,
     }),
     receiveFleetSeatMessage: async () => false,
+    listFleetPeerSeats: async () => undefined,
+    sendFleetPeerMessage: async () => {
+      throw new Error("Peer delivery unavailable");
+    },
+    reconcileFleetPeerMessage: async () => undefined,
     replySeatEvent: async () => false,
     bodyRoomConversation: (lane, targetId) => `room:${lane}:${targetId}`,
     laneToolBank: async (lane) => ({ lane, tools: [] }),

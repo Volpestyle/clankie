@@ -47,6 +47,11 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
     let bytes = "";
     request.on("data", (chunk) => (bytes += String(chunk)));
     request.on("end", () => {
+      if (request.url !== "/v1/fleet/mcp") {
+        response.writeHead(404);
+        response.end("{}");
+        return;
+      }
       const rpc = JSON.parse(bytes) as { id?: number; method: string };
       response.setHeader("content-type", "application/json");
       if (!bound || !assigned) {

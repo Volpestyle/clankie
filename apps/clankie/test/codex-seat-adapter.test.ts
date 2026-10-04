@@ -6,7 +6,8 @@ function fixture(nativePolicy?: NonNullable<Parameters<typeof createCodexSeatAda
   let event: (event: CodexSeatEvent) => void = () => undefined;
   const emit = (method: string, params: Record<string, unknown> = {}) =>
     event({ method, params: { threadId: "thread-1", ...params } });
-  const send = vi.fn<CodexAppServerSeat["send"]>(async () => {
+  const send = vi.fn<CodexAppServerSeat["send"]>(async (_message, guard) => {
+    await guard?.();
     emit("turn/started", { turn: { id: "turn-1" } });
     return { turnId: "turn-1", state: "started" as const };
   });
@@ -205,7 +206,7 @@ describe("Codex harness seat adapter", () => {
     );
     if (started.outcome !== "started") throw new Error(started.detail);
     try {
-      expect(f.send).toHaveBeenCalledExactlyOnceWith("original brief", guard);
+      expect(f.send).toHaveBeenCalledExactlyOnceWith("original brief", expect.any(Function));
       guard.mockRejectedValue(new Error("original turn ended"));
       expect(await started.control.send("fresh owner message")).toMatchObject({ outcome: "accepted" });
       expect(f.send).toHaveBeenLastCalledWith("fresh owner message");
@@ -213,6 +214,49 @@ describe("Codex harness seat adapter", () => {
       await started.control.close();
     }
   });
+
+  it.each(["off", "throws"])(
+    "refuses a %s peer guard after deferred native preparation without dispatch or uncertainty",
+    async (mode) => {
+      const f = fixture();
+      const started = await f.adapter.start({ harness: "codex", cwd: "/scratch", brief: "" }, f.view);
+      if (started.outcome !== "started") throw new Error(started.detail);
+      let preparationStarted!: () => void;
+      const preparing = new Promise<void>((resolve) => {
+        preparationStarted = resolve;
+      });
+      let finishPreparation!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        finishPreparation = resolve;
+      });
+      let authorized = true;
+      const beforeDispatch = vi.fn(async () => {
+        if (mode === "throws" && !authorized) throw new Error("authority lookup failed");
+        return authorized;
+      });
+      const write = vi.fn();
+      f.send.mockImplementationOnce(async (_message, guard) => {
+        preparationStarted();
+        await ready;
+        await guard?.();
+        write();
+        return { turnId: "never-written", state: "started" };
+      });
+      try {
+        const sending = started.control.send("peer context", { beforeDispatch });
+        await preparing;
+        expect(beforeDispatch).not.toHaveBeenCalled();
+        authorized = false;
+        finishPreparation();
+        expect(await sending).toMatchObject({ outcome: "offline", deliveryStage: "unavailable" });
+        expect(beforeDispatch).toHaveBeenCalledOnce();
+        expect(write).not.toHaveBeenCalled();
+        expect(await started.control.status()).toBe("idle");
+      } finally {
+        await started.control.close();
+      }
+    },
+  );
 
   it("refuses a different native thread before sending the brief", async () => {
     const f = fixture();
