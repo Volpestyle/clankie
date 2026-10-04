@@ -189,6 +189,7 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     expect(arrivalSession.frames().some((frame) => frame.type === "response.create")).toBe(true);
     expect(JSON.stringify(arrivalSession.frames())).toContain("self_joined");
     expect(vox.subscriptions).toHaveLength(0);
+    arrivalSession.serverEvent({ type: "response.created", response: { id: "arrival" } });
     arrivalSession.serverEvent({ type: "response.done", response: { id: "arrival", status: "completed" } });
     await flush();
 
@@ -267,13 +268,15 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
     expect(textItems[1]).toBe("Right now: tending the garden.");
     expect(textItems.join("\n")).toContain("clankie, you there?");
     expect(textItems).toContain(ADDRESSED_OFFER_TURN_ITEM);
-    expect(frames.some((frame) => frame.type === "response.create")).toBe(true);
+    expect(frames.filter((frame) => frame.type === "response.create")).toHaveLength(2);
+    engaged.serverEvent({ type: "response.created", response: { id: "addressed" } });
 
     // The wake is receipt-visible: floor evidence reports engaged/addressed.
     expect(evidence.filter((event) => event.type === "floor")).toMatchObject([
       { type: "floor", guildId: GUILD, channelId: CHANNEL, state: "engaged", reason: "addressed" },
     ]);
 
+    engaged.serverEvent({ type: "response.done", response: { id: "addressed", status: "completed" } });
     await session.leave();
   });
 
@@ -349,6 +352,8 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       // Otherwise the simulated reply belongs to arrival and is correctly stale.
       await flush(12);
       const arrival = sockets[1] as FakeRealtimeSocket;
+      expect(arrival.frames().filter((frame) => frame.type === "response.create")).toHaveLength(1);
+      arrival.serverEvent({ type: "response.created", response: { id: "arrival" } });
       arrival.serverEvent({ type: "response.done", response: { id: "arrival", status: "completed" } });
       await flush(12);
 
@@ -385,6 +390,9 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       expect(mouth.url).toContain(`model_id=${modelId}`);
       expect(mouth.url).toContain("output_format=pcm_24000");
 
+      // Acknowledge this requested response before emitting its attributed output.
+      expect(engaged.frames().filter((frame) => frame.type === "response.create")).toHaveLength(2);
+      engaged.serverEvent({ type: "response.created", response: { id: "resp_1" } });
       // Model text streams into one TTS context per item, then flushes and closes on done.
       engaged.serverEvent({
         type: "response.output_text.delta",
@@ -446,7 +454,11 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       // A three-utterance burst while the provider is thinking becomes one
       // further audible answer through the real session and both response queues.
       const beforeBurst = engaged.frames().filter((frame) => frame.type === "response.create").length;
-      for (const transcript of ["make that tomorrow", "actually Friday", "Friday afternoon"]) {
+      for (const [index, transcript] of [
+        "make that tomorrow",
+        "actually Friday",
+        "Friday afternoon",
+      ].entries()) {
         const captureId = vox.subscriptions.at(-1)!.captureId;
         vox.emit({ type: "user_audio_end", userId: OWNER, captureId });
         await flush();
@@ -458,6 +470,7 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
           transcript,
         });
         await flush(12);
+        if (index === 0) engaged.serverEvent({ type: "response.created", response: { id: "stale-burst" } });
       }
       expect(engaged.frames().filter((frame) => frame.type === "response.create")).toHaveLength(
         beforeBurst + 1,
@@ -467,6 +480,7 @@ describe("bridge realtime wiring (dormant → engaged, offline)", () => {
       expect(engaged.frames().filter((frame) => frame.type === "response.create")).toHaveLength(
         beforeBurst + 2,
       );
+      engaged.serverEvent({ type: "response.created", response: { id: "latest" } });
       engaged.serverEvent({
         type: "response.output_text.delta",
         response_id: "latest",
@@ -566,13 +580,17 @@ it.each(["openai", "xai"])(
       onError: () => undefined,
       onOutputTranscript: (event, source) => output.push({ ...event, source }),
     });
+    conversation.createResponse();
+    sockets[0]!.serverEvent({ type: "response.created", response: { id: "native-response" } });
     sockets[0]!.serverEvent({
       type: "response.output_audio_transcript.delta",
+      response_id: "native-response",
       item_id: "native",
       delta: "Right ",
     });
     sockets[0]!.serverEvent({
       type: "response.audio_transcript.done",
+      response_id: "native-response",
       item_id: "native",
       transcript: "Right here.",
     });
@@ -580,6 +598,10 @@ it.each(["openai", "xai"])(
       { itemId: "native", text: "Right ", final: false, source: "native_audio" },
       { itemId: "native", text: "Right here.", final: true, source: "native_audio" },
     ]);
+    sockets[0]!.serverEvent({
+      type: "response.done",
+      response: { id: "native-response", status: "completed" },
+    });
     conversation.close();
   },
 );
@@ -620,6 +642,8 @@ it.each(["eleven_v4_turbo", "eleven_flash_v2_5"])(
     expect(instructions.includes("[deadpan]")).toBe(model === "eleven_v4_turbo");
     port.createTextItem("Human says [laughs] as literal text.");
     expect(JSON.stringify(sockets[0]!.frames())).toContain("Human says [laughs] as literal text.");
+    port.createResponse();
+    sockets[0]!.serverEvent({ type: "response.created", response: { id: "r" } });
     const text = "[laughs] This sentence is long enough to remain one provider context. [invented] [sighs]";
     for (const delta of text)
       sockets[0]!.serverEvent({
