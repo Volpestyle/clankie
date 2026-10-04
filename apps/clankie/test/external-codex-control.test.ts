@@ -192,6 +192,82 @@ it("refuses a changed pane session before either proxy or queue", async () => {
   expect(codexQueue).not.toHaveBeenCalled();
 });
 
+it.each([
+  { state: "steered", daemon: true },
+  { state: "queued", daemon: true },
+  { state: "queued", daemon: false },
+] as const)(
+  "delivers to the parent Codex session with child rollouts open: %j",
+  async ({ state, daemon }) => {
+    const parent = "01a0ffca-ce02-7cc1-9c33-55318fe44667";
+    const codexControl = vi.fn(async () =>
+      state === "steered" ? { outcome: "delivered" as const, state } : undefined,
+    );
+    const codexQueue = vi.fn(async () => true);
+    const runner = {
+      resolveTerminal: async () => ({
+        paneId: "w3Z:p2",
+        agent: "codex",
+        session: { kind: "id", value: parent, source: "herdr:codex" },
+      }),
+      paneProcesses: async () => [
+        {
+          pid: 16676,
+          name: "codex",
+          argv: ["codex", "resume", parent, ...(daemon ? [] : ["--no-daemon"])],
+        },
+      ],
+      openFiles: async () =>
+        [
+          "n/child-home/sessions/rollout-child-01a103b0-1111-7111-9111-111111111111.jsonl",
+          `n/parent-home/sessions/rollout-parent-${parent}.jsonl`,
+          "n/child-home/sessions/rollout-child-01a103b1-1111-7111-9111-111111111111.jsonl",
+        ].join("\n"),
+      codexQueue,
+      codexControl,
+    } as unknown as HerdrWatchRunner;
+    expect(await createFleetSeatControl(runner, new Map()).deliverToSeat("w3Z:p2", "hello")).toMatchObject({
+      outcome: "delivered",
+      state,
+    });
+    if (daemon) expect(codexControl).toHaveBeenCalledWith(parent, "hello", "/parent-home", undefined);
+    else expect(codexControl).not.toHaveBeenCalled();
+    if (state === "queued") expect(codexQueue).toHaveBeenCalledWith(parent, "hello", "/parent-home");
+    else expect(codexQueue).not.toHaveBeenCalled();
+  },
+);
+
+it("uses the remote pane's reported parent without inspecting local rollouts", async () => {
+  const parent = "01a0ffca-ce02-7cc1-9c33-55318fe44667";
+  const inspect = vi.fn();
+  const local = vi.fn();
+  const queue = vi.fn(async () => true);
+  const native = vi.fn(async () => undefined);
+  const runner = {
+    resolveTerminal: async () => ({
+      paneId: "pc/w3Z:p2",
+      agent: "codex",
+      session: { kind: "id", value: parent, source: "herdr:codex" },
+    }),
+    paneProcesses: inspect,
+    openFiles: inspect,
+    codexControl: local,
+    codexQueue: local,
+  } as unknown as HerdrWatchRunner;
+  const select = vi.fn(() => native);
+  expect(
+    await createFleetSeatControl(runner, new Map(), undefined, queue, select).deliverToSeat(
+      "pc/w3Z:p2",
+      "hello",
+    ),
+  ).toMatchObject({ outcome: "delivered", state: "queued" });
+  expect(select).toHaveBeenCalledWith("pc", "pc/w3Z:p2");
+  expect(native).toHaveBeenCalledWith(parent, "hello");
+  expect(queue).toHaveBeenCalledWith("pc", parent, "hello");
+  expect(inspect).not.toHaveBeenCalled();
+  expect(local).not.toHaveBeenCalled();
+});
+
 it("never requeues an uncertain remote dispatch or falls back to a local server", async () => {
   const queue = vi.fn();
   const local = vi.fn();

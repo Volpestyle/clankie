@@ -65,4 +65,20 @@ describe("Codex session resolver", () => {
     ].join("\n");
     expect(resolveCodexSessionId(parseHerdrForegroundProcesses(PROCESS_INFO), listed)).toBe(first);
   });
+
+  it("prefers Herdr's exact open session over a child's earlier-listed rollout", () => {
+    const child = "01a103b0-1111-7111-9111-111111111111";
+    const listed = `n/Users/james/.codex/sessions/rollout-child-${child}.jsonl\n${OPEN_FILES}`;
+    expect(resolveCodexSessionId(parseHerdrForegroundProcesses(PROCESS_INFO), listed, SESSION)).toBe(SESSION);
+  });
+
+  it("still resolves a replacement when Herdr's reported rollout is no longer open", () => {
+    expect(
+      resolveCodexSessionId(
+        parseHerdrForegroundProcesses(PROCESS_INFO),
+        OPEN_FILES,
+        "01a103b1-1111-7111-9111-111111111111",
+      ),
+    ).toBe(SESSION);
+  });
 });
