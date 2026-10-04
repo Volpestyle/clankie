@@ -343,6 +343,7 @@ export async function runPairCommand(args: readonly string[], options: PairComma
     outputJson(stdout, {
       ok: true,
       code: offer.code,
+      ...(offer.localCode === undefined ? {} : { localCode: offer.localCode }),
       deepLink: offer.deepLink,
       expiresAt: offer.expiresAt,
       ...routeJson(offer),
@@ -357,8 +358,12 @@ export async function runPairCommand(args: readonly string[], options: PairComma
       "Scan this QR with the Clankie app to pair this device:",
       "",
       qr,
-      `Pairing code: ${offer.code}`,
-      "Or open this link on the device:",
+      ...(offer.localCode === undefined
+        ? [`Pairing code: ${offer.code}`, "Or open this link on the device:"]
+        : [
+            `On this Mac code: ${offer.localCode}`,
+            "Choose On this Mac in the Mac app. For another device, open this secure link:",
+          ]),
       offer.deepLink,
       `Expires ${offer.expiresAt} · single use — run \`clankie pair\` again for a new offer.`,
       ...routeLines(offer),

@@ -5269,6 +5269,11 @@ export const PairingOfferWireSchema = z.object({
   version: z.literal(1),
   deepLink: z.string().min(1),
   code: z.string().min(1),
+  /** Existing single-use short code for same-Mac direct pairing; absent on review offers. */
+  localCode: z
+    .string()
+    .regex(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/u)
+    .optional(),
   expiresAt: z.string().datetime(),
   /** Present on long-lived review offers so the operator's output can say so. */
   review: z.literal(true).optional(),

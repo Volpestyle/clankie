@@ -404,6 +404,10 @@ The console's `/pair` runs this same command and accepts the same flags.
 
 Public-gateway pairing uses a secure QR or full pasted link; the encryption
 credential is in its fragment. Short codes are for direct private connections.
+An ordinary offer also returns `localCode`, the offer's own short code, even when
+`code` is the gateway link; human output shows it as `On this Mac code` for the
+Mac app's **On this Mac** pairing. Only the authenticated operator's offer
+response carries it, and review offers never do.
 One link carries every route the Mac has (ADR 0204): the gateway fragment when
 remote access is on, and `direct=<origin>` when `clankie gateway direct` has
 configured a device-reachable control origin. With a direct route, the App
@@ -423,6 +427,7 @@ is omitted when the link carries neither route:
 {
   "ok": true,
   "code": "ABCD-EFGH",
+  "localCode": "ABCD-EFGH",
   "deepLink": "clankie://connect?v=1&offer=…&direct=…",
   "expiresAt": "2026-08-30T12:00:00.000Z",
   "routes": { "gateway": false, "direct": "http://my-mac.local:4311" }
