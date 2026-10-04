@@ -168,13 +168,14 @@ for (const { path, entry } of writes) {
     // Creation modes respect umask. Existing regular files keep private read/write
     // permissions; a Git executable change adds execute only for readable classes.
     const executable = entry.mode === "100755";
-    writeFileSync(path, entry.content, { mode: executable ? 0o755 : 0o644 });
+    let permissions = executable ? 0o755 : 0o644;
     if (previous?.isFile()) {
-      let permissions = previous.mode & 0o777;
+      permissions = previous.mode & 0o777;
       if (Boolean(permissions & 0o100) !== executable)
         permissions = (permissions & ~0o111) | (executable ? ((permissions & 0o444) >> 2) | 0o100 : 0);
-      chmodSync(path, permissions);
     }
+    writeFileSync(path, entry.content, { mode: permissions });
+    if (previous?.isFile()) chmodSync(path, permissions);
   }
 }
 spawnSync("git", ["update-index", "-q", "--refresh"]);
