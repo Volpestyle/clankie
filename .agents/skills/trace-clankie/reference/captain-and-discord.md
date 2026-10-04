@@ -48,10 +48,12 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   inspects saved native transcripts, including configured remote hosts and local
   registered OpenCode profiles. A saved transcript does not prove a live worker.
 
-- **A missing Pi tree does not prove no answer.** A one-shot can fail before
-  the first assistant message creates its session file, while an attached native
-  seat writes to its own harness transcript. Join the ingress, selected execution
-  destination and delivery/reply receipts before drawing a conclusion.
+- **A missing Pi tree does not identify the execution destination or outcome.**
+  Pi holds a session file back until the first assistant message; stalled cold
+  preparation or a one-shot failure can leave no tree. An attached native seat
+  can execute the input without any Pi tree. Match the conversation's run and
+  delivery receipts to its native transcript or service log. Absence alone does
+  not prove that no external effects occurred or authorize resending.
 
 - **A provider failure can resolve with no reply.** For `captain_model_failed`
   or `captain_usage_limit_reached`, read the terminal assistant's `stopReason`
@@ -59,10 +61,20 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   receipts can hide the same failure; do not infer an empty successful run
   from that code alone.
 
-- **An `accepted` receipt is admission.** Without a terminal receipt the run may
-  still be active, interrupted or failed elsewhere. Inspect current run state,
-  its configured deadline and the original receipt; a time window alone does
-  not establish loss or authorize replay.
+- **An `accepted` receipt establishes admission, not execution or liveness.**
+  The input may be queued, preparing, executing or awaiting native delivery.
+  With no active Pi tools, service preparation and execution fail after five
+  minutes without host-observed preparation progress or Pi events. The watchdog
+  is suspended while one or more Pi tools execute; tools retain their own timeout
+  and cancellation behavior. A full five-minute idle window resumes after the
+  last tool ends. Pre-start inactivity remains bounded, and queued runs do not
+  consume that timeout while waiting.
+  For `conversation_turn_stalled`, match the run ID to the service log's
+  conversation and stalled phase. Healthy runs have no total duration cap.
+  Discord Pi stream stalls use `captain_turn_stalled`; native acknowledgments
+  and escalation replies retain their own deadlines. A stall can leave earlier
+  effects unknown. Inspect the original receipt before retrying; accepted or
+  uncertain native delivery is never replayed into the service runner.
 
 - **`absorbed` is not `declined` or answered.** It records input folded into a
   live run (ADR 0118); inspect that run's final reply and delivery. `declined`

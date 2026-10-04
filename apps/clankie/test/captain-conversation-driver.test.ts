@@ -8,11 +8,15 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
+import { CONVERSATION_RUN_STALL_MS } from "../src/captain/conversation-run.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import * as fleetRunner from "../src/captain/herdr-fleet-runner.ts";
 
 const fake = vi.hoisted(() => ({
   prompts: [] as string[],
+  beforeCreate: vi.fn(async () => {}),
+  dispose: vi.fn(() => {}),
+  emit: (_event: unknown) => {},
   beforePrompt: async (_text: string) => {},
 }));
 vi.mock("../src/captain/model.ts", () => ({
@@ -26,7 +30,11 @@ vi.mock("../src/captain/model.ts", () => ({
 vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
   ...(await original<typeof import("@earendil-works/pi-coding-agent")>()),
   createAgentSession: async () => {
+    await fake.beforeCreate();
     const listeners = new Set<(event: unknown) => void>();
+    fake.emit = (event) => {
+      for (const listener of listeners) listener(event);
+    };
     return {
       session: {
         isStreaming: false,
@@ -41,7 +49,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
         getContextUsage: () => undefined,
         resourceLoader: { getSkills: () => ({ skills: [] }) },
         abort: async () => {},
-        dispose: () => {},
+        dispose: fake.dispose,
         prompt: async (text: string) => {
           fake.prompts.push(text);
           await fake.beforePrompt(text);
@@ -77,7 +85,11 @@ afterEach(async () => {
     rmSync(root, { recursive: true, force: true });
   }
   fake.prompts.length = 0;
+  fake.beforeCreate.mockReset();
+  fake.dispose.mockClear();
+  fake.emit = () => {};
   fake.beforePrompt = async () => {};
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -104,6 +116,7 @@ async function fixture() {
     workingDirectory: root,
     settings: new SettingsStore(join(root, "settings.json")),
     personaImages: async () => ({ images: [], hash: "fake", files: [] }),
+    nativeCensusRunner: async () => ({ stdout: "", stderr: "" }),
   });
   fixtures.push({ captain, root });
   const created = await captain.serveOperatorConversation({
@@ -135,6 +148,211 @@ async function fixture() {
   };
   return { captain, id, journal, send, agent, autonomous };
 }
+
+it("a stuck session startup fails loudly and releases an attached seat to handle later turns", async () => {
+  const { captain, id, journal, send, agent } = await fixture();
+  let entered!: () => void;
+  const starting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fake.beforeCreate.mockImplementationOnce(async () => {
+    entered();
+    await gate;
+  });
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.useFakeTimers();
+  const delivery = { id: randomUUID(), binding: (await captain.fleetSeatMessageBinding(agent.paneId))! };
+  let poll: ReturnType<typeof captain.pollSeatEvents> | undefined;
+  try {
+    expect(
+      await captain.receiveFleetSeatMessage(agent.paneId, "Original worker report", delivery),
+    ).toMatchObject({ received: true, deliveryStage: "stored" });
+    await starting;
+    const first = journal.read(id).find((event) => event.type === "turn" && event.phase === "accepted")!;
+    if (first.type !== "turn") throw new Error("acceptance missing");
+    poll = captain.pollSeatEvents(10_000, undefined, id);
+    void poll.catch(() => {});
+    for (let i = 0; i < 9; i++) await send(`Later owner turn ${i}`);
+    expect(fake.prompts).toEqual([]);
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 1);
+    expect(journal.read(id)).toContainEqual(
+      expect.objectContaining({
+        type: "turn",
+        runId: first.runId,
+        phase: "failed",
+        reasonCode: "conversation_turn_stalled",
+      }),
+    );
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining(first.runId), expect.any(Error));
+    for (let i = 0; i < 9; i++) {
+      const [event] = await poll;
+      expect(event?.content).toContain(`Later owner turn ${i}`);
+      poll = captain.pollSeatEvents(10_000, undefined, id);
+      void poll.catch(() => {});
+      await captain.replySeatEvent(event!.id, "Native answer", id);
+    }
+    // Reconciliation preserves the original acceptance; it never replays the report.
+    expect(
+      await captain.receiveFleetSeatMessage(agent.paneId, "Original worker report", delivery),
+    ).toMatchObject({ received: true });
+    release();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fake.prompts).toEqual([]);
+    expect(fake.dispose).toHaveBeenCalledOnce();
+  } finally {
+    release();
+    await captain.close();
+    await poll?.catch(() => {});
+  }
+});
+
+it.each(["startup", "execution"])(
+  "a stuck %s is evicted so later service turns proceed before its late rejection",
+  async (boundary) => {
+    const { captain, id, journal, send } = await fixture();
+    let entered!: () => void;
+    const starting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let reject!: (error: Error) => void;
+    const gate = new Promise<void>((_resolve, fail) => {
+      reject = fail;
+    });
+    if (boundary === "startup")
+      fake.beforeCreate.mockImplementationOnce(async () => {
+        entered();
+        await gate;
+      });
+    else
+      fake.beforePrompt = async (text) => {
+        if (text.includes("Hung execution")) {
+          entered();
+          await gate;
+        }
+      };
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      await send(`Hung ${boundary}`);
+      await starting;
+      await send("Later service turn");
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 1);
+      await vi.waitFor(() =>
+        expect(
+          journal.read(id).filter((event) => event.type === "turn" && event.phase === "completed"),
+        ).toHaveLength(1),
+      );
+      const failed = journal.read(id).find((event) => event.type === "turn" && event.phase === "failed");
+      expect(failed).toMatchObject({ reasonCode: "conversation_turn_stalled" });
+      expect(fake.prompts.some((text) => text.includes("Later service turn"))).toBe(true);
+      expect(fake.beforeCreate).toHaveBeenCalledTimes(2);
+      reject(new Error("Late abandoned dependency rejection"));
+      await vi.advanceTimersByTimeAsync(1);
+      await send("Reuse the healthy replacement session");
+      await vi.waitFor(() =>
+        expect(
+          journal.read(id).filter((event) => event.type === "turn" && event.phase === "completed"),
+        ).toHaveLength(2),
+      );
+      expect(fake.beforeCreate).toHaveBeenCalledTimes(2);
+      expect(fake.prompts.filter((text) => text.includes(`Hung ${boundary}`))).toHaveLength(
+        boundary === "startup" ? 0 : 1,
+      );
+    } finally {
+      reject(new Error("Release fixture"));
+      await captain.close();
+    }
+  },
+);
+
+it("Pi progress keeps an operator turn alive beyond the inactivity deadline", async () => {
+  const { captain, id, journal, send } = await fixture();
+  let entered!: () => void;
+  const running = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fake.beforePrompt = async () => {
+    entered();
+    await gate;
+  };
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.useFakeTimers();
+  try {
+    await send("Healthy long-running work");
+    await running;
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
+      fake.emit({ type: "agent_start" });
+    }
+    expect(journal.read(id).filter((event) => event.type === "turn" && event.phase !== "accepted")).toEqual(
+      [],
+    );
+    release();
+    await vi.waitFor(() =>
+      expect(journal.read(id)).toContainEqual(expect.objectContaining({ type: "turn", phase: "completed" })),
+    );
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    release();
+    await captain.close();
+  }
+});
+
+it("a silent in-flight tool keeps an operator turn alive beyond the inactivity deadline", async () => {
+  const { captain, id, journal, send } = await fixture();
+  let entered!: () => void;
+  const running = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fake.beforePrompt = async () => {
+    entered();
+    await gate;
+  };
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.useFakeTimers();
+  try {
+    await send("Run a long check with output redirected");
+    await running;
+    fake.emit({
+      type: "tool_execution_start",
+      toolCallId: "silent-check",
+      toolName: "bash",
+      args: { command: "pnpm check > log 2>&1" },
+    });
+    await vi.advanceTimersByTimeAsync(CONVERSATION_RUN_STALL_MS + 8 * 60_000);
+    expect(journal.read(id).filter((event) => event.type === "turn" && event.phase !== "accepted")).toEqual(
+      [],
+    );
+    expect(fake.dispose).not.toHaveBeenCalled();
+    fake.emit({
+      type: "tool_execution_end",
+      toolCallId: "silent-check",
+      toolName: "bash",
+      result: { content: [], details: {} },
+      isError: false,
+    });
+    release();
+    await vi.waitFor(() =>
+      expect(journal.read(id)).toContainEqual(expect.objectContaining({ type: "turn", phase: "completed" })),
+    );
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    release();
+    await captain.close();
+  }
+});
 
 it("the attached project receives worker reports, watches, self wakes and escalations without Pi or global leakage", async () => {
   const { captain, id, journal, send, agent, autonomous } = await fixture();

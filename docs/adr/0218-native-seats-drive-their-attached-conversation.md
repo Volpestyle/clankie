@@ -90,3 +90,29 @@ uncertain delivery without replay; room reply authority and independent room
 routing; and discovery and native launch selection. A live post-landing worker
 report to the hiring Claude conversation remains separate evidence from these
 deterministic checks.
+
+## Stalled service preparation and execution (VUH-1613)
+
+A service reservation cannot hold attachment and later turns indefinitely.
+A five-minute inactivity watchdog covers cold preparation from the reservation
+through Pi execution. Host-observed preparation progress and Pi events renew it.
+The watchdog is suspended while one or more Pi tools execute; each tool retains
+its own timeout and cancellation behavior. A full five-minute idle window resumes
+after the last tool ends. Before execution starts, or with no active tool and no
+preparation or streamed progress, inactivity still times out after five minutes.
+Healthy work has no total duration cap. Queued runs do not consume this timeout
+while waiting. Question authority and hook checks before driver selection, and
+native attachment preparation before dispatch, are bounded too.
+
+On a stall, a stored run fails with `conversation_turn_stalled`. The service log
+identifies the conversation, run ID and stalled phase. The host aborts and evicts
+that exact cached startup/session and releases its admission, allowing the attached
+seat to receive later queued inputs. Late completion cannot prompt or publish.
+The failed input keeps its original acceptance and receipt; it is never replayed
+into another destination. Earlier effects may have an unknown outcome, so check
+the original evidence before submitting a new request.
+
+Native delivery retains its existing acknowledgment and reply deadlines, including
+the ten-minute escalation reply wait. The service inactivity watchdog does not
+impose a five-minute native reply cutoff or permit replay of taken, accepted or
+uncertain native delivery.
