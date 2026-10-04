@@ -139,6 +139,11 @@ give one bounded pass after the producer's checks. Inspect the artifact itself;
 for code, review its scoped diff. Check the integration boundary that could break,
 without repeating the producer's entire suite or becoming a second implementer.
 
+Ask for coverage of the changed boundary: full E2E with real dependencies and
+nothing mocked first, integration across data/API/schema boundaries next, then
+goldens grounded in real examples for edge-case regressions. Push back on new
+unit-test bloat. Existing unit-test pruning is a separate reviewed effort.
+
 When correctness depends on interpreting external observations (pixels, audio,
 sensor readings or extracted labels), pair the first producer change with a small
 inspected source sample and valid controls before scaling extraction. Passing
