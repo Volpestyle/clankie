@@ -17,10 +17,40 @@ it("rejects raw console, selectors, injected subjects and disabled idle limits b
     ["admin", '{"operation":"say","text":"hi\\nstop"}'],
     ["admin", '{"operation":"list","discordUserId":"123"}'],
     ["configure", '{"idleTimeoutMs":900001}'],
+    ["configure", '{"backend":{"kind":"aws-ec2","profile":"clankie"}}'],
+    ["configure", '{"backend":{"kind":"local","secretAccessKey":"secret"}}'],
     ["start", "world.example"],
   ])
     await expect(runMinecraftHostCommand(args, { env: {}, fetchImpl })).rejects.toThrow("Usage");
   expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it("sends AWS backend selection through the authenticated host configuration API", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "minecraft-host-cli-"));
+  try {
+    const store = new FileCredentialStore(join(dir, "auth.json"));
+    const key = mintOperatorToken();
+    await store.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key });
+    const backend = {
+      kind: "aws-ec2",
+      accountId: "123456789012",
+      instanceId: "i-0123456789abcdef0",
+      region: "us-east-1",
+    };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ backend }));
+    await runMinecraftHostCommand(["configure", JSON.stringify({ backend })], {
+      env: {},
+      operatorCredentialStore: store,
+      fetchImpl,
+    });
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
+      action: "configure",
+      settings: { backend },
+    });
+    expect(fetchImpl.mock.calls[0]?.[1]?.headers).toMatchObject({ authorization: `Bearer ${key}` });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 it("keeps claim approval on the official site and completes it using the operator credential", async () => {

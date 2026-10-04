@@ -50,7 +50,7 @@
       "entry": ["src/presence-runtime-module.ts"]
     },
     "integrations/minecraft-mcp": {
-      "entry": ["test/**/*.test.ts"]
+      "entry": ["test/**/*.test.ts", "src/aws-guest.ts", "scripts/aws/provision-credential.mjs"]
     },
     "packages/play": {
       "ignoreExportsUsedInFile": true

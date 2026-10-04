@@ -18,9 +18,19 @@ minutes with no players and has a maximum uptime watchdog; a connected bot count
 as a player. An approved Discord-bound friend may request a start. Other host lifecycle and
 administration require the configured owner or an individually designated machine
 operator, not a guild-wide machine grant.
-Use status to check auth and tunnel readiness. A claim is an operator setup step;
+Use status to check auth and host readiness. Local hosting additionally needs a
+ready playit tunnel; AWS uses its current instance address, which may change on
+start. A claim is a local-host operator setup step;
 never manufacture or publish an address. `minecraft_host_invite` posts the safe
 address/version only in the requesting Discord channel.
+
+AWS provisioning and budget changes are operator work, outside gameplay tools.
+Use only the configured instance through its scoped broker credential. After
+stopping an AWS world, confirm EC2 is stopped; stopped Paper alone is insufficient.
+Guest idle/max-uptime controls must remain active independently of this service.
+A CloudWatch low-CPU alarm is a fallback heuristic, and a budget alert is not a
+hard spending cap; stopped storage still costs money. Never prolong an idle
+server just to keep an invite alive or reuse an old public address.
 
 For friends, capture a username request with `minecraft_host_request_enrollment`;
 `minecraft_host_approve_enrollment` approves that stored Discord identity. Do not

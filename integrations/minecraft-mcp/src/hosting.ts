@@ -74,12 +74,13 @@ const HOST_ARTIFACTS = [
 const BOT_PROVIDER = "clankie_minecraft_host_bot";
 const RCON_PROVIDER = "clankie_minecraft_host_rcon";
 const BOT = "ClankieLocal26";
-type HostStatus = {
+export type HostStatus = {
   phase: "stopped" | "starting" | "running" | "stopping" | "backoff" | "failed";
   authReady: boolean;
   version: "1.21.4";
   gamePort: number;
   botUsername: string;
+  publicAddress?: string;
   retryAt?: number;
   failure?: string;
   gameEndpoint: { host: "127.0.0.1"; port: number; version: "1.21.4"; username: string; auth: "offline" };
@@ -101,6 +102,7 @@ type HostOptions = {
   codeTtlMs?: number;
   idleTimeoutMs?: number;
   maxUptimeMs?: number;
+  startupTimeoutMs?: number;
   onUnavailable?: () => Promise<void>;
 };
 const HostConfigurationSchema = MinecraftHostSettingsSchema.refine(
@@ -108,7 +110,7 @@ const HostConfigurationSchema = MinecraftHostSettingsSchema.refine(
   "Minecraft ports must differ",
 );
 export const HostConfigurationPatchSchema = MinecraftHostSettingsSchema.partial();
-type HostConfiguration = z.infer<typeof HostConfigurationSchema>;
+export type HostConfiguration = z.infer<typeof HostConfigurationSchema>;
 /** Replaceable host lifecycle boundary; this wave supplies only the local Paper implementation. */
 export interface MinecraftHostingPort {
   readonly dataDir: string;
@@ -183,6 +185,11 @@ export class MinecraftHost implements MinecraftHostingPort {
     this.dataDir = options.dataDir ?? join(homedir(), ".local", "share", "clankie", "minecraft-host");
     for (const timeout of [options.idleTimeoutMs, options.maxUptimeMs, options.codeTtlMs])
       if (timeout !== undefined) z.number().int().min(100).max(86400000).parse(timeout);
+    z.number()
+      .int()
+      .min(100)
+      .max(480000)
+      .parse(options.startupTimeoutMs ?? 120000);
     const gamePort = z
       .number()
       .int()
@@ -393,7 +400,10 @@ export class MinecraftHost implements MinecraftHostingPort {
       this.child = child;
       const done = new Promise<void>((resolve, reject) => {
         let tail = "";
-        const timeout = setTimeout(() => reject(new Error("Minecraft server startup timeout")), 120000);
+        const timeout = setTimeout(
+          () => reject(new Error("Minecraft server startup timeout")),
+          this.options.startupTimeoutMs ?? 120000,
+        );
         let logLine = "";
         const consume = (chunk: Buffer) => {
           logLine += String(chunk);
@@ -485,11 +495,26 @@ export class MinecraftHost implements MinecraftHostingPort {
         Math.min(30000, Math.max(100, Math.min(this.settings.idleTimeoutMs, this.settings.maxUptimeMs) / 3)),
       );
       this.watchdog.unref();
-    } catch {
+    } catch (error) {
       this.desired = false;
       await this.stopNow();
       this.state.phase = "failed";
-      this.state.failure = "startup_failed";
+      this.state.failure =
+        error instanceof Error && error.message === "Minecraft server startup timeout"
+          ? "startup_timeout"
+          : error instanceof Error && error.message === "Minecraft server exited before readiness"
+            ? "startup_process_exited"
+            : error instanceof Error && error.message === "Minecraft server process failed"
+              ? "startup_process_failed"
+              : "startup_failed";
+      await this.privateWrite(
+        "last-startup-failure.json",
+        JSON.stringify({
+          failure: this.state.failure,
+          at: Date.now(),
+          startupTimeoutMs: this.options.startupTimeoutMs ?? 120000,
+        }) + "\n",
+      ).catch(() => {});
       throw new Error("Minecraft hosted server failed to start safely");
     }
   }

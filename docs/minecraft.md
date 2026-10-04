@@ -16,8 +16,9 @@ the motor independently through Paper RCON; ordinary CI never starts a world.
 The Minecraft integration owns a pinned Paper **1.21.4 build 232** server, Java
 process, private RCON, world backups and playit agent. Clankie's service owns
 Discord authority, username bindings, auditing, destination policy and the one
-play lease. The integration's hosting port is the boundary for a future host
-provider; this wave implements the local Mac provider only.
+play lease. The integration's hosting port separates the local Mac provider
+from the optional AWS EC2 provider. Neither starts a server during catalog or
+status reads.
 
 Hosting is **off by default**. Ask Clankie to start a world when you want to play,
 or use the operator CLI/TUI:
@@ -50,6 +51,74 @@ before stopping; the uptime limit also applies while players are present. Crash
 restarts use backoff and retain the original run deadline. An idle/watchdog stop
 also stops the tunnel. A bot still connected counts as a player; maximum uptime
 prevents it keeping the server alive indefinitely.
+
+### AWS hosting and cost controls
+
+AWS hosting manages one pre-provisioned EC2 instance through Systems Manager
+(SSM). Provisioning is an operator task; gameplay tools cannot create instances,
+change IAM or increase spending limits. The controller needs AWS CLI v2 and the
+Session Manager plugin. The product uses its own scoped broker
+credential, never the operator's administrative SSO profile. SSH and public RCON
+are unnecessary. Preserve an existing volume with a snapshot before modifying an
+existing server; an x86 instance cannot be resized directly to an ARM/Graviton
+instance type.
+
+Checkout provisioning helpers live in
+[`integrations/minecraft-mcp/scripts/aws/`](../integrations/minecraft-mcp/scripts/aws/).
+They require explicit account/instance identifiers and verify the target before
+changes; deployment finishes with EC2 stopped. Cold Paper startup can take several
+minutes on a small instance; the AWS guest permits up to eight minutes of Java
+startup while retaining its independent boot and uptime limits.
+
+Select the provider while the existing host is stopped. The operator supplies
+the account and instance identifiers from provisioning; these are not model
+inputs or credentials:
+
+```sh
+clankie minecraft host configure '{"backend":{"kind":"aws-ec2","accountId":"YOUR_ACCOUNT_ID","instanceId":"YOUR_INSTANCE_ID","region":"us-east-1"}}'
+clankie minecraft host configure '{"backend":{"kind":"local"}}'
+```
+
+Clankie's bot reaches the guest's loopback Paper port through a scoped SSM port
+forward, preserving the bot's source restriction and the ordinary shared play
+lease. Friend invitations use the public address. Host control uses a bounded
+custom SSM document; secret-bearing replies are encrypted to the requesting
+adapter rather than recorded as plaintext in SSM command history.
+
+The instance stays stopped until someone requests play. Its public IP/DNS may
+change on every start; use the current ready-state invite, not a saved address.
+No Elastic IP or playit tunnel is required. Public TCP ingress must preserve the
+real client address through a trusted guest proxy; Paper and RCON remain bound
+to loopback. The proxy opens only after authentication readiness and closes before
+server transitions. Do not expose Paper's PROXY-enabled listener directly to the internet:
+a client could forge its source address.
+
+Cost protection has separate failure boundaries:
+
+- A guest watcher checks actual player occupancy and saves, backs up and shuts
+  down after 15 empty minutes. It runs independently of Clankie's service; a
+  failed backup must not prevent shutdown.
+- A maximum-uptime limit bounds even occupied or unhealthy runs. A guest deadline
+  survives controller failure; the service also checks the requested run. The
+  supplied systemd timer powers off at six hours after boot regardless of a
+  longer configured application timeout.
+- A CloudWatch low-CPU alarm provides an additional EC2 stop action. CPU is only a
+  heuristic: low CPU does not prove there are no players, and busy idle software
+  can avoid its threshold.
+- A Minecraft-tagged monthly budget alerts the operator around $10. **A budget
+  alert is not a hard spending cap.** Stopped instances still incur EBS and
+  snapshot storage charges, and active instances may incur public IPv4, transfer
+  and CPU-credit charges. Activate the resource tag for cost allocation before
+  relying on the filtered budget; resource tags alone do not enable billing
+  allocation. See [AWS cost allocation tags](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/cost-alloc-tags.html).
+
+A stopped Paper process is not proof that EC2 stopped. Verify the instance state
+through EC2 after every manual test, including failed starts and guardrail probes.
+Live acceptance must separately establish the guest idle stop with the controller
+absent, the uptime deadline, the CloudWatch stop action, budget configuration,
+a premium human join and the bot join. Unit tests and an installed alarm alone
+cannot establish those outcomes. Resource IDs, private account details and live
+cost measurements belong in the operator's private provisioning record.
 
 ### Public tunnel and invites
 
