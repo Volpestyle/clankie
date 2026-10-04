@@ -35,14 +35,15 @@ calls while manual grants keep working. Removing a connection invalidates that
 fleet's admission. Calls recheck the account, setting and live admission immediately
 before effects; the host retains its final account/configuration fence.
 
-The switch is a stop for new calls, not a cancellation of one already dispatching.
-After its own credential and connection awaits, the host runs the fleet fence
-(admission, then the switch) and then its configuration check, so a change that
-lands before those checks refuses the call. A change that races the host's
-last asynchronous read can let at most that one in-flight call complete, the way
-revoking a token mid-request does. Closing that window would need a synchronous
-in-memory switch fed by a settings watcher; the owner-facing promise does not
-justify that machinery (decided by the lead, 2026-10-04, VUH-1585).
+Turning the switch off, or losing admission, refuses every call whose final
+pre-dispatch checks run after the change. After its own credential and connection
+awaits, the host runs the fleet fence (admission, then the switch) and then its
+configuration check. A call whose last asynchronous check has already read the old
+state can still reach the provider after the change; this is not a cancellation,
+and there is no proven bound on how many concurrent calls can be in that position.
+Whether that is the contract, or dispatch must be refused after any change, is an
+open owner decision on VUH-1585. Refusing it absolutely needs a final check that
+does not await, which the current settings and admission reads cannot provide.
 
 Standing records are synthesized in memory from the current verified catalog,
 not loaded from durable grant files. Audit principals include `fleet:ID:pane:PANE`,
