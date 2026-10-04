@@ -37,9 +37,13 @@ test("awaited first TUI plugin initialization binds before prompt mounting, then
   const { writeFile } = await import("node:fs/promises");
   const loader = join(directory, "worker-tui.mjs");
   await writeFile(loader, source);
-  const { tui } = (await import(pathToFileURL(loader).href)) as {
-    tui(api: unknown, options: unknown): Promise<void>;
+  // Match the pinned host's readV1Plugin contract, rather than bypassing its
+  // loader with the module's named exports.
+  const module = (await import(pathToFileURL(loader).href)) as {
+    default: { id: string; tui(api: unknown, options: unknown): Promise<void> };
   };
+  expect(module.default.id).toBe("clankie-native-worker");
+  const { tui } = module.default;
   const sessionId = "ses_nativeWorker123";
   let mounted = false;
   let route: { name: string; params?: { sessionID: string } } = { name: "home" };

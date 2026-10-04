@@ -134,3 +134,6 @@ export async function tui(api, options) {
     throw error;
   }
 }
+
+// OpenCode 1.18.18's readV1Plugin loads the TUI entry from a default object.
+export default { id, tui };
