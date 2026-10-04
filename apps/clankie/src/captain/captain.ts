@@ -1,3 +1,4 @@
+import { projectPresence, pollPresence, captainIsThinking } from "./presence.ts";
 import { projectOnboarding } from "./project-onboarding.ts";
 import {
   authorizeQuestion,
@@ -3219,6 +3220,41 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               ? [...seats]
               : seats.map(({ goal: _goal, assignment: _assignment, ...seat }) => seat),
         };
+      }
+      if (request.op === "presence") {
+        let seatCursor: string | undefined;
+        let activeSeats = 0;
+        const snapshot = await pollPresence(
+          async () => {
+            const currentSeatCursor = fleetChanges.current();
+            if (seatCursor !== currentSeatCursor) {
+              activeSeats = (await refreshFleet()).length;
+              seatCursor = currentSeatCursor;
+            }
+            const [voice, play] = await Promise.all([
+              deps.presence.listSessions(),
+              deps.embodiment.getLiveSession(),
+            ]);
+            const thinking = await captainIsThinking(sessions.values());
+            const inVoice = voice.some(
+              (session) => session.gatewayConnected && session.voiceGuildIds.length > 0,
+            );
+            return projectPresence({
+              thinking,
+              inVoice,
+              playing:
+                deps.hostedWorld?.inspect().outcome === "playing" ||
+                (play !== undefined && ["running", "stopping"].includes(play.state)),
+              ...(play === undefined ? {} : { playingSince: play.requestedAt }),
+              activeSeats,
+              pendingOwnerItem: conversations.pendingPresenceOwnerItem(),
+            });
+          },
+          request.cursor,
+          request.waitMs ?? 0,
+          shutdown.signal,
+        );
+        return { op: "presence", schemaVersion: 1, snapshot };
       }
       if (request.op === "fleet") {
         await fleetChanges.wait(request.cursor, request.waitMs ?? 0);

@@ -1,3 +1,6 @@
+import { OperatorPresenceResultSchema, type OperatorPresenceSnapshot } from "@clankie/protocol/presence";
+import { OPERATOR_CONVERSATION_DISPATCH_PATH } from "@clankie/protocol";
+import { createCaptainRouteClient, resolveCaptainRouteToken } from "../session/operator-conversations.ts";
 import { inspectOperatorCredential, type OperatorCredentialStatus } from "@clankie/credential-broker";
 import { createServiceOptions, inspectServices, type CreateServiceOptionsInput } from "../../bin/services.ts";
 import { SERVICE_ORDER, type ServiceStatus } from "../../bin/service-supervisor.ts";
@@ -27,6 +30,8 @@ export interface StatusCommandResult {
   /** Live remote-access doorway for phone pairing (absent when settings cannot be read). */
   readonly doorway?: GatewayDoorwayReport;
   readonly nextStep?: string;
+  readonly presence?: OperatorPresenceSnapshot;
+  readonly presenceState?: "unreachable";
 }
 
 export async function statusCommand(options: StatusCommandOptions): Promise<StatusCommandResult> {
@@ -46,7 +51,35 @@ export async function statusCommand(options: StatusCommandOptions): Promise<Stat
   const clankie = services.find((service) => service.id === "clankie");
   const serviceHealthy = clankie?.state === "healthy";
   const access = await phoneAccess(options, env, serviceHealthy);
+  let presence: OperatorPresenceSnapshot | undefined;
+  if (serviceHealthy) {
+    try {
+      const token = await resolveCaptainRouteToken({
+        env,
+        ...(options.captainCredentialStore === undefined ? {} : { store: options.captainCredentialStore }),
+      });
+      const route = createCaptainRouteClient({
+        host:
+          options.host ??
+          env.CLANKIE_CONTROL_PLANE_URL ??
+          env.CLANKIE_CAPTAIN_URL ??
+          DEFAULT_CONTROL_PLANE_URL,
+        ...(token === undefined ? {} : { captainToken: token }),
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      });
+      const response = await route.fetch(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op: "presence", schemaVersion: 1 }),
+        signal: AbortSignal.timeout(3000),
+      });
+      if (response.ok) presence = OperatorPresenceResultSchema.parse(await response.json()).snapshot;
+    } catch {
+      /* A failed read must never manufacture an idle mood. */
+    }
+  }
   return {
+    ...(presence === undefined ? { presenceState: "unreachable" as const } : { presence }),
     ok: serviceHealthy && operatorCredentialHealthy,
     status: !serviceHealthy
       ? (clankie?.state ?? "unreachable")

@@ -467,3 +467,24 @@ it("trusted context recognizes real registered worktrees and reports uncertain r
     "unknown",
   );
 });
+
+it("projects the canonical pending owner question and drops it after resolution", async () => {
+  const { store, id, read, target } = await fixture();
+  const question = await read();
+  expect(store.pendingPresenceOwnerItem()).toEqual({
+    conversationId: id,
+    questionId: question.question!.requestId,
+    title: question.question!.prompt,
+    since: question.question!.createdAt,
+  });
+  await store.serve(
+    {
+      op: "input_cancel",
+      schemaVersion: 1,
+      ...target,
+      expectedRevision: question.revision!,
+    },
+    owner,
+  );
+  expect(store.pendingPresenceOwnerItem()).toBeUndefined();
+});

@@ -107,6 +107,7 @@ type ConversationServiceRequest = Exclude<
   | { op: "autonomy" }
   | { op: "roster" }
   | { op: "fleet" }
+  | { op: "presence" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }
   | { op: "state_work" }
@@ -130,6 +131,7 @@ type ConversationServiceResult = Exclude<
   | { op: "autonomy" }
   | { op: "roster" }
   | { op: "fleet" }
+  | { op: "presence" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }
   | { op: "state_work" }
@@ -1109,6 +1111,27 @@ export class ConversationStore {
     return () => {
       this.durableMessageListeners.delete(listener);
     };
+  }
+
+  /** Oldest unanswered owner preference, read from canonical question receipts. */
+  public pendingPresenceOwnerItem(): import("../../../../packages/protocol/src/presence.ts").OperatorPresenceSnapshot["pendingOwnerItem"] {
+    const questions = [...this.metas.values()].flatMap((meta) =>
+      (meta.questions?.records ?? []).flatMap(({ question }) =>
+        question.status === "pending"
+          ? [
+              {
+                conversationId: meta.conversationId,
+                questionId: question.requestId,
+                title: question.prompt.slice(0, 200),
+                since: question.createdAt,
+              },
+            ]
+          : [],
+      ),
+    );
+    return questions.sort(
+      (a, b) => a.since.localeCompare(b.since) || a.questionId.localeCompare(b.questionId),
+    )[0];
   }
 
   /**

@@ -1325,6 +1325,19 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                   s.title("Launcher"),
                   s.line("status", launcher.status, launcher.ok ? "ok" : "bad"),
                   s.line(
+                    "Clankie",
+                    launcher.presence?.detail ?? "Unreachable",
+                    launcher.presence === undefined ? "warn" : "ok",
+                  ),
+                  ...(launcher.presence === undefined
+                    ? []
+                    : [
+                        s.line("agents", String(launcher.presence.activeSeats), "normal"),
+                        ...(launcher.presence.pendingOwnerItem === undefined
+                          ? []
+                          : [s.line("waiting for you", launcher.presence.pendingOwnerItem.title, "warn")]),
+                      ]),
+                  s.line(
                     "operator credential",
                     `${launcher.operatorCredential.source} · ${launcher.operatorCredential.consistency}`,
                     launcher.operatorCredential.present &&

@@ -1,4 +1,10 @@
 import {
+  OperatorPresenceRequestSchema,
+  OperatorPresenceResultSchema,
+  type OperatorPresenceSnapshot,
+} from "./presence.ts";
+export * from "./presence.ts";
+import {
   ProjectProposalLocatorSchema,
   ProjectProposalTargetSchema,
   ProjectProposalResultSchema,
@@ -2746,6 +2752,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
    * One cursor-based live fleet read. An absent/old cursor returns now; the
    * current cursor parks until Herdr or fleet-owned state changes.
    */
+  OperatorPresenceRequestSchema,
   z
     .object({
       op: z.literal("fleet"),
@@ -3108,6 +3115,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
     })
     .strict(),
+  OperatorPresenceResultSchema,
   z
     .object({
       op: z.literal("fleet"),
@@ -3268,6 +3276,8 @@ export interface OperatorConversationServiceClient {
   roster(): Promise<readonly OperatorFleetSeat[]>;
   /** Park until the fleet cursor changes, then return one coherent snapshot. */
   fleet?(cursor?: string, signal?: AbortSignal): Promise<OperatorFleetSnapshot>;
+  /** Park until present-tense activity changes. */
+  presence?(cursor?: string, signal?: AbortSignal): Promise<OperatorPresenceSnapshot>;
   /** Commands and skills accepted by this exact conversation target. */
   composerCatalog?(conversationId: string): Promise<OperatorComposerCatalog>;
   /**
@@ -3469,6 +3479,19 @@ export function createOperatorConversationServiceClient(
         signal,
       );
       if (result.op !== "fleet") throw new Error(`Unexpected ${result.op} result for fleet`);
+      return result.snapshot;
+    },
+    async presence(cursor, signal) {
+      const result = await dispatch(
+        {
+          op: "presence",
+          schemaVersion: 1,
+          ...(cursor === undefined ? {} : { cursor }),
+          waitMs: fleetWaitMs,
+        },
+        signal,
+      );
+      if (result.op !== "presence") throw new Error(`Unexpected ${result.op} result for presence`);
       return result.snapshot;
     },
     async composerCatalog(conversationId) {

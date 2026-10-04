@@ -2785,3 +2785,17 @@ The owner endpoints are `POST /v1/operator/projects/add-worktree-root`
 (`projectId`, `rootId`, `expectedRevision`). Read the current revision from
 `GET /v1/operator/projects`. Both writes recheck owner authority and settings
 immediately before persistence; enrollment also re-observes the native root/repo.
+
+### Present tense
+
+`clankie status` and the TUI `/status` include the service's `presence` snapshot
+when it answers. The operator `presence` read accepts a cursor and `waitMs` up
+to 30000 ms; callers with the current cursor wait for a projected change. Mood
+priority is needs_you, thinking, in_voice, playing, leading, idle. Thinking
+includes background Discord captain turns. `activeSeats` counts all live
+registered fleet seats, including those waiting between turns. The oldest
+unanswered owner preference appears as `pendingOwnerItem`, with the conversation
+and question IDs needed to open it. `since` is a source start timestamp, or null
+when that source has no known start. An unreachable service has no mood; clients
+show that connection failure separately. The same read passes through the relay
+and hosted paired-device authority seam.

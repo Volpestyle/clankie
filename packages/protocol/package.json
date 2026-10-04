@@ -18,7 +18,8 @@
     "./hosted-pairing": "./src/hosted-pairing.ts",
     "./hosted-operator": "./src/hosted-operator.ts",
     "./discord-settings": "./src/discord-settings.ts",
-    "./projects": "./src/projects.ts"
+    "./projects": "./src/projects.ts",
+    "./presence": "./src/presence.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

@@ -375,7 +375,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               },
               abort.signal,
             )
-          : serviceRequest.op === "send"
+          : serviceRequest.op === "send" || serviceRequest.op === "presence"
             ? options.dispatch(serviceRequest, abort.signal)
             : options.dispatch(serviceRequest);
       const result =

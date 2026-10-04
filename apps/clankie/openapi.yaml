@@ -1538,6 +1538,15 @@ paths:
         returns 409 without changing a worker. Seat-control operations
         return 503 with herdr_unavailable when the default runtime is unavailable;
         ordinary conversations and their durable records remain accessible.
+        `presence` returns a strict snapshot with mood (`needs_you`, `thinking`,
+        `in_voice`, `playing`, `leading`, `idle`, in that precedence), detail,
+        since (source start timestamp or null when unknown), activeSeats (all live
+        registered fleet seats), and optional pendingOwnerItem (oldest unanswered
+        owner preference: conversationId, questionId, title, since). It uses
+        optional cursor and waitMs (0–30000); an absent or changed cursor returns
+        immediately. A current cursor parks until the projected sources change,
+        sampled within 500 ms, or the wait expires. Unreachable is a client
+        transport state, never a mood. Paired hosted devices may read it.
         `fleet` returns one cursor-coherent snapshot. Optional `view: home`
         omits historical personas that are neither seated
         contacts nor channel participants. Seats, channels, tallies and edges
