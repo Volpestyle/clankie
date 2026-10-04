@@ -17,6 +17,7 @@ import {
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
 import type { SavedAgentSession } from "../src/agent-sessions.ts";
+import { HireLayoutUnconfirmed } from "../src/captain/hire-layout.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -249,7 +250,7 @@ test.each([
 
 test("unknown argv allocation is not retried, nor treated as a safe prelaunch capacity release", async () => {
   const f = await fixture();
-  f.runner.createTab.mockRejectedValue(new Error("layout reply lost"));
+  f.runner.createTab.mockRejectedValue(new HireLayoutUnconfirmed("layout reply lost"));
   expect(await f.hire()).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
   expect(f.prepared.start).not.toHaveBeenCalled();
   expect(f.prepared.dispose).toHaveBeenCalledOnce();

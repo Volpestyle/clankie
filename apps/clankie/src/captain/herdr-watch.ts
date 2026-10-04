@@ -1,3 +1,4 @@
+import { createHireLayout, HireLayoutUnconfirmed } from "./hire-layout.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { realpath } from "node:fs/promises";
 import { ProjectHires, type ProjectHireProcessProof } from "./project-hires.ts";
@@ -165,7 +166,9 @@ export interface HerdrWatchRunner {
   createTab?(options: {
     readonly cwd: string;
     readonly label: string;
-    readonly besidePane?: string;
+    readonly paneLabel?: string;
+    readonly pipeline?: string;
+    readonly placement?: "new-tab" | "split";
     readonly env?: Readonly<Record<string, string>>;
     /** Initial native argv, never terminal input. Only prepared adapters use this. */
     readonly command?: readonly string[];
@@ -427,6 +430,7 @@ export function createHerdrWatchRunner(
     available?.() === false
       ? Promise.reject(new Error("Herdr execution is unavailable"))
       : exec(args, signal, timeoutMs);
+  const createTab = createHireLayout(runHerdr, createCommandTab);
   return {
     list: async () => parseHerdrPaneList(await runHerdr(["pane", "list"]), true),
     get: async (target) => parseHerdrAgentResult(await runHerdr(["agent", "get", target])),
@@ -530,52 +534,7 @@ export function createHerdrWatchRunner(
       writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
       renameSync(tmp, path);
     },
-    createTab: async ({ cwd, label, env, command, besidePane }) => {
-      if (besidePane !== undefined) {
-        if (command)
-          throw new Error(
-            "Prepared native initial-command hires require new-tab placement; split is unsupported.",
-          );
-        const layout = JSON.parse(await runHerdr(["pane", "layout", "--pane", besidePane])).result.layout;
-        const area = layout.panes.find((p: { pane_id: string }) => p.pane_id === besidePane)?.rect;
-        if (!area) throw new Error("Lead pane disappeared before split; no pane was opened.");
-        const result = JSON.parse(
-          await runHerdr([
-            "pane",
-            "split",
-            "--pane",
-            besidePane,
-            "--direction",
-            area.width > area.height * 2 ? "right" : "down",
-            "--cwd",
-            cwd,
-            "--no-focus",
-            ...Object.entries(env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
-          ]),
-        );
-        const id = result.result?.pane?.pane_id;
-        if (typeof id !== "string" || !id)
-          throw new Error("Split pane creation unconfirmed; inspect Herdr before retrying");
-        return id;
-      }
-      if (command !== undefined) {
-        if (!createCommandTab) throw new Error("Native initial-command pane creation unavailable");
-        return createCommandTab({ cwd, label, command, ...(env === undefined ? {} : { env }) });
-      }
-      const envArgs = Object.entries(env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
-      try {
-        return parseHerdrRootPaneId(
-          await runHerdr(["tab", "create", "--cwd", cwd, "--label", label, "--no-focus", ...envArgs]),
-        );
-      } catch (caught) {
-        // A fresh owned session has no workspace yet (ADR 0166): the first hire
-        // founds one, and its root pane is the hire's pane.
-        if (!isHerdrWorkspaceMissing(caught)) throw caught;
-        return parseHerdrRootPaneId(
-          await runHerdr(["workspace", "create", "--cwd", cwd, "--label", label, "--no-focus", ...envArgs]),
-        );
-      }
-    },
+    createTab,
     startAgent: ({ name, kind, paneId, args }) =>
       // Returns only once herdr has detected the harness and considers it ready
       // for input, so a resolved call means the seat can actually be messaged.
@@ -622,16 +581,6 @@ function spawnFailureReason(detail: string): "harness_unavailable" | "not_ready"
 /** `tab create` on a server with no workspace: herdr answers `workspace_not_found`. */
 export function isHerdrWorkspaceMissing(caught: unknown): boolean {
   return caught instanceof Error && /workspace_not_found/u.test(caught.message);
-}
-
-function parseHerdrRootPaneId(stdout: string): string {
-  const parsed = JSON.parse(stdout) as { result?: { root_pane?: unknown } };
-  const rootPane = parsed.result?.root_pane;
-  const paneId = isRecord(rootPane) ? rootPane.pane_id : undefined;
-  if (typeof paneId !== "string" || paneId.length === 0) {
-    throw new Error("Herdr created a tab without a pane");
-  }
-  return paneId;
 }
 
 /**
@@ -763,9 +712,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly hireDefaults: (() => Promise<HireProfile>) | undefined;
   private readonly resolveModel: ((harness: string, model: string) => Promise<string>) | undefined;
   private readonly claudeAccounts: (() => Promise<readonly CodexAccount[]>) | undefined;
-  private readonly leadPane:
-    | ((input: HireRequest, authority?: HireAuthority) => Promise<string | undefined>)
-    | undefined;
   private readonly accounts: () => Promise<readonly CodexAccount[]>;
   private readonly resumeInventory: ((fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>) | undefined;
   private readonly resumeStarts = new Map<string, Promise<void>>();
@@ -779,7 +725,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly hireDefaults?: () => Promise<HireProfile>;
       readonly resolveHireModel?: (harness: string, model: string) => Promise<string>;
       readonly claudeAccounts?: () => Promise<readonly CodexAccount[]>;
-      readonly leadPane?: (input: HireRequest, authority?: HireAuthority) => Promise<string | undefined>;
       readonly codexAccounts?: () => Promise<readonly CodexAccount[]>;
       readonly skillBundle?: {
         readonly repoRoot: string;
@@ -846,7 +791,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.hireDefaults = options.hireDefaults;
     this.resolveModel = options.resolveHireModel;
     this.claudeAccounts = options.claudeAccounts;
-    this.leadPane = options.leadPane;
     this.accounts = options.codexAccounts ?? (async () => codexAccounts());
     this.remoteWorkspace = options.remoteWorkspace;
     this.piSeatModel = options.piSeatModel;
@@ -2023,7 +1967,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     let paneId: string;
     let nativePrepared: PreparedSeatLaunch | undefined;
-    let commandAttempted = false;
     let nativeLaunch: SeatLaunch | undefined;
     let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = prepared ?? {
       args: [],
@@ -2042,11 +1985,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       if (claudeHome)
         skillLaunch = { ...skillLaunch, env: { ...skillLaunch.env, CLAUDE_CONFIG_DIR: claudeHome } };
-      const besidePane = input.placement === "split" ? await this.leadPane?.(input, authority) : undefined;
-      if (input.placement === "split" && !besidePane)
-        throw new Error(
-          "Split placement requires a verified lead pane in the target fleet. Choose new-tab or hire from that native lead conversation.",
-        );
+      if (input.placement === "split" && !input.pipeline)
+        throw new Error("Split placement requires a named pipeline; provide pipeline or choose new-tab.");
       // External Herdr panes inherit the server's environment, not this
       // service's. Carry its discovery namespace explicitly for local hires.
       // Trusted preallocation owns its complete environment; SSH fleets use
@@ -2092,18 +2032,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
         if (authority !== undefined) await assertConversationAuthority(authority);
         await this.admitProjectLaunch(input);
       }
-      commandAttempted = nativePrepared !== undefined;
-      if (besidePane !== undefined && (await this.leadPane?.(input, authority)) !== besidePane)
-        throw new Error("Lead pane changed before split; no pane was opened.");
       if (claudeHome) {
         const current = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === input.account);
         if (!current || (await realpath(current.home).catch(() => undefined)) !== claudeHome)
           throw new Error("Claude account profile changed during startup");
       }
       paneId = await createTab({
-        ...(besidePane === undefined ? {} : { besidePane }),
+        ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),
+        ...(input.placement === undefined ? {} : { placement: input.placement }),
         cwd: input.workingDirectory,
-        label: resume === undefined ? input.title : resumePaneLabel(resume),
+        label: input.role ? `${input.title} · ${input.role}` : input.title,
+        ...(resume === undefined ? {} : { paneLabel: resumePaneLabel(resume) }),
         ...(nativePrepared === undefined
           ? skillLaunch.env === undefined
             ? {}
@@ -2113,13 +2052,25 @@ export class HerdrWatchStore implements HerdrWatchPort {
       });
     } catch (caught) {
       await nativePrepared?.dispose();
+      if (caught instanceof HireLayoutUnconfirmed && caught.paneId) {
+        const pane = remote === undefined ? caught.paneId : `${remote}/${caught.paneId}`;
+        if (receiptKey !== undefined) {
+          const receipt = this.hireReceipts.pending(receiptKey)!;
+          this.hireReceipts.update(receiptKey, receipt.messageId, { paneId: pane });
+        }
+        const allocation = this.projectAllocations.get(input);
+        if (allocation) this.projectHires.pane(allocation, pane);
+        if (authority !== undefined)
+          this.hireOwners.bind(pane, authority.owner, undefined, authority.intentId);
+      }
       return {
         outcome: "failed",
-        reason: commandAttempted
-          ? "start_unconfirmed"
-          : adapter?.prepare
-            ? "harness_unavailable"
-            : "herdr_unreachable",
+        reason:
+          caught instanceof HireLayoutUnconfirmed
+            ? "start_unconfirmed"
+            : adapter?.prepare
+              ? "harness_unavailable"
+              : "herdr_unreachable",
         detail: reasonDetail(caught),
       };
     }
@@ -2516,6 +2467,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     readonly subject: string;
     readonly harness: SpawnOperatorSeat["harness"];
     readonly title: SpawnOperatorSeat["title"];
+    readonly role?: SpawnOperatorSeat["role"];
     readonly workingDirectory: string;
   }): Promise<HerdrSeatMoveResult> {
     if (this.closed) return { outcome: "failed", reason: "herdr_unreachable" };
@@ -2567,6 +2519,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
         schemaVersion: 1,
         harness: input.harness,
         title: input.title,
+        ...(input.role === undefined ? {} : { role: input.role }),
+        // A move names a destination, not a shared pipeline enrollment.
+        placement: "new-tab",
         workingDirectory: input.workingDirectory,
         ...(fleet === undefined ? {} : { fleet }),
       },

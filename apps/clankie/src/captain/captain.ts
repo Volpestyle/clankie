@@ -1078,21 +1078,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       { label: "default", home: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude") },
       ...(await settings()).claudeAccounts,
     ],
-    leadPane: async (input, authority) => {
-      const native =
-        authority === undefined ? undefined : conversations.nativeSource(authority.owner.conversationId);
-      if (
-        !native?.session ||
-        (splitFleetQualified(native.paneId)?.fleet ?? "default") !== (input.fleet ?? "default")
-      )
-        return undefined;
-      const current = await herdrRunner.get(native.paneId);
-      return current.terminalId === native.terminalId &&
-        current.session &&
-        occupantIdForHerdrSession(current.session) === occupantIdForHerdrSession(native.session)
-        ? native.paneId
-        : undefined;
-    },
     projectHirePolicy: {
       settings: async () => (await settings()).projects,
       ...(options.projectHireTools === undefined ? {} : { tools: options.projectHireTools }),
@@ -4035,11 +4020,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }
         const standing = stances.read(seat.seatId);
         const remainingMs = standing === undefined ? 0 : Date.parse(standing.expiresAt) - Date.now();
+        const role = personas
+          .all(liveSeats, () => undefined)
+          .find((persona) => persona.personaId === seat.personaId)?.role;
         const moved = await herdrWatches.moveSeat({
           seatId: seat.seatId,
           subject,
           harness,
           title: seat.title,
+          ...(role === undefined ? {} : { role }),
           workingDirectory: request.move.workingDirectory,
         });
         if (moved.outcome !== "spawned") {

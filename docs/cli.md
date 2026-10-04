@@ -1610,10 +1610,31 @@ use its native children. `panes` assigns independent slices to separate hires.
 Closing a pane releases its admission only after successful inventory confirms
 it absent. Retry reconciliation retains the original profile.
 
-`new-tab` is the normal placement. `split` opens a sibling of the verified lead
-pane in the target fleet, preserving focus. It refuses when that native lead
-cannot be verified; prepared initial-command Pi/OpenCode launches currently
-require `new-tab`. It never uses another client's focused pane as a fallback.
+New hires use one Herdr workspace per repository on the selected fleet, even
+when the lead or another client is focused elsewhere. Herdr's observed Git
+identity groups linked worktrees of the same repo; equal directory names do not
+group unrelated repos. A workspace is created and named from the repo once,
+with a separate root tab reserved as `Clankie`. Existing labels are preserved.
+An unmarked hand-created workspace is reused only when all its observed pane
+directories belong to that repo. Mixed legacy workspaces stay untouched.
+Non-Git directories use their exact working directory instead.
+
+`new-tab` is the normal placement: a solo worker gets a `Name · role` tab.
+A deliberate pipeline supplies a per-hire `pipeline` name, for example
+`"VUH-1550 design → implement → review"`. Its first hire opens that named tab;
+later hires use `placement: "split"` with the same pipeline and split its last
+stage, preserving focus. `split` without a pipeline refuses. A same-named tab
+with unmarked panes refuses instead of appending to an unrelated lane. Pipeline
+names belong to the hire, not a blanket role or fleet default. Prepared
+initial-command Pi/OpenCode hires can create the first pipeline tab but cannot
+yet split into an existing one; they refuse rather than rebuild it.
+
+This policy allocates new panes only. Resuming an already live native session
+keeps its existing pane; a saved-session resume that needs a new pane uses the
+same repo/tab rule. An explicitly requested move re-hires in a solo tab at the destination,
+carrying its human name and known role; there is no automatic migration, rename or cleanup of older
+workspaces, tabs or panes. The protocol `spawn_seat` request and `hire_agent`
+accept the same optional `pipeline` field alongside `placement`.
 Local Codex accounts use the registered account labels and homes; local Claude
 accounts use `claudeAccounts` entries (`{label, home}`) plus the implicit
 `default` profile. The owner registers their existing alternate directory with
