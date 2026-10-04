@@ -26,6 +26,9 @@ const fake = vi.hoisted(() => ({
   stopConfirmed: true,
   calibrationStopUnconfirmed: false,
   gradeFailure: undefined as string | undefined,
+  neutralFailure: undefined as
+    | { code: string; verifierStopConfirmed: boolean; containerId: string }
+    | undefined,
 }));
 vi.mock("node:fs", async (original) => {
   const fs = await original<typeof import("node:fs")>();
@@ -280,6 +283,8 @@ vi.mock("../../../scripts/evals/lead-terminal-bench.mjs", () => ({
     }
     async verify() {
       fake.events.push("official-verify");
+      if (fake.neutralFailure)
+        throw Object.assign(Error("fixture neutral verification unavailable"), fake.neutralFailure);
       return { status: "passed", tests: 1 };
     }
   },
@@ -355,6 +360,7 @@ beforeEach(() => {
     stopConfirmed: true,
     calibrationStopUnconfirmed: false,
     gradeFailure: undefined,
+    neutralFailure: undefined,
   });
   Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
   Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
@@ -671,6 +677,35 @@ it.each(["historical-stop-unconfirmed", "artifact-unavailable"])(
       },
     });
     expect(result.taskResult.verifier).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(f.config.runParent, "once/result.json"), "utf8"))).toEqual(result);
+  },
+);
+
+it.each([
+  { code: "terminal-bench-stop-unconfirmed", verifierStopConfirmed: false, status: "stop-unconfirmed" },
+  { code: "artifact-unavailable", verifierStopConfirmed: true, status: "verification-unavailable" },
+])(
+  "retains neutral verification and exact cleanup independently: $code",
+  async ({ code, verifierStopConfirmed, status }) => {
+    vi.useFakeTimers();
+    const f = fixture();
+    fake.neutralFailure = { code, verifierStopConfirmed, containerId: "d".repeat(64) };
+    const running = bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path));
+    await vi.waitFor(() => expect(fake.events).toContain("task-send"));
+    await vi.advanceTimersByTimeAsync(1100);
+    const result = await running;
+    expect(result).toMatchObject({
+      status,
+      verifierStopConfirmed,
+      taskResult: {
+        status: "unavailable",
+        containerId: "d".repeat(64),
+        reason:
+          code === "terminal-bench-stop-unconfirmed" ? code : "official-verifier-or-artifact-unavailable",
+      },
+    });
+    expect(result.taskResult.verifier).toBeUndefined();
+    expect(fake.events.filter((event) => event === "official-verify")).toHaveLength(1);
     expect(JSON.parse(readFileSync(join(f.config.runParent, "once/result.json"), "utf8"))).toEqual(result);
   },
 );

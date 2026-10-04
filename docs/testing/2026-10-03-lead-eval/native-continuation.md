@@ -98,6 +98,22 @@ Pinned test.sh writes `/logs/verifier/ctrf.json`; the actual pytest-json-ctrf 0.
 source establishes the case-name schema. Passing requires complete named case
 coverage and consistent reward, not exit zero alone.
 
+The verifier owns cleanup across creation and its first inspection. Once the
+controller receives an exact container ID, a later inspection, execution or report
+failure still stops that ID through the existing container lifecycle. Cancellation
+while creation is pending prevents a later start; cancellation during cleanup also
+prevents accepting a completed report. An ambiguous create response authorizes
+neither name-based cleanup nor another create attempt.
+
+`official-verification/container-stop.json` records the exact ID, stop outcome,
+cancellation and completion/report error separately. Stop uncertainty takes
+precedence over a passing report and reaches the manual result as
+`terminal-bench-stop-unconfirmed`; ordinary report failure with confirmed cleanup
+remains `verification-unavailable` with `verifierStopConfirmed: true`. Cleanup is not reported as confirmed without an exact ID and a confirmed stop.
+Deterministic fake
+command fixtures cover these transitions; this does not establish a live verifier
+run, native child admission or permission to launch the held campaign.
+
 Both verifier Dockerfiles create an empty `/app`; artifact-only mounting does not
 hide their trusted support. Routing grader inputs/checker live under `/tests` and
 the candidate is data-only JSON. Routing's initial environment files under `/app`

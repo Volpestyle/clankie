@@ -843,16 +843,18 @@ export async function runManualBootstrap(invocation) {
           }),
         );
       } catch (error) {
-        const stopUnconfirmed = error?.code === "historical-stop-unconfirmed";
+        const stopUnconfirmed =
+          error?.code === "historical-stop-unconfirmed" || error?.code === "terminal-bench-stop-unconfirmed";
         result.status = stopUnconfirmed ? "stop-unconfirmed" : "verification-unavailable";
-        result.verifierStopConfirmed = false;
+        result.verifierStopConfirmed = !stopUnconfirmed && error?.verifierStopConfirmed === true;
         persist(
           join(root, "verifier-result.json"),
           (result.taskResult = {
             taskId: task.id,
             status: "unavailable",
+            ...(/^[a-f0-9]{64}$/.test(error?.containerId ?? "") ? { containerId: error.containerId } : {}),
             reason: stopUnconfirmed
-              ? "historical-stop-unconfirmed"
+              ? error.code
               : historical
                 ? "historical-verifier-or-artifact-unavailable"
                 : "official-verifier-or-artifact-unavailable",
