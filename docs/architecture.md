@@ -170,12 +170,15 @@ opens Claude Code, on the owner's own plan, as Clankie: the plugin at
 [`integrations/claude-plugin`](../integrations/claude-plugin/README.md) forces
 his identity as the output style, injects the owner persona, reach, address,
 and service model card at session start (`clankie prompt`) and the newest
-memory card once per session and again when it changes (`clankie memory-card --hook`), and names one stdio MCP
+memory card once per session and then only its new notes (`clankie memory-card --hook`), and names one stdio MCP
 server, `clankie mcp`, that bridges to the service's lane tool bank at
 `/v1/mcp` with the operator bearer read from the broker. The bank is the same
 authored registry the pi session is built from, wrapped once at runtime and
 scoped by the bearer's lane, so a Codex pane with the same entry is the same
-seat. A herdr pane named `clankie` is his head: the census binds it to his own
+seat. A connected service lists only its `initialTools`; the rest of its catalog
+is reached through `mcp_tool_search` and `mcp_tool_call`, so a harness does not
+carry every tracker schema on each request. Per-turn hook commands
+(`memory-card`, `seat-sync`, `seat-hook`) skip the launcher's import graph. A herdr pane named `clankie` is his head: the census binds it to his own
 persona rather than a fleet contact and projects its transcript into the
 conversation the app pins. While a seat is bound, self-wakes, herdr completion
 watches, and room escalations reach it as channel events pushed by `clankie

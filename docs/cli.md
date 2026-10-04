@@ -1071,14 +1071,14 @@ See [persona images](persona-images.md) for caching, voice, model support and A/
 
 Update one or more persona fields atomically:
 
-| Flag                    | Value                                |
-| ----------------------- | ------------------------------------ |
-| `--display-name`        | 1–64 characters                      |
-| `--aliases`             | Comma-separated names; `none` clears |
-| `--character-notes`     | Up to 4,000 characters               |
-| `--chattiness`          | `quiet`, `balanced`, or `chatty`     |
-| `--reply-policy`        | `addressed` or `all`                 |
-| `--live-message-window` | Whole number from 0 through 100      |
+| Flag                    | Value                                                                                    |
+| ----------------------- | ---------------------------------------------------------------------------------------- |
+| `--display-name`        | 1–64 characters                                                                          |
+| `--aliases`             | Comma-separated names; `none` clears                                                     |
+| `--character-notes`     | Up to 4,000 characters                                                                   |
+| `--chattiness`          | `quiet`, `balanced`, or `chatty`; shapes Discord and stream rooms, not the operator lane |
+| `--reply-policy`        | `addressed` or `all`                                                                     |
+| `--live-message-window` | Whole number from 0 through 100                                                          |
 
 JSON contains `{ "ok": true, "persona": { … }, "settingsFile": "…", "restart": "clankie restart captain" }`.
 The TUI `/persona` modal calls this same writer.
@@ -1891,8 +1891,9 @@ The intended consumer is a per-turn hook, so a seat in another harness carries
 the same recent past his own sessions do.
 
 `--hook` reads Claude hook JSON on stdin. On `UserPromptSubmit` it prints the
-card only when that `session_id` has not seen this exact card yet, so unchanged
-turns add nothing to the conversation. `SessionStart` prints nothing and re-arms
+whole card the first time a `session_id` asks, then only the notes that session
+has not seen yet, under a short "Newer notes" header. Unchanged turns, and notes
+that merely age out of the card, add nothing to the conversation. `SessionStart` prints nothing and re-arms
 the session, so the prompt after startup, resume, `/clear`, or compaction
 injects it again. Input without a usable `session_id` prints the card every
 time.

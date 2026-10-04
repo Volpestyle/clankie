@@ -51,10 +51,11 @@ export function laneAuthoredTools(
 }
 
 /**
- * Everything that lane reaches, as one flat list. The browser and MCP tools are
- * the same registrations `browserExtension` and `mcpExtension` make, minus their
- * `*_tool_search` helpers: a harness with its own search over a full tool list
- * does not need pi's narrowing, which exists to keep a prompt small.
+ * Everything that lane reaches. Authored and browser tools are listed flat. A
+ * connected service lists only its `initialTools`, the same narrowing
+ * `mcpExtension` gives pi; the rest stay reachable through `mcp_tool_search` and
+ * `mcp_tool_call`. A tracker's server alone advertises dozens of large schemas,
+ * and a harness that lists them pays for every one on each request.
  */
 export async function buildLaneToolBank(
   deps: CaptainDeps,
@@ -83,8 +84,146 @@ export async function buildLaneToolBank(
     if (tool.requiresShell && lane !== "operator" && turn.shell !== true) continue;
     tools.push(browserLaneTool(deps, turn, tool, lane === "operator" || turn.shell === true));
   }
-  for (const tool of await deps.mcp.catalog(lane)) tools.push(mcpLaneTool(deps, lane, tool));
+  const services = await deps.mcp.catalog(lane);
+  for (const tool of services) if (tool.initial) tools.push(mcpLaneTool(deps, lane, tool));
+  if (services.some((tool) => !tool.initial)) tools.push(...serviceDirectoryTools(deps, lane, services));
   return { lane, tools };
+}
+
+const MAX_SEARCH_RESULTS = 20;
+const MAX_SCHEMA_NAMES = 10;
+
+/**
+ * The deferred half of a connected service: one tool to find a name and its
+ * schema, one to call it. Search covers the whole catalog, listed ones included,
+ * so a miss means the service really lacks it.
+ */
+function serviceDirectoryTools(
+  deps: CaptainDeps,
+  lane: CaptainSessionLaneV2,
+  catalog: readonly McpToolDescriptor[],
+): LaneTool[] {
+  const byName = new Map(catalog.map((tool) => [tool.qualifiedName, tool]));
+  const servers = [...new Set(catalog.map((tool) => tool.server))].join(", ");
+  return [
+    {
+      name: "mcp_tool_search",
+      description:
+        `Find tools on his connected services (${servers}) beyond the ones listed. ` +
+        "Search with query for names and one-line summaries, then pass names for full input schemas. " +
+        "Use this before saying a service cannot do something.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            maxLength: 200,
+            description: "Words describing the task, e.g. 'project labels'.",
+          },
+          names: {
+            type: "array",
+            items: { type: "string", maxLength: 256 },
+            maxItems: MAX_SCHEMA_NAMES,
+            description: "Qualified tool names whose input schemas to return.",
+          },
+        },
+        additionalProperties: false,
+      },
+      async call(args) {
+        const names = Array.isArray(args.names) ? args.names.filter((name) => typeof name === "string") : [];
+        if (names.length > 0) {
+          const found = names.slice(0, MAX_SCHEMA_NAMES).flatMap((name) => {
+            const tool = byName.get(name);
+            return tool === undefined
+              ? []
+              : [
+                  {
+                    name,
+                    description: tool.description,
+                    inputSchema: tool.inputSchema,
+                  },
+                ];
+          });
+          const missing = names.filter((name) => !byName.has(name));
+          return {
+            content: toolJson({
+              tools: found,
+              ...(missing.length > 0 ? { missing } : {}),
+            }).content,
+          };
+        }
+        const query = typeof args.query === "string" ? args.query : "";
+        return {
+          content: toolJson({ tools: searchCatalog(catalog, query) }).content,
+        };
+      },
+    },
+    {
+      name: "mcp_tool_call",
+      description:
+        "Call a connected-service tool by the qualified name mcp_tool_search returned, with arguments matching its input schema.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 256 },
+          arguments: { type: "object" },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      async call(args) {
+        const tool = typeof args.name === "string" ? byName.get(args.name) : undefined;
+        if (tool === undefined) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No connected tool named ${String(args.name)}. Search with mcp_tool_search.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        const input = args.arguments;
+        const callArgs =
+          input !== null && typeof input === "object" && !Array.isArray(input)
+            ? (input as Record<string, unknown>)
+            : {};
+        return await mcpLaneTool(deps, lane, tool).call(callArgs);
+      },
+    },
+  ];
+}
+
+/** Ranked by how many query words a tool's name and description contain; an empty query lists them all. */
+function searchCatalog(catalog: readonly McpToolDescriptor[], query: string) {
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter(Boolean);
+  return catalog
+    .map((tool) => {
+      const haystack = `${tool.qualifiedName} ${tool.description}`.toLowerCase();
+      const name = tool.qualifiedName.toLowerCase();
+      const score = terms.reduce(
+        (total, term) => total + (name.includes(term) ? 2 : haystack.includes(term) ? 1 : 0),
+        0,
+      );
+      return { tool, score };
+    })
+    .filter(({ score }) => terms.length === 0 || score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map(({ tool }) => ({
+      name: tool.qualifiedName,
+      summary: summaryOf(tool.description),
+    }));
+}
+
+function summaryOf(description: string): string {
+  const line = description.trim().split("\n")[0] ?? "";
+  const sentence = /^.*?[.!?](?:\s|$)/u.exec(line)?.[0]?.trim() ?? line;
+  return sentence.length > 160 ? `${sentence.slice(0, 157)}...` : sentence;
 }
 
 /**

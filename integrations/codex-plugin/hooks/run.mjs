@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,29 +28,46 @@ if (!binding.sessionId && hook.hook_event_name === "SessionStart") {
 }
 if (binding.sessionId !== hook.session_id) process.exit(0);
 const env = { ...process.env, CLANKIE_SEAT_SESSION_ID: binding.sessionId, CLANKIE_SEAT_HARNESS: "codex" };
-const run = (args, required = true) => {
-  const result = spawnSync("clankie", args, { env, input, encoding: "utf8", timeout: 20000 });
-  const ok = !result.error && result.status === 0;
-  if (!ok) {
-    process.stderr.write(result.stderr || String(result.error || `clankie ${args[0]} failed`));
-    if (required) process.exitCode = 1;
-  }
-  return { ok, text: result.stdout || "" };
-};
+// Each clankie command is a cold start, so independent ones run side by side
+// rather than adding up on every prompt.
+const run = (args, required = true) =>
+  new Promise((resolve) => {
+    const child = spawn("clankie", args, { env, timeout: 20000 });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
+    child.stdin.on("error", () => {});
+    child.stdin.end(input);
+    let settled = false;
+    const settle = (ok, error) => {
+      if (settled) return;
+      settled = true;
+      if (!ok) {
+        process.stderr.write(stderr || String(error || `clankie ${args[0]} failed`));
+        if (required) process.exitCode = 1;
+      }
+      resolve({ ok, text: stdout });
+    };
+    child.on("error", (error) => settle(false, error));
+    child.on("close", (code) => settle(code === 0));
+  });
+// A display-upload failure must not discard context whose memory digest was
+// already advanced, or block a native Stop. Retained entries retry next hook.
+const sync = run(["seat-sync"], false);
 if (hook.hook_event_name === "SessionStart") {
+  const [prompt] = await Promise.all([
+    run(["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model"]),
+    run(["memory-card", "--lane", "operator", "--hook"]),
+  ]);
   process.stdout.write(
     readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../instructions/clankie.md"), "utf8"),
   );
-  process.stdout.write(
-    run(["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model"]).text,
-  );
-  run(["memory-card", "--lane", "operator", "--hook"]);
+  process.stdout.write(prompt.text);
 } else if (hook.hook_event_name === "UserPromptSubmit") {
-  process.stdout.write(run(["memory-card", "--lane", "operator", "--hook"]).text);
+  process.stdout.write((await run(["memory-card", "--lane", "operator", "--hook"])).text);
 }
-// A display-upload failure must not discard context whose memory digest was
-// already advanced, or block a native Stop. Retained entries retry next hook.
-const synced = run(["seat-sync"], false).ok;
+const synced = (await sync).ok;
 if (hook.hook_event_name === "SessionStart") {
   binding.contextReady = !process.exitCode;
   binding.ready = binding.contextReady && synced;
