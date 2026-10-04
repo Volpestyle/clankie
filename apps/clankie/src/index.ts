@@ -1,3 +1,5 @@
+import { ComputerBody } from "./computer-body.ts";
+import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
 import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
@@ -652,6 +654,10 @@ const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-ro
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
+const computer =
+  process.platform === "darwin"
+    ? new ComputerBody(new PeekabooComputerAdapter(), bodyLeaseStore, join(stateRoot, "body"))
+    : undefined;
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
 let minecraftCapture: MinecraftCapture | undefined;
@@ -1025,6 +1031,7 @@ const clankie = await createClankieApp({
   minecraft,
   minecraftHost,
   minecraftPrivateDelivery,
+  ...(computer === undefined ? {} : { computer }),
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,

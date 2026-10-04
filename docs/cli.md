@@ -1292,6 +1292,9 @@ clankie body request '{"action":"queue","resource":"browser","conversationId":"C
 clankie body request '{"action":"ask","resource":"voice","conversationId":"CONVERSATION_ID","request":"Can you finish this voice stay?","ttlMs":300000}'
 ```
 
+`computer` ownership is exposed separately through `clankie computer request`
+and `/v1/computer`; the legacy body status resource set stays unchanged.
+
 `GET /v1/body-leases` returns `{leases:[...]}` with resource, owning stable
 conversation ID, expiry and `active`/`recovery_required` state. It accepts the
 operator or an active paired device's existing observe grant. It exposes no
@@ -3152,3 +3155,31 @@ and question IDs needed to open it. `since` is a source start timestamp, or null
 when that source has no known start. An unreachable service has no mood; clients
 show that connection failure separately. The same read passes through the relay
 and hosted paired-device authority seam.
+
+## Computer body
+
+```sh
+clankie computer request '{"conversationId":"global-default","command":{"action":"status"}}'
+clankie computer request '{"conversationId":"global-default","command":{"action":"acquire"}}'
+clankie computer request '{"conversationId":"global-default","command":{"action":"inventory","leaseId":"LEASE_UUID"}}'
+clankie computer request '{"conversationId":"global-default","command":{"action":"capture","leaseId":"LEASE_UUID","target":{"appId":"PID:123","windowId":"456"}}}'
+clankie computer request '{"conversationId":"global-default","command":{"action":"frame","leaseId":"LEASE_UUID","screenshotId":"SCREENSHOT_UUID"}}' --image-path /tmp/clankie-frame-unique.png
+clankie computer request '{"conversationId":"global-default","command":{"action":"input","leaseId":"LEASE_UUID","screenshotId":"SCREENSHOT_UUID","requestId":"REQUEST_UUID","inputs":[{"kind":"click","at":{"x":100,"y":80}}]}}'
+```
+
+Replace IDs with current receipts and a new UUID for each intended batch. The
+command uses operator authority and `POST /v1/computer`, bound to the selected
+runnable conversation. `frame --image-path NEW_PNG_PATH` saves a private PNG and prints its metadata;
+read that image before deciding inputs. It refuses an existing destination.
+Without the flag, `frame` returns base64 PNG media. Receipts
+contain no pixels. Further actions are `renew` (`leaseId`, optional `ttlMs`),
+`release` (`leaseId`), `revoke` (`leaseId`) and `recover` (operator stop-proof recovery). Never retry
+uncertain input with a new request UUID. A busy body does not transfer ownership. `revoke` quarantines the current driver
+even during an input batch; its next input refuses. Recovery still needs host stop
+proof.
+
+The service currently registers a macOS Peekaboo adapter. Other hosts return
+`computer_body_unavailable`; native Codex/provider loops and hosted displays are
+not implemented. [Desktop control](desktop-control.md#shared-computer-body)
+explains capture freshness, coordinate mapping and the provider's recovery
+limitation.

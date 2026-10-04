@@ -1,7 +1,7 @@
 # @clankie/interactive-environment
 
 Provider-neutral contracts shared by the GBA body, Discord presence, rendered
-surfaces, and activity observation. The package defines session phases, leases,
+surfaces, computer bodies, and activity observation. The package defines session phases, leases,
 action results, concrete GBA commands and observations, semantic events, bounded
 telemetry references, and Discord presence tool exposure.
 
@@ -40,3 +40,12 @@ model text, authority, or raw media into the semantic plane.
 `RenderedSurfaceFrameSchema` and `RenderedSurfaceAudioSchema` carry bounded PNG
 and stereo PCM packets only on that rendered-media plane. Audio is live-only;
 consumers drop stale packets instead of retaining or replaying them.
+
+`ComputerLeaseSchema` follows the environment clock conventions and binds a
+driver to a body and conversation. `ComputerScreenshotSchema` carries a fresh
+image identity, exact target, dimensions and coordinate mapping;
+`ComputerFrameSchema` keeps bounded PNG media separate from semantic metadata
+and input receipts. `ComputerCommandSchema` admits ordered concrete inputs;
+`ComputerReceiptSchema` distinguishes confirmed, failed and uncertain outcomes.
+The service owns authority, native references and the persistent single-driver
+registry. The contract selects no model or hosting implementation.

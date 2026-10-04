@@ -13,11 +13,12 @@ not select that corpus. `pnpm test:eval` uses `vitest.eval.config.ts` to run it.
 Authority and evaluator-runner unit regressions remain ordinary tests; they do
 not execute evaluations.
 
-| Lane                | Command                 | Evidence and limits                                                                                                     |
-| ------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Full gate           | `pnpm check`            | CI JUnit report in `.data/qa/tests.xml`; Rust/IPC results remain in the job log.                                        |
-| Host integration    | `pnpm test:integration` | Loopback HTTP boot/restart, pairing, device authority, encryption and conversation relay.                               |
-| Manual offline eval | `pnpm test:eval`        | Frozen play-evidence calibration cases. Every assertion must pass; this lane is excluded from full checks and releases. |
+| Lane                | Command                          | Evidence and limits                                                                                                            |
+| ------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Full gate           | `pnpm check`                     | CI JUnit report in `.data/qa/tests.xml`; Rust/IPC results remain in the job log.                                               |
+| Computer body       | `pnpm test:computer-integration` | Explicit real Chromium/localhost-fixture contract proof; excluded from default tests and checks. No comparison or model calls. |
+| Host integration    | `pnpm test:integration`          | Loopback HTTP boot/restart, pairing, device authority, encryption and conversation relay.                                      |
+| Manual offline eval | `pnpm test:eval`                 | Frozen play-evidence calibration cases. Every assertion must pass; this lane is excluded from full checks and releases.        |
 
 The host-integration command selects tests already in the full gate. The eval
 command is separate and never runs implicitly. Retries are disabled. CI cancels

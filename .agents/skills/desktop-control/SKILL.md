@@ -24,6 +24,16 @@ does not drive apps. Peekaboo is his own hands, guided by this session's current
 observation. A hired Codex computer-use seat is another visible driver; coordinate
 one active driver on the display instead of overlapping it with Peekaboo.
 
+The shared computer body is available through `clankie computer request JSON`
+(`conversationId`, `command`). Acquire its driver lease, inventory PID/window
+IDs, capture and save its frame with `--image-path NEW_PNG_PATH`. Read that image,
+then send ordered input against the
+fresh screenshot UUID. Coordinates are image pixels; foreground input is an
+explicit choice. Reconcile the same request UUID after transport loss and never
+replay an uncertain input. Its macOS adapter preserves Peekaboo's limitations;
+recovery needs host stop proof. Contract and examples:
+[desktop control](../../../docs/desktop-control.md#shared-computer-body).
+
 ## Discover the target
 
 ```sh

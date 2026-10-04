@@ -149,6 +149,9 @@ importers:
       mineflayer:
         specifier: 4.35.0
         version: 4.35.0
+      playwright-core:
+        specifier: 1.63.0
+        version: 1.63.0
       tsx:
         specifier: 4.23.0
         version: 4.23.0
@@ -315,6 +318,9 @@ importers:
       '@clankie/credential-broker':
         specifier: workspace:*
         version: link:../../packages/credential-broker
+      '@clankie/interactive-environment':
+        specifier: workspace:*
+        version: link:../../packages/interactive-environment
       '@clankie/model-provider':
         specifier: workspace:*
         version: link:../../packages/model-provider

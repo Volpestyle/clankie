@@ -1,3 +1,4 @@
+import { registerComputerRoutes } from "./computer-http.ts";
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
 import type { PeerSeatAuthority } from "./captain/peer-seat-messages.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -509,6 +510,7 @@ export interface ClankieAppDependencies {
     ReturnType<typeof import("./minecraft-host-invite.ts").createMinecraftPrivateDeliveryClient>,
     "authorize"
   >;
+  computer?: import("./computer-body.ts").ComputerBody;
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;
@@ -3545,14 +3547,26 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (dependencies.bodyLeases === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
     try {
       return context.json({
-        leases: BodyResourceSchema.options.flatMap((resource) => {
-          const lease = dependencies.bodyLeases!.store.status(resource);
-          return lease === undefined ? [] : [lease];
-        }),
+        // The computer contract is opt-in; old clients have a closed body-resource enum.
+        leases: BodyResourceSchema.options
+          .filter((resource) => resource !== "computer")
+          .flatMap((resource) => {
+            const lease = dependencies.bodyLeases!.store.status(resource);
+            return lease === undefined ? [] : [lease];
+          }),
       });
     } catch {
       return context.json({ error: "body_leases_unavailable" }, 503);
     }
+  });
+
+  registerComputerRoutes(app, {
+    ...(dependencies.computer === undefined ? {} : { body: dependencies.computer }),
+    async identity(request, conversationId) {
+      const operator = await authenticateOperator(request, dependencies);
+      if (!operator || operator === "unavailable") return undefined;
+      return operatorBodyIdentity(conversationId, request);
+    },
   });
 
   app.post("/v1/body-leases", async (context) => {
@@ -3564,6 +3578,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const body = dependencies.bodyLeases;
     if (body === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
     const input = parsed.data;
+    if (input.resource === "computer") return context.json({ error: "use_computer_contract" }, 409);
     // An operator bearer can select its own existing writable thread. Room inspection is insufficient.
     const identity = operatorBodyIdentity(input.conversationId, context.req.raw);
     if (identity === undefined)
