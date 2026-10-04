@@ -74,7 +74,7 @@ export function minecraftHostTools(client: MinecraftHostToolPort, turn: TurnCont
       name: "minecraft_host_lifecycle",
       label: "Manage Minecraft server",
       description:
-        "Start, stop or restart your own Minecraft server for an authenticated owner or individual machine operator. Server lifecycle is separate from your play lease; stopping must reconcile your bot's exact connection.",
+        "Start your off-by-default server on a play request from an authenticated owner, individual machine operator or already approved Discord-bound friend. Stop/restart require an owner or individual operator. Empty servers save, back up and stop after about 15 minutes; maximum uptime is bounded. Server lifecycle is separate from your play lease; stopping must reconcile your bot's exact connection.",
       parameters: Type.Object({
         operation: Type.Union([Type.Literal("start"), Type.Literal("stop"), Type.Literal("restart")]),
       }),
