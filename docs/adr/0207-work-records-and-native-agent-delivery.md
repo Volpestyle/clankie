@@ -61,3 +61,34 @@ turn boundary; a session API may steer an active turn. Results must describe the
 actual mechanism. An unavailable connection is not a promise of automatic retry,
 and a saved session ID alone does not prove restart reattachment. Reuse existing
 mailboxes and session state; add recovery machinery only for demonstrated gaps.
+
+## MCP reconnect and native call receipts (VUH-1638)
+
+Overlapping operator MCP calls share an HTTP client. Resetting that client after
+one logical error can close another call that already reached native dispatch,
+losing its result while its effect continues. A reconnect must therefore drain
+the old client generation without closing its pending calls. Only an explicit
+`unknown_session` rejection before tool admission permits one retry in a new
+session. Network failure or a missing result never permits mutation replay.
+
+The bridge assigns `deliveryId` for `message_seat` and `hireId` for `hire_agent`
+before protected dispatch and carries them in MCP `_meta["clankie/seat-call"]`.
+The service persists the exact scoped receipt before the native effect, binding
+the request by fingerprint without storing its request text. Lost
+results return typed uncertainty with the original ID, rather than hiding it in
+a transport exception or launching a replacement. Reconnect does not change that
+pending action's identity or replay it.
+
+These IDs identify the operator dispatch; native delivery receipts retain their
+own identities. A settled call receipt preserves the original tool result,
+including any native uncertainty, rather than asserting task completion.
+
+`reconcile_seat_call({deliveryId})` or `reconcile_seat_call({hireId})` reads the
+original receipt in its owning operator conversation. It sends no message,
+starts no hire and grants no new authority. This operator receipt scope is
+separate from worker inbound and fleet peer-message ledgers. The journal keeps
+the latest 1,000 settled result bodies; older IDs remain non-replayable and report
+an expired result, while uncertain originals remain retained. ID, scope and
+fingerprint tombstones survive result-body expiry and service restart. Reconciliation
+reports what the original receipt proves, preserving the distinction between
+native delivery, uncertainty and completed work.

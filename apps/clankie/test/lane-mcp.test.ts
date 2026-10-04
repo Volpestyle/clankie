@@ -124,7 +124,11 @@ describe("lane MCP endpoint", () => {
 
     const operator = await connect(app, "operator");
     const discord = await connect(app, "discord-text");
-    expect(await toolNames(app, "operator", operator)).toEqual(["observe_room", "generate_image"]);
+    expect(await toolNames(app, "operator", operator)).toEqual([
+      "observe_room",
+      "generate_image",
+      "reconcile_seat_call",
+    ]);
     expect(await toolNames(app, "discord-text", discord)).toEqual(["observe_room"]);
 
     // A session belongs to the lane that opened it, whatever bearer arrives next.

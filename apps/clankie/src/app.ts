@@ -413,6 +413,8 @@ export interface ClankieAppDependencies {
   discordIngress?: DiscordIngress;
   /** Durable exact Discord turn receipts; production supplies its state directory. */
   discordTurnReceiptPath?: string;
+  /** Durable operator MCP hire/delivery receipts, retained across service restarts. */
+  seatCallReceiptPath?: string;
   discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
   /** The owner's GitHub and Linear account connections (ADR 0196). */
@@ -1879,7 +1881,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // The same lane's tools, over streamable-HTTP MCP, for a seat in a harness
   // that speaks it (VUH-1085). The bearer selects the lane; the captain's tool
   // registry is still the only place a tool is defined.
-  const laneMcp = createLaneMcpEndpoint({ captain: dependencies.captain });
+  const laneMcp = createLaneMcpEndpoint({
+    captain: dependencies.captain,
+    ...(dependencies.seatCallReceiptPath === undefined
+      ? {}
+      : { receiptPath: dependencies.seatCallReceiptPath }),
+  });
   app.all("/v1/mcp", async (context) => {
     const auth = await authenticateLane(context);
     if ("denial" in auth) return auth.denial;

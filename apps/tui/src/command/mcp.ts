@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { createInboundSender } from "../../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
 /**
  * `clankie mcp --lane operator` and `clankie mcp --seat` — stdio MCP for a
@@ -32,7 +33,9 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   CallToolRequestSchema,
+  ErrorCode,
   ListToolsRequestSchema,
+  McpError,
   type CallToolResult,
   type Notification,
   type Request,
@@ -47,8 +50,11 @@ import {
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorSeatEventsPageSchema,
+  RECONCILE_SEAT_CALL,
+  SEAT_CALL_META,
   fleetSeatEventsPath,
   fleetSeatMessagesPath,
+  uncertainSeatCall,
   type CaptainSessionLaneV2,
   type OperatorSeatEvent,
 } from "@clankie/protocol";
@@ -67,6 +73,8 @@ const OPERATOR_CHANNEL_ENTRIES = [
   "server:clankie",
 ] as const;
 const REQUEST_TIMEOUT_MS = 10 * 60_000;
+const CONNECT_TIMEOUT_MS = 10_000;
+const SEAT_RECONCILE_TIMEOUT_MS = 10_000;
 /** Under the outbox's bound window (45s), so a live bridge is always mid-poll or just back. */
 const OUTBOX_POLL_WAIT_MS = 25_000;
 const OUTBOX_RETRY_MS = 5_000;
@@ -380,17 +388,49 @@ export async function connectLaneUpstream(input: {
     return url;
   };
   class ExpiredSeatSession extends Error {}
+  const isLogicalError = (error: unknown) =>
+    error instanceof McpError &&
+    error.code < 0 &&
+    error.code !== ErrorCode.ConnectionClosed &&
+    error.code !== ErrorCode.RequestTimeout;
   let closed = false;
   const invalidated = new WeakSet<Client>();
+  const generations = new Set<Client>();
+  const retired = new WeakSet<Client>();
+  const closing = new WeakSet<Client>();
+  const pending = new Map<Client, number>();
   const listeners = new Set<() => void>();
+  const closeIfIdle = (previous: Client) => {
+    if (!retired.has(previous) || pending.has(previous) || closing.has(previous)) return;
+    closing.add(previous);
+    void previous
+      .close()
+      .catch(() => undefined)
+      .finally(() => generations.delete(previous));
+  };
   const connect = async () => {
     const next = new Client(SEAT_CLIENT, { capabilities: {} });
     next.onclose = () => invalidated.add(next);
     next.onerror = () => invalidated.add(next);
+    let initializing = true;
+    const initializationDeadline = AbortSignal.timeout(CONNECT_TIMEOUT_MS);
     const transport = new StreamableHTTPClientTransport(urlFor("/v1/mcp"), {
       requestInit: { headers },
       fetch: async (url, init) => {
-        const response = await fetchImpl(url, init);
+        // Bound both initialize and its initialized notification. The SSE stream
+        // has its own lifetime and must not inherit this short setup deadline.
+        const response = await fetchImpl(
+          url,
+          initializing && init?.method === "POST"
+            ? {
+                ...init,
+                signal:
+                  init.signal == null
+                    ? initializationDeadline
+                    : AbortSignal.any([init.signal, initializationDeadline]),
+              }
+            : init,
+        );
         // This explicit rejection happens before tool admission. Network errors,
         // generic 404s and lost results must never replay a potentially run tool.
         if (init?.method === "POST" && response.status === 404) {
@@ -411,11 +451,14 @@ export async function connectLaneUpstream(input: {
       },
     });
     try {
-      await next.connect(transport as unknown as Transport, { timeout: REQUEST_TIMEOUT_MS });
+      await next.connect(transport as unknown as Transport, { timeout: CONNECT_TIMEOUT_MS });
+      generations.add(next);
       return next;
     } catch (error) {
       await next.close().catch(() => undefined);
       throw error;
+    } finally {
+      initializing = false;
     }
   };
   let client = await connect();
@@ -429,31 +472,44 @@ export async function connectLaneUpstream(input: {
         throw new Error("Seat bridge is closed");
       }
       client = next;
-      await previous.close().catch(() => undefined);
+      // Closing an SDK Client rejects every admitted request on it. A new
+      // generation can serve callers while the old one finishes its receipts.
+      retired.add(previous);
+      closeIfIdle(previous);
       for (const listener of listeners) listener();
     })().finally(() => {
       reconnecting = undefined;
     });
     await reconnecting;
   };
+  const perform = async <T>(active: Client, operation: (active: Client) => Promise<T>): Promise<T> => {
+    pending.set(active, (pending.get(active) ?? 0) + 1);
+    try {
+      return await operation(active);
+    } catch (error) {
+      // A logical JSON-RPC rejection is a response, not a broken transport.
+      // Transport onerror/onclose still invalidate the generation independently.
+      if (!isLogicalError(error)) invalidated.add(active);
+      throw error;
+    } finally {
+      const remaining = (pending.get(active) ?? 1) - 1;
+      if (remaining === 0) pending.delete(active);
+      else pending.set(active, remaining);
+      closeIfIdle(active);
+    }
+  };
   const request = async <T>(operation: (active: Client) => Promise<T>): Promise<T> => {
     if (closed) throw new Error("Seat bridge is closed");
     if (invalidated.has(client)) await reconnect(client);
     const previous = client;
     try {
-      return await operation(previous);
+      return await perform(previous, operation);
     } catch (error) {
-      invalidated.add(previous);
       // Only the service's explicit pre-admission rejection authorizes this one replay.
       // Unknown network failures escape; the NEXT caller reconnects a fresh session.
       if (!(error instanceof ExpiredSeatSession) || closed) throw error;
       await reconnect(previous);
-      try {
-        return await operation(client);
-      } catch (failure) {
-        invalidated.add(client);
-        throw failure;
-      }
+      return await perform(client, operation);
     }
   };
   return {
@@ -476,15 +532,66 @@ export async function connectLaneUpstream(input: {
       return collected;
     },
     async callTool(name, args) {
-      const result = await request((active) =>
-        active.callTool({ name, arguments: args }, undefined, {
-          timeout: REQUEST_TIMEOUT_MS,
-        }),
-      );
-      return {
+      const tool = name === "message_seat" || name === "hire_agent" ? name : undefined;
+      // One identity belongs to this intent, including the explicit pre-admission
+      // replay above. Receipt recovery never dispatches the intent again.
+      const id = tool === undefined ? undefined : randomUUID();
+      const preserveResult = (result: Awaited<ReturnType<Client["callTool"]>>): CallToolResult => ({
+        ...result,
         content: Array.isArray(result.content) ? (result.content as CallToolResult["content"]) : [],
-        ...(result.isError === true ? { isError: true } : {}),
-      };
+      });
+      try {
+        return preserveResult(
+          await request((active) =>
+            active.callTool(
+              {
+                name,
+                arguments: args,
+                ...(id === undefined ? {} : { _meta: { [SEAT_CALL_META]: { id } } }),
+              },
+              undefined,
+              { timeout: REQUEST_TIMEOUT_MS },
+            ),
+          ),
+        );
+      } catch (error) {
+        if (tool === undefined || id === undefined || isLogicalError(error)) throw error;
+        try {
+          const result = await request((active) =>
+            active.callTool(
+              {
+                name: RECONCILE_SEAT_CALL,
+                arguments: tool === "message_seat" ? { deliveryId: id } : { hireId: id },
+              },
+              undefined,
+              { timeout: SEAT_RECONCILE_TIMEOUT_MS },
+            ),
+          );
+          const receipt = result._meta?.[SEAT_CALL_META];
+          if (
+            typeof receipt === "object" &&
+            receipt !== null &&
+            "id" in receipt &&
+            receipt.id === id &&
+            "tool" in receipt &&
+            receipt.tool === tool &&
+            (tool === "message_seat"
+              ? "deliveryId" in receipt && receipt.deliveryId === id
+              : "hireId" in receipt && receipt.hireId === id) &&
+            "state" in receipt &&
+            (receipt.state === "settled" || receipt.state === "uncertain")
+          ) {
+            return preserveResult(result);
+          }
+        } catch {
+          // An unavailable or lost read cannot authorize repeating the action.
+        }
+        return uncertainSeatCall(
+          id,
+          tool,
+          "The tool result was lost and its receipt could not be confirmed. Reconcile this ID; do not resend the action.",
+        );
+      }
     },
     async pollEvents(waitMs, signal) {
       // The harness closing the bridge must not wait out a parked poll.
@@ -527,7 +634,8 @@ export async function connectLaneUpstream(input: {
       closed = true;
       listeners.clear();
       await reconnecting?.catch(() => undefined);
-      await client.close();
+      await Promise.all([...generations].map((active) => active.close()));
+      generations.clear();
     },
   };
 }

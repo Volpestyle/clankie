@@ -245,9 +245,23 @@ on a loaded machine. Raising that outer limit alone does not fix credential cont
 ### Service restarts
 
 The operator bridge renews its MCP session after an explicit `unknown_session`
-rejection and retries that rejected request once. Concurrent requests share the
-new session. Network failures and lost tool results are not replayed because the
-tool may already have run. Persisted Herdr watches retain their stable terminal
+rejection before tool admission and retries that rejected request once. Concurrent
+requests share the new session. Old HTTP clients drain without closing pending
+calls when another request reconnects. Network failures and lost tool results
+never replay a pending action because the tool may already have run.
+
+Before protected `message_seat` or `hire_agent` dispatch, the bridge assigns a
+`deliveryId` or `hireId` in MCP `_meta["clankie/seat-call"]`; the service persists
+the receipt before the native effect. Lost results return typed uncertainty with
+the original ID. Use read-only `reconcile_seat_call({deliveryId})` or
+`reconcile_seat_call({hireId})` from the owning operator conversation to inspect
+that receipt. This never resends a message or starts a replacement hire. Settled
+receipts survive restart within bounded result-body retention; original IDs
+remain non-replayable, and uncertain originals remain retained. These
+operator call receipts are separate from the fleet peer-message ledger. See
+[ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md#mcp-reconnect-and-native-call-receipts-vuh-1638).
+
+Persisted Herdr watches retain their stable terminal
 identity when a wait process fails, retry observation, and resume on service start.
 A failed wait is not treated as agent completion.
 
