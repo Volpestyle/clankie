@@ -1,3 +1,5 @@
+import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
+import { effectiveHireProfile } from "@clankie/protocol";
 import { applyProjectCreate } from "./project-create.ts";
 import { isDeepStrictEqual } from "node:util";
 import { Hono } from "hono";
@@ -52,8 +54,13 @@ export function createProjectRoutes(
     app.use(path, bodyLimit({ maxSize: 16 * 1024 }));
   }
   app.get(PROJECTS_PATH, async (context) => {
-    const value = (await settings.load()).projects;
-    return context.json({ settings: value, revision: projectsRevision(value) });
+    const current = await settings.load();
+    const value = current.projects;
+    return context.json({
+      settings: value,
+      ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
+      revision: projectsRevision(value),
+    });
   });
   app.post(PROJECT_CREATE_SETTINGS_PATH, async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
@@ -85,6 +92,17 @@ export function createProjectRoutes(
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
     const input = UpdateProjectSettingsSchema.safeParse(await context.req.json().catch(() => null));
     if (!input.success) return context.json({ error: "malformed" }, 400);
+    try {
+      const current = await settings.load();
+      const catalog = await createModelRegistry().catalog();
+      for (const role of input.data.changes.roles ?? []) {
+        const profile = effectiveHireProfile({}, role, current.fleet.hire);
+        for (const model of [profile.model, profile.subagents?.model])
+          if (model) resolveHireModel(catalog, profile.harness, model);
+      }
+    } catch (error) {
+      return context.json({ error: "invalid_hire_model", detail: String(error) }, 400);
+    }
     let before: string | undefined;
     try {
       const updated = await settings.update(

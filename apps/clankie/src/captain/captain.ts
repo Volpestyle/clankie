@@ -1,5 +1,6 @@
 import { DesktopExpressions } from "./desktop.ts";
 import { projectPresence, pollPresence, captainIsThinking } from "./presence.ts";
+import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { projectOnboarding } from "./project-onboarding.ts";
 import {
   authorizeQuestion,
@@ -1044,8 +1045,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     consent: () => claudeWorkerChannelConsent(),
     ...claudeWorkerDeps,
   });
+  const hireRegistry = createModelRegistry();
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     validateOwner: validateConversationOwner,
+    hireDefaults: async () => (await settings()).fleet.hire ?? {},
+    resolveHireModel: async (harness, model) =>
+      resolveHireModel(await hireRegistry.catalog(), harness, model),
+    claudeAccounts: async () => [
+      { label: "default", home: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude") },
+      ...(await settings()).claudeAccounts,
+    ],
+    leadPane: async (input, authority) => {
+      const native =
+        authority === undefined ? undefined : conversations.nativeSource(authority.owner.conversationId);
+      if (
+        !native?.session ||
+        (splitFleetQualified(native.paneId)?.fleet ?? "default") !== (input.fleet ?? "default")
+      )
+        return undefined;
+      const current = await herdrRunner.get(native.paneId);
+      return current.terminalId === native.terminalId &&
+        current.session &&
+        occupantIdForHerdrSession(current.session) === occupantIdForHerdrSession(native.session)
+        ? native.paneId
+        : undefined;
+    },
     projectHirePolicy: {
       settings: async () => (await settings()).projects,
       ...(options.projectHireTools === undefined ? {} : { tools: options.projectHireTools }),
@@ -2195,7 +2219,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           throw new Error("Saved-session resolution is unavailable");
         resume = await deps.agentSessions.resolve(request.resume);
         if (
-          request.harness !== savedSessionHarness(resume) ||
+          (request.harness !== undefined && request.harness !== savedSessionHarness(resume)) ||
           request.workingDirectory !== resume.workingDirectory
         )
           throw new Error("Harness and workingDirectory must match the saved transcript");

@@ -1,4 +1,6 @@
 import { runDesktopCommand } from "./command/desktop.ts";
+import { runClaudeAccountsCommand } from "./command/claude-accounts.ts";
+import { runProjectRolesMenu } from "./project-role-menu.ts";
 import { runMachinesCommand } from "./command/machines.ts";
 import { runProjectSettingsCommand } from "./command/project-settings.ts";
 import { planSeat, parseSeatArgs } from "./command/seat.ts";
@@ -418,6 +420,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint:
         '[contacts | roles | role NAME "ROLE"|none | rename NAME "NEW NAME" | legacy session commands; see /sessions]',
       async run(argument, shell): Promise<void> {
+        if (argument.trim() === "roles") {
+          await runProjectRolesMenu(shell);
+          return;
+        }
         if (argument.trim()) {
           const result = await runAgentsCommand(splitQuotedArguments(argument));
           shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
@@ -1000,14 +1006,17 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "accounts",
       aliases: [],
-      description: "Register and inspect local Codex accounts and headroom",
-      argumentHint: "codex [list | add HOME --label LABEL | remove LABEL]",
+      description: "Register local Claude profiles and Codex accounts/headroom",
+      argumentHint: "codex|claude [list | add HOME --label LABEL | remove LABEL]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
-        const words = argument.trim().split(/\s+/u).filter(Boolean);
-        if (words[0] !== "codex")
-          throw new Error("Use /accounts codex [list | add HOME --label LABEL | remove LABEL]");
-        const result = await runCodexAccountsCommand(words.slice(1), settings ? { settings } : {});
+        const words = splitQuotedArguments(argument);
+        if (!["codex", "claude"].includes(words[0] ?? ""))
+          throw new Error("Use /accounts codex|claude [list | add HOME --label LABEL | remove LABEL]");
+        const result = await (words[0] === "claude" ? runClaudeAccountsCommand : runCodexAccountsCommand)(
+          words.slice(1),
+          settings ? { settings } : {},
+        );
         shell.insertCommandResult("/accounts", JSON.stringify(result, null, 2), "success");
       },
     },

@@ -94,13 +94,13 @@ it("persists validated policy edits, clears optional fields, preserves untouched
     const before = await f.store.load();
     const revision = projectsRevision(before.projects);
     const response = await f.update({
-      roles: [{ ...before.projects.projects[0]!.roles[0]!, model: "new-model", concurrencyCap: 0 }],
+      roles: [{ ...before.projects.projects[0]!.roles[0]!, model: "gpt-6-astra", concurrencyCap: 0 }],
       workerCap: null,
     });
     expect(response.status).toBe(200);
     const after = await f.store.load();
     expect(after.projects.projects[0]).toMatchObject({
-      roles: [{ model: "new-model", concurrencyCap: 0, harness: "codex", hireNaming: "Trees" }],
+      roles: [{ model: "gpt-6-astra", concurrencyCap: 0, harness: "codex", hireNaming: "Trees" }],
       fleet: { size: "small" },
       labelRoleMap: [{ label: "code", role: "builder" }],
     });
@@ -219,12 +219,9 @@ it("saved role model/effort and caps govern actual hire admission without starti
     const hires = new ProjectHires(join(f.directory, "fixture-hires.json"));
     const request = {
       schemaVersion: 1 as const,
-      harness: "pi" as const,
       workingDirectory: f.a,
       title: "Fixture",
       role: "builder",
-      model: "request-model",
-      effort: "low" as const,
     };
     expect((await f.update({ workerCap: 0 })).status).toBe(200);
     let current = (await f.store.load()).projects;
@@ -234,7 +231,7 @@ it("saved role model/effort and caps govern actual hire admission without starti
         await f.update({
           workerCap: 1,
           roles: [
-            { ...current.projects[0]!.roles[0]!, model: "saved-model", effort: "high", concurrencyCap: 1 },
+            { ...current.projects[0]!.roles[0]!, model: "gpt-6-astra", effort: "high", concurrencyCap: 1 },
           ],
         })
       ).status,
@@ -242,7 +239,7 @@ it("saved role model/effort and caps govern actual hire admission without starti
     current = (await f.store.load()).projects;
     expect(hires.reserve(current, "garden", request).request).toMatchObject({
       harness: "codex",
-      model: "saved-model",
+      model: "gpt-6-astra",
       effort: "high",
     });
     expect(() => hires.reserve(current, "garden", { ...request, workingDirectory: f.b })).toThrow(

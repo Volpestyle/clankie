@@ -33,7 +33,12 @@ adding project launch overrides. A nonempty roles list defines the project's
 available roles. Hire admission, native assignment membership, persona associations
 and tracker role mappings use the same effective policy.
 VUH-1536 enforces configured role harness,
-model and effort at the native launch, overriding conflicting hire inputs. The
+model and effort at the native launch. VUH-1596 extends roles with native-subagent
+model/effort, delegation, account and placement. Explicit per-hire owner choices
+now win over role preferences, then `fleet.hire` defaults. Friendly model names
+resolve against the model registry before launch. Native-first admission journals
+a stable project/deliverable key and refuses another pane while that hire is
+live, starting or uncertain; subagent instructions use the same native first brief. The
 hiring conversation's verified native assignment or canonical effective workspace
 pins its project; otherwise the canonical destination workspace selects it. An
 optional requested project must match that context. Overlapping approvals and

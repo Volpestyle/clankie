@@ -56,7 +56,12 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
   const result = await fleetStatus({ settings: services.settings });
   shell.insertCommandResult(
     "/fleet status",
-    [`settings file: ${result.settingsFile}`, "", ...formatFleetLines(result.fleet)].join("\n"),
+    [
+      `settings file: ${result.settingsFile}`,
+      "",
+      ...formatFleetLines(result.fleet),
+      ...result.roleProfiles.map((r) => `${r.projectId}/${r.role}: ${JSON.stringify(r.profile)}`),
+    ].join("\n"),
     "success",
   );
 }

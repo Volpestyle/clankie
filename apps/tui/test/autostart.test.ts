@@ -221,7 +221,7 @@ describe("autostart command", () => {
 
     const exitCode = await runHeadlessCaptainCommand(["autostart", "status"], {
       repoRoot: root,
-      env,
+      env: { ...env, XDG_CONFIG_HOME: join(root, "config") },
       execFileImpl: launchctl.execFileImpl,
       stdout: { write: (chunk: string) => (output += chunk) },
       stderr: { write: () => undefined },

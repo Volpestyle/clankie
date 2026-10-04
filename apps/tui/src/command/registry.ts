@@ -73,7 +73,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["agents", "sessions"],
     lines: [
       "  agents contacts          Known agent identities and availability (JSON)",
-      "  agents role NAME|ID ROLE|none | roles | rename NAME|ID NEW_NAME",
+      "  agents role ROLE --project PROJECT [--harness KIND --model NAME --effort LEVEL --subagent-model NAME --subagent-effort LEVEL --delegation native-first|panes --account LABEL --placement new-tab|split]\n  agents role NAME|ID ROLE|none | roles | rename NAME|ID NEW_NAME",
       '                           Built-in (planner, builder, ...) or "custom role"; roles lists in use (JSON)',
       "  sessions                 Alias for agents session commands",
       "  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]",
@@ -221,6 +221,7 @@ const HEADLESS_COMMAND_HELP = [
       "  accounts [list] | connect github | disconnect github|linear   Owner's GitHub and Linear connections (JSON)",
       "  accounts connect linear-app --client-id ID --secret-stdin   Connect a workspace-owned Clankie app",
       "  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom",
+      "  accounts claude [list | add HOME --label LABEL | remove LABEL]   Register existing local Claude profiles",
       "  accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]",
     ],
   },

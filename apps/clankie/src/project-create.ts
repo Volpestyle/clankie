@@ -1,3 +1,5 @@
+import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
+import { effectiveHireProfile } from "@clankie/protocol";
 import { isDeepStrictEqual } from "node:util";
 import {
   createProjectSettings,
@@ -16,6 +18,12 @@ export async function applyProjectCreate(
 ) {
   const original = await settings.load();
   createProjectSettings(original.projects, input);
+  const catalog = await createModelRegistry().catalog();
+  for (const role of input.roles ?? []) {
+    const profile = effectiveHireProfile({}, role, original.fleet.hire);
+    for (const model of [profile.model, profile.subagents?.model])
+      if (model) resolveHireModel(catalog, profile.harness, model);
+  }
   await requireOwner();
   const initial = await observeProjectEnrollment(original.projects, input);
   if (expectedObservation && !isDeepStrictEqual(initial, expectedObservation))

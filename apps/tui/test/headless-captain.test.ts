@@ -48,6 +48,7 @@ async function stateEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-headless-test-"));
   tempDirs.push(root);
   return {
+    XDG_CONFIG_HOME: join(root, "config"),
     XDG_STATE_HOME: root,
     CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
     CLANKIE_OPERATOR_TOKEN: "operator-secret",
@@ -215,7 +216,7 @@ describe("headless clankie commands", () => {
 
     const exitCode = await runHeadlessCaptainCommand(["operator-credential", "rotate", "--json"], {
       repoRoot: "/unused",
-      env: {},
+      env: { XDG_CONFIG_HOME: join(root, "config") },
       operatorCredentialStore: store,
       stdout: stdout.stream,
     });
