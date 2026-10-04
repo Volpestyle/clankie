@@ -224,7 +224,12 @@ it("persists hire intent before discovery and exact pane/seat ownership before c
   await vi.waitFor(() => expect(waits).toBe(2));
   settle({ ...agent, status: "blocked" });
   await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce());
-  expect(wake).toHaveBeenCalledWith("hirer-a", expect.stringContaining("Harvest the worker"));
+  expect(wake).toHaveBeenCalledWith(
+    "hirer-a",
+    expect.stringContaining("Harvest the worker"),
+    undefined,
+    expect.any(Function),
+  );
   restarted.close();
 });
 

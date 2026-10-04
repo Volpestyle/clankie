@@ -146,6 +146,11 @@ type ConversationServiceResult = Exclude<
   | { op: "terminal_input" }
 >;
 
+/** A native delivery that was accepted or uncertain is handled and never replayed. */
+interface ConversationDriver<T> {
+  run(): Promise<{ readonly handled: true; readonly result: T } | { readonly handled: false }>;
+}
+
 const CURSOR_WIDTH = 12;
 const ZERO_CURSOR = "0".repeat(CURSOR_WIDTH);
 /** The stable room for opt-in Linear awareness (ADR 0168). */
@@ -534,6 +539,9 @@ export class ConversationStore {
   /** Internal turns whose `invoke()` has begun and not yet settled — not merely queued. */
   private readonly internalRuns = new Map<string, number>();
   private readonly activeInvocations = new Map<string, number>();
+  /** Admission fences only; the captain's existing live mailbox selects the native driver. */
+  private readonly serviceDrives = new Map<string, Set<Promise<void>>>();
+  private readonly driverAdmissions = new Map<string, Set<Promise<void>>>();
 
   private readonly root: string;
   private readonly journal: ConversationJournal;
@@ -1492,6 +1500,83 @@ export class ConversationStore {
     this.saveMeta(meta);
   }
 
+  /**
+   * Reserve attachment before awaiting any service work. Polling itself remains
+   * the existing mailbox's proof of liveness; a remembered transcript alone is
+   * never a driver. A service invocation admitted before this reservation owns
+   * its turn through settlement, so its answer cannot race an attached seat.
+   */
+  public async pollConversationDriver<T>(conversationId: string, poll: () => Promise<T>): Promise<T> {
+    if (!this.metas.has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);
+    let ready!: () => void;
+    const admission = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const admissions = this.driverAdmissions.get(conversationId) ?? new Set<Promise<void>>();
+    admissions.add(admission);
+    this.driverAdmissions.set(conversationId, admissions);
+    // Capture only work already admitted. Later work waits on this reservation.
+    const service = [...(this.serviceDrives.get(conversationId) ?? [])];
+    let started: Promise<T>;
+    try {
+      await Promise.all(service);
+      if (!this.metas.has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);
+      // The callback establishes mailbox binding synchronously, before the
+      // reservation is released. Never await the parked long poll here.
+      started = poll();
+    } finally {
+      admissions.delete(admission);
+      if (admissions.size === 0 && this.driverAdmissions.get(conversationId) === admissions)
+        this.driverAdmissions.delete(conversationId);
+      ready();
+    }
+    return started;
+  }
+
+  /**
+   * Choose the live execution driver at admission, then pin its exact dispatch.
+   * Only a definite pre-delivery refusal may choose again. The selection and
+   * service reservation have no await between them, closing the attach race.
+   * Both stored operator runs and Discord's existing room turns use this fence.
+   */
+  public async runWithConversationDriver<T>(
+    conversationId: string,
+    driver: () => ConversationDriver<T> | undefined,
+    service: () => Promise<T>,
+  ): Promise<T> {
+    for (;;) {
+      for (;;) {
+        const admissions = this.driverAdmissions.get(conversationId);
+        if (admissions === undefined || admissions.size === 0) break;
+        await Promise.all(admissions);
+      }
+      if (!this.metas.has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);
+      const selected = driver();
+      if (selected !== undefined) {
+        const delivery = await selected.run();
+        if (delivery.handled) return delivery.result;
+        // A replacement may have attached while the old mailbox refused.
+        // Recheck its admission and current liveness before starting service.
+        continue;
+      }
+      let settled!: () => void;
+      const invocation = new Promise<void>((resolve) => {
+        settled = resolve;
+      });
+      const serviceRuns = this.serviceDrives.get(conversationId) ?? new Set<Promise<void>>();
+      serviceRuns.add(invocation);
+      this.serviceDrives.set(conversationId, serviceRuns);
+      try {
+        return await service();
+      } finally {
+        serviceRuns.delete(invocation);
+        if (serviceRuns.size === 0 && this.serviceDrives.get(conversationId) === serviceRuns)
+          this.serviceDrives.delete(conversationId);
+        settled();
+      }
+    }
+  }
+
   /** One inspectable conversation per room, irrespective of its execution authority. */
   public roomConversation(lane: "discord_presence" | "discord_voice", targetId: string): string {
     const id = `room-${createHash("sha256").update(`${lane}:${targetId}`).digest("hex").slice(0, 24)}`;
@@ -1503,6 +1588,18 @@ export class ConversationStore {
       );
     }
     return id;
+  }
+
+  /** Host-observed Discord names affect discovery only, never room authority. */
+  public nameRoomConversation(conversationId: string, title: string): void {
+    const meta = this.metas.get(conversationId);
+    if (meta?.scope.kind !== "room") throw new Error("Expected a room conversation");
+    const name = title.trim();
+    if (!name || name.includes("\0") || name.length > 200) throw new Error("Invalid room title");
+    if (meta.title === name) return;
+    meta.title = name;
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
   }
 
   public syncRoomTranscript(conversationId: string, transcript: HerdrSeatTranscript): void {
@@ -1554,7 +1651,11 @@ export class ConversationStore {
     activity?: "responding" | "waiting",
   ): boolean {
     const meta = this.metas.get(conversationId);
-    if (!meta || (meta.scope.kind !== "global" && meta.scope.kind !== "workspace")) return false;
+    if (
+      !meta ||
+      (meta.scope.kind !== "global" && meta.scope.kind !== "workspace" && meta.scope.kind !== "room")
+    )
+      return false;
     for (const candidate of this.metas.values()) {
       if (
         candidate.conversationId !== conversationId &&
@@ -1816,20 +1917,34 @@ export class ConversationStore {
 
   /** Read actual on-disk acceptance, never an in-memory success guess. */
   public inboundAcceptance(id: string): InboundAcceptance | undefined {
-    const raw = JSON.parse(readFileSync(join(this.root, "global-default", "meta.json"), "utf8"));
-    const entries = z.record(z.string(), InboundAcceptanceSchema).parse(raw.inboundAcceptances ?? {});
-    const receipt = entries[id];
-    if (receipt && receipt.deliveryId !== id) throw new Error("Mismatched acceptance ID");
+    let receipt: InboundAcceptance | undefined;
+    for (const entry of readdirSync(this.root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const raw = JSON.parse(readFileSync(join(this.root, entry.name, "meta.json"), "utf8"));
+      const entries = z.record(z.string(), InboundAcceptanceSchema).parse(raw.inboundAcceptances ?? {});
+      const candidate = entries[id];
+      if (candidate === undefined) continue;
+      if (candidate.deliveryId !== id) throw new Error("Mismatched acceptance ID");
+      if (receipt !== undefined) throw new Error("Inbound delivery accepted by multiple conversations");
+      receipt = candidate;
+    }
     return receipt;
   }
 
   public submitInbound(
     message: string,
     receipt: Omit<InboundAcceptance, "message" | "runId" | "acceptedCursor">,
+    /** The service resolves this target; inbound worker content cannot select it. */
+    conversationId = "global-default",
+    /** A room's frozen owner keeps its Discord admission and reply path. */
+    roomRunner?: ConversationRunner,
   ): SubmitOperatorConversationTurnResult {
-    const meta = this.metas.get("global-default");
-    if (!meta) throw new Error("Missing global conversation");
-    return this.enqueue(meta, message, undefined, false, this.runner, {
+    const meta = this.metas.get(conversationId);
+    if (!meta) throw new Error(`Unknown conversation ${conversationId}`);
+    const runner = meta.scope.kind === "room" ? roomRunner : this.runner;
+    if (runner === undefined || (!this.runsCaptainTurns(conversationId) && meta.scope.kind !== "room"))
+      throw new ConversationRefusedError("This conversation cannot accept inbound worker messages.");
+    return this.enqueue(meta, message, undefined, false, runner, {
       origin: "watch",
       inboundReceipt: receipt,
     });

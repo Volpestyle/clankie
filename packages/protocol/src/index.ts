@@ -4552,6 +4552,15 @@ export const DiscordPresenceChannelTurnRequestSchema = z
     schemaVersion: z.literal(1),
     deliveryId: z.string().min(1),
     identity: DiscordPresenceChannelIdentitySchema,
+    /** Gateway-observed display names for discovery only; IDs remain the authority and route. */
+    room: z
+      .object({
+        guildName: z.string().trim().min(1).max(100).optional(),
+        channelName: z.string().trim().min(1).max(100).optional(),
+        peerName: z.string().trim().min(1).max(100).optional(),
+      })
+      .strict()
+      .optional(),
     trigger: z
       .object({
         kind: z.enum(["message", "mention", "dm", "reaction", "voice_event", "slash_handoff"]),

@@ -49,6 +49,11 @@ delivery, and continuation limits are documented separately.
 Each fresh native launch gets its own workspace chat, including simultaneous
 launches in the same directory. Resume keeps that chat; an explicit conversation
 ID selects an existing one. Transcripts and wake channels follow the selected chat.
+The selected chat can also be a Discord room. While the seat's channel is live,
+worker reports, room turns, wakes and watches reach that seat; new inputs return
+to the built-in agent after it leaves. Each channel or DM remains a separate
+conversation with its existing permissions. Workers report to the conversation
+that hired or subsequently adopted them, as resolved by the service.
 
 ## History, memory, and goals
 

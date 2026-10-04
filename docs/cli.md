@@ -1751,6 +1751,10 @@ messages, tools, and lifecycle events; follow `nextCursor` while `hasMore` is
 true. `tail` streams newline-delimited JSON events, live drafts, and explicit
 cursor-recovery notices. `--limit` is 1–100 (default 100). A selector is a
 conversation id, exact title, or an unambiguous Discord channel/target id.
+Native `claude`, `codex`, and `opencode` launches accept the same selectors with
+`--conversation`; use the stable ID when room names are ambiguous. Room names
+include the server and channel, or the DM peer, when the Discord transport
+provides them; retained rooms without names display their target IDs.
 
 Discord room records are read-only: use Discord to send messages. Their
 transcripts include model-visible context and bounded, redacted tool details;
@@ -2081,13 +2085,26 @@ credential are required; failure to create the chat stops the launch.
 `--resume` reopens the last seat for that Claude command and its chat. The
 conversation selection is retained on resume, and a different `--conversation` is refused.
 Skill selection is reapplied at launch, but resumed history can still contain previously loaded guidance.
-`--conversation ID` selects an existing global/workspace service conversation,
-resolves its cwd through `/v1/captain/seat-context`, and opens Claude there. That
+`--conversation ID` selects an existing global/workspace service conversation or
+Discord text/voice room, resolves its cwd through `/v1/captain/seat-context`, and
+opens the selected harness there. That
 workspace must exist on the native host. The prompt includes its agent
 instructions and the owner's persona/fleet preferences. The MCP bank and channel
 share its conversation. Inherited worker capabilities and conversation
 selections do not select the seat. Use `--conversation global-default` to select
 the shared global chat. Workspace seats do not rename themselves as the global Herdr head.
+
+While its channel is live, the seat receives that conversation's worker reports,
+escalations, wakes and watches instead of starting a service model turn. Closing
+the seat returns new inputs to the service runner. A turn already accepted by
+either destination keeps that destination; uncertain native delivery is never
+replayed automatically. Existing Pi goal continuations retain their service loop.
+Selecting `global-default` affects only that chat. To drive a Discord room,
+select its conversation; replies return through the original room delivery and
+authority checks. Rooms remain read-only to ordinary `send` and `reset` commands.
+Room attachment adds no machine grants: its cached MCP bank has social tools and
+no generic operator body identity. It cannot inherit an actor's grants from a
+later room message. See [ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md).
 
 `--dry-run` prints the launch plan without creating a chat or launching:
 
@@ -2190,6 +2207,13 @@ Projects retain roles, caps, hiring and tracker binding.
 The service lists exactly `clankie_tools` and `clankie_call`; the worker plugin
 adds `message_clankie`. Search with `{query}` for at most 20 names/descriptions,
 or `{names}` for up to 10 input schemas, then call with `{name, arguments}`.
+`message_clankie` reports to the conversation that hired the worker. A
+host-admitted `message_seat` from another conversation adopts that worker, so
+future reports and completion watches follow the new lead. The worker does not
+choose the destination. Worker reports fall back to `global-default` when that
+conversation has been removed; a retained room with revoked grants is refused.
+Local and fleet-qualified remote workers follow the same persisted ownership
+proof and delivery receipts.
 `clankie fleet set --tools off` stops new standing tool admissions. Each call
 rechecks live admission, account binding and settings, but a call already past its
 last asynchronous check can still reach a provider after tools-off or admission

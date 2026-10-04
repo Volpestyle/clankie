@@ -95,6 +95,8 @@ const HerdrWatchRecordSchema = z
     terminalId: z.string().min(1),
     /** Missing legacy native proof cannot authorize a completion harvest. */
     occupantId: z.string().min(1).optional(),
+    /** Only a host-created hire harvest follows adoption; explicit watches keep their arming source. */
+    hired: z.literal(true).optional(),
     reason: z.string().min(1),
     createdAt: z.string().min(1),
     discord: DiscordWatchOriginSchema.optional(),
@@ -218,7 +220,12 @@ export interface HerdrWatchPort {
 type HireAuthority = ConversationAuthority & { readonly intentId?: string };
 type AdoptHire = (result: Extract<HerdrSeatSpawnResult, { outcome: "spawned" }>) => void;
 
-type InternalWake = (conversationId: string, prompt: string, discord?: DiscordWatchOrigin) => Promise<void>;
+type InternalWake = (
+  conversationId: string,
+  prompt: string,
+  discord?: DiscordWatchOrigin,
+  guard?: () => Promise<void>,
+) => Promise<void>;
 type HerdrSeatProjection =
   | { readonly kind: "status"; readonly status: string }
   | { readonly kind: "summary"; readonly text: string }
@@ -968,6 +975,49 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.closed)
       return uncontrolled?.() ?? { outcome: "offline", detail: "Native hire service is closed." };
     return this.seatControl.deliverToSeat(seatId, text, uncontrolled);
+  }
+
+  /** Only fresh host-observed native proof selects a worker's leading conversation. */
+  public nativeOwner(agent: HerdrAgentSnapshot): ConversationOwner | undefined {
+    const owner =
+      agent.session === undefined
+        ? undefined
+        : this.hireOwners.owner(agent.paneId, agent.terminalId, occupantIdForHerdrSession(agent.session));
+    if (owner === undefined && this.hireOwners.hasClaim(agent.paneId, agent.terminalId))
+      throw new Error("The worker native occupant no longer matches its persisted owner");
+    return owner;
+  }
+
+  /** Persist adoption before native delivery so an immediate report sees its new lead. */
+  public async adoptSeat(seatId: string, source: ConversationAuthority): Promise<void> {
+    const authority = captureConversationAuthority(source);
+    if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
+    await assertConversationAuthority(authority);
+    const agent = await this.runner.resolveTerminal(seatId);
+    if (!isMessageableSeat(agent) || agent.session === undefined || agent.terminalId !== seatId)
+      throw new Error("Exact native session attribution is unavailable");
+    this.nativeOwner(agent);
+    await assertConversationAuthority(authority);
+    const latest = await this.runner.resolveTerminal(seatId);
+    if (
+      latest?.session === undefined ||
+      latest.paneId !== agent.paneId ||
+      latest.terminalId !== seatId ||
+      latest.agent !== agent.agent ||
+      occupantIdForHerdrSession(latest.session) !== occupantIdForHerdrSession(agent.session)
+    )
+      throw new Error("The adopted native occupant changed during admission");
+    await assertConversationAuthority(authority);
+    const sessionId = nativeSessionId(latest);
+    this.hireOwners.adopt(
+      latest.paneId,
+      latest.terminalId,
+      occupantIdForHerdrSession(latest.session),
+      authority.owner,
+      sessionId === undefined
+        ? undefined
+        : JSON.stringify([splitFleetQualified(latest.paneId)?.fleet ?? "local", latest.agent, sessionId]),
+    );
   }
 
   /** The herdr status an adapter-held seat's own status reads as; undefined when no adapter holds it. */
@@ -2304,7 +2354,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.stateUnreadable) throw new Error("Herdr watcher state is unreadable");
     if (
       this.state.watches.some(
-        (watch) => watch.conversationId === owner.conversationId && watch.terminalId === seatId,
+        (watch) => watch.hired === true && watch.terminalId === seatId && watch.occupantId === occupantId,
       )
     )
       return;
@@ -2314,6 +2364,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       target: seatId,
       terminalId: seatId,
       occupantId,
+      hired: true,
       reason: "Harvest the worker hired by this conversation; report completion or escalation here.",
       createdAt: new Date().toISOString(),
       ...(owner.discord === undefined ? {} : { discord: { ...owner.discord } }),
@@ -2364,7 +2415,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       throw new Error(`Herdr pane ${target} has no working agent to watch (status ${status})`);
     }
     const existing = this.state.watches.find(
-      (watch) => watch.conversationId === conversationId && watch.terminalId === agent.terminalId,
+      (watch) =>
+        this.watchOwner(watch)?.conversationId === conversationId && watch.terminalId === agent.terminalId,
     );
     if (existing !== undefined) {
       return {
@@ -2407,9 +2459,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   public cancelConversation(conversationId: string): void {
-    const removed = this.state.watches.filter((watch) => watch.conversationId === conversationId);
+    const removed = this.state.watches.filter(
+      (watch) => this.watchOwner(watch)?.conversationId === conversationId,
+    );
     if (removed.length === 0) return;
-    this.state.watches = this.state.watches.filter((watch) => watch.conversationId !== conversationId);
+    const removedIds = new Set(removed.map((watch) => watch.id));
+    this.state.watches = this.state.watches.filter((watch) => !removedIds.has(watch.id));
     for (const watch of removed) this.controllers.get(watch.id)?.abort();
     this.save();
   }
@@ -2612,6 +2667,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
     void this.run(record, controller.signal).finally(() => this.controllers.delete(record.id));
   }
 
+  private watchOwner(record: HerdrWatchRecord): ConversationOwner | undefined {
+    if (record.occupantId === undefined) return undefined;
+    const owner =
+      record.hired === true ? this.hireOwners.seatOwner(record.terminalId, record.occupantId) : undefined;
+    if (record.hired === true && owner === undefined && this.hireOwners.hasClaim("", record.terminalId))
+      return undefined;
+    return (
+      owner ?? {
+        conversationId: record.conversationId,
+        ...(record.discord === undefined ? {} : { discord: record.discord }),
+      }
+    );
+  }
+
   private async run(record: HerdrWatchRecord, signal: AbortSignal): Promise<void> {
     let prompt: string;
     try {
@@ -2668,9 +2737,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     if (signal.aborted) return;
     try {
-      await (record.discord === undefined
-        ? this.wake?.(record.conversationId, prompt)
-        : this.wake?.(record.conversationId, prompt, record.discord));
+      const owner = this.watchOwner(record);
+      if (owner === undefined) {
+        this.remove(record.id);
+        return;
+      }
+      const guard = async () => {
+        if (!isDeepStrictEqual(this.watchOwner(record), owner))
+          throw new Error("The watched worker changed its leading conversation before acceptance");
+      };
+      // Explicit watches retain their existing wake shape. Automatic harvests refresh
+      // persisted adoption and fence it again at the asynchronous host boundary.
+      if (record.hired === true) await this.wake?.(owner.conversationId, prompt, owner.discord, guard);
+      else
+        await (owner.discord === undefined
+          ? this.wake?.(owner.conversationId, prompt)
+          : this.wake?.(owner.conversationId, prompt, owner.discord));
       this.remove(record.id);
     } catch {
       this.retry(record);

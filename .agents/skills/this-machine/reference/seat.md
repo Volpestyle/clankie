@@ -1,6 +1,6 @@
 # The seat
 
-Claude Code or Codex sitting in Clankie's operator seat.
+Claude Code, Codex or OpenCode driving a selected Clankie conversation.
 
 ## The seat
 
@@ -23,6 +23,19 @@ watches follow its conversation as `<channel source="clankie">` events.
 `--dry-run` creates no chat. With `--conversation global-default`, a seat inside
 the service's herdr fleet claims the agent name `clankie` and becomes the shared
 global head.
+
+Find the selected conversation with `clankie conversations list`; native
+`--conversation` accepts its stable ID, exact title or unambiguous Discord
+target/channel ID. Each server channel and DM has its own conversation. Attaching
+to `global-default` affects only that chat; attach to the room's conversation to
+drive its turns. A live seat receives worker reports, escalations, wakes and
+watches through its channel. After it leaves, new inputs use the service runner.
+An accepted or uncertain delivery is never replayed across that handover.
+Pi goal continuations keep their existing service loop.
+
+Room replies keep the original actor's route and mouth lease. Attachment never
+adds grants: a cached room MCP bank stays social without generic operator body
+authority. Ordinary `send` and `reset` still refuse room conversations.
 
 `clankie codex --conversation ID` opens the same operator seat
 in the real Codex TUI, using the Codex plugin and a dedicated app-server thread.
@@ -76,6 +89,13 @@ not select its runtime. Hire with `hire_agent`, deliver context with
 link (`clankie herdr prepare FLEET`); `runtime list` reports `linkState`.
 The paired app exposes execution and account inventory in Settings → Connection.
 Load `lead` for leadership and the fleet reference for native delivery.
+
+Workers' `message_clankie` reports reach the conversation that hired them.
+Messaging a worker with `message_seat` adopts it under the sending conversation;
+its reports and completion watches then follow that lead. The service resolves
+this persisted route, including remote fleet seats; the worker never chooses it.
+Only a removed lead conversation makes worker reports fall back to
+`global-default`; revoked room grants remain a refusal.
 
 For shared Linear tools, inspect `clankie access linear`; verify an API-key
 or OAuth connection with `clankie access linear verify` and check the intended automation identity.
