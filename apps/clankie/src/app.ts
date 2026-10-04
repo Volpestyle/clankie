@@ -4039,7 +4039,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       { offerId: offer.offerId, operatorId: operator.operatorId, expiresAt: offer.expiresAt },
       "pairing offer minted",
     );
-    const wire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    const protectedWire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    const wire =
+      parsed.data.review === undefined ? { ...protectedWire, localCode: offer.code } : protectedWire;
     return context.json(direct === undefined ? wire : withDirectPairingRoute(wire, direct));
   });
 

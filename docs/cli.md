@@ -369,14 +369,18 @@ lives five minutes. A remote `CLANKIE_CONTROL_PLANE_URL` fails with
 The console's `/pair` runs this same command and accepts the same flags.
 
 Public-gateway pairing uses a secure QR or full pasted link; the encryption
-credential is in its fragment. Short codes are for direct private connections.
+credential is in its fragment. Ordinary offers also print **On this Mac code**,
+the existing eight-character single-use code. Choose **On this Mac** in the Mac
+app to redeem it against the local loopback service, then review device access.
+This does not change secure remote pairing: another device still needs the QR
+or full link. Review offers omit this local code.
 One link carries every route the Mac has (ADR 0204): the gateway fragment when
 remote access is on, and `direct=<origin>` when `clankie gateway direct` has
 configured a device-reachable control origin. With a direct route, the App
 Store app pairs without a Clankie account. It uses the gateway first when both
 are present. Human output ends with `Routes: remote access (gateway) + direct
-(<origin>)`, one of them, or `Route: this Mac only`, which pairs only a source
-build. It warns when the App Store app cannot reach the direct origin: plain
+(<origin>)`, one of them, or `Route: this Mac only`, which pairs the Mac app
+through its explicit local choice. It warns when the App Store app cannot reach the direct origin: plain
 HTTP works only for `.local`, single-label and private IP addresses, so serve
 tailnet names over HTTPS (`tailscale serve --https`). The service reaches the
 LAN only through the opt-in device doorway (`CLANKIE_DEVICE_HOST`,
@@ -389,6 +393,7 @@ is omitted when the link carries neither route:
 {
   "ok": true,
   "code": "ABCD-EFGH",
+  "localCode": "ABCD-EFGH",
   "deepLink": "clankie://connect?v=1&offer=…&direct=…",
   "expiresAt": "2026-08-30T12:00:00.000Z",
   "routes": { "gateway": false, "direct": "http://my-mac.local:4311" }
