@@ -1,8 +1,9 @@
-# The seat
+# Native harness commands
 
-Claude Code, Codex or OpenCode driving a selected Clankie conversation.
+Open Clankie's operator seat with `clankie claude`, `clankie codex`, or
+`clankie opencode`; the seat drives a selected Clankie conversation.
 
-## The seat
+## Launch and resume
 
 `clankie claude2` selects the owner's `claude2` account command. Numbered
 Claude commands resolve aliases and functions through the interactive `$SHELL`

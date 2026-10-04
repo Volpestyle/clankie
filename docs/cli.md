@@ -2119,7 +2119,7 @@ is detected there, which binds the pane to his own persona rather than a fleet
 contact; a second pane claiming the name stays an ordinary fleet agent and is
 told so on stderr. The pane is un-named again when the session ends.
 
-Every fresh seat starts a new Claude Code session under a recorded id and creates
+Every fresh Claude launch starts a new Claude Code session under a recorded id and creates
 a separate workspace chat through `POST /v1/captain/seat-context`, rooted at the
 launch directory. Multiple launches in the same directory or account each get
 their own chat, transcript, tool context and wake channel. The chat is available
@@ -2185,7 +2185,7 @@ later room message. See [ADR 0218](adr/0218-native-seats-drive-their-attached-co
 The [plugin README](../integrations/claude-plugin/README.md) describes the component
 source and session-only channel identity.
 
-`--harness codex` opens the real Codex TUI on its own app-server thread.
+`clankie codex` opens the real Codex TUI on its own app-server thread.
 Install the [Codex seat plugin](../integrations/codex-plugin/README.md) first.
 The launch plan includes a typed `hook_trust_required` owner step: review the
 plugin in Codex's `/hooks`, then exit and launch the seat again. The launcher never
@@ -2712,8 +2712,8 @@ The single hosted-device authority policy allows chat, fleet, terminal, model,
 keys, persona and connections. **Restart, reset and deprovision require the
 account page/control plane**, including when attempted through the old device
 relay. The API policy does not inspect shell commands typed under terminal
-control. Local lifecycle, autostart, sockets, `seat`, `mcp` and shell escapes
-refuse in hosted mode.
+control. Local lifecycle, autostart, sockets, native harness commands
+(`claude[N]`, `codex[N]`, `opencode`), `mcp` and shell escapes refuse in hosted mode.
 
 Closing the client leaves accepted work running. `logout` forgets this Mac's
 device credential and wake key and selects This Mac for the next launch;
