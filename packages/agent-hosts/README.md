@@ -80,7 +80,7 @@ flowchart TD
 | Claude Code | Native worker-plugin channel and turn hooks          | Implemented; requires the owner's channel consent         |
 | Codex       | App-server shared with the native TUI's bound thread | Implemented; starts or steers a turn                      |
 | Pi          | Native extension follow-up or steering messages      | Researched; not implemented in this local hire path       |
-| OpenCode    | Session endpoint on the existing TUI's server        | Researched; not implemented in this local hire path       |
+| OpenCode    | Injected SDK in the process-bound native worker TUI  | Implemented locally; pinned to OpenCode 1.18.18           |
 | Prime Agent | Daemon-backed messages to the active session         | Researched for PrimeIntellect's CLI; not implemented here |
 
 Transcript discovery and an available native CLI
@@ -109,8 +109,15 @@ for the boundary between task records, native terminals and harness delivery.
 The OpenCode **operator** seat is available separately through
 `clankie seat --harness opencode`. Its plugin uses the native injected SDK client
 for the exact interactive session; the shared dispatch implementation lives in
-`integrations/opencode-plugin/runtime.mjs`. This does not add an OpenCode hire
-adapter or filesystem transcript discovery. See the
+`integrations/opencode-plugin/runtime.mjs`. The local worker hire adapter uses
+the separate `worker-tui.mjs` and `worker-server.mjs` entries. OpenCode 1.18.18
+loads the TUI entry's default `{ id, tui }` object; named exports alone do not
+initialize its session. The prepared host observes the fresh pane with
+`pane.get` before native TUI detection, then requires the exact bound harness
+and session while retaining the process, socket and allocation fences. Worker
+history comes only from its registered profile, not an owner-wide store. See
+the [subagent verification](../../docs/testing/2026-10-04-opencode-subagents/README.md)
+and the
 [operator seat guide](../../integrations/opencode-plugin/README.md) for current
 capabilities and verification limits.
 

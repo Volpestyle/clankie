@@ -127,21 +127,23 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
             }),
           })
           .parse(await request(original, "pane.process_info", { pane_id: paneId })).result.process_info;
-      const agent = async () =>
+      // A prepared native argv may still be loading before Herdr recognizes its
+      // TUI. Capture the pane allocation, not an already recognized agent.
+      const allocation = async () =>
         z
           .object({
             result: z.object({
-              agent: z.object({
+              pane: z.object({
                 pane_id: z.literal(paneId),
                 terminal_id: z.string().min(1),
-                agent: z.string().optional(),
+                agent: z.string().nullish(),
                 agent_session: z
                   .object({ source: z.string(), kind: z.string(), value: z.string() })
-                  .optional(),
+                  .nullish(),
               }),
             }),
           })
-          .parse(await request(original, "agent.get", { target: paneId })).result.agent;
+          .parse(await request(original, "pane.get", { pane_id: paneId })).result.pane;
       const initial = await info();
       if (initial.shell_pid !== initial.foreground_process_group_id)
         throw new Error("Original native command is not the foreground root");
@@ -169,19 +171,19 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
         return before;
       };
       const birth = await facts();
-      const originalAgent = await agent();
+      const originalAllocation = await allocation();
       let reportedSession: PreparedNativeSession | undefined;
       const current = async () => {
-        const latestAgent = await agent();
+        const latestAllocation = await allocation();
         if (
           JSON.stringify(await binding()) !== JSON.stringify(original) ||
           JSON.stringify(await info()) !== JSON.stringify(initial) ||
-          latestAgent.terminal_id !== originalAgent.terminal_id ||
+          latestAllocation.terminal_id !== originalAllocation.terminal_id ||
           (reportedSession !== undefined &&
-            (latestAgent.agent !== harness ||
-              latestAgent.agent_session?.kind !== reportedSession.kind ||
-              latestAgent.agent_session.source !== reportedSession.source ||
-              latestAgent.agent_session.value !== reportedSession.value)) ||
+            (latestAllocation.agent !== harness ||
+              latestAllocation.agent_session?.kind !== reportedSession.kind ||
+              latestAllocation.agent_session.source !== reportedSession.source ||
+              latestAllocation.agent_session.value !== reportedSession.value)) ||
           JSON.stringify(await facts()) !== JSON.stringify(birth)
         )
           throw new Error("Original native allocation changed");
@@ -189,7 +191,7 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
       await current();
       return {
         paneId,
-        terminalId: originalAgent.terminal_id,
+        terminalId: originalAllocation.terminal_id,
         async check(socket) {
           const clientPort = socket.remotePort;
           const serverPort = socket.localPort;

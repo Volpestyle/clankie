@@ -46,3 +46,30 @@ children, unaddressed/remote seats, missing registration, profile retargeting
 and projection bounds. The
 [existing worker checkpoint](../2026-10-04-opencode-workers/README.md) describes
 the remaining native TUI/control and installed-version limitations.
+
+## Live pinned-worker acceptance
+
+An owned private service based on runtime `9f82ae5d`, with the fresh-pane capture
+and default TUI export fixes, hired OpenCode **1.18.18** on 2026-10-04. It used
+the already-configured `openai/gpt-6.1-sol` provider without credential changes.
+The parent started one native general task and collected it. After opening the
+seat's chat, the fleet reported `general: Lifecycle proof` with task call ID
+`call_YDhIpf2dXavUjmaEQVxAtG76`, `startedAt: 2026-10-04T21:04:56.370Z`, then
+`done` with `endedAt: 2026-10-04T21:06:04.419Z` in the next roster read at
+`21:06:04.874Z`. The child row's `parent_id` matched the registered native
+parent session; both had version 1.18.18. Times match the native task part.
+
+Evidence is retained under
+`~/.herdr-handoffs/clankie-backlog-20261003/evidence/VUH-1586/hire-fix/live-batch5-1/`
+(`LIVE.json`, `INSPECTED.json`, `DISCOVERY-GUARD.json`). The shared discovery
+descriptor was compared in memory before boot and after cleanup: byte-identical,
+150 bytes, SHA-256 `ccd5fab11e8ff8a025954af94228a6dc9f5c8b741224df7ade07fbb01539a539`.
+The private descriptor, owned pane and service process group were absent after
+cleanup. Native `close_seat` returned `closed: false`; the exact owned pane was
+closed through Herdr instead.
+
+This proves the addressed-seat roster lifecycle, not a rendered app/world tray.
+The hire response's persona differed from subsequent roster reconciliation,
+so the probe explicitly opened a seat chat before reading subagents. Automatic
+hire-to-roster persona continuity remains a separate gap. The adapter stays
+pinned to 1.18.18; 1.18.34 was not exercised.
