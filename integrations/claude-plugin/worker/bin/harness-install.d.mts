@@ -31,3 +31,8 @@ export function confirmClaudeWorkerEnabled(
     configBefore: string | undefined;
   },
 ): Promise<boolean>;
+
+export function codexSourceSetupCommand(
+  script: string,
+  options?: { platform?: NodeJS.Platform; node?: string },
+): { command: string; args: string[] };

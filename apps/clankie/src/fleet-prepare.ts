@@ -1,7 +1,7 @@
 import { prepareWorkerSkill } from "../../../integrations/claude-plugin/worker/bin/skill-bundle.mjs";
 import { readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { CLAUDE_WORKER_PLUGIN, CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
 import {
   SSH_BASE_OPTIONS,
@@ -150,7 +150,11 @@ function stageCommand(fleet: HerdrFleet): string {
 }
 
 /** Native installers receive the explicit owner approval from `herdr prepare`; no config append. */
-function installCommand(fleet: HerdrFleet): string {
+function installCommand(fleet: HerdrFleet, sourceSetup?: string): string {
+  const setupArgs =
+    sourceSetup === undefined
+      ? ""
+      : ` --codex-source-setup ${fleet.ssh.shell === "powershell" ? powershellLiteral(sourceSetup) : posixQuote(sourceSetup)}`;
   return fleet.ssh.shell === "powershell"
     ? powershellScriptCommand(
         [
@@ -159,7 +163,7 @@ function installCommand(fleet: HerdrFleet): string {
           `$target = Join-Path $env:USERPROFILE ${powershellLiteral(MARKETPLACE_DIR.replaceAll("/", "\\"))}`,
           "if (Test-Path -LiteralPath $target) { Remove-Item -Recurse -Force -LiteralPath $target }",
           "Move-Item -LiteralPath $stage -Destination $target",
-          "& node (Join-Path $target 'worker\\bin\\harness-setup.mjs') --approved $target",
+          `& node (Join-Path $target 'worker\\bin\\harness-setup.mjs') --approved $target${setupArgs}`,
           "if ($LASTEXITCODE -ne 0) { throw 'Native harness setup failed' }",
         ].join("; "),
       )
@@ -170,7 +174,7 @@ function installCommand(fleet: HerdrFleet): string {
           `target="$HOME/${MARKETPLACE_DIR}"`,
           'rm -rf "$target"',
           'mv "$stage" "$target"',
-          'node "$target/worker/bin/harness-setup.mjs" --approved "$target"',
+          `node "$target/worker/bin/harness-setup.mjs" --approved "$target"${setupArgs}`,
         ].join("\n"),
       );
 }
@@ -199,10 +203,18 @@ export async function prepareFleet(
     readonly shell: FleetShellRun;
     /** Clankie's own worker plugin directory (`integrations/claude-plugin/worker`). */
     readonly workerPluginDir: string;
+    /** An owner-selected source manager on the remote machine. */
+    readonly codexSourceSetup?: string;
     /** Copies a directory to a path relative to the remote home; scp by default. */
     readonly copy?: (source: string, destination: string) => Promise<void>;
   },
 ): Promise<FleetPrepareResult> {
+  if (
+    options.codexSourceSetup !== undefined &&
+    (/\p{Cc}/u.test(options.codexSourceSetup) ||
+      !(fleet.ssh.shell === "powershell" ? win32 : posix).isAbsolute(options.codexSourceSetup))
+  )
+    throw new Error("Codex source setup must be an absolute script path on the remote machine");
   const copy =
     options.copy ??
     ((source: string, destination: string) =>
@@ -229,10 +241,14 @@ export async function prepareFleet(
   await options.shell(stageCommand(fleet), 60_000);
   await copy(options.workerPluginDir, `${STAGING_DIR}/worker`);
   await copy(join(options.workerPluginDir, "..", ".agents"), `${STAGING_DIR}/.agents`);
-  const installations = JSON.parse(await options.shell(installCommand(fleet), 180_000));
+  const installations = JSON.parse(
+    await options.shell(installCommand(fleet, options.codexSourceSetup), 180_000),
+  );
   const harnesses = (await inspectFleetHarnesses(fleet, options)) as {
     claude: Array<{ executable: boolean; enabled: boolean; versionMatches: boolean }>;
     codex: {
+      executable: boolean;
+      skill: boolean;
       registered: boolean;
       pluginInstalled: boolean;
       versionMatches: boolean;
@@ -254,6 +270,40 @@ export async function prepareFleet(
               .join("; ")
           : "Native installer returned no profile results"),
     );
+  const codexReady =
+    harnesses.codex.executable === true &&
+    harnesses.codex.pluginInstalled &&
+    harnesses.codex.versionMatches &&
+    harnesses.codex.enabled &&
+    harnesses.codex.bridge &&
+    harnesses.codex.identityForwarding &&
+    harnesses.codex.skill;
+  if (
+    (harnesses.codex.executable !== false || harnesses.codex.registered || harnesses.codex.pluginInstalled) &&
+    !codexReady
+  ) {
+    const missing = [
+      "executable",
+      "pluginInstalled",
+      "versionMatches",
+      "enabled",
+      "bridge",
+      "identityForwarding",
+      "skill",
+    ].filter((key) => harnesses.codex[key as keyof typeof harnesses.codex] !== true);
+    const setup = Array.isArray(installations)
+      ? installations
+          .filter((entry: { harness?: string }) => entry.harness === "codex")
+          .map(
+            (entry: { status?: string; detail?: string }) =>
+              `${entry.status ?? "unknown"} (${(entry.detail ?? "").slice(0, 400)})`,
+          )
+          .join("; ")
+      : "Native installer returned no Codex result";
+    throw new Error(
+      `Codex preparation incomplete on ${fleet.id}: missing ${missing.join(", ")}. ${setup}. Inspect clankie doctor; managed configuration requires --codex-source-setup.`,
+    );
+  }
   const read = await options.shell(readPolicyCommand(fleet), 30_000);
   const marked = read.indexOf(POLICY_MARK);
   const afterMark = marked < 0 ? "" : read.slice(marked + POLICY_MARK.length);
@@ -276,18 +326,13 @@ export async function prepareFleet(
     harnesses,
     policy: { path, changed: approved.changed },
     codex: {
-      registered:
-        harnesses.codex.registered ||
-        (harnesses.codex.pluginInstalled &&
-          harnesses.codex.versionMatches &&
-          harnesses.codex.enabled &&
-          harnesses.codex.bridge &&
-          harnesses.codex.identityForwarding),
+      registered: Boolean(codexReady),
       changed:
         Array.isArray(installations) &&
         installations.some(
           (result: { harness?: string; status?: string }) =>
-            result.harness === "codex" && result.status === "installed",
+            result.harness === "codex" &&
+            ["installed", "source-setup-completed"].includes(result.status ?? ""),
         ),
     },
   };

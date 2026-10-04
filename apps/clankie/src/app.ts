@@ -1,6 +1,7 @@
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
 import type { PeerSeatAuthority } from "./captain/peer-seat-messages.ts";
 import { isDeepStrictEqual } from "node:util";
+import { posix, win32 } from "node:path";
 import { FLEET_PEER_SEATS_PATH, FLEET_PEER_MESSAGES_PATH, FleetPeerMessageSchema } from "@clankie/protocol";
 import { createFleetProjectMembershipRoutes } from "./fleet-project-membership-routes.ts";
 import { createProjectRoutes } from "./project-routes.ts";
@@ -318,6 +319,18 @@ const DiscordPersonMemoryReadQuerySchema = z
   })
   .strict();
 
+const FleetPrepareRequestSchema = z
+  .object({
+    codexSourceSetup: z
+      .string()
+      .refine(
+        (path) => !/\p{Cc}/u.test(path) && (posix.isAbsolute(path) || win32.isAbsolute(path)),
+        "Codex source setup must be an absolute script path on the remote machine",
+      )
+      .optional(),
+  })
+  .strict();
+
 /**
  * A redeemed-but-not-yet-completed pairing, held in memory only (single-use,
  * ~10 min). A restart drops these, so an in-flight pairing must restart —
@@ -450,8 +463,8 @@ export interface ClankieAppDependencies {
   localFleet?: { identity(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined };
   fleetProjectMembership?: Pick<import("./fleet-project-membership.ts").FleetProjectMembership, "read">;
   projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
-  /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
-  prepareFleet?: (id: string) => Promise<unknown>;
+  /** `clankie herdr prepare NAME`: prepare native workers through that fleet's registered transport. */
+  prepareFleet?: (id: string, options: { codexSourceSetup?: string }) => Promise<unknown>;
   inspectFleetHarnesses?: (id: string) => Promise<unknown>;
   /** Host-only project eligibility on a configured fleet; never verifies an MCP connection. */
   inspectFleetMembership?: (
@@ -1302,15 +1315,27 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "membership_inspection_unavailable" }, 503);
     }
   });
-  // The owner's one step for Claude workers on an ssh fleet (VUH-1527).
-  app.post("/v1/runtime-connections/:id/prepare", async (context) => {
+  // The owner's one step for native workers on an ssh fleet.
+  app.post("/v1/runtime-connections/:id/prepare", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     if (!dependencies.prepareFleet) return context.json({ error: "runtimes_unavailable" }, 503);
+    const input = FleetPrepareRequestSchema.safeParse(
+      await context.req
+        .text()
+        .then((raw) => (raw.length === 0 ? {} : JSON.parse(raw)))
+        .catch(() => undefined),
+    );
+    if (!input.success) return context.json({ error: "invalid_fleet_prepare" }, 400);
+    const options =
+      input.data.codexSourceSetup === undefined ? {} : { codexSourceSetup: input.data.codexSourceSetup };
     try {
-      return context.json({ ok: true, prepared: await dependencies.prepareFleet(context.req.param("id")) });
+      return context.json({
+        ok: true,
+        prepared: await dependencies.prepareFleet(context.req.param("id"), options),
+      });
     } catch (error) {
       return context.json(
         { error: "fleet_prepare_failed", detail: error instanceof Error ? error.message : "Prepare failed" },

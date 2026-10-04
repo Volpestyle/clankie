@@ -275,7 +275,7 @@ physical appearance; the caption preserves that distinction. A restart of Clanki
 ### Owner installation across profiles
 
 `clankie harness install` offers consent for each discovered local Claude profile
-and native Codex worker plugin. `clankie herdr prepare NAME` explicitly installs
+and native Codex worker plugin. `clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` explicitly installs
 and enables the worker for hand-started and hired agents across remote Claude
 profiles, including `CLAUDE_CONFIG_DIR` and named `~/.claude-*` directories.
 The worker MCP server is `clankie`. Bump both worker manifests on every shipment
@@ -286,7 +286,13 @@ reports bridge, hook and `clankie` skill presence separately. Native Codex worke
 packaging lives beside the Claude packaging in `.agents/plugins/marketplace.json`
 and `worker/.codex-plugin`; it reuses the fleet bridge, has no operator bearer and
 does not advertise Claude hooks as Codex receivers. Managed Codex configuration
-must go through its real source/setup. Live membership and reply delivery require
+must go through its real source/setup. Remote preparation can invoke the explicitly
+selected source-owned script; it receives the prepared marketplace and native
+executable without rewriting the managed link. The dotfiles `codex-worker-setup.py`
+installs through native Codex using a temporary regular config with access to the
+runtime plugin cache, then renders only its owned worker selection. Missing native
+worker checks make preparation fail even if a legacy MCP registration exists.
+Live membership and reply delivery require
 native session proof; installation alone supplies neither.
 
 ### Working beside Clankie

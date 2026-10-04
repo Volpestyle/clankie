@@ -140,6 +140,16 @@ the `clankie-worker` plugin over the fleet's link, so a briefed remote Claude
 hire fails with the fix until the owner has run `clankie herdr prepare NAME` for
 that machine once. `herdr fleets` reports each link's state.
 
+For a source-managed remote Codex config, use
+`clankie herdr prepare NAME --codex-source-setup ABSOLUTE_REMOTE_SCRIPT` with its
+owning setup. Dotfiles ships `scripts/codex-worker-setup.py` for its configuration
+symlinks; the hook uses native plugin installation and renders the generated
+source directly. Clankie preserves the runtime link and unrelated settings.
+Preparation is incomplete if native worker version, activation, bridge, identity
+forwarding or skill checks fail, even with a legacy MCP registration. Read
+`clankie doctor --machine NAME` after preparation. Installed files are static
+proof; do not restart another lane's pane or claim native tools were tested.
+
 Admitted fleet panes get verified connected tools through `clankie_tools` and
 `clankie_call`, independent of project grants or native process proof. The owner
 can disable them with `clankie fleet set --tools off`; disconnecting a fleet also

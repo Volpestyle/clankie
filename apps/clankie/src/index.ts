@@ -1101,11 +1101,12 @@ const clankie = await createClankieApp({
       gitWorktree: projectGitWorktree,
     });
   },
-  prepareFleet: async (id: string) => {
+  prepareFleet: async (id: string, options) => {
     const fleet = (await runtimes.fleets()).find((entry) => entry.id === id);
     if (fleet === undefined)
       throw new Error(`No ssh fleet ${id} is connected; add it with clankie herdr add first`);
     return prepareFleet(fleet, {
+      ...options,
       shell: runtimes.fleetShell(fleet),
       workerPluginDir: workerPluginDir(repoRoot),
     });
