@@ -1,4 +1,5 @@
 /** Controller-origin, credential-free Linux sandbox proof. Imports never probe. */
+import { claudeSandboxArgs, claudeEnvironment, CLAUDE } from "./lead-native-claude-sandbox.mjs";
 import { nativePermissionConfig } from "./lead-native-policy.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -18,6 +19,7 @@ const ENV = [
 /** Explicit future probe only. No auth, provider requests, agent turns, or owner fleet. */
 export async function probeNativeRuntime({ build, command, root }) {
   const built = requireNativeBuild(build, command);
+  if (built.runtime === "claude") return probeClaudeControl({ built, command, root });
   mkdirSync(root, { mode: 0o700 });
   for (const path of [
     "control",
@@ -273,4 +275,139 @@ export function nativeRuntimeEvidence(proof) {
   const record = proofs.get(proof);
   if (!record) throw Error("No controller-origin native capability evidence");
   return structuredClone(record.evidence);
+}
+
+/** Earned independently of Codex's model-tool sandbox; the entire process is contained. */
+async function probeClaudeControl({ built, command, root }) {
+  mkdirSync(root, { mode: 0o700 });
+  for (const directory of [
+    "control",
+    "control/claude",
+    "control/claude/home",
+    "control/claude/config",
+    "tasks",
+    "tasks/lead",
+    "tasks/other",
+  ])
+    mkdirSync(join(root, directory), { mode: 0o700 });
+  const { writeNativeClaudeCollectorHooks } = await import("./lead-native-claude-collector.mjs");
+  writeNativeClaudeCollectorHooks(root);
+  const nonce = randomUUID();
+  writeFileSync(join(root, "control/canary"), nonce, { mode: 0o600, flag: "wx" });
+  writeFileSync(join(root, "control/claude/settings.json"), "{}", { mode: 0o400, flag: "wx" });
+  writeFileSync(join(root, "tasks/other/canary"), nonce, { mode: 0o600, flag: "wx" });
+  const daemon = JSON.parse(await command(["info", "--format", "{{json .}}"]));
+  if (!daemon.ID || daemon.OSType !== "linux") throw Error("Exact Claude Linux daemon unavailable");
+  const container = new LeadContainer({ image: built.image, root, role: "probe", command });
+  const env = claudeEnvironment();
+  const clean = ["/usr/bin/env", "-i", ...Object.entries(env).map(([key, value]) => `${key}=${value}`)];
+  await container.create([
+    "/usr/local/bin/node",
+    "-e",
+    `const f=require('node:fs'),n=require('node:net');n.createServer(s=>s.end('canary')).listen('/eval/control/private.sock',()=>f.writeFileSync('/eval/control/supervisor.json',JSON.stringify({pid:process.pid,namespaces:Object.fromEntries(['pid','mnt','net'].map(k=>[k,f.readlinkSync('/proc/self/ns/'+k)]))})));`,
+  ]);
+  let evidence;
+  try {
+    await container.start();
+    const paths = [
+      CLAUDE,
+      "/opt/codex/bin/bwrap",
+      "/usr/local/bin/herdr",
+      "/usr/local/bin/node",
+      "/usr/bin/python3",
+      ...Object.keys(built.modules),
+    ];
+    const binaries = JSON.parse(
+      await container.exec([
+        "/usr/local/bin/node",
+        "-e",
+        `const f=require('node:fs'),c=require('node:crypto');process.stdout.write(JSON.stringify(Object.fromEntries(${JSON.stringify(paths)}.map(p=>[p,c.createHash('sha256').update(f.readFileSync(p)).digest('hex')]))));`,
+      ]),
+    );
+    if (
+      Object.keys(binaries).length !== paths.length ||
+      paths.some((path) => !/^[a-f0-9]{64}$/u.test(binaries[path])) ||
+      binaries[CLAUDE] !== built.artifact.sha256 ||
+      Object.entries(built.modules).some(([path, hash]) => binaries[path] !== hash)
+    )
+      throw Error("Claude native image/module identity unavailable");
+    const outside = JSON.parse(
+      await container.exec([
+        "/usr/local/bin/node",
+        "-e",
+        `const f=require('node:fs');const deadline=Date.now()+5000;const read=()=>{try{process.stdout.write(f.readFileSync('/eval/control/supervisor.json'));}catch{if(Date.now()>deadline)process.exit(1);setTimeout(read,20)}};read();`,
+      ]),
+    );
+    const args = claudeSandboxArgs({ hooks: true });
+    const result = JSON.parse(
+      await container.exec(
+        [
+          ...clean,
+          "/opt/codex/bin/bwrap",
+          ...args,
+          "--",
+          "/usr/local/bin/node",
+          "-e",
+          `const f=require('node:fs');const denied=p=>{try{f.readFileSync(p);return false}catch{return true}};const out={nonce:${JSON.stringify(nonce)},controlDenied:denied('/eval/control/canary'),otherWorkspaceDenied:denied('/eval/tasks/other/canary'),parentProcDenied:denied('/proc/${outside.pid}/root/eval/control/canary'),namespaces:Object.fromEntries(['pid','mnt','net'].map(k=>[k,f.readlinkSync('/proc/self/ns/'+k)]))};f.writeFileSync('/eval/tasks/lead/canary','ok');out.allocatedWrite=f.readFileSync('/eval/tasks/lead/canary','utf8')==='ok';try{f.writeFileSync('/eval/control/claude/settings.json','bad');out.settingsWriteDenied=false}catch{out.settingsWriteDenied=true}const socket=require('node:net').createConnection('/eval/control/private.sock');socket.setTimeout(1000);socket.once('connect',()=>process.exit(1));socket.once('timeout',()=>process.exit(1));socket.once('error',()=>{out.privateSocketDenied=true;process.stdout.write(JSON.stringify(out));});`,
+        ],
+        { timeoutMs: 10000 },
+      ),
+    );
+    if (
+      result.nonce !== nonce ||
+      [
+        "controlDenied",
+        "privateSocketDenied",
+        "otherWorkspaceDenied",
+        "parentProcDenied",
+        "allocatedWrite",
+        "settingsWriteDenied",
+      ].some((key) => result[key] !== true) ||
+      ["pid", "mnt", "net"].some(
+        (key) =>
+          typeof result.namespaces?.[key] !== "string" || result.namespaces[key] === outside.namespaces[key],
+      )
+    )
+      throw Error("Claude whole-process control isolation unavailable");
+    const version = (
+      await container.exec([...clean, "/opt/codex/bin/bwrap", ...args, "--", CLAUDE, "--version"], {
+        timeoutMs: 10000,
+      })
+    ).trim();
+    if (version !== `${built.artifact.version} (Claude Code)`)
+      throw Error("Selected Claude native version mismatch");
+    evidence = {
+      runtime: "claude",
+      source: built,
+      binaries,
+      version,
+      daemonId: daemon.ID,
+      endpoint: dockerTransportIdentity(command),
+      probeContainerId: container.id,
+      policy: args,
+      isolation: result,
+      providerNetwork: "denied",
+      providerAdmission: false,
+      childRouting: false,
+      nativeTuiObserved: false,
+      vendorProvenance: false,
+      createdAt: Date.now(),
+    };
+  } finally {
+    await container.stop("credential-free Claude control probe settled");
+  }
+  const result = Object.freeze({
+    schemaVersion: 1,
+    image: built.image,
+    evidence: structuredClone(evidence),
+    sha256: hash(evidence),
+  });
+  proofs.set(result, {
+    image: built.image,
+    evidence: structuredClone(evidence),
+    command,
+    daemonId: daemon.ID,
+    endpoint: dockerTransportIdentity(command),
+  });
+  return result;
 }

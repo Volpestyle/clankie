@@ -1,0 +1,34 @@
+# mini_idle: breathing; M is the worker tint mask
+direction forward
+
+frame 450
+......LLLL..
+.LLL.sLLLLL.
+LLLlfsllll..
+.ll..fs.....
+.ooooofsooo.
+occcccccccco
+ocffffffffco
+ocfceccecfco
+ocfpccccpfco
+ocffffffffco
+.oooooooooo.
+obMMMMMMMMbo
+.ooMMMMMMoo.
+..ooo..ooo..
+
+frame 450
+............
+LL....LLLLL.
+LLL..sLLLLLl
+.lllfsllll..
+.....fs.....
+.ooooofsooo.
+occcccccccco
+ocffffffffco
+ocfceccecfco
+ocfpccccpfco
+ocffffffffco
+.oooooooooo.
+.ooMMMMMMoo.
+..ooo..ooo..

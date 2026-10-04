@@ -1,3 +1,6 @@
+import { DesktopExpressions } from "./desktop.ts";
+import { projectPresence, pollPresence, captainIsThinking } from "./presence.ts";
+import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { projectOnboarding } from "./project-onboarding.ts";
 import {
   authorizeQuestion,
@@ -28,9 +31,11 @@ import {
 } from "./conversation-owner.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.js";
 import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
+import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { deliveryFingerprint } from "./delivery-fence.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
+import { createRemoteCodexGoals } from "./remote-codex-goals.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
@@ -126,6 +131,7 @@ import {
   type FleetSeatDelivery,
 } from "./fleet-seat.ts";
 import { SeatLinkInterruptedError, SeatOutbox } from "./seat-outbox.ts";
+import { ConversationServiceRun, waitForConversationRun } from "./conversation-run.ts";
 import { createSeatLedger, runResultForSeatStatus, seatLedgerPath, type SeatLedger } from "./seat-ledger.ts";
 import { createStanceStore } from "./stances.ts";
 import { captainComposerCatalog, seatComposerCatalog } from "./composer-catalog.ts";
@@ -838,8 +844,9 @@ export async function runDurableTurn(
  *
  * The session's own event stream is the liveness signal: a token, a tool call,
  * a retry — anything at all — is proof the turn is still a turn, and resets the
- * clock. Nothing here caps total duration, because the length of an answer is
- * the length of the work behind it.
+ * clock. An executing tool keeps the turn alive until it ends, with its own
+ * timeout and cancellation. Nothing here caps total duration, because the
+ * length of an answer is the length of the work behind it.
  *
  * Every Discord turn goes through here, one-shot and durable alike. A durable
  * lane had no backstop at all before, which was survivable only while text was
@@ -849,18 +856,19 @@ export async function runDurableTurn(
 export async function runTurnWithStallWatchdog<T>(
   session: Pick<AgentSession, "abort" | "subscribe">,
   start: (signal: AbortSignal) => Promise<T>,
-  options: { stallMs?: number; now?: () => number } = {},
+  options: { stallMs?: number; now?: () => number; signal?: AbortSignal } = {},
 ): Promise<{ completed: true; value: T } | { completed: false }> {
   const now = options.now ?? Date.now;
   const stallMs = options.stallMs ?? DISCORD_TURN_STALL_MS;
   const cancellation = new AbortController();
   let lastSignAtMs = now();
-  const unsubscribe = session.subscribe(() => {
-    lastSignAtMs = now();
-  });
+  const executingTools = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let renew = (): void => {};
   const stalled = new Promise<false>((resolve) => {
     const tick = (): void => {
+      timer = undefined;
+      if (executingTools.size > 0) return;
       const quietFor = now() - lastSignAtMs;
       if (quietFor >= stallMs) {
         resolve(false);
@@ -870,10 +878,23 @@ export async function runTurnWithStallWatchdog<T>(
       timer = setTimeout(tick, Math.min(STALL_TICK_MS, stallMs - quietFor));
       timer.unref?.();
     };
+    renew = tick;
     tick();
   });
+  const unsubscribe = session.subscribe((event) => {
+    lastSignAtMs = now();
+    if (event.type === "tool_execution_start") executingTools.add(event.toolCallId);
+    else if (event.type === "tool_execution_end") executingTools.delete(event.toolCallId);
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    renew();
+  });
   try {
-    const outcome = await Promise.race([start(cancellation.signal).then((value) => ({ value })), stalled]);
+    const work = start(cancellation.signal).then((value) => ({ value }));
+    const outcome = await Promise.race([
+      options.signal === undefined ? work : waitForConversationRun(work, options.signal),
+      stalled,
+    ]);
     if (outcome === false) {
       void session.abort().catch(() => undefined);
       return { completed: false };
@@ -1025,7 +1046,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         );
         return mailbox.bound() || mailbox.uncertain();
       },
-      deliver: async (seatId, text) => {
+      deliver: async (seatId, text, source?: string, recipientBinding?: string) => {
         const delivery = await fleetSeatMailbox(
           fleetMailboxes,
           seatId,
@@ -1033,9 +1054,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ).deliver({
           kind: "message",
           conversationId: conversations.conversationIdForSeat(seatId) ?? seatId,
-          source: "captain",
+          source: source ?? "captain",
           content: text,
           wantsReply: false,
+          ...(recipientBinding === undefined ? {} : { recipientBinding }),
         });
         return delivery.outcome === "unconfirmed" ? delivery : delivery.outcome === "delivered";
       },
@@ -1045,8 +1067,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     consent: () => claudeWorkerChannelConsent(),
     ...claudeWorkerDeps,
   });
+  const hireRegistry = createModelRegistry();
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     validateOwner: validateConversationOwner,
+    hireDefaults: async () => (await settings()).fleet.hire ?? {},
+    resolveHireModel: async (harness, model) =>
+      resolveHireModel(await hireRegistry.catalog(), harness, model),
+    claudeAccounts: async () => [
+      { label: "default", home: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude") },
+      ...(await settings()).claudeAccounts,
+    ],
+    leadPane: async (input, authority) => {
+      const native =
+        authority === undefined ? undefined : conversations.nativeSource(authority.owner.conversationId);
+      if (
+        !native?.session ||
+        (splitFleetQualified(native.paneId)?.fleet ?? "default") !== (input.fleet ?? "default")
+      )
+        return undefined;
+      const current = await herdrRunner.get(native.paneId);
+      return current.terminalId === native.terminalId &&
+        current.session &&
+        occupantIdForHerdrSession(current.session) === occupantIdForHerdrSession(native.session)
+        ? native.paneId
+        : undefined;
+    },
     projectHirePolicy: {
       settings: async () => (await settings()).projects,
       ...(options.projectHireTools === undefined ? {} : { tools: options.projectHireTools }),
@@ -1181,7 +1226,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               string,
               { revision: number; queue: ReturnType<typeof remoteCodexQueue> }
             >();
-            return async (fleetId: string, sessionId: string, text: string) => {
+            return async (
+              fleetId: string,
+              sessionId: string,
+              text: string,
+              beforeDispatch?: () => Promise<boolean>,
+            ) => {
               await refreshFleets();
               const fleet = remoteFleets.find((entry) => entry.id === fleetId);
               if (fleet === undefined) return false;
@@ -1191,7 +1241,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 cached = {
                   revision,
                   queue: remoteCodexQueue(fleet, async (...args) => {
-                    await refreshFleets();
                     if ((fleetRevisions.get(fleetId) ?? 0) !== revision)
                       throw new Error("Machine connection changed or disconnected");
                     return deps.fleets!.shell!(fleet)(...args);
@@ -1199,7 +1248,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 };
                 queues.set(fleetId, cached);
               }
-              return cached.queue(sessionId, text);
+              return cached.queue(sessionId, text, async () => {
+                await refreshFleets();
+                if ((fleetRevisions.get(fleetId) ?? 0) !== revision) return false;
+                return beforeDispatch ? beforeDispatch() : true;
+              });
             };
           })(),
           remoteSeatAdapters: (fleetId: string) => {
@@ -1310,6 +1363,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return shown;
   };
   const settingsStore = options.settings ?? new SettingsStore();
+  const desktop = new DesktopExpressions(async () => (await settingsStore.load()).desktop);
+  const desktopDeps = { ...deps, desktop };
   const personaImages = options.personaImages ?? createPersonaImageSource(settingsStore, options.repoRoot);
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
@@ -1340,6 +1395,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   /** Pane join for the current roster, rebuilt with it on every census. */
   let liveEdgeSeats: readonly EdgeSeat[] = [];
   let modelRuntime: Promise<CaptainModelRuntime> | undefined;
+  let modelRuntimeReady = false;
   // The seat (ADR 0152): the herdr pane holding his name, and the outbox its
   // bridge polls. The head conversation is always the default global one.
   const shutdown = new AbortController();
@@ -1381,11 +1437,41 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const settings = (): Promise<ClankieSettings> => settingsStore.load();
   const cacheSalt = promptCacheSalt(join(options.stateDir, "prompt-cache-salt"));
-  const runtime = (): Promise<CaptainModelRuntime> =>
-    (modelRuntime ??=
-      options.evalSessionBoundary === undefined
-        ? createCaptainModelRuntime(options.repoRoot)
-        : Promise.resolve(options.evalSessionBoundary.runtime));
+  const runtime = async (run?: ConversationServiceRun): Promise<CaptainModelRuntime> => {
+    run?.signal.throwIfAborted();
+    if (modelRuntime === undefined) {
+      const created =
+        options.evalSessionBoundary === undefined
+          ? createCaptainModelRuntime(options.repoRoot)
+          : Promise.resolve(options.evalSessionBoundary.runtime);
+      modelRuntime = created;
+      modelRuntimeReady = false;
+      void created.then(
+        () => {
+          if (modelRuntime === created) modelRuntimeReady = true;
+        },
+        () => {
+          if (modelRuntime === created) modelRuntime = undefined;
+        },
+      );
+    }
+    const pending = modelRuntime;
+    if (run === undefined) return pending;
+    // A canceled cold setup must not make later conversations inherit its hung
+    // promise. An initialized shared runtime is independent of a caller's turn.
+    const onAbort = (): void => {
+      if (modelRuntime === pending && !modelRuntimeReady) modelRuntime = undefined;
+    };
+    run.signal.addEventListener("abort", onAbort, { once: true });
+    if (run.signal.aborted) onAbort();
+    try {
+      const result = await run.wait("model runtime", pending);
+      run.signal.throwIfAborted();
+      return result;
+    } finally {
+      run.signal.removeEventListener("abort", onAbort);
+    }
+  };
 
   function systemPrompt(
     lane: CaptainSessionLaneV2,
@@ -1434,7 +1520,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     cwd: string,
     sideConversation = false,
     _conversationId?: string,
+    run?: ConversationServiceRun,
   ): Promise<LaneSession> {
+    async function prepare<T>(phase: string, work: () => Promise<T>): Promise<T> {
+      run?.signal.throwIfAborted();
+      const pending = work();
+      const result = await (run === undefined ? pending : run.wait(phase, pending));
+      run?.signal.throwIfAborted();
+      return result;
+    }
+    run?.signal.throwIfAborted();
     const capture: TurnContext = { shell: systemTools };
     if (systemTools && options.deliveredFiles !== undefined) {
       capture.publishFile = async (input) => {
@@ -1448,15 +1543,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return published;
       };
     }
-    const { runtime: models, resolveRoute } = await runtime();
-    const currentSettings = await settings();
-    const computerUse = systemTools ? await harnessesForPrompt() : [];
+    const { runtime: models, resolveRoute } = await runtime(run);
+    const currentSettings = await prepare("session settings", settings);
+    const computerUse = systemTools ? await prepare("computer-use discovery", harnessesForPrompt) : [];
     const purpose = sessionPurpose(lane, systemTools);
-    const route = { current: await resolveRoute(purpose) };
+    const route = { current: await prepare("session model route", () => resolveRoute(purpose)) };
     const budget = { compactBeforeNextRun: false };
     const selection = route.current.selection;
     const hasPersonaImages =
-      options.evalSessionBoundary === undefined && (await personaImages()).images.length > 0;
+      options.evalSessionBoundary === undefined &&
+      (await prepare("persona images", personaImages)).images.length > 0;
     const piSettings = options.evalSessionBoundary?.settings() ?? SettingsManager.inMemory();
     const quietSkills = new Set<string>();
     const loader: ResourceLoader =
@@ -1519,9 +1615,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }),
         settingsManager: piSettings,
       });
-    await loader.reload();
+    await prepare("session resources and connected tools", () => loader.reload());
     const authored = laneAuthoredTools(
-      deps,
+      desktopDeps,
       capture,
       laneLog,
       lane,
@@ -1532,41 +1628,65 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       messageSeat,
     );
     const evalTools = options.evalSessionBoundary?.tools({ cwd, systemTools, authored });
-    const { session } = await createAgentSession({
-      cwd,
-      model: selection.model,
-      thinkingLevel: selection.thinkingLevel,
-      modelRuntime: models,
-      customTools: evalTools?.customTools ?? authored,
-      ...(evalTools === undefined ? {} : { tools: evalTools.tools }),
-      resourceLoader: loader,
-      sessionManager,
-      settingsManager: piSettings,
-      // Coding tools (read/bash/edit/write) run unsandboxed as the service
-      // user. The operator console always has them. Discord gets them only from
-      // the authenticated authority plan: per-user grants stay one-shot in
-      // shared rooms, while private owner DMs and explicitly trusted guild
-      // lanes may bind them durably. A tools list is a boundary; prompt framing
-      // around untrusted channel history is not.
-      ...(systemTools ? {} : { noTools: "builtin" as const }),
-    });
-    await session.bindExtensions({ mode: "print" });
-    const laneSession: LaneSession = {
-      session,
-      capture,
-      quietSkills,
-      purpose,
-      route,
-      budget,
-      lastAssistantText: "",
-      turnCounter: 0,
+    let preparingSession: AgentSession | undefined;
+    let disposed = false;
+    const disposePreparingSession = (): void => {
+      if (preparingSession === undefined || disposed) return;
+      disposed = true;
+      void preparingSession.abort().catch(() => undefined);
+      preparingSession.dispose();
     };
-    session.subscribe((event) => {
-      if (event.type === "message_end" && event.message.role === "assistant") {
-        laneSession.lastAssistantText = assistantText(event.message);
-      }
-    });
-    return laneSession;
+    run?.signal.addEventListener("abort", disposePreparingSession, { once: true });
+    try {
+      const { session } = await prepare("session startup", async () => {
+        const created = await createAgentSession({
+          cwd,
+          model: selection.model,
+          thinkingLevel: selection.thinkingLevel,
+          modelRuntime: models,
+          customTools: evalTools?.customTools ?? authored,
+          ...(evalTools === undefined ? {} : { tools: evalTools.tools }),
+          resourceLoader: loader,
+          sessionManager,
+          settingsManager: piSettings,
+          // Coding tools (read/bash/edit/write) run unsandboxed as the service
+          // user. The operator console always has them. Discord gets them only from
+          // the authenticated authority plan: per-user grants stay one-shot in
+          // shared rooms, while private owner DMs and explicitly trusted guild
+          // lanes may bind them durably. A tools list is a boundary; prompt framing
+          // around untrusted channel history is not.
+          ...(systemTools ? {} : { noTools: "builtin" as const }),
+        });
+        preparingSession = created.session;
+        if (run?.signal.aborted) {
+          disposePreparingSession();
+          run.signal.throwIfAborted();
+        }
+        return created;
+      });
+      await prepare("session extensions", () => session.bindExtensions({ mode: "print" }));
+      const laneSession: LaneSession = {
+        session,
+        capture,
+        quietSkills,
+        purpose,
+        route,
+        budget,
+        lastAssistantText: "",
+        turnCounter: 0,
+      };
+      session.subscribe((event) => {
+        if (event.type === "message_end" && event.message.role === "assistant") {
+          laneSession.lastAssistantText = assistantText(event.message);
+        }
+      });
+      return laneSession;
+    } catch (error) {
+      disposePreparingSession();
+      throw error;
+    } finally {
+      run?.signal.removeEventListener("abort", disposePreparingSession);
+    }
   }
 
   /**
@@ -1611,28 +1731,55 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     systemTools: boolean,
     cwd: string,
     sideConversation = false,
+    run?: ConversationServiceRun,
   ): Promise<LaneSession> {
-    const existing = sessions.get(key);
-    if (existing !== undefined) return existing;
-    const created = (async () => {
-      let manager: SessionManager;
-      try {
-        manager = SessionManager.continueRecent(cwd, dir);
-      } catch {
-        manager = SessionManager.create(cwd, dir);
-      }
-      return buildSession(
-        lane,
-        manager,
-        systemTools,
-        cwd,
-        sideConversation,
-        key.startsWith("operator:") ? key.slice("operator:".length) : undefined,
+    run?.signal.throwIfAborted();
+    let pending = sessions.get(key);
+    if (pending === undefined) {
+      const created = (async () => {
+        let manager: SessionManager;
+        try {
+          manager = SessionManager.continueRecent(cwd, dir);
+        } catch {
+          manager = SessionManager.create(cwd, dir);
+        }
+        return buildSession(
+          lane,
+          manager,
+          systemTools,
+          cwd,
+          sideConversation,
+          key.startsWith("operator:") ? key.slice("operator:".length) : undefined,
+          run,
+        );
+      })();
+      sessions.set(key, created);
+      void created.catch(() => {
+        if (sessions.get(key) === created) sessions.delete(key);
+      });
+      pending = created;
+    }
+    if (run === undefined) return pending;
+    const selected = pending;
+    const onAbort = (): void => {
+      if (sessions.get(key) === selected) sessions.delete(key);
+      // The dependency may ignore its signal. If it finishes later, this lane
+      // belongs to the abandoned run and cannot return to the session cache.
+      void selected.then(
+        (lane) => {
+          void lane.session.abort().catch(() => undefined);
+          lane.session.dispose();
+        },
+        () => undefined,
       );
-    })();
-    sessions.set(key, created);
-    created.catch(() => sessions.delete(key));
-    return created;
+    };
+    run.signal.addEventListener("abort", onAbort, { once: true });
+    run.onClose(() => run.signal.removeEventListener("abort", onAbort));
+    if (run.signal.aborted) onAbort();
+    return waitForConversationRun(selected, run.signal).then((lane) => {
+      run.signal.throwIfAborted();
+      return lane;
+    });
   }
 
   function seatEventKind(
@@ -1649,23 +1796,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     trackHostedConversationRunner(async (conversationId, incoming, publish, context) => {
       // A queued turn may start after close releases the preceding seat waiter.
       // It must not see an empty outbox and fall through into a fresh Pi turn.
-      shutdown.signal.throwIfAborted();
-      if (context.inputAnswer) {
-        await authorizeQuestion(context.ownerAuthority);
-        if (!conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
+      const signal = AbortSignal.any([context.signal, shutdown.signal]);
+      signal.throwIfAborted();
+      const preparation = new ConversationServiceRun(signal);
+      let preparedMessage: string | undefined;
+      try {
+        if (context.inputAnswer) {
+          await preparation.wait("question authority", authorizeQuestion(context.ownerAuthority));
+          if (!conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
+        }
+        // Turning follow off also drops activity still queued behind a live turn.
+        if (
+          context.origin === "hook" &&
+          (!(await preparation.wait("Linear following settings", settings())).linearWebhook.following ||
+            (options.linearFollowing !== undefined &&
+              !(await preparation.wait("Linear following authorization", options.linearFollowing()))))
+        )
+          return;
+        // A hook wake is worded when it starts, from whatever arrived until now.
+        preparedMessage =
+          context.origin === "hook"
+            ? conversations.linearWakePrompt(conversationId, context.runId)
+            : incoming;
+      } finally {
+        preparation.close();
       }
-      // Turning follow off also drops activity still queued behind a live turn.
-      if (
-        context.origin === "hook" &&
-        (!(await settings()).linearWebhook.following ||
-          (options.linearFollowing !== undefined && !(await options.linearFollowing())))
-      )
-        return;
-      // A hook wake is worded when it starts, from whatever arrived until now.
-      const message =
-        context.origin === "hook" ? conversations.linearWakePrompt(conversationId, context.runId) : incoming;
+      const message = preparedMessage;
       if (message === undefined) return;
-      shutdown.signal.throwIfAborted();
+      signal.throwIfAborted();
       return conversations.runWithConversationDriver<void>(
         conversationId,
         () => {
@@ -1675,15 +1833,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           return {
             run: async () => {
               // The harness in his seat opens files by path, the way any worker does.
-              const attached =
-                context.attachments === undefined
-                  ? undefined
-                  : await materializeOwnerAttachments({
-                      workspace: context.workspace ?? workingDirectory,
-                      messageId: context.runId,
-                      attachments: context.attachments,
-                    });
-              shutdown.signal.throwIfAborted();
+              const preparation = new ConversationServiceRun(signal);
+              let attached: Awaited<ReturnType<typeof materializeOwnerAttachments>> | undefined;
+              try {
+                attached =
+                  context.attachments === undefined
+                    ? undefined
+                    : await preparation.wait(
+                        "native owner attachments",
+                        materializeOwnerAttachments({
+                          workspace: context.workspace ?? workingDirectory,
+                          messageId: context.runId,
+                          attachments: context.attachments,
+                        }),
+                      );
+              } finally {
+                preparation.close();
+              }
+              signal.throwIfAborted();
               const delivery = await selectedOutbox.deliver({
                 kind,
                 conversationId,
@@ -1691,8 +1858,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 content:
                   attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
                 wantsReply: kind === "escalation",
-                signal: context.signal,
+                signal,
               });
+              // Shutdown loses the reply target; cancellation must not turn an
+              // unanswered accepted native dispatch into a completed turn.
+              shutdown.signal.throwIfAborted();
               if (delivery.deliveryStage !== undefined && delivery.outcome !== "unbound")
                 context.deliveryReceipt?.(delivery.deliveryStage);
               if (delivery.outcome === "replied") {
@@ -1706,13 +1876,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
           };
         },
-        async () => {
+        async (run) => {
           // A Linear wake is a one-shot: a fresh session sees only the new
           // headlines, so it never resends the conversation it reports into
           // (VUH-1382). It publishes there like any turn, and its own tree stays
           // on disk as the record of what it ran.
           // ponytail: one tree per wake, unbounded; prune by mtime if it grows.
-          shutdown.signal.throwIfAborted();
+          run.signal.throwIfAborted();
           const oneShot = context.origin === "hook";
           const cwd = context.workspace ?? workingDirectory;
           const lane = oneShot
@@ -1726,6 +1896,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 cwd,
                 false,
                 conversationId,
+                run,
               )
             : await durableSession(
                 `operator:${conversationId}`,
@@ -1734,6 +1905,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 true,
                 cwd,
                 context.side === true,
+                run,
               );
           if (shutdown.signal.aborted) {
             if (oneShot) lane.session.dispose();
@@ -1742,14 +1914,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // Operator interrupt: stop the live model turn. Aborting mid-stream makes
           // pi settle the message as aborted; partial text still publishes below so
           // the transcript shows what he had said before the interrupt.
-          if (context.signal.aborted) {
+          if (run.signal.aborted) {
             if (oneShot) lane.session.dispose();
-            return;
+            run.signal.throwIfAborted();
           }
           const onInterrupt = (): void => {
             void lane.session.abort().catch(() => undefined);
           };
-          context.signal.addEventListener("abort", onInterrupt, { once: true });
+          run.signal.addEventListener("abort", onInterrupt, { once: true });
           let releaseStarting: (() => void) | undefined;
           if (lane.running === undefined && lane.starting === undefined && !lane.session.isStreaming) {
             lane.starting = new Promise<void>((resolve) => {
@@ -1763,7 +1935,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             route: { owner: { conversationId }, mode: "machine" as const },
             current: () =>
               lane.capture.bodyIdentity === bodyIdentity &&
-              !context.signal.aborted &&
+              !run.signal.aborted &&
               conversations.runsCaptainTurns(conversationId),
             authorize: async () => conversations.runsCaptainTurns(conversationId),
           };
@@ -1792,7 +1964,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           lane.capture.room = roomKey("operator", conversationId);
           lane.capture.targetId = conversationId;
           lane.capture.publishFile = (input) => conversations.publishFile({ conversationId, ...input });
-          if (releaseStarting === undefined && lane.starting !== undefined) await lane.starting;
+          if (releaseStarting === undefined && lane.starting !== undefined)
+            try {
+              await run.wait("active session preparation", lane.starting);
+            } catch (error) {
+              run.signal.removeEventListener("abort", onInterrupt);
+              throw error;
+            }
 
           const live = lane.running !== undefined || lane.session.isStreaming;
           const operatorTokensStart = contextTokenCount(lane.session.getContextUsage());
@@ -1817,11 +1995,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             publish({ type: "activity", phase });
           };
           const drafts = createDraftPacer((text) => {
-            context.draft(text);
+            if (!run.signal.aborted) context.draft(text);
           });
+          const unsubscribeProgress = lane.session.subscribe((event) => run.observe(event));
           const unsubscribe = live
             ? () => undefined
             : lane.session.subscribe((event) => {
+                if (run.signal.aborted) return;
                 if (metrics !== undefined) recordPiTurnEvent(metrics, event);
                 if (event.type === "message_update") {
                   if (
@@ -1901,15 +2081,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           let settled: TurnSettledOutcome | undefined;
           try {
             shutdown.signal.throwIfAborted();
-            if (!live) await syncModel(lane);
+            if (!live) await run.wait("model synchronization", syncModel(lane));
             // After the sync, so a `/model` or `/effort` change made under a live
             // conversation is attributed to this turn — the first one to execute it.
             metrics?.recordExecution(sessionExecutionIdentity(lane.session));
-            await laneLog.append("operator", conversationId, {
-              at: new Date().toISOString(),
-              kind: "heard",
-              text: message,
-            });
+            await run.wait(
+              "heard log",
+              laneLog.append("operator", conversationId, {
+                at: new Date().toISOString(),
+                kind: "heard",
+                text: message,
+              }),
+            );
             const paneId = context.seat?.herdrPaneId;
             // Seated or not, an operator turn carries the fleet of the pinned
             // session (ADR 0149); an unseated turn with no live session attaches
@@ -1918,25 +2101,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const census =
               live || oneShot || conversationId === LINEAR_INBOX_CONVERSATION_ID
                 ? undefined
-                : await readHerdrSessionCensus(paneId, {
-                    ...(options.nativeCensusRunner
-                      ? { runCommand: options.nativeCensusRunner, summaries: {} }
-                      : {}),
-                    fleets: await censusFleets(),
-                    localAvailable: deps.herdrAvailable?.() !== false,
-                  });
+                : await run.wait(
+                    "fleet census",
+                    readHerdrSessionCensus(paneId, {
+                      ...(options.nativeCensusRunner
+                        ? { runCommand: options.nativeCensusRunner, summaries: {} }
+                        : {}),
+                      fleets: await run.wait("fleet connections", censusFleets()),
+                      localAvailable: deps.herdrAvailable?.() !== false,
+                    }),
+                  );
             // Owner attachments reach his model as images; the note numbers them
             // and names where each original is stored (ADR 0209).
             const attached =
               context.attachments === undefined
                 ? undefined
-                : await modelImagesForOwnerAttachments(context.attachments);
+                : await run.wait("owner model images", modelImagesForOwnerAttachments(context.attachments));
             const workspaceNote =
               context.ownerAuthority && context.questionBinding
-                ? await questionWorkspaceContext(cwd, async () => (await settings()).projects)
+                ? await run.wait(
+                    "question workspace",
+                    questionWorkspaceContext(cwd, async () => (await settings()).projects),
+                  )
                 : "";
             if (context.ownerAuthority && context.questionBinding) {
-              await authorizeQuestion(context.ownerAuthority);
+              await run.wait("question authority", authorizeQuestion(context.ownerAuthority));
               if (!conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
             }
             const prompt = resolveOperatorPrompt(
@@ -1961,46 +2150,52 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             }
             // The resource loader disables discovered extensions and prompt templates;
             // exact, loaded operator skills are the only input allowed to reach Pi expansion.
-            const role = await runDurableTurn(
-              lane,
-              [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
-              attached?.images ?? [],
-              {
-                expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,
-                ...(context.inputAnswer
-                  ? {
-                      // Existing admission reservation rechecks immediately before prompt().
-                      preparePrompt: async () => {
-                        await authorizeQuestion(context.ownerAuthority);
-                        return () => {
-                          if (
-                            !bodyIdentity.current() ||
-                            !context.ownerAuthority!.current() ||
-                            !conversations.questionEligible(conversationId) ||
-                            !context.questionBinding ||
-                            !sameQuestionWorkspace(cwd, context.questionBinding.workspace)
-                          )
-                            throw new Error("question_context_lost");
-                          return [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n");
-                        };
-                      },
-                      onAbsorbed: () => {
-                        throw new Error("question_continuation_busy");
-                      },
-                    }
-                  : {}),
-                // runDurableTurn rechecks immediately before prompt/steer, including
-                // after waiting for another invocation or its startup reservation.
-                signal: AbortSignal.any([context.signal, shutdown.signal]),
-              },
+            const role = await run.wait(
+              "Pi execution",
+              runDurableTurn(
+                lane,
+                [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
+                attached?.images ?? [],
+                {
+                  expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,
+                  ...(context.inputAnswer
+                    ? {
+                        // Existing admission reservation rechecks immediately before prompt().
+                        preparePrompt: async () => {
+                          await authorizeQuestion(context.ownerAuthority);
+                          return () => {
+                            if (
+                              !bodyIdentity.current() ||
+                              !context.ownerAuthority!.current() ||
+                              !conversations.questionEligible(conversationId) ||
+                              !context.questionBinding ||
+                              !sameQuestionWorkspace(cwd, context.questionBinding.workspace)
+                            )
+                              throw new Error("question_context_lost");
+                            return [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n");
+                          };
+                        },
+                        onAbsorbed: () => {
+                          throw new Error("question_continuation_busy");
+                        },
+                      }
+                    : {}),
+                  // runDurableTurn rechecks immediately before prompt/steer, including
+                  // after waiting for another invocation or its startup reservation.
+                  signal: run.signal,
+                },
+              ),
             );
             if (role === "absorbed") return;
             const text = lane.lastAssistantText.trim();
-            await laneLog.append("operator", conversationId, {
-              at: new Date().toISOString(),
-              kind: "said",
-              text,
-            });
+            await run.wait(
+              "said log",
+              laneLog.append("operator", conversationId, {
+                at: new Date().toISOString(),
+                kind: "said",
+                text,
+              }),
+            );
             if (goalWasActive || autonomy.getGoal(conversationId)?.status === "active") {
               autonomy.finishTurn(conversationId, runTokens);
             }
@@ -2009,7 +2204,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             if (metrics !== undefined) settled = context.signal.aborted ? "interrupted" : "failed";
             throw error;
           } finally {
-            context.signal.removeEventListener("abort", onInterrupt);
+            run.signal.removeEventListener("abort", onInterrupt);
+            unsubscribeProgress();
             if (settled !== undefined) {
               tryAppendTurnSettled(
                 turnSettled,
@@ -2027,6 +2223,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             if (oneShot) lane.session.dispose();
           }
         },
+        signal,
       );
     }, deps.onWorkStarted),
     (conversationId, scope) => {
@@ -2062,8 +2259,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         join(options.stateDir, "conversations", conversationId, "pi"),
       );
       const created = buildSession("operator", manager, true, cwd, true, conversationId);
-      sessions.set(`operator:${conversationId}`, created);
-      created.catch(() => sessions.delete(`operator:${conversationId}`));
+      const key = `operator:${conversationId}`;
+      sessions.set(key, created);
+      void created.catch(() => {
+        if (sessions.get(key) === created) sessions.delete(key);
+      });
       await created;
     },
     createChannelProjection({
@@ -2209,7 +2409,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           throw new Error("Saved-session resolution is unavailable");
         resume = await deps.agentSessions.resolve(request.resume);
         if (
-          request.harness !== savedSessionHarness(resume) ||
+          (request.harness !== undefined && request.harness !== savedSessionHarness(resume)) ||
           request.workingDirectory !== resume.workingDirectory
         )
           throw new Error("Harness and workingDirectory must match the saved transcript");
@@ -2283,31 +2483,53 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     seatId: string,
     message: string,
     context: FleetSeatMessageContext,
-    guard?: () => Promise<void>,
-    stableReceiptKey?: string,
+    deliveryOptions?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> {
     const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
     const prior = nextTurnMailboxes.receipt(seatId, inboundBinding(current), message);
-    if (prior && stableReceiptKey === undefined) return prior;
+    if (prior && deliveryOptions?.stableReceiptKey === undefined) return prior;
+    const mailbox = fleetSeatMailbox(
+      fleetMailboxes,
+      seatId,
+      join(options.stateDir, "delivery-receipts", "fleet"),
+    );
+    if (deliveryOptions?.reconcileOnly) {
+      const receipt = mailbox.receipt(message);
+      if (receipt?.outcome === "delivered") return { outcome: "delivered", deliveryStage: "delivered" };
+    }
     // An adapter-driven seat takes its message through the adapter, which
     // waits for the harness's own receipt; any other seat needs a structured lane.
-    fleetSeatMailbox(fleetMailboxes, seatId, join(options.stateDir, "delivery-receipts", "fleet"));
-    const deliver = () => {
-      const uncontrolled = async () => {
-        const live = fleetMailboxes.get(seatId);
-        if (live?.bound() || live?.uncertain()) {
-          await guard?.();
-          return deliverFleetSeatMessage(fleetMailboxes, seatId, message, context);
-        }
-        const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
-        await guard?.();
-        return nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
-      };
-      if (stableReceiptKey !== undefined)
-        return herdrWatches.deliverToSeat(seatId, message, uncontrolled, guard, stableReceiptKey);
-      if (guard !== undefined) return herdrWatches.deliverToSeat(seatId, message, uncontrolled, guard);
-      return herdrWatches.deliverToSeat(seatId, message, uncontrolled);
+    const fallback = async (): Promise<FleetSeatDelivery> => {
+      const live = fleetMailboxes.get(seatId);
+      if (live?.bound() || live?.uncertain()) {
+        await deliveryOptions?.guard?.();
+        if (deliveryOptions?.fence && !(await deliveryOptions.fence(current)))
+          return {
+            outcome: "undelivered",
+            deliveryStage: "rejected",
+            detail: "Peer authority changed before mailbox delivery; nothing was sent.",
+          };
+        return deliverFleetSeatMessage(fleetMailboxes, seatId, message, {
+          ...context,
+          ...(deliveryOptions?.recipientBinding === undefined
+            ? {}
+            : { recipientBinding: deliveryOptions.recipientBinding }),
+        });
+      }
+      const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+      await deliveryOptions?.guard?.();
+      if (deliveryOptions?.fence && !(await deliveryOptions.fence(agent)))
+        return {
+          outcome: "undelivered",
+          deliveryStage: "rejected",
+          detail: "Peer authority changed before mailbox storage; nothing was sent.",
+        };
+      return nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
     };
+    const deliver = () =>
+      deliveryOptions
+        ? herdrWatches.deliverToSeat(seatId, message, fallback, deliveryOptions)
+        : herdrWatches.deliverToSeat(seatId, message, fallback);
     let delivery: FleetSeatDelivery | undefined;
     if (context.source === "room") {
       await herdrWatches.sendAndWatchReply(seatId, message, async () => {
@@ -2398,6 +2620,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   let seatSubagents = "";
+  const withRemoteGoals = createRemoteCodexGoals({ shell: (fleet) => deps.fleets?.shell?.(fleet) });
   let seatWork = "";
   let captainGoals = "";
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
@@ -2428,16 +2651,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     const seats = options.nativeCensusRunner
       ? personas.reconcile(fleet.seats)
-      : withSeatWork(
-          withSeatSubagents(
-            personas.reconcile(fleet.seats),
+      : await withRemoteGoals(
+          withSeatWork(
+            await withSeatSubagents(
+              personas.reconcile(fleet.seats),
+              fleet.seats,
+              (seat) =>
+                conversations.conversationIdForPersona(seat.personaId) !== undefined ||
+                conversations.conversationIdForSeat(seat.seatId) !== undefined,
+              undefined,
+              async (session) =>
+                session.kind === "id" ? deps.agentSessions?.subagents?.(`local:${session.value}`) : undefined,
+            ),
             fleet.seats,
-            (seat) =>
-              conversations.conversationIdForPersona(seat.personaId) !== undefined ||
-              conversations.conversationIdForSeat(seat.seatId) !== undefined,
+            agentWork,
           ),
           fleet.seats,
-          agentWork,
+          remoteFleets,
         );
     const nextWork = JSON.stringify(seats.map((seat) => [seat.goal, seat.assignment, seat.harnessBridge]));
     if (seatWork !== nextWork) {
@@ -2632,7 +2862,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   void refreshFleet().catch(() => undefined);
 
   /** The session a planned Discord turn runs in, whether a message or a watch woke it. */
-  function discordLane(normalized: NormalizedDiscordTurn, systemTools: boolean): Promise<LaneSession> {
+  function discordLane(
+    normalized: NormalizedDiscordTurn,
+    systemTools: boolean,
+    run?: ConversationServiceRun,
+  ): Promise<LaneSession> {
     if (!normalized.durable) {
       // One-shot for context, durable for evidence: a fresh session per turn
       // (nothing carries forward), but written to disk under the room's own
@@ -2649,6 +2883,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ),
         systemTools,
         workingDirectory,
+        false,
+        undefined,
+        run,
       );
     }
     // Voice keeps the directory it has always written to; text rooms get
@@ -2664,6 +2901,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ),
       systemTools,
       workingDirectory,
+      false,
+      run,
     );
   }
 
@@ -2871,7 +3110,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (!outbox.bound() && !outbox.uncertain()) return undefined;
         return {
           run: async () => {
-            await guard?.();
+            const preparation = new ConversationServiceRun(shutdown.signal);
+            try {
+              await preparation.wait("native room authority", guard?.() ?? Promise.resolve());
+            } finally {
+              preparation.close();
+            }
             shutdown.signal.throwIfAborted();
             const delivery = await outbox.deliver({
               kind: "escalation",
@@ -2886,12 +3130,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
         };
       },
-      async () => {
-        await guard?.();
-        shutdown.signal.throwIfAborted();
-        const lane = await discordLane(normalized, systemTools);
-        return runDiscordTurn(lane, normalized, deliveryId, toolProgressEnabled, origin);
+      async (run) => {
+        await run.wait("room authority", guard?.() ?? Promise.resolve());
+        run.signal.throwIfAborted();
+        const lane = await discordLane(normalized, systemTools, run);
+        const onAbort = () => {
+          void lane.session.abort().catch(() => undefined);
+          if (!normalized.durable) lane.session.dispose();
+        };
+        run.signal.addEventListener("abort", onAbort, { once: true });
+        const unsubscribe = lane.session.subscribe((event) => run.observe(event));
+        try {
+          return await waitForConversationRun(
+            runDiscordTurn(lane, normalized, deliveryId, toolProgressEnabled, origin, run),
+            run.signal,
+          );
+        } finally {
+          unsubscribe();
+          run.signal.removeEventListener("abort", onAbort);
+        }
       },
+      shutdown.signal,
     );
   }
 
@@ -2901,6 +3160,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     deliveryId: string,
     toolProgressEnabled: boolean,
     origin: DiscordWatchOrigin,
+    serviceRun: ConversationServiceRun,
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = conversations.roomConversation(normalized.lane, normalized.targetId);
     const naturalTurn = !deliveryId.startsWith("watch-");
@@ -2928,6 +3188,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       conversationId,
       origin,
       async () => resolveDiscordSettings((await settings()).discord, options.discordEnvironment).settings,
+      serviceRun.signal,
     );
     lane.capture.bodyIdentity = bodyIdentity;
     lane.capture.conversationAuthority = {
@@ -2944,17 +3205,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane.capture.requestText = normalized.heard;
     lane.capture.discordOrigin = normalized.lane === "discord_presence" ? origin : undefined;
     const turnId = `turn-${lane.turnCounter}-${deliveryId}`;
-    await laneLog.append(normalized.lane, normalized.targetId, {
-      at: new Date().toISOString(),
-      kind: "heard",
-      text: normalized.heard,
-    });
+    await serviceRun.wait(
+      "room heard log",
+      laneLog.append(normalized.lane, normalized.targetId, {
+        at: new Date().toISOString(),
+        kind: "heard",
+        text: normalized.heard,
+      }),
+    );
     const live = lane.running !== undefined || lane.session.isStreaming;
     if (!live)
       conversations.publishRoomEvent(conversationId, { type: "turn", runId: turnId, phase: "accepted" });
     const unsubscribeTranscript = live
       ? () => undefined
       : lane.session.subscribe((event) => {
+          if (serviceRun.signal.aborted) return;
           if (
             event.type === "tool_execution_start" ||
             event.type === "tool_execution_end" ||
@@ -2962,6 +3227,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ) {
             // Pi persists the native record in the same dispatch; read after its listeners finish.
             queueMicrotask(() => {
+              if (serviceRun.signal.aborted) return;
               try {
                 syncTranscript();
               } catch (error) {
@@ -3025,6 +3291,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       metrics === undefined && toolProgress === undefined && typing === undefined
         ? () => undefined
         : lane.session.subscribe((event) => {
+            if (serviceRun.signal.aborted) return;
             if (metrics !== undefined) recordPiTurnEvent(metrics, event);
             if (event.type === "tool_execution_start") {
               toolProgress?.toolStarted(event.toolCallId, event.toolName);
@@ -3045,17 +3312,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     let tokensEnd: number | undefined;
     try {
       if (normalized.durable) {
-        if (lane.running === undefined && !lane.session.isStreaming) await syncModel(lane);
+        if (lane.running === undefined && !lane.session.isStreaming)
+          await serviceRun.wait("room model synchronization", syncModel(lane));
         metrics?.recordExecution(sessionExecutionIdentity(lane.session));
-        const outcome = await runTurnWithStallWatchdog(lane.session, (signal) =>
-          runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent), {
-            preparePrompt: guidancePrompt,
-            signal,
-            deliveryId,
-            onAbsorbed: (id) => {
-              replyDeliveryId = id;
-            },
-          }),
+        const outcome = await runTurnWithStallWatchdog(
+          lane.session,
+          (signal) =>
+            runDurableTurn(lane, normalized.prompt, normalized.images.map(toImageContent), {
+              preparePrompt: guidancePrompt,
+              signal: AbortSignal.any([signal, serviceRun.signal]),
+              deliveryId,
+              onAbsorbed: (id) => {
+                replyDeliveryId = id;
+              },
+            }),
+          { signal: serviceRun.signal },
         );
         if (!outcome.completed) {
           settled = "interrupted";
@@ -3072,10 +3343,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // A one-shot session was built with the current selection moments ago;
         // read it off that session rather than resolving the config a second time.
         metrics?.recordExecution(sessionExecutionIdentity(lane.session));
-        const completed = await runOneShotDiscordTurn(
-          lane.session,
-          (await guidancePrompt())(),
-          normalized.images.map(toImageContent),
+        const prepared = await serviceRun.wait("room guidance", guidancePrompt());
+        serviceRun.signal.throwIfAborted();
+        const completed = await serviceRun.wait(
+          "room Pi execution",
+          runOneShotDiscordTurn(lane.session, prepared(), normalized.images.map(toImageContent)),
         );
         if (!completed) {
           settled = "interrupted";
@@ -3274,8 +3546,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           conversationId: recipient.owner?.conversationId ?? recipient.seatId,
           source: "linear",
         },
-        fence,
-        `linear:${deliveryFingerprint(JSON.stringify([recipient.seatId, recipient.occupantId, recipient.binding, eventId]))}`,
+        {
+          guard: fence,
+          recipientBinding: recipient.binding,
+          stableReceiptKey: `linear:${deliveryFingerprint(JSON.stringify([recipient.seatId, recipient.occupantId, recipient.binding, eventId]))}`,
+        },
       );
     } catch (error) {
       return {
@@ -3286,7 +3561,33 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
+  const peerMessages = new PeerSeatMessages({
+    path: join(options.stateDir, "delivery-receipts", "peer-messages.json"),
+    enabled: async () => (await settings()).fleet.peerMessages === "on",
+    sender: (pane) => herdrRunner.get(pane).catch(() => undefined),
+    recipient: (seat) => herdrRunner.resolveTerminal(seat).catch(() => undefined),
+    seats: () => herdrRunner.list?.() ?? Promise.resolve([]),
+    deliver: (seat, text, deliveryOptions) =>
+      deliverToSeat(
+        seat,
+        text,
+        {
+          conversationId: conversations.defaultGlobalConversationId(),
+          source: "peer",
+        },
+        deliveryOptions,
+      ),
+    record: ({ message, receipt }) =>
+      conversations.publishFleetPeerExchange(
+        `${message}\n\nPeer delivery receipt: ${JSON.stringify(receipt)}`,
+      ),
+  });
+
   return {
+    listFleetPeerSeats: (authority) => peerMessages.list(authority),
+    sendFleetPeerMessage: (authority, input) => peerMessages.send(authority, input),
+    reconcileFleetPeerMessage: (authority, delivery, fingerprint) =>
+      peerMessages.reconcile(authority, delivery, fingerprint),
     async submitChannelProjectionMessage(request) {
       await refreshFleet();
       const accepted = conversations.submitProjectedMessage(request.guildId, request.channelId, request.body);
@@ -3468,6 +3769,42 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               ? [...seats]
               : seats.map(({ goal: _goal, assignment: _assignment, ...seat }) => seat),
         };
+      }
+      if (request.op === "presence") {
+        let seatCursor: string | undefined;
+        let activeSeats = 0;
+        const snapshot = await pollPresence(
+          async () => {
+            const currentSeatCursor = fleetChanges.current();
+            if (seatCursor !== currentSeatCursor) {
+              activeSeats = (await refreshFleet()).length;
+              seatCursor = currentSeatCursor;
+            }
+            const [voice, play] = await Promise.all([
+              deps.presence.listSessions(),
+              deps.embodiment.getLiveSession(),
+            ]);
+            const thinking = await captainIsThinking(sessions.values());
+            const inVoice = voice.some(
+              (session) => session.gatewayConnected && session.voiceGuildIds.length > 0,
+            );
+            return projectPresence({
+              expression: await desktop.current(),
+              thinking,
+              inVoice,
+              playing:
+                deps.hostedWorld?.inspect().outcome === "playing" ||
+                (play !== undefined && ["running", "stopping"].includes(play.state)),
+              ...(play === undefined ? {} : { playingSince: play.requestedAt }),
+              activeSeats,
+              pendingOwnerItem: conversations.pendingPresenceOwnerItem(),
+            });
+          },
+          request.cursor,
+          request.waitMs ?? 0,
+          shutdown.signal,
+        );
+        return { op: "presence", schemaVersion: 1, snapshot };
       }
       if (request.op === "fleet") {
         await fleetChanges.wait(request.cursor, request.waitMs ?? 0);
@@ -3950,7 +4287,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       const currentSettings = await settings();
       return buildLaneToolBank(
-        deps,
+        desktopDeps,
         capture,
         laneLog,
         toolLane,
@@ -3966,10 +4303,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
       conversations.cancelPendingQuestion(binding.conversationId, "native_seat_takeover");
-      const events = conversations.pollConversationDriver(binding.conversationId, () =>
-        seatOutbox(binding.conversationId).poll(waitMs, signal),
-      );
-      return events;
+      const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);
+      return conversations
+        .pollConversationDriver(
+          binding.conversationId,
+          () => seatOutbox(binding.conversationId).poll(waitMs, pollSignal),
+          pollSignal,
+        )
+        .catch((error: unknown) => {
+          if (pollSignal.aborted) return [];
+          throw error;
+        });
     },
 
     async recordSeatHook(paneId, hook, proof) {
@@ -4095,11 +4439,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return undefined;
       const seatId = await herdrWatches.seatIdForPane(paneId);
       if (seatId === undefined) return undefined;
+      const native = await herdrRunner.get(paneId).catch(() => undefined);
       return fleetSeatMailbox(
         fleetMailboxes,
         seatId,
         join(options.stateDir, "delivery-receipts", "fleet"),
-      ).poll(waitMs, signal);
+      ).poll(waitMs, signal, native?.terminalId === seatId ? inboundBinding(native) : undefined);
     },
 
     async acknowledgeFleetSeatEvent(paneId, eventId) {

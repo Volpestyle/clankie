@@ -102,9 +102,9 @@ readable afterwards ([ADR 0107](adr/0107-a-one-shot-turn-still-leaves-a-trail.md
 The reply carries the turn's last screenshot or generated image with it — and
 when that artifact cannot be resolved, the words still post and say the picture
 did not — while replying with the silence sentinel sends nothing: silence is a
-real answer. Nothing caps how long a turn may take — looking something
-up properly is work, not a fault — but a turn that emits no event at all for 5
-minutes is a dead stream, so the stall watchdog aborts its pi session and
+real answer. Healthy Pi turns have no total duration cap — looking something
+up properly is work, not a fault — but a Discord Pi turn with no executing tool
+and no event for five minutes is a dead stream, so the stall watchdog aborts its pi session and
 settles it as `captain_turn_stalled`. While someone waits on a slow requested
 turn, he can post one short `send_text_update` message to the channel ("hang on,
 pulling the bracket up") without ending it; work he elects to do on his own
@@ -168,6 +168,25 @@ conversation admits `message_seat`. Reports use that lead, with the default chat
 as fallback only when the lead conversation is gone. Explicit watches retain
 their arming conversation. See
 [ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md).
+
+A five-minute service inactivity watchdog starts at reservation and includes
+cold preparation, before a Pi session exists. Host-observed preparation progress
+and Pi events renew it. The watchdog is suspended while one or more Pi tools
+execute; tools retain their own timeout and cancellation behavior. A full
+five-minute idle window resumes after the last tool ends. Before execution starts,
+or with no active tool and no preparation or streamed progress, inactivity still
+times out after five minutes. Healthy work has no total duration cap; queued runs
+do not consume the timeout while waiting.
+Question authority and hook checks before driver selection, and native attachment
+preparation before dispatch, are also bounded. On a stall, the host aborts and evicts the exact
+cached startup/session, prevents late completion from prompting or publishing,
+and releases admission so
+the attached seat can receive later queued inputs. Stored runs fail with
+`conversation_turn_stalled`; the service log records the conversation, run ID
+and stalled phase. The original acceptance and receipt remain, with no replay
+and potentially unknown earlier effects. Native delivery keeps its existing
+acknowledgment deadlines and ten-minute escalation reply wait; a timeout never
+turns accepted or uncertain native delivery into permission to replay it.
 
 `clankie codex` selects the [Codex plugin](../integrations/codex-plugin/README.md).
 Its trusted native hooks add the shared identity, service context and memory card,

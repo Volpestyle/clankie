@@ -130,6 +130,15 @@ export const commands = [
     .addSubcommand((sub) =>
       sub
         .setName("watch")
-        .setDescription("Post a launch link for the activity surface so the room can watch him play."),
+        .setDescription("Post a launch link for the activity surface so the room can watch him play.")
+        .addStringOption((option) =>
+          option
+            .setName("surface")
+            .setDescription("The play surface to launch.")
+            .addChoices(
+              { name: "Pokémon", value: "gba_emulator" },
+              { name: "Minecraft", value: "minecraft" },
+            ),
+        ),
     ),
 ].map((command) => command.toJSON());

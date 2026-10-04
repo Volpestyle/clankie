@@ -11,6 +11,8 @@ export type ExternalCodexControl = (
   codexHome?: string,
   /** Exact --remote endpoint observed on this pane, never a guessed socket. */
   endpoint?: string,
+  /** Recheck peer authority after all native preparation and before the write. */
+  beforeDispatch?: () => Promise<boolean>,
 ) => Promise<FleetSeatDelivery | undefined>;
 
 /** Proxy is a raw WebSocket stream, including HTTP Upgrade, not JSONL. */
@@ -19,7 +21,7 @@ export function codexProxyControl(
   args: readonly string[] = ["app-server", "proxy"],
   timeoutMs = 5_000,
 ): ExternalCodexControl {
-  return async (sessionId, text, codexHome, endpoint) => {
+  return async (sessionId, text, codexHome, endpoint, beforeDispatch) => {
     if (endpoint !== undefined && !endpoint.startsWith("unix://")) return undefined;
     const proxyArgs =
       endpoint === undefined ? [...args] : [...args, "--sock", endpoint.slice("unix://".length)];
@@ -37,6 +39,7 @@ export function codexProxyControl(
     });
     const client = new CodexAppServerClient(socket, () => {}, timeoutMs);
     let attempted = false;
+    let denied = false;
     try {
       await new Promise<void>((resolve, reject) => {
         socket.once("open", resolve);
@@ -62,6 +65,14 @@ export function codexProxyControl(
       })) as { data?: { id?: string; status?: string }[] };
       const turn = page.data?.[0];
       if (turn?.status !== "inProgress" || typeof turn.id !== "string") return undefined;
+      if (beforeDispatch) {
+        try {
+          if (!(await beforeDispatch())) throw new Error("Peer authority changed; nothing was sent.");
+        } catch (error) {
+          denied = true;
+          throw error;
+        }
+      }
       // Once written, even a timeout/rejection cannot authorize a second send.
       attempted = true;
       const result = (await client.request("turn/steer", {
@@ -72,6 +83,12 @@ export function codexProxyControl(
       if (result.turnId !== turn.id) throw new Error("Codex did not confirm the selected active turn");
       return { outcome: "delivered", state: "steered" };
     } catch (error) {
+      if (denied)
+        return {
+          outcome: "undelivered",
+          deliveryStage: "unavailable",
+          detail: `Codex authority changed before dispatch; nothing was sent: ${String(error)}`,
+        };
       return attempted
         ? {
             outcome: "unconfirmed",

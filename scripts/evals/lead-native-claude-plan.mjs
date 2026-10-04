@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { LeadContainer } from "./lead-containment.mjs";
 import { nativeClaudeArmReadiness } from "./lead-native-claude.mjs";
+const plans = new WeakMap();
 const HEX = /^[a-f0-9]{64}$/u;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 function directory(path) {
@@ -23,7 +24,7 @@ function directory(path) {
   if (!stat.isDirectory() || stat.uid !== process.getuid() || stat.mode & 0o077)
     throw Error("Private controller-owned directory required");
 }
-function binary(path, expected) {
+function binary(path, expected, copyTo) {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = fstatSync(fd);
@@ -39,12 +40,14 @@ function binary(path, expected) {
     const hash = createHash("sha256"),
       buffer = Buffer.alloc(65536);
     let offset = 0;
+    const chunks = [];
     while (offset < stat.size) {
       const count = readSync(fd, buffer, 0, Math.min(buffer.length, stat.size - offset), offset);
       if (!count) throw Error("Native artifact changed while reading");
       if (!offset && !buffer.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])))
         throw Error("Linux native ELF artifact required");
       hash.update(buffer.subarray(0, count));
+      if (copyTo) chunks.push(Buffer.from(buffer.subarray(0, count)));
       offset += count;
     }
     const after = fstatSync(fd),
@@ -59,10 +62,16 @@ function binary(path, expected) {
       hash.digest("hex") !== expected
     )
       throw Error("Pinned native artifact changed");
+    if (copyTo) writeFileSync(copyTo, Buffer.concat(chunks), { flag: "wx", mode: 0o500 });
     return { sha256: expected, bytes: stat.size };
   } finally {
     closeSync(fd);
   }
+}
+
+/** Copies only the exact bounded artifact bytes; it does not attest vendor provenance. */
+export function copyNativeClaudeArtifact(path, destination, sha256) {
+  return binary(path, sha256, destination);
 }
 
 /** A reviewable launch specification, NOT a runtime capability or authorized launch. */
@@ -206,6 +215,7 @@ export function prepareNativeClaudePlan({
     flag: "wx",
     mode: 0o400,
   });
+  plans.set(plan, { root, plan: structuredClone(plan) });
   return plan;
 }
 
@@ -222,4 +232,12 @@ export async function stopNativeClaudeArm(container, reason) {
     error.code = "native-claude-stop-unconfirmed";
     throw error;
   }
+}
+
+/** Prepared controller instance only; this still grants no provider/eval admission. */
+export function requireNativeClaudePlan(plan, container) {
+  const record = plans.get(plan);
+  if (!record || record.root !== container.root || record.plan.image !== container.image)
+    throw Error("Exact controller-prepared Claude plan required");
+  return structuredClone(record.plan);
 }

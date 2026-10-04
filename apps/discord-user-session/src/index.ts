@@ -1,3 +1,7 @@
+import {
+  createMinecraftLoginCodeDelivery,
+  tryHandleMinecraftLoginCodeRequest,
+} from "@clankie/discord-presence-core";
 import { voiceRoomEvidence } from "@clankie/discord-presence-core";
 import { tryHandleVoiceOutputControl } from "@clankie/discord-presence-core";
 import { BodyVoiceTargetSchema } from "@clankie/protocol";
@@ -978,6 +982,13 @@ if (terminalFailure !== undefined) {
 }
 
 const controlPort = Number.parseInt(process.env.CLANKIE_USER_SESSION_CONTROL_PORT ?? "4312", 10);
+const deliverMinecraftLoginCode = createMinecraftLoginCodeDelivery({
+  apiUrl,
+  bridgeToken,
+  discordToken: admission.userToken,
+  transport: "user_session",
+  getCredential: (providerId) => credentialStore.get(providerId),
+});
 const server = createServer((request, response) => {
   const url = request.url ?? "/";
   if (shuttingDown) {
@@ -1189,6 +1200,7 @@ const server = createServer((request, response) => {
     })
   )
     return;
+  if (tryHandleMinecraftLoginCodeRequest(request, response, deliverMinecraftLoginCode)) return;
   if (tryHandleCaptainDiscordActionRequest(request, response, executeCaptainDiscordAction)) return;
   response.writeHead(404);
   response.end();

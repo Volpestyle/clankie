@@ -1,3 +1,6 @@
+import { runDesktopCommand } from "./command/desktop.ts";
+import { runClaudeAccountsCommand } from "./command/claude-accounts.ts";
+import { runProjectRolesMenu } from "./project-role-menu.ts";
 import { runMachinesCommand } from "./command/machines.ts";
 import { runProjectSettingsCommand } from "./command/project-settings.ts";
 import { planSeat, parseSeatArgs } from "./command/seat.ts";
@@ -60,6 +63,7 @@ import {
 import { runSkillsCommand } from "./command/skills.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
 import { runRivalsCommand } from "./command/rivals.ts";
+import { runMinecraftCommand } from "./command/minecraft.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
@@ -416,6 +420,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint:
         '[contacts | roles | role NAME "ROLE"|none | rename NAME "NEW NAME" | legacy session commands; see /sessions]',
       async run(argument, shell): Promise<void> {
+        if (argument.trim() === "roles") {
+          await runProjectRolesMenu(shell);
+          return;
+        }
         if (argument.trim()) {
           const result = await runAgentsCommand(splitQuotedArguments(argument));
           shell.insertCommandResult("/agents", JSON.stringify(result, null, 2), "success");
@@ -998,14 +1006,17 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "accounts",
       aliases: [],
-      description: "Register and inspect local Codex accounts and headroom",
-      argumentHint: "codex [list | add HOME --label LABEL | remove LABEL]",
+      description: "Register local Claude profiles and Codex accounts/headroom",
+      argumentHint: "codex|claude [list | add HOME --label LABEL | remove LABEL]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
-        const words = argument.trim().split(/\s+/u).filter(Boolean);
-        if (words[0] !== "codex")
-          throw new Error("Use /accounts codex [list | add HOME --label LABEL | remove LABEL]");
-        const result = await runCodexAccountsCommand(words.slice(1), settings ? { settings } : {});
+        const words = splitQuotedArguments(argument);
+        if (!["codex", "claude"].includes(words[0] ?? ""))
+          throw new Error("Use /accounts codex|claude [list | add HOME --label LABEL | remove LABEL]");
+        const result = await (words[0] === "claude" ? runClaudeAccountsCommand : runCodexAccountsCommand)(
+          words.slice(1),
+          settings ? { settings } : {},
+        );
         shell.insertCommandResult("/accounts", JSON.stringify(result, null, 2), "success");
       },
     },
@@ -1066,6 +1077,36 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           }
         } finally {
           flow.end();
+        }
+      },
+    },
+    {
+      name: "desktop",
+      aliases: [],
+      description: "Set desktop quiet hours",
+      argumentHint: "[status | quiet-hours START END TIME_ZONE | quiet-hours off]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (settings === undefined) {
+          shell.insertCommandResult("/desktop", "Desktop settings are unavailable.", "error");
+          return;
+        }
+        try {
+          const result = await runDesktopCommand(argument.trim().split(/\s+/u).filter(Boolean), { settings });
+          const hours = result.desktop.quietHours;
+          shell.insertCommandResult(
+            "/desktop",
+            hours === undefined
+              ? "Desktop quiet hours are off."
+              : `Desktop quiet hours: ${hours.start}–${hours.end} (${hours.timeZone}).`,
+            "success",
+          );
+        } catch (error) {
+          shell.insertCommandResult(
+            "/desktop",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
         }
       },
     },
@@ -1183,6 +1224,30 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         } catch (error) {
           shell.insertCommandResult(
             "/rivals",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
+      name: "minecraft",
+      aliases: [],
+      description: "Host, invite, administer, configure, and play in Minecraft",
+      argumentHint: "[configure|status|join PROFILE|leave|cancel|pause|resume|chat|follow]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        try {
+          const result = await runMinecraftCommand(argument.trim().split(/\s+/u).filter(Boolean), {
+            ...(settings === undefined ? {} : { settings }),
+            ...(conversations?.conversationId === undefined
+              ? {}
+              : { conversationId: conversations.conversationId }),
+          });
+          shell.insertCommandResult("/minecraft", JSON.stringify(result, null, 2), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/minecraft",
             error instanceof Error ? error.message : String(error),
             "error",
           );
@@ -1324,6 +1389,19 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
               : [
                   s.title("Launcher"),
                   s.line("status", launcher.status, launcher.ok ? "ok" : "bad"),
+                  s.line(
+                    "Clankie",
+                    launcher.presence?.detail ?? "Unreachable",
+                    launcher.presence === undefined ? "warn" : "ok",
+                  ),
+                  ...(launcher.presence === undefined
+                    ? []
+                    : [
+                        s.line("agents", String(launcher.presence.activeSeats), "normal"),
+                        ...(launcher.presence.pendingOwnerItem === undefined
+                          ? []
+                          : [s.line("waiting for you", launcher.presence.pendingOwnerItem.title, "warn")]),
+                      ]),
                   s.line(
                     "operator credential",
                     `${launcher.operatorCredential.source} · ${launcher.operatorCredential.consistency}`,

@@ -1596,6 +1596,22 @@ paths:
         returns 409 without changing a worker. Seat-control operations
         return 503 with herdr_unavailable when the default runtime is unavailable;
         ordinary conversations and their durable records remain accessible.
+        `presence` returns a strict snapshot with mood (`needs_you`, `thinking`,
+        `in_voice`, `playing`, `leading`, `idle`, in that precedence), detail,
+        since (source start timestamp or null when unknown), activeSeats (all live
+        registered fleet seats), and optional pendingOwnerItem (oldest unanswered
+        owner preference: conversationId, questionId, title, since). It uses
+        optional cursor and waitMs (0–30000); an absent or changed cursor returns
+        immediately. A current cursor parks until the projected sources change,
+        sampled within 500 ms, or the wait expires. Unreachable is a client
+        transport state, never a mood. Paired hosted devices may read it.
+        Optional expression is a transient desktop action with UUID id and ISO
+        expiresAt: kind emote adds animation (a hero sprite tag), kind say adds
+        text (1–200 characters), and kind move adds x/y (normalized 0–1 on the
+        current display, left-to-right/top-to-bottom). Expiry or owner quiet
+        hours removes it and changes the cursor without changing the mood.
+        Clients discard expired actions even while disconnected, honor Focus,
+        and never take keyboard focus to show an expression.
         `fleet` returns one cursor-coherent snapshot. Optional `view: home`
         omits historical personas that are neither seated
         contacts nor channel participants. Seats, channels, tallies and edges
@@ -2181,6 +2197,113 @@ paths:
         "404":
           description: No messageable agent in that pane
 
+  /v1/fleet/seats/{paneId}/peers:
+    get:
+      tags: [Captain]
+      operationId: listFleetPeerSeats
+      summary: List native seats in the calling worker's fleet
+      description: |
+        Requires the local process listener or registered remote relay's exact
+        native pane/session proof. Operator and fleet bearers alone do not
+        identify a peer sender. Returns sender and recipient seat IDs, panes,
+        harnesses, titles and native binding hashes. The owner setting
+        fleet.peerMessages=off refuses discovery. No workspace or account
+        authority is granted by a peer message (ADR 0213 amendment).
+      security: []
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Current same-fleet native seat bindings
+        "403":
+          description: Peer messaging off or native sender proof unavailable
+
+  /v1/fleet/seats/{paneId}/peer-messages:
+    post:
+      tags: [Captain]
+      operationId: sendFleetPeerMessage
+      summary: Send one same-fleet peer message through native seat delivery
+      description: |
+        Uses the same native delivery path as message_seat, with server-authored
+        sender attribution and agent-output framing. Requires native process
+        admission, the sender binding, and the exact same-fleet recipient binding
+        returned by peers. Rechecks the owner switch and native bindings before
+        dispatch. Persists the original delivery UUID before sending. Uncertain
+        attempts reconcile through GET only; neither a duplicate UUID nor a new
+        follow-up replays the original. Records exchanges and receipts in the
+        service audit and Clankie's agent-role transcript without an owner turn.
+      security: []
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              schemaVersion: 1
+              seatId: pc/recipient-terminal
+              recipientBinding: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+              text: "The shared interface is ready."
+              delivery:
+                id: 10000000-0000-4000-8000-000000000001
+                binding: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      responses:
+        "200":
+          description: Exact receipt with deliveryId, bindings, fingerprint, outcome and deliveryStage
+        "400":
+          description: Invalid peer message
+        "403":
+          description: Native peer sender proof unavailable
+
+  /v1/fleet/seats/{paneId}/peer-messages/{id}:
+    get:
+      tags: [Captain]
+      operationId: reconcileFleetPeerMessage
+      summary: Inspect the original peer delivery receipt without resending
+      description: |
+        Requires the original sender's native process/session, original binding,
+        delivery UUID and fingerprint. The fingerprint covers recipient seat,
+        recipient binding and normalized text. Available while peer messaging
+        is off. May match the original native transcript or exact channel/hook
+        acknowledgment; absence of proof remains uncertain while the original
+        recipient is bound. A lost recipient binding settles to recipient_gone
+        with outcome unconfirmed: delivery remains unknown, never resends, and
+        no longer blocks fresh messages. Older settled bodies are pruned after
+        100 messages; exact compact receipts and unresolved originals are retained.
+      security: []
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: binding
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+        - in: query
+          name: fingerprint
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Original receipt, with no new send attempt
+        "400":
+          description: Invalid original receipt reference
+        "403":
+          description: Native peer sender proof unavailable
+        "404":
+          description: No exact original receipt available; delivery remains uncertain
+
   /v1/fleet/seats/{paneId}/hook:
     post:
       tags: [Captain, Operator]
@@ -2515,6 +2638,145 @@ paths:
         "204":
           description: Forgotten
 
+  /v1/minecraft:
+    get:
+      tags: [Operator]
+      operationId: getMinecraftStatus
+      summary: Read the current Minecraft body session
+      description: Operator-authenticated read of the approved offline Java body. Account material and raw endpoints are excluded. x-clankie-conversation-id selects an existing owning conversation.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Current exact session and bounded action state }
+        "403": { description: Operator authority required }
+        "503": { description: Minecraft unavailable }
+    post:
+      tags: [Operator]
+      operationId: commandMinecraft
+      summary: Join, act, inspect, pause, cancel or leave Minecraft
+      description: Select an approved profile id or submit a typed Minecraft action. Long work returns a handle. The shared play lease is retained until exact confirmed disconnect. Completion is distinct from server-verified effects.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  {
+                    type: string,
+                    enum: [status, profiles, join, observe, act, action_status, pause, resume, cancel, leave],
+                  }
+                profileId: { type: string }
+                actionId: { type: string }
+                request: { type: object, description: Domain action including its type and bounded arguments }
+      responses:
+        "200": { description: Session or action handle with settlement and evidence }
+        "400": { description: Invalid typed command }
+        "403": { description: Operator authority required }
+        "409": { description: Busy play lease, stale identity or refused operation }
+        "503": { description: Motor unavailable }
+
+  /v1/minecraft/host:
+    post:
+      tags: [Operator]
+      operationId: commandMinecraftHost
+      summary: Configure, start, administer or back up Clankie's own Minecraft server
+      description: Integration-owned on-demand Paper host and broker-backed playit claim. Hosting is off by default, idle-stops after at most 15 minutes, and has a maximum uptime watchdog. x-clankie-conversation-id selects an existing operator conversation. Typed administration has no op, raw RCON or secret arguments. Enrollment approval uses a previously verified Discord requester; operator arguments cannot select a Discord subject.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  {
+                    type: string,
+                    enum:
+                      [
+                        status,
+                        configuration,
+                        configure,
+                        start,
+                        stop,
+                        restart,
+                        backup,
+                        admin,
+                        claim,
+                        claim_complete,
+                        request_enrollment,
+                        approve_enrollment,
+                      ],
+                  }
+                command:
+                  {
+                    type: object,
+                    description: Strict MinecraftHostAdminCommandSchema union; operation whitelist_add/remove,
+                    kick,
+                    ban,
+                    pardon,
+                    gamerule,
+                    time,
+                    weather,
+                    gamemode,
+                    say,
+                    tell or list,
+                  }
+                settings:
+                  {
+                    type: object,
+                    description: Stopped-only partial MinecraftHostSettingsSchema; resource,
+                    game/RCON ports,
+                    backups and bounded idle/max uptime settings,
+                  }
+                username: { type: string, pattern: "^[A-Za-z0-9_]{3,16}$" }
+      responses:
+        "200":
+          {
+            description: Safe status,
+            configuration,
+            completed/refused/uncertain action or one-time claim URL; no account keys or login codes,
+          }
+        "400": { description: Invalid typed hosting command }
+        "403": { description: Operator authority required }
+        "503": { description: Hosting adapter unavailable }
+
+  /v1/minecraft/configuration:
+    get:
+      tags: [Operator]
+      operationId: getMinecraftConfiguration
+      summary: Read owner Minecraft profiles and destination allowlist
+      description: Offline host, port, version, username and explicit public destination grants. This operator configuration does not appear in model tools.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Offline profiles and public allowlist }
+        "403": { description: Operator authority required }
+    put:
+      tags: [Operator]
+      operationId: configureMinecraft
+      summary: Replace offline Minecraft profiles and public destination grants
+      description: Owner-only settings write. DNS and SRV destinations are checked again before dial; model calls cannot supply raw host or authentication arguments.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profiles, publicAllowlist]
+              properties:
+                profiles: { type: array, maxItems: 32, items: { type: object } }
+                publicAllowlist: { type: array, maxItems: 64, items: { type: object } }
+      responses:
+        "200": { description: Updated offline profiles and public allowlist }
+        "400": { description: Invalid settings }
+        "403": { description: Operator authority required }
+        "503": { description: Settings unavailable }
+
   /v1/embodiment/intents:
     post:
       tags: [Embodiment]
@@ -2807,7 +3069,7 @@ paths:
       security: [{ operatorBearer: [] }]
       responses:
         "200":
-          description: Offer wire (deep link + code)
+          description: Offer wire (deep link + code); ordinary offers also include the existing single-use localCode for same-Mac direct pairing; review offers omit localCode
 
   /v1/pairing/redeem:
     post:

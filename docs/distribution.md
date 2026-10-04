@@ -91,6 +91,10 @@ release and imports Browser Use Pi from its final image location as the runtime
 user. This catches broken package links before an image can pass its build.
 
 Optional integrations such as cloudflared remain external executables.
+The Minecraft MCP motor ships as its own compiled entrypoint under
+`integrations/minecraft-mcp`, with Mineflayer, version data and browser viewer
+assets in their normal package layout. It joins lazily through an approved
+profile. Chrome remains external; the renderer avoids native canvas/GL builds.
 Clankie's own herdr plugin declaration ships under
 `integrations/herdr-plugin` so it can be linked without a git checkout.
 `clankie doctor` reports whether this tree is a release or a checkout, which
@@ -100,7 +104,7 @@ are on PATH. The headless command contract is
 skills under `.agents/dev-skills` stay out of the archive. The release also
 ships `docs/bundled-skills.md`, the pinned process-skill manifest and MIT license,
 `docs/worker-access.md`, `docs/model-keys.md`, `docs/rivals.md`,
-`docs/discord-ingress.md` and
+`docs/discord-ingress.md`, `docs/minecraft.md` and
 `infra/hosted/README.md` for the installed skills' operational references.
 Other repository documentation does not ship.
 

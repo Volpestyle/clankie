@@ -59,6 +59,36 @@ afterEach(async () => {
 });
 
 describe("authenticated operator conversation relay", () => {
+  it("passes a paired hosted device's presence read and rechecks authorization", async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      cursor: "presence-1",
+      mood: "thinking",
+      detail: "Thinking",
+      since: null,
+      activeSeats: 2,
+    } as const;
+    const authorize = vi.fn(async () => ({
+      authorized: true as const,
+      device: { ...activeDevice, controlScope: "hosted" as const },
+    }));
+    const dispatch = vi.fn(async () => ({ op: "presence" as const, schemaVersion: 1 as const, snapshot }));
+    const relay = await startRelay({ dispatch, authorizeDevice: { authorize } });
+    const response = await post(relay.url, "/operator/v1/dispatch", {
+      op: "presence",
+      schemaVersion: 1,
+      cursor: "presence-0",
+      waitMs: 1000,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ op: "presence", schemaVersion: 1, snapshot });
+    expect(dispatch).toHaveBeenCalledWith(
+      { op: "presence", schemaVersion: 1, cursor: "presence-0", waitMs: 1000 },
+      expect.any(AbortSignal),
+    );
+    expect(authorize.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("refuses hosted reset through the legacy device relay before dispatch", async () => {
     const dispatch = vi.fn();
     const relay = await startRelay({

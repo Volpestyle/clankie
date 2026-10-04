@@ -42,6 +42,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "autonomy",
         "roster",
         "fleet",
+        "presence",
         "composer_catalog",
         "state_stance",
         "terminal_catalog",

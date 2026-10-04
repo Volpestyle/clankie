@@ -97,7 +97,7 @@ it("creates only the reviewed local project, preserving zero/inherited caps and 
         {
           role: "Sound Designer",
           harness: "codex",
-          model: "fixture/model",
+          model: "gpt-6-astra",
           effort: "high",
           concurrencyCap: null,
         },
@@ -119,7 +119,7 @@ it("creates only the reviewed local project, preserving zero/inherited caps and 
     grants: [],
     worktreeRoots: [],
     roles: [
-      { role: "Sound Designer", harness: "codex", model: "fixture/model", effort: "high" },
+      { role: "Sound Designer", harness: "codex", model: "gpt-6-astra", effort: "high" },
       { role: "builder", concurrencyCap: 0 },
     ],
   });

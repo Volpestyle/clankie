@@ -1,3 +1,4 @@
+import { runProjectRoleCommand } from "./project-role.ts";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
   OPERATOR_AGENT_ROLE_MAX,
@@ -17,6 +18,7 @@ import { commandHost } from "./io.ts";
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
   `       clankie agents role NAME|PERSONA_ID ROLE|none   (${OPERATOR_AGENT_ROLES.join(", ")}, or "a custom role")\n` +
+  "       clankie agents role ROLE --project PROJECT [--harness KIND] [--model NAME] [--effort LEVEL] [--subagent-model NAME] [--subagent-effort LEVEL] [--delegation native-first|panes] [--account LABEL] [--placement new-tab|split]\n" +
   "       clankie agents roles\n" +
   "       clankie agents rename NAME|PERSONA_ID NEW_NAME\n" +
   "       clankie agents [list] [--host ID] [--limit N]\n" +
@@ -73,6 +75,7 @@ export async function runAgentsCommand(
     operatorCredentialStore?: CredentialStore;
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "role" && args.includes("--project")) return runProjectRoleCommand(args.slice(1), options);
   if (
     (args[0] === "contacts" && args.length === 1) ||
     (args[0] === "roles" && args.length === 1) ||

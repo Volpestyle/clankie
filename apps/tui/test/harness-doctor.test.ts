@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, writeFile, symlink, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { inspectHarnessBridges } from "../src/harness-doctor.ts";
 
 it("reports harness registration, generated config source, and live membership separately without secrets", async () => {
@@ -88,3 +88,82 @@ it("reports harness registration, generated config source, and live membership s
     await rm(home, { recursive: true, force: true });
   }
 });
+
+it("names an installed but outdated Claude worker plugin as remediation", async () => {
+  const home = await mkdtemp(join(tmpdir(), "clankie-harness-doctor-stale-"));
+  try {
+    const bundle = join(home, "bundle");
+    await mkdir(join(bundle, ".claude-plugin"), { recursive: true });
+    await mkdir(join(home, ".claude/plugins"), { recursive: true });
+    await writeFile(join(bundle, ".claude-plugin/plugin.json"), JSON.stringify({ version: "0.2.0" }));
+    await writeFile(join(bundle, ".mcp.json"), JSON.stringify({ mcpServers: { swarm: {} } }));
+    await writeFile(
+      join(home, ".claude/settings.json"),
+      JSON.stringify({ enabledPlugins: { "clankie-worker@clankie": true } }),
+    );
+    await writeFile(
+      join(home, ".claude/plugins/installed_plugins.json"),
+      JSON.stringify({ plugins: { "clankie-worker@clankie": [{ scope: "user", installPath: bundle }] } }),
+    );
+    const execute = async () => ({ stdout: "", stderr: "" });
+    const repoRoot = join(import.meta.dirname, "../../..");
+    const report = await inspectHarnessBridges({ HOME: home }, execute, fetch, repoRoot);
+    const stale = report.remediation.filter((line) => line.includes(join(home, ".claude")));
+    expect(stale).toHaveLength(1);
+    expect(stale[0]).toMatch(
+      /^Update clankie-worker 0\.2\.0 in .+ to \d+\.\d+\.\d+: clankie harness install$/u,
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+it.each([true, false])(
+  "uses only the private state discovery root (descriptor present=%s)",
+  async (present) => {
+    const home = await mkdtemp(join(tmpdir(), "clankie-doctor-state-"));
+    const privateRoot = join(home, "private-state");
+    const descriptor = (url: string) =>
+      JSON.stringify({
+        schemaVersion: 2,
+        authentication: "local-process",
+        socket: "/test/default.sock",
+        url,
+      });
+    try {
+      await mkdir(join(home, ".clankie", "links"), { recursive: true });
+      await writeFile(
+        join(home, ".clankie", "links", "default-local.json"),
+        descriptor("http://127.0.0.1:54321"),
+      );
+      if (present) {
+        await mkdir(join(privateRoot, "links"), { recursive: true });
+        await writeFile(
+          join(privateRoot, "links", "default-local.json"),
+          descriptor("http://127.0.0.1:54322"),
+        );
+      }
+      const execute = async () => ({ stderr: "", stdout: "{}" });
+      const probe = vi.fn<typeof fetch>(async () => new Response(null, { status: 400 }));
+      const report = await inspectHarnessBridges(
+        {
+          HOME: home,
+          CLANKIE_STATE: ` ${privateRoot} `,
+          HERDR_PANE_ID: "w1:p1",
+          HERDR_SOCKET_PATH: "/test/default.sock",
+        },
+        execute,
+        probe,
+      );
+      if (process.platform === "darwin" && present) {
+        expect(report.localFleet.membership).toBe("verified");
+        expect(probe).toHaveBeenCalledWith("http://127.0.0.1:54322/v1/fleet/mcp", expect.any(Object));
+      } else {
+        expect(report.localFleet.membership).toBe(process.platform === "darwin" ? "no-link" : "unsupported");
+        expect(probe).not.toHaveBeenCalled();
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  },
+);

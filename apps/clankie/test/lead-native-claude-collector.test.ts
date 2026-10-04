@@ -54,6 +54,10 @@ vi.mock("../../../scripts/evals/lead-native-attachment.mjs", () => ({
 vi.mock("../../../scripts/evals/lead-native-capability.mjs", () => ({
   nativeRuntimeEvidence: () => ({ binaries: { "/opt/claude/bin/claude": "c".repeat(64) } }),
 }));
+vi.mock("../../../scripts/evals/lead-native-claude-runtime.mjs", () => ({
+  nativeClaudeCollectorSelection: (selection: unknown) => selection,
+  assertNativeClaudeSelection: async () => {},
+}));
 // @ts-expect-error -- checkout-only ESM fixture module.
 import * as collection from "../../../scripts/evals/lead-native-claude-collector.mjs";
 // @ts-expect-error -- checkout-only ESM fixture module.
@@ -77,6 +81,8 @@ const rootBinding = {
 };
 const selection = {
   paneId: "w1:p1",
+  launchPid: rootBinding.pid,
+  launchStartTicks: rootBinding.startTicks,
   cwd: "/eval/tasks/lead",
   sessionId,
   executableSha256: rootBinding.executableSha256,

@@ -2,12 +2,13 @@ import { fleetLinkFetch } from "../../clankie/src/fleet-link.ts";
 import { createHash } from "node:crypto";
 import { ConversationStore } from "../../clankie/src/captain/conversations.ts";
 import { InboundSeatReceipts } from "../../clankie/src/captain/inbound-seat-receipts.ts";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const bin = join(import.meta.dirname, "..", "..", "..", "integrations", "claude-plugin", "worker", "bin");
@@ -168,6 +169,82 @@ async function linkedHome(url: string, local = false): Promise<string> {
   );
   return home;
 }
+
+describe("worker discovery in a private service's state root (VUH-1631)", () => {
+  it.each([true, false])(
+    "never falls back to the shared descriptor (private link present=%s)",
+    async (present) => {
+      const home = await linkedHome("http://127.0.0.1:54321", true);
+      const privateRoot = join(home, "private-state");
+      try {
+        if (present) {
+          await mkdir(join(privateRoot, "links"), { recursive: true });
+          await writeFile(
+            join(privateRoot, "links", "default-local.json"),
+            JSON.stringify({
+              schemaVersion: 2,
+              authentication: "local-process",
+              fleet: "default",
+              socket: SOCKET,
+              url: "http://127.0.0.1:54322",
+            }),
+          );
+        }
+        const output = execFileSync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `import { readLink, hasLinks } from ${JSON.stringify(pathToFileURL(join(bin, "link.mjs")).href)}; console.log(JSON.stringify({link: readLink(), linked: hasLinks()}));`,
+          ],
+          {
+            encoding: "utf8",
+            env: { HOME: home, HERDR_SOCKET_PATH: SOCKET, CLANKIE_STATE: ` ${privateRoot} ` },
+          },
+        );
+        expect(JSON.parse(output)).toEqual(
+          present
+            ? {
+                link: {
+                  schemaVersion: 2,
+                  authentication: "local-process",
+                  fleet: "default",
+                  socket: SOCKET,
+                  url: "http://127.0.0.1:54322",
+                },
+                linked: true,
+              }
+            : { linked: false },
+        );
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("treats whitespace state as the default home state", async () => {
+    const home = await linkedHome("http://127.0.0.1:54321", true);
+    try {
+      const output = execFileSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `import { readLink, hasLinks } from ${JSON.stringify(pathToFileURL(join(bin, "link.mjs")).href)}; console.log(JSON.stringify({url: readLink()?.url, linked: hasLinks()}));`,
+        ],
+        { encoding: "utf8", env: { HOME: home, HERDR_SOCKET_PATH: SOCKET, CLANKIE_STATE: "  " } },
+      );
+      expect(JSON.parse(output)).toEqual({ url: "http://127.0.0.1:54321", linked: true });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("forwards the service state to the Codex MCP bridge", async () => {
+    const config = JSON.parse(await readFile(join(bin, "..", "codex-mcp.json"), "utf8"));
+    expect(config.mcpServers.clankie.env_vars).toContain("CLANKIE_STATE");
+  });
+});
 
 describe("the worker plugin on a linked machine (VUH-1527)", () => {
   it.each(["ssh", "local"])("serves the seat channel and granted tools through the %s link", async (kind) => {
@@ -576,7 +653,12 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
       revoked = true;
       const before = service.seen.length;
       expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(["message_clankie"]);
-      expect(service.seen.slice(before)).toHaveLength(1);
+      expect(
+        service.seen
+          .slice(before)
+          .map((request) => request.path)
+          .sort(),
+      ).toEqual(["/v1/fleet/mcp", "/v1/fleet/seats/w8%3Ap3/peers"]);
     },
   );
 

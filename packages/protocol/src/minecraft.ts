@@ -283,3 +283,22 @@ export const MinecraftStatusSchema = z
     }
   });
 export type MinecraftStatus = z.infer<typeof MinecraftStatusSchema>;
+
+/** Operator and captain commands share profile references; only owner settings contain endpoints. */
+export const MinecraftCommandSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("status") }),
+  z.strictObject({ action: z.literal("profiles") }),
+  z.strictObject({ action: z.literal("join"), profileId: MinecraftServerProfileIdSchema }),
+  z.strictObject({ action: z.literal("observe") }),
+  z.strictObject({ action: z.literal("pause") }),
+  z.strictObject({ action: z.literal("resume") }),
+  z.strictObject({ action: z.literal("leave") }),
+  z.strictObject({ action: z.literal("cancel"), actionId: MinecraftActionIdSchema.optional() }),
+  z.strictObject({ action: z.literal("action_status"), actionId: MinecraftActionIdSchema }),
+  z.strictObject({
+    action: z.literal("act"),
+    request: MinecraftActionSchema,
+    actionId: MinecraftActionIdSchema.optional(),
+  }),
+]);
+export type MinecraftCommand = z.infer<typeof MinecraftCommandSchema>;

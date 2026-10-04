@@ -4,15 +4,25 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { expect, it } from "vitest";
 
-async function bridge(expected: string | undefined, catalog: (cursor?: string) => unknown | undefined) {
+async function bridge(
+  expected: string | undefined,
+  catalog: (cursor?: string) => unknown | undefined,
+  linked = true,
+) {
   const home = await mkdtemp(join(tmpdir(), "hired-catalog-bridge-"));
   let calls = 0;
   const http = createServer((request, response) => {
     let bytes = "";
     request.on("data", (chunk) => (bytes += String(chunk)));
     request.on("end", () => {
+      if (request.url !== "/v1/fleet/mcp") {
+        response.writeHead(404);
+        response.end("{}");
+        return;
+      }
       const rpc = JSON.parse(bytes);
       response.setHeader("content-type", "application/json");
       response.setHeader("mcp-session-id", "fixture");
@@ -46,16 +56,18 @@ async function bridge(expected: string | undefined, catalog: (cursor?: string) =
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   const port = (http.address() as { port: number }).port;
   await mkdir(join(home, ".clankie", "links"), { recursive: true });
-  await writeFile(
-    join(home, ".clankie", "links", "pc.json"),
-    JSON.stringify({
-      schemaVersion: 2,
-      authentication: "local-process",
-      fleet: "pc",
-      socket: "fixture",
-      url: `http://127.0.0.1:${port}`,
-    }),
-  );
+  const admit = () =>
+    writeFile(
+      join(home, ".clankie", "links", "pc.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        authentication: "local-process",
+        fleet: "pc",
+        socket: "fixture",
+        url: `http://127.0.0.1:${port}`,
+      }),
+    );
+  if (linked) await admit();
   const module = new URL("../../../integrations/claude-plugin/worker/bin/seat-channel.mjs", import.meta.url)
     .href;
   const env = Object.fromEntries(
@@ -84,6 +96,7 @@ async function bridge(expected: string | undefined, catalog: (cursor?: string) =
   await client.connect(transport);
   return {
     client,
+    admit,
     calls: () => calls,
     close: async () => {
       await client.close();
@@ -94,6 +107,26 @@ async function bridge(expected: string | undefined, catalog: (cursor?: string) =
   };
 }
 const tool = (name: string) => ({ name, inputSchema: { type: "object" } });
+
+it("adopts fleet membership after startup and emits a list-change notification including the message tool", async () => {
+  const f = await bridge(undefined, () => ({ tools: [tool("clankie_tools"), tool("clankie_call")] }), false);
+  try {
+    expect((await f.client.listTools()).tools).toEqual([]);
+    const notified = new Promise<void>((resolve) =>
+      f.client.setNotificationHandler(ToolListChangedNotificationSchema, () => resolve()),
+    );
+    await f.admit();
+    await notified;
+    expect((await f.client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      "message_clankie",
+      "clankie_tools",
+      "clankie_call",
+    ]);
+    expect(f.calls()).toBe(0);
+  } finally {
+    await f.close();
+  }
+}, 10_000);
 
 it("requires all expected paginated tools before a native Connected surrogate can succeed, and never grants from the hint", async () => {
   let admitted = false;

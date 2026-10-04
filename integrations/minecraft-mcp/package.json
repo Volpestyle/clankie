@@ -1,0 +1,36 @@
+{
+  "name": "@clankie/minecraft-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/motor.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config ../../vitest.config.ts",
+    "conformance": "node scripts/conformance.ts"
+  },
+  "dependencies": {
+    "@clankie/credential-broker": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.27.1",
+    "express": "4.21.2",
+    "minecraft-data": "3.105.0",
+    "mineflayer": "4.35.0",
+    "mineflayer-pathfinder": "2.4.5",
+    "playwright-core": "1.63.0",
+    "prismarine-viewer": "1.33.0",
+    "socket.io": "4.8.1",
+    "vec3": "0.1.10",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "4.17.25",
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

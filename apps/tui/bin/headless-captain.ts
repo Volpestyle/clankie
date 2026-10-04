@@ -1,3 +1,4 @@
+import { runDesktopCommand } from "../src/command/desktop.ts";
 import { runHarnessCommand } from "../src/command/harness.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
 import { runBodyCommand } from "../src/command/body.ts";
@@ -48,6 +49,7 @@ import { runPairCommand } from "../src/command/pair.ts";
 import { runDevicesCommand } from "../src/command/devices.ts";
 import { runPlayCommand } from "../src/command/play.ts";
 import { runRivalsCommand } from "../src/command/rivals.ts";
+import { runMinecraftCommand } from "../src/command/minecraft.ts";
 import { runStanceCommand } from "../src/command/stance.ts";
 import { runPromptCommand } from "../src/command/prompt.ts";
 import { runResetCommand } from "../src/command/reset.ts";
@@ -200,6 +202,10 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "play") return await runPlayCommand(rest, options);
+    if (command === "minecraft") {
+      outputJson(stdout, await runMinecraftCommand(rest, options));
+      return 0;
+    }
     if (command === "rivals") {
       const result = await runRivalsCommand(rest, options);
       outputJson(stdout, result);
@@ -244,6 +250,10 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "skills") {
       outputJson(stdout, await runSkillsCommand(rest, options));
+      return 0;
+    }
+    if (command === "desktop") {
+      outputJson(stdout, await runDesktopCommand(rest, options));
       return 0;
     }
     if (command === "games") {

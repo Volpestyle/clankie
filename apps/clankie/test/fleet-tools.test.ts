@@ -77,6 +77,12 @@ async function fixture(admission: Admission = "bearer") {
     credentials,
     host,
     fleetTools: async () => state.tools,
+    fleetToolsSnapshot: async () => ({
+      tools: state.tools,
+      assertCurrent: () => {
+        if (state.tools !== "connected") throw new Error("Fleet tools are off");
+      },
+    }),
   });
   const local = new LocalFleetLink({
     directory: join(root, "links"),
@@ -84,7 +90,12 @@ async function fixture(admission: Admission = "bearer") {
     prove: async (_socket, pane) => state.live && pane === "w1:p1",
   });
   const identities = new WeakMap<Request, LocalFleetIdentity>();
-  const identity = { fleet: "pc", pane: "w1:p1", validate: async () => state.live };
+  const identity = {
+    fleet: "pc",
+    pane: "w1:p1",
+    current: () => state.live,
+    validate: async () => state.live,
+  };
   const app = await createClankieApp({
     captain: createStubCaptain(),
     workerMcp: worker,

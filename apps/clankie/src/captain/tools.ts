@@ -49,7 +49,10 @@ import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat, MessageSeat } from "./port.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
+import { desktopTools } from "./desktop.ts";
 import { rivalsTools } from "./rivals-tools.ts";
+import { minecraftTools } from "./minecraft-tools.ts";
+import { minecraftHostTools } from "./minecraft-host-tools.ts";
 import { WorkRequestSchema } from "../work-items.ts";
 
 /**
@@ -158,6 +161,7 @@ export function captainTools(
       : [],
   );
   return [
+    ...desktopTools(deps.desktop),
     ...(deps.bodyLeases === undefined
       ? []
       : [
@@ -192,6 +196,8 @@ export function captainTools(
           },
         ]),
     ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
+    ...(deps.minecraft === undefined ? [] : minecraftTools(deps.minecraft, turn)),
+    ...(deps.minecraftHost === undefined ? [] : minecraftHostTools(deps.minecraftHost, turn)),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     // A Discord room with a shell can start workers, so it watches and
     // harvests its own; its report belongs in the room that asked (ADR 0186).
@@ -678,9 +684,8 @@ function hireAgentTool(
     label: "Hire an agent",
     description:
       "Hire a fleet seat: Herdr opens a pane in the working directory, starts the harness there, and the seat " +
-      "lands watched and messageable as a persona — never a bare `herdr agent start`. model and effort use the " +
-      "harness's own spelling (--model; effort is pi's --thinking, claude's --effort, codex's " +
-      "model_reasoning_effort); a selected project role overrides them; omit both for the default. Typed " +
+      "lands watched and messageable as a persona — never a bare `herdr agent start`. " +
+      "Explicit hire fields (the owner's words) win over the project role, then fleet.hire defaults. Omit fields to inherit. Friendly model names are checked against the registry; retired/unknown models refuse. Subagent model/effort travel in the native brief. native-first requires a stable deliverable key and refuses another pane for it; use the worker's native subagents. Placement is new-tab or split beside a verified native lead pane. For an override across model families, specify the matching harness (for example claude / Opus) and clear incompatible child settings with subagents:null. Typed " +
       "outcomes: unknown_directory, harness_unavailable (no wired flag for what you asked), not_ready (rejected " +
       "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, " +
       "at_capacity (close or reuse a hired agent). brief is its first prompt (codex needs one) and is delivered " +
@@ -698,7 +703,7 @@ function hireAgentTool(
           },
         ),
       ),
-      harness: StringEnum(OPERATOR_SEAT_HARNESSES),
+      harness: Type.Optional(StringEnum(OPERATOR_SEAT_HARNESSES)),
       resume: Type.Optional(
         Type.String({
           minLength: 1,
@@ -710,7 +715,8 @@ function hireAgentTool(
       account: Type.Optional(
         Type.String({
           pattern: "^[a-z][a-z0-9_-]{0,63}$",
-          description: "Registered local Codex account label; omit to choose by headroom.",
+          description:
+            "Registered local Codex or Claude account label; omitted inherits role/fleet, then Codex chooses by headroom. Claude profiles come from claudeAccounts.",
         }),
       ),
       title: Type.String({
@@ -737,6 +743,25 @@ function hireAgentTool(
       }),
       model: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_MODEL_MAX })),
       effort: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_EFFORT_MAX })),
+      subagents: Type.Optional(
+        Type.Union([
+          Type.Null(),
+          Type.Object({
+            model: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+            effort: Type.Optional(StringEnum(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"])),
+          }),
+        ]),
+      ),
+      delegation: Type.Optional(StringEnum(["native-first", "panes"])),
+      placement: Type.Optional(StringEnum(["new-tab", "split"])),
+      deliverable: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 512,
+          description:
+            "Stable work item/deliverable key, e.g. VUH-1596. Required for native-first; all slices keep this same key.",
+        }),
+      ),
       skills: Type.Optional(
         StringEnum(["bundled", "plain"], {
           description:
@@ -1347,14 +1372,21 @@ function discordActionTools(
       description:
         "Show your live play surface in the speaker's current voice channel. The body chooses its supported " +
         "Discord surface and freshly resolves the speaker's voice channel; a refusal is a fact, not a retry cue.",
-      parameters: Type.Object({}),
-      execute: (callId) => {
+      parameters: Type.Object({
+        surface: Type.Optional(Type.Union([Type.Literal("gba_emulator"), Type.Literal("minecraft")])),
+      }),
+      execute: (callId, input) => {
         const grounded = context(callId);
         if (grounded.guildId === undefined) {
           return Promise.resolve(json({ ok: false, message: "Voice needs a server." }));
         }
         return deps
-          .discordActions!.execute({ action: "watch_start", ...grounded, guildId: grounded.guildId })
+          .discordActions!.execute({
+            action: "watch_start",
+            ...grounded,
+            guildId: grounded.guildId,
+            ...(input.surface === undefined ? {} : { surface: input.surface }),
+          })
           .then(json);
       },
     }),
@@ -1614,7 +1646,7 @@ export function mcpExtension(
     name: "captain-mcp",
     hidden: true,
     async factory(pi) {
-      const catalog = await deps.mcp.catalog(lane);
+      const catalog = (await deps.mcp.catalog(lane)).filter((tool) => tool.server !== "minecraft");
       if (catalog.length === 0) return;
 
       const registeredNames = new Set<string>();

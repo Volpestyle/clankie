@@ -6,12 +6,29 @@ export function copyBrowserUseRuntime(repoRoot, targetRoot) {
   return copyRuntime("@browser_use/pi", join(repoRoot, "apps/clankie"), targetRoot);
 }
 
+// Mineflayer and its browser viewer load version data and client assets by path.
+// Preserve their normal package trees beside the compiled motor entrypoint.
+export const minecraftRuntimePackages = [
+  "mineflayer",
+  "mineflayer-pathfinder",
+  "minecraft-data",
+  "prismarine-viewer",
+  "playwright-core",
+  "express",
+  "socket.io",
+  "vec3",
+];
+
+export async function copyMinecraftRuntime(repoRoot, targetRoot) {
+  return copyRuntime(minecraftRuntimePackages, join(repoRoot, "integrations/minecraft-mcp"), targetRoot);
+}
+
 async function copyRuntime(name, from, targetRoot) {
   const copied = new Map();
   async function copy(name, from, destination) {
     const require = createRequire(join(from, "package.json"));
     let root;
-    for (const candidate of require.resolve.paths(name) ?? []) {
+    for (const candidate of require.resolve.paths(`${name}/package.json`) ?? []) {
       try {
         root = await realpath(join(candidate, name));
         break;
@@ -37,6 +54,8 @@ async function copyRuntime(name, from, targetRoot) {
       await copy(dependency, root, join(destination, "node_modules", dependency));
     }
   }
-  await copy(name, from, join(targetRoot, "node_modules", name));
+  for (const dependency of Array.isArray(name) ? name : [name]) {
+    await copy(dependency, from, join(targetRoot, "node_modules", dependency));
+  }
   return [...copied.keys()];
 }

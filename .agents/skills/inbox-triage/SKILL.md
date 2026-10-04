@@ -17,6 +17,11 @@ another mailbox silently. A missing connection is a missing source, not an empty
 inbox. Report the refusal and the available connection step without asking for
 passwords or tokens in chat.
 
+A fleet worker uses `clankie_tools` / `clankie_call` for admitted connected
+sources. Fleet membership does not grant the operator-only built-in mail lane.
+Use `clankie` for account and outward-action boundaries; preserve the selected
+private destination rather than sending personal content to a peer or public room.
+
 Group the result by what the owner can do: needs a reply, dated commitments,
 and useful information. Include sender, subject, date and a source reference.
 Explain consequential uncertainty, such as an attachment you could not inspect

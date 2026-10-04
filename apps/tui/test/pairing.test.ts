@@ -243,6 +243,31 @@ describe("clankie pair — success", () => {
     expect(stdout.text().split("\n").length).toBeGreaterThan(10);
   });
 
+  it("labels the short code for this Mac and keeps the encrypted link for other devices", async () => {
+    const deepLink = "clankie://connect?v=1&offer=capability#encrypted-gateway-route";
+    const offer = validOffer({ code: deepLink, deepLink, gateway: true, localCode: "7F3K-M2QT" });
+    const stdout = outputBuffer();
+    expect(await runPair([], { fetchImpl: jsonFetch(offer), stdout: stdout.stream })).toBe(0);
+    expect(stdout.text()).toContain("On this Mac code: 7F3K-M2QT");
+    expect(stdout.text()).toContain("Choose On this Mac in the Mac app.");
+    expect(stdout.text()).toContain(deepLink);
+    expect(stdout.text()).not.toContain(`Pairing code: ${deepLink}`);
+    const json = outputBuffer();
+    expect(await runPair(["--json"], { fetchImpl: jsonFetch(offer), stdout: json.stream })).toBe(0);
+    expect(JSON.parse(json.text())).toMatchObject({ localCode: "7F3K-M2QT", code: deepLink, deepLink });
+  });
+
+  it("fails closed on malformed same-Mac code metadata", async () => {
+    const stdout = outputBuffer();
+    expect(
+      await runPair(["--json"], {
+        fetchImpl: jsonFetch(validOffer({ localCode: "not-a-short-code" })),
+        stdout: stdout.stream,
+      }),
+    ).toBe(1);
+    expect(JSON.parse(stdout.text())).toMatchObject({ ok: false, status: "malformed" });
+  });
+
   it("says a gatewayless code needs the sign-in when remote access is signed out", async () => {
     const offer = validOffer();
     const doorway = { state: "sign_in_required", since: "2026-09-29T13:27:00Z" };

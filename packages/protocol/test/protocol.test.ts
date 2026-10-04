@@ -30,6 +30,7 @@ import {
   OperatorAgentPersonaSchema,
   UpdateOperatorAgentPersonaSchema,
   OperatorFleetSeatSchema,
+  OperatorSeatSubagentsSchema,
   SpawnOperatorSeatSchema,
   OperatorConversationRecoverySchema,
   OperatorConversationRevisionConflictSchema,
@@ -65,6 +66,22 @@ describe("protocol", () => {
       });
     for (const change of [{}, { name: "" }, { name: null }, { avatarPngBase64: "" }, { appearance: null }])
       expect(() => UpdateOperatorAgentPersonaSchema.parse({ ...identity, ...change })).toThrow();
+  });
+
+  it("accepts older subagent entries and validates native identities and lifecycle times", () => {
+    const recent = [{ label: "Explore", status: "done" }];
+    expect(OperatorSeatSubagentsSchema.parse({ running: 0, recent }).recent).toEqual(recent);
+    const entry = {
+      ...recent[0],
+      id: "child-id",
+      startedAt: "2026-10-04T18:00:00.000Z",
+      endedAt: "2026-10-04T18:01:00.000Z",
+    };
+    expect(OperatorSeatSubagentsSchema.parse({ running: 0, recent: [entry] }).recent[0]).toEqual(entry);
+    for (const invalid of [{ id: "" }, { startedAt: "not-a-time" }, { endedAt: "not-a-time" }])
+      expect(
+        OperatorSeatSubagentsSchema.safeParse({ running: 0, recent: [{ ...entry, ...invalid }] }).success,
+      ).toBe(false);
   });
 
   it("carries an optional semantic role, seat subagents and work item labels (ADR 0208)", () => {

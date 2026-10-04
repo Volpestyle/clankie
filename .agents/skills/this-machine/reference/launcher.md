@@ -35,10 +35,11 @@ to store the URL and secret, including on old setups that stored only a secret;
 Following on wakes `global-default` only for notifications attributed from signed
 webhook history that match `linearWebhook.wake`. Unknown or ambiguous actors are
 collected without waking. Old issue bindings remain inspectable
-with `clankie linear work list` but have no routing effect. For notification
+with `clankie linear work list` but have no routing effect. Routing to the
+owning work conversation is still in flight; do not promise it from a binding. For notification
 reads and acknowledgments keep `--conversation global-default`; omit it for
 all passive history. The owner-connected tracker account is the identity of Clankie and every worker
-in his swarm. Use his connected tools or granted worker bridge for tracker writes;
+in his fleet. Use his connected tools or granted worker bridge for tracker writes;
 never fall back to a harness’s independent account. Without delegated access,
 ask the lead to perform the write. Linear is the current connector; the rule
 applies to any connected tracker.
@@ -87,6 +88,10 @@ signing and delivery registrations. Tokens and delivery keys never go to the hos
 <episodeId> --summary "…"` to curate them through the operator API. Retained
 notes survive the recent ring; a full retained store refuses another retain
 until a note is released or forgotten. `/memory` is the console browser.
+`clankie pair --json` returns `localCode` for same-Mac **On this Mac** pairing,
+even when `code` is a gateway link. Review offers do not expose it. Keep the offer
+private; a pairing receipt is not proof the device connected.
+
 If `clankie pair` exits with "No pairing code was made", this Mac is signed out of
 remote access: sign it back in (`/remote-access` → "Sign this Mac back in", or
 `clankie remote-access on --email EMAIL --code-stdin`), restart the captain, and
@@ -134,11 +139,10 @@ JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 `operator-credential rotate` default to human text — pass `--json`.
 
 If a newly released model is missing, run `clankie model refresh`, select it
-with `clankie model set provider/model`, then restart the captain. Astra accepts
-`low`, `medium`, `high`, `xhigh`, and `max`; unsupported efforts fail when a turn
-executes. Voice and image/video models have independent selectors. Model
+with `clankie model set provider/model`, then restart Clankie. Use the current model card for supported effort values; do not assume one
+provider's scale applies to another. Voice and image/video models have independent selectors. Model
 routing (`clankie model routing`) sends social Discord turns to a cheap routine
-model while operator and granted work stays on the captain model; with
+model while operator and granted work stays on the service model; with
 escalation on, a routine turn can call `escalate` to finish on the bigger one.
 `play stop` prints `Nothing is playing.` (not JSON) when idle. A bare
 `--base-url` origin is rewritten to `/v1`. `--set` selects the first listed

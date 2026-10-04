@@ -7,7 +7,8 @@ import {
   type WindowsCodexBridgeBinding,
 } from "../windows-codex-launch.ts";
 import { codexControlEndpoint, codexProcess, parseHerdrForegroundProcesses } from "./codex-seat.ts";
-import { codexProxyControl } from "./external-codex-control.ts";
+import { codexProxyControl, type ExternalCodexControl } from "./external-codex-control.ts";
+import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
@@ -427,11 +428,27 @@ export function remoteCodexQueue(fleet: HerdrFleet, shell: FleetShellRun) {
         script = undefined;
         throw error;
       }));
-  return async (sessionId: string, text: string): Promise<boolean> => {
+  return async (
+    sessionId: string,
+    text: string,
+    beforeDispatch?: () => Promise<boolean>,
+  ): Promise<boolean | FleetSeatDelivery> => {
     const argv = ["queue", "--thread", sessionId, "--message", text];
+    const queueArgs = fleet.ssh.shell === "powershell" ? [await codexScript(), ...argv] : argv;
+    if (beforeDispatch) {
+      try {
+        if (!(await beforeDispatch())) throw new Error("Peer authority changed; nothing was sent.");
+      } catch (error) {
+        return {
+          outcome: "undelivered",
+          deliveryStage: "unavailable",
+          detail: `Codex authority changed before queue dispatch; nothing was sent: ${String(error)}`,
+        };
+      }
+    }
     const stdout = await shell(
       fleet.ssh.shell === "powershell"
-        ? remoteProgramCommand("powershell", "node", [await codexScript(), ...argv])
+        ? remoteProgramCommand("powershell", "node", queueArgs)
         : remoteProgramCommand("posix", "codex", argv),
     );
     return !/no active session/iu.test(stdout);
@@ -444,8 +461,8 @@ export function remoteCodexControl(
   shell: FleetShellRun,
   herdr: HerdrFleetRun,
   paneId: string,
-) {
-  return async (sessionId: string, text: string) => {
+): ExternalCodexControl {
+  return async (sessionId, text, _codexHome, _endpoint, beforeDispatch) => {
     const qualified = splitFleetQualified(paneId);
     if (qualified?.fleet !== fleet.id) return undefined;
     let endpoint: string | undefined | null;
@@ -482,7 +499,7 @@ export function remoteCodexControl(
         prefix = [result.script];
       }
     }
-    return codexProxyControl("ssh", [
+    const control = codexProxyControl("ssh", [
       ...SSH_BASE_OPTIONS,
       "--",
       fleet.ssh.host,
@@ -492,6 +509,9 @@ export function remoteCodexControl(
         "proxy",
         ...(endpoint === undefined ? [] : ["--sock", endpoint.slice("unix://".length)]),
       ]),
-    ])(sessionId, text);
+    ]);
+    return beforeDispatch
+      ? control(sessionId, text, undefined, undefined, beforeDispatch)
+      : control(sessionId, text);
   };
 }

@@ -32,6 +32,7 @@ export interface OpenCodeController {
     method: "initialize" | "status" | "send" | "history" | "settlement" | "interrupt",
     input?: unknown,
     timeoutMs?: number,
+    beforeDispatch?: () => Promise<boolean>,
   ): Promise<unknown>;
   select(sessionId: string): void;
   pending(): { readonly messageId: string } | undefined;
@@ -249,7 +250,7 @@ export async function createOpenCodeController(input: {
       sessionId = id;
     },
     pending: () => (sessionId ? fence.pending(sessionId) : undefined),
-    async request(method, value, timeoutMs = 15_000) {
+    async request(method, value, timeoutMs = 15_000, beforeDispatch) {
       const deadline = Date.now() + timeoutMs;
       if (!peer && !retired)
         await new Promise<void>((resolve) => {
@@ -267,6 +268,11 @@ export async function createOpenCodeController(input: {
       if (method === "send" && (!sessionId || fence.pending(sessionId)))
         throw new Error("An earlier native delivery is uncertain; no resend");
       if (method === "send") {
+        if (beforeDispatch && !(await beforeDispatch().catch(() => false)))
+          return {
+            outcome: "unavailable",
+            detail: "Peer authority changed before native dispatch; nothing was sent.",
+          };
         if (activeSend) throw new Error("Another native dispatch is pending");
         activeSend = z
           .object({

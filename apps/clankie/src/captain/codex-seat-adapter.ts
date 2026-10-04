@@ -181,11 +181,16 @@ export function createCodexSeatAdapter(
               "mcp_servers.clankie.enabled=true",
               'mcp_servers.clankie.command="clankie"',
               'mcp_servers.clankie.args=["mcp","--fleet"]',
-              'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH"]',
+              'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
             );
           await view.guard?.();
           seat = await (options.start ?? startCodexAppServerSeat)({
             cwd: launch.cwd,
+            ...(options.localProcess &&
+            launch.env?.CLANKIE_CODEX_ISOLATED_HOME === launch.env?.CODEX_HOME &&
+            launch.env?.CODEX_HOME
+              ? { catalogRefreshHome: launch.env.CODEX_HOME }
+              : {}),
             onServerStarted: (pid) => {
               releaseProcess = options.localProcess?.(pid, view.paneId);
             },
@@ -248,7 +253,7 @@ export function createCodexSeatAdapter(
           let initialDispatch = Boolean(launch.brief);
           const control: SeatControl = {
             ref,
-            async send(message) {
+            async send(message, options) {
               if (closed || state === "offline")
                 return {
                   outcome: "offline",
@@ -256,11 +261,26 @@ export function createCodexSeatAdapter(
                   detail: "Codex app-server is offline",
                 };
               const messageId = randomUUID();
+              const previousState = state;
+              let denied = false;
               try {
                 // A request reply may precede turn/started. Do not expose the
                 // preceding idle settlement as the result of this new message.
                 if (state === "idle") state = "working";
-                const guard = initialDispatch ? view.guard : undefined;
+                const initialGuard = initialDispatch ? view.guard : undefined;
+                const guard =
+                  initialGuard || options?.beforeDispatch
+                    ? async () => {
+                        try {
+                          await initialGuard?.();
+                          if (options?.beforeDispatch && !(await options.beforeDispatch()))
+                            throw new Error("Peer authority changed; nothing was sent.");
+                        } catch (error) {
+                          denied = true;
+                          throw error;
+                        }
+                      }
+                    : undefined;
                 initialDispatch = false;
                 const accepted = guard ? await seat!.send(message, guard) : await seat!.send(message);
                 return {
@@ -270,6 +290,14 @@ export function createCodexSeatAdapter(
                   state: accepted.state,
                 };
               } catch (error) {
+                if (denied) {
+                  if (state === "working" && previousState === "idle") state = "idle";
+                  return {
+                    outcome: "offline",
+                    deliveryStage: "unavailable",
+                    detail: `Codex authority changed before dispatch; nothing was sent: ${String(error)}`,
+                  };
+                }
                 return {
                   outcome: "unconfirmed",
                   deliveryStage: "uncertain",

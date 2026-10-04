@@ -44,6 +44,10 @@ import type { WorkItemsService } from "../work-items.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  /** Exact conversation-owned Minecraft stay, sharing the Pokémon play lease. */
+  readonly minecraft?: import("../minecraft.ts").MinecraftService;
+  readonly minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
+  readonly desktop?: import("./desktop.ts").DesktopExpressions;
   readonly runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
   readonly roomObservations?: import("../discord-room-observations.ts").DiscordRoomObservations;
   /** Host-proven original body account, presence, source receipt and opt-in. */
@@ -82,7 +86,8 @@ export interface CaptainDeps {
   };
   readonly rivals?: RivalsClient;
   /** Claude/Codex transcripts on this machine and owner-configured SSH hosts. */
-  readonly agentSessions?: Pick<AgentSessions, "list" | "read"> & Partial<Pick<AgentSessions, "resolve">>;
+  readonly agentSessions?: Pick<AgentSessions, "list" | "read"> &
+    Partial<Pick<AgentSessions, "resolve" | "subagents">>;
   /** Work items in each repo's own tracking convention (ADR 0191). */
   readonly workItems?: Pick<WorkItemsService, "handle">;
   /** Tools on his connected MCP servers. The lane is passed on every call. */

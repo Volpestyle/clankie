@@ -1,3 +1,7 @@
+import {
+  createMinecraftLoginCodeDelivery,
+  tryHandleMinecraftLoginCodeRequest,
+} from "@clankie/discord-presence-core";
 import { voiceRoomEvidence } from "@clankie/discord-presence-core";
 import { tryHandleVoiceOutputControl } from "@clankie/discord-presence-core";
 import { tryHandleBodyVoiceReconcile } from "@clankie/discord-presence-core";
@@ -1163,11 +1167,12 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
       }
       await interaction.deferReply({ ephemeral: true });
       const health = await presencePort.getHealth();
+      const surface = interaction.options.getString("surface") === "minecraft" ? "minecraft" : "gba_emulator";
       const write = DiscordPresenceWriteSchema.parse({
         schemaVersion: 1,
         // Deterministic per channel: a repeat within the dedup window returns
         // the already-posted link rather than piling up invites.
-        idempotencyKey: `activity-start:gba:${channel.id}:v2`,
+        idempotencyKey: `activity-start:${surface}:${channel.id}:v2`,
         action: "discord.presence.activity_start",
         identity: {
           presenceSessionId: `discord:${interaction.guild.id}:${channel.id}`,
@@ -1181,7 +1186,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
           kind: "activity_start",
           guildId: interaction.guild.id,
           channelId: channel.id,
-          surface: "gba_emulator",
+          surface,
         },
       });
       try {
@@ -1499,7 +1504,12 @@ async function executeCaptainDiscordAction(
         input.action === "watch_start" ? "discord.presence.activity_start" : "discord.presence.activity_stop",
       payload:
         input.action === "watch_start"
-          ? { kind: "activity_start", guildId: admitted.guildId, channelId, surface: "gba_emulator" }
+          ? {
+              kind: "activity_start",
+              guildId: admitted.guildId,
+              channelId,
+              surface: input.surface ?? "gba_emulator",
+            }
           : { kind: "activity_stop", guildId: admitted.guildId, channelId },
       successMessage:
         input.action === "watch_start"
@@ -1834,6 +1844,13 @@ if (textIngress !== undefined) {
 }
 
 const musicControlPort = Number.parseInt(process.env.CLANKIE_DISCORD_BRIDGE_CONTROL_PORT ?? "4313", 10);
+const deliverMinecraftLoginCode = createMinecraftLoginCodeDelivery({
+  apiUrl,
+  bridgeToken,
+  discordToken: token,
+  transport: "bot",
+  getCredential: (providerId) => credentialStore.get(providerId),
+});
 const musicServer = createServer((request, response) => {
   const url = request.url ?? "/";
   if (request.method === "GET" && (url === "/" || url === "/health")) {
@@ -1938,6 +1955,7 @@ const musicServer = createServer((request, response) => {
     })
   )
     return;
+  if (tryHandleMinecraftLoginCodeRequest(request, response, deliverMinecraftLoginCode)) return;
   if (tryHandleCaptainDiscordActionRequest(request, response, executeCaptainDiscordAction)) return;
   response.writeHead(404);
   response.end();

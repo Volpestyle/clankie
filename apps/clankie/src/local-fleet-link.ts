@@ -10,6 +10,8 @@ export interface LocalFleetIdentity {
   readonly fleet?: string;
   readonly pane: string;
   validate(): Promise<boolean>;
+  /** Synchronous link revocation only; never substitutes for async process admission. */
+  current?(): boolean;
   projectProof?(): Promise<ProjectProcessProof | undefined>;
 }
 
@@ -36,9 +38,9 @@ export class LocalFleetLink {
     return async (request: Request, env: HttpBindings | Http2Bindings): Promise<Response> => {
       const path = new URL(request.url).pathname;
       const seat =
-        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages)$/u.exec(path) ||
+        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages)$/u.exec(path) ||
         (request.method === "GET" &&
-          /^\/v1\/fleet\/seats\/([^/]+)\/messages\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
+          /^\/v1\/fleet\/seats\/([^/]+)\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
             path,
           )) ||
         (request.method === "POST" && /^\/v1\/fleet\/seats\/([^/]+)\/events\/[^/]+\/ack$/u.exec(path));
@@ -46,10 +48,12 @@ export class LocalFleetLink {
       const pane = request.headers.get("x-clankie-pane") ?? "";
       if (seat && decodeURIComponent(seat[1]!) !== pane)
         return Response.json({ error: "local_pane_required" }, { status: 403 });
+      const current = () => this.open && env.incoming.socket.destroyed !== true;
       const identity = {
+        current,
         fleet: "default",
         pane,
-        validate: async () => this.open && (await this.options.prove(env.incoming.socket, pane)) && this.open,
+        validate: async () => current() && (await this.options.prove(env.incoming.socket, pane)) && current(),
         projectProof: async () =>
           this.open ? this.options.projectProof?.(env.incoming.socket, pane) : undefined,
       };

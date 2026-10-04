@@ -238,6 +238,33 @@ test("unavailable before dispatch is not falsely uncertain; accepted delivery re
   expect(next.controller.request.mock.calls.filter(([method]) => method === "send")).toHaveLength(1);
 });
 
+test("passes the late peer guard to native dispatch and retains a known refusal", async () => {
+  const f = await fixture();
+  const prepared = await f.adapter.prepare!(f.launch);
+  cleanups.push(() => prepared.dispose());
+  const started = await prepared.start(f.view);
+  if (started.outcome !== "started") throw new Error("fixture start");
+  const beforeDispatch = vi.fn(async () => false);
+  const originalRequest = f.controller.request.getMockImplementation()!;
+  f.controller.request.mockImplementation(async (method, input) =>
+    method === "send"
+      ? { outcome: "unavailable", detail: "Peer authority revoked before dispatch" }
+      : originalRequest(method, input),
+  );
+  expect(await started.control.send("peer work", { beforeDispatch, timeoutMs: 500 })).toMatchObject({
+    outcome: "offline",
+    deliveryStage: "unavailable",
+  });
+  expect(f.controller.request).toHaveBeenLastCalledWith(
+    "send",
+    expect.objectContaining({ text: "peer work" }),
+    500,
+    beforeDispatch,
+  );
+  expect(f.controller.acknowledge).not.toHaveBeenCalled();
+  expect(f.controller.pending()).toBeUndefined();
+});
+
 test.each([false, true])(
   "version imports are isolated from all owner data/config and cleaned (failure=%s)",
   async (fails) => {

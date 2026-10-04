@@ -552,3 +552,75 @@ it("keeps a fully listed service free of the search tools", async () => {
   );
   expect(bank.tools.some((entry) => entry.name === "mcp_tool_search")).toBe(false);
 });
+
+it("keeps Clankie's raw Minecraft motor out of direct and deferred lane MCP calls", async () => {
+  const call = vi.fn();
+  const mcp = {
+    catalog: async () => [
+      {
+        server: "minecraft",
+        name: "join",
+        qualifiedName: "minecraft_join",
+        description: "Raw motor",
+        inputSchema: {},
+        initial: true,
+      },
+      {
+        server: "minecraft",
+        name: "act",
+        qualifiedName: "minecraft_act",
+        description: "Raw action",
+        inputSchema: {},
+        initial: false,
+      },
+      {
+        server: "notes",
+        name: "read",
+        qualifiedName: "notes_read",
+        description: "Read",
+        inputSchema: {},
+        initial: false,
+      },
+    ],
+    call,
+  };
+  const bank = await buildLaneToolBank(
+    { ...bankDeps(), mcp } as unknown as CaptainDeps,
+    {},
+    {} as LaneLog,
+    "operator",
+  );
+  expect(bank.tools.map((tool) => tool.name)).not.toContain("minecraft_join");
+  const invoke = bank.tools.find((tool) => tool.name === "mcp_tool_call")!;
+  expect((await invoke.call({ name: "minecraft_act", arguments: {} })).isError).toBe(true);
+  const search = bank.tools.find((tool) => tool.name === "mcp_tool_search")!;
+  expect((await search.call({ query: "minecraft" })).content).toEqual([
+    { type: "text", text: JSON.stringify({ tools: [] }, null, 2) },
+  ]);
+  expect(call).not.toHaveBeenCalled();
+  const app = await createClankieApp({
+    captain: createStubCaptain({ laneToolBank: async () => bank }),
+    authenticateOperator: async () => ({ operatorId: "operator" }),
+  });
+  const session = await connect(app, "operator");
+  const raw = await callRpc("minecraft_join", {});
+  expect(raw.result).toMatchObject({ isError: true });
+  const deferred = await callRpc("mcp_tool_call", { name: "minecraft_act", arguments: {} });
+  expect(deferred.result).toMatchObject({ isError: true });
+  expect(call).not.toHaveBeenCalled();
+
+  async function callRpc(name: string, args: Record<string, unknown>): Promise<Rpc> {
+    return await (
+      await app.app.request("/v1/mcp", {
+        method: "POST",
+        headers: { ...MCP_HEADERS, authorization: "Bearer operator", "mcp-session-id": session },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      })
+    ).json();
+  }
+});

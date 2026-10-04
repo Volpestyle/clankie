@@ -1,3 +1,16 @@
+import { HireProfileSchema } from "./hire-profile.ts";
+export {
+  HireProfileSchema,
+  effectiveHireProfile,
+  type HireProfile,
+  type EffectiveHireProfile,
+} from "./hire-profile.ts";
+import {
+  OperatorPresenceRequestSchema,
+  OperatorPresenceResultSchema,
+  type OperatorPresenceSnapshot,
+} from "./presence.ts";
+export * from "./presence.ts";
 import {
   ProjectProposalLocatorSchema,
   ProjectProposalTargetSchema,
@@ -909,7 +922,18 @@ export const OperatorSeatSubagentsSchema = z
   .object({
     running: z.number().int().min(0),
     recent: z
-      .array(z.object({ label: z.string().max(120), status: z.enum(["running", "done"]) }).strict())
+      .array(
+        z
+          .object({
+            label: z.string().max(120),
+            status: z.enum(["running", "done"]),
+            // Optional for older hosts/transcripts; native readers fill available evidence.
+            id: z.string().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+            startedAt: z.string().datetime().optional(),
+            endedAt: z.string().datetime().optional(),
+          })
+          .strict(),
+      )
       .max(OPERATOR_SEAT_SUBAGENTS_RECENT_MAX),
   })
   .strict();
@@ -1110,7 +1134,6 @@ export function operatorFleetHome(snapshot: OperatorFleetSnapshot): OperatorFlee
 }
 
 export { OPERATOR_SEAT_HARNESSES, type OperatorSeatHarness } from "./seat-harnesses.ts";
-import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
 
 /**
  * Hire an agent (ADR 0013, "compose is hiring"): herdr opens a tab in the
@@ -1121,29 +1144,13 @@ import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
 export const SpawnOperatorSeatSchema = z
   .object({
     schemaVersion: z.literal(1),
-    harness: z.enum(OPERATOR_SEAT_HARNESSES),
+    ...HireProfileSchema.shape,
     /** Saved transcript ref (`host:sessionId`); continue it as a normal native seat. */
     resume: z.string().trim().min(1).max(128).optional(),
-    account: z
-      .string()
-      .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
-      .optional(),
     /** What the roster calls it; herdr's own agent name is derived from this. */
     title: OperatorAgentNameSchema,
     /** Absolute path it starts in — the district it joins (ADR 0022). */
     workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX),
-    /**
-     * Model the harness launches with, spelled the harness's own way (pi's
-     * `--model` pattern, claude's, codex's) (ADR 0185). Absent means the
-     * harness default, which is what an unopinionated hire should get.
-     */
-    model: z.string().trim().min(1).max(OPERATOR_SEAT_MODEL_MAX).optional(),
-    /**
-     * Reasoning effort the harness launches with, in the harness's own level
-     * vocabulary (pi's `--thinking`, claude's `--effort`, codex's
-     * `model_reasoning_effort`) (ADR 0185). Absent means the harness default.
-     */
-    effort: z.string().trim().min(1).max(OPERATOR_SEAT_EFFORT_MAX).optional(),
     /**
      * Start the harness with its owner's-Chrome integration on (ADR 0199):
      * claude's `--chrome`. Codex's Chrome and computer use follow the owner's
@@ -1166,6 +1173,8 @@ export const SpawnOperatorSeatSchema = z
       .string()
       .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
       .optional(),
+    /** Stable work item/deliverable key, required for native-first admission. */
+    deliverable: z.string().trim().min(1).max(512).optional(),
     /** The hired persona's team role (ADR 0208); absent leaves it as it was. */
     role: OperatorAgentRoleSchema.optional(),
   })
@@ -1204,6 +1213,7 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
       deliveryStage: DeliveryStageSchema.optional(),
       seat: OperatorFleetSeatSchema,
       control: SeatControlModeSchema.optional(),
+      profile: HireProfileSchema.optional(),
       skills: z
         .object({
           mode: z.enum(["bundled", "plain"]),
@@ -2508,6 +2518,65 @@ export const FLEET_SEAT_MESSAGES_PATH = "/v1/fleet/seats/:paneId/messages";
 export function fleetSeatMessagesPath(paneId: string): string {
   return `/v1/fleet/seats/${encodeURIComponent(paneId)}/messages`;
 }
+/** Peer messages carry no operator authority and never cross a fleet boundary. */
+export const FleetPeerSeatSchema = z
+  .object({
+    seatId: z.string().min(1).max(200),
+    paneId: z.string().min(1).max(200),
+    binding: z.string().regex(/^[a-f0-9]{64}$/u),
+    harness: z.string().min(1).max(80),
+    title: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX),
+  })
+  .strict();
+export const FleetPeerSeatsSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    fleet: z.string().min(1).max(64),
+    sender: FleetPeerSeatSchema,
+    seats: z.array(FleetPeerSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+  })
+  .strict();
+export type FleetPeerSeats = z.infer<typeof FleetPeerSeatsSchema>;
+export const FleetPeerMessageSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    seatId: z.string().min(1).max(200),
+    recipientBinding: z.string().regex(/^[a-f0-9]{64}$/u),
+    text: z.string().trim().min(1).max(32_768),
+    delivery: FleetSeatMessageDeliverySchema,
+  })
+  .strict();
+export type FleetPeerMessage = z.infer<typeof FleetPeerMessageSchema>;
+export const FleetPeerReceiptSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    deliveryId: z.string().uuid(),
+    binding: z.string().regex(/^[a-f0-9]{64}$/u),
+    seatId: z.string().min(1).max(200),
+    recipientBinding: z.string().regex(/^[a-f0-9]{64}$/u),
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+    deliveryStage: z.enum([
+      "stored",
+      "delivered",
+      "consumed",
+      "uncertain",
+      "recipient_gone",
+      "rejected",
+      "unavailable",
+    ]),
+    outcome: z.enum(["delivered", "unconfirmed", "undelivered", "offline"]),
+    detail: z.string().optional(),
+    messageId: z.string().optional(),
+    state: z.enum(["queued", "started", "steered"]).optional(),
+  })
+  .strict()
+  .refine((receipt) => receipt.deliveryStage !== "recipient_gone" || receipt.outcome === "unconfirmed", {
+    path: ["outcome"],
+    message: "A recipient-gone receipt retains an unknown delivery outcome",
+  });
+export type FleetPeerReceipt = z.infer<typeof FleetPeerReceiptSchema>;
+export const FLEET_PEER_SEATS_PATH = "/v1/fleet/seats/:paneId/peers";
+export const FLEET_PEER_MESSAGES_PATH = "/v1/fleet/seats/:paneId/peer-messages";
 /**
  * The link a machine on an ssh fleet uses to reach Clankie (VUH-1527): his
  * service through a reverse ssh forward on that machine's loopback, and a
@@ -2759,6 +2828,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
    * One cursor-based live fleet read. An absent/old cursor returns now; the
    * current cursor parks until Herdr or fleet-owned state changes.
    */
+  OperatorPresenceRequestSchema,
   z
     .object({
       op: z.literal("fleet"),
@@ -3121,6 +3191,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
     })
     .strict(),
+  OperatorPresenceResultSchema,
   z
     .object({
       op: z.literal("fleet"),
@@ -3281,6 +3352,8 @@ export interface OperatorConversationServiceClient {
   roster(): Promise<readonly OperatorFleetSeat[]>;
   /** Park until the fleet cursor changes, then return one coherent snapshot. */
   fleet?(cursor?: string, signal?: AbortSignal): Promise<OperatorFleetSnapshot>;
+  /** Park until present-tense activity changes. */
+  presence?(cursor?: string, signal?: AbortSignal): Promise<OperatorPresenceSnapshot>;
   /** Commands and skills accepted by this exact conversation target. */
   composerCatalog?(conversationId: string): Promise<OperatorComposerCatalog>;
   /**
@@ -3482,6 +3555,19 @@ export function createOperatorConversationServiceClient(
         signal,
       );
       if (result.op !== "fleet") throw new Error(`Unexpected ${result.op} result for fleet`);
+      return result.snapshot;
+    },
+    async presence(cursor, signal) {
+      const result = await dispatch(
+        {
+          op: "presence",
+          schemaVersion: 1,
+          ...(cursor === undefined ? {} : { cursor }),
+          waitMs: fleetWaitMs,
+        },
+        signal,
+      );
+      if (result.op !== "presence") throw new Error(`Unexpected ${result.op} result for presence`);
       return result.snapshot;
     },
     async composerCatalog(conversationId) {
@@ -4375,6 +4461,7 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
   }).strict(),
   DiscordCaptainActionContextSchema.extend({
     action: z.literal("watch_start"),
+    surface: z.enum(["gba_emulator", "minecraft"]).optional(),
     guildId: z.string().min(1).max(128),
   }).strict(),
   DiscordCaptainActionContextSchema.extend({
@@ -4399,7 +4486,7 @@ export type DiscordCaptainActionResult = z.infer<typeof DiscordCaptainActionResu
  * catalog: the executor maps a surface to its configured Discord application id
  * so a model can never name an arbitrary application to launch.
  */
-export const DiscordActivitySurfaceSchema = z.enum(["gba_emulator"]);
+export const DiscordActivitySurfaceSchema = z.enum(["gba_emulator", "minecraft"]);
 export type DiscordActivitySurface = z.infer<typeof DiscordActivitySurfaceSchema>;
 
 export const DiscordPresenceActionRiskClassSchema = z.enum([
@@ -5175,6 +5262,11 @@ export const PairingOfferWireSchema = z.object({
   version: z.literal(1),
   deepLink: z.string().min(1),
   code: z.string().min(1),
+  /** Existing single-use short code for same-Mac direct pairing; absent on review offers. */
+  localCode: z
+    .string()
+    .regex(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/u)
+    .optional(),
   expiresAt: z.string().datetime(),
   /** Present on long-lived review offers so the operator's output can say so. */
   review: z.literal(true).optional(),
@@ -6808,3 +6900,4 @@ export {
 
 export * from "./body-leases.ts";
 export * from "./minecraft.ts";
+export * from "./minecraft-host.ts";

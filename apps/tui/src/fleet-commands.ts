@@ -15,7 +15,7 @@ export interface FleetCommandServices {
 }
 
 /**
- * `/fleet` edits who Clankie reaches for and the connected-tool kill switch.
+ * `/fleet` edits who Clankie reaches for and the tool and peer-message switches.
  *
  * The routing notes are free text on purpose: a role enum only covers the
  * situations someone enumerated, and the useful ones are conditional. The swarm
@@ -41,7 +41,7 @@ export function buildFleetCommands(services: FleetCommandServices): FaceShellCom
           await runFleetCommand(["clear"], { settings: services.settings });
           shell.insertCommandResult(
             "/fleet clear",
-            "Cleared. Swarm size max, models optimal, fleet tools connected, and he picks a harness per job with nothing from you.",
+            "Cleared. Swarm size max, models optimal, fleet tools connected, peer messages on, and he picks a harness per job with nothing from you.",
             "success",
           );
           return;
@@ -56,7 +56,12 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
   const result = await fleetStatus({ settings: services.settings });
   shell.insertCommandResult(
     "/fleet status",
-    [`settings file: ${result.settingsFile}`, "", ...formatFleetLines(result.fleet)].join("\n"),
+    [
+      `settings file: ${result.settingsFile}`,
+      "",
+      ...formatFleetLines(result.fleet),
+      ...result.roleProfiles.map((r) => `${r.projectId}/${r.role}: ${JSON.stringify(r.profile)}`),
+    ].join("\n"),
     "success",
   );
 }
@@ -113,6 +118,25 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       allowBack: true,
     });
     if (tools !== "connected" && tools !== "off") return;
+    const peerMessages = await flow.readSelect({
+      message: "Fleet — messages between workers",
+      options: [
+        {
+          value: "on",
+          label: "on",
+          description: "Proven native workers may message other seats in their own fleet.",
+        },
+        {
+          value: "off",
+          label: "off",
+          description: "Stop new peer messages; existing delivery receipts remain readable.",
+        },
+      ],
+      initialValue: current.peerMessages,
+      currentValue: current.peerMessages,
+      allowBack: true,
+    });
+    if (peerMessages !== "on" && peerMessages !== "off") return;
     const notes = await flow.readText({
       message: "Fleet — which agents you want on what, and when (empty: he decides)",
       defaultValue: current.notes,
@@ -122,9 +146,12 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       validate: (value: string) => (value.length > 4_000 ? "Keep it under 4000 characters." : undefined),
     });
     if (notes === undefined) return;
-    await fleetUpdate({ size, models, tools, notes: notes.trim() }, { settings: services.settings });
+    await fleetUpdate(
+      { size, models, tools, peerMessages, notes: notes.trim() },
+      { settings: services.settings },
+    );
     flow.renderLine(
-      "Saved. Fleet tool access applies immediately. Run `clankie restart` to apply routing preferences.",
+      "Saved. Fleet tool access and peer-message settings apply immediately. Run `clankie restart` to apply routing preferences.",
       "success",
     );
   } finally {

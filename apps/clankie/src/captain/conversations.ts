@@ -27,6 +27,11 @@ import {
 } from "./conversation-questions.ts";
 import type { ConversationQuestionResult, ConversationQuestionAnswer } from "@clankie/protocol";
 import { SeatLinkInterruptedError } from "./seat-outbox.ts";
+import {
+  ConversationRunStalledError,
+  ConversationServiceRun,
+  waitForConversationRun,
+} from "./conversation-run.ts";
 import { fleetDeliveryStage, type DeliveryStage } from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
@@ -116,6 +121,7 @@ type ConversationServiceRequest = Exclude<
   | { op: "autonomy" }
   | { op: "roster" }
   | { op: "fleet" }
+  | { op: "presence" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }
   | { op: "state_work" }
@@ -139,6 +145,7 @@ type ConversationServiceResult = Exclude<
   | { op: "autonomy" }
   | { op: "roster" }
   | { op: "fleet" }
+  | { op: "presence" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }
   | { op: "state_work" }
@@ -1181,6 +1188,27 @@ export class ConversationStore {
     };
   }
 
+  /** Oldest unanswered owner preference, read from canonical question receipts. */
+  public pendingPresenceOwnerItem(): import("../../../../packages/protocol/src/presence.ts").OperatorPresenceSnapshot["pendingOwnerItem"] {
+    const questions = [...this.metas.values()].flatMap((meta) =>
+      (meta.questions?.records ?? []).flatMap(({ question }) =>
+        question.status === "pending"
+          ? [
+              {
+                conversationId: meta.conversationId,
+                questionId: question.requestId,
+                title: question.prompt.slice(0, 200),
+                since: question.createdAt,
+              },
+            ]
+          : [],
+      ),
+    );
+    return questions.sort(
+      (a, b) => a.since.localeCompare(b.since) || a.questionId.localeCompare(b.questionId),
+    )[0];
+  }
+
   /**
    * The one default global conversation — his own room, and the head a seat
    * outside any delivery attributes to. The store guarantees it exists.
@@ -1824,6 +1852,16 @@ export class ConversationStore {
     this.publishConversationEvent(this.conversationIdForSeat(seatId), body);
   }
 
+  /** Peer exchanges are visible context, never inbound owner turns or seat replies. */
+  public publishFleetPeerExchange(text: string): void {
+    this.publishConversationEvent(this.defaultGlobalConversationId(), {
+      type: "message",
+      role: "agent",
+      text,
+      streaming: false,
+    });
+  }
+
   private publishConversationEvent(
     conversationId: string | undefined,
     body: OperatorConversationEventBody,
@@ -1882,7 +1920,11 @@ export class ConversationStore {
    * never a driver. A service invocation admitted before this reservation owns
    * its turn through settlement, so its answer cannot race an attached seat.
    */
-  public async pollConversationDriver<T>(conversationId: string, poll: () => Promise<T>): Promise<T> {
+  public async pollConversationDriver<T>(
+    conversationId: string,
+    poll: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
     if (!this.metas.has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);
     let ready!: () => void;
     const admission = new Promise<void>((resolve) => {
@@ -1895,7 +1937,10 @@ export class ConversationStore {
     const service = [...(this.serviceDrives.get(conversationId) ?? [])];
     let started: Promise<T>;
     try {
-      await Promise.all(service);
+      const ready = Promise.all(service);
+      if (signal === undefined) await ready;
+      else await waitForConversationRun(ready, signal);
+      signal?.throwIfAborted();
       if (!this.metas.has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);
       // The callback establishes mailbox binding synchronously, before the
       // reservation is released. Never await the parked long poll here.
@@ -1918,14 +1963,18 @@ export class ConversationStore {
   public async runWithConversationDriver<T>(
     conversationId: string,
     driver: () => ConversationDriver<T> | undefined,
-    service: () => Promise<T>,
+    service: (run: ConversationServiceRun) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     for (;;) {
       for (;;) {
         const admissions = this.driverAdmissions.get(conversationId);
         if (admissions === undefined || admissions.size === 0) break;
-        await Promise.all(admissions);
+        const ready = Promise.all(admissions);
+        if (signal === undefined) await ready;
+        else await waitForConversationRun(ready, signal);
       }
+      signal?.throwIfAborted();
       if (!this.metas.has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);
       const selected = driver();
       if (selected !== undefined) {
@@ -1942,9 +1991,11 @@ export class ConversationStore {
       const serviceRuns = this.serviceDrives.get(conversationId) ?? new Set<Promise<void>>();
       serviceRuns.add(invocation);
       this.serviceDrives.set(conversationId, serviceRuns);
+      const run = new ConversationServiceRun(signal);
       try {
-        return await service();
+        return await waitForConversationRun(service(run), run.signal);
       } finally {
+        run.close();
         serviceRuns.delete(invocation);
         if (serviceRuns.size === 0 && this.serviceDrives.get(conversationId) === serviceRuns)
           this.serviceDrives.delete(conversationId);
@@ -3256,7 +3307,15 @@ export class ConversationStore {
     let deliveryStage: DeliveryStage | undefined;
     const invoke = async (): Promise<void> => {
       if (provenance.questionAnswer) {
-        await authorizeQuestion(provenance.questionAnswer.authority);
+        const preparation = new ConversationServiceRun(controller.signal);
+        try {
+          await preparation.wait(
+            "question authority",
+            authorizeQuestion(provenance.questionAnswer.authority),
+          );
+        } finally {
+          preparation.close();
+        }
         this.assertQuestionContext(meta, provenance.questionAnswer.record);
       }
       if (provenance.origin === "hook") this.linearHookQueued.delete(conversationId);
@@ -3354,7 +3413,7 @@ export class ConversationStore {
         // A bare class name ("Error") tells the operator nothing. The message is
         // the only thing that names the actual failure, so it rides along; the
         // stack goes to the service log for anything the summary truncates.
-        console.error(`operator turn ${runId} failed`, error);
+        console.error(`operator turn ${runId} in ${conversationId} failed`, error);
         this.append(meta, {
           type: "turn",
           runId,
@@ -3364,11 +3423,13 @@ export class ConversationStore {
             error instanceof Error &&
             ["question_owner_unavailable", "question_context_lost"].includes(error.message)
               ? "owner_context_lost"
-              : error instanceof SeatLinkInterruptedError
-                ? "service_restarted"
-                : error instanceof Error
-                  ? error.constructor.name
-                  : "run_failed",
+              : error instanceof ConversationRunStalledError
+                ? "conversation_turn_stalled"
+                : error instanceof SeatLinkInterruptedError
+                  ? "service_restarted"
+                  : error instanceof Error
+                    ? error.constructor.name
+                    : "run_failed",
           summary: turnFailureSummary(error),
         });
         if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "failed";

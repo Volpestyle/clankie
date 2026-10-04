@@ -7,6 +7,7 @@ import { ConversationStore } from "../src/captain/conversations.ts";
 import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
+import { CONVERSATION_RUN_STALL_MS } from "../src/captain/conversation-run.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -46,12 +47,15 @@ function fixture() {
       },
     };
   };
-  const store: ConversationStore = new ConversationStore(join(root, "conversations"), (id, message) =>
-    store.runWithConversationDriver(
-      id,
-      () => select(id, message),
-      () => service(message),
-    ),
+  const store: ConversationStore = new ConversationStore(
+    join(root, "conversations"),
+    (id, message, _publish, context) =>
+      store.runWithConversationDriver(
+        id,
+        () => select(id, message),
+        () => service(message),
+        context.signal,
+      ),
   );
   const drive = (message: string) =>
     store.runWithConversationDriver(
@@ -115,6 +119,140 @@ it("attachment waits for an admitted service turn, then takes queued work withou
   await f.store.awaitRun(queued.runId);
   expect(f.service.mock.calls).toEqual([["first"]]);
   f.outbox().close();
+  await f.store.close();
+});
+
+it("silent service work releases waiting attachment and queued work without replaying its late result", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const f = fixture();
+  const entered = deferred();
+  const dependency = deferred();
+  f.service.mockImplementationOnce(async () => {
+    entered.resolve();
+    await dependency.promise;
+  });
+  const first = f.store.submitInternal("global-default", "silent first", "watch");
+  if (first.status !== "accepted") throw new Error("acceptance missing");
+  await entered.promise;
+  const attached = f.poll();
+  const queued = f.store.submitInternal("global-default", "queued after silent first", "wake");
+  if (queued.status !== "accepted") throw new Error("acceptance missing");
+  await vi.advanceTimersByTimeAsync(CONVERSATION_RUN_STALL_MS - 1);
+  expect(f.outbox().bound()).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  expect((await attached).map((event) => event.content)).toEqual(["queued after silent first"]);
+  await f.poll(0);
+  await f.store.awaitRun(first.runId);
+  await f.store.awaitRun(queued.runId);
+  const journal = new ConversationJournal(join(f.root, "conversations"));
+  const settled = journal.read("global-default");
+  expect(settled).toContainEqual(
+    expect.objectContaining({
+      type: "turn",
+      runId: first.runId,
+      phase: "failed",
+      reasonCode: "conversation_turn_stalled",
+    }),
+  );
+  expect(f.service.mock.calls).toEqual([["silent first"]]);
+  dependency.resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(journal.read("global-default")).toEqual(settled);
+  expect(await f.poll(0)).toEqual([]);
+  expect(f.service.mock.calls).toEqual([["silent first"]]);
+  f.outbox().close();
+  await f.store.close();
+});
+
+it("cancellation releases an admitted service and its waiting attachment while a dependency stays pending", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const entered = deferred();
+  f.service.mockImplementationOnce(async () => {
+    entered.resolve();
+    await new Promise(() => {});
+  });
+  const first = f.store.submitInternal("global-default", "cancel this service", "watch");
+  if (first.status !== "accepted") throw new Error("acceptance missing");
+  await entered.promise;
+  const attached = f.poll();
+  expect(f.outbox().bound()).toBe(false);
+  expect(f.store.cancel("global-default", first.runId)).toBe(true);
+  await f.store.awaitRun(first.runId);
+  const next = f.store.submitInternal("global-default", "work after cancellation", "wake");
+  if (next.status !== "accepted") throw new Error("acceptance missing");
+  expect((await attached).map((event) => event.content)).toEqual(["work after cancellation"]);
+  await f.poll(0);
+  await f.store.awaitRun(next.runId);
+  expect(f.service.mock.calls).toEqual([["cancel this service"]]);
+  f.outbox().close();
+  await f.store.close();
+});
+
+it("a cancelled attaching poll releases its reservation and never binds after admitted service settles", async () => {
+  const f = fixture();
+  const entered = deferred();
+  const finish = deferred();
+  f.service.mockImplementationOnce(async () => {
+    entered.resolve();
+    await finish.promise;
+  });
+  const first = f.store.submitInternal("global-default", "admitted service", "watch");
+  if (first.status !== "accepted") throw new Error("acceptance missing");
+  await entered.promise;
+  const controller = new AbortController();
+  const poll = vi.fn(() => f.outbox().poll(5_000));
+  const attaching = f.store.pollConversationDriver("global-default", poll, controller.signal);
+  const reason = new Error("attaching client disconnected");
+  const cancelled = expect(attaching).rejects.toBe(reason);
+  controller.abort(reason);
+  await cancelled;
+  expect(poll).not.toHaveBeenCalled();
+  expect(f.outbox().bound()).toBe(false);
+  const queued = f.store.submitInternal("global-default", "queued after client disconnected", "wake");
+  if (queued.status !== "accepted") throw new Error("acceptance missing");
+  finish.resolve();
+  await f.store.awaitRun(first.runId);
+  await f.store.awaitRun(queued.runId);
+  expect(poll).not.toHaveBeenCalled();
+  expect(f.outbox().bound()).toBe(false);
+  expect(f.service.mock.calls).toEqual([["admitted service"], ["queued after client disconnected"]]);
+  expect(await f.poll(0)).toEqual([]);
+  f.outbox().close();
+  await f.store.close();
+});
+
+it("a cancelled invocation waiting for attachment admission cannot later start service or dispatch", async () => {
+  const f = fixture();
+  const started = deferred();
+  const neverSettles = deferred();
+  const occupying = f.store.runWithConversationDriver(
+    "global-default",
+    () => undefined,
+    async () => {
+      started.resolve();
+      await neverSettles.promise;
+    },
+  );
+  await started.promise;
+  const attached = f.poll();
+  const controller = new AbortController();
+  const selected = vi.fn(() => undefined);
+  const service = vi.fn(async () => {});
+  const waiting = f.store.runWithConversationDriver("global-default", selected, service, controller.signal);
+  const reason = new Error("cancelled while waiting for attachment");
+  const failed = expect(waiting).rejects.toBe(reason);
+  controller.abort(reason);
+  await failed;
+  expect(selected).not.toHaveBeenCalled();
+  expect(service).not.toHaveBeenCalled();
+  neverSettles.resolve();
+  await occupying;
+  f.outbox().close();
+  expect(await attached).toEqual([]);
+  expect(selected).not.toHaveBeenCalled();
+  expect(service).not.toHaveBeenCalled();
   await f.store.close();
 });
 

@@ -2,8 +2,9 @@
 
 Admitted fleet panes receive standing access to every connected MCP server whose
 account is verified. Provider credentials stay in Clankie's broker. The bridge
-exposes exactly `clankie_tools` and `clankie_call`; `message_clankie` comes from
-the native worker plugin separately. Manual grants keep their selected direct tools.
+exposes `clankie_tools` and `clankie_call` for connected accounts. The native
+worker bridge separately supplies `message_clankie` and, with stronger native
+identity proof, `list_fleet_seats` and `message_peer`. Manual grants keep their selected direct tools.
 [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md) supersedes the
 project-tool gate in ADR 0216. Projects still own roles, caps, hiring and tracker binding.
 
@@ -20,6 +21,33 @@ connected actor, read the issue and decisions, and perform the authorized change
 Tool access does not authorize every outward action. `linear-issues` carries the
 read-before-write and editing rules.
 
+## Catalog changes in Codex
+
+The fleet bridge checks its catalog every five seconds and emits MCP
+`notifications/tools/list_changed` for added, removed or changed definitions.
+An explicit admission refusal withdraws tools. Other failed discovery keeps the
+previous catalog; calls still pass through Clankie's current admission and
+account checks. A notification never replays a tool call.
+
+Codex 0.160.0 logs this notification without updating its executable catalog.
+Plain `config/mcpServer/reload` also reuses an unchanged ready connection.
+For locally hired seats with a dedicated app-server and copied worker config,
+Clankie's controller changes a connection environment revision through
+`config/value/write`, then reloads. Codex reconnects Clankie's MCP connection
+at the next model step on the same thread. The pane, conversation and message
+tool remain available. Refreshes are serialized and failed RPCs are retried at
+most three times per catalog change; no tool call or turn is retried.
+
+This workaround does not rewrite the owner's config, apply to manually started
+clients, or refresh remote seats. For those clients, first check admission and
+`fleet.tools`, then ask the owner to reconnect. Preserve the exact thread UUID,
+cwd, account home and launch flags. A shared daemon can keep an unloaded pane's
+thread cached: wait until that exact thread is no longer loaded before resuming
+it. Never restart a shared daemon or fork the conversation automatically.
+Controller-owned hires need controller recovery rather than a second manual
+process attached to their thread. A fresh status-list connection is not proof
+that an existing thread can call the tool.
+
 ## Fleet admission and the kill switch
 
 The existing transport admission is the proof:
@@ -30,10 +58,11 @@ The existing transport admission is the proof:
   current stream and registered fleet connection must remain live.
 - A remote fleet bearer link admits that fleet's tools without proving a pane.
   Its audit principal records `pane:unverified`; the session key belongs to the fleet.
-  The link does not establish a native project assignment or grant mailbox access.
+  The link does not establish a native project assignment, grant mailbox access
+  or permit peer messages.
 
 No native session, harness executable, PID lifetime, canonical cwd or project grant
-is needed for tools after fleet admission. Anything running in an admitted pane,
+is needed for connected tools after fleet admission. Anything running in an admitted pane,
 and anyone holding a valid remote fleet bearer, can use the verified connected
 accounts, including ordinary Linear writes as Clankie. This is the owner's accepted
 trust boundary; project approval does not narrow it.
@@ -61,6 +90,71 @@ or time bound has been proven. This is the chosen contract (VUH-1585,
 calls rather than promising atomic revocation. The original strict guarantee was
 not met and was replaced by this decision, not shown to pass. An operation already
 dispatched to a provider cannot be recalled.
+
+## Messages between workers
+
+Workers can message another current seat in their own fleet without asking
+Clankie to relay each exchange. The Claude worker plugin and `clankie mcp --fleet`
+share the `runSeatChannel` bridge and expose:
+
+- `list_fleet_seats({})`: the sender's own fleet, with its identity and exact
+  recipient seat/binding records.
+- `message_peer({seat, text})`: set `seat` to a returned `seatId` and provide the
+  message text. The bridge obtains the sender and recipient bindings; workers
+  do not supply them. A current binding does not authorize a later pane occupant.
+
+The service enforces this authority on local and remote paths. The sender must
+have a proven native pane process and a matching native session. Transport-only
+fleet admission, caller-supplied pane IDs and legacy bearer-only links cannot
+establish that identity. Connected-tool access and project approval do not widen
+peer-message scope. The recipient must belong to the same fleet, retain the exact
+current binding and have an available native delivery route. A changed occupant
+or session requires fresh discovery, not redirecting the old message.
+
+Discovery uses `GET /v1/fleet/seats/{paneId}/peers`, sending uses
+`POST /v1/fleet/seats/{paneId}/peer-messages`, and reconciliation reads
+`GET /v1/fleet/seats/{paneId}/peer-messages/{id}`. The server derives the sender
+from admitted process/session proof and scopes receipt reads to that sender.
+Delivery reuses `message_seat` and its native harness channel/session API,
+receipts and refusal states; it never types terminal keys or revives Swarm.
+
+Messages are framed as agent output from the verified sender, never owner
+instructions or new authority. Each send records server audit provenance and an
+agent-role entry in Clankie's default transcript; native channel events carry `source: peer`. This happens without waking
+him or creating an owner turn. The receiving
+worker and Clankie still act within their existing assignment and permissions.
+
+`fleet.peerMessages` defaults to `on`. Only the owner or an authorized operator
+changes it through the CLI or the `/fleet` editor:
+
+```sh
+clankie fleet status
+clankie fleet set --peer-messages off
+clankie fleet set --peer-messages on
+```
+
+`off` hides both peer tools and refuses new sends server-side, including calls
+from stale catalogs. It is independent of `fleet.tools`: either capability can
+be disabled while the other remains enabled. Existing receipt reads and native
+receipt reconciliation remain allowed with peer messages off. A message already
+dispatched cannot be recalled.
+
+After an uncertain send, retain and reconcile the original peer receipt and its
+original native delivery receipt. Never POST the same intent again, delete its
+receipt state or switch bridges to compensate for missing acknowledgment. An
+unknown result is a gap to report, not proof of failure. A successful native
+delivery receipt proves the stated handoff, not that the model read or accepted
+the message. While unresolved, another `message_peer` call reads only the
+original receipt. Once that receipt is settled, a different recipient or follow-up
+remains unsent; invoke again deliberately if that new message is still needed.
+If the original recipient closes or loses its native binding, reconciliation
+terminates as `recipient_gone` with an `unconfirmed` outcome. Delivery remains
+unknown; the original is never resent, and the sender can send a fresh message.
+The service retains full bodies for the latest 100 settled messages and every
+unresolved message. Older settled bodies are pruned, with compact exact receipts
+retained to prevent an old delivery ID from dispatching again.
+[ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608)
+records this contract.
 
 ## Discover and call
 
@@ -91,7 +185,8 @@ Ordinary connected tools use the shared rule matcher, argument checks and
 
 Codex hire readiness expects the two meta names while fleet tools are on, and
 no connected-tool names while off, regardless of project grants. The worker
-plugin's `message_clankie` is a separate expectation. This check does not create
+plugin's `message_clankie` is a separate expectation; authorized peer tools are a
+separate native capability. This check does not create
 a grant or prove a native provider call.
 
 ## Verify the account
@@ -180,8 +275,8 @@ source-managed/symlinked harness configuration. The existing PC Node bridge
 proxies list/call and needs no new wire protocol for the two-tool catalog.
 
 The bridge retries initial discovery with backoff for up to 20 seconds while a
-pane settles, including stalled HTTP requests. A persistent failure returns only
-`message_clankie`. Later lists and calls check current access; discovery never
+pane settles, including stalled HTTP requests. A persistent connected-tool
+failure retains the separately available worker tools. Later lists and calls check current access; discovery never
 retries a mutation. Codex can retain its startup catalog despite tool-list-change
 notifications, so the owner may need to reconnect MCP or restart a pane after
 cutover. A displayed stale tool never bypasses current service authorization.
@@ -203,6 +298,11 @@ bridge/catalog or demonstrated a call. Live PC acceptance is a separate native
 check after landing and re-pin: two connected bridge tools plus `message_clankie`,
 and a Linear issue read through `clankie_call`. Deterministic fixtures do not
 establish that acceptance.
+
+VUH-1608's live peer-message acceptance is a separate check with two actual KH2
+panes on the PC after landing and re-pin. It must establish discovery, native
+delivery, authority framing, the owner off switch and honest receipts in those
+panes. Deterministic server and bridge regressions do not establish that live result.
 
 ## Boundaries and limits
 

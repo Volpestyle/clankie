@@ -48,8 +48,8 @@ async function stateEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-headless-test-"));
   tempDirs.push(root);
   return {
-    XDG_STATE_HOME: root,
     XDG_CONFIG_HOME: join(root, "config"),
+    XDG_STATE_HOME: root,
     CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
     CLANKIE_OPERATOR_TOKEN: "operator-secret",
   };

@@ -1,8 +1,9 @@
-# The seat
+# Native harness commands
 
-Claude Code, Codex or OpenCode driving a selected Clankie conversation.
+Open Clankie's operator seat with `clankie claude`, `clankie codex`, or
+`clankie opencode`; the seat drives a selected Clankie conversation.
 
-## The seat
+## Launch and resume
 
 `clankie claude2` selects the owner's `claude2` account command. Numbered
 Claude commands resolve aliases and functions through the interactive `$SHELL`
@@ -14,7 +15,10 @@ the plugin's hooks, and these skills as `/clankie:this-machine` and
 `/clankie:trace-clankie`. Doctor's `laneTools` says whether the service's
 `/v1/mcp` route answers; `clankie claude --dry-run` prints the launch plan
 (`plugin.source` is `plugin-dir`, with the selected catalog and the
-`clankie@inline` channel identity). The seat's own brain is Claude Code's `/model`;
+`clankie@inline` channel identity). The launcher allows this seat's Clankie CLI and plugin MCP tools while denying
+independent tracker connectors. This avoids routine tool prompts; it does not
+expand the selected conversation's authority. Folder/hook/channel trust remains
+the owner's decision. The seat's own brain is Claude Code's `/model`;
 `clankie model` changes the service lanes. Each fresh launch creates a separate
 workspace chat, including multiple launches in the same directory or account.
 Its transcript appears in that chat in the app; tools, self-wakes and herdr
@@ -134,9 +138,10 @@ access. Codex currently keeps its initial catalog despite
 reconnect MCP or restart that native pane. New calls from a displayed stale catalog are checked live; this is not a promise
 that calls already past a final asynchronous check cannot dispatch after revocation.
 Missing tools do not authorize another connector or an operator lane.
-Project membership proves initial and final socket/native-process checkpoints
-afresh for each request. Independent observations run together; no proof is
-cached across calls. Slow or unavailable process observations still deny access.
+Native identity checks for worker messages, peer delivery and project assignments
+remain separate from connected-tool admission. Connected tools require the linked
+fleet and verified account, not a project or cwd proof (ADR 0217). Inspect the
+specific refusal instead of treating every missing capability as a project grant.
 
 OpenCode seats use the same isolation contract: a fresh `clankie opencode` creates a separate workspace chat; `--conversation ID` reuses one,
 `--resume` keeps the exact native session and chat, and `--dry-run` creates none.

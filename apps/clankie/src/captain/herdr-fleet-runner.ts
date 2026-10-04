@@ -216,7 +216,12 @@ export function routeHerdrFleets(
     createTab: async (options) => {
       const runner = options.fleet === undefined ? local : (await current()).get(options.fleet);
       if (runner?.createTab === undefined) throw new Error(`Unknown Herdr fleet ${String(options.fleet)}`);
-      const paneId = await runner.createTab(options);
+      const beside = options.besidePane === undefined ? undefined : splitFleetQualified(options.besidePane);
+      if (beside && beside.fleet !== options.fleet) throw new Error("Lead pane belongs to a different fleet");
+      const paneId = await runner.createTab({
+        ...options,
+        ...(options.besidePane === undefined ? {} : { besidePane: beside?.id ?? options.besidePane }),
+      });
       return options.fleet === undefined ? paneId : fleetQualified(options.fleet, paneId);
     },
     startAgent: async (options) => {

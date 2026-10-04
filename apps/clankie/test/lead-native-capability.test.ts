@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { createHash } from "node:crypto";
 import { EventEmitter, once } from "node:events";
 import { PassThrough } from "node:stream";
@@ -65,7 +66,7 @@ vi.mock("node:child_process", () => ({
 // @ts-expect-error -- manual checkout-only ESM runner.
 import { dockerTransport, LeadContainer } from "../../../scripts/evals/lead-containment.mjs";
 // @ts-expect-error -- manual checkout-only ESM runner.
-import { buildNativeImage } from "../../../scripts/evals/lead-native-image.mjs";
+import { buildNativeImage, buildNativeClaudeImage } from "../../../scripts/evals/lead-native-image.mjs";
 // @ts-expect-error -- manual checkout-only ESM runner.
 import * as nativeCapability from "../../../scripts/evals/lead-native-capability.mjs";
 const { probeNativeRuntime, assertNativeRuntimeCapability } = nativeCapability;
@@ -90,6 +91,9 @@ async function fixture() {
   const containers = new Map<string, any>();
   const tags = new Map<string, string>();
   let mediationFailed = false;
+  let claudeHash = "",
+    badClaudeVersion = false,
+    badClaudeBinary = false;
   let lastIsolation: unknown;
   let helperFails = false,
     descendantFails = false;
@@ -193,6 +197,88 @@ async function fixture() {
       }
       case "exec": {
         const script = args.at(-1)!;
+        if (args.includes("/opt/codex/bin/bwrap") && args.includes("--version"))
+          return badClaudeVersion ? "2.1.999 (Claude Code)" : "2.1.118 (Claude Code)";
+        if (args.includes("/opt/codex/bin/bwrap") && script.includes("settingsWriteDenied")) {
+          // Execute the actual generated probe with deterministic OS ports. Both
+          // namespaces use PID 1: its own environ is readable, private root is not.
+          const files = new Map([["/proc/1/environ", "own probe environment"]]);
+          if (!isolate) files.set("/eval/control/canary", "leaked control");
+          let output = "";
+          runInNewContext(
+            script,
+            {
+              require: (name: string) => {
+                if (name === "node:fs")
+                  return {
+                    readFileSync: (path: string) => {
+                      if (!files.has(path)) throw Error("unavailable");
+                      return files.get(path);
+                    },
+                    writeFileSync: (path: string, value: string) => {
+                      if (path !== "/eval/tasks/lead/canary") throw Error("read only");
+                      files.set(path, value);
+                    },
+                    readlinkSync: (path: string) => `${path.split("/").at(-1)}:[2]`,
+                  };
+                if (name === "node:net")
+                  return {
+                    createConnection: () => ({
+                      setTimeout: () => {},
+                      once: (event: string, callback: () => void) => {
+                        if (event === "error") callback();
+                      },
+                    }),
+                  };
+                throw Error("unexpected probe import");
+              },
+              process: {
+                stdout: {
+                  write: (text: string) => {
+                    output += text;
+                  },
+                },
+                exit: () => {
+                  throw Error("probe failed");
+                },
+              },
+            },
+            { timeout: 1000 },
+          );
+          return output;
+        }
+        if (script.includes("/opt/claude/bin/claude") && script.includes("Object.fromEntries"))
+          return JSON.stringify(
+            Object.fromEntries(
+              [
+                "/opt/claude/bin/claude",
+                "/opt/codex/bin/bwrap",
+                "/usr/local/bin/herdr",
+                "/usr/local/bin/node",
+                "/usr/bin/python3",
+                "/usr/local/lib/lead-native-claude-launch.py",
+                "/usr/local/lib/lead-native-claude-capture.py",
+              ].map((path) => [
+                path,
+                path === "/opt/claude/bin/claude"
+                  ? badClaudeBinary
+                    ? "0".repeat(64)
+                    : claudeHash
+                  : path.endsWith(".py")
+                    ? createHash("sha256")
+                        .update(
+                          readFileSync(
+                            new URL("../../../scripts/evals/" + path.split("/").at(-1), import.meta.url),
+                          ),
+                        )
+                        .digest("hex")
+                    : "b".repeat(64),
+              ]),
+            ),
+          );
+        if (claudeHash && script.includes("supervisor.json"))
+          return JSON.stringify({ pid: 1, namespaces: { pid: "pid:[1]", mnt: "mnt:[1]", net: "net:[1]" } });
+
         if (args.includes("/usr/local/bin/python3"))
           return JSON.stringify({
             python: "3.12",
@@ -271,6 +357,26 @@ async function fixture() {
     image,
     command,
     build,
+    async claudeBuild() {
+      const bytes = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 1, 2, 3, 4]);
+      const artifact = join(root, "selected-claude");
+      writeFileSync(artifact, bytes, { mode: 0o500 });
+      claudeHash = createHash("sha256").update(bytes).digest("hex");
+      return buildNativeClaudeImage({
+        command,
+        baseBuild: build,
+        output: join(root, "claude-build"),
+        artifact,
+        executableSha256: claudeHash,
+        version: "2.1.118",
+      });
+    },
+    badClaudeVersion: () => {
+      badClaudeVersion = true;
+    },
+    badClaudeBinary: () => {
+      badClaudeBinary = true;
+    },
     calls,
     containers,
     changeDaemon: () => {
@@ -439,3 +545,42 @@ it("uses the official bridge's derived-image/probe binding and rejects a mediati
     bridge.verify({ image: built.image, candidateRoot: candidate, output: join(f.root, "failed") }),
   ).rejects.toThrow("mediation failed");
 });
+
+it("earns Claude whole-process control through actual build/probe code despite namespace PID reuse", async () => {
+  const f = await fixture();
+  const build = await f.claudeBuild();
+  const proof = await probeNativeRuntime({ build, command: f.command, root: join(f.root, "claude-probe") });
+  await assertNativeRuntimeCapability(proof, f);
+  expect(nativeCapability.nativeRuntimeEvidence(proof)).toMatchObject({
+    runtime: "claude",
+    providerAdmission: false,
+    childRouting: false,
+    nativeTuiObserved: false,
+    vendorProvenance: false,
+    providerNetwork: "denied",
+  });
+  expect(
+    f.calls.some(
+      (args) =>
+        args.includes("/opt/codex/bin/bwrap") &&
+        args.includes("/opt/claude/bin/claude") &&
+        args.includes("--version"),
+    ),
+  ).toBe(true);
+  expect(f.calls.some((args) => args.includes("sandbox"))).toBe(false);
+  await expect(assertNativeRuntimeCapability(structuredClone(proof), f)).rejects.toThrow("controller-origin");
+  await expect(
+    probeNativeRuntime({ build: structuredClone(build), command: f.command, root: join(f.root, "copied") }),
+  ).rejects.toThrow("controller-origin");
+  expect([...f.containers.values()].every((info) => !info.State.Running)).toBe(true);
+});
+for (const failure of ["badClaudeVersion", "badClaudeBinary", "failedIsolation", "uncertainStop"] as const)
+  it(`refuses Claude capability after ${failure}`, async () => {
+    const f = await fixture();
+    const build = await f.claudeBuild();
+    f[failure]();
+    await expect(
+      probeNativeRuntime({ build, command: f.command, root: join(f.root, "claude-probe") }),
+    ).rejects.toThrow();
+    expect(f.calls.some((args) => args[0] === "kill")).toBe(true);
+  });

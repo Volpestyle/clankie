@@ -170,3 +170,62 @@ export function requireNativeBuild(build, command) {
     throw Error("Native image requires controller-origin source build on this exact daemon");
   return structuredClone({ ...record, command: undefined });
 }
+
+/** Claude-specific layer over the earned pinned Herdr/bubblewrap build; never accepts an image label. */
+export async function buildNativeClaudeImage({
+  command,
+  baseBuild,
+  output,
+  artifact,
+  executableSha256,
+  version,
+  signal,
+}) {
+  const base = requireNativeBuild(baseBuild, command);
+  if (base.runtime === "claude" || !/^2\.1\.[0-9]+$/u.test(version))
+    throw Error("Exact Claude version and native base required");
+  signal?.throwIfAborted();
+  mkdirSync(output, { mode: 0o700 });
+  if (realpathSync(output) !== output || lstatSync(output).uid !== process.getuid())
+    throw Error("Unowned Claude build directory");
+  const { copyNativeClaudeArtifact } = await import("./lead-native-claude-plan.mjs");
+  const selected = copyNativeClaudeArtifact(artifact, join(output, "claude"), executableSha256);
+  const modules = {};
+  for (const name of ["lead-native-claude-launch.py", "lead-native-claude-capture.py"]) {
+    const bytes = readFileSync(new URL(`./${name}`, import.meta.url));
+    modules[`/usr/local/lib/${name}`] = hash(bytes);
+    writeFileSync(join(output, name), bytes, { mode: 0o500, flag: "wx" });
+  }
+  const dockerfile = `FROM ${base.image}\nCOPY claude /opt/claude/bin/claude\nCOPY lead-native-claude-launch.py lead-native-claude-capture.py /usr/local/lib/\nRUN chmod 555 /opt/claude/bin/claude /usr/local/lib/lead-native-claude-launch.py && chmod 444 /usr/local/lib/lead-native-claude-capture.py\n`;
+  writeFileSync(join(output, "Dockerfile"), dockerfile, { mode: 0o400, flag: "wx" });
+  const iid = join(output, "image-id");
+  await command(
+    [
+      "build",
+      "--pull=false",
+      "--network=none",
+      "--iidfile",
+      iid,
+      "--file",
+      join(output, "Dockerfile"),
+      output,
+    ],
+    { timeout: 600_000, signal },
+  );
+  signal?.throwIfAborted();
+  const stat = lstatSync(iid);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== process.getuid() || stat.size > 256)
+    throw Error("Invalid Claude build result");
+  const image = readFileSync(iid, "utf8").trim();
+  if (!/^sha256:[a-f0-9]{64}$/u.test(image)) throw Error("Claude build has no immutable image ID");
+  const result = Object.freeze({
+    image,
+    runtime: "claude",
+    base,
+    artifact: { ...selected, version, vendorProvenance: false },
+    modules,
+    dockerfile: hash(dockerfile),
+  });
+  builds.set(result, { ...structuredClone(result), command, daemon: dockerTransportIdentity(command) });
+  return result;
+}

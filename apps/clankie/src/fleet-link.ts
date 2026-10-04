@@ -30,9 +30,9 @@ import {
  */
 
 /** The only paths the link listener answers (seat routes and the fleet's granted tools); everything else is 404. */
-const LINK_ROUTE = /^\/v1\/fleet\/(?:seats\/[^/]+\/(?:events|hook|messages)|mcp)$/u;
+const LINK_ROUTE = /^\/v1\/fleet\/(?:seats\/[^/]+\/(?:events|hook|messages|peers|peer-messages)|mcp)$/u;
 const LINK_RECEIPT =
-  /^\/v1\/fleet\/seats\/[^/]+\/messages\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
+  /^\/v1\/fleet\/seats\/[^/]+\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 const LINK_EVENT_ACK = /^\/v1\/fleet\/seats\/[^/]+\/events\/[^/]+\/ack$/u;
 
 export function fleetLinkFetch<Rest extends unknown[]>(
@@ -351,11 +351,13 @@ export class FleetLinks {
         if (!stream) continue;
         // Share only simultaneous reads; every later tool/membership check observes afresh.
         let pending: Promise<ProjectProcessProof | undefined> | undefined;
+        const current = () =>
+          stream.alive() && this.links.get(fleet) === link && link.status().state === "ready";
         const identity: LocalFleetIdentity = {
           fleet,
           pane,
-          validate: async () =>
-            stream.alive() && this.links.get(fleet) === link && link.status().state === "ready",
+          current,
+          validate: async () => current(),
           projectProof: () => {
             if (!stream.alive() || this.links.get(fleet) !== link) return Promise.resolve(undefined);
             return (pending ??= Promise.resolve(this.options.projectProof?.(fleet, pane, stream)).finally(

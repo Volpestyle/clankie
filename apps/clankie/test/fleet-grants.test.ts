@@ -55,7 +55,12 @@ it("retires fleet grants without copying or mutating them and admits bearer flee
       close: async () => undefined,
     }),
   });
-  const worker = new WorkerMcp({ directory: join(root, "grants"), credentials, host });
+  const worker = new WorkerMcp({
+    directory: join(root, "grants"),
+    credentials,
+    host,
+    fleetToolsSnapshot: async () => ({ tools: "connected", assertCurrent() {} }),
+  });
   const links = { authenticate: (token: string) => ({ "kh2-link": "kh2", "pc-link": "pc" })[token] };
   const clankie = await createClankieApp({
     captain: createStubCaptain(),

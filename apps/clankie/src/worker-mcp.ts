@@ -66,6 +66,7 @@ type WorkerAuthorization = {
   validateFleet?(): boolean | Promise<boolean>;
   /** Optional author attribution only; this never changes the connected tool grant. */
   nativeWriteProof?(): Promise<ProjectProcessProof | undefined>;
+  currentFleet?: (() => boolean) | undefined;
 };
 const FleetSearchSchema = z
   .object({
@@ -105,6 +106,8 @@ export class WorkerMcp {
     host: McpHost;
     projects?(): Promise<ProjectsSettings>;
     fleetTools?(): Promise<FleetSettings["tools"]>;
+    /** Canonical settings generation, checked without yielding at provider dispatch. */
+    fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
   };
   private readonly sessions = new Map<
     string,
@@ -187,6 +190,7 @@ export class WorkerMcp {
         "Fleet grants are retired. Admitted fleet members use connected tools; inspect clankie fleet status and revoke old records with clankie access revoke ID.",
       );
     const request = WorkerGrantRequestSchema.parse(input);
+    if (request.server === "minecraft") throw new Error("Clankie's Minecraft play seat cannot be delegated");
     if (request.project !== undefined) {
       const project = (await this.options.projects?.())?.projects.find(
         (project) => project.id === request.project,
@@ -336,6 +340,7 @@ export class WorkerMcp {
         return this.fleetAuthorization(
           fleet,
           () => current.validate(),
+          current.current === undefined ? undefined : () => current.current!(),
           current.pane,
           async () => {
             if (!(await current.validate())) return undefined;
@@ -355,7 +360,11 @@ export class WorkerMcp {
   async handleFleet(fleet: string, request: Request, linked: (token: string) => boolean): Promise<Response> {
     return this.handleAuthorized(request, async (token) => {
       if (!linked(token)) throw new Error("Not this fleet's link");
-      return this.fleetAuthorization(fleet, () => linked(token));
+      return this.fleetAuthorization(
+        fleet,
+        () => linked(token),
+        () => linked(token),
+      );
     });
   }
 
@@ -371,6 +380,7 @@ export class WorkerMcp {
   private async fleetAuthorization(
     fleet: string,
     validateFleet: NonNullable<WorkerAuthorization["validateFleet"]>,
+    currentFleet: WorkerAuthorization["currentFleet"],
     pane?: string,
     nativeWriteProof?: WorkerAuthorization["nativeWriteProof"],
   ): Promise<WorkerAuthorization> {
@@ -379,7 +389,9 @@ export class WorkerMcp {
     const expiresAt = Math.floor(Date.now() / 1000) + 900;
     const records: GrantRecord[] = [];
     if (await this.fleetToolsEnabled()) {
-      const catalog = await this.options.host.catalog("operator");
+      const catalog = (await this.options.host.catalog("operator")).filter(
+        (tool) => tool.server !== "minecraft",
+      );
       for (const server of new Set(catalog.map((tool) => tool.server))) {
         try {
           const { account, binding } = await this.options.host.account(server, "operator");
@@ -421,6 +433,7 @@ export class WorkerMcp {
       fleet,
       validateFleet,
       ...(nativeWriteProof ? { nativeWriteProof } : {}),
+      currentFleet,
     };
   }
 
@@ -549,7 +562,7 @@ export class WorkerMcp {
               Object.entries(rule.arguments).every(([key, value]) => isDeepStrictEqual(args[key], value)),
           ),
         );
-        if (!current) throw new Error("Tool or arguments are not granted");
+        if (!current || current.server === "minecraft") throw new Error("Tool or arguments are not granted");
         const rule = current.tools.find((rule) => `${current.server}_${rule.name}` === name)!;
         // Manual authority stays durable; fleet authority comes from live admission and
         // the current catalog. Both retain the host's final account/config fence.
@@ -582,7 +595,15 @@ export class WorkerMcp {
                 // Admission can await I/O; read the kill switch after it.
                 fence: async () => {
                   if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
-                  if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
+                  const snapshot = await this.options.fleetToolsSnapshot?.();
+                  if (snapshot?.tools !== "connected") throw new Error("Fleet tools are off or unavailable");
+                  // The host still has account/configuration I/O to finish. These
+                  // canonical checks must not yield after that last awaited read.
+                  return () => {
+                    snapshot.assertCurrent();
+                    if (authorityNow.currentFleet?.() !== true)
+                      throw new Error("Fleet admission unavailable");
+                  };
                 },
               }),
         });

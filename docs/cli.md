@@ -126,6 +126,12 @@ The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
 Always JSON, always exit 0. `ok` means the card was produced. Missing optional
 tools are facts in `remediations`, not failures.
 
+Local fleet discovery uses `<CLANKIE_STATE>/links`, defaulting to
+`~/.clankie/links`. Local hires carry the service's absolute state path, including
+into the Codex MCP bridge. Doctor and native workers select that same directory;
+an explicit private state directory never falls back to shared discovery.
+SSH fleets keep their own machine's discovery directory.
+
 `harnessBridges.linkedSession` checks Claude/Codex panes in the discovered local
 Herdr session, even when doctor runs outside that session. On macOS it joins the
 live foreground harness and bridge ancestry (or the exact dedicated Codex
@@ -404,6 +410,10 @@ The console's `/pair` runs this same command and accepts the same flags.
 
 Public-gateway pairing uses a secure QR or full pasted link; the encryption
 credential is in its fragment. Short codes are for direct private connections.
+An ordinary offer also returns `localCode`, the offer's own short code, even when
+`code` is the gateway link; human output shows it as `On this Mac code` for the
+Mac app's **On this Mac** pairing. Only the authenticated operator's offer
+response carries it, and review offers never do.
 One link carries every route the Mac has (ADR 0204): the gateway fragment when
 remote access is on, and `direct=<origin>` when `clankie gateway direct` has
 configured a device-reachable control origin. With a direct route, the App
@@ -423,6 +433,7 @@ is omitted when the link carries neither route:
 {
   "ok": true,
   "code": "ABCD-EFGH",
+  "localCode": "ABCD-EFGH",
   "deepLink": "clankie://connect?v=1&offer=…&direct=…",
   "expiresAt": "2026-08-30T12:00:00.000Z",
   "routes": { "gateway": false, "direct": "http://my-mac.local:4311" }
@@ -507,7 +518,7 @@ See [worker posts](linear-worker-posts.md) for examples, grants and limitations.
 ### `linear status` / `linear follow on|off`
 
 When a webhook is configured, accepted events appear in the **Linear inbox**
-conversation (`linear-inbox`) as **External activity** messages, including swarm
+conversation (`linear-inbox`) as **External activity** messages, including worker
 posts delivered by the webhook. Workspace webhook events are passive history. Clankie also reads the connected
 account’s actual Linear notifications once at startup and when webhooks arrive.
 There is no periodic poll. A newly persisted, signed workspace event (or a verified exact self echo) requests a
@@ -916,6 +927,33 @@ All return JSON; a refusal exits 1. `/rivals` exposes the same commands in the T
 Notes are context, not instructions the current scripted policy understands.
 See [Rivals setup and verification](rivals.md).
 
+### `minecraft`
+
+`minecraft host status|start|stop|restart|backup` manages the integration-owned
+Paper server. Hosting is off by default, stops after 15 minutes with no players,
+and has a six-hour maximum requested-run uptime. `host configure` reads its
+settings; `host configure JSON` updates stopped-server resource, backup and
+idle/uptime settings. `host admin JSON` accepts typed administration; `host approve
+USERNAME` approves an existing verified Discord request. No op, raw RCON or
+account-secret arguments are accepted. `host tunnel claim` displays one playit
+browser claim and waits for approval; the permanent key goes straight to the
+broker. This Mac builds pinned playit source during setup and requires Cargo.
+
+`minecraft configure PROFILE HOST --version VERSION [--port PORT] [--username NAME]`
+adds an offline Java server profile. `configure` shows settings; `configure remove PROFILE`
+and `configure allow-public|revoke-public HOST [PORT]` manage destinations.
+DNS/SRV targets are resolved and checked before dial; public endpoints require an
+owner allowlist. Model tools select profile ids only.
+
+`minecraft status|profiles|join PROFILE|leave|cancel [ACTION]|pause|resume|observe`
+manages the session. `chat TEXT`, `follow PLAYER [DISTANCE]`, `goto X Y Z`,
+`dig X Y Z`, `place X Y Z ITEM`, `craft ITEM COUNT`, and `action JSON` return
+prompt action handles; `action-status ACTION` separates settlement from server
+evidence. All return JSON. Use `--conversation ID` to select an existing owning
+conversation. `/minecraft` exposes the same controls and settings in the TUI.
+Minecraft and Pokémon share one play lease, released only after confirmed
+disconnect. See [Minecraft setup and limitations](minecraft.md).
+
 <a id="model-setup"></a>
 
 ### `model [status]`
@@ -1170,6 +1208,22 @@ Update one or more persona fields atomically:
 JSON contains `{ "ok": true, "persona": { … }, "settingsFile": "…", "restart": "clankie restart captain" }`.
 The TUI `/persona` modal calls this same writer.
 
+### `desktop [status]` / `desktop quiet-hours START END TIME_ZONE|off`
+
+Read or set desktop quiet hours. Times use `HH:mm` and an IANA time zone,
+for example `clankie desktop quiet-hours 22:00 07:00 America/Chicago`.
+Overnight ranges are supported; the start is inclusive and the end exclusive.
+Equal start and end times are rejected. `clankie desktop quiet-hours off`
+removes the range. The TUI `/desktop` takes the same arguments. Changes apply
+immediately without restarting. JSON returns `desktop` and `settingsFile`.
+
+The captain's `desktop` tool can emote, move within the current display using
+normalized coordinates, or show a short bubble. Expressions carry a unique ID
+and expiry in `presence`; they last five seconds by default, up to thirty.
+Quiet hours suppress them without changing the source-derived mood. Desktop
+clients also honor macOS Focus, discard expired expressions, and show them
+without taking keyboard focus. Publishing does not confirm a client displayed it.
+
 ### `games [status]` / `games set on|off`
 
 Read or set whether the PokeAgent MMO body is available. JSON contains the
@@ -1272,12 +1326,12 @@ in the TUI call the same code. A listed harness is hired with `hire_agent`;
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--tools connected|off]` / `fleet clear`
+### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--tools connected|off] [--peer-messages on|off]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
 which (up to 4,000 characters of free text) — and the budget he sizes the fleet
-to, plus the fleet connected-tool switch. `set` takes any combination of the flags;
+to, plus the fleet connected-tool and peer-message switches. `set` takes any combination of the flags;
 what is left out keeps its value. `clear` restores every default, including tools
 `connected`. `--tools off` stops new standing tool admissions; manual grants keep
 working. A call already past its last asynchronous check can still dispatch after
@@ -1285,6 +1339,15 @@ the change; there is no proven global concurrency or cancellation bound. That is
 chosen contract: the switch stops new calls
 ([ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md), VUH-1585). `--tools connected`
 restores standing access to verified accounts through `clankie_tools` and `clankie_call`.
+
+`--peer-messages off` stops new messages between fleet workers independently of
+connected tools. It hides `list_fleet_seats` and `message_peer` from current worker
+catalogs and the service refuses sends from stale catalogs too. Existing receipts
+remain readable for reconciliation; a message already handed to a native receiver
+cannot be recalled. `--peer-messages on` restores the capability, which defaults
+to on. Workers still need proven native pane/process and matching session identity;
+a fleet bearer alone cannot send. See [worker peer messages](worker-access.md#messages-between-workers)
+and [ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608).
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the
 leadership skill (`lead`) and his prompt use them to aim.
@@ -1314,16 +1377,17 @@ The notes reach him as the `fleet` prompt section, and only on lanes that hold a
 shell — a room that cannot dispatch would carry the section for nothing. They are
 preference, not authority: the section says plainly that he still reads the work
 and decides, and a note here can no more widen his reach than a warmer persona
-can. The section carries the swarm size and model mode whenever it renders. With
+can. The section carries the fleet size and model mode whenever it renders. With
 no notes and the default budget (`max`, `optimal`) there is no section at all.
 
-JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "tools": "connected" }, "settingsFile": "…", "restart": "clankie restart" }`.
-The TUI `/fleet` command opens the same editor (size, models, connected tools, then notes)
+JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "tools": "connected", "peerMessages": "on" }, "settingsFile": "…", "restart": "clankie restart" }`.
+The TUI `/fleet` command opens the same editor (size, models, connected tools, peer messages, then notes)
 and `/fleet status` prints the same values.
 
 ```bash
 clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
 clankie fleet set --size small --models efficient
+clankie fleet set --peer-messages off
 ```
 
 <a id="runtime-setup"></a>
@@ -1508,6 +1572,50 @@ in any casing is stored lowercase. A custom role keeps the casing you typed
 and compares case-insensitively, so `Sound Designer` and `sound designer` are
 one role. `none` clears it. It prints the updated persona.
 
+`clankie agents role ROLE --project PROJECT` edits a project hire profile through
+its revision-bearing owner API. Set any of `--harness`, `--model`, `--effort`,
+`--subagent-model`, `--subagent-effort`, `--delegation native-first|panes`,
+`--account LABEL`, `--placement new-tab|split`, `--cap N` and `--naming TEXT`.
+`inherit` clears one preference; omitted fields remain unchanged. The console's
+`/agents roles` menu sets the same fields.
+
+```sh
+clankie agents role implementer --project clankie --harness codex --model "sol 6.1" --effort xhigh --subagent-model "sol 6.1" --subagent-effort medium --delegation native-first --placement new-tab
+```
+
+Explicit hire fields expressing the owner's words win over the role, then
+`fleet.hire` defaults, then the harness default. Omit fields to inherit; a model
+family override includes its harness (for example `claude` / `Opus`) and
+`subagents: null` clears incompatible inherited children for that hire. Friendly
+names resolve to exact IDs against the current model registry. Missing, retired,
+or incompatible models refuse instead of silently selecting a replacement.
+Subagent settings inherit independently and travel in the first native brief;
+the worker passes them to its harness's native spawn calls.
+
+A `native-first` hire supplies a stable `deliverable` key, such as its issue ID.
+All slices keep that key. Another pane for that project/deliverable is refused
+while the original hire is live, starting or uncertain; message that worker and
+use its native children. `panes` assigns independent slices to separate hires.
+Closing a pane releases its admission only after successful inventory confirms
+it absent. Retry reconciliation retains the original profile.
+
+`new-tab` is the normal placement. `split` opens a sibling of the verified lead
+pane in the target fleet, preserving focus. It refuses when that native lead
+cannot be verified; prepared initial-command Pi/OpenCode launches currently
+require `new-tab`. It never uses another client's focused pane as a fallback.
+Local Codex accounts use the registered account labels and homes; local Claude
+accounts use `claudeAccounts` entries (`{label, home}`) plus the implicit
+`default` profile. The owner registers their existing alternate directory with
+`clankie accounts claude add /absolute/config/home --label second` (also
+`/accounts claude` in the console); no login or profile path is guessed. Remote
+account overrides remain unsupported. Profile selection confers no grants.
+
+`clankie fleet set --hire-profile FILE.json` sets fleet hire defaults with the
+same profile keys (`subagents` is `{model, effort}`); `fleet status` includes the
+defaults and effective project role profiles. The hire result's `profile` shows
+the effective launch preferences. These settings affect new hires, not running
+agents. James's global agent instructions remain owner-authored.
+
 `clankie agents rename NAME|PERSONA_ID NEW_NAME` changes an agent's saved display
 name. Quote names containing spaces. `/agents rename NAME "NEW NAME"` is the
 same TUI action. It uses the existing `update_persona` operation with only the
@@ -1525,7 +1633,7 @@ include offline personas. The role is semantic, unlike the cosmetic
 settings are the `set_persona_role` operator op (`{ personaId, role: ROLE |
 null }`, steer grant), the `roles` op (read), and `hire_agent`'s and
 `spawn_seat`'s `role` (required in the model-facing hire tool, optional for older API clients). In the TUI, `/agents role NAME "ROLE"` and
-`/agents roles` honour quotes. The `/agents` picker shows each live agent's role.
+`/agents roles` opens the project hire-profile editor. The `/agents` picker shows each live agent's role.
 
 The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`
 (known identities), `/rooms` (group channels and Discord inspection), and
@@ -1840,6 +1948,20 @@ inspect the conversation before resubmitting. Observe replies with
 `clankie --chat ID` or the conversation API. The running service and a local
 captain credential are required.
 
+Service preparation and execution have a five-minute inactivity watchdog,
+including cold startup before a Pi session exists. Host-observed preparation
+progress and Pi events renew it. The watchdog is suspended while one or more Pi
+tools execute; tools retain their own timeout and cancellation behavior. A full
+five-minute idle window resumes after the last tool ends. Before execution starts,
+or with no active tool and no preparation or streamed progress, inactivity still
+times out after five minutes. Healthy work has no total duration cap, and queued
+runs do not consume the timeout while waiting. A stalled stored run fails
+with `conversation_turn_stalled`; the service log names its conversation, run ID
+and stalled phase. The host releases its admission so later inputs can proceed, but its
+original receipt remains and the request is never replayed. Earlier effects may
+have an unknown outcome; inspect the original run before retrying. See
+[ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md#stalled-service-preparation-and-execution-vuh-1613).
+
 `--attach PATH` (repeatable, at most eight) sends images or video with the
 message: PNG, JPEG, HEIC/HEIF, GIF and WebP up to 20 MiB, and MP4 or MOV up to
 200 MiB. The message may then be empty. Each file is uploaded through the
@@ -2128,7 +2250,7 @@ is detected there, which binds the pane to his own persona rather than a fleet
 contact; a second pane claiming the name stays an ordinary fleet agent and is
 told so on stderr. The pane is un-named again when the session ends.
 
-Every fresh seat starts a new Claude Code session under a recorded id and creates
+Every fresh Claude launch starts a new Claude Code session under a recorded id and creates
 a separate workspace chat through `POST /v1/captain/seat-context`, rooted at the
 launch directory. Multiple launches in the same directory or account each get
 their own chat, transcript, tool context and wake channel. The chat is available
@@ -2151,6 +2273,9 @@ escalations, wakes and watches instead of starting a service model turn. Closing
 the seat returns new inputs to the service runner. A turn already accepted by
 either destination keeps that destination; uncertain native delivery is never
 replayed automatically. Existing Pi goal continuations retain their service loop.
+Stalled service preparation releases its admission so the attached seat can take
+later queued inputs. Native delivery keeps its existing acknowledgment deadlines
+and ten-minute escalation reply wait; it has no new five-minute reply cutoff.
 Selecting `global-default` affects only that chat. To drive a Discord room,
 select its conversation; replies return through the original room delivery and
 authority checks. Rooms remain read-only to ordinary `send` and `reset` commands.
@@ -2194,7 +2319,7 @@ later room message. See [ADR 0218](adr/0218-native-seats-drive-their-attached-co
 The [plugin README](../integrations/claude-plugin/README.md) describes the component
 source and session-only channel identity.
 
-`--harness codex` opens the real Codex TUI on its own app-server thread.
+`clankie codex` opens the real Codex TUI on its own app-server thread.
 Install the [Codex seat plugin](../integrations/codex-plugin/README.md) first.
 The launch plan includes a typed `hook_trust_required` owner step: review the
 plugin in Codex's `/hooks`, then exit and launch the seat again. The launcher never
@@ -2242,7 +2367,9 @@ development-channels dialog but then rejects `server:` as not on the approved
 allowlist. The service's hire path persists the server and passes the dangerous
 flag for a claude seat.
 
-### `mcp --fleet`: fleet connected tools
+<a id="mcp-fleet-fleet-connected-tools"></a>
+
+### `mcp --fleet`: fleet tools and native worker messages
 
 Register `clankie mcp --fleet` in Codex with `env_vars = ["HERDR_PANE_ID",
 "HERDR_SOCKET_PATH"]`, or install the `clankie-worker@clankie` Claude plugin.
@@ -2256,8 +2383,10 @@ A bearer proves only its fleet, with no verified pane or mailbox authority.
 No project grant, native session or workspace proof is needed for these tools.
 Projects retain roles, caps, hiring and tracker binding.
 
-The service lists exactly `clankie_tools` and `clankie_call`; the worker plugin
-adds `message_clankie`. Search with `{query}` for at most 20 names/descriptions,
+The connected-tool service lists `clankie_tools` and `clankie_call`; the shared
+worker bridge adds `message_clankie` and, for a proven native sender while peer
+messages are on, `list_fleet_seats` and `message_peer`. Search connected tools
+with `{query}` for at most 20 names/descriptions,
 or `{names}` for up to 10 input schemas, then call with `{name, arguments}`.
 `message_clankie` reports to the conversation that hired the worker. A
 host-admitted `message_seat` from another conversation adopts that worker, so
@@ -2272,6 +2401,30 @@ last asynchronous check can still reach a provider after tools-off or admission
 loss. The strict refusal guarantee is not met; see
 [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md) and VUH-1585. Manual
 grants keep their existing restrictions.
+
+Use `list_fleet_seats({})` to discover seats in the sender's own fleet, then pass
+the returned recipient `seatId` as `seat` to `message_peer({seat, text})`. The
+bridge obtains the sender and recipient bindings; workers do not supply them.
+Both the Claude worker plugin and `clankie mcp --fleet` use `runSeatChannel` for
+this path. The server requires the caller's proven native pane process and matching
+session, confines recipients to the same fleet and checks their current binding.
+Peer content reaches the existing `message_seat` native channel/session delivery
+path as agent output, never an owner instruction. It records a server audit and
+an agent-role message in Clankie's default transcript. Native channel events carry
+`source: peer`; the exchange does not wake him or create an owner turn.
+
+An uncertain peer send keeps its original receipt. Reconcile that ID through
+`GET /v1/fleet/seats/{paneId}/peer-messages/{id}`; do not issue another POST,
+delete receipt state or switch bridges to replay it. Discovery uses
+`GET /v1/fleet/seats/{paneId}/peers`; new sends use
+`POST /v1/fleet/seats/{paneId}/peer-messages`. These worker routes derive authority
+from the admitted identity, not caller-supplied pane or fleet fields. Receipt reads
+remain available with peer messages off. A lost recipient binding terminates
+reconciliation as `recipient_gone` with outcome `unconfirmed`: delivery stays
+unknown, the original is never resent, and fresh messages are allowed. The service
+keeps full bodies for the latest 100 settled messages and all unresolved originals;
+older settled bodies become exact compact receipts that still prevent ID replay.
+See [worker access](worker-access.md#messages-between-workers).
 
 `doctor.harnessBridges` reports installation, registration and invoking-process
 membership separately. Remote project `eligibility: unsupported` does not mean
@@ -2289,7 +2442,8 @@ The console exposes the same verbs through `/project`.
 The changes file may contain `name`, `roles`, `workerCap` and `trackerRef`.
 Omitted fields remain unchanged; `null` removes a worker cap or tracker binding.
 An empty roles list inherits the six built-in roles; an explicit list defines
-the available roles and may set their model, effort and concurrency cap. Zero
+the available roles and may set their whole hire profile (harness, model, effort,
+subagents, delegation, account, placement), naming rule and concurrency cap. Zero
 prevents new hires, while an absent cap adds no limit. These settings affect
 new hire admission, not the configuration of already running agents.
 
@@ -2693,8 +2847,8 @@ The single hosted-device authority policy allows chat, fleet, terminal, model,
 keys, persona and connections. **Restart, reset and deprovision require the
 account page/control plane**, including when attempted through the old device
 relay. The API policy does not inspect shell commands typed under terminal
-control. Local lifecycle, autostart, sockets, `seat`, `mcp` and shell escapes
-refuse in hosted mode.
+control. Local lifecycle, autostart, sockets, native harness commands
+(`claude[N]`, `codex[N]`, `opencode`), `mcp` and shell escapes refuse in hosted mode.
 
 Closing the client leaves accepted work running. `logout` forgets this Mac's
 device credential and wake key and selects This Mac for the next launch;
@@ -2895,3 +3049,17 @@ The owner endpoints are `POST /v1/operator/projects/add-worktree-root`
 (`projectId`, `rootId`, `expectedRevision`). Read the current revision from
 `GET /v1/operator/projects`. Both writes recheck owner authority and settings
 immediately before persistence; enrollment also re-observes the native root/repo.
+
+### Present tense
+
+`clankie status` and the TUI `/status` include the service's `presence` snapshot
+when it answers. The operator `presence` read accepts a cursor and `waitMs` up
+to 30000 ms; callers with the current cursor wait for a projected change. Mood
+priority is needs_you, thinking, in_voice, playing, leading, idle. Thinking
+includes background Discord captain turns. `activeSeats` counts all live
+registered fleet seats, including those waiting between turns. The oldest
+unanswered owner preference appears as `pendingOwnerItem`, with the conversation
+and question IDs needed to open it. `since` is a source start timestamp, or null
+when that source has no known start. An unreachable service has no mood; clients
+show that connection failure separately. The same read passes through the relay
+and hosted paired-device authority seam.

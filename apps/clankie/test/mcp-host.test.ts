@@ -488,6 +488,20 @@ describe("mcp host", () => {
     const call = () => host.call({ lane: "operator", server: "tracker", tool: "identity", arguments: {} });
     try {
       expect(await call()).toMatchObject({ outcome: "ok", content: "first-test-account" });
+      const guard = vi.fn(() => {
+        if (guard.mock.calls.length === 2) throw new Error("revoked before stdin write");
+      });
+      expect(
+        await host.call({
+          lane: "operator",
+          server: "tracker",
+          tool: "identity",
+          arguments: {},
+          fence: async () => guard,
+        }),
+      ).toMatchObject({ outcome: "refused", detail: "revoked before stdin write" });
+      expect(guard).toHaveBeenCalledTimes(2); // Host dispatch, then the actual stdio send boundary.
+      expect(await call()).toMatchObject({ outcome: "ok", content: "first-test-account" });
       await credentials.set("tracker", { type: "api", key: "second-test-account" });
       expect(await call()).toMatchObject({ outcome: "ok", content: "second-test-account" });
       await credentials.delete("tracker");

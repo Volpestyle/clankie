@@ -12,7 +12,9 @@ with the real dependency named in the claim.
 
 ## Proof ladder
 
-Run all applicable rungs; a higher rung does not replace the lower ones.
+Choose checks for the changed claim and risk; reuse evidence for unchanged
+inputs. A higher rung does not replace a relevant lower one. Evals are manual-only:
+never include them implicitly in a build, release gate or `pnpm check`.
 
 1. Characterize the promised public boundary with a deterministic dependency.
    Cover every success, refusal, and stop branch there, not helper functions.
@@ -35,7 +37,7 @@ where a list of asserted maybes proves nothing.
 
 ## Game-body boundary
 
-- There is one body: his credentialed seat in a hosted PokeAgents world
+- Pokémon uses his credentialed seat in a hosted PokeAgents world
   ([ADR 0145](../../../docs/adr/0145-the-world-is-the-only-body.md)). No
   emulator runs in this repo, so "it booted locally" is not a claim available
   to you.
@@ -50,6 +52,13 @@ where a list of asserted maybes proves nothing.
   follow-up unless the checked revision actually contains it.
 - `EnvironmentRuntime` lease expiry/recovery is an internal runtime property,
   not evidence that one process can possess another process's body.
+
+Minecraft is a separate service-owned MCP motor under the same conversation
+`play` lease; use `docs/minecraft.md` and ADR 0219. Offline Paper conformance
+cannot establish Microsoft authentication, a friend session or Discord viewing.
+For native fleets, match the proof to the conversation, fleet-qualified seat,
+current native occupant and original receipt. Host discovery alone does not
+prove the worker accepted tools or a report reached its hiring/adopting lead.
 
 ## What a live proof must demonstrate
 
@@ -214,8 +223,8 @@ comparable evidence; a merged fix alone is applied.
 
 ## Instruction and skill comparisons
 
-Use the checkout-only subscription eval runner described in [docs/evals.md](../../../docs/evals.md)
-before cutting standing instructions or bundled skills (ADR 0203). Preview with
+For an explicitly requested comparison, use the checkout-only subscription eval runner described in [docs/evals.md](../../../docs/evals.md)
+for instruction-quality comparisons (ADR 0203); objective stale-command/path repairs do not require an eval ritual. Preview with
 `node scripts/evals/run.mjs --dry-run`; default execution is up to three Claude calls,
 with no retries. Keep Codex sampling small while its weekly budget is low.
 Compare matched cases under `current`, `plain`, and `trimmed`, and retain failed

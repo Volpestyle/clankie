@@ -28,6 +28,8 @@
         "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
         "integrations/claude-plugin/worker/bin/fleet-mcp.mjs",
         "integrations/claude-plugin/worker/bin/inbound-receipt.d.mts",
+        "integrations/claude-plugin/worker/bin/peer-receipt.d.mts",
+        "integrations/claude-plugin/worker/bin/catalog-watch.d.mts",
         "integrations/codex-plugin/hooks/run.mjs",
         "integrations/opencode-plugin/plugin.mjs",
         "integrations/claude-plugin/worker/bin/seat-hook.mjs",
@@ -48,11 +50,17 @@
     "apps/discord-user-session": {
       "entry": ["src/presence-runtime-module.ts"]
     },
+    "integrations/minecraft-mcp": {
+      "entry": ["test/**/*.test.ts"]
+    },
     "packages/play": {
       "ignoreExportsUsedInFile": true
     },
     "apps/tui": {
       "entry": ["bin/runtime-update-helper.mjs"]
+    },
+    "packages/vec3": {
+      "entry": ["test/**/*.test.ts"]
     }
   },
   "ignoreIssues": {

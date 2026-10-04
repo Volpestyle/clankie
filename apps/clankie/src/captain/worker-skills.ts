@@ -82,6 +82,11 @@ export async function workerSkills(
       await symlink(source, destination);
     }
   }
+  await writeFile(join(overlay, "config.toml"), "", { flag: "wx", mode: 0o600 }).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error;
+    },
+  );
   // Keep personal tool skills (and system skills), with bundle names winning.
   const bundled: readonly string[] = [...catalog.map((skill) => skill.name), ...mergedLeadershipSkills];
   for (const skill of catalog) {
@@ -91,7 +96,7 @@ export async function workerSkills(
     if (!bundled.includes(name))
       await symlink(join(codexHome, "skills", name), join(overlay, "skills", name));
   }
-  return { args: [], env: { CODEX_HOME: overlay } };
+  return { args: [], env: { CODEX_HOME: overlay, CLANKIE_CODEX_ISOLATED_HOME: overlay } };
 }
 
 /**

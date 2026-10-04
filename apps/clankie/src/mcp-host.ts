@@ -31,6 +31,7 @@ import {
   type LinearRecipient,
   type WorkerWriteAuthority,
 } from "./captain/conversation-owner.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -60,6 +61,10 @@ const MAX_DATA_RESULT_BYTES = 8 * 1024 * 1024;
 const MAX_DESCRIPTION_CHARACTERS = 4_000;
 const CONNECT_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 60_000;
+/** Per invocation, including the SDK's later credential/header awaits; never connection-global. */
+const dispatchFence = new AsyncLocalStorage<(() => void) | undefined>();
+/** Refusal before a wire effect does not mean the shared provider connection failed. */
+class DispatchRefused extends Error {}
 /**
  * How long a failed connection is remembered before the next call retries.
  *
@@ -87,7 +92,15 @@ interface McpToolDescriptor {
   readonly initial: boolean;
 }
 
-type McpRefusalReason = "unknown_server" | "lane_denied" | "server_unavailable" | "result_too_large";
+type McpRefusalReason =
+  | "unknown_server"
+  | "lane_denied"
+  | "server_unavailable"
+  | "result_too_large"
+  | "body_owned";
+
+/** In-process service capability; HTTP/model arguments can never construct this symbol. */
+export const MINECRAFT_BODY_ACCESS = Symbol("minecraft-body-access");
 
 type McpCallResult =
   | { readonly outcome: "ok"; readonly content: string; readonly isError: boolean }
@@ -110,9 +123,13 @@ export interface McpHost {
     readonly arguments: Record<string, unknown>;
     /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
     readonly resultMode?: "model" | "data";
+    /** Host-selected bound for setup operations; never a model tool argument. */
+    readonly timeoutMs?: number;
+    /** Only MinecraftMcpPort holds Clankie's motor; raw and delegated routes are denied. */
+    readonly bodyAccess?: typeof MINECRAFT_BODY_ACCESS;
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
-    /** Live authority check run after the host's own awaits, immediately before the provider call. */
-    readonly fence?: () => Promise<void>;
+    /** Async admission may return a synchronous revocation check run after the final host reads. */
+    readonly fence?: () => Promise<void | (() => void)>;
     /** Host-stamped turn attribution; it grants no provider tools. */
     readonly conversationAuthority?: ConversationAuthority;
     /** Host-only socket/controller proof for native author attribution; never a grant. */
@@ -156,6 +173,12 @@ const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
 ];
 
 export interface McpHostOptions {
+  /** Shipped lazy motor, reserved for the service's MinecraftPort rather than raw catalogs. */
+  readonly minecraftMotor?: {
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly cwd?: string;
+  };
   readonly credentials: CredentialStore;
   readonly settings: SettingsStore;
   readonly logger: McpHostLogger;
@@ -189,7 +212,11 @@ export interface McpHostOptions {
 /** The part of an MCP client this host uses, so tests can supply a fake. */
 export interface McpConnection {
   listTools(): Promise<readonly { name: string; description?: string | undefined; inputSchema?: unknown }[]>;
-  callTool(name: string, args: Record<string, unknown>): Promise<{ content: string; isError: boolean }>;
+  callTool(
+    name: string,
+    args: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<{ content: string; isError: boolean }>;
   close(): Promise<void>;
 }
 
@@ -233,9 +260,24 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     const settings = await options.settings.load();
     // An explicitly disabled owner entry suppresses the curated default too.
     const authoredIds = new Set(settings.mcp.servers.map((server) => server.id));
+    const minecraft = options.minecraftMotor;
     const servers = [
       ...curated.filter((server) => !authoredIds.has(server.id)),
-      ...settings.mcp.servers,
+      ...settings.mcp.servers.filter((server) => minecraft === undefined || server.id !== "minecraft"),
+      ...(minecraft === undefined
+        ? []
+        : [
+            {
+              id: "minecraft",
+              transport: "stdio" as const,
+              command: minecraft.command,
+              args: [...minecraft.args],
+              ...(minecraft.cwd === undefined ? {} : { cwd: minecraft.cwd }),
+              lane: "operator" as const,
+              initialTools: [],
+              enabled: true,
+            },
+          ]),
     ].filter((server) => server.enabled);
     await Promise.all(
       [...states].map(async ([id, state]) => {
@@ -461,6 +503,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       const now = Date.now();
       const collected: McpToolDescriptor[] = [];
       for (const server of await activeServers()) {
+        if (server.id === "minecraft") continue;
         if (!laneAllows(server, lane)) continue;
         try {
           collected.push(...(await toolsFor(server, now)));
@@ -473,6 +516,15 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     },
 
     async call(input) {
+      if (
+        input.server === "minecraft" &&
+        (input.bodyAccess !== MINECRAFT_BODY_ACCESS || input.delegation !== undefined)
+      )
+        return {
+          outcome: "refused",
+          reason: "body_owned",
+          detail: "Clankie's Minecraft body is reachable only through the Minecraft service tools.",
+        };
       input = { ...input, arguments: structuredClone(input.arguments) };
       const providedSource = input.conversationAuthority
         ? captureConversationAuthority(input.conversationAuthority)
@@ -512,6 +564,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         };
       }
       let state: ServerState | undefined;
+      let dispatched = false;
       try {
         state = await stateFor(server);
         const client = await connection(server, state, now);
@@ -556,9 +609,20 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           recipient ??= authority ? { kind: "conversation", owner: authority.owner } : undefined;
         };
         await refreshAttribution();
-        // Attribution may await; provider authority is checked at the final boundary.
-        await input.fence?.();
+        // Admission may await; retain the account/config fence after it, then
+        // check revocation without yielding again before provider dispatch.
+        const current = input.fence ? await input.fence() : undefined;
         await assertCurrent(server, state);
+        const assertDispatch = () => {
+          try {
+            if (closed || states.get(server.id) !== state) throw new Error(`${server.id} connection changed`);
+            current?.();
+          } catch (error) {
+            throw new DispatchRefused(error instanceof Error ? error.message : "MCP dispatch refused");
+          }
+        };
+        assertDispatch();
+        dispatched = true;
         const result = workerPost
           ? await publishLinearWorker({
               tool: input.tool,
@@ -567,12 +631,17 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               author: options.linearAuthor ?? (async () => undefined),
               beforeWrite: async () => {
                 await refreshAttribution();
-                await input.fence?.();
+                const current = await input.fence?.();
                 await assertCurrent(server, state!);
+                current?.();
               },
               ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
             })
-          : await client.callTool(input.tool, input.arguments);
+          : await dispatchFence.run(assertDispatch, () =>
+              input.timeoutMs === undefined
+                ? client.callTool(input.tool, input.arguments)
+                : client.callTool(input.tool, input.arguments, input.timeoutMs),
+            );
         options.logger.info(
           {
             event: "mcp.host.call",
@@ -640,7 +709,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       } catch (error) {
         // A call that fails may have killed the process; drop the connection so
         // the next attempt reconnects instead of writing to a closed pipe.
-        if (state !== undefined && state.failure === undefined) await retire(server.id, state);
+        if (
+          dispatched &&
+          !(error instanceof DispatchRefused) &&
+          state !== undefined &&
+          state.failure === undefined
+        )
+          await retire(server.id, state);
         return {
           outcome: "refused",
           reason: "server_unavailable",
@@ -738,9 +813,12 @@ async function connectServer(
       return collected;
     },
 
-    async callTool(name, args) {
+    async callTool(name, args, timeoutMs) {
       const result = await client.callTool({ name, arguments: args }, undefined, {
-        timeout: REQUEST_TIMEOUT_MS,
+        timeout:
+          timeoutMs === undefined
+            ? REQUEST_TIMEOUT_MS
+            : z.number().int().positive().max(600_000).parse(timeoutMs),
       });
       const blocks = Array.isArray(result.content) ? result.content : [];
       const text = blocks
@@ -790,6 +868,7 @@ async function createTransport(
         if (providerId !== undefined) {
           headers.set("authorization", `Bearer ${await selectedBearer()}`);
         }
+        dispatchFence.getStore()?.();
         return fetch(url, { ...init, headers });
       },
     });
@@ -804,11 +883,20 @@ async function createTransport(
   if (server.credential !== undefined && server.credentialEnv !== undefined) {
     environment[server.credentialEnv] = await selectedBearer();
   }
-  return new StdioClientTransport({
+  const transport = new StdioClientTransport({
     command: server.command,
     args: [...server.args],
+    ...((server as McpServerSettings & { cwd?: string }).cwd === undefined
+      ? {}
+      : { cwd: (server as McpServerSettings & { cwd?: string }).cwd }),
     env: environment,
     // Servers chat on stderr; it must not land in the operator's console.
     stderr: "ignore",
   });
+  const send = transport.send.bind(transport);
+  transport.send = (message) => {
+    dispatchFence.getStore()?.();
+    return send(message);
+  };
+  return transport;
 }

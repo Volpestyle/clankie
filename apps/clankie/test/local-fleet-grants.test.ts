@@ -65,6 +65,12 @@ it("gives proven local panes the two-tool bridge without project proof and reche
     credentials,
     host,
     fleetTools: async () => tools,
+    fleetToolsSnapshot: async () => ({
+      tools,
+      assertCurrent: () => {
+        if (tools !== "connected") throw new Error("Fleet tools are off");
+      },
+    }),
     projects: async () => ProjectsSettingsSchema.parse({ projects: [{ id: "test", name: "Test" }] }),
   });
   let live = true;

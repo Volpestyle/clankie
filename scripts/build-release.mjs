@@ -19,7 +19,11 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { build } from "esbuild";
-import { copyBrowserUseRuntime } from "./release/node-runtime.mjs";
+import {
+  copyBrowserUseRuntime,
+  copyMinecraftRuntime,
+  minecraftRuntimePackages,
+} from "./release/node-runtime.mjs";
 import { buildHerdr, herdrPin, herdrSource } from "./build-herdr.mjs";
 import { bundleHerdrSkill } from "./release/herdr-skill.mjs";
 
@@ -48,6 +52,7 @@ const entrypoints = [
   "apps/discord-user-session/src/index.ts",
   "apps/discord-user-session/src/presence-runtime-module.ts",
   "apps/discord-activity/src/index.ts",
+  "integrations/minecraft-mcp/src/main.ts",
 ];
 const bundleBanner =
   'import { createRequire as __clankieCreateRequire } from "node:module"; ' +
@@ -56,6 +61,7 @@ const licenseName = /^(?:licen[cs]e|copying|notice|copyright)(?:[._-].*)?$/iu;
 const spdxLicenseChecksums = new Map([
   ["Apache-2.0", "c274f80372d90c012937370f0e1f15087d22e308ef98b27cea5dc0d2d088366c"],
   ["BSD-2-Clause", "ffcd6a8c421ee58d9f85b115ee0642805be3b497d2023565739622f044dc11e2"],
+  ["CC0-1.0", "e0456cbab4f7b5e7203e678faff37eadbdfef02e822db3b7a52a1dd9d3dc514a"],
   ["LGPL-2.1-or-later", "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"],
   ["MIT", "c3b1b78bc8bd3ea13aa4bc9778442d16560270afa235006d816e5e88cef24db4"],
   ["MPL-2.0", "66c10535a495f4cd8115607e890f8116d657064b98557f660c51e123b3f3fee6"],
@@ -98,7 +104,7 @@ try {
     absWorkingDir: repoRoot,
     banner: { js: bundleBanner },
     bundle: true,
-    external: ["@browser_use/pi"],
+    external: ["@browser_use/pi", ...minecraftRuntimePackages],
     entryPoints: entrypoints,
     format: "esm",
     logLevel: "info",
@@ -110,7 +116,10 @@ try {
   });
   await writeFile(metafile, JSON.stringify(bundle.metafile));
 
-  externalPackageRoots = [...(await copyBrowserUseRuntime(repoRoot, releaseRoot))];
+  externalPackageRoots = [
+    ...(await copyBrowserUseRuntime(repoRoot, releaseRoot)),
+    ...(await copyMinecraftRuntime(repoRoot, releaseRoot)),
+  ];
   await copyRuntimeAssets(releaseRoot);
   await copyDynamicRuntimePackages(releaseRoot, metafile);
   if (hosted) {
@@ -201,6 +210,10 @@ async function copyRuntimeAssets(targetRoot) {
     ["docs/worker-access.md", "docs/worker-access.md"],
     ["docs/model-keys.md", "docs/model-keys.md"],
     ["docs/rivals.md", "docs/rivals.md"],
+    ["docs/minecraft.md", "docs/minecraft.md"],
+    ["integrations/minecraft-mcp/LICENSE", "integrations/minecraft-mcp/LICENSE"],
+    ["integrations/minecraft-mcp/NOTICE", "integrations/minecraft-mcp/NOTICE"],
+    ["integrations/minecraft-mcp/README.md", "integrations/minecraft-mcp/README.md"],
     ["docs/discord-ingress.md", "docs/discord-ingress.md"],
     ["infra/hosted/README.md", "infra/hosted/README.md"],
     ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
@@ -444,7 +457,18 @@ function componentMetadata(manifest, root) {
   if (typeof manifest.name !== "string" || typeof manifest.version !== "string") {
     throw new Error(`Invalid package metadata at ${root}`);
   }
-  const license = typeof manifest.license === "string" ? manifest.license : "UNKNOWN";
+  // Older packages (including the viewer's xmlhttprequest-ssl) declare their
+  // licenses in the original npm array. Keep those declarations and still
+  // require the corresponding license text when assembling the inventory.
+  const legacyLicenses = Array.isArray(manifest.licenses)
+    ? manifest.licenses.map((entry) => entry?.type)
+    : [];
+  const license =
+    typeof manifest.license === "string"
+      ? manifest.license
+      : legacyLicenses.length > 0 && legacyLicenses.every((entry) => typeof entry === "string" && entry)
+        ? legacyLicenses.join(" OR ")
+        : "UNKNOWN";
   if (license === "UNKNOWN")
     throw new Error(`Package ${manifest.name}@${manifest.version} has no declared license`);
   const homepage =
