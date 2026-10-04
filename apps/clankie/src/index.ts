@@ -606,6 +606,7 @@ const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
     const proof = await localProjectProcessObserver("default", pane);
     return proof?.nativeSessionPending ? undefined : proof?.nativeOccupantId;
   },
+  warn: (message) => logger.warn({ event: "local_codex_seats.unreadable" }, message),
 });
 const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-room-observations.json"));
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));

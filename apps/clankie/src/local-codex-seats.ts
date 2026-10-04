@@ -54,6 +54,7 @@ interface DurableSeats {
   path: string;
   /** Fresh native foreground observation, required before admitting a restored server. */
   observeOccupant(pane: string): Promise<string | undefined>;
+  warn?(message: string): void;
 }
 
 /** Private app-servers belong to a view allocated by the service, including pending startup. */
@@ -72,7 +73,16 @@ export class LocalCodexSeats {
         stored = StateSchema.parse(JSON.parse(readFileSync(durable.path, "utf8")));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-        throw new Error("Private Codex launch records are unreadable", { cause: error });
+        // An unreadable record must not stop the service from starting: restore
+        // nothing and keep the file aside for inspection.
+        const aside = `${durable.path}.unreadable-${Date.now()}`;
+        try {
+          renameSync(durable.path, aside);
+        } catch {
+          // Leave it in place; the next save replaces it atomically.
+        }
+        durable.warn?.(`Private Codex launch records were unreadable; moved to ${aside} and restored none`);
+        return;
       }
       for (const { pid, start, ...seat } of stored.seats)
         this.seats.set(pid, { ...seat, start: Promise.resolve(start), capturedStart: start, restored: true });

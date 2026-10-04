@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
@@ -284,11 +284,26 @@ it.each(["release", "replacement"])(
   },
 );
 
-it("fails closed on corrupt controller launch records", () => {
+it("fails closed on corrupt controller launch records without blocking startup", async () => {
   const f = durableFixture();
   try {
     writeFileSync(f.path, "corrupt");
-    expect(() => f.create()).toThrow("Private Codex launch records are unreadable");
+    const warn = vi.fn();
+    const registry = new LocalCodexSeats(
+      () => f.binding,
+      async () => "original",
+      {
+        path: f.path,
+        observeOccupant: f.observeOccupant,
+        warn,
+      },
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("unreadable"));
+    expect(readdirSync(f.root).some((name) => name.startsWith("seats.json.unreadable-"))).toBe(true);
+    expect(await registry.allows([55, 42], "w1:p1", f.binding)).toBe(false);
+    // New registrations still persist after the bad file was set aside.
+    await registry.register(42, "w1:p1").bindSession?.("thread");
+    expect(JSON.parse(readFileSync(f.path, "utf8")).seats).toHaveLength(1);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
