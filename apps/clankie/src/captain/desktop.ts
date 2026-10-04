@@ -11,7 +11,7 @@ import {
 } from "@clankie/protocol/presence";
 
 const duration = z.number().int().min(1000).max(30000).default(5000);
-export const DesktopRequestSchema = z.discriminatedUnion("kind", [
+const DesktopRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("emote"), animation: DesktopAnimationSchema, durationMs: duration }).strict(),
   z
     .object({ kind: z.literal("say"), text: z.string().trim().min(1).max(200), durationMs: duration })
