@@ -1,3 +1,7 @@
+import {
+  nativeClaudeCollectorSelection,
+  assertNativeClaudeSelection,
+} from "./lead-native-claude-runtime.mjs";
 /** Protected retention for native observations; never a launch/account/budget authority. */
 import {
   constants,
@@ -116,8 +120,21 @@ export async function startNativeClaudeCollector({ container, ownerAttachment, s
     !HEX.test(container.id)
   )
     throw Error("Exact created native container and owner attachment required");
-  exactKeys(selection, ["paneId", "cwd", "sessionId", "argv", "executableSha256"]);
+  const launchSelection = selection;
+  selection = nativeClaudeCollectorSelection(launchSelection, container);
+  exactKeys(selection, [
+    "paneId",
+    "cwd",
+    "sessionId",
+    "argv",
+    "executableSha256",
+    "launchPid",
+    "launchStartTicks",
+  ]);
   if (
+    !Number.isSafeInteger(selection.launchPid) ||
+    selection.launchPid < 1 ||
+    !/^[1-9][0-9]*$/u.test(selection.launchStartTicks) ||
     !/^w[A-Za-z0-9]+:p[A-Za-z0-9]+$/u.test(selection.paneId) ||
     selection.cwd !== "/eval/tasks/lead" ||
     !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(selection.sessionId) ||
@@ -298,12 +315,15 @@ export async function startNativeClaudeCollector({ container, ownerAttachment, s
       )
     )
       throw Error("Invalid native process binding");
+    if (value.pid !== selection.launchPid || value.startTicks !== selection.launchStartTicks)
+      throw Error("Capture selected another launch lifetime");
     if (rootBinding && !isDeepStrictEqual(rootBinding, value)) throw Error("Native process lifetime changed");
     rootBinding ??= structuredClone(value);
   };
   const handle = async (frame) => {
     assertLive();
     await checkOwner();
+    if (frame.kind !== "ready") await assertNativeClaudeSelection(launchSelection, container);
     assertLive();
     lastFrameAt = Date.now();
     if (frame.kind !== "ready" && !transportReady) throw Error("Capture frame before ready");

@@ -92,7 +92,7 @@ it("keeps every imported readiness claim non-authorizing and returns independent
     "claude-physical-request-fence-unavailable",
   );
   result.missing.length = 0;
-  expect(nativeClaudeArmReadiness().missing.length).toBe(5);
+  expect(nativeClaudeArmReadiness().missing.length).toBe(6);
 });
 it("writes a scrubbed interactive plan with independent indexes but never authorizes launch", () => {
   const f = fixture(),
@@ -351,4 +351,18 @@ it("exports only lifecycle fields and payload hashes, never prompt or arbitrary 
   expect(left.events[0].encodedPayloadBytes).toBe(Buffer.byteLength(JSON.stringify(first)));
   expect(left.events[0].encodedPayloadSha256).not.toBe(right.events[0].encodedPayloadSha256);
   expect(left.lastHash).not.toBe(right.lastHash);
+});
+
+it("keeps controller plan identity private and ignores mutations of its public prepared copy", () => {
+  const f = fixture(),
+    plan = prepareNativeClaudePlan(f);
+  const container = { root: f.root, image: f.image };
+  expect(() => claudePlan.requireNativeClaudePlan({ ...plan }, container)).toThrow(/controller-prepared/);
+  expect(() => claudePlan.requireNativeClaudePlan(plan, { ...container, root: "/other" })).toThrow();
+  expect(() => claudePlan.requireNativeClaudePlan(plan, { ...container, image: "other" })).toThrow();
+  plan.argv[0] = "/forged";
+  plan.artifact.sha256 = "forged";
+  const original = claudePlan.requireNativeClaudePlan(plan, container);
+  expect(original.argv[0]).toBe("/opt/claude/bin/claude");
+  expect(original.artifact.sha256).toBe(f.executableSha256);
 });
