@@ -5,20 +5,17 @@ description: "Write to Linear correctly and concisely — the API mechanics that
 
 # Writing to Linear
 
-Tool names here (`save_issue`, `list_comments`, `get_status_updates`) are the
-**`linear-server` MCP's**. On the claude.ai native Linear connector the calls
-won't match — check which one you have before following any snippet below.
-Which connector to prefer is a per-person setup choice, not a rule this skill
-makes.
+Discover the actual Linear tool schemas before using examples below. Unprefixed
+names refer to the `linear-server` MCP; Clankie's connected tools use qualified
+`linear_*` names and may have different parameters. Use the workspace/account
+selected by the task and verify the authenticated actor before a write.
 
-Team-specific facts — which labels exist, what the workflow states are, who
-owns deploys — live in that team's own skill.
-
-In a confirmed Clankie fleet, load the shipped `clankie` skill for connected
-account identity, connected tools through the fleet bridge and worker posting
-routes. Its route
-takes precedence over the generic connector examples here; this skill keeps the
-Linear editing and writing rules.
+In Clankie's confirmed fleet, load `clankie`. Admitted linked panes discover
+verified connected-account tools with `clankie_tools` and invoke them with
+`clankie_call`; no short manual grant/revoke cycle is needed for ordinary fleet
+access. Persona-bound worker publishing still needs an exact grant or the lead.
+Missing tools do not authorize a harness's independent Linear connector. A Herdr
+environment variable or executable alone does not establish fleet admission.
 
 ## Linear is the source of truth
 
@@ -87,7 +84,7 @@ unchanged through `save_*` downgrades it to a file card.
 ## Write within the authorized scope
 
 Linear holds durable product, engineering and design work, decisions and
-evidence. Local swarm events — pane assignments, leadership transfers, usage
+evidence. Local fleet events — pane assignments, leadership transfers, usage
 limits and queue coordination — belong in realtime agent messages or local
 handoffs, not issue comments or descriptions.
 

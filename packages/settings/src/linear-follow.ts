@@ -6,12 +6,18 @@ export function linearFollowStatus(settings: LinearWebhookSettings, secretPresen
   if (!settings.url) missingWebhook.push("url");
   if (!secretPresent) missingWebhook.push("secret");
   const webhookConfigured = missingWebhook.length === 0;
+  const missingOwnerIds =
+    settings.following && settings.wake.actors.includes("owner") && settings.wake.ownerUserIds.length === 0;
+  const wakeWarning = missingOwnerIds
+    ? `following is on, but no owner IDs, so owner comments never wake.${settings.wake.actors.some((actor) => actor !== "owner") ? " Other selected actor rules may still wake." : ""}`
+    : null;
   return {
     following: settings.following,
     active: settings.following && webhookConfigured,
     webhookConfigured,
     reason: webhookConfigured ? null : ("linear_webhook_required" as const),
     missingWebhook,
+    wakeWarning,
     detail: webhookConfigured
       ? null
       : `Following requires a configured Linear webhook (missing: ${missingWebhook.join(", ")}). Use /connect linear → Follow Linear → Configure webhook.`,

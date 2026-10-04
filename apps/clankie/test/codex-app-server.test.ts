@@ -1,4 +1,8 @@
 import { once } from "node:events";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 import { CodexAppServerClient, type CodexSeatEvent } from "../src/captain/codex-app-server.ts";
@@ -108,10 +112,32 @@ describe("Codex app-server protocol", () => {
 // The provider and native TUI are replaced by one local protocol fixture. No
 // native process, credentials, account probe or model request leaves this test.
 describe("trusted native seat policy", () => {
+  it("does not borrow the caller's copied home when a trusted policy replaces the complete environment", async () => {
+    const { startCodexAppServerSeat } = await import("../src/captain/codex-app-server.ts");
+    const startView = vi.fn();
+    await expect(
+      startCodexAppServerSeat({
+        cwd: "/fixture",
+        env: { CODEX_HOME: "/caller-copy" },
+        catalogRefreshHome: "/caller-copy",
+        policy: {
+          launch: { environment: {}, socketRoot: "/unused", config: [] },
+          connected: async () => {},
+          beforeTurn: async () => {},
+          audit: async () => {},
+          failed: async () => {},
+        },
+        startView,
+      }),
+    ).rejects.toThrow("configuration must belong to this exact server");
+    expect(startView).not.toHaveBeenCalled();
+  });
+
   async function fixture(
     policy: import("../src/captain/codex-app-server.ts").CodexNativePolicy,
     callerEnv?: Record<string, string>,
     catalog?: { result: unknown; read(): void; validate?(): Promise<void> },
+    refresh?: { home: string; signal: string },
   ) {
     const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
     await once(server, "listening");
@@ -153,6 +179,7 @@ describe("trusted native seat policy", () => {
     const { startCodexAppServerSeat } = await import("../src/captain/codex-app-server.ts");
     const pending = startCodexAppServerSeat({
       cwd: "/fixture",
+      ...(refresh ? { catalogRefreshHome: refresh.home } : {}),
       ...(callerEnv ? { env: callerEnv } : {}),
       policy,
       startView: async () => {
@@ -162,6 +189,7 @@ describe("trusted native seat policy", () => {
         launches.push(input);
         return {
           endpoint: "fixture",
+          ...(refresh ? { catalogSignalPath: refresh.signal } : {}),
           ...(catalog
             ? {
                 waitForClankieCatalog: true as const,
@@ -190,6 +218,37 @@ describe("trusted native seat policy", () => {
       launches,
     };
   }
+
+  it("wires a private bridge signal to the owned app-server and stops it when the seat closes", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "owned-catalog-")));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const home = join(root, "worker-codex", "seat-fixture");
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    writeFileSync(join(home, "config.toml"), "");
+    const signal = join(root, "catalog-changed");
+    const f = await fixture(
+      {
+        connected: async () => {},
+        beforeTurn: async () => {},
+        audit: async () => {},
+        failed: async () => {},
+      },
+      { CODEX_HOME: home },
+      undefined,
+      { home, signal },
+    );
+    const seat = await f.pending;
+    expect(f.launches).toMatchObject([{ catalogRefresh: true }]);
+    writeFileSync(signal, randomUUID());
+    await vi.waitFor(() => expect(f.methods).toContain("config/mcpServer/reload"), { timeout: 3000 });
+    expect(f.methods.filter((method) => method === "config/value/write")).toHaveLength(1);
+    expect(f.methods).not.toContain("turn/start");
+    await seat.close();
+    const count = f.methods.length;
+    writeFileSync(signal, randomUUID());
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(f.methods).toHaveLength(count);
+  });
 
   it.each([
     {},

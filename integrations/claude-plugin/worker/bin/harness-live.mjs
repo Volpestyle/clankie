@@ -28,17 +28,47 @@ function descends(rows, pid, ancestor) {
 function environment(text, key) {
   return new RegExp(`(?:^| )${key}=([^]*?)(?= [A-Za-z_][A-Za-z0-9_]*=|$)`, "u").exec(text)?.[1];
 }
-function isBridge(command) {
+function bridgeKind(command) {
   // Match argv at the start, not a shell's embedded command or unrelated swarm-mcp.
-  return (
-    /^(?:\S*\/)?(?:node|bun|clankie)(?:\s+\S*\/clankie(?:\.ts)?)?\s+mcp\s+--fleet(?:\s|$)/u.test(command) ||
+  const launcher =
+    /^(?:\S*\/)?(?:node|bun|clankie)(?:\s+\S*\/clankie(?:\.(?:ts|js))?)?\s+mcp(?:\s|$)(.*)$/u.exec(command);
+  if (launcher) {
+    if (/(?:^|\s)--fleet(?:\s|$)/u.test(launcher[1])) return "worker";
+    if (/(?:^|\s)--(?:seat|grant)(?:\s|$)/u.test(launcher[1])) return undefined;
+    if (
+      !/(?:^|\s)--lane(?:\s|=)/u.test(launcher[1]) ||
+      /(?:^|\s)--lane(?:\s+|=)operator(?:\s|$)/u.test(launcher[1])
+    )
+      return "operator";
+  }
+  if (
     /^(?:\S*\/)?node\s+\S*\/(?:clankie-worker|worker)\/[^ ]*bin\/swarm-mcp\.mjs(?:\s|$)/u.test(command) ||
     /^(?:\S*\/)?node\s+\S*\/clankie-worker\/[^ ]*\/swarm-mcp\.mjs(?:\s|$)/u.test(command)
+  )
+    return "worker";
+  return undefined;
+}
+
+function processStarts(stdout) {
+  return new Map(
+    stdout.split("\n").flatMap((line) => {
+      const match = /^\s*(\d+)\s+([A-Z][a-z]{2} [A-Z][a-z]{2}\s+\d{1,2} \d{2}:\d{2}:\d{2} \d{4})\s*$/u.exec(
+        line,
+      );
+      const time = match && Date.parse(match[2]);
+      return Number.isFinite(time) ? [[Number(match[1]), time]] : [];
+    }),
   );
 }
 
 /** One process snapshot and one targeted env read, plus bounded Herdr pane facts. */
-export async function inspectLiveHarnessBridges({ socket, panes, run, platform = process.platform }) {
+export async function inspectLiveHarnessBridges({
+  socket,
+  panes,
+  run,
+  platform = process.platform,
+  runtimePid,
+}) {
   const targets = panes.filter((pane) => ["claude", "codex"].includes(pane.harness)).slice(0, MAX_PANES);
   const unknown = (pane, detail) => ({ ...pane, status: "unobserved", detail });
   if (platform !== "darwin")
@@ -62,18 +92,56 @@ export async function inspectLiveHarnessBridges({ socket, panes, run, platform =
       const commands = table(await run("/bin/ps", ["-p", argvPids.join(","), "-o", "pid=,ppid=,command="]));
       for (const [pid, row] of commands) if (rows.has(pid)) rows.get(pid).command = row.command;
     }
-    const candidates = [...rows].filter(([, row]) => isBridge(row.command));
+    const candidates = [...rows].filter(([, row]) => bridgeKind(row.command));
     if (candidates.length > MAX_BRIDGES) throw new Error("Bridge observation limit exceeded");
     const envText = candidates.length
       ? await run("/bin/ps", ["eww", "-p", candidates.map(([pid]) => pid).join(","), "-o", "pid=,command="])
       : "";
+    let starts = new Map();
+    if (Number.isSafeInteger(runtimePid) && runtimePid > 1 && rows.has(runtimePid)) {
+      try {
+        starts = processStarts(
+          await run("/bin/ps", [
+            "-p",
+            [...new Set([runtimePid, ...candidates.map(([pid]) => pid)])].join(","),
+            "-o",
+            "pid=,lstart=",
+          ]),
+        );
+      } catch {
+        // Missing process clocks say nothing about an otherwise healthy bridge.
+      }
+    }
+    const runtimeStart = starts.get(runtimePid);
+    const age = (bridge) => {
+      if (runtimePid === undefined) return { freshness: "unknown" };
+      const bridgeStart = starts.get(bridge.pid);
+      const older =
+        Number.isFinite(bridgeStart) && Number.isFinite(runtimeStart) && bridgeStart < runtimeStart;
+      return {
+        freshness:
+          Number.isFinite(bridgeStart) && Number.isFinite(runtimeStart)
+            ? older
+              ? "older-than-runtime"
+              : "current"
+            : "unknown",
+        ...(Number.isFinite(bridgeStart) ? { bridgeStartedAt: new Date(bridgeStart).toISOString() } : {}),
+        ...(Number.isFinite(runtimeStart) ? { runtimeStartedAt: new Date(runtimeStart).toISOString() } : {}),
+        ...(older
+          ? {
+              remediation:
+                "Seat bridge older than runtime; restart the seat to reload its bridge. Process age alone does not prove an obsolete build. Preserve the native session and reconcile uncertain deliveries before resuming.",
+            }
+          : {}),
+      };
+    };
     const envRows = new Map(
       envText.split("\n").flatMap((line) => {
         const match = /^\s*(\d+)\s+(.+)$/u.exec(line);
         return match ? [[Number(match[1]), match[2]]] : [];
       }),
     );
-    const bridges = candidates.map(([pid]) => {
+    const bridges = candidates.map(([pid, row]) => {
       const text = envRows.get(pid);
       const ancestors = [...rows].filter(
         ([ancestor, row]) =>
@@ -81,6 +149,7 @@ export async function inspectLiveHarnessBridges({ socket, panes, run, platform =
       );
       return {
         pid,
+        kind: bridgeKind(row.command),
         claimedPane:
           text && /^w[\w]+:p[\w]+$/u.test(environment(text, "HERDR_PANE_ID") ?? "")
             ? environment(text, "HERDR_PANE_ID")
@@ -145,24 +214,62 @@ export async function inspectLiveHarnessBridges({ socket, panes, run, platform =
                   : [];
               const matches = [...new Set([...descendants, ...dedicated])];
               matches.forEach((bridge) => owned.add(bridge.pid));
-              const good = matches.find(
+              const operatorMatches = matches.filter((bridge) => bridge.kind === "operator");
+              const operator = operatorMatches.find(
+                (bridge) =>
+                  bridge.claimedPane === pane.paneId && bridge.socket === socket && !bridge.sharedDaemon,
+              );
+              const operatorBridge = operator
+                ? {
+                    status: "live-process",
+                    bridgePid: operator.pid,
+                    claimedPane: operator.claimedPane,
+                    detail:
+                      "Operator bridge process belongs to this native pane and claims its pane/socket. Channel polling and reply delivery remain unverified.",
+                    ...age(operator),
+                  }
+                : operatorMatches.length
+                  ? {
+                      status: operatorMatches.some(
+                        (bridge) => bridge.claimedPane === undefined || bridge.socket === undefined,
+                      )
+                        ? "unobserved"
+                        : "pane-mismatch",
+                      bridgePid: operatorMatches[0].pid,
+                      claimedPane: operatorMatches[0].claimedPane,
+                      detail: "Operator bridge process has no proven matching pane/socket.",
+                    }
+                  : undefined;
+              const withOperator = (observation) => ({
+                ...observation,
+                ...(operatorBridge ? { operatorBridge } : {}),
+              });
+              const workerMatches = matches.filter((bridge) => bridge.kind === "worker");
+              const good = workerMatches.find(
                 (bridge) =>
                   bridge.claimedPane === pane.paneId && bridge.socket === socket && !bridge.sharedDaemon,
               );
               if (good)
-                return {
+                return withOperator({
                   ...pane,
                   status: "live-process",
                   bridgePid: good.pid,
                   claimedPane: good.claimedPane,
                   detail:
                     "Bridge process belongs to this native pane and claims its pane/socket. Native tools and reply delivery still need verification.",
-                };
-              if (matches.some((bridge) => bridge.claimedPane === undefined || bridge.socket === undefined))
-                return unknown(pane, "Bridge environment could not be observed; pane ownership is unproven.");
-              const mismatch = matches[0];
+                  ...age(good),
+                });
+              if (
+                workerMatches.some(
+                  (bridge) => bridge.claimedPane === undefined || bridge.socket === undefined,
+                )
+              )
+                return withOperator(
+                  unknown(pane, "Bridge environment could not be observed; pane ownership is unproven."),
+                );
+              const mismatch = workerMatches[0];
               if (mismatch)
-                return {
+                return withOperator({
                   ...pane,
                   status: "pane-mismatch",
                   bridgePid: mismatch.pid,
@@ -171,8 +278,8 @@ export async function inspectLiveHarnessBridges({ socket, panes, run, platform =
                   detail:
                     "The native pane's bridge claims another pane/socket or descends from a shared daemon.",
                   remediation: mismatch.sharedDaemon ? daemonFix : fix(pane.harness),
-                };
-              return {
+                });
+              return withOperator({
                 ...pane,
                 status: "missing",
                 detail:
@@ -186,7 +293,7 @@ export async function inspectLiveHarnessBridges({ socket, panes, run, platform =
                   bridges.some((bridge) => bridge.sharedDaemon && bridge.socket === socket)
                     ? daemonFix
                     : fix(pane.harness),
-              };
+              });
             } catch {
               return unknown(pane, "Herdr process facts unavailable.");
             }

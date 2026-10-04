@@ -48,6 +48,7 @@ async function stateEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-headless-test-"));
   tempDirs.push(root);
   return {
+    XDG_CONFIG_HOME: join(root, "config"),
     XDG_STATE_HOME: root,
     CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
     CLANKIE_OPERATOR_TOKEN: "operator-secret",
@@ -78,6 +79,7 @@ describe("headless clankie commands", () => {
       {
         env: {
           ...process.env,
+          XDG_CONFIG_HOME: join(root, "config"),
           CLANKIE_SETTINGS_FILE: settings.path,
           DISCORD_ACTIVE_BODY: "",
           DISCORD_USER_SESSION_ENABLED: "",
@@ -97,6 +99,7 @@ describe("headless clankie commands", () => {
     const stderr = outputBuffer();
     const exitCode = await runHeadlessCaptainCommand(["help"], {
       repoRoot: "/unused",
+      env: await stateEnv(),
       stdout: stdout.stream,
       stderr: stderr.stream,
     });
@@ -187,7 +190,11 @@ describe("headless clankie commands", () => {
 
     const exitCode = await runHeadlessCaptainCommand(["health"], {
       repoRoot: "/unused",
-      env: { XDG_STATE_HOME: root, CLANKIE_OPERATOR_TOKEN: overridden },
+      env: {
+        XDG_STATE_HOME: root,
+        XDG_CONFIG_HOME: join(root, "config"),
+        CLANKIE_OPERATOR_TOKEN: overridden,
+      },
       fetchImpl: healthyFetch(),
       listProcessCommandsImpl: () => [],
       operatorCredentialStore: store,
@@ -215,7 +222,7 @@ describe("headless clankie commands", () => {
 
     const exitCode = await runHeadlessCaptainCommand(["operator-credential", "rotate", "--json"], {
       repoRoot: "/unused",
-      env: {},
+      env: { XDG_CONFIG_HOME: join(root, "config") },
       operatorCredentialStore: store,
       stdout: stdout.stream,
     });
@@ -412,6 +419,7 @@ describe("headless clankie commands", () => {
             CLANKIE_CREDENTIALS_FILE: join(processStateRoot, "credentials.json"),
             CLANKIE_OPERATOR_TOKEN: "operator-secret",
             XDG_STATE_HOME: processStateRoot,
+            XDG_CONFIG_HOME: join(processStateRoot, "config"),
           },
         },
       );

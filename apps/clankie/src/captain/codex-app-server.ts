@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import WebSocket from "ws";
 import type { Duplex } from "node:stream";
+import { isolatedCodexConfig, watchCodexCatalog } from "./codex-catalog-refresh.ts";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue =>
@@ -147,6 +148,7 @@ export interface CodexAppServerSeat {
  * one, and resolves undefined while the server is not listening yet.
  */
 interface CodexServerConnection {
+  readonly catalogSignalPath?: string;
   /** Local child identity; remote launchers must not expose a remote PID here. */
   readonly pid?: number;
   readonly remoteRegistration?: RemoteCodexRegistration;
@@ -163,6 +165,7 @@ interface CodexServerConnection {
 }
 
 export type CodexServerLauncher = (input: {
+  readonly catalogRefresh?: true;
   readonly cwd: string;
   /** `-c key=value` pairs, already flattened. */
   readonly configArgs: readonly string[];
@@ -197,6 +200,7 @@ const localCodexServer: CodexServerLauncher = async (input) => {
   }
   const directory = await mkdtemp(join(input.socketRoot ?? tmpdir(), "clankie-codex-"));
   const socketPath = join(directory, "rpc.sock");
+  const catalogSignalPath = join(directory, "catalog-changed");
   // The supervisor must not lend its own pane identity or Swarm enrollment to
   // the child. Explicit worker launch settings (including CODEX_HOME) survive.
   const env =
@@ -212,12 +216,27 @@ const localCodexServer: CodexServerLauncher = async (input) => {
   const stderrFd = openSync(stderrPath, "a", 0o600);
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn("codex", [...input.configArgs, "app-server", "--listen", `unix://${socketPath}`], {
-      cwd: input.cwd,
-      env: { ...env, ...input.env },
-      detached: true,
-      stdio: ["ignore", "ignore", stderrFd],
-    });
+    child = spawn(
+      "codex",
+      [
+        ...input.configArgs,
+        ...(input.catalogRefresh
+          ? [
+              "-c",
+              `mcp_servers.clankie.env.CLANKIE_CODEX_CATALOG_SIGNAL=${JSON.stringify(catalogSignalPath)}`,
+            ]
+          : []),
+        "app-server",
+        "--listen",
+        `unix://${socketPath}`,
+      ],
+      {
+        cwd: input.cwd,
+        env: { ...env, ...input.env },
+        detached: true,
+        stdio: ["ignore", "ignore", stderrFd],
+      },
+    );
     child.unref();
   } finally {
     closeSync(stderrFd);
@@ -239,6 +258,7 @@ const localCodexServer: CodexServerLauncher = async (input) => {
     input.onExit(code);
   });
   return {
+    ...(input.catalogRefresh ? { catalogSignalPath } : {}),
     ...(child.pid === undefined ? {} : { pid: child.pid }),
     endpoint: `unix://${socketPath}`,
     connect: () => openCodexSocket(`ws+unix://${socketPath}:/`),
@@ -277,6 +297,8 @@ export function openCodexSocket(address: string, stream?: Duplex): Promise<WebSo
 
 /** Protocol reference: https://developers.openai.com/codex/app-server */
 export async function startCodexAppServerSeat(options: {
+  /** Copied local worker home; no owner or remote config is rewritten. */
+  catalogRefreshHome?: string;
   cwd: string;
   model?: string;
   effort?: string;
@@ -308,12 +330,24 @@ export async function startCodexAppServerSeat(options: {
   let client: CodexAppServerClient | undefined;
   let closed = false;
   let stopped = false;
+  let stopCatalogWatch: (() => void) | undefined;
+  if (
+    options.catalogRefreshHome &&
+    options.catalogRefreshHome !==
+      (launch === undefined ? options.env?.CODEX_HOME : launch.environment.CODEX_HOME)
+  )
+    throw new Error("Codex catalog refresh configuration must belong to this exact server");
+  const catalogConfig = options.catalogRefreshHome
+    ? await isolatedCodexConfig(options.catalogRefreshHome)
+    : undefined;
   const stoppedServer = () => {
     if (stopped) return;
     stopped = true;
+    stopCatalogWatch?.();
     options.onServerStopped?.();
   };
   const server = await (options.server ?? localCodexServer)({
+    ...(catalogConfig === undefined ? {} : { catalogRefresh: true as const }),
     cwd: options.cwd,
     configArgs,
     ...(launch === undefined
@@ -335,6 +369,7 @@ export async function startCodexAppServerSeat(options: {
   const close = async () => {
     if (closed) return;
     closed = true;
+    stopCatalogWatch?.();
     client?.close();
     try {
       await server.close();
@@ -409,6 +444,18 @@ export async function startCodexAppServerSeat(options: {
     };
     client = new CodexAppServerClient(socket, observe);
     await client.initialize();
+    if (catalogConfig && server.catalogSignalPath) {
+      stopCatalogWatch = watchCodexCatalog({
+        signalPath: server.catalogSignalPath,
+        configPath: catalogConfig,
+        request: (method, params) => client!.request(method, params),
+        onError: (error) =>
+          options.onEvent?.({
+            method: "mcpServer/catalogRefresh/failed",
+            params: { message: String(error) },
+          }),
+      });
+    }
     const read: CodexNativeRead = {
       request(method, params) {
         if (!["account/read", "account/rateLimits/read", "thread/list", "config/read"].includes(method))

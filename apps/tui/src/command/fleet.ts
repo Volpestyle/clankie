@@ -1,3 +1,7 @@
+import { effectiveHireProfile } from "@clankie/protocol";
+import { projectRolePolicy } from "@clankie/protocol/projects";
+import { readFile } from "node:fs/promises";
+import { HireProfileSchema } from "@clankie/protocol";
 import {
   FLEET_MODEL_GUIDANCE,
   FLEET_MODEL_MODES,
@@ -13,7 +17,7 @@ import {
 
 const FLEET_USAGE = [
   "Usage: clankie fleet [status]",
-  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--tools connected|off] [--peer-messages on|off]`,
+  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]`,
   "       clankie fleet clear",
 ].join("\n");
 
@@ -25,6 +29,11 @@ export interface FleetCommandOptions {
 export interface FleetCommandResult {
   readonly ok: true;
   readonly fleet: FleetSettings;
+  readonly roleProfiles: Array<{
+    projectId: string;
+    role: string;
+    profile: ReturnType<typeof effectiveHireProfile>;
+  }>;
   readonly settingsFile: string;
   readonly restart: string;
 }
@@ -43,6 +52,7 @@ export function formatFleetLines(fleet: FleetSettings): string[] {
     `models: ${fleet.models} — ${FLEET_MODEL_GUIDANCE[fleet.models]}`,
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
     `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
+    `hire defaults: ${JSON.stringify(fleet.hire ?? {})}`,
     "routing preferences:",
     ...(notes.length === 0
       ? ["  (none — the default: he picks a harness per job on his own)"]
@@ -51,7 +61,23 @@ export function formatFleetLines(fleet: FleetSettings): string[] {
 }
 
 async function result(settings: SettingsStore, fleet: FleetSettings): Promise<FleetCommandResult> {
-  return { ok: true, fleet, settingsFile: settings.path, restart: "clankie restart" };
+  const config = await settings.load();
+  return {
+    ok: true,
+    fleet,
+    roleProfiles: config.projects.projects.flatMap((p) =>
+      (p.roles.length
+        ? p.roles
+        : ["planner", "designer", "builder", "tester", "reviewer", "researcher"].map((role) => ({ role }))
+      ).map((r) => ({
+        projectId: p.id,
+        role: r.role,
+        profile: effectiveHireProfile({}, projectRolePolicy(p, r.role), fleet.hire),
+      })),
+    ),
+    settingsFile: settings.path,
+    restart: "clankie restart",
+  };
 }
 
 export async function fleetStatus(options: FleetCommandOptions = {}): Promise<FleetCommandResult> {
@@ -82,13 +108,17 @@ function isModelMode(value: string): value is FleetModelMode {
 }
 
 /** `set` takes each flag at most once, each with a value; anything else is a usage error. */
-function parseSet(flags: readonly string[]): FleetUpdate {
+async function parseSet(flags: readonly string[]): Promise<FleetUpdate> {
   if (flags.length === 0 || flags.length % 2 !== 0) throw new Error(FLEET_USAGE);
   const change: FleetUpdate = {};
   for (let index = 0; index < flags.length; index += 2) {
     const flag = flags[index];
     const value = flags[index + 1] ?? "";
-    if (flag === "--notes" && change.notes === undefined) {
+    if (flag === "--hire-profile" && change.hire === undefined) {
+      const text = await readFile(value, "utf8");
+      if (Buffer.byteLength(text) > 16 * 1024) throw new Error("Hire profile is too large");
+      change.hire = HireProfileSchema.parse(JSON.parse(text));
+    } else if (flag === "--notes" && change.notes === undefined) {
       if (value.length > 4_000) throw new Error("Keep --notes under 4000 characters.");
       change.notes = value;
     } else if (flag === "--size" && change.size === undefined) {
@@ -118,6 +148,6 @@ export async function runFleetCommand(
   if (verb === undefined || verb === "status") return await fleetStatus(options);
   // `clear` returns every field to its default: no notes, no plan limit.
   if (verb === "clear" && args.length === 1) return await fleetUpdate(FleetSettingsSchema.parse({}), options);
-  if (verb === "set") return await fleetUpdate(parseSet(args.slice(1)), options);
+  if (verb === "set") return await fleetUpdate(await parseSet(args.slice(1)), options);
   throw new Error(FLEET_USAGE);
 }

@@ -91,6 +91,43 @@ export function loadBundledCatalog(): Catalog {
   return bundledCatalog;
 }
 
+/** Resolve native hire names against the actual registry; never fall back to a different model. */
+export function resolveHireModel(catalog: Catalog, harness: string, name: string): string {
+  const key = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/\(latest\)/gu, "")
+      .replace(/^(gpt|claude)[-\s]*/u, "")
+      .replace(/[^a-z0-9.]/gu, "")
+      .replace(/^(\d+(?:\.\d+)*)(sol|astra|luna|terra)$/u, "$2$1");
+  const providers =
+    harness === "codex" ? ["openai"] : harness === "claude" ? ["anthropic"] : Object.keys(catalog);
+  const [providerName, modelName] = name.includes("/") ? name.split(/\/(.*)/su) : [undefined, name];
+  const wanted = key(modelName!);
+  const matches = providers.flatMap((provider) =>
+    Object.values(catalog[provider]?.models ?? {}).flatMap((model) => {
+      if (providerName !== undefined && providerName !== provider) return [];
+      if (!model.id || model.status === "deprecated") return [];
+      const exact = model.id === modelName || key(model.id) === wanted || key(model.name) === wanted;
+      const family =
+        harness === "claude" &&
+        ["opus", "sonnet", "haiku"].includes(wanted) &&
+        model.id.startsWith(`claude-${wanted}-`);
+      return exact || family ? [{ provider, model }] : [];
+    }),
+  );
+  matches.sort((a, b) => b.model.id.localeCompare(a.model.id, undefined, { numeric: true }));
+  const found = matches[0];
+  if (!found)
+    throw new Error(
+      `Model ${JSON.stringify(name)} is unavailable or retired in the model registry for ${harness}. Choose an available model before hiring.`,
+    );
+  if (harness === "claude" || harness === "codex") return found.model.id;
+  if (new Set(matches.map((m) => `${m.provider}/${m.model.id}`)).size > 1 && providerName === undefined)
+    throw new Error(`Model ${JSON.stringify(name)} is ambiguous; use provider/model from the registry.`);
+  return `${found.provider}/${found.model.id}`;
+}
+
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------

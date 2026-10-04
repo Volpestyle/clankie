@@ -2,42 +2,29 @@
 name: p
 description: >-
   Push the current branch to the same-named branch on its remote, and nothing
-  else — force-with-lease when a rebase requires it, never another branch, never
-  a tag or a different remote. The push counterpart to /c. Invoke manually as /p.
+  else — force-with-lease only for your authorized rewritten branch, never
+  another branch or tag. Invoke manually as /p.
 ---
 
 # p
 
-Push the checked-out branch to its own remote branch. That is the whole skill.
+A request to push authorizes this branch's push. Verify the authenticated account
+and repository destination first; a worker uses the task's authorized account.
+A request to commit alone does not authorize a push.
 
-## Trigger
+Read `git status -sb`, the current branch, remote URL and upstream. Select the
+branch's configured remote, or `origin` when it has none. Push an explicit
+same-name refspec: `git push REMOTE HEAD:refs/heads/BRANCH`. Never trust plain
+`git push` to select the destination: a worktree created from `origin/main` can
+inherit that upstream while its local branch has a different name. Set upstream
+with `-u` only to the same-named branch. Stop on detached HEAD.
 
-The user types `/p`, or asks to "push this" / "push it up". That ask is the
-authorization — push without checking in again.
+If rejected as non-fast-forward, inspect the remote branch. Use
+`--force-with-lease` only when your authorized rebase rewrote your own commits
+and the lease covers the remote revision you inspected. A remote advance or
+shared branch needs coordination, not an automatic forced retry. Load
+`shared-checkout` before changing shared state. Never use bare `--force`, push
+another branch or tag, delete a ref, or change remotes to make a push succeed.
 
-## Steps
-
-1. **Check.** `git status -sb` — confirm the branch and whether it has an upstream.
-2. **Push.**
-   - Upstream exists: `git push`
-   - No upstream: `git push -u origin HEAD` (creates the same-named remote branch)
-   - Rejected as non-fast-forward (normal after `/c` rebases): retry once with
-     `git push --force-with-lease`. Still rejected → the remote moved under you;
-     stop and report, don't escalate.
-3. **Report.** The branch pushed and the remote it landed on.
-
-## Guardrails
-
-- **Same name only.** Never `git push <remote> <local>:<other>`. `HEAD` is the only
-  refspec this skill writes, so the remote branch name always matches the local one.
-- **`--force-with-lease` only, never bare `--force`.** The lease is what makes force
-  safe here: it refuses if the remote branch moved since your last fetch, so you can
-  overwrite your own rewritten history but not someone else's push. No `+refs/`,
-  no `--force`, no disabling the lease.
-- **Origin only.** If the branch's upstream is a different remote, use that one; never
-  add or switch remotes.
-- **Never push a detached HEAD, a tag, or `--all`/`--mirror`/`--tags`.**
-- **Protected branches.** On `main`/`master`/`develop`, stop and ask first.
-- **Nothing to push?** Say so and stop.
-- Commits are `/c`'s job. If the tree is dirty, push what's committed and say what
-  was left uncommitted — don't commit here.
+Report the branch, remote and resulting commit. A failed check, credential prompt
+or rejection remains a failure; do not report it as published.

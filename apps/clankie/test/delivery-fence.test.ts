@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeliveryFence } from "../src/captain/delivery-fence.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 
@@ -12,6 +12,7 @@ function path() {
   return join(dir, "receipts.json");
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 const message = {
@@ -23,6 +24,34 @@ const message = {
 };
 
 describe("unresolved delivery receipts", () => {
+  it("retains stable completions separately from ordinary unresolved claims and bounds their retention", () => {
+    let now = 1_000_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const file = path();
+    const fence = new DeliveryFence(file);
+    const receipt = fence.begin("linear:event", {
+      fingerprint: "approval",
+      seatId: "author",
+      occupantId: "original",
+    });
+    expect(() => fence.complete("linear:event", "wrong-id", {})).toThrow(/original/u);
+    fence.complete("linear:event", receipt.messageId, {
+      messageId: "native",
+      state: "queued",
+      deliveryStage: "consumed",
+    });
+    const restarted = new DeliveryFence(file);
+    expect(restarted.pending("linear:event")).toBeUndefined();
+    expect(restarted.entries()).toEqual([]);
+    expect(restarted.completed("linear:event")?.completed).toMatchObject({ messageId: "native", at: now });
+    expect(() => restarted.begin("linear:event", { fingerprint: "replacement" })).toThrow();
+    const ordinary = restarted.begin("ordinary", { fingerprint: "other" });
+    expect(restarted.pending("ordinary")).toEqual(ordinary);
+    now += 7 * 24 * 60 * 60 * 1000 + 1;
+    expect(restarted.completed("linear:event")).toBeUndefined();
+    restarted.begin("later", { fingerprint: "later" });
+    expect(JSON.parse(readFileSync(file, "utf8"))["linear:event"]).toBeUndefined();
+  });
   it("survives restart, blocks explicit retry, and only reconciles the original receipt", () => {
     const file = path();
     const first = new DeliveryFence(file);

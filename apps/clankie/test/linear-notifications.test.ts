@@ -1,11 +1,18 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHmac } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { LinearWakeSettingsSchema } from "@clankie/settings";
 import { LinearNotifications } from "../src/linear-notifications.ts";
+import { LinearAttributionJournal } from "../src/linear-attribution.ts";
 import type { McpHost } from "../src/mcp-host.ts";
-import type { LinearActivityEvent } from "../src/linear-webhook.ts";
+import {
+  classifyLinearDelivery,
+  LinearWriteReceipts,
+  type LinearActivityEvent,
+} from "../src/linear-webhook.ts";
+import type { LinearRecipient } from "../src/captain/conversation-owner.ts";
 
 const roots: string[] = [];
 const pollers: LinearNotifications[] = [];
@@ -430,4 +437,217 @@ it("collects unattributed and excluded notifications, ignores purported MCP acto
   f.page([notification("self-after")]);
   await f.poller.poll();
   expect(f.received.at(-1)?.following).toBe(true);
+});
+
+it("enriches notifications with retained signed issue identity without changing actor wake rules", async () => {
+  const f = await fixture();
+  const issueId = "a06a1c92-8a14-4240-8802-a0bb868d639c";
+  const journal = new LinearAttributionJournal(join(dirname(f.options.path), "attribution.json"));
+  journal.record(
+    {
+      eventId: "signed-issue",
+      type: "Issue",
+      action: "update",
+      organizationId: "org",
+      deliveryId: "signed",
+      actorId: "owner",
+      actorType: "user",
+      actorName: undefined,
+      actorEmail: undefined,
+      createdAt: "2026-09-27T11:59:00.000Z",
+      url: "https://linear.app/issue/ABC-1/old-title",
+      data: { id: issueId },
+      updatedFrom: undefined,
+    },
+    new Date(NOW),
+  );
+  const options = {
+    ...f.options,
+    attribute: journal.attribute.bind(journal),
+    resolveIssue: vi.fn(journal.issue.bind(journal)),
+  };
+  const poller = new LinearNotifications(options);
+  pollers.push(poller);
+  f.page([{ ...notification("issue-event"), url: "https://linear.app/issue/ABC-1/new-title" }]);
+  await poller.poll();
+  expect(options.resolveIssue).toHaveBeenCalledWith(expect.objectContaining({ id: "issue-event" }), "org");
+  expect(f.received[0]).toMatchObject({
+    following: false,
+    activity: { organizationId: "org", issueId, actorId: undefined },
+  });
+  // Canonical identity never makes an actor outside the correlation window known.
+  f.page([
+    notification("unknown", "issueMention"),
+    { ...notification("unmapped"), url: "https://linear.app/issue/ABC-2" },
+  ]);
+  await poller.poll();
+  expect(f.received.find((entry) => entry.activity.data.id === "unmapped")?.activity.issueId).toBeUndefined();
+  expect(f.received.every((entry) => entry.following === false)).toBe(true);
+});
+
+it("passes the selected workspace to issue resolution and keeps ambiguous notifications passive", async () => {
+  const f = await fixture();
+  const resolveIssue = vi.fn<LinearAttributionJournal["issue"]>(() => undefined);
+  const poller = new LinearNotifications({ ...f.options, resolveIssue });
+  pollers.push(poller);
+  f.attribute.mockReturnValue(undefined);
+  f.page([notification("ambiguous")]);
+  await poller.poll();
+  expect(f.received[0]?.following).toBe(false);
+  expect(f.received[0]?.activity.issueId).toBeUndefined();
+  f.account.mockResolvedValue({
+    ...own,
+    binding: "another-workspace",
+    account: { ...own.account, workspaceId: "other-org" },
+  });
+  f.page([notification("another-workspace")]);
+  await poller.poll();
+  expect(resolveIssue.mock.calls.map((call) => call[1])).toEqual(["org", "other-org"]);
+});
+
+const UPDATE = "d9b90f52-0b0e-463d-a1e9-9457d250592c";
+const COMMENT = "0707b479-8a50-4496-b6ba-bec2efbd0a1f";
+const REPLY_URL =
+  "https://linear.app/work/project/kh2-abc123/activity#project-update-d9b90f52&comment-0707b479";
+const AUTHOR: LinearRecipient = {
+  kind: "native",
+  paneId: "pc/w3:pK",
+  seatId: "kh2-claude",
+  occupantId: "claude:kh2-session",
+  binding: "a".repeat(64),
+};
+async function replyFixture() {
+  const f = await fixture();
+  const journal = new LinearAttributionJournal(join(dirname(f.options.path), "attribution.json"));
+  const writes = new LinearWriteReceipts();
+  writes.record(
+    {
+      server: "linear",
+      tool: "save_status_update",
+      arguments: { type: "project" },
+      content: JSON.stringify({ id: UPDATE, updatedAt: NOW, body: "Status" }),
+      isError: false,
+      account: own.account,
+      recipient: AUTHOR,
+    },
+    new Date(NOW),
+  );
+  const body = JSON.stringify({
+    type: "Comment",
+    action: "create",
+    organizationId: "org",
+    webhookTimestamp: Date.parse(NOW),
+    createdAt: NOW,
+    actor: { id: "owner", type: "user" },
+    url: REPLY_URL,
+    data: { id: COMMENT, body: "I APPROVE all!!", projectUpdateId: UPDATE, projectUpdate: { id: UPDATE } },
+  });
+  classifyLinearDelivery({
+    rawBody: Buffer.from(body),
+    headers: {
+      signature: createHmac("sha256", "secret").update(body).digest("hex"),
+      delivery: "reply",
+      event: "Comment",
+    },
+    secret: "secret",
+    now: new Date(NOW),
+    writes,
+    recordActivity: (activity) => journal.record(activity, new Date(NOW)),
+  });
+  const poller = new LinearNotifications({
+    ...f.options,
+    attribute: (item, org) => journal.attribute(item, org),
+    resolveReplyRecipient: (item, org) => journal.replyRecipient(item, org),
+  });
+  pollers.push(poller);
+  return { ...f, poller };
+}
+const replyNotification = {
+  id: "project-reply-notification",
+  type: "projectUpdateNewComment",
+  createdAt: NOW,
+  url: REPLY_URL,
+};
+
+it("enriches an eligible project reply with its exact remote native author without changing wake rules", async () => {
+  const f = await replyFixture();
+  f.page([replyNotification]);
+  expect(await f.poller.poll()).toBe(true);
+  expect(f.received).toMatchObject([
+    {
+      following: true,
+      activity: {
+        type: "Notification",
+        actorId: "owner",
+        actorType: "user",
+        replyTo: { type: "ProjectUpdate", id: UPDATE },
+        replyRecipient: {
+          parentType: "ProjectUpdate",
+          parentId: UPDATE,
+          recipient: AUTHOR,
+          recordedAt: Date.parse(NOW),
+        },
+      },
+    },
+  ]);
+  f.page([replyNotification]);
+  expect(await f.poller.poll()).toBe(false);
+  expect(f.receive).toHaveBeenCalledTimes(1);
+});
+
+it.each(["following-off", "actor-filtered"])(
+  "retains proven reply context while %s remains quiet",
+  async (mode) => {
+    const f = await replyFixture();
+    if (mode === "following-off") f.following.mockResolvedValue(false);
+    else f.wakeRules.mockResolvedValue(LinearWakeSettingsSchema.parse({ ownerUserIds: ["different-owner"] }));
+    f.page([replyNotification]);
+    await f.poller.poll();
+    expect(f.received).toMatchObject([
+      { following: false, activity: { replyRecipient: { recipient: AUTHOR } } },
+    ]);
+  },
+);
+
+it("never promotes unsigned notification parent data or recipient fields into host proof", async () => {
+  const f = await fixture();
+  const resolveReplyRecipient = vi.fn<LinearAttributionJournal["replyRecipient"]>(() => undefined);
+  const poller = new LinearNotifications({ ...f.options, resolveReplyRecipient });
+  pollers.push(poller);
+  f.page([
+    {
+      ...replyNotification,
+      projectUpdateId: UPDATE,
+      replyRecipient: {
+        parentType: "ProjectUpdate",
+        parentId: UPDATE,
+        recipient: AUTHOR,
+        recordedAt: Date.parse(NOW),
+      },
+    },
+  ]);
+  await poller.poll();
+  expect(f.received[0]?.activity.replyRecipient).toBeUndefined();
+  expect(f.received[0]?.activity.replyTo).toBeUndefined();
+  expect(resolveReplyRecipient).toHaveBeenCalledWith(
+    expect.objectContaining({ id: replyNotification.id }),
+    "org",
+  );
+});
+
+it("retries failed reply admission with stable event identity and unchanged recipient proof", async () => {
+  const f = await replyFixture();
+  f.receive.mockImplementationOnce(() => {
+    throw new Error("storage unavailable");
+  });
+  f.page([replyNotification]);
+  expect(await f.poller.poll(false)).toBe(false);
+  expect(f.onError).toHaveBeenCalledTimes(1);
+  f.page([replyNotification]);
+  expect(await f.poller.poll(false)).toBe(true);
+  expect(f.receive).toHaveBeenCalledTimes(2);
+  const [failed, retried] = f.receive.mock.calls.map(([activity]) => activity);
+  expect(retried?.eventId).toBe(failed?.eventId);
+  expect(retried?.replyRecipient).toEqual(failed?.replyRecipient);
+  expect(f.received).toHaveLength(1);
 });

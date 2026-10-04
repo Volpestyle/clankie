@@ -15,6 +15,7 @@ export async function inspectHarnessBridges(
   repoRoot?: string,
 ) {
   const home = env.HOME?.trim() || homedir();
+  const stateRoot = env.CLANKIE_STATE?.trim() || join(home, ".clankie");
   const codexRoot = env.CODEX_HOME?.trim() || join(home, ".codex");
   const claudeRoot = env.CLAUDE_CONFIG_DIR?.trim() || join(home, ".claude");
   const configPath = join(codexRoot, "config.toml");
@@ -78,7 +79,7 @@ export async function inspectHarnessBridges(
       "Local process membership currently supports macOS; SSH fleet links use their existing authentication.";
   } else
     try {
-      const link = await json(join(home, ".clankie", "links", "default-local.json"));
+      const link = await json(join(stateRoot, "links", "default-local.json"));
       if (
         typeof link.socket !== "string" ||
         !link.socket.startsWith("/") ||
@@ -101,7 +102,26 @@ export async function inspectHarnessBridges(
             ? [{ paneId: agent.pane_id, harness: agent.agent }]
             : [],
         );
-        linkedSession = await inspectLiveHarnessBridges({ socket: link.socket, panes, run });
+        let runtimePid: number | undefined;
+        try {
+          const response = await fetchImpl(`${link.url}/health`, { signal: AbortSignal.timeout(5_000) });
+          const health = response.ok ? await response.json() : undefined;
+          if (
+            health?.ok === true &&
+            health.service === "clankie" &&
+            Number.isSafeInteger(health.runtime?.pid) &&
+            health.runtime.pid > 1
+          )
+            runtimePid = health.runtime.pid;
+        } catch {
+          // No running runtime identity: bridge presence remains observable, age remains unknown.
+        }
+        linkedSession = await inspectLiveHarnessBridges({
+          socket: link.socket,
+          panes,
+          run,
+          ...(runtimePid === undefined ? {} : { runtimePid }),
+        });
       } catch {
         linkedSession = { state: "unavailable", panes: [], unownedBridges: [] };
       }

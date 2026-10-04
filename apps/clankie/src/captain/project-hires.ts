@@ -13,7 +13,13 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
-import { operatorAgentRoleKey, SpawnOperatorSeatSchema, type SpawnOperatorSeat } from "@clankie/protocol";
+import {
+  effectiveHireProfile,
+  type HireProfile,
+  operatorAgentRoleKey,
+  SpawnOperatorSeatSchema,
+  type SpawnOperatorSeat,
+} from "@clankie/protocol";
 import { projectRolePolicy, type ProjectsSettings } from "@clankie/protocol/projects";
 
 const ProcessSchema = z.object({ pid: z.number().int().positive(), startTime: z.string().min(1) }).strict();
@@ -128,6 +134,7 @@ export class ProjectHires {
     settings: ProjectsSettings,
     projectId: string,
     input: SpawnOperatorSeat,
+    defaults: HireProfile = {},
   ): Allocation & { reused: boolean } {
     // Policy changes must not produce a different retry key and a second native job.
     const key = JSON.stringify([input.fleet ?? "default", input.workingDirectory]);
@@ -136,14 +143,16 @@ export class ProjectHires {
       if (pending) {
         if (
           pending.projectId !== projectId ||
-          operatorAgentRoleKey(pending.role ?? "") !== operatorAgentRoleKey(input.role ?? "")
+          operatorAgentRoleKey(pending.role ?? "") !== operatorAgentRoleKey(input.role ?? "") ||
+          pending.request.deliverable !== input.deliverable
         )
           throw new Error(
             "An earlier hire in this workspace is still being checked. Resolve it before hiring again.",
           );
         return { ...structuredClone(pending), reused: true };
       }
-      const request = projectHireRequest(settings, projectId, input);
+      const request = projectHireRequest(settings, projectId, input, defaults);
+      this.checkDeliverable(state.allocations, projectId, request);
       this.checkCaps(state.allocations, settings, projectId, request.role);
       const allocation: Allocation = {
         id: randomUUID(),
@@ -194,6 +203,31 @@ export class ProjectHires {
     delete request.effort;
     return { ...allocation, request, reused: false };
   }
+  private checkDeliverable(
+    allocations: Allocation[],
+    projectId: string,
+    request: SpawnOperatorSeat,
+    excluding?: string,
+  ): void {
+    if (request.delegation === "native-first" && !request.deliverable)
+      throw new Error(
+        "Native-first hiring requires a stable deliverable key (for example the issue ID). Its slices belong to the worker's native subagents.",
+      );
+    if (
+      request.deliverable &&
+      allocations.some(
+        (a) =>
+          !a.gone &&
+          a.id !== excluding &&
+          a.projectId === projectId &&
+          a.request.deliverable === request.deliverable &&
+          (a.request.delegation === "native-first" || request.delegation === "native-first"),
+      )
+    )
+      throw new Error(
+        `Deliverable ${request.deliverable} already has a pane under native-first delegation. Message the existing worker; use its native subagents for slices instead of another hire.`,
+      );
+  }
   private checkCaps(
     allocations: Allocation[],
     settings: ProjectsSettings,
@@ -227,14 +261,13 @@ export class ProjectHires {
       if (launchPolicy(settings, entry.projectId, entry.role) !== entry.policy)
         throw new Error("This role's launch settings changed. Start a new hire with the current settings.");
       this.checkCaps(state.allocations, settings, entry.projectId, entry.role, id);
+      this.checkDeliverable(state.allocations, entry.projectId, entry.request, id);
       entry.started = true;
     });
   }
   public requiredModel(id: string): string | undefined {
     const allocation = this.read().allocations.find((a) => a.id === id);
-    return allocation === undefined
-      ? undefined
-      : ((JSON.parse(allocation.policy) as (string | null)[])[1] ?? undefined);
+    return allocation === undefined ? undefined : allocation.request.model;
   }
   public confirmed(id: string): void {
     this.change((state) => {
@@ -321,7 +354,7 @@ export class ProjectHires {
       revision: createHash("sha256").update(JSON.stringify(entry)).digest("hex"),
       seat: entry.seat,
       nativeOccupantId: entry.occupantId,
-      harness: entry.request.harness,
+      harness: entry.request.harness ?? "codex",
       generic: entry.proof.shell.pid !== entry.proof.processes[0]!.pid,
     };
   }
@@ -370,26 +403,27 @@ export class ProjectHires {
   }
 }
 
-function projectHireRequest(
+export function projectHireRequest(
   settings: ProjectsSettings,
   projectId: string,
   request: SpawnOperatorSeat,
-): SpawnOperatorSeat {
+  defaults: HireProfile = {},
+): SpawnOperatorSeat & { harness: NonNullable<SpawnOperatorSeat["harness"]> } {
   const project = settings.projects.find((p) => p.id === projectId);
   if (!project) throw new Error("Choose an existing project before hiring.");
   const role = request.role === undefined ? undefined : projectRolePolicy(project, request.role);
   if (request.role !== undefined && !role)
     throw new Error(`${project.name} has no ${request.role} role. Choose one of its roles before hiring.`);
-  return {
-    ...request,
-    ...(role?.harness === undefined ? {} : { harness: role.harness }),
-    ...(role?.model === undefined ? {} : { model: role.model }),
-    ...(role?.effort === undefined ? {} : { effort: role.effort }),
-  };
+  const result = { ...request, ...effectiveHireProfile(request, role, defaults) };
+  if (result.subagents === null) delete result.subagents;
+  return result;
 }
 
 function launchPolicy(settings: ProjectsSettings, projectId: string, role?: string): string {
   const project = settings.projects.find((p) => p.id === projectId);
   const selected = project === undefined || role === undefined ? undefined : projectRolePolicy(project, role);
-  return JSON.stringify([selected?.harness, selected?.model, selected?.effort]);
+  const base = [selected?.harness, selected?.model, selected?.effort];
+  const extra = [selected?.subagents, selected?.delegation, selected?.account, selected?.placement];
+  // Preserve legacy journals when no new role fields are configured.
+  return JSON.stringify(extra.some((value) => value !== undefined) ? [...base, ...extra] : base);
 }

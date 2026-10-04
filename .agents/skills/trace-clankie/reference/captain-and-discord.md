@@ -35,28 +35,39 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   stay at turn acceptance while activity and tools keep appending. Judge a live
   turn by the newest `events.jsonl` event and its accepted/completed pair.
 
-- **Presence phases are edge-triggered at the event level.** `discord.presence.*`
-  and `captain.presence.*` phases persist until the owning process emits the
-  next transition, so judge liveness by the **age of the last event** for that
-  session id, never by the stored phase alone. The console keys presence rows
-  by bot binding (a successor's first event retires its predecessor's row) and
-  stamps each row `· since <t>` — a live phase with an old stamp is a dead
-  process that never got a successor.
+- **Presence phases are observations, not liveness proof.** A phase can remain
+  unchanged while its owner works. Join its exact binding/session to current
+  process health and newer events; an old timestamp alone does not establish a
+  dead process. A successor retires its predecessor's row.
 
-- **The agent roster only sees Herdr panes.** Clankie leads coding agents
-  through the herdr CLI; there is no worker protocol reporting to the service.
-  Inside Herdr the console lists panes from `herdr pane list` as
-  `[<agent> · herdr]` rows; outside Herdr an empty roster only means "no
-  visibility" — check `herdr pane list` yourself. The roster is not the limit of
-  what can be read: `clankie agents` lists, reads and resumes any Claude/Codex/Grok/Pi session by
-  its transcript, here or on a configured SSH host such as the PC, whatever
-  terminal it runs in (ADR 0189). Only the 200 newest transcripts per host
-  resolve by ref.
+- **A worker message is not a completion harvest.** Native `message_clankie`
+  reports carry `kind="message"` as untrusted agent output; completion harvests
+  remain `kind="watch"`, and self-wakes remain `kind="wake"`. Match the original
+  receipt and service-resolved lead conversation. A room-owned worker message
+  still needs its correlated native reply through the original room authority;
+  its tag does not turn the worker's words into owner instructions.
 
-- **A turn with no tree never answered.** Pi holds a session file back until the
-  first assistant message, so a one-shot that timed out or failed before he
-  replied leaves nothing under `turns/`. Absence is evidence; pair it with the
-  `discord.text.ingress` receipt that has no matching `discord.text.reply`.
+- **Bridge age is a reload hint, not build or delivery evidence.** Doctor and
+  the roster report `freshness: older-than-runtime` when the observed bridge
+  started before the running service, including a same-build service restart.
+  Read transport presence separately; `current` is a start-time comparison and
+  unavailable timing stays `unknown`. An operator bridge does not establish
+  worker readiness. Reconcile uncertain delivery before another attempt.
+
+- **The fleet roster and saved history answer different questions.** The roster
+  observes native occupants in connected Herdr fleets; hires and messages use
+  native harness channels/session APIs. Worker reports arrive with
+  `message_clankie` at their hiring/adopting conversation. Herdr visibility alone
+  proves neither report delivery nor completion. `clankie agents list|read`
+  inspects saved native transcripts, including configured remote hosts and local
+  registered OpenCode profiles. A saved transcript does not prove a live worker.
+
+- **A missing Pi tree does not identify the execution destination or outcome.**
+  Pi holds a session file back until the first assistant message; stalled cold
+  preparation or a one-shot failure can leave no tree. An attached native seat
+  can execute the input without any Pi tree. Match the conversation's run and
+  delivery receipts to its native transcript or service log. Absence alone does
+  not prove that no external effects occurred or authorize resending.
 
 - **A provider failure can resolve with no reply.** For `captain_model_failed`
   or `captain_usage_limit_reached`, read the terminal assistant's `stopReason`
@@ -64,14 +75,24 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   receipts can hide the same failure; do not infer an empty successful run
   from that code alone.
 
-- **An `accepted` receipt with no terminal one is a turn still running, not a
-  lost one.** The terminal receipt lands whenever the turn settles, which for a
-  wedged turn is at the 3-minute deadline — outside any window you picked from
-  the accepted timestamp. Widen the window before concluding a turn vanished.
+- **An `accepted` receipt establishes admission, not execution or liveness.**
+  The input may be queued, preparing, executing or awaiting native delivery.
+  With no active Pi tools, service preparation and execution fail after five
+  minutes without host-observed preparation progress or Pi events. The watchdog
+  is suspended while one or more Pi tools execute; tools retain their own timeout
+  and cancellation behavior. A full five-minute idle window resumes after the
+  last tool ends. Pre-start inactivity remains bounded, and queued runs do not
+  consume that timeout while waiting.
+  For `conversation_turn_stalled`, match the run ID to the service log's
+  conversation and stalled phase. Healthy runs have no total duration cap.
+  Discord Pi stream stalls use `captain_turn_stalled`; native acknowledgments
+  and escalation replies retain their own deadlines. A stall can leave earlier
+  effects unknown. Inspect the original receipt before retrying; accepted or
+  uncertain native delivery is never replayed into the service runner.
 
-- **`absorbed` is not `declined`.** A message folded into a live run reports
-  `absorbed` (ADR 0118): he answered, the answer just rode the delivery that
-  owned the run. Only `declined` means he read it and chose silence.
+- **`absorbed` is not `declined` or answered.** It records input folded into a
+  live run (ADR 0118); inspect that run's final reply and delivery. `declined`
+  records the choice to stay silent. Neither status grants new authority.
 
 - **A restart does not clear Discord conversation context.** The next ingress
   prompt can feed Clankie his own earlier replies from channel history, so a

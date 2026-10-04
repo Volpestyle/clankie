@@ -684,9 +684,8 @@ function hireAgentTool(
     label: "Hire an agent",
     description:
       "Hire a fleet seat: Herdr opens a pane in the working directory, starts the harness there, and the seat " +
-      "lands watched and messageable as a persona — never a bare `herdr agent start`. model and effort use the " +
-      "harness's own spelling (--model; effort is pi's --thinking, claude's --effort, codex's " +
-      "model_reasoning_effort); a selected project role overrides them; omit both for the default. Typed " +
+      "lands watched and messageable as a persona — never a bare `herdr agent start`. " +
+      "Explicit hire fields (the owner's words) win over the project role, then fleet.hire defaults. Omit fields to inherit. Friendly model names are checked against the registry; retired/unknown models refuse. Subagent model/effort travel in the native brief. native-first requires a stable deliverable key and refuses another pane for it; use the worker's native subagents. Placement is new-tab or split beside a verified native lead pane. For an override across model families, specify the matching harness (for example claude / Opus) and clear incompatible child settings with subagents:null. Typed " +
       "outcomes: unknown_directory, harness_unavailable (no wired flag for what you asked), not_ready (rejected " +
       "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, " +
       "at_capacity (close or reuse a hired agent). brief is its first prompt (codex needs one) and is delivered " +
@@ -695,7 +694,16 @@ function hireAgentTool(
       "its pane: reconcile before retrying. Follow up with message_seat and watch the returned seatId with " +
       "herdr_watch.",
     parameters: Type.Object({
-      harness: StringEnum(OPERATOR_SEAT_HARNESSES),
+      linearIssue: Type.Optional(
+        Type.Object(
+          { organizationId: Type.String({ format: "uuid" }), issueId: Type.String({ format: "uuid" }) },
+          {
+            description:
+              "Canonical Linear issue this hire works on. The admitted hiring conversation owns its later events.",
+          },
+        ),
+      ),
+      harness: Type.Optional(StringEnum(OPERATOR_SEAT_HARNESSES)),
       resume: Type.Optional(
         Type.String({
           minLength: 1,
@@ -707,7 +715,8 @@ function hireAgentTool(
       account: Type.Optional(
         Type.String({
           pattern: "^[a-z][a-z0-9_-]{0,63}$",
-          description: "Registered local Codex account label; omit to choose by headroom.",
+          description:
+            "Registered local Codex or Claude account label; omitted inherits role/fleet, then Codex chooses by headroom. Claude profiles come from claudeAccounts.",
         }),
       ),
       title: Type.String({
@@ -734,6 +743,25 @@ function hireAgentTool(
       }),
       model: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_MODEL_MAX })),
       effort: Type.Optional(Type.String({ minLength: 1, maxLength: OPERATOR_SEAT_EFFORT_MAX })),
+      subagents: Type.Optional(
+        Type.Union([
+          Type.Null(),
+          Type.Object({
+            model: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+            effort: Type.Optional(StringEnum(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"])),
+          }),
+        ]),
+      ),
+      delegation: Type.Optional(StringEnum(["native-first", "panes"])),
+      placement: Type.Optional(StringEnum(["new-tab", "split"])),
+      deliverable: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 512,
+          description:
+            "Stable work item/deliverable key, e.g. VUH-1596. Required for native-first; all slices keep this same key.",
+        }),
+      ),
       skills: Type.Optional(
         StringEnum(["bundled", "plain"], {
           description:
@@ -773,12 +801,14 @@ function hireAgentTool(
       if (available?.() === false)
         return json({ outcome: "failed", reason: "herdr_unreachable", deliveryStage: "unavailable" });
       const authority = captureConversationAuthority(turn.conversationAuthority);
+      const assignment = structuredClone(params);
       await assertConversationAuthority(authority);
-      const { brief, ...seat } = params as typeof params & { brief?: string };
+      const { brief, linearIssue, ...seat } = assignment as typeof params & { brief?: string };
       const result = await hire(
         SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }),
         brief,
         authority,
+        linearIssue,
       );
       if (result.outcome !== "spawned" || brief === undefined || message === undefined)
         return json({ ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) });
@@ -1607,7 +1637,11 @@ const MCP_TOOL_SEARCH = "mcp_tool_search";
  * registering them all active would tax every "hey clankie" in a voice channel
  * for capabilities that turn never uses.
  */
-export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): InlineExtension {
+export function mcpExtension(
+  deps: CaptainDeps,
+  lane: CaptainSessionLaneV2,
+  turn?: TurnContext,
+): InlineExtension {
   return {
     name: "captain-mcp",
     hidden: true,
@@ -1630,6 +1664,7 @@ export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): Inl
               server: tool.server,
               tool: tool.name,
               arguments: (params ?? {}) as Record<string, unknown>,
+              ...(turn?.conversationAuthority ? { conversationAuthority: turn.conversationAuthority } : {}),
             });
             // A server's own error is the model's to react to, so it is raised
             // rather than returned as a successful-looking payload.

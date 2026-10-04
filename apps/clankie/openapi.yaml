@@ -723,7 +723,7 @@ paths:
     get:
       tags: [Operator]
       operationId: listLinearWorkOwners
-      summary: Read legacy organization and issue bindings
+      summary: Read persisted organization and issue ownership
       security: [{ operatorBearer: [] }]
       responses:
         "200": { description: Owners in an owners array }
@@ -731,21 +731,48 @@ paths:
     put:
       tags: [Operator]
       operationId: bindLinearWorkOwner
-      summary: Retired issue binding mutation
-      deprecated: true
+      summary: Bind an exact Linear issue to an authorized conversation
+      description: Requires current operator authority over the selected runnable conversation. Selecting an attachable room grants no Discord or machine authority. Ownership routes future qualifying events; it does not replay passive history.
       security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [organizationId, issueId, conversationId]
+              properties:
+                organizationId: { type: string, format: uuid }
+                issueId: { type: string, format: uuid }
+                conversationId: { type: string, pattern: "^[a-zA-Z0-9_-]+$", maxLength: 256 }
       responses:
+        "200": { description: The persisted binding in bound }
+        "400": { description: Invalid issue or conversation binding }
         "401": { description: Operator authentication required }
-        "410": { description: Issue binding mutations are retired; existing records remain readable }
+        "409": { description: Source conversation authority is unavailable or was revoked }
+        "503": { description: Operator authentication unavailable }
     delete:
       tags: [Operator]
       operationId: unbindLinearWorkOwner
-      summary: Retired issue binding mutation
-      deprecated: true
+      summary: Remove an exact organization and issue binding
       security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [organizationId, issueId]
+              properties:
+                organizationId: { type: string, format: uuid }
+                issueId: { type: string, format: uuid }
       responses:
+        "200": { description: Whether a binding was removed in unbound }
+        "400": { description: Invalid organization and issue pair }
         "401": { description: Operator authentication required }
-        "410": { description: Issue binding mutations are retired; existing records remain readable }
+        "503": { description: Operator authentication unavailable }
   /v1/linear/inbox:
     get:
       tags: [Operator]
@@ -788,6 +815,30 @@ paths:
         "400": { description: Invalid acknowledgment }
         "401": { description: Operator authentication required }
         "409": { description: Cursor was not offered for this owner }
+  /v1/linear/inbox/handoff:
+    post:
+      tags: [Operator]
+      operationId: handoffLinearActivity
+      summary: Hand one retained inbox event to its current issue owner
+      description: The service resolves the persisted issue owner from the retained event. The caller cannot choose a destination or change passive wake rules. An accepted or uncertain handoff is never dispatched again.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [cursor]
+              properties:
+                cursor: { type: string, pattern: "^[0-9]{12}$" }
+      responses:
+        "200": { description: Accepted cursor in handedOff }
+        "400": { description: Invalid retained event cursor }
+        "401": { description: Operator authentication required }
+        "409":
+          { description: Event or authorized current owner is unavailable, or handoff was already attempted }
+        "503": { description: Operator authentication unavailable }
   /v1/linear/wake:
     get:
       tags: [Operator]
@@ -847,7 +898,7 @@ paths:
             reason,
             missingWebhook,
             detail,
-            canonical inbox conversation and operator wake conversation,
+            canonical inbox conversation; wakeRouting is work-owner and wakeConversationId is the inbox fallback,
           }
         "401": { description: Operator authentication required }
     put:
@@ -875,7 +926,7 @@ paths:
             reason,
             missingWebhook,
             detail,
-            canonical inbox conversation and operator wake conversation,
+            canonical inbox conversation; wakeRouting is work-owner and wakeConversationId is the inbox fallback,
           }
         "400": { description: Invalid request }
         "401": { description: Operator authentication required }
@@ -1146,7 +1197,7 @@ paths:
       tags: [Health]
       operationId: getHealth
       summary: Public liveness
-      description: Optional Herdr, gateway or host-power findings are reported separately and do not change service liveness. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md).
+      description: Optional Herdr, gateway, host-power and runtime identity findings do not change service liveness. `power` says whether this host may sleep and when it last did (`@clankie/protocol/host-power`; docs/always-on.md). When available, `runtime` exposes only this service boot's pid, commit, root and instanceId; update transaction details are omitted.
       security: []
       responses:
         "200":
@@ -1157,6 +1208,13 @@ paths:
                 {
                   ok: true,
                   service: clankie,
+                  runtime:
+                    {
+                      pid: 1234,
+                      commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,
+                      root: /fixture/pinned,
+                      instanceId: 11111111-1111-4111-8111-111111111111,
+                    },
                   power:
                     {
                       state: sleep_allowed,

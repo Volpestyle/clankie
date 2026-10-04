@@ -15,7 +15,10 @@ the plugin's hooks, and these skills as `/clankie:this-machine` and
 `/clankie:trace-clankie`. Doctor's `laneTools` says whether the service's
 `/v1/mcp` route answers; `clankie claude --dry-run` prints the launch plan
 (`plugin.source` is `plugin-dir`, with the selected catalog and the
-`clankie@inline` channel identity). The seat's own brain is Claude Code's `/model`;
+`clankie@inline` channel identity). The launcher allows this seat's Clankie CLI and plugin MCP tools while denying
+independent tracker connectors. This avoids routine tool prompts; it does not
+expand the selected conversation's authority. Folder/hook/channel trust remains
+the owner's decision. The seat's own brain is Claude Code's `/model`;
 `clankie model` changes the service lanes. Each fresh launch creates a separate
 workspace chat, including multiple launches in the same directory or account.
 Its transcript appears in that chat in the app; tools, self-wakes and herdr
@@ -74,8 +77,19 @@ that flag creates its own chat rooted at the launch directory. Owner preferences
 and project instructions follow that conversation. Fresh Codex seats also get
 separate chats; their resume record remains independent of Claude's.
 
-Followed Linear notifications use that channel when this seat owns the operator
-conversation (`global-default`); issue bindings do not route wakes.
+Eligible Linear notifications use that channel in the conversation that owns the
+issue. Successful conversation writes, `hire_agent` with canonical `linearIssue`,
+and `clankie linear work bind --organization UUID --issue UUID --conversation ID`
+establish ownership. `linear work list` reads it. Unowned/removed owners route to
+`linear-inbox`; its `linear inbox handoff CURSOR` uses the current issue owner and
+preserves the original wake decision. Read durable memory/work items/roster, not
+other conversations' transcripts. Follow and attribution rules still gate wakes;
+room ownership retains its original actor/route grants.
+Replies to project/initiative status updates use the retained author of that exact
+update. They can reach a native lead on a remote fleet through its existing channel,
+with the original seat/occupant proof refreshed before dispatch. `linear work list`
+also shows host-stamped native owners. Missing author proof stays in the inbox;
+never infer it from the current pane name or replay uncertain delivery.
 The launched Claude seat projects its settled transcript into the selected
 conversation even outside Herdr or with `--plugin-dir`. `clankie seat-sync` is the
 plugin hook; do not change its session binding to copy a transcript between rooms.
@@ -97,6 +111,13 @@ its reports and completion watches then follow that lead. The service resolves
 this persisted route, including remote fleet seats; the worker never chooses it.
 Only a removed lead conversation makes worker reports fall back to
 `global-default`; revoked room grants remain a refusal.
+
+Native projection carries these reports as `kind="message"`, framed as
+untrusted agent output, never an instruction from the owner. Completion harvests
+stay `kind="watch"`; self-wakes stay `kind="wake"`. The tag changes neither
+the retained owner route nor receipt semantics. A room-owned worker message
+still needs the existing `reply` with its `event_id` to return a correlated answer
+through that room's original actor, route and mouth checks.
 
 For shared Linear tools, inspect `clankie access linear`; verify an API-key
 or OAuth connection with `clankie access linear verify` and check the intended automation identity.
@@ -124,9 +145,10 @@ access. Codex currently keeps its initial catalog despite
 reconnect MCP or restart that native pane. New calls from a displayed stale catalog are checked live; this is not a promise
 that calls already past a final asynchronous check cannot dispatch after revocation.
 Missing tools do not authorize another connector or an operator lane.
-Project membership proves initial and final socket/native-process checkpoints
-afresh for each request. Independent observations run together; no proof is
-cached across calls. Slow or unavailable process observations still deny access.
+Native identity checks for worker messages, peer delivery and project assignments
+remain separate from connected-tool admission. Connected tools require the linked
+fleet and verified account, not a project or cwd proof (ADR 0217). Inspect the
+specific refusal instead of treating every missing capability as a project grant.
 
 OpenCode seats use the same isolation contract: a fresh `clankie opencode` creates a separate workspace chat; `--conversation ID` reuses one,
 `--resume` keeps the exact native session and chat, and `--dry-run` creates none.
@@ -142,3 +164,13 @@ are process-local: if `reply` reports that its target is gone, that answer was
 not sent. Check the conversation and seat before sending again; never infer
 that restart, transport acknowledgment, or queue consumption means the model
 finished, and never automatically replay an uncertain request.
+
+Doctor and the roster keep bridge transport presence separate from process age.
+An observed bridge that started before the running service reports
+`older-than-runtime`: “seat bridge older than runtime; restart the seat”.
+`current` means its observed start is at least as recent as the service's;
+unavailable runtime/process timing remains `unknown`. Optional `bridgeStartedAt`
+and `runtimeStartedAt` are timestamps, not build identities. Age alone establishes neither obsolete
+code nor delivery, and also changes after a same-build service restart. Doctor
+observes operator and worker bridges separately; operator presence never grants
+worker tools. Reconcile uncertain dispatch before another attempt.

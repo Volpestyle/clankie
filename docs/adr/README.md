@@ -66,3 +66,7 @@ receipts across handover, and routes worker reports to their persisted lead.
 [ADR 0220](0220-clankie-has-one-present-tense.md) adds one `presence` operator
 operation, a `desktop` tool for his own expressions, and hero pixel art in
 `branding/pet/`; the desktop pet itself lives in the private app.
+
+[ADR 0221](0221-tests-prove-the-product-and-its-boundaries.md) prioritizes real
+E2E, integration and golden coverage for new work; existing unit-test pruning
+remains a separate reviewed effort.

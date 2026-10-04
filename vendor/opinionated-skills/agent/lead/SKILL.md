@@ -1,6 +1,6 @@
 ---
 name: lead
-description: Lead authorized agent work through ownership, review, integration and delivery. Native hires and harness delivery; a status question alone does not authorize dispatch.
+description: Lead authorized agent work through ownership, review, integration and delivery. Native hire/message guidance for Clankie and shared judgment for herdr-lead; a status question alone does not authorize dispatch.
 ---
 
 # Lead
@@ -20,6 +20,22 @@ optional tracker; do not require the user to create agents in a particular host.
 Discover actual access before assigning work: visible terminals alone establish
 neither peer communication nor process-control authority.
 
+## Clankie's fleet
+
+Hire with `hire_agent`, send follow-ups with `message_seat`, and have workers
+report with `message_clankie`. These use the harness's native channels or session
+API inside visible Herdr panes. Use the returned seat ID, fleet-qualified for a
+remote worker (for example `kh2/term_…`). Never dispatch through terminal typing,
+Herdr prompt commands, handoff-file polling or the retired Swarm transport.
+A brief or evidence file is useful context when needed, not a delivery channel.
+
+The hiring conversation owns the worker. A host-admitted `message_seat` from
+another conversation adopts it, routing future reports and hire completion there.
+The worker cannot choose a different destination. An attached native operator
+seat drives its selected conversation; selecting `global-default` does not select
+other rooms. Missing or uncertain native control needs inspection of the original
+receipt, never a second dispatch path. See [native operations](reference/operations.md).
+
 ## Decide by default
 
 An authorized push carries its decisions. Decide reversible, in-scope calls
@@ -29,9 +45,10 @@ owner when the lead and producer agree on a recommendation, adopting uncommitted
 work whose session has ended after it passes the gate, restarting services or
 panes the delivery depends on, and dropping scope the evidence shows is obsolete.
 
-Ask only before spending money, writing to an external account or publishing
-(app stores, payments, cloud, DNS, mail, public posts), deleting data or
-history, or anything else hard to reverse. Batch those into one check-in.
+Existing authorization carries through to its external writes and delivery.
+Ask when an unresolved decision exceeds that scope: new spending, an external
+commitment, deletion of data or history, or another hard-to-reverse action.
+Prepare the concrete result first and batch open decisions into one check-in.
 
 ## Ready work comes first
 
@@ -82,6 +99,29 @@ Size toward the target, and go past it when the work clearly warrants; say so.
 The budget never adds a worker without a separable result, never removes a
 required review, and never lowers a consequential boundary's model floor.
 
+## Inherit the project's hire profile
+
+Clankie's `hire_agent` resolves explicit owner-authorized fields, then project
+role preferences, then `fleet.hire` defaults. Omit harness/model/effort/account/
+placement to inherit; a cross-family model override includes its matching harness.
+Friendly model names are registry-validated; missing, retired or incompatible
+models refuse. Inspect `profile` in the hire result and effective project profiles
+in `clankie fleet status`. The owner edits profiles with `clankie agents role
+ROLE --project PROJECT` or `/agents roles`; settings affect new hires.
+
+A `native-first` role uses one stable `deliverable` key, normally the issue ID.
+Its worker owns the slices through native subagents, carrying the configured
+child model/effort in the first native brief and passing them to spawn calls.
+Another pane for that project/deliverable is refused while starting, live or
+uncertain; message the existing worker, never invent a different key to bypass it.
+`panes` permits independently owned slices to have separate authorized hires.
+
+`new-tab` is normal placement. `split` requires a verified native lead pane in
+the target fleet; it never chooses another client's focused pane. Registered
+local account labels select existing profiles, not login, grants or global
+instructions. Remote account overrides are unsupported. Inspect the current
+schema on older installs; do not assume new profile fields are present.
+
 ## Inspect enough to decide
 
 Read the affected worker, checkout and resource owner before changing its work.
@@ -99,6 +139,11 @@ give one bounded pass after the producer's checks. Inspect the artifact itself;
 for code, review its scoped diff. Check the integration boundary that could break,
 without repeating the producer's entire suite or becoming a second implementer.
 
+Ask for coverage of the changed boundary: full E2E with real dependencies and
+nothing mocked first, integration across data/API/schema boundaries next, then
+goldens grounded in real examples for edge-case regressions. Push back on new
+unit-test bloat. Existing unit-test pruning is a separate reviewed effort.
+
 When correctness depends on interpreting external observations (pixels, audio,
 sensor readings or extracted labels), pair the first producer change with a small
 inspected source sample and valid controls before scaling extraction. Passing
@@ -115,7 +160,7 @@ focused follow-up, creating one only when needed. Keep known failures explicit.
 
 ## Dispatch an owned result
 
-Use the transport sections below for launch, delivery and waits. Verify the
+Use the selected coordination skill for launch, delivery and waits. Verify the
 worker's actual capability and effort against the responsibility before dispatch.
 Consequential security, concurrency and integration work needs a top-capability
 model at high effort unless the user explicitly chooses otherwise.
@@ -228,26 +273,3 @@ the recipient needs to act on that pane.
   with the artifact and exact question. Verify vendor facts against first-party
   sources before using them to justify an architectural gate.
 - Open optional dashboards or rearrange terminals only when requested.
-
-## Native hires and delivery
-
-Clankie hires workers with `hire_agent`. Give each hire its owned deliverable,
-checkout, acceptance and final report in `brief`; pick the harness and effort
-for that responsibility. Remote hires select the registered `fleet` and an
-approved `workingDirectory`. Herdr contains every native interactive worker.
-
-Deliver follow-ups with `message_seat` through the harness's channel or session
-API. A hand-started Claude session with an observed worker hook can receive
-`deliveryStage: stored` replies on its next user turn without a live channel;
-held mail expires within 24 hours. `delivered` confirms the hook's output pipe,
-not model consumption. Never resend an uncertain handoff. Independent linked
-agents can initiate messages with `message_clankie`.
-Use `herdr_watch` for completion and inspect the final report and artifact before
-accepting. Work ownership, dependencies and evidence stay in the repo's tracker
-or files. Missing delivery is an actionable limitation; reconcile uncertainty
-in that same native path before another attempt. Automated briefs and messages
-never fall back to terminal typing.
-
-Load `this-machine` for live install and fleet details and `herdr` for explicit
-terminal observation or process control. The native harness owns model consent,
-trust and approvals. Preserve operator input and close only workers you own.

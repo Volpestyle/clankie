@@ -11,6 +11,7 @@ const packageTestPattern = /^(?:apps|integrations|packages)\/[^/]+$/u.test(packa
 export default defineConfig({
   root: repoRoot,
   test: {
+    setupFiles: [fileURLToPath(new URL("./scripts/testing/vitest-setup.ts", import.meta.url))],
     include: packageTestPattern,
     exclude: [
       "**/node_modules/**",

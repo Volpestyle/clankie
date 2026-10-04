@@ -19,6 +19,11 @@ When your reach card lists a computer-use harness, a long flow in your
 person's apps usually goes better as a hired seat. `computer-use-delegation`
 has that pattern. This skill is for driving the desktop yourself.
 
+The `desktop` tool expresses Clankie's presence (emote, bubble, movement); it
+does not drive apps. Peekaboo is his own hands, guided by this session's current
+observation. A hired Codex computer-use seat is another visible driver; coordinate
+one active driver on the display instead of overlapping it with Peekaboo.
+
 ## Discover the target
 
 ```sh

@@ -181,11 +181,16 @@ export function createCodexSeatAdapter(
               "mcp_servers.clankie.enabled=true",
               'mcp_servers.clankie.command="clankie"',
               'mcp_servers.clankie.args=["mcp","--fleet"]',
-              'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH"]',
+              'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
             );
           await view.guard?.();
           seat = await (options.start ?? startCodexAppServerSeat)({
             cwd: launch.cwd,
+            ...(options.localProcess &&
+            launch.env?.CLANKIE_CODEX_ISOLATED_HOME === launch.env?.CODEX_HOME &&
+            launch.env?.CODEX_HOME
+              ? { catalogRefreshHome: launch.env.CODEX_HOME }
+              : {}),
             onServerStarted: (pid) => {
               releaseProcess = options.localProcess?.(pid, view.paneId);
             },

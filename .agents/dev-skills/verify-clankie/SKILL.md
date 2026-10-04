@@ -5,28 +5,34 @@ description: Use when validating a Clankie capability across a service, credenti
 
 # Verify Clankie
 
-Match the evidence to the claim. A deterministic double proves client logic. It
-does not prove that the real service boots, decodes, accepts the request, or
-preserves state. Call a capability working only after exercising the public path
-with the real dependency named in the claim.
+Match the evidence to the claim. Call a capability working only after exercising
+the public path with the real dependency named in the claim. Isolated client
+logic does not prove that the service boots, decodes, accepts a request or
+preserves state.
 
-## Proof ladder
+## Coverage that earns its place
 
-Run all applicable rungs; a higher rung does not replace the lower ones.
+Follow [ADR 0221](../../../docs/adr/0221-tests-prove-the-product-and-its-boundaries.md)
+for new work, in this order:
 
-1. Characterize the promised public boundary with a deterministic dependency.
-   Cover every success, refusal, and stop branch there, not helper functions.
-2. Run the repository gate (`pnpm check`). Record its exit code and confirm the
-   new test appears in Vitest's **Test Files** output.
-3. Drive the same public entry point the product uses against the real system.
-   Do not substitute an in-process host call for a Unix-socket client, or a
-   helper method for a captain tool/body seam.
+1. Full E2E through the product's public entry point, real dependencies and nothing
+   mocked. Authorized production test accounts through Playwright or an equivalent
+   are valid. An in-process host call does not prove the Unix-socket client path.
+2. Integration across real data/API/schema producers and consumers. Include
+   old-client/new-host compatibility when a host contract evolves.
+3. Goldens from inspected real data, retained as edge-case regressions.
+
+Do not add unit tests by default. Existing ones are not mass-deleted; pruning is
+a separate reviewed effort. Choose checks for the changed claim and risk, reuse
+valid evidence for unchanged inputs, and record what actually ran. Follow the
+current gate assignment; workers run scoped checks when the lead owns the composed
+full check. Evals are manual-only, never implicit in a build, release or `pnpm check`.
 
 Report advertised capabilities as `live`, `refused`, or `absent`. A receipt
 that fails because a promised capability is absent is useful evidence; do not
 weaken the expectation to make the instrument green.
 
-Name the rung the evidence actually reached. A claim backed by anything short
+Name the public path the evidence actually reached. A claim backed by anything short
 of the real dependency through the public path is unproven — report it as
 unproven rather than writing it up as settled. For a safety claim ("this
 change cannot break X"), find the one fact it is safe because of and prove
@@ -35,7 +41,7 @@ where a list of asserted maybes proves nothing.
 
 ## Game-body boundary
 
-- There is one body: his credentialed seat in a hosted PokeAgents world
+- Pokémon uses his credentialed seat in a hosted PokeAgents world
   ([ADR 0145](../../../docs/adr/0145-the-world-is-the-only-body.md)). No
   emulator runs in this repo, so "it booted locally" is not a claim available
   to you.
@@ -51,6 +57,13 @@ where a list of asserted maybes proves nothing.
 - `EnvironmentRuntime` lease expiry/recovery is an internal runtime property,
   not evidence that one process can possess another process's body.
 
+Minecraft is a separate service-owned MCP motor under the same conversation
+`play` lease; use `docs/minecraft.md` and ADR 0219. Offline Paper conformance
+cannot establish Microsoft authentication, a friend session or Discord viewing.
+For native fleets, match the proof to the conversation, fleet-qualified seat,
+current native occupant and original receipt. Host discovery alone does not
+prove the worker accepted tools or a report reached its hiring/adopting lead.
+
 ## What a live proof must demonstrate
 
 - Booting is not playing. Require a decoded observation and a meaningful state
@@ -64,7 +77,7 @@ where a list of asserted maybes proves nothing.
 - Use semantic observations to steer scripted cartridge setup. Fixed button
   loops can reopen a menu or take a different branch and then misdiagnose the
   implementation under test.
-- Preserve odd baseline behavior in characterization tests. Correct it later
+- Preserve odd baseline behavior in real-data goldens. Correct it later
   as a separately reviewed behavior change.
 
 ## Operator console (TUI) proof
@@ -96,8 +109,8 @@ Read the repo's root `vitest.config.ts` before deciding where a test belongs.
 Clankie discovers `<package>/test/**/*.test.ts` only; co-located
 `<package>/src/**/*.test.ts` files are outside the gate.
 
-Confirm discovery by count, not by exit code. Note **Test Files** and **Tests**
-before and after; if adding tests did not move both, they are not in the gate.
+Confirm the selected test appears in the runner's output. A green exit without
+discovery does not verify it.
 
 ## Hosted FireRed proof
 
@@ -214,8 +227,8 @@ comparable evidence; a merged fix alone is applied.
 
 ## Instruction and skill comparisons
 
-Use the checkout-only subscription eval runner described in [docs/evals.md](../../../docs/evals.md)
-before cutting standing instructions or bundled skills (ADR 0203). Preview with
+For an explicitly requested comparison, use the checkout-only subscription eval runner described in [docs/evals.md](../../../docs/evals.md)
+for instruction-quality comparisons (ADR 0203); objective stale-command/path repairs do not require an eval ritual. Preview with
 `node scripts/evals/run.mjs --dry-run`; default execution is up to three Claude calls,
 with no retries. Keep Codex sampling small while its weekly budget is low.
 Compare matched cases under `current`, `plain`, and `trimmed`, and retain failed

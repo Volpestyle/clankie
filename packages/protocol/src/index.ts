@@ -1,3 +1,10 @@
+import { HireProfileSchema } from "./hire-profile.ts";
+export {
+  HireProfileSchema,
+  effectiveHireProfile,
+  type HireProfile,
+  type EffectiveHireProfile,
+} from "./hire-profile.ts";
 import {
   OperatorPresenceRequestSchema,
   OperatorPresenceResultSchema,
@@ -932,7 +939,7 @@ export const OperatorSeatSubagentsSchema = z
   .strict();
 export type OperatorSeatSubagents = z.infer<typeof OperatorSeatSubagentsSchema>;
 
-const OperatorHarnessBridgeSchema = z
+const HarnessBridgeProcessSchema = z
   .object({
     status: z.enum(["live-process", "missing", "pane-mismatch", "unobserved"]),
     detail: z.string().max(1024),
@@ -940,8 +947,16 @@ const OperatorHarnessBridgeSchema = z
     bridgePid: z.number().int().positive().optional(),
     claimedPane: z.string().max(128).optional(),
     sharedDaemon: z.boolean().optional(),
+    /** Process age is a reload hint, not proof of the loaded build or tool delivery. */
+    freshness: z.enum(["older-than-runtime", "current", "unknown"]).optional(),
+    bridgeStartedAt: z.string().datetime().optional(),
+    runtimeStartedAt: z.string().datetime().optional(),
   })
   .strict();
+const OperatorHarnessBridgeSchema = HarnessBridgeProcessSchema.extend({
+  /** Operator channel and worker connected tools are independent processes. */
+  operatorBridge: HarnessBridgeProcessSchema.optional(),
+});
 
 export const OperatorFleetSeatSchema = z
   .object({
@@ -1127,7 +1142,6 @@ export function operatorFleetHome(snapshot: OperatorFleetSnapshot): OperatorFlee
 }
 
 export { OPERATOR_SEAT_HARNESSES, type OperatorSeatHarness } from "./seat-harnesses.ts";
-import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
 
 /**
  * Hire an agent (ADR 0013, "compose is hiring"): herdr opens a tab in the
@@ -1138,29 +1152,13 @@ import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
 export const SpawnOperatorSeatSchema = z
   .object({
     schemaVersion: z.literal(1),
-    harness: z.enum(OPERATOR_SEAT_HARNESSES),
+    ...HireProfileSchema.shape,
     /** Saved transcript ref (`host:sessionId`); continue it as a normal native seat. */
     resume: z.string().trim().min(1).max(128).optional(),
-    account: z
-      .string()
-      .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
-      .optional(),
     /** What the roster calls it; herdr's own agent name is derived from this. */
     title: OperatorAgentNameSchema,
     /** Absolute path it starts in — the district it joins (ADR 0022). */
     workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX),
-    /**
-     * Model the harness launches with, spelled the harness's own way (pi's
-     * `--model` pattern, claude's, codex's) (ADR 0185). Absent means the
-     * harness default, which is what an unopinionated hire should get.
-     */
-    model: z.string().trim().min(1).max(OPERATOR_SEAT_MODEL_MAX).optional(),
-    /**
-     * Reasoning effort the harness launches with, in the harness's own level
-     * vocabulary (pi's `--thinking`, claude's `--effort`, codex's
-     * `model_reasoning_effort`) (ADR 0185). Absent means the harness default.
-     */
-    effort: z.string().trim().min(1).max(OPERATOR_SEAT_EFFORT_MAX).optional(),
     /**
      * Start the harness with its owner's-Chrome integration on (ADR 0199):
      * claude's `--chrome`. Codex's Chrome and computer use follow the owner's
@@ -1183,6 +1181,8 @@ export const SpawnOperatorSeatSchema = z
       .string()
       .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
       .optional(),
+    /** Stable work item/deliverable key, required for native-first admission. */
+    deliverable: z.string().trim().min(1).max(512).optional(),
     /** The hired persona's team role (ADR 0208); absent leaves it as it was. */
     role: OperatorAgentRoleSchema.optional(),
   })
@@ -1221,6 +1221,7 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
       deliveryStage: DeliveryStageSchema.optional(),
       seat: OperatorFleetSeatSchema,
       control: SeatControlModeSchema.optional(),
+      profile: HireProfileSchema.optional(),
       skills: z
         .object({
           mode: z.enum(["bundled", "plain"]),
@@ -2424,8 +2425,8 @@ export const OPERATOR_HEAD_AGENT_NAME = "clankie";
 export const OPERATOR_SEAT_EVENTS_PATH = "/v1/seat/events";
 export const OPERATOR_SEAT_EVENT_WAIT_MS_MAX = 30_000;
 /**
- * `message` is a fleet seat's kind: a DM or a room turn that would otherwise
- * be typed into the pane. The head never receives one.
+ * `message` carries a fleet seat's DM or room turn, or an authenticated worker
+ * report to its leading conversation. Its content grants no new authority.
  */
 export const OperatorSeatEventKindSchema = z.enum(["wake", "watch", "escalation", "message"]);
 export type OperatorSeatEventKind = z.infer<typeof OperatorSeatEventKindSchema>;

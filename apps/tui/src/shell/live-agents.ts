@@ -45,8 +45,20 @@ function statusText(status: LiveAgent["seat"]["status"], text: string, { ansi }:
 /** A pane whose harness bridge is missing or claims another pane, as doctor observed it (VUH-1587). */
 function bridgeWarning({ seat }: LiveAgent, { ansi }: AgentTheme): string | undefined {
   const bridge = seat.harnessBridge;
+  if (
+    bridge?.freshness === "older-than-runtime" ||
+    bridge?.operatorBridge?.freshness === "older-than-runtime"
+  )
+    return ansi.red("seat bridge older than runtime");
   if (!bridge || bridge.status === "live-process" || bridge.status === "unobserved") return undefined;
   return ansi.red(`bridge ${clean(bridge.status)}`);
+}
+
+function bridgeRemediation({ seat }: LiveAgent): string | undefined {
+  const bridge = seat.harnessBridge;
+  return bridge?.operatorBridge?.freshness === "older-than-runtime"
+    ? bridge.operatorBridge.remediation
+    : bridge?.remediation;
 }
 
 function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
@@ -174,8 +186,8 @@ export class LiveAgentPicker implements Component {
           this.theme.ansi.bold(clean(selected.name)),
           `${agentMetadata(selected, this.theme)} · ${this.theme.ansi.dim(clean(selected.seat.seatId))}`,
           step ?? this.theme.ansi.dim("Step unavailable"),
-          ...(selected.seat.harnessBridge?.remediation && bridgeWarning(selected, this.theme)
-            ? [`${this.theme.ansi.red("Fix:")} ${clean(selected.seat.harnessBridge.remediation)}`]
+          ...(bridgeRemediation(selected) && bridgeWarning(selected, this.theme)
+            ? [`${this.theme.ansi.red("Fix:")} ${clean(bridgeRemediation(selected)!)}`]
             : []),
         ].flatMap((line) => wrapTextWithAnsi(line, contentWidth))
       : [];

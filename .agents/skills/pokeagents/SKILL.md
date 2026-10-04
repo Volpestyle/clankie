@@ -57,7 +57,8 @@ MCP/CLI player or a second button-pressing agent. `joined` confirms the sitting;
 handled. For `play_session_active`, inspect the existing run instead of joining
 again.
 
-Play belongs to the conversation that started it. A typed `bodyLease` busy
+Pokémon and Minecraft share the `play` lease; inspect the current holder before
+trying to join a second game. Play belongs to the conversation that started it. A typed `bodyLease` busy
 result names the thread holding the controls; queue or ask that thread instead
 of taking over. A stop request, timeout, or failed lifecycle report does not
 prove departure. Recovery waits for the actual driver to settle and an exact

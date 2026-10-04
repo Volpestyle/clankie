@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileCredentialStore } from "@clankie/credential-broker";
+import { FileCredentialStore, LINEAR_WEBHOOK_PROVIDER_ID } from "@clankie/credential-broker";
 import { SETTINGS_SCHEMA_VERSION, SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectInstall, inspectInstallKind, type ExecFileImpl } from "../src/install-doctor.ts";
@@ -26,6 +26,85 @@ const missing: ExecFileImpl = async () => {
 const offline: typeof fetch = () => Promise.reject(new Error("no probe in tests"));
 
 describe("install doctor", () => {
+  it("keeps missing webhook credentials separate from an empty owner rule", async () => {
+    const root = await installRoot();
+    const settings = new SettingsStore(join(root, "settings.json"));
+    await settings.update((current) => ({
+      ...current,
+      linearWebhook: { ...current.linearWebhook, following: true, url: "https://example.com/linear" },
+    }));
+    const report = await inspectInstall({
+      repoRoot: root,
+      env: { HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config") },
+      settings,
+      credentialStore: new FileCredentialStore(join(root, "credentials.json")),
+      execFileImpl: missing,
+      fetchImpl: offline,
+    });
+    expect(report.linear).toMatchObject({
+      following: true,
+      active: false,
+      webhookConfigured: false,
+      reason: "linear_webhook_required",
+      missingWebhook: ["secret"],
+      wakeWarning: "following is on, but no owner IDs, so owner comments never wake.",
+    });
+  });
+
+  it.each([
+    { following: true, actors: ["owner"], ownerUserIds: [], warning: true, otherActors: false },
+    { following: false, actors: ["owner"], ownerUserIds: [], warning: false, otherActors: false },
+    { following: true, actors: ["owner"], ownerUserIds: ["james"], warning: false, otherActors: false },
+    { following: true, actors: ["human"], ownerUserIds: [], warning: false, otherActors: true },
+    { following: true, actors: ["owner", "human"], ownerUserIds: [], warning: true, otherActors: true },
+  ] as const)("reports ineffective owner wake rules without changing configuration: %j", async (input) => {
+    const root = await installRoot();
+    const settings = new SettingsStore(join(root, "settings.json"));
+    await settings.update((current) => ({
+      ...current,
+      linearWebhook: {
+        ...current.linearWebhook,
+        following: input.following,
+        url: "https://example.com/linear",
+        wake: {
+          ...current.linearWebhook.wake,
+          actors: [...input.actors],
+          ownerUserIds: [...input.ownerUserIds],
+        },
+      },
+    }));
+    const store = new FileCredentialStore(join(root, "credentials.json"));
+    const secret = "doctor-linear-secret-must-not-leak";
+    await store.set(LINEAR_WEBHOOK_PROVIDER_ID, { type: "api", key: secret });
+    const before = await settings.load();
+    const report = await inspectInstall({
+      repoRoot: root,
+      env: { HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config") },
+      settings,
+      credentialStore: store,
+      execFileImpl: missing,
+      fetchImpl: offline,
+    });
+    const warning = "following is on, but no owner IDs, so owner comments never wake.";
+    const diagnostic = input.warning
+      ? `${warning}${input.otherActors ? " Other selected actor rules may still wake." : ""}`
+      : null;
+    expect(report.linear).toMatchObject({
+      following: input.following,
+      active: input.following,
+      webhookConfigured: true,
+      wakeWarning: diagnostic,
+    });
+    expect(report.remediations.some((entry) => entry.includes(warning))).toBe(input.warning);
+    if (input.warning) {
+      expect(report.remediations).toContain(
+        `${diagnostic} Set owner IDs with \`clankie linear wake set --owner-user-ids IDS\`.`,
+      );
+    }
+    expect(await settings.load()).toEqual(before);
+    expect(JSON.stringify(report)).not.toContain(secret);
+  });
+
   it("treats a tree with libexec/node and release.json as a release", async () => {
     const root = await installRoot();
     await mkdir(join(root, "libexec"), { recursive: true });
@@ -221,7 +300,11 @@ describe("install doctor", () => {
 
   it("names where a harness reaches his tools, on the evidence of the route's own 401", async () => {
     const root = await installRoot();
-    const env = { HOME: join(root, "home"), CLANKIE_CONTROL_PLANE_URL: "http://127.0.0.1:4310/" };
+    const env = {
+      HOME: join(root, "home"),
+      XDG_CONFIG_HOME: join(root, "config"),
+      CLANKIE_CONTROL_PLANE_URL: "http://127.0.0.1:4310/",
+    };
     const store = new FileCredentialStore(join(root, "credentials.json"));
     const served = await inspectInstall({
       repoRoot: root,
@@ -245,7 +328,7 @@ describe("install doctor", () => {
 
   it("asks for a sign-in when the Mac is shut out of its own doorway", async () => {
     const root = await installRoot();
-    const env = { HOME: join(root, "home") };
+    const env = { HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config") };
     const store = new FileCredentialStore(join(root, "credentials.json"));
     const signedOut = await inspectInstall({
       repoRoot: root,
@@ -363,7 +446,8 @@ describe("install doctor", () => {
 
     const report = await inspectInstall({
       repoRoot: root,
-      env: { HOME: join(root, "home"), PATH: bin },
+      env: { HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config"), PATH: bin },
+      credentialStore: new FileCredentialStore(join(root, "credentials.json")),
       execFileImpl,
       fetchImpl: offline,
     });

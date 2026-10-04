@@ -11,6 +11,7 @@ import {
   readTerminalCatalog,
 } from "../src/captain/herdr-census.ts";
 import { operatorPromptWithHerdrSeat } from "../src/captain/herdr-seat.ts";
+import { OperatorFleetSeatSchema } from "@clankie/protocol";
 
 const list = {
   result: {
@@ -404,5 +405,77 @@ it("projects linked-session host bridge gaps into the roster without changing na
   });
   expect(fleet.seats[0]?.harnessBridge?.remediation).toEqual(
     process.platform === "darwin" ? expect.stringContaining("clankie-worker@clankie") : undefined,
+  );
+});
+
+it("projects bridge age from this service process into strict fleet health without upgrading operator-only workers", async () => {
+  const fleet = await readFleet({
+    bridgeSocket: "/test/linked.sock",
+    runtimePid: 99,
+    runCommand: async (command, args) => {
+      if (command === "/bin/ps")
+        return {
+          stdout: args.includes("pid=,lstart=")
+            ? "30 Sat Oct  3 12:00:00 2026\n99 Sun Oct  4 12:00:00 2026"
+            : args[0] === "eww"
+              ? "30 node clankie mcp --lane operator HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/test/linked.sock"
+              : "20 10 /bin/claude\n30 20 node /home/.local/bin/clankie mcp --lane operator\n99 1 node /runtime/apps/clankie/src/index.ts",
+          stderr: "",
+        };
+      if (args[0] === "pane")
+        return {
+          stdout: JSON.stringify({
+            result: {
+              process_info: {
+                pane_id: "w1:p1",
+                shell_pid: 10,
+                foreground_process_group_id: 20,
+              },
+            },
+          }),
+          stderr: "",
+        };
+      if (args[0] === "agent")
+        return {
+          stdout: JSON.stringify({
+            result: {
+              agents: [
+                {
+                  pane_id: "w1:p1",
+                  terminal_id: "term-worker",
+                  agent: "claude",
+                  agent_status: "idle",
+                  agent_session: { source: "herdr:claude", kind: "id", value: "native-worker" },
+                },
+              ],
+            },
+          }),
+          stderr: "",
+        };
+      return { stdout: "{}", stderr: "" };
+    },
+  });
+  const observed = fleet.seats[0]!;
+  const seat = OperatorFleetSeatSchema.parse({
+    seatId: observed.seatId,
+    personaId: "test-persona",
+    occupantId: observed.occupantId,
+    harness: observed.harness,
+    status: observed.status,
+    title: observed.title,
+    harnessBridge: observed.harnessBridge,
+  });
+  if (process.platform === "darwin")
+    expect(seat.harnessBridge).toMatchObject({
+      status: "missing",
+      operatorBridge: {
+        status: "live-process",
+        freshness: "older-than-runtime",
+        remediation: expect.stringContaining("restart the seat"),
+      },
+    });
+  expect(seat.seatId).toBe("term-worker");
+  expect(seat.occupantId).toBe(
+    occupantIdForHerdrSession({ source: "herdr:claude", kind: "id", value: "native-worker" }),
   );
 });

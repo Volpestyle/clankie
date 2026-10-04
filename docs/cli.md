@@ -126,6 +126,12 @@ The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
 Always JSON, always exit 0. `ok` means the card was produced. Missing optional
 tools are facts in `remediations`, not failures.
 
+Local fleet discovery uses `<CLANKIE_STATE>/links`, defaulting to
+`~/.clankie/links`. Local hires carry the service's absolute state path, including
+into the Codex MCP bridge. Doctor and native workers select that same directory;
+an explicit private state directory never falls back to shared discovery.
+SSH fleets keep their own machine's discovery directory.
+
 `harnessBridges.linkedSession` checks Claude/Codex panes in the discovered local
 Herdr session, even when doctor runs outside that session. On macOS it joins the
 live foreground harness and bridge ancestry (or the exact dedicated Codex
@@ -135,6 +141,17 @@ environment. The roster carries the same observation in each seat's
 `harnessBridge`; the console flags missing/mismatched bridges and shows the
 selected pane's full fix when focused with `Ctrl+G`. Roster polls reuse these
 bounded process observations for up to five seconds; doctor takes a fresh sample.
+
+Doctor observes operator bridges separately from worker bridges; an operator
+bridge does not prove worker readiness. Process age is separate from transport
+status. `freshness: older-than-runtime` means the observed bridge started before
+the running service, with the remedy “seat bridge older than runtime; restart the
+seat”. `current` means the bridge started at least as recently as the service;
+`unknown` keeps unavailable timing unknown. The optional `bridgeStartedAt` and
+`runtimeStartedAt` fields expose the observed timestamps, not build identities.
+Age alone does not prove an obsolete build or successful delivery; a same-build
+service restart also produces this reload guidance. The roster warns seats it
+already lists; doctor also observes the named head's operator bridge.
 
 - `live-process`: the pane has a matching live bridge process. This does not
   verify the native tool catalog, a successful call, or reply delivery.
@@ -512,7 +529,7 @@ See [worker posts](linear-worker-posts.md) for examples, grants and limitations.
 ### `linear status` / `linear follow on|off`
 
 When a webhook is configured, accepted events appear in the **Linear inbox**
-conversation (`linear-inbox`) as **External activity** messages, including swarm
+conversation (`linear-inbox`) as **External activity** messages, including worker
 posts delivered by the webhook. Workspace webhook events are passive history. Clankie also reads the connected
 account’s actual Linear notifications once at startup and when webhooks arrive.
 There is no periodic poll. A newly persisted, signed workspace event (or a verified exact self echo) requests a
@@ -521,12 +538,12 @@ once after another 1.5 seconds. Refreshes coalesce bursts and never overlap an
 active read. A failed startup or manual read gets one delayed catch-up attempt;
 a failed retry retains its checkpoint for the next webhook or restart.
 Following requires a configured webhook. Following controls
-whether those notifications wake his operator conversation:
+whether those notifications wake the conversation that owns the issue, or the inbox for unowned work:
 
-| Following     | Inbox delivery                          | Automatic model turns                            |
-| ------------- | --------------------------------------- | ------------------------------------------------ |
-| Off (default) | Events stay visible in the conversation | None from incoming events                        |
-| On            | Events stay visible in the conversation | Rule-matched notifications wake `global-default` |
+| Following     | Inbox delivery                          | Automatic model turns                                              |
+| ------------- | --------------------------------------- | ------------------------------------------------------------------ |
+| Off (default) | Events stay visible in the conversation | None from incoming events                                          |
+| On            | Events stay visible in the conversation | Rule-matched notifications wake their work owner or `linear-inbox` |
 
 Notifications wake only after attribution from signed webhook history and matching
 `linearWebhook.wake`. Defaults select configured owner humans only and exclude
@@ -534,7 +551,7 @@ Notifications wake only after attribution from signed webhook history and matchi
 selected; unknown or ambiguous actors stay quiet. Collection is unchanged
 ([ADR 0214](adr/0214-linear-wakes-require-attribution-and-rules.md)).
 Mentions, assignments, subscribed issue activity and replies follow Linear’s
-own inbox semantics. No per-issue binding is needed. The first connection starts
+own inbox semantics. Successful conversation writes and issue-scoped hires establish ownership automatically; explicit claims can adopt it. The first connection starts
 watching from now; existing Linear notifications remain readable with
 `linear_get_notifications`. Notification IDs and a private durable checkpoint
 prevent restart, pagination and read-state changes from creating extra wakes.
@@ -566,7 +583,13 @@ finish. `clankie linear follow on|off` applies without a restart, and
 `clankie linear status` reports the switch and webhook readiness. All three
 return JSON with `ok`, `following`, `active`, `webhookConfigured`, `reason`,
 `missingWebhook`, `detail`, `conversationId` (`linear-inbox`),
-`wakeConversationId` (`global-default`), and `settingsFile`. Enabling without a
+`wakeConversationId` (`linear-inbox`, the fallback), `wakeRouting` (`work-owner`),
+`wakeWarning`, and `settingsFile`. When following is on with the owner selector
+and no owner IDs, status and doctor report: “following is on, but no owner IDs, so
+owner comments never wake”. Other selected actors can still match. Verify the
+owner through the connected Linear account, then configure
+`clankie linear wake set --owner-user-ids OWNER_UUID`; it applies live.
+Enabling without a
 stored webhook URL or signing secret leaves the switch unchanged and returns
 `ok: false`, `error: "linear_webhook_required"`, and a nonzero exit status.
 `missingWebhook` names `url`, `secret`, or both, with setup guidance in `detail`.
@@ -612,7 +635,7 @@ reply. A delivery supplies context, not new permission.
 The local operator API exposes `GET /v1/linear/follow` and
 `PUT /v1/linear/follow` with `{ "following": true | false }`. Both require the
 operator bearer and return `{ "schemaVersion": 1, "following": boolean,
-"conversationId": "linear-inbox", "wakeConversationId": "global-default" }`. The signed public ingress remains
+"conversationId": "linear-inbox", "wakeConversationId": "linear-inbox", "wakeRouting": "work-owner" }`. The signed public ingress remains
 `POST /v1/hooks/linear`. Changing the local follow switch does not change which
 events Linear sends; the owner configures that subscription in Linear.
 
@@ -670,13 +693,59 @@ is sent to GraphQL. This index does not change inbox retention or acknowledgment
 
 #### Issue ownership
 
-Issue bindings are legacy metadata and no longer route events or notifications.
-`clankie linear work list` and `GET /v1/linear/work` still show existing records.
-`work bind` and `work unbind` are retired; authenticated `PUT` and `DELETE`
-requests return `410` with `linear_work_bindings_retired`. Existing records are
-not rewritten or deleted and no longer pin conversations against retention or
-explicit deletion. Eligible notifications wake `global-default`.
-Use `clankie linear inbox read --conversation global-default` and retain the
+A successful issue/comment write from an admitted conversation, an issue-scoped
+`hire_agent` (`linearIssue: { organizationId, issueId }`), or an explicit claim
+records the issue's leading conversation. A delegated native worker write uses
+its host-proven hiring/adopting conversation. Organization and issue UUIDs are
+canonical; names and notification subtitles do not establish ownership.
+An identifier-only comment write can establish its issue through the later exact
+signed write receipt. Without a canonical returned issue or sufficient receipt
+proof (resource UUID, revision timestamp and saved fields), automatic ownership
+stays unproven; explicitly claim the canonical issue instead. Signed
+webhook history maps notification URLs to issue UUIDs. Ambiguous identity stays
+unowned. Ownership survives restarts in the existing `linear-work.json`.
+
+A native author without a leading service conversation can own work through its
+original fleet-qualified seat and native occupant. `work list` exposes that
+host-stamped `nativeRecipient`; callers cannot manufacture one with `work bind`.
+Replies to project or initiative status updates use the exact author captured by
+`linear_save_status_update` in the existing write receipt and signed attribution
+index. An eligible reply reaches that author automatically, including a remote
+fleet's native lead, rather than requiring inbox triage. Notification URL aliases
+must agree with retained full parent/comment IDs. Missing or conflicting author
+proof stays in the inbox. Pre-upgrade writes with no retained author proof remain
+unproven; a current pane or project assignment cannot reconstruct them.
+
+```sh
+clankie linear work list
+clankie linear work bind --organization ORGANIZATION_UUID --issue ISSUE_UUID --conversation CONVERSATION_ID
+clankie linear work unbind --organization ORGANIZATION_UUID --issue ISSUE_UUID
+clankie linear inbox handoff CURSOR
+```
+
+`GET /v1/linear/work` lists owners. Authenticated `PUT` accepts
+`{ organizationId, issueId, conversationId }`; `DELETE` accepts
+`{ organizationId, issueId }`. Claims require the selected conversation's existing
+authority. Selecting a room does not grant an operator source or widen its tools;
+room writes/hires retain their admitted actor and route proof.
+
+Eligible notifications wake the issue owner through its existing attached native
+seat or service runner. Unowned work and removed owners fall back to
+`linear-inbox`. A present room with revoked grants remains undelivered. The inbox
+reads shared durable memory, work items, roster and issue ownership, without
+importing other conversations' transcripts. Its explicit handoff uses a retained
+event's current issue owner, keeping the original follow/rules decision. The API
+is authenticated `POST /v1/linear/inbox/handoff` with `{ cursor }`. An already
+handed-off item cannot be sent again. Passive/filtered history stays quiet.
+Native delivery refreshes the original occupant and any original room grants at
+dispatch. A changed or unavailable recipient stays undelivered in the shared
+journal; it does not inherit another seat or `global-default`. The existing native
+delivery fence retains the accepted ID, so a retry reconciles uncertain delivery
+and does not dispatch a second message.
+Unresolved native admissions older than the seven-day receipt window remain
+undelivered for explicit reconciliation; they are never automatically replayed.
+
+Use `clankie linear inbox read --conversation CONVERSATION_ID` and retain the
 same conversation on `inbox ack`. Omit the conversation to inspect all history.
 Never acknowledge truncated output or a cursor offered to another conversation.
 
@@ -1322,7 +1391,7 @@ The notes reach him as the `fleet` prompt section, and only on lanes that hold a
 shell — a room that cannot dispatch would carry the section for nothing. They are
 preference, not authority: the section says plainly that he still reads the work
 and decides, and a note here can no more widen his reach than a warmer persona
-can. The section carries the swarm size and model mode whenever it renders. With
+can. The section carries the fleet size and model mode whenever it renders. With
 no notes and the default budget (`max`, `optimal`) there is no section at all.
 
 JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "tools": "connected", "peerMessages": "on" }, "settingsFile": "…", "restart": "clankie restart" }`.
@@ -1517,6 +1586,50 @@ in any casing is stored lowercase. A custom role keeps the casing you typed
 and compares case-insensitively, so `Sound Designer` and `sound designer` are
 one role. `none` clears it. It prints the updated persona.
 
+`clankie agents role ROLE --project PROJECT` edits a project hire profile through
+its revision-bearing owner API. Set any of `--harness`, `--model`, `--effort`,
+`--subagent-model`, `--subagent-effort`, `--delegation native-first|panes`,
+`--account LABEL`, `--placement new-tab|split`, `--cap N` and `--naming TEXT`.
+`inherit` clears one preference; omitted fields remain unchanged. The console's
+`/agents roles` menu sets the same fields.
+
+```sh
+clankie agents role implementer --project clankie --harness codex --model "sol 6.1" --effort xhigh --subagent-model "sol 6.1" --subagent-effort medium --delegation native-first --placement new-tab
+```
+
+Explicit hire fields expressing the owner's words win over the role, then
+`fleet.hire` defaults, then the harness default. Omit fields to inherit; a model
+family override includes its harness (for example `claude` / `Opus`) and
+`subagents: null` clears incompatible inherited children for that hire. Friendly
+names resolve to exact IDs against the current model registry. Missing, retired,
+or incompatible models refuse instead of silently selecting a replacement.
+Subagent settings inherit independently and travel in the first native brief;
+the worker passes them to its harness's native spawn calls.
+
+A `native-first` hire supplies a stable `deliverable` key, such as its issue ID.
+All slices keep that key. Another pane for that project/deliverable is refused
+while the original hire is live, starting or uncertain; message that worker and
+use its native children. `panes` assigns independent slices to separate hires.
+Closing a pane releases its admission only after successful inventory confirms
+it absent. Retry reconciliation retains the original profile.
+
+`new-tab` is the normal placement. `split` opens a sibling of the verified lead
+pane in the target fleet, preserving focus. It refuses when that native lead
+cannot be verified; prepared initial-command Pi/OpenCode launches currently
+require `new-tab`. It never uses another client's focused pane as a fallback.
+Local Codex accounts use the registered account labels and homes; local Claude
+accounts use `claudeAccounts` entries (`{label, home}`) plus the implicit
+`default` profile. The owner registers their existing alternate directory with
+`clankie accounts claude add /absolute/config/home --label second` (also
+`/accounts claude` in the console); no login or profile path is guessed. Remote
+account overrides remain unsupported. Profile selection confers no grants.
+
+`clankie fleet set --hire-profile FILE.json` sets fleet hire defaults with the
+same profile keys (`subagents` is `{model, effort}`); `fleet status` includes the
+defaults and effective project role profiles. The hire result's `profile` shows
+the effective launch preferences. These settings affect new hires, not running
+agents. James's global agent instructions remain owner-authored.
+
 `clankie agents rename NAME|PERSONA_ID NEW_NAME` changes an agent's saved display
 name. Quote names containing spaces. `/agents rename NAME "NEW NAME"` is the
 same TUI action. It uses the existing `update_persona` operation with only the
@@ -1534,7 +1647,7 @@ include offline personas. The role is semantic, unlike the cosmetic
 settings are the `set_persona_role` operator op (`{ personaId, role: ROLE |
 null }`, steer grant), the `roles` op (read), and `hire_agent`'s and
 `spawn_seat`'s `role` (required in the model-facing hire tool, optional for older API clients). In the TUI, `/agents role NAME "ROLE"` and
-`/agents roles` honour quotes. The `/agents` picker shows each live agent's role.
+`/agents roles` opens the project hire-profile editor. The `/agents` picker shows each live agent's role.
 
 The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`
 (known identities), `/rooms` (group channels and Discord inspection), and
@@ -1849,6 +1962,20 @@ inspect the conversation before resubmitting. Observe replies with
 `clankie --chat ID` or the conversation API. The running service and a local
 captain credential are required.
 
+Service preparation and execution have a five-minute inactivity watchdog,
+including cold startup before a Pi session exists. Host-observed preparation
+progress and Pi events renew it. The watchdog is suspended while one or more Pi
+tools execute; tools retain their own timeout and cancellation behavior. A full
+five-minute idle window resumes after the last tool ends. Before execution starts,
+or with no active tool and no preparation or streamed progress, inactivity still
+times out after five minutes. Healthy work has no total duration cap, and queued
+runs do not consume the timeout while waiting. A stalled stored run fails
+with `conversation_turn_stalled`; the service log names its conversation, run ID
+and stalled phase. The host releases its admission so later inputs can proceed, but its
+original receipt remains and the request is never replayed. Earlier effects may
+have an unknown outcome; inspect the original run before retrying. See
+[ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md#stalled-service-preparation-and-execution-vuh-1613).
+
 `--attach PATH` (repeatable, at most eight) sends images or video with the
 message: PNG, JPEG, HEIC/HEIF, GIF and WebP up to 20 MiB, and MP4 or MOV up to
 200 MiB. The message may then be empty. Each file is uploaded through the
@@ -2160,6 +2287,9 @@ escalations, wakes and watches instead of starting a service model turn. Closing
 the seat returns new inputs to the service runner. A turn already accepted by
 either destination keeps that destination; uncertain native delivery is never
 replayed automatically. Existing Pi goal continuations retain their service loop.
+Stalled service preparation releases its admission so the attached seat can take
+later queued inputs. Native delivery keeps its existing acknowledgment deadlines
+and ten-minute escalation reply wait; it has no new five-minute reply cutoff.
 Selecting `global-default` affects only that chat. To drive a Discord room,
 select its conversation; replies return through the original room delivery and
 authority checks. Rooms remain read-only to ordinary `send` and `reset` commands.
@@ -2225,14 +2355,21 @@ or the launcher-set `CLANKIE_CONVERSATION_ID` binds tools, polls and replies to
 one service conversation; the API rejects a changed binding within an MCP session.
 
 It is also his channel. While it runs it long-polls `/v1/seat/events` and
-pushes each self-wake, herdr completion watch, and room escalation into the
-session as `<channel source="clankie" kind="wake|watch|escalation"
+pushes worker reports, self-wakes, herdr completion watches and room escalations into the
+session as `<channel source="clankie" kind="message|wake|watch|escalation"
 conversation="…" event_id="…">`; that polling is what binds the seat as his
 head, and with no bridge polling the same turns run the pi operator lane. A
 `reply` tool answers an escalation by `event_id`; the reply lands in the
 escalating conversation as his own message. Claude Code loads the channel
 only when `clankie claude` passes its development flag; without it the tools
 still work without consuming events, leaving those turns with the service.
+
+Worker `message_clankie` reports project as `kind="message"`, framed as
+untrusted agent output, never an owner instruction. Completion harvests remain
+`kind="watch"`, and self-wakes remain `kind="wake"`. These tags do not change
+the service-owned lead route or delivery receipts. A room-owned worker message
+still uses `reply` with its `event_id` for the correlated room reply; the original
+actor, route and mouth checks remain in force.
 
 ### `mcp --seat`
 
@@ -2326,7 +2463,8 @@ The console exposes the same verbs through `/project`.
 The changes file may contain `name`, `roles`, `workerCap` and `trackerRef`.
 Omitted fields remain unchanged; `null` removes a worker cap or tracker binding.
 An empty roles list inherits the six built-in roles; an explicit list defines
-the available roles and may set their model, effort and concurrency cap. Zero
+the available roles and may set their whole hire profile (harness, model, effort,
+subagents, delegation, account, placement), naming rule and concurrency cap. Zero
 prevents new hires, while an absent cap adds no limit. These settings affect
 new hire admission, not the configuration of already running agents.
 

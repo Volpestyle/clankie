@@ -337,7 +337,6 @@ it("binds native tools, project doctrine and channel delivery to selected servic
     },
   );
   try {
-    const id = captain.seatContext()!.conversationId;
     const projects: Array<{ conversationId: string; cwd: string }> = [];
     for (const name of ["alpha", "beta"]) {
       const cwd = join(root, name);
@@ -375,6 +374,7 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
       conversationId: a,
     };
+    expect(captain.recordLinearWorkOwner(owner, { conversationId: a })).toBe(true);
     const activity = {
       eventId: "a".repeat(64),
       notification: true,
@@ -385,21 +385,22 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       actorEmail: undefined,
       actorId: "human",
       organizationId: owner.organizationId,
+      issueId: owner.issueId,
       createdAt: new Date().toISOString(),
       url: undefined,
       updatedFrom: undefined,
       data: { id: "comment", issueId: owner.issueId, body: "Check the existing work" },
     };
-    const linearWake = captain.pollSeatEvents(1000);
+    const linearWake = captain.pollSeatEvents(1000, undefined, a);
     expect(captain.receiveLinearActivity(activity, true)).toBe(true);
     expect(await linearWake).toMatchObject([
-      { conversationId: id, kind: "wake", content: expect.stringContaining(`--conversation ${id}`) },
+      { conversationId: a, kind: "wake", content: expect.stringContaining(`--conversation ${a}`) },
     ]);
-    await captain.pollSeatEvents(0);
+    await captain.pollSeatEvents(0, undefined, a);
     expect(await captain.pollSeatEvents(0, undefined, a)).toEqual([]);
     expect(captain.receiveLinearActivity(activity, true)).toBe(false);
     webhookReady = false;
-    const blockedWake = captain.pollSeatEvents(100);
+    const blockedWake = captain.pollSeatEvents(100, undefined, a);
     expect(captain.receiveLinearActivity({ ...activity, eventId: "b".repeat(64) }, true)).toBe(true);
     expect(await blockedWake).toEqual([]);
     expect(await captain.pollSeatEvents(0, undefined, b)).toEqual([]);

@@ -60,7 +60,9 @@ describe("skill catalog", () => {
       "name: preferred-skill\ndescription: User version",
     );
 
-    await expect(discoverClankieSkills(repo, { HOME: home })).resolves.toEqual([
+    await expect(
+      discoverClankieSkills(repo, { HOME: home, XDG_CONFIG_HOME: join(root, "config") }),
+    ).resolves.toEqual([
       { name: "linked-skill", description: "A linked user skill" },
       { name: "preferred-skill", description: "Project Pi version" },
       { name: "project-skill", description: "Project version" },
@@ -81,7 +83,9 @@ describe("skill catalog", () => {
       "name: verify-clankie\ndescription: Checkout proof ladder",
     );
 
-    await expect(discoverClankieSkills(repo, { HOME: home })).resolves.toEqual([
+    await expect(
+      discoverClankieSkills(repo, { HOME: home, XDG_CONFIG_HOME: join(root, "config") }),
+    ).resolves.toEqual([
       { name: "this-machine", description: "Product install map" },
       { name: "verify-clankie", description: "Checkout proof ladder" },
     ]);

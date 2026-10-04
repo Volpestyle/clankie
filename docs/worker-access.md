@@ -16,10 +16,44 @@ reports fall back to `global-default`; a retained room still requires its curren
 actor and route grants. Existing receipt IDs prevent rerouting or replaying an
 already accepted report.
 
+When a native seat drives that lead conversation, `message_clankie` reports
+arrive as `kind="message"`, framed as untrusted agent output. Completion harvests
+retain `kind="watch"`, and self-wakes retain `kind="wake"`. The message tag
+grants no owner authority and changes neither the retained lead route nor receipt
+semantics. Room-owned reports still use the existing correlated native reply
+and original actor, route and mouth checks.
+
 Load the shipped `clankie` skill to discover the current catalog, verify the
 connected actor, read the issue and decisions, and perform the authorized change.
 Tool access does not authorize every outward action. `linear-issues` carries the
 read-before-write and editing rules.
+
+## Catalog changes in Codex
+
+The fleet bridge checks its catalog every five seconds and emits MCP
+`notifications/tools/list_changed` for added, removed or changed definitions.
+An explicit admission refusal withdraws tools. Other failed discovery keeps the
+previous catalog; calls still pass through Clankie's current admission and
+account checks. A notification never replays a tool call.
+
+Codex 0.160.0 logs this notification without updating its executable catalog.
+Plain `config/mcpServer/reload` also reuses an unchanged ready connection.
+For locally hired seats with a dedicated app-server and copied worker config,
+Clankie's controller changes a connection environment revision through
+`config/value/write`, then reloads. Codex reconnects Clankie's MCP connection
+at the next model step on the same thread. The pane, conversation and message
+tool remain available. Refreshes are serialized and failed RPCs are retried at
+most three times per catalog change; no tool call or turn is retried.
+
+This workaround does not rewrite the owner's config, apply to manually started
+clients, or refresh remote seats. For those clients, first check admission and
+`fleet.tools`, then ask the owner to reconnect. Preserve the exact thread UUID,
+cwd, account home and launch flags. A shared daemon can keep an unloaded pane's
+thread cached: wait until that exact thread is no longer loaded before resuming
+it. Never restart a shared daemon or fork the conversation automatically.
+Controller-owned hires need controller recovery rather than a second manual
+process attached to their thread. A fresh status-list connection is not proof
+that an existing thread can call the tool.
 
 ## Fleet admission and the kill switch
 
@@ -267,7 +301,13 @@ through the lead's watch. The outbound Codex adapter's turn state stays in memor
 Fleet membership doctor reports project eligibility and native observations.
 `eligibility: unsupported` or missing project proof does not deny fleet tools.
 `nativeTools: not-verified` means the diagnostic has not inspected that pane's
-bridge/catalog or demonstrated a call. Live PC acceptance is a separate native
+bridge/catalog or demonstrated a call. Doctor and the roster distinguish bridge
+transport presence from `freshness: older-than-runtime`: the observed bridge
+started before the running service, so the seat needs reloading. This is a reload
+hint, including after a same-build service restart, not proof of an obsolete
+build or successful delivery. Missing start-time facts remain `unknown`.
+Operator bridge presence does not prove worker bridge readiness; reconcile an
+uncertain original receipt before another attempt. Live PC acceptance is a separate native
 check after landing and re-pin: two connected bridge tools plus `message_clankie`,
 and a Linear issue read through `clankie_call`. Deterministic fixtures do not
 establish that acceptance.

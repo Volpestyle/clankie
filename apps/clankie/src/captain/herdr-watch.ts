@@ -54,14 +54,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual, stripVTControlCharacters } from "node:util";
 import { redactSensitiveText } from "@clankie/observability";
 import {
   OPERATOR_CONVERSATION_SUMMARY_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
   type OperatorSeatSpawnResult,
-  type SpawnOperatorSeat,
+  effectiveHireProfile,
+  type HireProfile,
+  type SpawnOperatorSeat as HireRequest,
 } from "@clankie/protocol";
 import { z } from "zod";
 import { parseHerdrForegroundProcesses, type HerdrForegroundProcess } from "./codex-seat.ts";
@@ -129,6 +131,8 @@ export interface HerdrAgentSnapshot {
   readonly workingDirectory?: string;
 }
 
+type SpawnOperatorSeat = HireRequest & { harness: NonNullable<HireRequest["harness"]> };
+
 export interface HerdrWatchRunner {
   /** Fresh complete inventory of exactly one fleet, for native session reuse. */
   list?(fleet?: string): Promise<readonly HerdrAgentSnapshot[]>;
@@ -158,6 +162,7 @@ export interface HerdrWatchRunner {
   createTab?(options: {
     readonly cwd: string;
     readonly label: string;
+    readonly besidePane?: string;
     readonly env?: Readonly<Record<string, string>>;
     /** Initial native argv, never terminal input. Only prepared adapters use this. */
     readonly command?: readonly string[];
@@ -522,7 +527,34 @@ export function createHerdrWatchRunner(
       writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
       renameSync(tmp, path);
     },
-    createTab: async ({ cwd, label, env, command }) => {
+    createTab: async ({ cwd, label, env, command, besidePane }) => {
+      if (besidePane !== undefined) {
+        if (command)
+          throw new Error(
+            "Prepared native initial-command hires require new-tab placement; split is unsupported.",
+          );
+        const layout = JSON.parse(await runHerdr(["pane", "layout", "--pane", besidePane])).result.layout;
+        const area = layout.panes.find((p: { pane_id: string }) => p.pane_id === besidePane)?.rect;
+        if (!area) throw new Error("Lead pane disappeared before split; no pane was opened.");
+        const result = JSON.parse(
+          await runHerdr([
+            "pane",
+            "split",
+            "--pane",
+            besidePane,
+            "--direction",
+            area.width > area.height * 2 ? "right" : "down",
+            "--cwd",
+            cwd,
+            "--no-focus",
+            ...Object.entries(env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
+          ]),
+        );
+        const id = result.result?.pane?.pane_id;
+        if (typeof id !== "string" || !id)
+          throw new Error("Split pane creation unconfirmed; inspect Herdr before retrying");
+        return id;
+      }
       if (command !== undefined) {
         if (!createCommandTab) throw new Error("Native initial-command pane creation unavailable");
         return createCommandTab({ cwd, label, command, ...(env === undefined ? {} : { env }) });
@@ -679,6 +711,7 @@ export interface ProjectHirePolicy {
 export class HerdrWatchStore implements HerdrWatchPort {
   private readonly projectHires: ProjectHires;
   private readonly projectPolicy: ProjectHirePolicy | undefined;
+  private readonly hireDefaultPolicies = new WeakMap<SpawnOperatorSeat, string>();
   private readonly projectAllocations = new WeakMap<SpawnOperatorSeat, string>();
   private readonly activeProjectHires = new Set<string>();
   private readonly projectRecoveryOnly = new WeakSet<SpawnOperatorSeat>();
@@ -724,6 +757,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private stateUnreadable = false;
   private closed = false;
   private readonly nativeLaunchPolicy: NativeLaunchPolicy | undefined;
+  private readonly hireDefaults: (() => Promise<HireProfile>) | undefined;
+  private readonly resolveModel: ((harness: string, model: string) => Promise<string>) | undefined;
+  private readonly claudeAccounts: (() => Promise<readonly CodexAccount[]>) | undefined;
+  private readonly leadPane:
+    | ((input: HireRequest, authority?: HireAuthority) => Promise<string | undefined>)
+    | undefined;
   private readonly accounts: () => Promise<readonly CodexAccount[]>;
   private readonly resumeInventory: ((fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>) | undefined;
   private readonly resumeStarts = new Map<string, Promise<void>>();
@@ -734,6 +773,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly validateOwner?: (owner: ConversationOwner) => Promise<boolean>;
       readonly nativeLaunchPolicy?: NativeLaunchPolicy;
       readonly projectHirePolicy?: ProjectHirePolicy;
+      readonly hireDefaults?: () => Promise<HireProfile>;
+      readonly resolveHireModel?: (harness: string, model: string) => Promise<string>;
+      readonly claudeAccounts?: () => Promise<readonly CodexAccount[]>;
+      readonly leadPane?: (input: HireRequest, authority?: HireAuthority) => Promise<string | undefined>;
       readonly codexAccounts?: () => Promise<readonly CodexAccount[]>;
       readonly skillBundle?: {
         readonly repoRoot: string;
@@ -797,6 +840,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.projectPolicy = options.projectHirePolicy;
     this.hireReceipts = new DeliveryFence(`${path}.hire-receipts.json`);
     this.skillBundle = options.skillBundle;
+    this.hireDefaults = options.hireDefaults;
+    this.resolveModel = options.resolveHireModel;
+    this.claudeAccounts = options.claudeAccounts;
+    this.leadPane = options.leadPane;
     this.accounts = options.codexAccounts ?? (async () => codexAccounts());
     this.remoteWorkspace = options.remoteWorkspace;
     this.piSeatModel = options.piSeatModel;
@@ -983,7 +1030,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return { outcome: "offline", deliveryStage: "unavailable", detail: "Native seat delivery is closed." };
     if (this.closed)
       return uncontrolled?.() ?? { outcome: "offline", detail: "Native hire service is closed." };
-    return this.seatControl.deliverToSeat(seatId, text, uncontrolled, options);
+    return options === undefined
+      ? this.seatControl.deliverToSeat(seatId, text, uncontrolled)
+      : this.seatControl.deliverToSeat(seatId, text, uncontrolled, options);
   }
 
   /** Only fresh host-observed native proof selects a worker's leading conversation. */
@@ -1096,15 +1145,26 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   public async spawnSeat(
-    input: SpawnOperatorSeat,
+    inputRequest: HireRequest,
     subjectOverride?: string,
     brief?: string,
     resume?: SavedAgentSession,
     authority?: HireAuthority,
     adopt?: AdoptHire,
   ): Promise<HerdrSeatSpawnResult> {
+    const defaults = (await this.hireDefaults?.()) ?? {};
+    let input = { ...inputRequest, ...effectiveHireProfile(inputRequest, {}, defaults) };
+    this.hireDefaultPolicies.set(input, JSON.stringify(defaults));
+    if (!this.projectPolicy && input.delegation === "native-first")
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: "Native-first hiring requires a verified project and stable deliverable key.",
+      };
     if (!this.projectPolicy)
-      return this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt);
+      return this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt).then((result) =>
+        result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result,
+      );
     let allocation: string | undefined;
     try {
       if (authority) await assertConversationAuthority(authority);
@@ -1119,11 +1179,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (input.projectId !== undefined && input.projectId !== projectId)
         throw new Error("The selected project does not match this hiring conversation or workspace.");
       if (projectId === undefined) {
+        if (input.delegation === "native-first")
+          throw new Error("Native-first hiring requires a verified project and stable deliverable key.");
         if (this.projectHires.unresolved(input))
           throw new Error(
             "An earlier hire in this workspace is still being checked. Resolve it before hiring again.",
           );
-        return this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt);
+        return this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt).then(
+          (result) =>
+            result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result,
+        );
       }
       let live: HerdrAgentSnapshot | undefined;
       if (this.runner.list) {
@@ -1146,7 +1211,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
               seat: live.terminalId,
               occupantId: occupantIdForHerdrSession(live.session),
             });
-      const reserved = reused ?? this.projectHires.reserve(settings, projectId, input);
+      const reserved =
+        reused ??
+        this.projectHires.reserve(
+          settings,
+          projectId,
+          inputRequest.workingDirectory === input.workingDirectory
+            ? inputRequest
+            : { ...inputRequest, workingDirectory: input.workingDirectory },
+          defaults,
+        );
       if (resume !== undefined && reserved.request.harness !== savedSessionHarness(resume)) {
         this.projectHires.failed(reserved.id);
         throw new Error(
@@ -1160,7 +1234,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
           detail: "The earlier hire is still starting. Wait for its result before trying again.",
         };
       allocation = reserved.id;
-      input = reserved.request;
+      input = { ...reserved.request, harness: reserved.request.harness! };
+      this.hireDefaultPolicies.set(input, JSON.stringify(defaults));
       this.projectAllocations.set(input, allocation);
       this.projectContexts.set(input, { projectId, ...(authority === undefined ? {} : { authority }) });
       if (reused) this.projectLiveReuse.add(input);
@@ -1169,7 +1244,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const result = await this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt);
       if (result.outcome === "spawned") this.projectHires.confirmed(allocation);
       else this.projectHires.failed(allocation);
-      return result;
+      return result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result;
     } catch (error) {
       if (allocation) this.projectHires.failed(allocation);
       return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
@@ -1179,6 +1254,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   private async admitProjectLaunch(input: SpawnOperatorSeat): Promise<void> {
+    const defaultPolicy = this.hireDefaultPolicies.get(input);
+    if (defaultPolicy !== undefined && defaultPolicy !== JSON.stringify((await this.hireDefaults?.()) ?? {}))
+      throw new Error(
+        "Fleet hire defaults changed during startup. Check the current profile before hiring again.",
+      );
     const id = this.projectAllocations.get(input);
     const context = this.projectContexts.get(input);
     if (!id || !context || !this.projectPolicy) return;
@@ -1198,6 +1278,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return [...new Set(await this.projectPolicy.tools(project))].sort();
   }
 
+  private async resolveHireModels(input: SpawnOperatorSeat): Promise<SpawnOperatorSeat> {
+    if (!this.resolveModel) return input;
+    // Validate without replacing the journaled friendly names; native argv uses resolved IDs.
+    if (input.model) await this.resolveModel(input.harness, input.model);
+    if (input.subagents?.model) await this.resolveModel(input.harness, input.subagents.model);
+    return input;
+  }
   private async spawnAdmittedSeat(
     input: SpawnOperatorSeat,
     subjectOverride?: string,
@@ -1206,6 +1293,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
     authority?: HireAuthority,
     adopt?: AdoptHire,
   ): Promise<HerdrSeatSpawnResult> {
+    try {
+      input = await this.resolveHireModels(input);
+      const subagentModel =
+        input.subagents?.model && this.resolveModel
+          ? await this.resolveModel(input.harness, input.subagents.model)
+          : input.subagents?.model;
+      brief = hireProfileBrief(
+        { ...input, ...(subagentModel ? { subagents: { ...input.subagents, model: subagentModel } } : {}) },
+        brief,
+      );
+    } catch (error) {
+      return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
+    }
     // Persist origin before discovery or native startup can leave an uncertain pane.
     if (authority !== undefined) {
       const admitted = captureConversationAuthority(authority);
@@ -1471,8 +1571,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
           reason: "unknown_directory",
           detail: "The saved session's directory is not granted on this fleet",
         };
-      if (input.account !== undefined && (input.fleet !== undefined || input.harness !== "codex"))
-        throw new Error("Account overrides require a local Codex seat");
+      if (
+        input.account !== undefined &&
+        (input.fleet !== undefined || !["codex", "claude"].includes(input.harness))
+      )
+        throw new Error("Account overrides require a local Codex or Claude seat");
+      if (input.account && input.harness === "claude") {
+        const home = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === input.account)?.home;
+        if (
+          !home ||
+          !session.file ||
+          !(await realpath(session.file.path)).startsWith(`${await realpath(home)}/projects/`)
+        )
+          throw new Error("Saved Claude session belongs to a different or unregistered account profile");
+      }
       const account =
         input.fleet === undefined && input.harness === "codex"
           ? await savedCodexAccount(session, await this.accounts(), input.account)
@@ -1785,11 +1897,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
             excluded: catalog.filter((skill) => !skill.included).map((skill) => skill.name),
           };
     let account: CodexAccount | undefined = prepared?.account;
-    if (input.account !== undefined && (remote !== undefined || input.harness !== "codex")) {
+    if (
+      input.account !== undefined &&
+      (remote !== undefined || !["codex", "claude"].includes(input.harness))
+    ) {
       return {
         outcome: "failed",
         reason: "harness_unavailable",
-        detail: "Account overrides require a local Codex hire.",
+        detail: "Account overrides require a registered local Codex or Claude profile.",
       };
     }
     if (prepared === undefined && remote === undefined && input.harness === "codex") {
@@ -1803,6 +1918,23 @@ export class HerdrWatchStore implements HerdrWatchPort {
       } catch (error) {
         return { outcome: "failed", reason: "harness_unavailable", detail: reasonDetail(error) };
       }
+    }
+    let claudeHome: string | undefined;
+    if (input.harness === "claude" && input.account) {
+      const selected = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === input.account);
+      if (!selected)
+        return {
+          outcome: "failed",
+          reason: "harness_unavailable",
+          detail: `Claude account ${input.account} is not registered. Configure its profile home in claudeAccounts; no login or account fallback was attempted.`,
+        };
+      claudeHome = await realpath(selected.home).catch(() => undefined);
+      if (!claudeHome)
+        return {
+          outcome: "failed",
+          reason: "harness_unavailable",
+          detail: `Claude account ${input.account} profile home is unavailable. Register its existing directory again; no account fallback was attempted.`,
+        };
     }
     let paneId: string;
     let nativePrepared: PreparedSeatLaunch | undefined;
@@ -1823,6 +1955,26 @@ export class HerdrWatchStore implements HerdrWatchPort {
           input.workingDirectory,
         );
       }
+      if (claudeHome)
+        skillLaunch = { ...skillLaunch, env: { ...skillLaunch.env, CLAUDE_CONFIG_DIR: claudeHome } };
+      const besidePane = input.placement === "split" ? await this.leadPane?.(input, authority) : undefined;
+      if (input.placement === "split" && !besidePane)
+        throw new Error(
+          "Split placement requires a verified lead pane in the target fleet. Choose new-tab or hire from that native lead conversation.",
+        );
+      // External Herdr panes inherit the server's environment, not this
+      // service's. Carry its discovery namespace explicitly for local hires.
+      // Trusted preallocation owns its complete environment; SSH fleets use
+      // their own machine's state and must never receive this local path.
+      if (prepared === undefined && remote === undefined) {
+        skillLaunch = {
+          ...skillLaunch,
+          env: {
+            ...skillLaunch.env,
+            CLANKIE_STATE: resolve(process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie")),
+          },
+        };
+      }
       await this.nativeLaunchPolicy?.admit({
         seat: structuredClone(input),
         phase: "launch",
@@ -1842,7 +1994,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
           cwd: input.workingDirectory,
           brief: brief ?? "",
           ...(resume === undefined ? {} : { resumeSessionId: resume.sessionId }),
-          ...(input.model === undefined ? {} : { model: input.model }),
+          ...(input.model === undefined
+            ? {}
+            : {
+                model: this.resolveModel ? await this.resolveModel(input.harness, input.model) : input.model,
+              }),
           ...(input.effort === undefined ? {} : { effort: input.effort }),
           ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
           harnessArgs: skillLaunch.args,
@@ -1852,7 +2008,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
         await this.admitProjectLaunch(input);
       }
       commandAttempted = nativePrepared !== undefined;
+      if (besidePane !== undefined && (await this.leadPane?.(input, authority)) !== besidePane)
+        throw new Error("Lead pane changed before split; no pane was opened.");
+      if (claudeHome) {
+        const current = ((await this.claudeAccounts?.()) ?? []).find((a) => a.label === input.account);
+        if (!current || (await realpath(current.home).catch(() => undefined)) !== claudeHome)
+          throw new Error("Claude account profile changed during startup");
+      }
       paneId = await createTab({
+        ...(besidePane === undefined ? {} : { besidePane }),
         cwd: input.workingDirectory,
         label: resume === undefined ? input.title : resumePaneLabel(resume),
         ...(nativePrepared === undefined
@@ -1896,10 +2060,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const receipt = this.hireReceipts.pending(receiptKey)!;
         this.hireReceipts.update(receiptKey, receipt.messageId, { paneId, agentName: subject });
       }
-      const model = input.harness === "pi" ? await this.hostedPiModel(input.model) : input.model;
+      const requestedModel =
+        input.model === undefined || !this.resolveModel
+          ? input.model
+          : await this.resolveModel(input.harness, input.model);
+      const model = input.harness === "pi" ? await this.hostedPiModel(requestedModel) : requestedModel;
       const requiredModel =
         projectAllocation === undefined ? undefined : this.projectHires.requiredModel(projectAllocation);
-      if (requiredModel !== undefined && model !== requiredModel)
+      if (
+        requiredModel !== undefined &&
+        model !== (this.resolveModel ? await this.resolveModel(input.harness, requiredModel) : requiredModel)
+      )
         throw new Error(
           "This role's model is not available on this machine. Choose an available model in the project settings.",
         );
@@ -2982,4 +3153,20 @@ function delay(ms: number): Promise<void> {
     const timer = setTimeout(resolve, ms);
     timer.unref?.();
   });
+}
+
+/** Policy travels through the existing native first-prompt path, not a second delivery. */
+function hireProfileBrief(profile: HireProfile, brief?: string): string | undefined {
+  const lines: string[] = [];
+  if (profile.delegation === "native-first")
+    lines.push(
+      "Delegation: native-first. Split this deliverable's independent slices across your harness's own native subagents. Do not hire additional Herdr panes for the same deliverable.",
+    );
+  if (profile.delegation === "panes")
+    lines.push("Delegation: panes. Each independently owned slice uses its own authorized hire.");
+  if (profile.subagents?.model || profile.subagents?.effort)
+    lines.push(
+      `Native subagents: ${profile.subagents.model ? `model ${profile.subagents.model}` : "inherit model"}; ${profile.subagents.effort ? `effort ${profile.subagents.effort}` : "inherit effort"}. Pass these settings when spawning native children; if the harness cannot honor them, report the limitation instead of substituting.`,
+    );
+  return lines.length ? `${brief ?? ""}\n\nHire profile:\n${lines.join("\n")}`.trim() : brief;
 }

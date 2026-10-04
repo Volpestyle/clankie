@@ -24,6 +24,10 @@ export interface PeerSeatAuthority {
   validate(): Promise<boolean>;
 }
 export interface PeerDeliveryOptions {
+  /** Host-only native author/admission check, combined with any peer fence. */
+  readonly guard?: () => Promise<void>;
+  /** Exact host-stamped original event key; retains confirmed native acceptance. */
+  readonly stableReceiptKey?: string;
   readonly reconcileOnly?: boolean;
   readonly originalId?: string;
   readonly recipientBinding?: string;

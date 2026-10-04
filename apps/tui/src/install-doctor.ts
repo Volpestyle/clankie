@@ -7,6 +7,7 @@ import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 import {
   createDefaultCredentialStore,
+  LINEAR_WEBHOOK_PROVIDER_ID,
   type CredentialStore,
   type RedactedCredential,
 } from "@clankie/credential-broker";
@@ -19,7 +20,13 @@ import {
   type ClankieConfig,
   type LoadConfigResult,
 } from "@clankie/model-provider";
-import { bundledSkills, SettingsStore, defaultSettingsPath, type ClankieSettings } from "@clankie/settings";
+import {
+  bundledSkills,
+  SettingsStore,
+  defaultSettingsPath,
+  linearFollowStatus,
+  type ClankieSettings,
+} from "@clankie/settings";
 import { inspectHarnessBridges } from "./harness-doctor.ts";
 import { commandHost } from "./command/io.ts";
 import { probeHealth, type GatewayDoorwayReport } from "./command/gateway.ts";
@@ -94,6 +101,7 @@ export interface InstallDoctorReport {
     readonly catalog: readonly ReturnType<typeof bundledSkills>[number][];
   };
   readonly emailConfigured: boolean;
+  readonly linear?: ReturnType<typeof linearFollowStatus>;
   readonly mcpServers: readonly string[];
   readonly credentials: readonly InstallDoctorCredential[];
   readonly commands: { readonly [name: string]: CommandPresence };
@@ -173,8 +181,14 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   const kind = inspectInstallKind(options.repoRoot);
   const settings = await (options.settings ?? new SettingsStore(defaultSettingsPath(env))).load();
   const config = await (options.loadConfigImpl ?? loadConfig)({ cwd: options.repoRoot, env });
-  const credentials = await listCredentialIds(
-    options.credentialStore ?? createDefaultCredentialStore({ env }),
+  const credentialStore = options.credentialStore ?? createDefaultCredentialStore({ env });
+  const [credentials, linearSecret] = await Promise.all([
+    listCredentialIds(credentialStore),
+    credentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID).catch(() => undefined),
+  ]);
+  const linear = linearFollowStatus(
+    settings.linearWebhook,
+    linearSecret?.type === "api" && linearSecret.key.trim().length > 0,
   );
   const execute = options.execFileImpl ?? defaultExecFile(env);
   const activeHerdr = join(
@@ -232,6 +246,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     selectedModel,
     doorway,
     power,
+    linear,
   });
 
   return {
@@ -264,6 +279,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
       settings.email.username !== undefined ||
       settings.email.fromAddress !== undefined ||
       settings.email.imapHost !== undefined,
+    linear,
     mcpServers: settings.mcp.servers.filter((server) => server.enabled).map((server) => server.id),
     credentials,
     commands,
@@ -463,8 +479,14 @@ function collectRemediations(input: {
   readonly selectedModel: SelectedModelReport | null;
   readonly doorway: GatewayDoorwayReport;
   readonly power: HostPowerReport;
+  readonly linear: ReturnType<typeof linearFollowStatus>;
 }): string[] {
   const remediations: string[] = [];
+  if (input.linear.wakeWarning !== null) {
+    remediations.push(
+      `${input.linear.wakeWarning} Set owner IDs with \`clankie linear wake set --owner-user-ids IDS\`.`,
+    );
+  }
   if (input.model === null) {
     remediations.push("Pick a captain model with `clankie model set provider/model` or `/setup`.");
   }

@@ -50,12 +50,13 @@ it("shows defaults, validates and persists partial flag edits, and preserves rul
   });
   expect((await settings.load()).linearWebhook.wake).toMatchObject({ actors: ["human"], ownerUserIds: [] });
 });
-it("bare /linear opens Follow Linear and its help has no retired binding commands", async () => {
+it("bare /linear opens Follow Linear and its help names ownership and handoff commands", async () => {
   const linearFollowMenu = vi.fn(async () => undefined);
   const command = buildConsoleCommands({ linearFollowMenu }).find((item) => item.name === "linear")!;
   const shell = {} as ClankieFaceShell;
   await command.run("", shell);
   expect(linearFollowMenu).toHaveBeenCalledExactlyOnceWith(shell);
   expect(command.argumentHint).toContain("wake show/set");
-  expect(command.argumentHint).not.toMatch(/bind|unbind/u);
+  expect(command.argumentHint).toContain("work list/bind/unbind");
+  expect(command.argumentHint).toContain("inbox read/ack/handoff");
 });

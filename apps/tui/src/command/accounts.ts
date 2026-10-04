@@ -1,3 +1,4 @@
+import { runClaudeAccountsCommand } from "./claude-accounts.ts";
 import { runCodexAccountsCommand } from "./codex-accounts.ts";
 import { text } from "node:stream/consumers";
 import { AccountLinearAppRequestSchema } from "@clankie/protocol/accounts";
@@ -30,6 +31,10 @@ export async function runAccountsCommand(
     readonly request?: (path: string, body?: unknown) => Promise<Record<string, unknown>>;
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "claude") {
+    if (options.request) throw new Error("Claude homes are managed on the local machine");
+    return runClaudeAccountsCommand(args.slice(1), options);
+  }
   if (args[0] === "codex") {
     if (options.request) throw new Error("Codex homes are managed on the local machine");
     return runCodexAccountsCommand(args.slice(1), options);

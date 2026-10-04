@@ -152,6 +152,7 @@ describe("captain hire_agent", () => {
       },
       undefined,
       expect.objectContaining({ owner: { conversationId: "global-default" } }),
+      undefined,
     );
     // The mechanism outcome stays intact beside its shared receipt stage.
     expect(result.details).toEqual({ outcome: "failed", reason: "not_ready", deliveryStage: "unavailable" });
@@ -251,4 +252,38 @@ describe("captain hire_agent", () => {
     ).rejects.toThrow(/may propose a hire, not execute one/u);
     expect(hireSeat).not.toHaveBeenCalled();
   });
+});
+
+it("keeps the hiring conversation host-stamped while forwarding an issue-scoped assignment", async () => {
+  const owner = { conversationId: "project-lead" };
+  const hire = vi.fn(async () => ({ outcome: "failed", reason: "not_ready" }) as OperatorSeatSpawnResult);
+  const tool = hireTool(
+    captainTools(
+      deps,
+      { shell: true, conversationAuthority: { owner, current: () => true, authorize: async () => true } },
+      {} as LaneLog,
+      "operator",
+      undefined,
+      undefined,
+      undefined,
+      hire,
+    ),
+  );
+  const linearIssue = {
+    organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",
+    issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
+  };
+  await tool.execute(
+    "hire-work",
+    { harness: "codex", title: "Mara", role: "worker", workingDirectory: "/tmp", linearIssue },
+    undefined,
+    undefined,
+    {} as never,
+  );
+  expect(hire).toHaveBeenCalledWith(
+    expect.not.objectContaining({ linearIssue }),
+    undefined,
+    expect.objectContaining({ owner }),
+    linearIssue,
+  );
 });
