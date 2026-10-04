@@ -119,6 +119,15 @@ voice tools keep running while that work waits. Tool results carry their
 recipient, and the mouth gives that person the gist, expanding when warranted. Responses serialize through
 provider completion and, for external voices, TTS drain.
 
+A realtime server error can abandon the current local response attempt as failed,
+without fabricating provider completion or usage. An unidentified bare error does
+not establish which provider response caused it. Abandonment stops that attempt's
+partial playback, and the next eligible offer can proceed; failed lines are never
+replayed. Uncertain errors before `response.created`, and uncorrelatable ID-less
+xAI output after abandonment, close the existing conversation. The next eligible
+offer uses the normal lazy reopen path. Delayed events from the failed response
+cannot settle a newer offer. Live provider compatibility remains unproven.
+
 The floor retains up to five recently engaged speakers for 60 seconds each.
 Their unnamed follow-ups are offers Clankie may decline; unrelated chatter is
 offered for contextual judgment without forcing a response. Typed-input

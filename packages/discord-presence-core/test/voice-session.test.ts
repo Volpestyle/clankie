@@ -3849,6 +3849,9 @@ describe("snappy conversation absorption", () => {
     const stale = pcmDelta(480, 7);
     conversation.input.onAudioDelta(stale, "stale-first");
     done(conversation);
+    expect(harness.ofType("model_response").find((event) => event.responseId === "r")?.phase).toBe(
+      "completed",
+    );
     // The real adapters evaluate these callbacks as queued requests reach the front.
     // Their separate socket/TTS tests prove only the surviving callback starts a response.
     expect(conversation.responseGuards[1]!()).toBe(false);
@@ -4498,7 +4501,16 @@ it.each([
       await flush();
       expect(h.vox.audio).toHaveLength(1);
     }
-    if (!partial && !ambiguousXai) await h.say(BOB, "clankie answer Bob instead");
+    let rejectedQueueDelivery: string | undefined;
+    if (!partial && !ambiguousXai) {
+      await h.say(BOB, "clankie answer Bob instead");
+      if (!beforeCreated) {
+        rejectedQueueDelivery = h
+          .ofType("model_response")
+          .findLast((event) => event.phase === "requested" && event.userId === BOB)!.deliveryId;
+        await h.say(BOB, "clankie answer Bob with the latest detail");
+      }
+    }
     const queuedBeforeClose = beforeCreated
       ? h.ofType("model_response").find((event) => event.phase === "requested" && event.userId === BOB)
       : undefined;
@@ -4514,6 +4526,17 @@ it.each([
     }
     await flush();
     const opensAfterError = sockets.length;
+    if (rejectedQueueDelivery !== undefined) {
+      const rejected = h
+        .ofType("model_response")
+        .filter((event) => event.deliveryId === rejectedQueueDelivery);
+      expect(rejected.map((event) => event.phase)).toEqual(["requested", "failed"]);
+      expect(rejected[1]).toMatchObject({ outcome: "silent", userId: BOB });
+      expect(rejected[1]).not.toHaveProperty("responseId");
+      expect(rejected[1]).not.toHaveProperty("audioBytes");
+      expect(rejected[1]).not.toHaveProperty("textCharacters");
+      expect(h.ofType("response").filter((event) => event.deliveryId === rejectedQueueDelivery)).toEqual([]);
+    }
     if (partial) {
       expect(h.vox.stops).toHaveLength(1);
       await h.say(BOB, "clankie answer Bob after that failure");

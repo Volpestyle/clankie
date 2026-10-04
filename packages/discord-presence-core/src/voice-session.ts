@@ -2144,7 +2144,9 @@ export class DiscordVoiceSession {
       if (this.startingResponse === pending) this.startingResponse = undefined;
       pending.done = true;
       this.settleOffer(pending, false);
-      if (generation === this.sessionGeneration) this.emitModelResponseCompletion(pending);
+      // A rejected queued request has no provider completion. Preserve a real
+      // completion if this guard belongs to a superseded tool continuation.
+      if (generation === this.sessionGeneration) this.emitModelResponseCompletion(pending, "failed");
       this.pendingResponses = this.pendingResponses.filter((candidate) => candidate !== pending);
       return false;
     };
@@ -3253,7 +3255,10 @@ export class DiscordVoiceSession {
     this.queueMembershipResponse();
   }
 
-  private emitModelResponseCompletion(pending: PendingVoiceResponse): void {
+  private emitModelResponseCompletion(
+    pending: PendingVoiceResponse,
+    missingResponsePhase: "completed" | "failed" = "completed",
+  ): void {
     if (pending.modelResponseEmitted === true) return;
     pending.modelResponseEmitted = true;
     const guildId = this.guildId;
@@ -3266,7 +3271,7 @@ export class DiscordVoiceSession {
       channelId,
       deliveryId: pending.deliveryId,
       ...(pending.speakerId === undefined ? {} : { userId: pending.speakerId }),
-      phase: meta === undefined || meta.status === "completed" ? "completed" : "failed",
+      phase: meta === undefined ? missingResponsePhase : meta.status === "completed" ? "completed" : "failed",
       outcome:
         pending.firstAudioAtMs !== undefined ? "audio" : pending.toolCalled === true ? "tool" : "silent",
       ...(meta?.responseId === undefined ? {} : { responseId: meta.responseId }),
