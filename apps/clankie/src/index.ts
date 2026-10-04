@@ -17,6 +17,7 @@ import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorwa
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
 import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
 import { WorkerMcp } from "./worker-mcp.ts";
+import { OpenCodeProfiles } from "./opencode-profiles.ts";
 import { createAgentSessions } from "./agent-sessions.ts";
 /**
  * Composition root for the merged Clankie service: the surviving control-plane
@@ -91,6 +92,7 @@ import { createEmailPort } from "./email.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
+import { createOpenCodeNativeHost } from "./captain/opencode-native-host.ts";
 import { createProjectWorkspaceResolver } from "./project-membership.ts";
 import {
   createRemoteProjectObserver,
@@ -549,7 +551,11 @@ const runtimes = new ExecutionConnections({
 });
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
-const agentSessions = createAgentSessions(settingsStore);
+const agentSessions = createAgentSessions(
+  settingsStore,
+  undefined,
+  new OpenCodeProfiles(join(stateRoot, "captain")),
+);
 // Work items in each repo's own convention (ADR 0191): Linear rides his
 // connected account, GitHub the owner's GitHub connection or gh login (a
 // hosted body has only the connection, ADR 0196), files the repo itself.
@@ -829,6 +835,10 @@ const captain = createCaptain(
       remoteCodexSeats.register(launch, proofFleetLinks?.lifetime(launch.fleet) ?? (() => false)),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
+    openCodeNative: createOpenCodeNativeHost({
+      binding: localFleetBinding,
+      processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
+    }),
     repoRoot,
     ...(startupSettings.captain.workingDirectory === undefined
       ? {}

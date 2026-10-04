@@ -17,7 +17,28 @@ import type { DeliveryStage } from "@clankie/protocol";
  * blocked or uncertain delivery without typing into the owner's terminal.
  */
 
-export type SeatHarness = "claude" | "codex";
+export type SeatHarness = "claude" | "codex" | "opencode";
+
+/** Internal controller observation. Never accepted from a request or plugin payload. */
+export interface SeatProcessIdentity {
+  readonly nativeOccupantId: string;
+  readonly fleet: string;
+  readonly pane: string;
+  readonly binding: { readonly socketPath: string; readonly session?: string };
+  readonly processes: readonly { readonly pid: number; readonly startTime: string }[];
+  readonly shell: { readonly pid: number; readonly startTime: string };
+}
+
+/** A harness requiring a true initial argv process, before its native pane exists. */
+export interface PreparedSeatLaunch {
+  readonly command: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  start(view: SeatView, signal?: AbortSignal): Promise<SeatStartResult>;
+  /** Exact allocated native root/controller, rechecked across host admission awaits. */
+  verify(ref: SeatRef): Promise<SeatProcessIdentity>;
+  /** Retires only this controller and its temporary config, never an unproved pane. */
+  dispose(): Promise<void>;
+}
 
 /** What a hire asks for, in harness-neutral terms. */
 export interface SeatLaunch {
@@ -138,6 +159,8 @@ export type SeatEvent =
 /** Control of one live seat. */
 export interface SeatControl {
   readonly ref: SeatRef;
+  /** Original prepared controller/root observation; never a wire or saved-metadata proof. */
+  verify?(): Promise<SeatProcessIdentity>;
   send(message: string, options?: { readonly timeoutMs?: number }): Promise<SeatDelivery>;
   status(): Promise<SeatStatus>;
   /**
@@ -154,6 +177,7 @@ export interface SeatControl {
 
 export interface HarnessSeatAdapter {
   readonly harness: SeatHarness;
+  prepare?(launch: SeatLaunch, signal?: AbortSignal): Promise<PreparedSeatLaunch>;
   start(launch: SeatLaunch, view: SeatView, signal?: AbortSignal): Promise<SeatStartResult>;
   /**
    * Control of a seat this adapter started, possibly before a service restart.

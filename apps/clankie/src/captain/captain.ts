@@ -1,3 +1,4 @@
+import { savedSessionHarness } from "../agent-sessions.ts";
 import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
@@ -21,6 +22,8 @@ import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
+import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
+import type { createOpenCodeNativeHost } from "./opencode-native-host.ts";
 import {
   createRemoteCodexSeatAdapter,
   remoteCodexQueue,
@@ -566,6 +569,7 @@ export interface CaptainOptions {
   readonly evalSessionBoundary?: EvalSessionBoundary;
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
+  readonly openCodeNative?: ReturnType<typeof createOpenCodeNativeHost>;
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
   readonly projectHireIdentity?: (
     fleet: string,
@@ -940,7 +944,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     })),
   ];
   const herdrRunner = routeHerdrFleets(
-    options.nativeHerdrRunner ?? createHerdrWatchRunner(deps.herdrAvailable),
+    options.nativeHerdrRunner ??
+      createHerdrWatchRunner(deps.herdrAvailable, undefined, options.openCodeNative?.createCommandTab),
     async () =>
       new Map([
         ...(await refreshFleets()).map((fleet) => {
@@ -1121,6 +1126,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
       ),
       claudeWorkerSeats,
+      ...(options.openCodeNative === undefined
+        ? []
+        : [
+            createOpenCodeSeatAdapter({
+              repoRoot: options.repoRoot,
+              stateDir: options.stateDir,
+              native: options.openCodeNative,
+            }),
+          ]),
     ],
     // Remote seats get native channels too (VUH-1527): Codex its own app-server
     // over the fleet's ssh, Claude the worker plugin over the fleet's link.
@@ -2082,7 +2096,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (deps.agentSessions?.resolve === undefined)
           throw new Error("Saved-session resolution is unavailable");
         resume = await deps.agentSessions.resolve(request.resume);
-        if (request.harness !== resume.file.harness || request.workingDirectory !== resume.workingDirectory)
+        if (
+          request.harness !== savedSessionHarness(resume) ||
+          request.workingDirectory !== resume.workingDirectory
+        )
           throw new Error("Harness and workingDirectory must match the saved transcript");
         const fleet = savedSessionFleet(resume, request.fleet, await refreshFleets(), namedLocal);
         request = { ...request, ...(fleet === undefined ? {} : { fleet }) };

@@ -1,3 +1,5 @@
+import { savedSessionHarness } from "./agent-sessions.ts";
+import { redactSensitiveText } from "@clankie/observability";
 import type { Machines } from "./machines.ts";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -24,7 +26,7 @@ const ResumeSchema = z
   .strict();
 
 function errorDetail(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return redactSensitiveText(error instanceof Error ? error.message : String(error));
 }
 
 /** Operator-only access to independent native transcripts. */
@@ -60,8 +62,8 @@ export function createAgentSessionRoutes(
           {
             schemaVersion: 1,
             resume: session.ref,
-            harness: session.file.harness,
-            title: `Resume ${session.file.harness}`,
+            harness: savedSessionHarness(session),
+            title: `Resume ${savedSessionHarness(session)}`,
             workingDirectory: session.workingDirectory,
             ...(input.data.fleet === undefined ? {} : { fleet: input.data.fleet }),
           },
