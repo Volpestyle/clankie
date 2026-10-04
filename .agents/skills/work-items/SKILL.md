@@ -57,8 +57,20 @@ REVISION` changes only the reviewed name, roles, worker cap or tracker binding;
 owner authorization before changing those settings. A tracker binding points
 to an already enrolled workspace's existing `.clankie/tracking.json`; it does
 not initialize tracking or choose a connected account. The app reads local
-bindings through read-only project repo references. Remote or missing sources
+bindings through project repo references. Remote or missing sources
 remain unavailable, never a reason to select another local repo or backend.
+
+Owner-authorized devices with `terminalControl` can set work metadata owner,
+add/remove a role label, or append a prerequisite using `work_item_write`.
+`clankie work write ID --owner NAME|--no-owner|--add-label ROLE|--remove-label
+ROLE|--add-blocker ID` uses the same narrow receipt path. It returns a
+`requestId` and `applied`, `refused`, or `uncertain`. Keep the ID; use
+`clankie work receipt ID --request-id UUID` or `work_item_write_receipt` after
+uncertainty. Never resend the change with a new ID. This path requires a saved
+local tracker and connected provider account; it preserves unrelated labels
+and prerequisites. Broader agent updates retain the existing CLI and tools.
+Items may have an optional backend-native `parent`; it groups work and does
+not imply a prerequisite.
 
 1. **Discover before creating.** If `clankie work` returns a `question`, the
    repo tracks work in more than one place or only in a single `TODO.md`. Ask

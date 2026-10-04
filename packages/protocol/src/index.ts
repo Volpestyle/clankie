@@ -53,6 +53,16 @@ import {
   type WorkItemsResult,
   type WorkRepo,
 } from "./work-items.ts";
+import {
+  WorkItemWriteRequestSchema,
+  WorkItemWriteReceiptRequestSchema,
+  WorkItemWriteReceiptSchema,
+  uncertainWorkItemWrite,
+  type WorkItemWriteRequest,
+  type WorkItemWriteReceiptRequest,
+  type WorkItemWriteReceipt,
+} from "./work-item-write.ts";
+export * from "./work-item-write.ts";
 export * from "./device-push.ts";
 export * from "./evaluator.ts";
 
@@ -2829,7 +2839,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   /**
    * The repos this machine registered for work tracking, and one repo's items
-   * in its own convention (ADR 0191). Read-only: devices never write items.
+   * in its own convention (ADR 0191). Writes below require exact owner authority.
    */
   z
     .object({
@@ -2844,6 +2854,20 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       repoId: WorkRepoSchema.shape.id,
       /** Only items carrying this label, case-insensitively (a role station's backlog). */
       label: WorkItemLabelSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_item_write"),
+      schemaVersion: z.literal(1),
+      request: WorkItemWriteRequestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_item_write_receipt"),
+      schemaVersion: z.literal(1),
+      ...WorkItemWriteReceiptRequestSchema.shape,
     })
     .strict(),
   // `react` is the operator's own reaction only. An agent reacts through the
@@ -3226,6 +3250,22 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({
+      op: z.literal("work_item_write"),
+      schemaVersion: z.literal(1),
+      outcome: z.literal("accepted"),
+      receipt: WorkItemWriteReceiptSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_item_write_receipt"),
+      schemaVersion: z.literal(1),
+      outcome: z.literal("accepted"),
+      receipt: WorkItemWriteReceiptSchema,
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("react"),
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
@@ -3470,6 +3510,10 @@ export interface OperatorConversationServiceClient {
   workRepos?(): Promise<readonly WorkRepo[]>;
   /** One repo's work items, or why they cannot be read yet. */
   workItems?(repoId: string, options?: { readonly label?: string }): Promise<OperatorWorkItemsOutcome>;
+  /** One owner-authorized intent; transport loss returns its original ID without replay. */
+  workItemWrite?(input: WorkItemWriteRequest): Promise<WorkItemWriteReceipt>;
+  /** Read the original intent's receipt; never dispatch or retry a mutation. */
+  workItemWriteReceipt?(input: WorkItemWriteReceiptRequest): Promise<WorkItemWriteReceipt>;
   /**
    * Put the operator's reaction on one transcript entry, or take it back off.
    * False when the entry is not in the conversation's retained log.
@@ -3740,6 +3784,36 @@ export function createOperatorConversationServiceClient(
       });
       if (result.op !== "work_items") throw new Error(`Unexpected ${result.op} result for work_items`);
       return result.result;
+    },
+    async workItemWrite(input) {
+      const request = WorkItemWriteRequestSchema.parse(input);
+      try {
+        const result = await dispatch({ op: "work_item_write", schemaVersion: 1, request });
+        if (result.op !== "work_item_write") throw new Error("Unexpected work-item write receipt");
+        const receipt = WorkItemWriteReceiptSchema.parse(result.receipt);
+        if (receipt.requestId !== request.requestId) throw new Error("Unexpected work-item write receipt");
+        return receipt;
+      } catch {
+        return uncertainWorkItemWrite(
+          request.requestId,
+          "The write response was lost or invalid. It may have happened; read this request's receipt, never resend it.",
+        );
+      }
+    },
+    async workItemWriteReceipt(input) {
+      const request = WorkItemWriteReceiptRequestSchema.parse(input);
+      try {
+        const result = await dispatch({ op: "work_item_write_receipt", schemaVersion: 1, ...request });
+        if (result.op !== "work_item_write_receipt") throw new Error("Unexpected work-item write receipt");
+        const receipt = WorkItemWriteReceiptSchema.parse(result.receipt);
+        if (receipt.requestId !== request.requestId) throw new Error("Unexpected work-item write receipt");
+        return receipt;
+      } catch {
+        return uncertainWorkItemWrite(
+          request.requestId,
+          "The original receipt could not be read. Nothing was resent; inspect the item and read this request's receipt again.",
+        );
+      }
     },
     async discordRooms() {
       const result = await dispatch({ op: "discord_rooms", schemaVersion: 1 });

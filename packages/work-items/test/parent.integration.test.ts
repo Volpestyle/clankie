@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseProtocolResponse } from "@clankie/protocol";
+import { parseProtocolResponse } from "../../protocol/test/fixtures/response-8d982a93.ts";
 import { WorkItemSchema, WorkItemsResultSchema, type WorkItem } from "@clankie/protocol/work-items";
 import { afterEach, expect, it } from "vitest";
 import { WorkItemsResultSchema as oldResultSchema } from "../../protocol/test/fixtures/work-items-8d982a93.ts";
@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 // Freeze the client from before VUH-1593. Host and request schemas stay strict;
-// the production response reader projects additive host fields for this client.
+// the frozen production response reader projects additive host fields for this client.
 const result = (items: WorkItem[], backend: "linear" | "github" | "markdown") =>
   WorkItemsResultSchema.parse({
     repo: { id: "parent-fixture", name: "Parent fixture", backend, needsDecision: false },

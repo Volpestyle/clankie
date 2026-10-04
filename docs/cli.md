@@ -887,7 +887,7 @@ Environment overrides still win: check `effectiveVoice` before restarting.
 This command is local-only; hosted mode refuses it. See the
 [voice operating guide](../apps/discord-bridge/README.md) for verification limits.
 
-### `work [status]` / `work init` / `work list|show|create|update|close|attach`
+### `work [status]` / `work init` / `work list|show|create|update|close|attach|write|receipt`
 
 Tracks work where the repo already does ([ADR 0191](adr/0191-work-is-tracked-where-the-repo-tracks-it.md)):
 its Linear team (through the Linear account connected to Clankie), its GitHub
@@ -931,6 +931,35 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
 - `clankie work close ID [--canceled]` sets `done` (or `canceled`).
 - `clankie work attach ID --url URL --caption TEXT [--kind image|video|log|link]`
   appends evidence; the kind is inferred from the URL when omitted.
+
+`clankie work write ID --owner NAME|--no-owner|--add-label ROLE|--remove-label
+ROLE|--add-blocker ID [--request-id UUID]` performs exactly one owner-authorized
+change to an existing item. `--owner` sets its work metadata, not a provider user
+assignee. The CLI allocates an ID before dispatch when omitted; retain that ID
+from the JSON result. `clankie work receipt ID --request-id UUID` reads the
+original result. Both accept a registered or project repository ID in `--repo`;
+a local path resolves to an already registered repository. Use `work status`
+to register it before writing. Project references require their local saved
+tracker workspace. GitHub writes require its connected account.
+
+The JSON result includes `requestId`, `outcome` (`applied`, `refused`,
+`uncertain`), a plain `message`, and optionally the refreshed `item`. Repeating
+an ID reads its receipt after checking the original owner, item, binding and
+command; it never writes again. If the response is lost, inspect the receipt
+and tracker rather than sending the same change with a new ID. Labels and
+blockers merge into freshly read state, preserving unrelated labels and
+prerequisites. GitHub status labels are reserved. `parent` is optional read
+metadata, separate from blockers.
+
+Paired devices with `terminalControl` use the owner-preserving operator ops
+`work_item_write` (`request: {repoId, itemId, requestId, command}`) and
+`work_item_write_receipt` (`repoId`, `itemId`, `requestId`). Commands are
+`{action:"assign", owner:NAME|null}`, `{action:"add_label", label:ROLE}`,
+`{action:"remove_label", label:ROLE}`, or `{action:"add_dependency", id:ID}`.
+The host checks owner authority again at publication and audits each write;
+chat and execution credentials cannot authorize it. Local HTTP uses
+`POST /v1/work` with `{action:"write", request:...}` or
+`{action:"write_receipt", request:...}` and the operator bearer.
 
 Statuses are `todo`, `in_progress`, `in_review`, `done` and `canceled`,
 projected onto each backend's own states. A recorded backend that cannot be

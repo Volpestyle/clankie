@@ -38,6 +38,8 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "discord_rooms",
         "work_repos",
         "work_items",
+        "work_item_write",
+        "work_item_write_receipt",
         "react",
         "autonomy",
         "roster",

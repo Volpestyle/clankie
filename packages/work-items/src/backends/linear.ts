@@ -2,11 +2,15 @@ import { WorkItemSchema, type WorkItem, type WorkItemStatus } from "@clankie/pro
 import {
   matchesFilter,
   patchCriteria,
+  patchDependsOn,
+  patchLabels,
   touchesCriteria,
   WorkItemNotFoundError,
+  WorkItemScopeError,
   workItemLabels,
   type WorkBackend,
   type WorkItemPatch,
+  type WorkWriteCallbacks,
 } from "../backend.ts";
 import { parseBody, patchBody, renderEvidence } from "../format.ts";
 
@@ -31,6 +35,8 @@ interface LinearIssue {
   readonly statusType?: string;
   readonly url?: string;
   readonly updatedAt?: string;
+  readonly teamId?: string;
+  readonly projectId?: string | null;
   /** Linear's MCP returns names; the GraphQL shape nests them. */
   readonly labels?:
     | readonly (string | { readonly name?: string })[]
@@ -109,8 +115,29 @@ export function descriptionPatch(
   const old = blocks(before);
   const next = blocks(after);
   const ops: { op: "replace" | "append"; old_string?: string; new_string?: string; text?: string }[] = [];
-  for (const block of next) {
+  const isLead = (block: string) => !block.startsWith("## ");
+  const oldLead = old.find(isLead)?.trim() ?? "";
+  const nextLead = next.find(isLead)?.trim() ?? "";
+  let prependedHeading: string | undefined;
+  if (oldLead !== nextLead) {
+    if (oldLead !== "") ops.push({ op: "replace", old_string: oldLead, new_string: nextLead });
+    else if (nextLead !== "") {
+      const first = old.find((block) => block.trim() !== "");
+      if (first === undefined) ops.push({ op: "append", text: nextLead });
+      else {
+        prependedHeading = first.split("\n")[0]!;
+        const replacement = next.find((block) => block.split("\n")[0] === prependedHeading) ?? first;
+        ops.push({
+          op: "replace",
+          old_string: first.trim(),
+          new_string: `${nextLead}\n\n${replacement.trim()}`,
+        });
+      }
+    }
+  }
+  for (const block of next.filter((entry) => !isLead(entry))) {
     const heading = block.split("\n")[0]!;
+    if (heading === prependedHeading) continue;
     const match = old.find((candidate) => candidate.split("\n")[0] === heading);
     if (match === undefined) ops.push({ op: "append", text: `\n\n${block.trim()}` });
     else if (match.trim() !== block.trim())
@@ -119,12 +146,15 @@ export function descriptionPatch(
   return ops;
 }
 
-export function createLinearBackend(options: {
-  readonly team: string;
-  readonly project?: string;
-  readonly label?: string;
-  readonly call: LinearToolCall;
-}): WorkBackend {
+export function createLinearBackend(
+  options: {
+    readonly team: string;
+    readonly project?: string;
+    readonly label?: string;
+    readonly call: LinearToolCall;
+    readonly scopedWrites?: boolean;
+  } & WorkWriteCallbacks,
+): WorkBackend {
   let statuses: Promise<LinearStatus[]> | undefined;
   const teamStatuses = () =>
     (statuses ??= options.call("list_issue_statuses", { team: options.team }).then((result) => {
@@ -163,8 +193,41 @@ export function createLinearBackend(options: {
     }
   };
 
-  const save = async (args: Record<string, unknown>): Promise<LinearIssue> =>
-    (await options.call("save_issue", args)) as LinearIssue;
+  const save = async (args: Record<string, unknown>): Promise<LinearIssue> => {
+    options.beforeWrite?.();
+    options.onDispatch?.();
+    const saved = await options.call("save_issue", args);
+    options.effectConfirmed?.();
+    return saved as LinearIssue;
+  };
+
+  const assertScope = async (issue: LinearIssue) => {
+    if (!options.scopedWrites) return;
+    const [team, project] = await Promise.all([
+      options.call("get_team", { query: options.team }),
+      options.project === undefined ? undefined : options.call("get_project", { query: options.project }),
+    ]);
+    const uuid = (value: unknown) =>
+      typeof value === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value)
+        ? value.toLowerCase()
+        : undefined;
+    const identity = (value: unknown) => {
+      if (value === null || typeof value !== "object") return undefined;
+      const resource = value as { id?: unknown; uuid?: unknown };
+      if (resource.uuid !== undefined && uuid(resource.uuid) === undefined) return undefined;
+      const ids = [uuid(resource.id), uuid(resource.uuid)].filter((id) => id !== undefined);
+      return ids.length > 0 && ids.every((id) => id === ids[0]) ? ids[0] : undefined;
+    };
+    const teamId = identity(team);
+    const projectId = identity(project);
+    if (
+      teamId === undefined ||
+      uuid(issue.teamId) !== teamId ||
+      (options.project !== undefined && (projectId === undefined || uuid(issue.projectId) !== projectId))
+    )
+      throw new WorkItemScopeError();
+  };
 
   const saveDescription = async (issue: LinearIssue, next: string, extra: Record<string, unknown> = {}) => {
     const before = issue.description ?? "";
@@ -242,18 +305,27 @@ export function createLinearBackend(options: {
     },
     async update(id, patch: WorkItemPatch) {
       const issue = await fetchIssue(id);
+      await assertScope(issue);
       const current = toItem(issue);
-      const bodyChanged =
-        touchesCriteria(patch) || patch.owner !== undefined || patch.dependsOn !== undefined;
+      const dependsChanged = patch.dependsOn !== undefined || patch.addDependsOn !== undefined;
+      const bodyChanged = touchesCriteria(patch) || patch.owner !== undefined || dependsChanged;
       const extra = {
         ...(patch.title === undefined ? {} : { title: patch.title }),
         ...(patch.status === undefined ? {} : { state: pickLinearState(await teamStatuses(), patch.status) }),
+        ...(patch.addLabels === undefined && patch.removeLabels === undefined
+          ? {}
+          : {
+              labels: patchLabels(
+                linearLabelNames(issue).filter((name): name is string => typeof name === "string"),
+                patch,
+              ),
+            }),
       };
       if (bodyChanged) {
         const next = patchBody(issue.description ?? "", {
           ...(touchesCriteria(patch) ? { criteria: patchCriteria(current.criteria, patch) } : {}),
           ...(patch.owner === undefined ? {} : { owner: patch.owner }),
-          ...(patch.dependsOn === undefined ? {} : { dependsOn: patch.dependsOn }),
+          ...(dependsChanged ? { dependsOn: patchDependsOn(current.dependsOn, patch) } : {}),
         });
         await saveDescription(issue, next, extra);
       } else if (Object.keys(extra).length > 0) {
@@ -263,6 +335,7 @@ export function createLinearBackend(options: {
     },
     async attach(id, evidence) {
       const issue = await fetchIssue(id);
+      await assertScope(issue);
       const current = toItem(issue);
       const before = issue.description ?? "";
       if (/uploads\.linear\.app/u.test(before)) {

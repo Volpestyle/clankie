@@ -4217,7 +4217,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       if (request.op === "connections")
         throw new Error("Connections are served by the authenticated app boundary");
-      if (request.op === "work_repos" || request.op === "work_items")
+      if (
+        request.op === "work_repos" ||
+        request.op === "work_items" ||
+        request.op === "work_item_write" ||
+        request.op === "work_item_write_receipt"
+      )
         throw new Error("Work items are served by the authenticated app boundary");
       if (request.op === "subagent_replay") {
         const input = request.replay;
