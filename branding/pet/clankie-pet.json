@@ -1,1600 +1,1600 @@
 {
- "frames": [
-  {
-   "filename": "clankie-pet 0.aseprite",
-   "frame": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 500
-  },
-  {
-   "filename": "clankie-pet 1.aseprite",
-   "frame": {
-    "x": 32,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 300
-  },
-  {
-   "filename": "clankie-pet 2.aseprite",
-   "frame": {
-    "x": 64,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 500
-  },
-  {
-   "filename": "clankie-pet 3.aseprite",
-   "frame": {
-    "x": 96,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 300
-  },
-  {
-   "filename": "clankie-pet 4.aseprite",
-   "frame": {
-    "x": 128,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 60
-  },
-  {
-   "filename": "clankie-pet 5.aseprite",
-   "frame": {
-    "x": 160,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 90
-  },
-  {
-   "filename": "clankie-pet 6.aseprite",
-   "frame": {
-    "x": 192,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 800
-  },
-  {
-   "filename": "clankie-pet 7.aseprite",
-   "frame": {
-    "x": 224,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 800
-  },
-  {
-   "filename": "clankie-pet 8.aseprite",
-   "frame": {
-    "x": 256,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 130
-  },
-  {
-   "filename": "clankie-pet 9.aseprite",
-   "frame": {
-    "x": 288,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 130
-  },
-  {
-   "filename": "clankie-pet 10.aseprite",
-   "frame": {
-    "x": 320,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 130
-  },
-  {
-   "filename": "clankie-pet 11.aseprite",
-   "frame": {
-    "x": 352,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 130
-  },
-  {
-   "filename": "clankie-pet 12.aseprite",
-   "frame": {
-    "x": 384,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 130
-  },
-  {
-   "filename": "clankie-pet 13.aseprite",
-   "frame": {
-    "x": 416,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 130
-  },
-  {
-   "filename": "clankie-pet 14.aseprite",
-   "frame": {
-    "x": 448,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 130
-  },
-  {
-   "filename": "clankie-pet 15.aseprite",
-   "frame": {
-    "x": 480,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 130
-  },
-  {
-   "filename": "clankie-pet 16.aseprite",
-   "frame": {
-    "x": 512,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 90
-  },
-  {
-   "filename": "clankie-pet 17.aseprite",
-   "frame": {
-    "x": 544,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 80
-  },
-  {
-   "filename": "clankie-pet 18.aseprite",
-   "frame": {
-    "x": 576,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 150
-  },
-  {
-   "filename": "clankie-pet 19.aseprite",
-   "frame": {
-    "x": 608,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 110
-  },
-  {
-   "filename": "clankie-pet 20.aseprite",
-   "frame": {
-    "x": 640,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 450
-  },
-  {
-   "filename": "clankie-pet 21.aseprite",
-   "frame": {
-    "x": 672,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 500
-  },
-  {
-   "filename": "clankie-pet 22.aseprite",
-   "frame": {
-    "x": 704,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 600
-  },
-  {
-   "filename": "clankie-pet 23.aseprite",
-   "frame": {
-    "x": 736,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 700
-  },
-  {
-   "filename": "clankie-pet 24.aseprite",
-   "frame": {
-    "x": 768,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 500
-  },
-  {
-   "filename": "clankie-pet 25.aseprite",
-   "frame": {
-    "x": 800,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 700
-  },
-  {
-   "filename": "clankie-pet 26.aseprite",
-   "frame": {
-    "x": 832,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 500
-  },
-  {
-   "filename": "clankie-pet 27.aseprite",
-   "frame": {
-    "x": 864,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 400
-  },
-  {
-   "filename": "clankie-pet 28.aseprite",
-   "frame": {
-    "x": 896,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 250
-  },
-  {
-   "filename": "clankie-pet 29.aseprite",
-   "frame": {
-    "x": 928,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 300
-  },
-  {
-   "filename": "clankie-pet 30.aseprite",
-   "frame": {
-    "x": 960,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 30
-  },
-  {
-   "filename": "clankie-pet 31.aseprite",
-   "frame": {
-    "x": 992,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 30
-  },
-  {
-   "filename": "clankie-pet 32.aseprite",
-   "frame": {
-    "x": 1024,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 30
-  },
-  {
-   "filename": "clankie-pet 33.aseprite",
-   "frame": {
-    "x": 1056,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 30
-  },
-  {
-   "filename": "clankie-pet 34.aseprite",
-   "frame": {
-    "x": 1088,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 30
-  },
-  {
-   "filename": "clankie-pet 35.aseprite",
-   "frame": {
-    "x": 1120,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 30
-  },
-  {
-   "filename": "clankie-pet 36.aseprite",
-   "frame": {
-    "x": 1152,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 35
-  },
-  {
-   "filename": "clankie-pet 37.aseprite",
-   "frame": {
-    "x": 1184,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 40
-  },
-  {
-   "filename": "clankie-pet 38.aseprite",
-   "frame": {
-    "x": 1216,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 45
-  },
-  {
-   "filename": "clankie-pet 39.aseprite",
-   "frame": {
-    "x": 1248,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 50
-  },
-  {
-   "filename": "clankie-pet 40.aseprite",
-   "frame": {
-    "x": 1280,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 55
-  },
-  {
-   "filename": "clankie-pet 41.aseprite",
-   "frame": {
-    "x": 1312,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 60
-  },
-  {
-   "filename": "clankie-pet 42.aseprite",
-   "frame": {
-    "x": 1344,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 70
-  },
-  {
-   "filename": "clankie-pet 43.aseprite",
-   "frame": {
-    "x": 1376,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 80
-  },
-  {
-   "filename": "clankie-pet 44.aseprite",
-   "frame": {
-    "x": 1408,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 95
-  },
-  {
-   "filename": "clankie-pet 45.aseprite",
-   "frame": {
-    "x": 1440,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 110
-  },
-  {
-   "filename": "clankie-pet 46.aseprite",
-   "frame": {
-    "x": 1472,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 130
-  },
-  {
-   "filename": "clankie-pet 47.aseprite",
-   "frame": {
-    "x": 1504,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 150
-  },
-  {
-   "filename": "clankie-pet 48.aseprite",
-   "frame": {
-    "x": 1536,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 175
-  },
-  {
-   "filename": "clankie-pet 49.aseprite",
-   "frame": {
-    "x": 1568,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 240
-  },
-  {
-   "filename": "clankie-pet 50.aseprite",
-   "frame": {
-    "x": 1600,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 120
-  },
-  {
-   "filename": "clankie-pet 51.aseprite",
-   "frame": {
-    "x": 1632,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 120
-  },
-  {
-   "filename": "clankie-pet 52.aseprite",
-   "frame": {
-    "x": 1664,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 120
-  },
-  {
-   "filename": "clankie-pet 53.aseprite",
-   "frame": {
-    "x": 1696,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 350
-  },
-  {
-   "filename": "clankie-pet 54.aseprite",
-   "frame": {
-    "x": 1728,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 110
-  },
-  {
-   "filename": "clankie-pet 55.aseprite",
-   "frame": {
-    "x": 1760,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 350
-  },
-  {
-   "filename": "clankie-pet 56.aseprite",
-   "frame": {
-    "x": 1792,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 110
-  },
-  {
-   "filename": "clankie-pet 57.aseprite",
-   "frame": {
-    "x": 1824,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 100
-  },
-  {
-   "filename": "clankie-pet 58.aseprite",
-   "frame": {
-    "x": 1856,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 140
-  },
-  {
-   "filename": "clankie-pet 59.aseprite",
-   "frame": {
-    "x": 1888,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 180
-  },
-  {
-   "filename": "clankie-pet 60.aseprite",
-   "frame": {
-    "x": 1920,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 300
-  },
-  {
-   "filename": "clankie-pet 61.aseprite",
-   "frame": {
-    "x": 1952,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 300
-  },
-  {
-   "filename": "clankie-pet 62.aseprite",
-   "frame": {
-    "x": 1984,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 200
-  },
-  {
-   "filename": "clankie-pet 63.aseprite",
-   "frame": {
-    "x": 2016,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 200
-  },
-  {
-   "filename": "clankie-pet 64.aseprite",
-   "frame": {
-    "x": 2048,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 1400
-  },
-  {
-   "filename": "clankie-pet 65.aseprite",
-   "frame": {
-    "x": 2080,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 40
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 40
-   },
-   "duration": 160
+  "frames": [
+    {
+      "filename": "clankie-pet 0.aseprite",
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 500
+    },
+    {
+      "filename": "clankie-pet 1.aseprite",
+      "frame": {
+        "x": 32,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 300
+    },
+    {
+      "filename": "clankie-pet 2.aseprite",
+      "frame": {
+        "x": 64,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 500
+    },
+    {
+      "filename": "clankie-pet 3.aseprite",
+      "frame": {
+        "x": 96,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 300
+    },
+    {
+      "filename": "clankie-pet 4.aseprite",
+      "frame": {
+        "x": 128,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 60
+    },
+    {
+      "filename": "clankie-pet 5.aseprite",
+      "frame": {
+        "x": 160,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 90
+    },
+    {
+      "filename": "clankie-pet 6.aseprite",
+      "frame": {
+        "x": 192,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 800
+    },
+    {
+      "filename": "clankie-pet 7.aseprite",
+      "frame": {
+        "x": 224,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 800
+    },
+    {
+      "filename": "clankie-pet 8.aseprite",
+      "frame": {
+        "x": 256,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 130
+    },
+    {
+      "filename": "clankie-pet 9.aseprite",
+      "frame": {
+        "x": 288,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 130
+    },
+    {
+      "filename": "clankie-pet 10.aseprite",
+      "frame": {
+        "x": 320,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 130
+    },
+    {
+      "filename": "clankie-pet 11.aseprite",
+      "frame": {
+        "x": 352,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 130
+    },
+    {
+      "filename": "clankie-pet 12.aseprite",
+      "frame": {
+        "x": 384,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 130
+    },
+    {
+      "filename": "clankie-pet 13.aseprite",
+      "frame": {
+        "x": 416,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 130
+    },
+    {
+      "filename": "clankie-pet 14.aseprite",
+      "frame": {
+        "x": 448,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 130
+    },
+    {
+      "filename": "clankie-pet 15.aseprite",
+      "frame": {
+        "x": 480,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 130
+    },
+    {
+      "filename": "clankie-pet 16.aseprite",
+      "frame": {
+        "x": 512,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 90
+    },
+    {
+      "filename": "clankie-pet 17.aseprite",
+      "frame": {
+        "x": 544,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 80
+    },
+    {
+      "filename": "clankie-pet 18.aseprite",
+      "frame": {
+        "x": 576,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 150
+    },
+    {
+      "filename": "clankie-pet 19.aseprite",
+      "frame": {
+        "x": 608,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 110
+    },
+    {
+      "filename": "clankie-pet 20.aseprite",
+      "frame": {
+        "x": 640,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 450
+    },
+    {
+      "filename": "clankie-pet 21.aseprite",
+      "frame": {
+        "x": 672,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 500
+    },
+    {
+      "filename": "clankie-pet 22.aseprite",
+      "frame": {
+        "x": 704,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 600
+    },
+    {
+      "filename": "clankie-pet 23.aseprite",
+      "frame": {
+        "x": 736,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 700
+    },
+    {
+      "filename": "clankie-pet 24.aseprite",
+      "frame": {
+        "x": 768,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 500
+    },
+    {
+      "filename": "clankie-pet 25.aseprite",
+      "frame": {
+        "x": 800,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 700
+    },
+    {
+      "filename": "clankie-pet 26.aseprite",
+      "frame": {
+        "x": 832,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 500
+    },
+    {
+      "filename": "clankie-pet 27.aseprite",
+      "frame": {
+        "x": 864,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 400
+    },
+    {
+      "filename": "clankie-pet 28.aseprite",
+      "frame": {
+        "x": 896,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 250
+    },
+    {
+      "filename": "clankie-pet 29.aseprite",
+      "frame": {
+        "x": 928,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 300
+    },
+    {
+      "filename": "clankie-pet 30.aseprite",
+      "frame": {
+        "x": 960,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 30
+    },
+    {
+      "filename": "clankie-pet 31.aseprite",
+      "frame": {
+        "x": 992,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 30
+    },
+    {
+      "filename": "clankie-pet 32.aseprite",
+      "frame": {
+        "x": 1024,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 30
+    },
+    {
+      "filename": "clankie-pet 33.aseprite",
+      "frame": {
+        "x": 1056,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 30
+    },
+    {
+      "filename": "clankie-pet 34.aseprite",
+      "frame": {
+        "x": 1088,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 30
+    },
+    {
+      "filename": "clankie-pet 35.aseprite",
+      "frame": {
+        "x": 1120,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 30
+    },
+    {
+      "filename": "clankie-pet 36.aseprite",
+      "frame": {
+        "x": 1152,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 35
+    },
+    {
+      "filename": "clankie-pet 37.aseprite",
+      "frame": {
+        "x": 1184,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 40
+    },
+    {
+      "filename": "clankie-pet 38.aseprite",
+      "frame": {
+        "x": 1216,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 45
+    },
+    {
+      "filename": "clankie-pet 39.aseprite",
+      "frame": {
+        "x": 1248,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 50
+    },
+    {
+      "filename": "clankie-pet 40.aseprite",
+      "frame": {
+        "x": 1280,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 55
+    },
+    {
+      "filename": "clankie-pet 41.aseprite",
+      "frame": {
+        "x": 1312,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 60
+    },
+    {
+      "filename": "clankie-pet 42.aseprite",
+      "frame": {
+        "x": 1344,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 70
+    },
+    {
+      "filename": "clankie-pet 43.aseprite",
+      "frame": {
+        "x": 1376,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 80
+    },
+    {
+      "filename": "clankie-pet 44.aseprite",
+      "frame": {
+        "x": 1408,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 95
+    },
+    {
+      "filename": "clankie-pet 45.aseprite",
+      "frame": {
+        "x": 1440,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 110
+    },
+    {
+      "filename": "clankie-pet 46.aseprite",
+      "frame": {
+        "x": 1472,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 130
+    },
+    {
+      "filename": "clankie-pet 47.aseprite",
+      "frame": {
+        "x": 1504,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 150
+    },
+    {
+      "filename": "clankie-pet 48.aseprite",
+      "frame": {
+        "x": 1536,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 175
+    },
+    {
+      "filename": "clankie-pet 49.aseprite",
+      "frame": {
+        "x": 1568,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 240
+    },
+    {
+      "filename": "clankie-pet 50.aseprite",
+      "frame": {
+        "x": 1600,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 120
+    },
+    {
+      "filename": "clankie-pet 51.aseprite",
+      "frame": {
+        "x": 1632,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 120
+    },
+    {
+      "filename": "clankie-pet 52.aseprite",
+      "frame": {
+        "x": 1664,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 120
+    },
+    {
+      "filename": "clankie-pet 53.aseprite",
+      "frame": {
+        "x": 1696,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 350
+    },
+    {
+      "filename": "clankie-pet 54.aseprite",
+      "frame": {
+        "x": 1728,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 110
+    },
+    {
+      "filename": "clankie-pet 55.aseprite",
+      "frame": {
+        "x": 1760,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 350
+    },
+    {
+      "filename": "clankie-pet 56.aseprite",
+      "frame": {
+        "x": 1792,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 110
+    },
+    {
+      "filename": "clankie-pet 57.aseprite",
+      "frame": {
+        "x": 1824,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 100
+    },
+    {
+      "filename": "clankie-pet 58.aseprite",
+      "frame": {
+        "x": 1856,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 140
+    },
+    {
+      "filename": "clankie-pet 59.aseprite",
+      "frame": {
+        "x": 1888,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 180
+    },
+    {
+      "filename": "clankie-pet 60.aseprite",
+      "frame": {
+        "x": 1920,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 300
+    },
+    {
+      "filename": "clankie-pet 61.aseprite",
+      "frame": {
+        "x": 1952,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 300
+    },
+    {
+      "filename": "clankie-pet 62.aseprite",
+      "frame": {
+        "x": 1984,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 200
+    },
+    {
+      "filename": "clankie-pet 63.aseprite",
+      "frame": {
+        "x": 2016,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 200
+    },
+    {
+      "filename": "clankie-pet 64.aseprite",
+      "frame": {
+        "x": 2048,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 1400
+    },
+    {
+      "filename": "clankie-pet 65.aseprite",
+      "frame": {
+        "x": 2080,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 40
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 40
+      },
+      "duration": 160
+    }
+  ],
+  "meta": {
+    "app": "branding/pet/build.py",
+    "version": "1",
+    "image": "clankie-pet.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 2112,
+      "h": 40
+    },
+    "scale": "1",
+    "frameTags": [
+      {
+        "name": "idle",
+        "from": 0,
+        "to": 3,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "blink",
+        "from": 4,
+        "to": 5,
+        "direction": "forward",
+        "color": "#000000ff",
+        "repeat": "1"
+      },
+      {
+        "name": "look_left",
+        "from": 6,
+        "to": 6,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "look_right",
+        "from": 7,
+        "to": 7,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "walk_left",
+        "from": 8,
+        "to": 11,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "walk_right",
+        "from": 12,
+        "to": 15,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "hop",
+        "from": 16,
+        "to": 19,
+        "direction": "forward",
+        "color": "#000000ff",
+        "repeat": "1"
+      },
+      {
+        "name": "fall_asleep",
+        "from": 20,
+        "to": 22,
+        "direction": "forward",
+        "color": "#000000ff",
+        "repeat": "1"
+      },
+      {
+        "name": "sleep",
+        "from": 23,
+        "to": 26,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "wake",
+        "from": 27,
+        "to": 29,
+        "direction": "forward",
+        "color": "#000000ff",
+        "repeat": "1"
+      },
+      {
+        "name": "think",
+        "from": 30,
+        "to": 49,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "talk",
+        "from": 50,
+        "to": 52,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "play",
+        "from": 53,
+        "to": 56,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "alert",
+        "from": 57,
+        "to": 59,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "happy",
+        "from": 60,
+        "to": 61,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "catch",
+        "from": 62,
+        "to": 63,
+        "direction": "forward",
+        "color": "#000000ff"
+      },
+      {
+        "name": "offline",
+        "from": 64,
+        "to": 65,
+        "direction": "forward",
+        "color": "#000000ff"
+      }
+    ],
+    "layers": [
+      {
+        "name": "Layer",
+        "opacity": 255,
+        "blendMode": "normal"
+      }
+    ],
+    "slices": []
   }
- ],
- "meta": {
-  "app": "branding/pet/build.py",
-  "version": "1",
-  "image": "clankie-pet.png",
-  "format": "RGBA8888",
-  "size": {
-   "w": 2112,
-   "h": 40
-  },
-  "scale": "1",
-  "frameTags": [
-   {
-    "name": "idle",
-    "from": 0,
-    "to": 3,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "blink",
-    "from": 4,
-    "to": 5,
-    "direction": "forward",
-    "color": "#000000ff",
-    "repeat": "1"
-   },
-   {
-    "name": "look_left",
-    "from": 6,
-    "to": 6,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "look_right",
-    "from": 7,
-    "to": 7,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "walk_left",
-    "from": 8,
-    "to": 11,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "walk_right",
-    "from": 12,
-    "to": 15,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "hop",
-    "from": 16,
-    "to": 19,
-    "direction": "forward",
-    "color": "#000000ff",
-    "repeat": "1"
-   },
-   {
-    "name": "fall_asleep",
-    "from": 20,
-    "to": 22,
-    "direction": "forward",
-    "color": "#000000ff",
-    "repeat": "1"
-   },
-   {
-    "name": "sleep",
-    "from": 23,
-    "to": 26,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "wake",
-    "from": 27,
-    "to": 29,
-    "direction": "forward",
-    "color": "#000000ff",
-    "repeat": "1"
-   },
-   {
-    "name": "think",
-    "from": 30,
-    "to": 49,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "talk",
-    "from": 50,
-    "to": 52,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "play",
-    "from": 53,
-    "to": 56,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "alert",
-    "from": 57,
-    "to": 59,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "happy",
-    "from": 60,
-    "to": 61,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "catch",
-    "from": 62,
-    "to": 63,
-    "direction": "forward",
-    "color": "#000000ff"
-   },
-   {
-    "name": "offline",
-    "from": 64,
-    "to": 65,
-    "direction": "forward",
-    "color": "#000000ff"
-   }
-  ],
-  "layers": [
-   {
-    "name": "Layer",
-    "opacity": 255,
-    "blendMode": "normal"
-   }
-  ],
-  "slices": []
- }
 }

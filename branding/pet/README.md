@@ -6,16 +6,16 @@ pixel offset (124, 108)). Nothing comes from an external sprite.
 
 ## Files
 
-| Path | What |
-| --- | --- |
-| `src/palette.txt` | One-character palette keys used by every grid |
-| `src/pet/<tag>.txt` | Main character, one file per animation, one text grid per frame |
-| `src/mini/<tag>.txt` | Worker minis, same format |
-| `build.py` | Renders the grids into everything below |
-| `clankie-pet.png` / `.json` | Main sheet, 1×, one row, Aseprite array JSON |
-| `clankie-mini.png` / `.json` | Mini sheet, same format |
-| `preview/<tag>.gif` | Each tag at 6×, nearest-neighbour, on a flat warm background |
-| `preview/contact-sheet.png` | Every frame at 4×, labelled, with center (blue) and baseline (red) guides |
+| Path                         | What                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| `src/palette.txt`            | One-character palette keys used by every grid                             |
+| `src/pet/<tag>.txt`          | Main character, one file per animation, one text grid per frame           |
+| `src/mini/<tag>.txt`         | Worker minis, same format                                                 |
+| `build.py`                   | Renders the grids into everything below                                   |
+| `clankie-pet.png` / `.json`  | Main sheet, 1×, one row, Aseprite array JSON                              |
+| `clankie-mini.png` / `.json` | Mini sheet, same format                                                   |
+| `preview/<tag>.gif`          | Each tag at 6×, nearest-neighbour, on a flat warm background              |
+| `preview/contact-sheet.png`  | Every frame at 4×, labelled, with center (blue) and baseline (red) guides |
 
 ## Regenerate
 
@@ -69,10 +69,10 @@ frames 1 and 3 are passing poses. Every frame has one leg raised a row.
 
 ## Geometry
 
-| Sheet | Cell | Horizontal center | Baseline |
-| --- | --- | --- | --- |
-| `clankie-pet` | 32×40 | between columns 15 and 16 (x = 16.0) | feet end on row 38; row 39 is the first empty row |
-| `clankie-mini` | 12×14 | between columns 5 and 6 (x = 6.0) | feet on row 13 (the last row) |
+| Sheet          | Cell  | Horizontal center                    | Baseline                                          |
+| -------------- | ----- | ------------------------------------ | ------------------------------------------------- |
+| `clankie-pet`  | 32×40 | between columns 15 and 16 (x = 16.0) | feet end on row 38; row 39 is the first empty row |
+| `clankie-mini` | 12×14 | between columns 5 and 6 (x = 6.0)    | feet on row 13 (the last row)                     |
 
 In the standing pose the logo figure sits at cell offset (5, 11): head and body
 are symmetric about the center, and the sprout keeps the logo's asymmetry. Feet
@@ -83,31 +83,31 @@ toward the travel direction while the torso and the stride stay centered.
 
 ## Palette
 
-| Key | Hex | Role |
-| --- | --- | --- |
-| `.` | — | transparent |
-| `L` | `#c6d668` | leaf light |
-| `l` | `#7d8f41` | leaf dark |
-| `s` | `#6f5f36` | stem |
-| `f` | `#806440` | frame |
-| `o` | `#503b2c` | outline |
-| `c` | `#f2e5c8` | face |
-| `e` | `#262f3a` | eyes (also mouths, unplugged cord) |
-| `p` | `#f3b2a4` | cheeks |
+| Key | Hex       | Role                                     |
+| --- | --------- | ---------------------------------------- |
+| `.` | —         | transparent                              |
+| `L` | `#c6d668` | leaf light                               |
+| `l` | `#7d8f41` | leaf dark                                |
+| `s` | `#6f5f36` | stem                                     |
+| `f` | `#806440` | frame                                    |
+| `o` | `#503b2c` | outline                                  |
+| `c` | `#f2e5c8` | face                                     |
+| `e` | `#262f3a` | eyes (also mouths, unplugged cord)       |
+| `p` | `#f3b2a4` | cheeks                                   |
 | `d` | `#e3d3ae` | face shade (also blink lid, plug prongs) |
-| `b` | `#dfddb6` | body |
-| `B` | `#b2ae7e` | body shade |
+| `b` | `#dfddb6` | body                                     |
+| `B` | `#b2ae7e` | body shade                               |
 
 Added colors (five):
 
-| Key | Hex | Role |
-| --- | --- | --- |
-| `r` | `#d0745a` | handheld shell (`play`) |
-| `R` | `#a85742` | handheld shell shade: back-cover seams and grip ridges (`play`) |
-| `y` | `#e6ebbf` | faint screen glow on his face (`play`) |
-| `g` | `#3c4856` | glare and scanline on the switched-off screen (`offline`) |
+| Key | Hex       | Role                                                                                                                 |
+| --- | --------- | -------------------------------------------------------------------------------------------------------------------- |
+| `r` | `#d0745a` | handheld shell (`play`)                                                                                              |
+| `R` | `#a85742` | handheld shell shade: back-cover seams and grip ridges (`play`)                                                      |
+| `y` | `#e6ebbf` | faint screen glow on his face (`play`)                                                                               |
+| `g` | `#3c4856` | glare and scanline on the switched-off screen (`offline`)                                                            |
 | `n` | `#cfc6a8` | dimmed screen while he sleeps, seated (`fall_asleep`, `sleep`); never dark, so sleep can't be mistaken for `offline` |
-| `M` | `#ff00ff` | **tint mask, minis only** |
+| `M` | `#ff00ff` | **tint mask, minis only**                                                                                            |
 
 ## Worker tint mask
 
@@ -122,27 +122,27 @@ expect shading.
 Durations are in ms. "Once" tags carry `"repeat": "1"` in the JSON. The app
 decides what follows them.
 
-| Tag | Frames | Durations | Plays | Notes |
-| --- | --- | --- | --- | --- |
-| `idle` | 0–3 | 500, 300, 500, 300 | loop | Head settles 1 px; the sprout follows a beat late |
-| `blink` | 4–5 | 60, 90 | once | Half-closed, closed; drawn on the `idle` 0 pose |
-| `look_left` | 6 | 800 | hold | Eyes glance to screen-left |
-| `look_right` | 7 | 800 | hold | Eyes glance to screen-right |
-| `walk_left` | 8–11 | 130 ×4 | loop | 3/4 turn toward screen-left: head and face lead, side of the head shows, near arm and leg lead the stride, sprout streams behind |
-| `walk_right` | 12–15 | 130 ×4 | loop | 3/4 turn toward screen-right. The body mirrors `walk_left`; the sprout is re-lit so the stem's light edge stays on the left |
-| `hop` | 16–19 | 90, 80, 150, 110 | once | Crouch, rise, apex (6 px up), land squash |
-| `fall_asleep` | 20–22 | 450, 500, 600 | once | Yawn, droop; the last frame equals `sleep` 0 |
-| `sleep` | 23–26 | 700, 500, 700, 500 | loop | Eyes shut, leaves folded down, slow breathing; app draws z's |
-| `wake` | 27–29 | 400, 250, 300 | once | Stretch with arms up, half-open eyes, settle toward `idle` 0 |
-| `think` | 30–49 | 30 ×6, 35, 40, 45, 50, 55, 60, 70, 80, 95, 110, 130, 150, 175, 240 | loop | Loading-spinner propeller, eyes up; all timing is in the frame durations, so the app just loops the tag (see below) |
-| `talk` | 50–52 | 120 ×3 | loop | Mouth shapes on the `idle` 0 pose: small, rounded open, mid |
-| `play` | 53–56 | 350, 110, 350, 110 | loop | Holds a handheld facing himself, so we see its back: cartridge in the top slot, battery cover, grip ridges, his hands on the sides. Eyes down; the game shows as a faint glow on his face that flickers between frames. The short frames are button presses: head, device and hands nod 1 px |
-| `alert` | 57–59 | 100, 140, 180 | loop | Sprout perks into a V, wide eyes, small bounce; app draws "!" |
-| `happy` | 60–61 | 300, 300 | loop | `^ ^` eyes, wider blush, gentle bob |
-| `catch` | 62–63 | 200, 200 | loop | Arms up (stubs, then full reach) while a file hovers |
-| `offline` | 64–65 | 1400, 160 | loop | Sits slumped, screen switched off, sprout wilted, unplugged cord beside him; a scanline flickers on the dead screen |
-| `mini_idle` | 0–1 | 450, 450 | loop | Breathing |
-| `mini_walk` | 2–5 | 120 ×4 | loop | Front-facing shuffle, direction-neutral, so no mirroring is needed |
+| Tag           | Frames | Durations                                                          | Plays | Notes                                                                                                                                                                                                                                                                                        |
+| ------------- | ------ | ------------------------------------------------------------------ | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `idle`        | 0–3    | 500, 300, 500, 300                                                 | loop  | Head settles 1 px; the sprout follows a beat late                                                                                                                                                                                                                                            |
+| `blink`       | 4–5    | 60, 90                                                             | once  | Half-closed, closed; drawn on the `idle` 0 pose                                                                                                                                                                                                                                              |
+| `look_left`   | 6      | 800                                                                | hold  | Eyes glance to screen-left                                                                                                                                                                                                                                                                   |
+| `look_right`  | 7      | 800                                                                | hold  | Eyes glance to screen-right                                                                                                                                                                                                                                                                  |
+| `walk_left`   | 8–11   | 130 ×4                                                             | loop  | 3/4 turn toward screen-left: head and face lead, side of the head shows, near arm and leg lead the stride, sprout streams behind                                                                                                                                                             |
+| `walk_right`  | 12–15  | 130 ×4                                                             | loop  | 3/4 turn toward screen-right. The body mirrors `walk_left`; the sprout is re-lit so the stem's light edge stays on the left                                                                                                                                                                  |
+| `hop`         | 16–19  | 90, 80, 150, 110                                                   | once  | Crouch, rise, apex (6 px up), land squash                                                                                                                                                                                                                                                    |
+| `fall_asleep` | 20–22  | 450, 500, 600                                                      | once  | Yawn, droop; the last frame equals `sleep` 0                                                                                                                                                                                                                                                 |
+| `sleep`       | 23–26  | 700, 500, 700, 500                                                 | loop  | Eyes shut, leaves folded down, slow breathing; app draws z's                                                                                                                                                                                                                                 |
+| `wake`        | 27–29  | 400, 250, 300                                                      | once  | Stretch with arms up, half-open eyes, settle toward `idle` 0                                                                                                                                                                                                                                 |
+| `think`       | 30–49  | 30 ×6, 35, 40, 45, 50, 55, 60, 70, 80, 95, 110, 130, 150, 175, 240 | loop  | Loading-spinner propeller, eyes up; all timing is in the frame durations, so the app just loops the tag (see below)                                                                                                                                                                          |
+| `talk`        | 50–52  | 120 ×3                                                             | loop  | Mouth shapes on the `idle` 0 pose: small, rounded open, mid                                                                                                                                                                                                                                  |
+| `play`        | 53–56  | 350, 110, 350, 110                                                 | loop  | Holds a handheld facing himself, so we see its back: cartridge in the top slot, battery cover, grip ridges, his hands on the sides. Eyes down; the game shows as a faint glow on his face that flickers between frames. The short frames are button presses: head, device and hands nod 1 px |
+| `alert`       | 57–59  | 100, 140, 180                                                      | loop  | Sprout perks into a V, wide eyes, small bounce; app draws "!"                                                                                                                                                                                                                                |
+| `happy`       | 60–61  | 300, 300                                                           | loop  | `^ ^` eyes, wider blush, gentle bob                                                                                                                                                                                                                                                          |
+| `catch`       | 62–63  | 200, 200                                                           | loop  | Arms up (stubs, then full reach) while a file hovers                                                                                                                                                                                                                                         |
+| `offline`     | 64–65  | 1400, 160                                                          | loop  | Sits slumped, screen switched off, sprout wilted, unplugged cord beside him; a scanline flickers on the dead screen                                                                                                                                                                          |
+| `mini_idle`   | 0–1    | 450, 450                                                           | loop  | Breathing                                                                                                                                                                                                                                                                                    |
+| `mini_walk`   | 2–5    | 120 ×4                                                             | loop  | Front-facing shuffle, direction-neutral, so no mirroring is needed                                                                                                                                                                                                                           |
 
 ### `think` timing
 

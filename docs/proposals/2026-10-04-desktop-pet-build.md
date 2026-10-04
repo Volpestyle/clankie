@@ -70,6 +70,7 @@ the lead to make the writes.
      shown as sleep
 
    Honor Reduce Motion.
+
 6. **Pocket panel (app).** A hover pill with compose, dictate and list
    buttons. The panel has Chats (the history drawer's directory: new chat, his
    threads, worker threads, Discord rooms) opening a compact chat screen with
@@ -118,6 +119,7 @@ pass. Don't push, release or restart shared services.
   - opening the panel, continuing a real conversation, and listing real seats
 
   Capture screenshots or a short recording.
+
 - Dropping a file on him reaches the conversation as an attachment.
 - The service turns "unreachable" when the local service stops, and the pet
   recovers when it comes back.
