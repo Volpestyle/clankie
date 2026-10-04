@@ -51,6 +51,16 @@ ended. When no current parent status exists, five minutes without a child file
 write means done as a heuristic; a quiet running tool may be misclassified.
 A current explicit running status takes precedence over idleness.
 
+Recent entries also carry a stable native `id`, `startedAt`, and `endedAt`
+when available (VUH-1607, 2026-10-04). Claude uses the native `Agent`/`Task`
+call ID; Codex uses the child's own thread UUID and rollout creation time.
+Claude ends at a parent result, background notification or the next main
+assistant message; Codex ends at its parent collection/status record. An idle
+Codex ending uses the last file-write time plus the five-minute idle threshold,
+so it is an estimate. Running entries omit `endedAt`; reopening preserves the
+native ID. Missing/invalid native timestamps remain absent. These fields are
+optional in the protocol so entries from older hosts and journals still validate.
+
 To respect ADR 0188, discovery alone never reads a transcript. The host reads
 only seats it already has an address for: one it hired or whose chat the owner
 opened. It reads only local seats. It stores nothing and imports no entries,

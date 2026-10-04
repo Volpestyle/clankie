@@ -29,8 +29,22 @@ const line = (value: unknown) => `${JSON.stringify(value)}\n`;
 const now = new Date("2026-10-04T18:00:00Z");
 const roots: string[] = [];
 const label = "Herschel · /root/wave1_adr";
-const running = { running: 1, recent: [{ label, status: "running" }] };
-const done = { running: 0, recent: [{ label, status: "done" }] };
+const running = {
+  running: 1,
+  recent: [{ id: fixture.child.payload.id, label, status: "running", startedAt: fixture.child.timestamp }],
+};
+const done = {
+  running: 0,
+  recent: [
+    {
+      id: fixture.child.payload.id,
+      label,
+      status: "done",
+      startedAt: fixture.child.timestamp,
+      endedAt: fixture.collected.timestamp,
+    },
+  ],
+};
 
 function fresh(path: string): void {
   utimesSync(path, now, now);
@@ -138,7 +152,10 @@ describe("Codex children on the existing seat subagents path", () => {
         agents: [{ agent_name: "/root/wave1_adr", agent_status: { completed: "result" } }],
       }),
     );
-    expect(readCodexSubagents(session)).toEqual(done);
+    expect(readCodexSubagents(session)).toMatchObject({
+      running: 0,
+      recent: [{ id: fixture.child.payload.id, label, status: "done", startedAt: fixture.child.timestamp }],
+    });
   });
 
   it("settles legacy close results by child UUID, not session_id (which is the parent)", () => {
@@ -150,7 +167,10 @@ describe("Codex children on the existing seat subagents path", () => {
         "multi_agent_v1",
       ),
     );
-    expect(readCodexSubagents(session)).toEqual(done);
+    expect(readCodexSubagents(session)).toMatchObject({
+      running: 0,
+      recent: [{ id: fixture.child.payload.id, label, status: "done", startedAt: fixture.child.timestamp }],
+    });
   });
 
   it("uses the older targeted wait result, and ignores close errors", () => {
@@ -168,21 +188,33 @@ describe("Codex children on the existing seat subagents path", () => {
         "multi_agent_v1",
       ),
     );
-    expect(readCodexSubagents(session)).toEqual(done);
+    expect(readCodexSubagents(session)).toMatchObject({
+      running: 0,
+      recent: [{ id: fixture.child.payload.id, label, status: "done", startedAt: fixture.child.timestamp }],
+    });
   });
 
   it("restarts after successful followup, preserves completion after failed followup, and settles interruption", () => {
     const { parent, session } = setup(line(fixture.collected));
-    expect(readCodexSubagents(session)).toEqual(done);
+    expect(readCodexSubagents(session)).toMatchObject({
+      running: 0,
+      recent: [{ id: fixture.child.payload.id, label, status: "done", startedAt: fixture.child.timestamp }],
+    });
     appendFileSync(
       parent,
       tool("followup_task", "collab tool failed: agent thread limit reached", "wave1_adr"),
     );
-    expect(readCodexSubagents(session)).toEqual(done);
+    expect(readCodexSubagents(session)).toMatchObject({
+      running: 0,
+      recent: [{ id: fixture.child.payload.id, label, status: "done", startedAt: fixture.child.timestamp }],
+    });
     appendFileSync(parent, tool("followup_task", "", "wave1_adr"));
     expect(readCodexSubagents(session)).toEqual(running);
     appendFileSync(parent, tool("interrupt_agent", { previous_status: "running" }, "wave1_adr"));
-    expect(readCodexSubagents(session)).toEqual(done);
+    expect(readCodexSubagents(session)).toMatchObject({
+      running: 0,
+      recent: [{ id: fixture.child.payload.id, label, status: "done", startedAt: fixture.child.timestamp }],
+    });
   });
 
   it("resolves relative followup targets from a subagent parent's own task path", () => {
@@ -219,7 +251,10 @@ describe("Codex children on the existing seat subagents path", () => {
 
   it("a newer child task_started supersedes the previous collected turn", () => {
     const { child, session } = setup(line(fixture.collected));
-    expect(readCodexSubagents(session)).toEqual(done);
+    expect(readCodexSubagents(session)).toMatchObject({
+      running: 0,
+      recent: [{ id: fixture.child.payload.id, label, status: "done", startedAt: fixture.child.timestamp }],
+    });
     appendFileSync(
       child,
       line({ timestamp: "2026-10-04T17:55:00Z", type: "event_msg", payload: { type: "task_started" } }),
@@ -231,7 +266,10 @@ describe("Codex children on the existing seat subagents path", () => {
   it("falls back to file idleness, but a native running status overrides the heuristic", () => {
     const { child, parent, session } = setup();
     utimesSync(child, new Date(now.getTime() - 300_000), new Date(now.getTime() - 300_000));
-    expect(readCodexSubagents(session)).toEqual(done);
+    expect(readCodexSubagents(session)).toMatchObject({
+      running: 0,
+      recent: [{ id: fixture.child.payload.id, label, status: "done", startedAt: fixture.child.timestamp }],
+    });
     fresh(child);
     expect(readCodexSubagents(session)).toEqual(running);
     utimesSync(child, new Date(now.getTime() - 300_000), new Date(now.getTime() - 300_000));
@@ -303,7 +341,10 @@ describe("Codex children on the existing seat subagents path", () => {
     appendFileSync(parent, collected.slice(0, -2));
     expect(readCodexSubagents(session)).toEqual(running);
     appendFileSync(parent, collected.slice(-2));
-    expect(readCodexSubagents(session)).toEqual(done);
+    expect(readCodexSubagents(session)).toMatchObject({
+      running: 0,
+      recent: [{ id: fixture.child.payload.id, label, status: "done", startedAt: fixture.child.timestamp }],
+    });
     const replacement = `${parent}.replacement`;
     writeFileSync(replacement, line(fixture.parent));
     renameSync(replacement, parent);

@@ -25,6 +25,8 @@ const SUBAGENT_TOOLS = new Set(["Agent", "Task"]);
 
 interface SubagentCall {
   readonly label: string;
+  readonly startedAt: string | undefined;
+  endedAt: string | undefined;
   /** The assistant message that made the call; a later one means a sync call was abandoned. */
   readonly messageId: string | undefined;
   background: boolean;
@@ -204,6 +206,14 @@ export function readCodexSubagents(session: HerdrAgentSession): OperatorSeatSuba
         label: label(
           [metadata.nickname, metadata.task].filter((value) => typeof value === "string").join(" · "),
         ),
+        startedAt: isoTime(metadata.startedAt),
+        endedAt: done
+          ? isoTime(
+              signal !== undefined && signal.at >= child.state.data.startedAt
+                ? signal.at
+                : child.state.mtimeMs + CODEX_IDLE_MS,
+            )
+          : undefined,
         messageId: undefined,
         background: false,
         done,
@@ -397,21 +407,16 @@ export function parseClaudeSubagents(jsonl: string): OperatorSeatSubagents {
 }
 
 function foldClaudeSubagentLine(calls: Map<string, SubagentCall>, line: string): void {
-  // The notification is plain text inside whichever record carries it
-  // (a queue operation, a user turn); the tags survive JSON escaping.
+  const entry = jsonRecord(line);
+  const at = entry === undefined ? undefined : isoTime(codexTimestamp(entry));
+  // Native background notifications settle at their parent record timestamp.
   if (line.includes("<task-notification>")) {
     for (const match of line.matchAll(
       /<tool-use-id>([^<]{1,200})<\/tool-use-id>[\s\S]*?<status>([a-z_]{1,32})<\/status>/gu,
     )) {
       const call = calls.get(match[1]!);
-      if (call !== undefined && match[2] !== "running") call.done = true;
+      if (call !== undefined && match[2] !== "running") endClaudeCall(call, at);
     }
-  }
-  let entry: unknown;
-  try {
-    entry = JSON.parse(line);
-  } catch {
-    return;
   }
   if (!isRecord(entry) || entry.isSidechain === true) return;
   const message = isRecord(entry.message) ? entry.message : undefined;
@@ -422,7 +427,7 @@ function foldClaudeSubagentLine(calls: Map<string, SubagentCall>, line: string):
     // new message means that call ended without a recorded result (an
     // interrupt, a rewound branch).
     for (const call of calls.values()) {
-      if (!call.done && !call.background && call.messageId !== messageId) call.done = true;
+      if (!call.done && !call.background && call.messageId !== messageId) endClaudeCall(call, at);
     }
     for (const item of content) {
       if (item.type !== "tool_use" || typeof item.id !== "string" || !SUBAGENT_TOOLS.has(String(item.name)))
@@ -430,6 +435,8 @@ function foldClaudeSubagentLine(calls: Map<string, SubagentCall>, line: string):
       const input = isRecord(item.input) ? item.input : {};
       calls.set(item.id, {
         label: label(input.description ?? input.subagent_type),
+        startedAt: at,
+        endedAt: undefined,
         messageId,
         background: false,
         done: false,
@@ -445,19 +452,36 @@ function foldClaudeSubagentLine(calls: Map<string, SubagentCall>, line: string):
     const call = calls.get(String(item.tool_use_id));
     if (call === undefined) continue;
     if (result?.status === "async_launched" || result?.isAsync === true) call.background = true;
-    else call.done = true;
+    else endClaudeCall(call, at);
   }
 }
 
 function summarize(calls: ReadonlyMap<string, SubagentCall>): OperatorSeatSubagents {
-  const all = [...calls.values()];
+  const all = [...calls.entries()];
   return {
-    running: all.filter((call) => !call.done).length,
+    running: all.filter(([, call]) => !call.done).length,
     recent: all
       .slice(-OPERATOR_SEAT_SUBAGENTS_RECENT_MAX)
       .reverse()
-      .map((call) => ({ label: call.label, status: call.done ? "done" : "running" })),
+      .map(([id, call]) => ({
+        id,
+        label: call.label,
+        status: call.done ? "done" : "running",
+        ...(call.startedAt === undefined ? {} : { startedAt: call.startedAt }),
+        ...(!call.done || call.endedAt === undefined ? {} : { endedAt: call.endedAt }),
+      })),
   };
+}
+
+function endClaudeCall(call: SubagentCall, at: string | undefined): void {
+  if (call.done) return;
+  call.done = true;
+  call.endedAt = at;
+}
+
+/** Missing/invalid source timestamps remain unknown, never wall-clock invention. */
+function isoTime(at: number): string | undefined {
+  return at > 0 && Number.isFinite(at) ? new Date(at).toISOString() : undefined;
 }
 
 function label(value: unknown): string {

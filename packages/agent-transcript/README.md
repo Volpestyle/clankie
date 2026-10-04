@@ -44,3 +44,10 @@ parent status, five minutes of file idleness is a heuristic fallback, not proof
 that a process exited. At most 64 children, 4,096 recent headers (64 KiB each)
 and 32 addressed parent sessions are retained. Partial lines wait for the next
 read; file replacement or truncation restarts the bounded tail.
+
+Recent subagent entries carry optional `id`, `startedAt` and `endedAt` fields
+([VUH-1607](https://linear.app/vuhlp/issue/VUH-1607)). Readers use native call IDs
+(Claude) or child thread UUIDs (Codex) and source timestamps. Running entries
+omit the ending; older entries without these fields still validate. A Codex
+idle ending is estimated at last file write plus five minutes. Missing source
+timestamps remain unknown rather than using the fleet read's wall clock.
