@@ -13,7 +13,9 @@ exact session UUID, models and independent repository indexes. It creates fresh
 private HOME/config/temp directories and fixed argv/environment/settings. It does
 not import credentials or execute the specification. The ELF check identifies
 selected bytes; it does not verify their vendor, version or behavior. The declared
-version remains unverified. The native image builder/probe is still Codex-only.
+version remains unverified. A separate [controller-owned image/control and launch path](native-claude-runtime.md)
+is now implemented with deterministic fixtures; actual Linux/native acceptance and
+official artifact provenance remain unavailable.
 
 The plan selects restricted mode, no user/project/local settings sources, disabled
 hooks, empty plugin settings, strict empty MCP configuration and explicit tools.
@@ -76,5 +78,6 @@ rename hook fixtures as acceptance.
 
 The [protected collector seam](native-claude-collector.md) now implements bounded
 process/peer-checked capture and outside-mount retention for a future verified
-Claude runtime. Its actual Claude capability and runtime integration remain
-unavailable; no launch or accounting authority is derived from collection.
+Claude runtime. Its private Claude runtime selection now requires the controller-created original
+process and fresh Herdr foreground binding. Actual acceptance remains unrun; no
+provider, campaign or accounting authority is derived from collection.

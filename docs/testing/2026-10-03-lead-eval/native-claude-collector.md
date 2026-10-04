@@ -11,28 +11,32 @@ authority, and the existing Codex capability cannot authorize a Claude binary.
 its real `NativeOwnerAttachment`. The existing private runtime capability reader
 must bind `/opt/claude/bin/claude` to the selected executable hash. Native `pipe`
 still enforces the private image/daemon/runtime capability. No imported JSON,
-selected artifact label or fixture flag supplies that origin. The current issuer
-does not contain a Claude binary proof, so this seam remains unavailable until
-the actual Claude image/runtime capability is engineered and verified.
+selected artifact label or fixture flag supplies that origin. The
+[Claude runtime controller](native-claude-runtime.md) now implements a separate
+private image/control capability and original-lifetime launch selection; actual
+Linux/native acceptance and vendor provenance remain unavailable.
 
-A controller-supplied Python helper runs through the contained pipe. It selects
-one process by kernel-observed exact argv, session, cwd, config directory, pane
-environment label, nonzero terminal,
-executable hash and PID/start ticks. The executable is hashed through its actual
-`/proc/PID/exe` descriptor; later checks retain the executable device/inode/size/
-ctime identity. It rejects PID reuse, changed argv/config/cwd, replaced executables,
-headless selections and missing or ambiguous roots. Every hook uses Linux Unix
-socket peer credentials and a bounded ancestor chain to that root; all ancestor
-lifetimes are rechecked. Snapshots recheck the selected root around reads and
-before transmission. These are process observations, not account attestation.
-They do not prove that the selected Herdr pane launched or foregrounded Claude.
-The pane environment label is caller-controlled and is not pane membership or
-native-child authority. Owner attachment proves the owner-to-Herdr socket binding,
-not a Claude-to-pane binding.
+The collector accepts only the controller's in-memory selection token. Before
+exec, the immutable pane launcher retains the original bubblewrap child pidfd;
+the controller independently proves that launcher's peer and shell through the
+actual Herdr pane process API. After exec, the controller checks original lifetime,
+selected executable/cwd and native foreground membership before activating the
+token. Environment/session/argv/TTY labels only constrain that already-owned
+lifetime; they cannot select or adopt a process. Every data frame awaits fresh
+controller binding, while the passive ready frame only stages the hook listener.
 
-The root's model tools must still be proven unable to access control files,
-collector sockets and parent process descriptors by the future Claude runtime
-capability. Codex sandbox evidence does not establish that for Claude. A native
+The capture helper reads only the original selected PID/start ticks. The executable
+is hashed through its actual `/proc/PID/exe` descriptor; later checks retain its
+device/inode/size/ctime identity. It rejects PID reuse, changed argv/config/cwd,
+replaced executables and headless selections. Every hook uses Linux Unix socket
+peer credentials and a bounded ancestor chain to that root; all ancestor lifetimes
+are rechecked. Snapshots recheck the selected root around reads and transmission.
+These are process observations, not account attestation.
+
+The whole native process, including Read/Edit, is inside the Claude-specific
+kernel boundary. Private controller files/sockets and parent processes are absent;
+the fixed hook-input socket is intentionally available as untrusted input.
+A native
 process or descendant able to write transcript/hook bytes can forge their contents;
 a valid peer chain does not prove an official hook fired, nor that all children or
 provider requests were seen. Every exported report therefore remains
@@ -88,10 +92,9 @@ no callback relies on a model-written claim to keep collection alive.
 
 ## Remaining work
 
-Implement and verify the actual Claude image/control isolation capability, connect
-this seam to the manual native TUI runtime, add trusted selected native launch and
-foreground binding to the Herdr pane, establish effective hook configuration
-and process/path compatibility, and exercise live collection only after owner
-approval. Provider identity/quota observation, physical-request admission and native
+Verify the implemented image/control and original-launch path on the actual
+selected native artifact, including official provenance, effective hook settings,
+process/path compatibility and descendant-wide stop. Live collection remains held.
+Provider identity/quota observation, physical-request admission and native
 child/index routing remain separate missing engineering. Retained filesystem
 claims and their hashes cannot close any of those gaps.

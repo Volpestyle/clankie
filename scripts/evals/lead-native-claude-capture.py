@@ -55,9 +55,9 @@ def process_row(pid, proc="/proc"):
     return {"pid": int(pid), "parent": int(fields[1]), "tty": int(fields[4]), "startTicks": fields[19]}
 
 
-def verify_process(config, expected=None, proc="/proc"):
+def verify_process(config, expected=None, proc="/proc", selected_pid=None):
     rows = []
-    pids = [str(expected["pid"])] if expected else [p for p in bounded_names(proc, 512) if p.isdecimal()]
+    pids = [str(expected["pid"])] if expected else ([str(selected_pid)] if selected_pid else [p for p in bounded_names(proc, 512) if p.isdecimal()])
     if len(pids) > 512:
         raise ValueError("process inventory exceeds bound")
     for pid in pids:
@@ -107,6 +107,8 @@ def verify_process(config, expected=None, proc="/proc"):
                 os.close(fd)
             if row != process_row(pid, proc):
                 raise ValueError("native process lifetime changed")
+            if config.get("launchStartTicks") and row["startTicks"] != config["launchStartTicks"]:
+                raise ValueError("original launch lifetime changed")
             binding = {"pid": row["pid"], "startTicks": row["startTicks"], "tty": row["tty"], "executableSha256": config["executableSha256"], **fingerprint}
             if expected and binding != expected:
                 raise ValueError("native process binding changed")
@@ -279,7 +281,7 @@ def serve(config):
     try:
         while True:
             if root:
-                root = verify_process(config, root)
+                root = verify_process(config, root, selected_pid=config["launchPid"])
             if time.monotonic() - last_heartbeat >= 1:
                 acknowledged({"kind": "heartbeat", "root": root})
                 last_heartbeat = time.monotonic()
@@ -292,7 +294,7 @@ def serve(config):
                 continue
             with connection:
                 connection.settimeout(2)
-                root = verify_process(config, root)
+                root = verify_process(config, root, selected_pid=config["launchPid"])
                 peer = peer_binding(connection, root)
                 raw = bytearray()
                 while True:
@@ -307,13 +309,13 @@ def serve(config):
                     raise ValueError("unsupported or mismatched native hook")
                 if peer_binding(connection, root) != peer:
                     raise ValueError("hook peer lifetime changed")
-                root = verify_process(config, root)
+                root = verify_process(config, root, selected_pid=config["launchPid"])
                 sequence += 1
                 acknowledged({"kind": "hook", "sequence": sequence, "root": root, "peer": peer, "data": base64.b64encode(raw).decode("ascii"), "bytes": len(raw), "sha256": sha(raw)})
                 files, gaps = snapshots(config)
-                root = verify_process(config, root)
+                root = verify_process(config, root, selected_pid=config["launchPid"])
                 for item in files:
-                    root = verify_process(config, root)
+                    root = verify_process(config, root, selected_pid=config["launchPid"])
                     acknowledged({"kind": "snapshot", "sequence": sequence, "root": root, **item})
                 acknowledged({"kind": "batch-end", "sequence": sequence, "root": root, "gaps": gaps})
                 connection.sendall(b"ok\n")
@@ -325,8 +327,10 @@ def main():
     if len(sys.argv) != 2:
         raise ValueError("exact capture configuration required")
     config = json.loads(sys.argv[1])
-    if set(config) != {"paneId", "cwd", "sessionId", "argv", "executableSha256"} or not re.fullmatch(r"w[A-Za-z0-9]+:p[A-Za-z0-9]+", config["paneId"]) or config["cwd"] != "/eval/tasks/lead" or not re.fullmatch(r"[a-f0-9-]{36}", config["sessionId"]) or not re.fullmatch(r"[a-f0-9]{64}", config["executableSha256"]):
+    if set(config) != {"paneId", "cwd", "sessionId", "argv", "executableSha256", "launchPid", "launchStartTicks"} or not re.fullmatch(r"w[A-Za-z0-9]+:p[A-Za-z0-9]+", config["paneId"]) or config["cwd"] != "/eval/tasks/lead" or not re.fullmatch(r"[a-f0-9-]{36}", config["sessionId"]) or not re.fullmatch(r"[a-f0-9]{64}", config["executableSha256"]):
         raise ValueError("invalid selected capture identity")
+    if type(config["launchPid"]) is not int or config["launchPid"] < 1 or not re.fullmatch(r"[1-9][0-9]*", config["launchStartTicks"]):
+        raise ValueError("original launch identity required")
     argv = config["argv"]
     if not isinstance(argv, list) or not argv or argv[0] != EXECUTABLE or any(not isinstance(arg, str) for arg in argv) or any(re.match(r"^-p|^--(?:print|bg|background|input-format|output-format|sdk-url)(?:=|$)|^--settings=", arg) for arg in argv) or argv.count("--session-id") != 1 or argv[argv.index("--session-id") + 1] != config["sessionId"]:
         raise ValueError("exact interactive session argv required")
