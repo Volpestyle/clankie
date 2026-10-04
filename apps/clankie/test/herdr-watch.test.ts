@@ -1448,7 +1448,7 @@ describe("hiring a seat", () => {
     expect(createTab).toHaveBeenCalledWith({
       cwd: tmpdir(),
       label: "Release prep",
-      env: { CODEX_HOME: codexHome },
+      env: expect.objectContaining({ CODEX_HOME: codexHome }),
     });
     expect(startAgent.mock.calls[0]?.[0]).toMatchObject({ kind: "codex", paneId: "w1C:p9" });
     if (result.outcome === "spawned") {
@@ -1499,7 +1499,7 @@ describe("hiring a seat", () => {
     expect(createTab).toHaveBeenCalledWith({
       cwd: tmpdir(),
       label: "Release prep",
-      env: { CODEX_HOME: codexHome },
+      env: expect.objectContaining({ CODEX_HOME: codexHome }),
     });
     // Hired under the name it already had: that name is the persona's binding
     // key, so the same character sits down in the new district.

@@ -197,3 +197,11 @@ grants. A worker persona, an inspected room, and a default conversation confer
 no ownership. API `spawn_seat` requires the selected `conversationId`; ordinary
 `hire_agent` gets it from the admitted host turn. Legacy saved sessions without
 persisted owner proof cannot be claimed by choosing a conversation.
+
+## Local discovery state
+
+The local service and native worker bridge share `CLANKIE_STATE`; discovery is
+in its `links` directory, defaulting to `~/.clankie/links`. Local hires receive
+the absolute service state path. An explicit private state directory never
+falls back to the shared descriptor. Doctor uses the same state selection.
+SSH fleets retain their own machine's state; no local state path is sent there.

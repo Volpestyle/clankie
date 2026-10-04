@@ -179,7 +179,7 @@ const settingsFilledNames = [
   ...applyRelaySettingsToEnvironment(startupSettings.relay),
 ];
 
-const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
+const stateRoot = resolve(process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"));
 // Workers inherit private Herdr XDG paths; Clankie commands still use this owner settings file.
 process.env.CLANKIE_SETTINGS_FILE = settingsStore.path;
 const herdr = await startHerdrConnection({
@@ -935,7 +935,7 @@ const fleetLinks = new FleetLinks({
 proofFleetLinks = fleetLinks;
 runtimes.linkStatus = (fleet) => fleetLinks.status(fleet);
 const localFleet = new LocalFleetLink({
-  directory: join(homedir(), ".clankie", "links"),
+  directory: join(stateRoot, "links"),
   binding: localFleetBinding,
   projectProof: localProjectProof({
     binding: localFleetBinding,

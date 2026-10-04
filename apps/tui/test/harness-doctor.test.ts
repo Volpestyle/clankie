@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, writeFile, symlink, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { inspectHarnessBridges } from "../src/harness-doctor.ts";
 
 it("reports harness registration, generated config source, and live membership separately without secrets", async () => {
@@ -88,3 +88,53 @@ it("reports harness registration, generated config source, and live membership s
     await rm(home, { recursive: true, force: true });
   }
 });
+
+it.each([true, false])(
+  "uses only the private state discovery root (descriptor present=%s)",
+  async (present) => {
+    const home = await mkdtemp(join(tmpdir(), "clankie-doctor-state-"));
+    const privateRoot = join(home, "private-state");
+    const descriptor = (url: string) =>
+      JSON.stringify({
+        schemaVersion: 2,
+        authentication: "local-process",
+        socket: "/test/default.sock",
+        url,
+      });
+    try {
+      await mkdir(join(home, ".clankie", "links"), { recursive: true });
+      await writeFile(
+        join(home, ".clankie", "links", "default-local.json"),
+        descriptor("http://127.0.0.1:54321"),
+      );
+      if (present) {
+        await mkdir(join(privateRoot, "links"), { recursive: true });
+        await writeFile(
+          join(privateRoot, "links", "default-local.json"),
+          descriptor("http://127.0.0.1:54322"),
+        );
+      }
+      const execute = async () => ({ stderr: "", stdout: "{}" });
+      const probe = vi.fn<typeof fetch>(async () => new Response(null, { status: 400 }));
+      const report = await inspectHarnessBridges(
+        {
+          HOME: home,
+          CLANKIE_STATE: ` ${privateRoot} `,
+          HERDR_PANE_ID: "w1:p1",
+          HERDR_SOCKET_PATH: "/test/default.sock",
+        },
+        execute,
+        probe,
+      );
+      if (process.platform === "darwin" && present) {
+        expect(report.localFleet.membership).toBe("verified");
+        expect(probe).toHaveBeenCalledWith("http://127.0.0.1:54322/v1/fleet/mcp", expect.any(Object));
+      } else {
+        expect(report.localFleet.membership).toBe(process.platform === "darwin" ? "no-link" : "unsupported");
+        expect(probe).not.toHaveBeenCalled();
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  },
+);

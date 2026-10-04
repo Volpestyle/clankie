@@ -81,6 +81,26 @@ describe("Codex harness seat adapter", () => {
     if (local.outcome === "started") await local.control.close();
   });
 
+  it("forwards the local service's discovery state into Codex's worker MCP environment", async () => {
+    const f = fixture();
+    const adapter = createCodexSeatAdapter({
+      start: f.start,
+      herdr: f.herdr,
+      trackerOverrides: async () => [],
+      localProcess: () => () => {},
+    });
+    const result = await adapter.start(
+      { harness: "codex", cwd: "/scratch", brief: "", env: { CLANKIE_STATE: "/private/service" } },
+      f.view,
+    );
+    expect(result.outcome).toBe("started");
+    expect(f.start.mock.calls[0]![0]).toMatchObject({ env: { CLANKIE_STATE: "/private/service" } });
+    expect(f.start.mock.calls[0]![0].config).toContain(
+      'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
+    );
+    if (result.outcome === "started") await result.control.close();
+  });
+
   it("passes a deny-only expected catalog to the dedicated server and rejects a changed binding", async () => {
     const f = fixture();
     const adapter = createCodexSeatAdapter({
