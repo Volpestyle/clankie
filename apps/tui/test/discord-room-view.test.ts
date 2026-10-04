@@ -3,7 +3,7 @@ import { DiscordSettingsSchema, type DiscordRoomStatus } from "@clankie/protocol
 import { DISCORD_EDITABLE_FIELDS } from "../src/discord-commands.ts";
 import { formatDiscordRoomStatus } from "../src/discord-room-view.ts";
 it("the TUI field editor exposes every canonical Discord field", () => {
-  expect(DISCORD_EDITABLE_FIELDS).toHaveLength(37);
+  expect(new Set(DISCORD_EDITABLE_FIELDS).size).toBe(DISCORD_EDITABLE_FIELDS.length);
   expect(new Set(DISCORD_EDITABLE_FIELDS)).toEqual(new Set(Object.keys(DiscordSettingsSchema.shape)));
 });
 it("shows explicit silence/failure and private guidance without claiming pending deliveries were answered", () => {
