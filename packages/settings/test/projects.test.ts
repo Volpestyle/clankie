@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OPERATOR_SEAT_HARNESSES } from "@clankie/protocol";
+import { OPERATOR_AGENT_ROLES, OPERATOR_SEAT_HARNESSES } from "@clankie/protocol";
 import { ProjectsSettingsSchema, ProjectSchema, ProjectRoleSchema } from "@clankie/protocol/projects";
 import {
   migratePersonaRoles,
@@ -24,6 +24,60 @@ const project = (id: string, path = "/code/team") =>
   });
 
 describe("owner projects", () => {
+  it.each([
+    { name: "omitted", roles: undefined },
+    { name: "empty", roles: [] },
+  ])("accepts built-in assignments and tracker mappings with $name roles", ({ roles }) => {
+    const settings = ProjectsSettingsSchema.parse({
+      projects: [
+        { id: "one", name: "One", roles, labelRoleMap: [{ label: "implementation", role: "BUILDER" }] },
+      ],
+      assignments: OPERATOR_AGENT_ROLES.map((role) => ({ projectId: "one", personaId: role, role })),
+    });
+    expect(settings.projects[0]!.roles).toEqual([]);
+    for (const role of OPERATOR_AGENT_ROLES)
+      expect(
+        resolveProjectMembership(settings, {
+          occupantId: "agent",
+          hire: { occupantId: "agent", projectId: "one", role: role.toUpperCase() },
+        }),
+      ).toMatchObject({ outcome: "member", projectId: "one", source: "hire" });
+    expect(
+      resolveProjectMembership(settings, {
+        occupantId: "agent",
+        hire: { occupantId: "agent", projectId: "one", role: "Unconfigured" },
+      }),
+    ).toEqual({ outcome: "invalid_assignment" });
+  });
+
+  it("assigns a default built-in role without disabling the other inherited roles", () => {
+    const settings = setDefaultProjectRole(empty(), "alice", "builder");
+    expect(settings.projects[0]!.roles).toEqual([]);
+    expect(projectRoleForPersona(settings, "alice")).toBe("builder");
+    expect(
+      resolveProjectMembership(settings, {
+        occupantId: "agent",
+        hire: { occupantId: "agent", projectId: "default", role: "designer" },
+      }),
+    ).toMatchObject({ outcome: "member" });
+  });
+
+  it("keeps inherited assignments valid when a default custom role is added", () => {
+    const settings = setDefaultProjectRole(
+      setDefaultProjectRole(empty(), "alice", "builder"),
+      "bob",
+      "Sound Designer",
+    );
+    expect(projectRoleForPersona(settings, "alice")).toBe("builder");
+    expect(projectRoleForPersona(settings, "bob")).toBe("Sound Designer");
+    expect(
+      resolveProjectMembership(settings, {
+        occupantId: "agent",
+        hire: { occupantId: "agent", projectId: "default", role: "designer" },
+      }),
+    ).toMatchObject({ outcome: "member" });
+  });
+
   it("accepts every canonical hire harness as a role default without widening the executable allow-list", () => {
     expect(OPERATOR_SEAT_HARNESSES).toContain("opencode");
     for (const harness of OPERATOR_SEAT_HARNESSES) {

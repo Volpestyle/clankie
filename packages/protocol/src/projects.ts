@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
-import { OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
+import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -30,6 +30,16 @@ export const ProjectRoleSchema = z
     hireNaming: z.string().trim().min(1).max(500).optional(),
   })
   .strict();
+/** Empty or omitted project roles inherit the built-ins without persisting overrides (ADR 0216). */
+export function projectRolePolicy(
+  project: Pick<Project, "roles">,
+  role: string,
+): z.infer<typeof ProjectRoleSchema> | undefined {
+  const key = operatorAgentRoleKey(role);
+  if (project.roles.length === 0 && OPERATOR_AGENT_ROLES.some((builtIn) => builtIn === key))
+    return { role: key };
+  return project.roles.find((entry) => operatorAgentRoleKey(entry.role) === key);
+}
 /** References constrain later grants; these records cannot replace broker/link/account checks. */
 export const ProjectGrantRuleSchema = z
   .object({
@@ -103,7 +113,7 @@ export const ProjectSchema = z
     if (project.trackerRef && !project.workspaces.some((w) => w.id === project.trackerRef?.workspaceId))
       ctx.addIssue({ code: "custom", message: "Tracker workspace must belong to the project" });
     for (const mapping of project.labelRoleMap)
-      if (!project.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(mapping.role)))
+      if (projectRolePolicy(project, mapping.role) === undefined)
         ctx.addIssue({ code: "custom", message: "Tracker role must belong to the project" });
   });
 /** Semantic association only. Never use this record as proof of a live hire or pane's membership. */
@@ -148,9 +158,7 @@ export const ProjectsSettingsSchema = z
     for (const assignment of value.assignments)
       if (
         !value.projects.some(
-          (p) =>
-            p.id === assignment.projectId &&
-            p.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(assignment.role)),
+          (p) => p.id === assignment.projectId && projectRolePolicy(p, assignment.role) !== undefined,
         )
       )
         ctx.addIssue({ code: "custom", message: "Assignment must reference an existing project role" });

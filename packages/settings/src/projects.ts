@@ -4,10 +4,11 @@ import {
   DEFAULT_PROJECT_ID,
   ProjectsSettingsSchema,
   ProjectSchema,
+  projectRolePolicy,
   type ProjectsSettings,
   type ProjectMembership,
 } from "@clankie/protocol/projects";
-import { OperatorAgentRoleSchema, operatorAgentRoleKey } from "@clankie/protocol";
+import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "@clankie/protocol";
 
 export function projectsRevision(settings: ProjectsSettings): string {
   return createHash("sha256")
@@ -68,8 +69,11 @@ export function setDefaultProjectRole(
     (a) => a.projectId !== DEFAULT_PROJECT_ID || a.personaId !== personaId,
   );
   if (parsed !== null) {
-    if (!project.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(parsed)))
+    if (projectRolePolicy(project, parsed) === undefined) {
+      // Extending an inherited list must retain its roles and existing assignments.
+      if (project.roles.length === 0) project.roles.push(...OPERATOR_AGENT_ROLES.map((role) => ({ role })));
       project.roles.push({ role: parsed });
+    }
     next.assignments.push({ projectId: DEFAULT_PROJECT_ID, personaId, role: parsed });
   }
   return ProjectsSettingsSchema.parse(next);
@@ -108,8 +112,7 @@ export function resolveProjectMembership(
     if (
       input.hire.occupantId !== input.occupantId ||
       !project ||
-      (input.hire.role !== undefined &&
-        !project.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(input.hire!.role!)))
+      (input.hire.role !== undefined && projectRolePolicy(project, input.hire.role) === undefined)
     )
       return { outcome: "invalid_assignment" };
     return {

@@ -14,7 +14,7 @@ import {
 import { dirname } from "node:path";
 import { z } from "zod";
 import { operatorAgentRoleKey, SpawnOperatorSeatSchema, type SpawnOperatorSeat } from "@clankie/protocol";
-import { type ProjectsSettings } from "@clankie/protocol/projects";
+import { projectRolePolicy, type ProjectsSettings } from "@clankie/protocol/projects";
 
 const ProcessSchema = z.object({ pid: z.number().int().positive(), startTime: z.string().min(1) }).strict();
 const ProofSchema = z
@@ -196,9 +196,7 @@ export class ProjectHires {
       throw new Error(
         `${project.name} allows ${project.workerCap} running agents. ${project.workerCap === 0 ? "Raise this limit in project settings before hiring." : "Close an agent’s Herdr pane before hiring another."}`,
       );
-    const selected = project.roles.find(
-      (r) => role !== undefined && operatorAgentRoleKey(r.role) === operatorAgentRoleKey(role),
-    );
+    const selected = role === undefined ? undefined : projectRolePolicy(project, role);
     if (
       selected?.concurrencyCap !== undefined &&
       live.filter(
@@ -339,10 +337,7 @@ function projectHireRequest(
 ): SpawnOperatorSeat {
   const project = settings.projects.find((p) => p.id === projectId);
   if (!project) throw new Error("Choose an existing project before hiring.");
-  const role =
-    request.role === undefined
-      ? undefined
-      : project.roles.find((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(request.role!));
+  const role = request.role === undefined ? undefined : projectRolePolicy(project, request.role);
   if (request.role !== undefined && !role)
     throw new Error(`${project.name} has no ${request.role} role. Choose one of its roles before hiring.`);
   return {
@@ -354,8 +349,7 @@ function projectHireRequest(
 }
 
 function launchPolicy(settings: ProjectsSettings, projectId: string, role?: string): string {
-  const selected = settings.projects
-    .find((p) => p.id === projectId)
-    ?.roles.find((r) => role !== undefined && operatorAgentRoleKey(r.role) === operatorAgentRoleKey(role));
+  const project = settings.projects.find((p) => p.id === projectId);
+  const selected = project === undefined || role === undefined ? undefined : projectRolePolicy(project, role);
   return JSON.stringify([selected?.harness, selected?.model, selected?.effort]);
 }

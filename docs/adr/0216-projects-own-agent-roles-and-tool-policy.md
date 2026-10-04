@@ -24,7 +24,12 @@ defaults. A role can select a harness, model, effort, concurrency cap and naming
 rule. Roles retain the existing built-ins and validated custom names; comparison
 is case-insensitive while custom display spelling is preserved. Worker caps and
 role concurrency caps are independent limits, with zero meaning no new hires.
-Unset values inherit host policy. VUH-1536 enforces configured role harness,
+Unset values inherit host policy. An omitted or empty roles list inherits the six
+built-in roles (planner, designer, builder, tester, reviewer, researcher) without
+adding project launch overrides. A nonempty roles list defines the project's
+available roles. Hire admission, native assignment membership, persona associations
+and tracker role mappings use the same effective policy.
+VUH-1536 enforces configured role harness,
 model and effort at the native launch, overriding conflicting hire inputs. The
 hiring conversation's verified native assignment or canonical effective workspace
 pins its project; otherwise the canonical destination workspace selects it. An
