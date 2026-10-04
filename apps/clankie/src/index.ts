@@ -555,6 +555,8 @@ const agentSessions = createAgentSessions(settingsStore);
 // hosted body has only the connection, ADR 0196), files the repo itself.
 const workItems = createWorkItemsService({
   stateDirectory: stateRoot,
+  projects: async () => (await settingsStore.load()).projects,
+  localMachineId: "local",
   workspace: () => startupSettings.captain.workingDirectory ?? process.cwd(),
   mcpHost,
   githubToken: () => githubConnectionToken(operatorCredentialStore),

@@ -18,6 +18,7 @@ import { runSeatHookCommand } from "../src/command/seat-hook.ts";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
 import { runAgentsCommand } from "../src/command/agents.ts";
 import { runProjectCommand } from "../src/command/project.ts";
+import { runProjectSettingsCommand } from "../src/command/project-settings.ts";
 import { runAccessCommand } from "../src/command/access.ts";
 import { runEvaluatorCommand } from "../src/command/evaluator.ts";
 import { runConversationsCommand } from "../src/command/conversations.ts";
@@ -288,7 +289,12 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "project") {
-      outputJson(stdout, await runProjectCommand(rest, options));
+      outputJson(
+        stdout,
+        await (["list", "update"].includes(rest[0] ?? "")
+          ? runProjectSettingsCommand(rest, options)
+          : runProjectCommand(rest, options)),
+      );
       return 0;
     }
     if (command === "access") {

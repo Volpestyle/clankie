@@ -2161,6 +2161,33 @@ fleet tools are denied; `nativeTools: not-verified` still requires an actual nat
 catalog/call check. MCP sessions bind to fleet/pane (fleet only for bearer links)
 and expire after 15 minutes idle. See [worker access](worker-access.md).
 
+### `project list` and `project update`
+
+`clankie project list` reads the current project settings and their revision.
+`clankie project update PROJECT --changes FILE.json --revision REVISION` submits
+reviewed changes for an existing project through the authenticated service API.
+The console exposes the same verbs through `/project`.
+
+The changes file may contain `name`, `roles`, `workerCap` and `trackerRef`.
+Omitted fields remain unchanged; `null` removes a worker cap or tracker binding.
+An empty roles list inherits the six built-in roles; an explicit list defines
+the available roles and may set their model, effort and concurrency cap. Zero
+prevents new hires, while an absent cap adds no limit. These settings affect
+new hire admission, not the configuration of already running agents.
+
+The service validates the whole resulting project settings document, preserving
+workspaces, roots, assignments, grants, label mappings and unrelated projects.
+Stale revisions or removal of an in-use role fail without overwriting the saved
+settings. Read the settings again and review the changes before retrying.
+
+`trackerRef` selects an existing project workspace and the fixed path
+`.clankie/tracking.json`. It does not initialize a tracker, select an account or
+register a repo. The app's existing work reader receives a read-only virtual
+repo for the binding. Only an exact canonical workspace on the current local
+machine is readable; remote, missing or changed sources report unavailable.
+Existing registered repos remain independent. Project label mappings are
+preserved but this editor does not apply them to station placement.
+
 ### `project add NAME --workspace PATH`
 
 The owner can approve one local project workspace with `clankie project add NAME

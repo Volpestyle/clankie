@@ -1,4 +1,5 @@
 import { runMachinesCommand } from "./command/machines.ts";
+import { runProjectSettingsCommand } from "./command/project-settings.ts";
 import { planSeat, parseSeatArgs } from "./command/seat.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
@@ -316,6 +317,27 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         }
         const result = await runRuntimeCommand(["inventory"]);
         shell.insertCommandResult("/connections", JSON.stringify(result, null, 2), "success");
+      },
+    },
+    {
+      name: "project",
+      aliases: [],
+      description: "Read or edit project roles, models, limits and tracked work",
+      takesArgument: true,
+      argumentHint: "list | update PROJECT --changes FILE.json --revision REVISION",
+      async run(argument, shell): Promise<void> {
+        try {
+          const result = await runProjectSettingsCommand(
+            argument.trim() ? splitQuotedArguments(argument) : ["list"],
+          );
+          shell.insertCommandResult("/project", JSON.stringify(result, null, 2), "success");
+        } catch (error) {
+          shell.insertCommandResult(
+            "/project",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
       },
     },
     {
