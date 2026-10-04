@@ -1957,7 +1957,8 @@ export const OperatorConversationTurnAcceptedSchema = z
     runId: OperatorConversationRunIdSchema,
     revision: z.number().int().nonnegative(),
     safeCursor: OperatorConversationCursorSchema,
-    /** Native receipt, distinct from the conversation accepting the message. */
+    /** Actual turn admission (including Clankie), distinct from its eventual answer.
+     * Existing optional shape keeps older strict clients compatible. */
     seatDelivery: z
       .object({
         state: z.enum(["queued", "started", "steered"]),

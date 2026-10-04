@@ -24,6 +24,8 @@ export interface PeerSeatAuthority {
   validate(): Promise<boolean>;
 }
 export interface PeerDeliveryOptions {
+  /** Owner send intent, absent for peer messages and automatic delivery. */
+  readonly delivery?: "steer" | "queue";
   readonly reconcileOnly?: boolean;
   readonly originalId?: string;
   readonly recipientBinding?: string;

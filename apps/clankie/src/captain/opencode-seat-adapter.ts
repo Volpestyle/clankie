@@ -323,6 +323,7 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
               let lastMessageId: string | undefined;
               const control: SeatControl = {
                 ref: selectedRef,
+                deliveryModes: ["queue"],
                 verify: () => verify(selectedRef),
                 async status(): Promise<SeatStatus> {
                   try {

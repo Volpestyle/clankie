@@ -50,6 +50,7 @@ export function createFleetSeatControl(
     agent: HerdrAgentSnapshot,
     text: string,
     authorized?: () => Promise<boolean>,
+    delivery?: "steer" | "queue",
   ): Promise<FleetSeatDelivery | undefined> => {
     const remote = splitFleetQualified(agent.paneId)?.fleet;
     if (remote !== undefined) {
@@ -58,10 +59,14 @@ export function createFleetSeatControl(
       try {
         if (authorized && !(await authorized())) return refused();
         const control = remoteCodexControl?.(remote, agent.paneId);
-        const native = authorized
-          ? await control?.(agent.session.value, text, undefined, undefined, authorized)
-          : await control?.(agent.session.value, text);
+        const native =
+          delivery === "queue"
+            ? undefined
+            : authorized
+              ? await control?.(agent.session.value, text, undefined, undefined, authorized)
+              : await control?.(agent.session.value, text);
         if (native !== undefined) return native;
+        if (delivery === "steer") return modeUnavailable("steer");
         if (authorized && !(await authorized())) return refused();
         const queuedResult = authorized
           ? await remoteCodexQueue(remote, agent.session.value, text, authorized)
@@ -104,12 +109,13 @@ export function createFleetSeatControl(
     try {
       if (authorized && !(await authorized())) return refused();
       const native =
-        endpoint === null
+        delivery === "queue" || endpoint === null
           ? undefined
           : authorized
             ? await runner.codexControl?.(sessionId, text, home, endpoint, authorized)
             : await runner.codexControl?.(sessionId, text, home, endpoint);
       if (native !== undefined) return native;
+      if (delivery === "steer") return modeUnavailable("steer");
       if (authorized && !(await authorized())) return refused();
       if (await codexQueue(sessionId, text, home)) return queued();
       return {
@@ -130,22 +136,45 @@ export function createFleetSeatControl(
     uncontrolled?: () => Promise<FleetSeatDelivery>,
     options?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> => {
+    // Claude's channel supports both choices through the turn-aware mailbox.
+    // Its older adapter receipt alone cannot distinguish a live steer from a hold.
+    if (options?.delivery && isMessageableSeat(current) && current.agent === "claude" && uncontrolled) {
+      if (options.fence && !(await options.fence(current))) return refused();
+      return uncontrolled();
+    }
     const control = current === undefined ? undefined : await attach(current);
+    // Codex's native queue is distinct from app-server turn/steer, including
+    // seats we own. An explicit Queue must never take the automatic live lane.
+    if (options?.delivery === "queue" && isMessageableSeat(current) && current.agent === "codex") {
+      begin();
+      const result = await deliverCodexQueue(
+        current,
+        text,
+        options.fence ? () => options.fence!(current) : undefined,
+        "queue",
+      );
+      if (result !== undefined) return result;
+      clear();
+      return modeUnavailable("queue");
+    }
     // A chosen channel is the sole delivery attempt. Uncertain delivery must
     // never be replayed through a queue, mailbox or terminal.
     if (control !== undefined) {
+      if (options?.delivery && !control.deliveryModes?.includes(options.delivery))
+        return modeUnavailable(options.delivery);
       if (options?.fence && !(await options.fence(current))) return refused();
       begin();
       try {
-        const delivery = options?.fence
-          ? await control.send(text, {
-              beforeDispatch: () => options.fence!(current),
-              source: "peer",
-              ...(options.recipientBinding === undefined
-                ? {}
-                : { recipientBinding: options.recipientBinding }),
-            })
-          : await control.send(text);
+        const delivery =
+          options?.fence || options?.delivery
+            ? await control.send(text, {
+                ...(options.fence ? { beforeDispatch: () => options.fence!(current), source: "peer" } : {}),
+                ...(options.delivery === undefined ? {} : { delivery: options.delivery }),
+                ...(options.recipientBinding === undefined
+                  ? {}
+                  : { recipientBinding: options.recipientBinding }),
+              })
+            : await control.send(text);
         if (delivery.outcome === "accepted")
           return { outcome: "delivered", messageId: delivery.messageId, state: delivery.state };
         if (delivery.outcome === "unconfirmed" || delivery.outcome === "offline") return delivery;
@@ -163,10 +192,12 @@ export function createFleetSeatControl(
         current,
         text,
         options?.fence ? () => options.fence!(current) : undefined,
+        options?.delivery,
       );
       if (delivery !== undefined) return delivery;
       clear();
     }
+    if (options?.delivery === "steer") return modeUnavailable("steer");
     if (uncontrolled !== undefined) {
       if (options?.fence && !(await options.fence(current))) return refused();
       return uncontrolled();
@@ -344,6 +375,17 @@ function queued(): FleetSeatDelivery {
     state: "queued",
     detail:
       "Queued until the current Codex turn ends (a goal may keep it pending until the goal ends); active-turn delivery was not confirmed.",
+  };
+}
+
+function modeUnavailable(mode: "steer" | "queue"): FleetSeatDelivery {
+  return {
+    outcome: "undelivered",
+    deliveryStage: "rejected",
+    detail:
+      mode === "steer"
+        ? "This agent's native connection cannot steer the running turn. Choose Queue or use its terminal. Nothing was sent."
+        : "This agent's native connection cannot queue a follow-up. Nothing was sent.",
   };
 }
 

@@ -215,3 +215,38 @@ keeps the Codex thread and its selected conversation, using a separate record
 from Claude. Live verification uses a scratch conversation and closes its own
 seat, never the owner's global-default conversation. Full live acceptance remains
 dependent on the owner's native hook review; see the issue's attached evidence.
+
+## Explicit turn delivery (2026-10-04, VUH-1636)
+
+The app's active-turn composer carries the existing `delivery: steer | queue`
+request into the chosen native driver. For an attached Claude operator seat,
+Steer enters the channel immediately. Its exact bridge acknowledgment reports
+`steered` when the take happened during an active native turn, or `started` when
+idle. The outcome is admission, never evidence of model awareness or completion.
+
+Queue is held in that conversation's outbox while its native turn is active.
+The authenticated `seat-sync` activity from UserPromptSubmit/PostToolUse marks
+the turn active; Stop and the existing terminal hooks mark it waiting. Waiting
+releases one queued follow-up and reserves the next turn before another queued
+message can be taken. A different session's waiting report cannot release that
+hold. Queue admission does not wait for the older escalation's reply window.
+Polling still proves binding; a remembered transcript cannot take over a Pi run.
+If the bridge disconnects before taking an explicit send, it settles as
+unavailable without starting a fallback model turn.
+
+Pi keeps its native streaming steer and serial follow-up chain. Agent DM sends
+carry the mode into fleet native control; Codex Queue chooses its native queue
+instead of automatic live steering. A driver that cannot honor a requested mode
+refuses before dispatch with a reason. An uncertain dispatch never falls back to
+another channel or queue.
+Claude agent DMs use the same turn-aware fleet outbox, bound to the original
+native occupant. Their existing verified seat-hook Stop releases the hold;
+channel acknowledgment reports live admission. A working census can seed an
+unknown turn, but cannot override an observed native Stop.
+
+Receipts reuse the existing optional `seatDelivery` shape with
+`started | steered | queued`, so older strict parsers can still read them. Failure
+uses the existing refusal/uncertainty results. Integration proof lives in the
+app's `tests/integration/turn-delivery.test.ts`: actual app controls and receipts,
+local and encrypted HTTP routes, native control, and the real Claude outbox/MCP
+bridge/seat-sync boundary. It follows ADR 0221, "Tests prove the product and its boundaries."

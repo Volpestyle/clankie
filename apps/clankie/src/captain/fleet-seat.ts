@@ -11,6 +11,7 @@ export interface FleetSeatMessageContext {
   readonly conversationId: string;
   readonly source: string;
   readonly recipientBinding?: string;
+  readonly delivery?: "steer" | "queue";
 }
 
 export type FleetSeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
@@ -125,18 +126,35 @@ export async function deliverFleetSeatMessage(
 ): Promise<FleetSeatDelivery> {
   const mailbox = mailboxes.get(seatId);
   if (mailbox !== undefined && (mailbox.bound() || mailbox.uncertain())) {
-    const delivery = await mailbox.deliver({
-      kind: "message",
-      conversationId: context.conversationId,
-      source: context.source,
-      content: message,
-      wantsReply: false,
-      ...(context.recipientBinding === undefined ? {} : { recipientBinding: context.recipientBinding }),
+    let admit!: (delivery: FleetSeatDelivery) => void;
+    const admission = new Promise<FleetSeatDelivery>((resolve) => {
+      admit = resolve;
     });
-    if (delivery.outcome === "delivered" || delivery.outcome === "replied")
-      return { outcome: "delivered", deliveryStage: headSeatDeliveryStage(delivery.outcome) };
-    if (delivery.outcome === "unconfirmed") return delivery;
-    return { outcome: "undelivered", detail: `Seat mailbox delivery was ${delivery.outcome}.` };
+    const delivered = mailbox
+      .deliver({
+        kind: "message",
+        conversationId: context.conversationId,
+        source: context.source,
+        content: message,
+        wantsReply: false,
+        onAdmitted: (state) => {
+          if (context.delivery !== undefined)
+            admit({
+              outcome: "delivered",
+              state,
+              deliveryStage: state === "queued" ? "stored" : "delivered",
+            });
+        },
+        ...(context.delivery === undefined ? {} : { delivery: context.delivery }),
+        ...(context.recipientBinding === undefined ? {} : { recipientBinding: context.recipientBinding }),
+      })
+      .then((delivery): FleetSeatDelivery => {
+        if (delivery.outcome === "delivered" || delivery.outcome === "replied")
+          return { outcome: "delivered", deliveryStage: headSeatDeliveryStage(delivery.outcome) };
+        if (delivery.outcome === "unconfirmed") return delivery;
+        return { outcome: "undelivered", detail: `Seat mailbox delivery was ${delivery.outcome}.` };
+      });
+    return context.delivery === undefined ? delivered : Promise.race([admission, delivered]);
   }
   return { outcome: "undelivered", detail: "No seat mailbox is polling; no terminal input was sent." };
 }
