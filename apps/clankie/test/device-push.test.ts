@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SUPERVISE_GRANTS, type DomainEvent } from "@clankie/protocol";
 import type { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClankieApp, type TrustedOperatorIdentity } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -17,7 +17,9 @@ const IOS = { name: "James iPhone", platform: "ios" } as const;
 const REGISTRATION = "6f1f0f9a-4e7c-4a4f-9c1a-2b6d5f0a1c33";
 const OTHER_REGISTRATION = "9c8f3a21-5d6e-4b7c-9a8b-1f2e3d4c5b6a";
 
+beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }));
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -223,7 +225,7 @@ describe("POST /v1/devices/self/push", () => {
 
     const { conversations } = restarted;
     conversations.publishHeadEvent({ type: "message", role: "captain", text: "back up", streaming: false });
-    await settle(gateway.sent);
+    await settle();
     expect(gateway.sent[0]).toMatchObject({ deviceId, registrationId: REGISTRATION, sequence: 2 });
     restarted.close();
   });
@@ -286,7 +288,7 @@ describe("POST /v1/devices/self/push", () => {
     await setPush(app, token, { registrationId: REGISTRATION, sequence: 7, enabled: true });
 
     conversations.publishHeadEvent({ type: "message", role: "captain", text: "hello", streaming: false });
-    await settle(gateway.sent);
+    await settle();
     await until(async () => (await listedPush(app, deviceId))?.enabled === false);
 
     // The gateway recorded `enabled: false` at version 7. The app asking for
@@ -324,8 +326,8 @@ describe("POST /v1/devices/self/push", () => {
       await app.request(`/v1/devices/${deviceId}/revoke`, { method: "POST", headers: OPERATOR });
 
     conversations.publishHeadEvent({ type: "message", role: "captain", text: "hello", streaming: false });
-    await settle(gateway.sent);
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await settle();
+    await vi.advanceTimersByTimeAsync(100);
 
     // The clear is skipped rather than throwing a push change at a revoked record.
     expect(store.readAll().filter((entry) => entry.type === "device.push.changed")).toHaveLength(1);
@@ -353,7 +355,7 @@ describe("one service instance hears only its own captain", () => {
     }
 
     one.conversations.publishHeadEvent({ type: "message", role: "captain", text: "mine", streaming: false });
-    await settle(a.sent);
+    await settle();
     expect(a.sent).toHaveLength(1);
     // A module-wide bus woke both; through the port, the other instance's
     // devices never hear a conversation they cannot open.
@@ -367,7 +369,7 @@ describe("one service instance hears only its own captain", () => {
       text: "after close",
       streaming: false,
     });
-    await new Promise((resolve) => setTimeout(resolve, 2_400));
+    await vi.advanceTimersByTimeAsync(2_400);
     expect(a.sent).toEqual([]);
     two.close();
   });
@@ -407,16 +409,14 @@ async function listedPush(
 async function until(check: () => Promise<boolean>, attempts = 40): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (await check()) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.advanceTimersByTimeAsync(50);
   }
   throw new Error("condition never held");
 }
 
 /** Waits out the dispatcher's coalescing window plus its send. */
-async function settle(sent: unknown[], attempts = 40): Promise<void> {
-  for (let attempt = 0; attempt < attempts && sent.length === 0; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+async function settle(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(2_000);
 }
 
 describe("push delivery of a message that is already written", () => {
@@ -430,7 +430,7 @@ describe("push delivery of a message that is already written", () => {
     conversations.publishHeadEvent({ type: "message", role: "captain", text: "one", streaming: false });
     conversations.publishHeadEvent({ type: "message", role: "captain", text: "two", streaming: false });
     conversations.publishHeadEvent({ type: "message", role: "captain", text: "three", streaming: false });
-    await settle(gateway.sent);
+    await settle();
 
     expect(gateway.sent).toHaveLength(1);
     expect(gateway.sent[0]).toMatchObject({ deviceId, registrationId: REGISTRATION, sequence: 1 });
@@ -469,7 +469,7 @@ describe("push delivery of a message that is already written", () => {
         },
       ],
     });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await vi.advanceTimersByTimeAsync(2_000);
 
     expect(gateway.sent).toEqual([]);
     close();
@@ -524,7 +524,7 @@ describe("the push dispatcher", () => {
     const { dispatcher, sent } = dispatcherFor([revoked, noChat, unregistered]);
 
     dispatcher.notify("conv-1");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.advanceTimersByTimeAsync(50);
     expect(sent).toEqual([]);
     dispatcher.close();
   });
@@ -535,7 +535,7 @@ describe("the push dispatcher", () => {
 
     dispatcher.notify("conv-1");
     records[0] = { ...device, status: "revoked" };
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.advanceTimersByTimeAsync(50);
     expect(sent).toEqual([]);
     dispatcher.close();
   });
@@ -545,7 +545,7 @@ describe("the push dispatcher", () => {
     const { dispatcher, sent, cleared } = dispatcherFor(records, ["unregistered"]);
 
     dispatcher.notify("conv-1");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.advanceTimersByTimeAsync(50);
     expect(sent).toHaveLength(1);
     expect(cleared).toEqual([{ deviceId: "device-1", binding }]);
     dispatcher.close();
@@ -556,9 +556,9 @@ describe("the push dispatcher", () => {
     const { dispatcher, cleared } = dispatcherFor(records, ["unavailable", "throttled"]);
 
     dispatcher.notify("conv-1");
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.advanceTimersByTimeAsync(30);
     dispatcher.notify("conv-2");
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.advanceTimersByTimeAsync(30);
     expect(cleared).toEqual([]);
     dispatcher.close();
   });
@@ -577,7 +577,7 @@ describe("the push dispatcher", () => {
     dispatcher.notify("conv-1");
     dispatcher.notify("conv-2");
     dispatcher.notify("conv-3");
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await vi.advanceTimersByTimeAsync(120);
     expect(gateway.sent.map((request) => request.conversationId)).toEqual(["conv-1", "conv-2"]);
     dispatcher.close();
   });

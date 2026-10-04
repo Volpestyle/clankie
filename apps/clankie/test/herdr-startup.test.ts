@@ -1,3 +1,4 @@
+import type { ExecFileException, ExecFileOptions } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -7,6 +8,31 @@ import {
   HerdrWatchStore,
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
+
+// Exercise real subprocess completion and watchdog termination at one tenth
+// of their production time. The long/short deadline ratio stays unchanged.
+vi.mock("node:child_process", async (original) => {
+  const child = await original<typeof import("node:child_process")>();
+  return {
+    ...child,
+    execFile: (
+      command: string,
+      args: string[],
+      options: ExecFileOptions,
+      callback: (error: ExecFileException | null, stdout: string, stderr: string) => void,
+    ) =>
+      child.execFile(
+        command,
+        args,
+        {
+          ...options,
+          encoding: "utf8",
+          ...(command === "herdr" && options.timeout !== undefined ? { timeout: options.timeout / 10 } : {}),
+        },
+        callback,
+      ),
+  };
+});
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -53,7 +79,7 @@ else console.log("{}");
 }
 
 it("lets Herdr report a pi session after the short command deadline, without restarting the agent", async () => {
-  const fake = await fakeHerdr('setTimeout(() => console.log("{}"), 5500);');
+  const fake = await fakeHerdr('setTimeout(() => console.log("{}"), 550);');
   try {
     const result = await fake.store.spawnSeat({
       schemaVersion: 1,

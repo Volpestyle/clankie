@@ -5,7 +5,7 @@
  */
 import { WORLD_OPERATIONS, type WorldOperationName } from "@pokeagents/world-protocol";
 
-export const HOSTED_WORLD_OPERATION_CLASS = {
+const HOSTED_WORLD_OPERATION_CLASS = {
   "world.join": "body",
   "world.leave": "body",
   "play.observe": "body",
