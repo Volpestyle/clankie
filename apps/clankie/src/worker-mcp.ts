@@ -1,6 +1,7 @@
 import { ProjectIdSchema, type ProjectsSettings } from "@clankie/protocol/projects";
 import type { FleetSettings } from "@clankie/settings";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
+import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -63,6 +64,8 @@ type WorkerAuthorization = {
   /** Standing fleet records are synthesized from the current connected catalog, never persisted. */
   fleet?: string;
   validateFleet?(): boolean | Promise<boolean>;
+  /** Optional author attribution only; this never changes the connected tool grant. */
+  nativeWriteProof?(): Promise<ProjectProcessProof | undefined>;
   currentFleet?: (() => boolean) | undefined;
 };
 const FleetSearchSchema = z
@@ -333,11 +336,19 @@ export class WorkerMcp {
       return await this.handleAuthorized(new Request(request, { headers }), async (token) => {
         const current = this.localRequests.get(token);
         if (!current || !(await current.validate())) throw new Error("Local fleet membership unavailable");
+        const fleet = current.fleet ?? "default";
         return this.fleetAuthorization(
-          current.fleet ?? "default",
+          fleet,
           () => current.validate(),
           current.current === undefined ? undefined : () => current.current!(),
           current.pane,
+          async () => {
+            if (!(await current.validate())) return undefined;
+            const observed = await current.projectProof?.();
+            if (observed?.fleet !== fleet || observed.pane !== current.pane || !(await current.validate()))
+              return undefined;
+            return observed;
+          },
         );
       });
     } finally {
@@ -371,6 +382,7 @@ export class WorkerMcp {
     validateFleet: NonNullable<WorkerAuthorization["validateFleet"]>,
     currentFleet: WorkerAuthorization["currentFleet"],
     pane?: string,
+    nativeWriteProof?: WorkerAuthorization["nativeWriteProof"],
   ): Promise<WorkerAuthorization> {
     FleetIdSchema.parse(fleet);
     const principalId = `fleet:${fleet}:pane:${pane ?? "unverified"}`;
@@ -420,6 +432,7 @@ export class WorkerMcp {
       expiresAt,
       fleet,
       validateFleet,
+      ...(nativeWriteProof ? { nativeWriteProof } : {}),
       currentFleet,
     };
   }
@@ -567,6 +580,7 @@ export class WorkerMcp {
           server: current.server,
           tool: rule.name,
           arguments: args,
+          ...(authorityNow.nativeWriteProof ? { nativeWriteProof: authorityNow.nativeWriteProof } : {}),
           delegation: {
             binding: current.grant.profileHash,
             grantId: current.grant.grantId,

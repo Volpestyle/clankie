@@ -1030,7 +1030,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return { outcome: "offline", deliveryStage: "unavailable", detail: "Native seat delivery is closed." };
     if (this.closed)
       return uncontrolled?.() ?? { outcome: "offline", detail: "Native hire service is closed." };
-    return this.seatControl.deliverToSeat(seatId, text, uncontrolled, options);
+    return options === undefined
+      ? this.seatControl.deliverToSeat(seatId, text, uncontrolled)
+      : this.seatControl.deliverToSeat(seatId, text, uncontrolled, options);
   }
 
   /** Only fresh host-observed native proof selects a worker's leading conversation. */

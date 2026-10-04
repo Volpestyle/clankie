@@ -9,6 +9,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import type { LocalFleetIdentity } from "../src/local-fleet-link.ts";
+import type { ProjectProcessProof } from "../src/project-process-proof.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 it("runs the remote admitted-pane handshake without native project proof and fences fleet identity and link lifetime", async () => {
@@ -26,7 +27,13 @@ it("runs the remote admitted-pane handshake without native project proof and fen
   };
   await credentials.set("linear", { type: "api", key: "test-only", account });
   const callTool = vi.fn(async () => ({ content: "test issue", isError: false }));
+  const authorProofs: { principal: string; proof: ProjectProcessProof }[] = [];
   const host = createMcpHost({
+    writeAuthorityForWorker: async (principal, observe) => {
+      const proof = await observe?.();
+      if (proof) authorProofs.push({ principal, proof });
+      return undefined;
+    },
     credentials,
     settings: { load: async () => ({ mcp: { servers: [] } }) } as unknown as SettingsStore,
     curated: [
@@ -49,7 +56,9 @@ it("runs the remote admitted-pane handshake without native project proof and fen
     }),
   });
   let live = true;
+  let currentProof: ProjectProcessProof | undefined;
   const projectProof = vi.fn(async () => {
+    if (currentProof) return currentProof;
     throw new Error("No project proof for tools");
   });
   const identity: LocalFleetIdentity = {
@@ -120,6 +129,8 @@ it("runs the remote admitted-pane handshake without native project proof and fen
       ).json();
     expect((await call()).result.isError).toBe(false);
     expect(callTool).toHaveBeenCalledOnce();
+    expect(authorProofs).toEqual([]);
+    expect(projectProof).toHaveBeenCalled();
     const otherFleet: LocalFleetIdentity = { ...identity, fleet: "kh2" };
     const originalFetch = app.app.fetch;
     // A session cannot move to a different admitted fleet with the same pane string.
@@ -144,8 +155,22 @@ it("runs the remote admitted-pane handshake without native project proof and fen
       account: { ...account, connectionId: randomUUID() },
     });
     // Standing fleet authority uses the current verified connection, not a saved grant.
+    currentProof = {
+      fleet: "pc",
+      pane: "w3:p8",
+      nativeOccupantId: "original-native-session",
+      binding: { socketPath: "remote-observed-socket", session: "kh2" },
+      processes: [{ pid: 123, startTime: "original" }],
+      shell: { pid: 122, startTime: "shell" },
+    };
     expect((await call()).result.isError).toBe(false);
     expect(callTool).toHaveBeenCalledTimes(2);
+    expect(authorProofs).toEqual([{ principal: "fleet:pc:pane:w3:p8", proof: currentProof }]);
+    // A claimed header cannot borrow another pane's observed native author.
+    currentProof = { ...currentProof, pane: "w3:p9" };
+    expect((await call()).result.isError).toBe(false);
+    expect(callTool).toHaveBeenCalledTimes(3);
+    expect(authorProofs).toHaveLength(1);
     live = false;
     expect((await rpc("tools/list", {}, session)).status).toBe(403);
   } finally {

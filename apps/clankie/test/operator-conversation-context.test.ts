@@ -50,7 +50,7 @@ async function drain(): Promise<void> {
 }
 
 describe("operator conversation context", () => {
-  it("ignores old bindings and recovers operator notifications without replaying passive backlog", async () => {
+  it("uses retained bindings and recovers owned notifications without replaying passive backlog", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-linear-owners-"));
     const snapshot = await mkdtemp(join(tmpdir(), "clankie-linear-restart-"));
     roots.push(root, snapshot);
@@ -75,6 +75,7 @@ describe("operator conversation context", () => {
     const activity = (n: number): LinearActivityEvent => ({
       eventId: n.toString(16).padStart(64, "0"),
       notification: true,
+      issueId: owner.issueId,
       deliveryId: `delivery-${n}`,
       type: "Comment",
       action: "create",
@@ -89,9 +90,9 @@ describe("operator conversation context", () => {
     });
     expect(store.receiveLinearActivity(activity(1), false)).toBe(true);
     expect(store.receiveLinearActivity(activity(2), true)).toBe(true);
-    const interrupted = store.linearWakePrompt("global-default");
+    const interrupted = store.linearWakePrompt(project);
     expect(interrupted).toContain("1 new event");
-    expect(interrupted).toContain("--conversation global-default");
+    expect(interrupted).toContain(`--conversation ${project}`);
     cpSync(root, snapshot, { recursive: true }); // A crash after checkpointing, before the turn settles.
     await store.close();
     const wakes: Array<{ owner: string; prompt: string | undefined }> = [];
@@ -101,24 +102,22 @@ describe("operator conversation context", () => {
     expect(reopened.linearWorkOwners()).toEqual([owner]);
     reopened.resumeLinearActivity();
     await drain();
-    expect(wakes).toMatchObject([
-      { owner: "global-default", prompt: expect.stringContaining("1 new event") },
-    ]);
+    expect(wakes).toMatchObject([{ owner: project, prompt: expect.stringContaining("1 new event") }]);
     expect(reopened.receiveLinearActivity(activity(2), true)).toBe(false);
     reopened.receiveLinearActivity(activity(3), true);
     reopened.receiveLinearActivity({ ...activity(4), organizationId: "another-workspace" }, true);
     await reopened.close();
-    expect(wakes.map((entry) => entry.owner)).toEqual(["global-default", "global-default"]);
-    const page = reopened.readLinearInbox({ conversationId: "global-default" });
-    expect(page.unreadCount).toBe(4);
-    expect(reopened.readLinearInbox({ conversationId: project }).unreadCount).toBe(0);
-    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, project)).toBe(false);
-    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, "global-default")).toBe(true);
+    expect(wakes.map((entry) => entry.owner)).toEqual([project, project, "linear-inbox"]);
+    const page = reopened.readLinearInbox({ conversationId: project });
+    expect(page.unreadCount).toBe(3);
+    expect(reopened.readLinearInbox({ conversationId: "global-default" }).unreadCount).toBe(0);
+    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, "global-default")).toBe(false);
+    expect(reopened.acknowledgeLinearInbox(page.ackCursor!, project)).toBe(true);
     expect(await readFile(join(snapshot, "linear-work.json"), "utf8")).toBe(bindingFile);
     // A completed turn already in the log wins over a stale checkpoint after a crash.
-    const metaPath = join(snapshot, "global-default", "meta.json");
+    const metaPath = join(snapshot, project, "meta.json");
     const meta = JSON.parse(await readFile(metaPath, "utf8"));
-    const completed = (await readFile(join(snapshot, "global-default", "events.jsonl"), "utf8"))
+    const completed = (await readFile(join(snapshot, project, "events.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line))
@@ -218,7 +217,7 @@ describe("operator conversation context", () => {
     release();
     await store.close();
     // The first delivery ran; the five behind it share one queued turn.
-    expect(runs).toEqual(["global-default", "global-default"]);
+    expect(runs).toEqual(["linear-inbox", "linear-inbox"]);
     expect(store.readLinearInbox().unreadCount).toBe(6);
   });
 
