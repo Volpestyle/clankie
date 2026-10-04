@@ -3,6 +3,7 @@ import { cp, mkdtemp, readdir, readFile, rm, writeFile, lstat, mkdir } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { bundledSkills } from "@clankie/settings";
 // @ts-expect-error -- release assembly is plain ESM.
 import { copySkillAssets } from "../../../scripts/release/skills.mjs";
@@ -14,6 +15,20 @@ import { inspectHarnessProfiles } from "../../../integrations/claude-plugin/work
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+it("loads the canonical Clankie skill through the native Pi parser", async () => {
+  const repo = join(import.meta.dirname, "../../..");
+  const state = await mkdtemp(join(tmpdir(), "canonical-skill-"));
+  roots.push(state);
+  const result = loadSkills({
+    cwd: state,
+    agentDir: state,
+    skillPaths: [join(repo, ".agents/skills/clankie")],
+    includeDefaults: false,
+  });
+  expect(result.diagnostics).toEqual([]);
+  expect(result.skills.map((skill) => skill.name)).toEqual(["clankie"]);
 });
 
 it("assembles only selected skills in all release projections, with no checkout dependencies", async () => {
@@ -74,6 +89,17 @@ it("assembles only selected skills in all release projections, with no checkout 
   ]) {
     expect(await readFile(join(release, directory, "clankie/SKILL.md"), "utf8")).toBe(canonical);
     expect((await lstat(join(release, directory, "clankie/SKILL.md"))).isFile()).toBe(true);
+    const parsed = loadSkills({
+      cwd: release,
+      agentDir: release,
+      skillPaths: [join(release, directory, "clankie")],
+      includeDefaults: false,
+    });
+    expect(parsed.diagnostics, directory).toEqual([]);
+    expect(
+      parsed.skills.map((skill) => skill.name),
+      directory,
+    ).toEqual(["clankie"]);
   }
   // Isolate the actual installable worker: no repo source or builder remains.
   const standalone = await mkdtemp(join(tmpdir(), "standalone-worker-"));
@@ -81,6 +107,14 @@ it("assembles only selected skills in all release projections, with no checkout 
   const worker = join(standalone, "worker");
   await cp(join(release, "integrations/claude-plugin/worker"), worker, { recursive: true });
   await expect(prepareWorkerSkill(worker)).resolves.toBeUndefined();
+  const standaloneSkill = loadSkills({
+    cwd: standalone,
+    agentDir: standalone,
+    skillPaths: [join(worker, "skills/clankie")],
+    includeDefaults: false,
+  });
+  expect(standaloneSkill.diagnostics).toEqual([]);
+  expect(standaloneSkill.skills.map((skill) => skill.name)).toEqual(["clankie"]);
   const nativePackageCheck = spawnSync(process.execPath, [join(worker, "bin/skill-bundle.mjs")], {
     encoding: "utf8",
     timeout: 5_000,

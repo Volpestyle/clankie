@@ -36,7 +36,7 @@ it("reports installed, enabled, version, bridge, hook and skill gaps independent
     );
     const report = await inspectHarnessProfiles({
       env: { HOME: home, CLAUDE_CONFIG_DIR: active },
-      expectedVersion: "0.6.0",
+      expectedVersion: "0.6.1",
       execute: async (_command, args) => (args[0] === "--version" ? "version" : "{}"),
     });
     expect(report.claude).toHaveLength(3);
@@ -77,14 +77,14 @@ it.each(["current", "stale", "disabled", "missing-bridge", "missing-forwarding"]
     const root = join(
       home,
       ".codex/plugins/cache/clankie-fleet/clankie-worker",
-      kind === "stale" ? "0.3.0" : "0.6.0",
+      kind === "stale" ? "0.3.0" : "0.6.1",
     );
     try {
       await mkdir(join(root, ".codex-plugin"), { recursive: true });
       await mkdir(join(root, "bin"));
       await writeFile(
         join(root, ".codex-plugin/plugin.json"),
-        JSON.stringify({ version: kind === "stale" ? "0.3.0" : "0.6.0", mcpServers: "./codex-mcp.json" }),
+        JSON.stringify({ version: kind === "stale" ? "0.3.0" : "0.6.1", mcpServers: "./codex-mcp.json" }),
       );
       await writeFile(join(root, "bin/fleet-mcp.mjs"), "// fixture\n");
       if (kind !== "missing-bridge")
@@ -107,7 +107,7 @@ it.each(["current", "stale", "disabled", "missing-bridge", "missing-forwarding"]
             installed: [
               {
                 pluginId: "clankie-worker@clankie-fleet",
-                version: kind === "stale" ? "0.3.0" : "0.6.0",
+                version: kind === "stale" ? "0.3.0" : "0.6.1",
                 enabled: kind !== "disabled",
               },
             ],
@@ -124,7 +124,7 @@ it.each(["current", "stale", "disabled", "missing-bridge", "missing-forwarding"]
           });
         return "version";
       };
-      const report = await inspectHarnessProfiles({ env: { HOME: home }, expectedVersion: "0.6.0", execute });
+      const report = await inspectHarnessProfiles({ env: { HOME: home }, expectedVersion: "0.6.1", execute });
       const summary = await inspectHarnessBridges(
         { HOME: home },
         async (command, args) => ({ stdout: await execute(command, args), stderr: "" }),
@@ -183,6 +183,6 @@ it.each([true, false])(
 it("ships matching Claude and Codex worker versions for doctor comparisons", async () => {
   const root = join(import.meta.dirname, "../../../integrations/claude-plugin/worker");
   for (const manifest of [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
-    expect(JSON.parse(await readFile(join(root, manifest), "utf8")).version).toBe("0.6.0");
+    expect(JSON.parse(await readFile(join(root, manifest), "utf8")).version).toBe("0.6.1");
   }
 });

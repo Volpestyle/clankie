@@ -1,6 +1,6 @@
 ---
 name: clankie
-description: Work beside Clankie in his confirmed Herdr fleets: project-granted Linear tools, conversations and Discord, GitHub, native agent sessions and machines. Covers actor identity, owner-approved outward actions, workspace and tool grants, and honest reply delivery. Use when Clankie is named or this is his registered fleet; Herdr alone is not enough.
+description: "Work beside Clankie in his confirmed Herdr fleets: project-granted Linear tools, conversations and Discord, GitHub, native agent sessions and machines. Covers actor identity, owner-approved outward actions, workspace and tool grants, and honest reply delivery. Use when Clankie is named or this is his registered fleet; Herdr alone is not enough."
 ---
 
 # Working beside Clankie
