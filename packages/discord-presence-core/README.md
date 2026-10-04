@@ -125,8 +125,8 @@ not establish which provider response caused it. Abandonment stops that attempt'
 partial playback, and the next eligible offer can proceed; failed lines are never
 replayed. Uncertain errors before `response.created`, and uncorrelatable ID-less
 xAI output after abandonment, close the existing conversation. The next eligible
-offer uses the normal lazy reopen path. Delayed events from the failed response
-cannot settle a newer offer. Live provider compatibility remains unproven.
+offer uses the normal lazy reopen path. Correlated delayed response events cannot
+settle a newer offer. Live provider compatibility remains unproven.
 
 The floor retains up to five recently engaged speakers for 60 seconds each.
 Their unnamed follow-ups are offers Clankie may decline; unrelated chatter is
