@@ -118,6 +118,58 @@ paths:
         "401": { description: authentication_required }
         "403": { description: forbidden — terminalControl required }
         "503": { description: unavailable }
+  /v1/model-keys/options:
+    get:
+      tags: [Operator]
+      operationId: listModelOptions
+      summary: List providers usable without key entry and the running model's reasoning effort
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. Returns provider ids and
+        effort levels only; no credentials. A separate read so clients parsing
+        the strict model catalog never meet a new field. Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Usable providers and the running model's effort
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelOptionsResponse" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
+  /v1/model-keys/effort:
+    post:
+      tags: [Operator]
+      operationId: setModelEffort
+      summary: Set or clear the running model's reasoning effort for the next turn
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. Writes the same config as
+        `clankie effort set`; null returns the model to its default. An effort
+        the model does not accept, or no running model, is unsupported_model.
+        Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelEffortSetRequest" }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "400":
+          description: Malformed input, or an effort the running model does not accept
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelKeyResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "413": { description: malformed — body exceeds 16 KiB }
+        "503": { description: unavailable }
   /v1/model-keys/set:
     post:
       tags: [Operator]
@@ -3027,6 +3079,44 @@ components:
             properties:
               providerId: { type: string }
               name: { type: string }
+    ModelEffort:
+      type: string
+      enum: ["off", minimal, low, medium, high, xhigh, max]
+    ModelOptionsResponse:
+      type: object
+      additionalProperties: false
+      required: [usableProviders, effort]
+      properties:
+        usableProviders:
+          type: array
+          maxItems: 256
+          items: { type: string }
+        effort:
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [model, current, default, levels]
+              properties:
+                model: { type: string }
+                current:
+                  oneOf:
+                    - type: "null"
+                    - $ref: "#/components/schemas/ModelEffort"
+                default: { $ref: "#/components/schemas/ModelEffort" }
+                levels:
+                  type: array
+                  maxItems: 7
+                  items: { $ref: "#/components/schemas/ModelEffort" }
+    ModelEffortSetRequest:
+      type: object
+      additionalProperties: false
+      required: [effort]
+      properties:
+        effort:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/ModelEffort"
     ModelKeysResponse:
       type: object
       additionalProperties: false

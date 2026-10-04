@@ -1025,7 +1025,8 @@ Read the current captain model's stored effort override. JSON:
 
 Set or remove the variant for the named model. Without `--model`, the currently
 configured captain model is the target. The TUI `/effort` modal obtains the
-supported levels from Pi and calls this writer.
+supported levels from Pi and calls this writer. Paired apps read and set the running
+model's effort through the [owner model-key API](model-keys.md).
 
 The writer saves the requested effort. At execution, an unsupported effort is
 refused by name with the supported ladder, consistently across captain,
