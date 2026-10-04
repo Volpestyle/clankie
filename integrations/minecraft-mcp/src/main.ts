@@ -292,7 +292,13 @@ server.registerTool(
 server.registerTool(
   "host_claim_complete",
   { description: "Complete an approved playit claim into broker storage.", inputSchema: z.strictObject({}) },
-  async () => result(await (await currentTunnel()).completeClaim()),
+  async () => {
+    const activeTunnel = await currentTunnel();
+    const claim = await activeTunnel.completeClaim();
+    const status = host.status();
+    if (claim.claimed && status.phase === "running" && status.authReady) await activeTunnel.start();
+    return result(claim);
+  },
 );
 await server.connect(new StdioServerTransport());
 let closing = false;
