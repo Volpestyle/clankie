@@ -39,7 +39,14 @@ const seat = {
   status: "idle",
   title: "Juniper",
 } satisfies OperatorFleetSeat;
-const observed: ObservedFleetSeat = { ...seat, subject: "juniper", paneId: "pc/w1:p1", session };
+const observed: ObservedFleetSeat = {
+  ...seat,
+  subject: "juniper",
+  paneId: "pc/w1:p1",
+  machine: fleet.ssh.host,
+  herdrSession: fleet.session,
+  session,
+};
 const row = {
   objective: "Verify the remote app — café",
   status: "active",
@@ -189,6 +196,25 @@ it("rejects unobserved, unsupported or invalid sessions and never transfers cach
     (await project([seat], [observed], [{ ...fleet, ssh: { ...fleet.ssh, host: "replacement" } }]))[0]?.goal,
   ).toBeUndefined();
   expect((await project([seat], [observed], [fleet]))[0]?.goal).toBeUndefined();
+});
+
+it("does not read an old host or Herdr session's observed UUID on a replacement connection", async () => {
+  for (const replacement of [
+    { ...fleet, ssh: { ...fleet.ssh, host: "new-host" } },
+    { ...fleet, session: "new-session" },
+  ]) {
+    const shell = vi.fn<FleetShellRun>().mockResolvedValue(JSON.stringify([[id, row]]));
+    const project = createRemoteCodexGoals({ shell: () => shell });
+    expect((await project([seat], [observed], [fleet]))[0]?.goal).toBeDefined();
+    expect(shell).toHaveBeenCalledTimes(1);
+    // Same seat, fleet ID and native UUID, but census predates reconfiguration.
+    expect((await project([seat], [observed], [replacement]))[0]?.goal).toBeUndefined();
+    expect(shell).toHaveBeenCalledTimes(1);
+    // Only a census of that new connection authorizes a fresh read there.
+    const current = { ...observed, machine: replacement.ssh.host, herdrSession: replacement.session };
+    expect((await project([seat], [current], [replacement]))[0]?.goal).toBeDefined();
+    expect(shell).toHaveBeenCalledTimes(2);
+  }
 });
 
 it("bounds each fleet batch and retries unread sessions on the next poll", async () => {

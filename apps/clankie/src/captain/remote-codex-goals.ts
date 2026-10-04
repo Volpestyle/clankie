@@ -126,6 +126,8 @@ export function createRemoteCodexGoals(options: {
             seat.fleet !== fleet.id ||
             observation?.harness !== "codex" ||
             observation.fleet !== fleet.id ||
+            observation.machine !== fleet.ssh.host ||
+            observation.herdrSession !== fleet.session ||
             observation.occupantId !== seat.occupantId ||
             observation.session === undefined
           )
