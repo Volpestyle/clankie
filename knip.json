@@ -56,6 +56,9 @@
     },
     "apps/tui": {
       "entry": ["bin/runtime-update-helper.mjs"]
+    },
+    "packages/vec3": {
+      "entry": ["test/**/*.test.ts"]
     }
   },
   "ignoreIssues": {

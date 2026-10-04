@@ -14,6 +14,7 @@ catalogs:
       version: 4.1.10
 
 overrides:
+  vec3: workspace:@clankie/vec3@*
   prismarine-chunk: 1.39.0
   prismarine-world: 3.6.3
   prismarine-registry: 1.11.0
@@ -399,8 +400,8 @@ importers:
         specifier: 4.8.1
         version: 4.8.1
       vec3:
-        specifier: 0.1.10
-        version: 0.1.10
+        specifier: workspace:@clankie/vec3@*
+        version: link:../../packages/vec3
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -775,6 +776,12 @@ importers:
       typescript:
         specifier: 5.9.3
         version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(vite@8.1.3(@types/node@24.12.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  packages/vec3:
+    devDependencies:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(vite@8.1.3(@types/node@24.12.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0))
@@ -4026,9 +4033,6 @@ packages:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
 
-  vec3@0.1.10:
-    resolution: {integrity: sha512-Sr1U3mYtMqCOonGd3LAN9iqy0qF6C+Gjil92awyK/i2OwiUo9bm7PnLgFpafymun50mOjnDcg4ToTgRssrlTcw==}
-
   vite@8.1.3:
     resolution: {integrity: sha512-Ds+gBRbj0lwRO2Y5hwnUBdxSwlAve9LeRyU4sNnAr0ewW0gWF0n5bgXgUzbgZ49MV9BVUAQUFYVcDUcilUExMA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -6801,7 +6805,7 @@ snapshots:
       prismarine-item: 1.17.0
       prismarine-nbt: 2.8.0
       prismarine-physics: 1.10.0
-      vec3: 0.1.10
+      vec3: link:packages/vec3
     transitivePeerDependencies:
       - supports-color
 
@@ -6824,7 +6828,7 @@ snapshots:
       protodef: 1.19.0
       typed-emitter: 1.4.0
       uuid-1345: 1.0.2
-      vec3: 0.1.10
+      vec3: link:packages/vec3
     transitivePeerDependencies:
       - encoding
       - supports-color
@@ -7110,7 +7114,7 @@ snapshots:
       prismarine-registry: 1.11.0
       smart-buffer: 4.2.0
       uint4: 0.1.2
-      vec3: 0.1.10
+      vec3: link:packages/vec3
       xxhash-wasm: 0.4.2
     transitivePeerDependencies:
       - supports-color
@@ -7120,7 +7124,7 @@ snapshots:
       prismarine-chat: 1.13.0
       prismarine-item: 1.17.0
       prismarine-registry: 1.11.0
-      vec3: 0.1.10
+      vec3: link:packages/vec3
     transitivePeerDependencies:
       - supports-color
 
@@ -7139,7 +7143,7 @@ snapshots:
     dependencies:
       minecraft-data: 3.105.0
       prismarine-nbt: 2.8.0
-      vec3: 0.1.10
+      vec3: link:packages/vec3
 
   prismarine-realms@1.6.0:
     dependencies:
@@ -7174,7 +7178,7 @@ snapshots:
       socket.io-client: 4.8.4
       three: 0.128.0
       three.meshline: 1.4.0
-      vec3: 0.1.10
+      vec3: link:packages/vec3
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -7190,7 +7194,7 @@ snapshots:
 
   prismarine-world@3.6.3:
     dependencies:
-      vec3: 0.1.10
+      vec3: link:packages/vec3
 
   process-warning@5.0.0: {}
 
@@ -7647,8 +7651,6 @@ snapshots:
   uuid@8.3.2: {}
 
   vary@1.1.2: {}
-
-  vec3@0.1.10: {}
 
   vite@8.1.3(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.0)(yaml@2.9.0):
     dependencies:

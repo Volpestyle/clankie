@@ -8,6 +8,7 @@ engineStrict: true
 # The Minecraft body uses the Paper 1.21.4 conformance tree. Newer chunk
 # releases expect 26.1 data absent from this pinned Mineflayer/data baseline.
 overrides:
+  vec3: workspace:@clankie/vec3@*
   prismarine-chunk: 1.39.0
   prismarine-world: 3.6.3
   prismarine-registry: 1.11.0

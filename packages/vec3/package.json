@@ -1,0 +1,21 @@
+{
+  "name": "@clankie/vec3",
+  "version": "0.1.0",
+  "description": "Independent vector API for the pinned Minecraft runtime",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "main": "index.cjs",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.cjs"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --config ../../vitest.config.ts"
+  },
+  "devDependencies": {
+    "vitest": "4.1.10"
+  }
+}
