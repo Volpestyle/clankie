@@ -17,11 +17,16 @@ lane's staged files.
 ## Am I in a shared checkout?
 
 Assume yes whenever a brief put you in a repo you did not create a worktree
-for. To confirm, ask herdr who else is there:
+for. Use the assignment and current ownership evidence. In Herdr, a bounded roster
+can show another live writer:
 
 ```bash
 herdr agent list
 ```
+
+An empty roster does not make existing edits yours or prove their owner ended.
+In Clankie's fleet, coordinate contested paths through `message_peer` when
+available, or `message_clankie` to the lead. Do not type into another pane.
 
 Two agents in different *subdirectories* of one repo still share one index.
 Separate worktrees do not — they have their own index and HEAD, which is why
@@ -55,6 +60,21 @@ Add a new commit instead. A slightly untidy history is recoverable; a
 
 If you genuinely must fix your own last commit, make a second commit that
 fixes it. Squashing is the integrator's job, once the lane is quiet.
+
+## Check an exported snapshot
+
+When checking an exported source snapshot with already-installed pnpm 11
+dependencies, use `pnpm_config_verify_deps_before_run=false pnpm check`.
+The default preflight can launch an install even for a check command and
+rewrite dependency links. Keep the sibling-directory layout declared by
+`pnpm-workspace.yaml`; linked dependencies alone do not satisfy workspace checks.
+Make each sibling a real directory, never a symlink: pnpm links through a
+symlinked sibling but does not register it as an importer, so a lockfile
+generated there omits its dependencies and a frozen install passes in the
+scratch copy but fails in a real checkout or CI.
+Pin linked workspace sources too: a clean app export can still bundle dirty
+sibling code through dependency links. For JavaScript bundles, compare source-map
+contents against each workspace's committed revision, not just the app's.
 
 ## Photograph the tree before you touch it
 

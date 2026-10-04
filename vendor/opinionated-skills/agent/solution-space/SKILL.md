@@ -49,23 +49,10 @@ Trivial changes. Systems you own and know. Cases where you've already read the p
 source this session. This is a reflex against unexamined design, not a research ritual —
 two minutes of doc-reading, not a literature review.
 
-## Worked example
+## Fleet example
 
-Studio users invited via Cognito `AdminCreateUser` land in `FORCE_CHANGE_PASSWORD`. If the
-7-day temp password expires, "forgot password" returns HTTP 200 and silently does nothing —
-no email, no log. Users were unrecoverable without an admin.
-
-The plan was: new `resendInvite()` wrapping `AdminCreateUser --message-action RESEND`, then
-reconcile two email shapes (6-digit code vs temporary password), then a line of UI copy to
-explain the mismatch to the user. It would have worked. Tests would have passed.
-
-The line of copy was the tell — a wart being talked into acceptability.
-
-Reading the docs for a *different* feature (CSV-imported users) surfaced `RESET_REQUIRED`:
-a second "must set a password before sign-in" state that, unlike the first, **is**
-self-service recoverable. `AdminResetUserPassword` moves a user into it and sends a code —
-and `CognitoUserRepository.resetPassword()` already implemented it.
-
-Same outcome, no new method, no email reconciliation, no explanatory copy, and the bug
-self-heals on first use. The original plan was not wrong so much as answering a question
-that didn't need to be asked.
+A visible terminal is not a message API. Before building a file-polling handoff
+or keyboard driver, inspect the harness's native channel/session interface.
+Clankie already models `hire_agent`, `message_seat` and `message_clankie`, with
+bound identities and receipts. Reuse them and repair a demonstrated admission
+gap at that boundary; a second transport would hide uncertainty and risk replay.

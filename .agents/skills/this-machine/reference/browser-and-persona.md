@@ -7,7 +7,8 @@ His browser workspace and owner-authored persona image folders.
 Browser tools use Clankie's service-private profile, never the owner's Chrome.
 Browser Use Pi supplies his persistent JavaScript workspace; load `browser-use`
 for its primitives. `clankie browser tools` lists the catalog, and
-`clankie browser call TOOL JSON` calls it with operator authority.
+`clankie browser call TOOL JSON` calls it with operator authority and `--conversation ID` for the selected
+runnable conversation. A busy lease names its holder; it does not grant takeover.
 Browsing starts headless. `browser_use_open` with `headed: true` opens a
 visible takeover window for sign-in; that mode lasts through the current burst.
 `headed: false` returns early. After 60 seconds without a browser tool call,

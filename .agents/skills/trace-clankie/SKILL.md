@@ -5,8 +5,9 @@ description: Use when tracing what Clankie said, did, or observed after the fact
 
 # Trace Clankie
 
-Every surface leaves a durable trail. Find the right one, read it (everything
-is append-only JSONL or plain files now), never write to it.
+Start from the owning conversation and its source references. Read durable
+journals and receipts; never alter runtime state files to repair a missing trail.
+A snapshot or presence card describes an observation, not completion evidence.
 
 ## Start with the conversation
 
@@ -21,10 +22,16 @@ not ambient speech. Historical discovery covers native room journals modified
 within conversation retention (30 days); older source files remain inspectable
 through the trail map.
 
+A live attached native seat receives that conversation's worker reports, wakes
+and watches. Worker reports follow the hiring/adopting conversation, not always
+`global-default`. Peer exchanges are agent-role audit context and do not wake him.
+Use `this-machine` for current routing and the retained delivery receipt for its
+stage; transcript presence alone does not prove an effect or model awareness.
+
 ## Where to look
 
 - Operator console chat (the TUI dialogue): `~/.clankie/captain/conversations/<conversationId>/`
-- The seat's turns (Claude Code as Clankie): `~/.claude/projects/<cwd-as-dashes>/<sessionId>.jsonl`, folded into `~/.clankie/captain/conversations/global-default/events.jsonl`
+- Native seat turns: the harness transcript, projected into `~/.clankie/captain/conversations/<conversationId>/events.jsonl`; use `clankie agents read HOST:SESSION --tail 20` for bounded native history.
 - Per-turn tool-shape metrics: `~/.clankie/captain/turn-settled.jsonl`, read with `clankie metrics` or `GET /v1/captain/turn-metrics`
 - The pi session behind a conversation: `~/.clankie/captain/conversations/<conversationId>/pi/`
 - What he heard/said per room: `~/.clankie/captain/lanes/<lane>~<encoded-target>.jsonl`
@@ -40,7 +47,7 @@ through the trail map.
 - Browser recordings (opt-in): `~/.clankie/runner/browser/recordings/*.webm`, named by start time
 - Service stdout + lifecycle: `~/.local/state/clankie/<id>.log`, `<id>-service.json`
 - Live status: `clankie status` / `/trace` in the face
-- What's on the TUI screen right now: `herdr pane read <pane> --source recent`
+- What's on the TUI screen right now: `herdr pane read <pane> --source visible`
 
 Shapes, retention and the Discord media and Linear inbox details are in
 [the trail map](reference/trail-map.md).

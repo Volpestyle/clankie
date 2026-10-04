@@ -5,7 +5,13 @@ description: Join an approved Minecraft Java world, play through Clankie's servi
 
 # Minecraft
 
-Use the `minecraft_*` tools in the owning conversation. Call `minecraft_join`
+The shipped body supports approved offline Java profiles on local/private worlds.
+Microsoft authentication and live friend/Discord acceptance remain deferred;
+a configured viewer or offline conformance result does not establish them.
+
+Use the `minecraft_*` tools in the owning conversation. Clankie's existing mind
+chooses the actions; the service-owned MCP motor supplies navigation and physics.
+Workers need their own bot identities, never a raw MCP bypass to Clankie's body. Call `minecraft_join`
 without a profile id to list approved profile names, then select one. Endpoint and account configuration are
 operator-owned. The CLI equivalent is `clankie minecraft`, and `/minecraft`
 exposes it in the console. Setup and limitations live in

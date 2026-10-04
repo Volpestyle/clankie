@@ -15,6 +15,11 @@ services use `mcp_tool_search` and their returned schemas. Calendar is not a
 built-in mail capability. Do not invent events, connect accounts, change lanes,
 or search a different account to fill a gap. A refusal is not “nothing today.”
 
+A fleet worker uses `clankie_tools` / `clankie_call` for admitted connected
+sources. Fleet membership does not grant the operator-only built-in mail lane.
+Use `clankie` for account and outward-action boundaries; preserve the selected
+private destination rather than sending personal content to a peer or public room.
+
 Read enough supporting content to substantiate each priority. Collapse a mail
 thread into one item, distinguish an invitation from an accepted event, and
 show event times in the chosen zone. Include short source references so the
