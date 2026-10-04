@@ -78,6 +78,7 @@ export async function windowsCodexBridge(): Promise<WindowsCodexBridge> {
     ".codex-plugin/plugin.json",
     "bin/fleet-mcp.mjs",
     "bin/seat-channel.mjs",
+    "bin/catalog-watch.mjs",
     "bin/link.mjs",
     "bin/inbound-receipt.mjs",
     "bin/peer-receipt.mjs",

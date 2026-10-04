@@ -60,6 +60,15 @@ permission for every write. If tools are absent, report the machine/session,
 catalog and refusal so the lead can inspect admission, the setting and account.
 Never substitute a harness's independent Linear connector.
 
+The bridge reports catalog changes every five seconds. Locally hired Codex
+seats with a dedicated app-server and isolated config refresh at the next model
+step on the same thread. Codex 0.160.0 otherwise ignores MCP list-change
+notifications; `/mcp` or a fresh status connection does not refresh that thread.
+For manual or remote clients, report the stale catalog and ask the owner to
+reconnect the exact thread with its original cwd, account home and flags after
+its runtime unloads. Never restart a shared daemon, fork automatically, or
+replay an uncertain tool call. Controller-owned hires need controller recovery.
+
 Before an authorized write, load `linear-issues` for read-before-write, labels,
 media and editorial rules. Read the record again immediately before updating it.
 Keep evidence on the assigned issue. After a timed-out mutation, inspect the
