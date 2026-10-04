@@ -30,6 +30,7 @@ export function resolveDiscordSettings(
   takeString(merged, "applicationId", "DISCORD_APPLICATION_ID");
   takeString(merged, "guildId", "DISCORD_GUILD_ID");
   takeString(merged, "swarmGuildId", "DISCORD_SWARM_GUILD_ID");
+  takeString(merged, "swarmGuildId", "DISCORD_MANAGED_GUILD_ID");
   takeList(merged, "ambientRoleIds", "DISCORD_AMBIENT_ROLE_IDS");
   takeList(merged, "ambientUserIds", "DISCORD_AMBIENT_USER_IDS");
   takeList(merged, "approvalRoleIds", "DISCORD_APPROVAL_ROLE_IDS");
@@ -110,6 +111,8 @@ export function applyDiscordSettingsToEnvironment(
 ): string[] {
   const applied: string[] = [];
   for (const [name, value] of Object.entries(discordSettingsToEnvironment(settings))) {
+    // Preserve the legacy spelling's environment-wins behavior during migration.
+    if (name === "DISCORD_MANAGED_GUILD_ID" && env.DISCORD_SWARM_GUILD_ID?.trim()) continue;
     const existing = env[name];
     if (existing !== undefined && existing.length > 0) continue;
     env[name] = value;
@@ -129,7 +132,7 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
 
   put("DISCORD_APPLICATION_ID", settings.applicationId);
   put("DISCORD_GUILD_ID", settings.guildId);
-  put("DISCORD_SWARM_GUILD_ID", settings.swarmGuildId);
+  put("DISCORD_MANAGED_GUILD_ID", settings.swarmGuildId);
   putList("DISCORD_AMBIENT_ROLE_IDS", settings.ambientRoleIds);
   putList("DISCORD_AMBIENT_USER_IDS", settings.ambientUserIds);
   putList("DISCORD_APPROVAL_ROLE_IDS", settings.approvalRoleIds);
@@ -170,4 +173,9 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
   put("CLANKIE_ACTIVITY_TUNNEL_NAME", settings.activityTunnelName);
   put("CLANKIE_ACTIVITY_TUNNEL_HOSTNAME", settings.activityTunnelHostname);
   return env;
+}
+
+/** Preferred name plus a compatibility alias for existing installations. */
+export function discordManagedGuildId(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.DISCORD_MANAGED_GUILD_ID?.trim() || env.DISCORD_SWARM_GUILD_ID?.trim() || undefined;
 }

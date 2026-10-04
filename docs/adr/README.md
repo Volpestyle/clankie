@@ -70,3 +70,5 @@ operation, a `desktop` tool for his own expressions, and hero pixel art in
 [ADR 0221](0221-tests-prove-the-product-and-its-boundaries.md) prioritizes real
 E2E, integration and golden coverage for new work; existing unit-test pruning
 remains a separate reviewed effort.
+
+- [0222 — Discord setup has one shared definition](0222-discord-setup-has-one-shared-definition.md)

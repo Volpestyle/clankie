@@ -1011,6 +1011,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     app.route(
       "/",
       createDiscordRoomRoutes({
+        machineName: dependencies.hostedBody ? "his cloud computer" : hostDisplayName,
         authorize: authorizeRoom,
         captain: dependencies.captain,
         observations: dependencies.roomObservations,

@@ -11,7 +11,7 @@ export const DiscordSettingsSchema = z
     guildId: SnowflakeSchema.optional(),
     /**
      * The one server Clankie controls and may make rooms in (ADR 0146): the
-     * swarm home. Deliberately not `guildId` — a server he merely inhabits can
+     * managed server. Deliberately not `guildId` — a server he merely inhabits can
      * be on every ingress, presence, and voice allowlist without ever becoming
      * a place his agents can be given a channel in. Unset means no Discord
      * projection at all — not even a pasted webhook, which would otherwise be

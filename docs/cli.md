@@ -2575,6 +2575,16 @@ Return stored and effective non-secret Discord configuration:
 `discord` is the stored value. `effectiveDiscord` includes environment
 overrides, whose variable names appear in `overriddenByEnvironment`.
 
+### `discord definition`
+
+Read the host's shared four-sentence Discord definition, picker kinds, help text,
+check kinds, Advanced groups and choice labels as JSON. Requires operator
+authentication, like `discord rooms`. The included `machineName` names the host
+Clankie uses, including “his cloud computer” when hosted. An older host without
+this optional metadata returns a clear unsupported error. See
+[Discord settings](discord-rooms.md) for revision checks and the preferred
+`DISCORD_MANAGED_GUILD_ID` environment name.
+
 ### `discord transcripts [--cursor CURSOR] [--limit N]`
 
 Read the private retained voice log through the authenticated service API.

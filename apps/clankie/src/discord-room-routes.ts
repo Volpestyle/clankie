@@ -7,6 +7,7 @@ import {
   DISCORD_SETTINGS_PATH,
   DiscordRoomGuidanceRequestSchema,
   DiscordSettingsUpdateSchema,
+  DISCORD_SETUP_DEFINITION,
 } from "@clankie/protocol";
 import type { ClankieSettings } from "@clankie/settings";
 import type { CaptainPort } from "./captain/port.ts";
@@ -18,6 +19,8 @@ export interface RoomAuthorization {
   current(): boolean;
 }
 export interface DiscordRoomRoutesOptions {
+  /** Host name, or “his cloud computer” for a hosted runtime. */
+  machineName?: string;
   authorize(request: Request, access: RoomAccess): Promise<RoomAuthorization | undefined>;
   captain: Pick<CaptainPort, "serveOperatorConversation">;
   observations: DiscordRoomObservations;
@@ -106,7 +109,13 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
     const settings = (await options.settings.load()).discord;
     await authority.guard();
     if (!authority.current()) return context.json({ error: "room_observe_required" }, 403);
-    return context.json({ settings, revision: discordSettingsRevision(settings) });
+    return context.json({
+      settings,
+      revision: discordSettingsRevision(settings),
+      ...(options.machineName
+        ? { setup: { definition: DISCORD_SETUP_DEFINITION, machineName: options.machineName } }
+        : {}),
+    });
   });
   app.post(DISCORD_SETTINGS_PATH, async (context) => {
     const authority = await options.authorize(context.req.raw, "settings");
@@ -128,7 +137,13 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
     );
     await authority.guard();
     if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
-    return context.json({ settings: updated.discord, revision: discordSettingsRevision(updated.discord) });
+    return context.json({
+      settings: updated.discord,
+      revision: discordSettingsRevision(updated.discord),
+      ...(options.machineName
+        ? { setup: { definition: DISCORD_SETUP_DEFINITION, machineName: options.machineName } }
+        : {}),
+    });
   });
   return app;
 }

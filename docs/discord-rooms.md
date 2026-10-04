@@ -58,6 +58,23 @@ operator bridge still requires `mintedBy=hosted-account-operator` and
 `terminalControl`; `steer` does not grant settings access. The canonical schema
 lives in protocol and is reexported by settings. All 37 fields are editable under
 TUI `/discord` → **All Discord settings** and existing `clankie discord set/clear`.
+The optional `setup` member contains the shared four-sentence definition, picker
+kinds, help, check kinds, Advanced groups and choice labels from protocol's
+`discord-setup.ts`. `machineName` comes from the host (its name when self-hosted,
+“his cloud computer” when hosted). It does not depend on the device opening
+settings. `clankie discord definition` reads the same metadata with operator
+authentication. Check kinds describe which checks a surface should present;
+this foundation does not claim that an invite, permission check or test post ran.
+Clients read responses through `parseProtocolResponse`; strict settings writes
+retain `expectedRevision` and never accept display metadata or unknown fields.
+Computer access remains a separate explicit choice, never a server/room preset.
+
+`DISCORD_MANAGED_GUILD_ID` is the preferred environment spelling. The old
+`DISCORD_SWARM_GUILD_ID` is accepted as a compatibility alias, with the preferred
+name winning when both are set. The persisted/wire key `swarmGuildId` stays
+compatible with older clients. A legacy shell override still wins over stored
+settings; exporting settings emits the preferred name.
+
 Credentials remain in the credential broker. Environment overrides and settings
 that require a body restart retain their existing behavior; changing a stored
 field does not claim the running body already applied it.

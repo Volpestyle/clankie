@@ -21,6 +21,7 @@ import {
   type ProjectProposalResult,
 } from "./projects.ts";
 export * from "./discord-settings.ts";
+export * from "./discord-setup.ts";
 export * from "./discord-rooms.ts";
 import { BodyLeaseResultSchema } from "./body-leases.ts";
 import { DeliveryStageSchema } from "./delivery.ts";
@@ -610,7 +611,7 @@ export type OperatorConversationScope = z.infer<typeof OperatorConversationScope
 export const OPERATOR_CHANNEL_MEMBER_MAX = 12;
 
 /**
- * One room in the swarm home a channel can be projected onto (ADR 0146).
+ * One room in the managed server a channel can be projected onto (ADR 0146).
  * Projection is not limited to rooms Clankie made: he owns Manage Webhooks in
  * the one server he controls, so any text or announcement channel there is a
  * place the fleet can be put without the owner copying a URL out of Server
@@ -695,13 +696,13 @@ export const UpsertOperatorChannelSchema = z
      * projection exactly as it is.
      *
      * `provision` is the ordinary path and the one that makes rooms cheap to
-     * create: Clankie makes the webhook himself inside the swarm home — a fresh
+     * create: Clankie makes the webhook himself inside the managed server — a fresh
      * channel when no `room` is given, an existing channel when one is named,
      * or a new post inside a selected forum.
      * `webhook` is the manual fallback for a webhook the owner made by hand in
      * that same server, for when Clankie lacks the permission to make one. It
-     * is not a way into another guild: a URL resolving outside the swarm home
-     * is refused, and with no swarm home set neither path projects anything.
+     * is not a way into another guild: a URL resolving outside the managed server
+     * is refused, and with no managed server set neither path projects anything.
      * `off` removes an existing projection: the room stays, with its whole
      * transcript, and stops posting to or hearing from the guild. A webhook
      * Clankie provisioned is deleted in Discord; a pasted one belongs to the
@@ -2777,9 +2778,9 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     })
     .strict(),
   /**
-   * The swarm home's rooms, so choosing where a channel is projected is a pick
+   * The managed server's rooms, so choosing where a channel is projected is a pick
    * rather than a snowflake typed from memory. Empty where no Discord runtime
-   * can list them, and empty when no swarm home is set.
+   * can list them, and empty when no managed server is set.
    */
   z
     .object({
@@ -3416,7 +3417,7 @@ export interface OperatorConversationServiceClient {
   }>;
   /** Every channel that exists here; absent on older injected clients. */
   channels?(): Promise<readonly OperatorChannel[]>;
-  /** The swarm home's rooms, to pick which one a channel is projected onto. */
+  /** The managed server's rooms, to pick which one a channel is projected onto. */
   discordRooms?(): Promise<readonly DiscordGuildRoom[]>;
   /** Repos registered for work tracking on this machine (ADR 0191). */
   workRepos?(): Promise<readonly WorkRepo[]>;
