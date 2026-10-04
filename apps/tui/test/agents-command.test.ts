@@ -218,3 +218,30 @@ it("renames a Unicode agent by id using a name-only persona update", async () =>
     persona: { schemaVersion: 1, personaId: "agent-1", name: "美咲" },
   });
 });
+
+it("preserves exact native OpenCode IDs and typed unavailable resume outcomes", async () => {
+  const ref = "local:ses_NativeExact123";
+  const calls: Array<{ path: string; body: unknown }> = [];
+  const options = {
+    env: { CLANKIE_OPERATOR_TOKEN: "fixture" },
+    fetchImpl: (async (url, init) => {
+      calls.push({
+        path: new URL(String(url)).pathname + new URL(String(url)).search,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return Response.json({
+        outcome: "failed",
+        reason: "harness_unavailable",
+        detail: "Original native exit unproven",
+      });
+    }) as typeof fetch,
+  };
+  await runAgentsCommand(["read", ref, "--tail", "50"], options);
+  expect(
+    await runAgentsCommand(["resume", ref, "--conversation", "hiring-conversation"], options),
+  ).toMatchObject({ outcome: "failed", detail: "Original native exit unproven" });
+  expect(calls).toEqual([
+    { path: "/v1/agent-sessions/read?ref=local%3Ases_NativeExact123&tail=50", body: undefined },
+    { path: "/v1/agent-sessions/resume", body: { ref, conversationId: "hiring-conversation" } },
+  ]);
+});

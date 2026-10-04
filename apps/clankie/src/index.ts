@@ -17,6 +17,7 @@ import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorwa
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
 import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
 import { WorkerMcp } from "./worker-mcp.ts";
+import { OpenCodeProfiles } from "./opencode-profiles.ts";
 import { createAgentSessions } from "./agent-sessions.ts";
 /**
  * Composition root for the merged Clankie service: the surviving control-plane
@@ -550,7 +551,11 @@ const runtimes = new ExecutionConnections({
 });
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
-const agentSessions = createAgentSessions(settingsStore);
+const agentSessions = createAgentSessions(
+  settingsStore,
+  undefined,
+  new OpenCodeProfiles(join(stateRoot, "captain")),
+);
 // Work items in each repo's own convention (ADR 0191): Linear rides his
 // connected account, GitHub the owner's GitHub connection or gh login (a
 // hosted body has only the connection, ADR 0196), files the repo itself.

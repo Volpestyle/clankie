@@ -1,3 +1,4 @@
+import { writeOpenCodeNativeSession } from "./helpers/opencode-native-db.ts";
 import { mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,7 +45,15 @@ async function fixture() {
     pending: () => pending,
     request: vi.fn(
       async (method: Parameters<OpenCodeController["request"]>[0], input?: unknown): Promise<unknown> => {
-        if (method === "initialize") return { sessionId, version: "1.18.18" };
+        if (method === "initialize") {
+          const profiles = await readdir(join(directory, "opencode-workers", "profiles"));
+          await writeOpenCodeNativeSession(
+            join(directory, "opencode-workers", "profiles", profiles[0]!, "opencode.db"),
+            directory,
+            sessionId,
+          );
+          return { sessionId, version: "1.18.18" };
+        }
         if (method === "send")
           return {
             outcome: "accepted",
@@ -124,11 +133,15 @@ test("prepared initial argv owns one controller, preserves native config, and tr
   expect((await prepared.start(f.view)).outcome).toBe("failed");
   expect(f.native.capture).toHaveBeenCalledTimes(1);
   if (result.outcome !== "started") throw new Error("fixture start");
+  expect(await result.control.verify?.()).toEqual(f.proof);
   expect(await f.adapter.attach(f.ref)).toBe(result.control);
   await result.control.close();
   expect(f.controller.close).toHaveBeenCalledOnce();
   expect(await f.adapter.attach(f.ref)).toBeUndefined();
-  expect(await readdir(join(f.directory, "opencode-workers"))).toEqual([]);
+  expect(await readdir(join(f.directory, "opencode-workers"))).toEqual(["profiles"]);
+  expect(
+    JSON.parse(await readFile(join(prepared.env!.OPENCODE_DB!, "..", "source.json"), "utf8")),
+  ).toMatchObject({ sessionId });
 });
 
 test.each(["wrong-version", "model", "variant", "resume", "extra-args", "bad-config"])(
@@ -168,14 +181,14 @@ test("aborted preparation and refused allocation guard dispose only this private
   expect(other.controller.close).toHaveBeenCalledOnce();
 });
 
-test("exact resume argv and returned native identity must agree, without starting any fallback", async () => {
+test("saved identity without original exit proof cannot create a duplicate native process", async () => {
   const f = await fixture();
-  const prepared = await f.adapter.prepare!({ ...f.launch, resumeSessionId: "ses_savedOriginal123" });
-  expect(prepared.command).toEqual(["/native/opencode", f.directory, "--session", "ses_savedOriginal123"]);
-  expect((await prepared.start(f.view)).outcome).toBe("failed");
-  expect(f.view.bound).not.toHaveBeenCalled();
-  expect(f.root.report).not.toHaveBeenCalled();
-  expect(f.controller.close).toHaveBeenCalledOnce();
+  await expect(f.adapter.prepare!({ ...f.launch, resumeSessionId: "ses_savedOriginal123" })).rejects.toThrow(
+    "exit is unproven",
+  );
+  expect(f.discovery).not.toHaveBeenCalled();
+  expect(f.native.capture).not.toHaveBeenCalled();
+  expect(f.controller.request).not.toHaveBeenCalled();
 });
 
 test("bound callback precedes first brief; substituted ref and changed held process cannot submit", async () => {
@@ -294,7 +307,10 @@ test.each(["peer-loss", "proof-revoked"])(
           return;
         }
         let result: unknown = "idle";
-        if (frame.method === "initialize") result = { sessionId, version: "1.18.18" };
+        if (frame.method === "initialize") {
+          await writeOpenCodeNativeSession(prepared.env!.OPENCODE_DB!, f.directory, sessionId);
+          result = { sessionId, version: "1.18.18" };
+        }
         if (frame.method === "send") {
           const id = "claim-callback";
           await new Promise<void>((resolve) => {

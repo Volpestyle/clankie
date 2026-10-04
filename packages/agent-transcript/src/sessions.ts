@@ -24,18 +24,33 @@ export interface AgentSessionFile {
   readonly mtimeMs: number;
 }
 
-export interface AgentSessionSummary {
+interface AgentSessionSummaryBase {
   /** `host:sessionId`, what `read` takes back. */
   readonly ref: string;
   readonly host: string;
-  readonly harness: AgentSessionFile["harness"];
   readonly sessionId: string;
   /** Claude's project directory name, which encodes the launch directory. */
   readonly project?: string;
-  readonly size: number;
   /** Last write. A recent one means recently active, never that a process is running. */
   readonly modifiedAt: string;
 }
+
+export type AgentSessionSummary = AgentSessionSummaryBase &
+  (
+    | { readonly harness: AgentSessionFile["harness"]; readonly size: number; readonly source?: undefined }
+    | {
+        readonly harness: "opencode";
+        readonly size?: never;
+        readonly source: {
+          readonly kind: "opencode-sqlite";
+          readonly profileId: string;
+          readonly scope: "stored-v1-export";
+        };
+        readonly projectionBytes: number;
+        readonly stagedRevert: boolean;
+      }
+  );
+type PageSession<T = AgentSessionSummary> = T extends AgentSessionSummary ? Omit<T, "modifiedAt"> : never;
 
 /** Entries as they cross the API: a viewed image keeps its identity, not its host path. */
 export type AgentSessionEntry =
@@ -47,12 +62,12 @@ export type AgentSessionEntry =
     };
 
 export interface AgentSessionPage {
-  /** No `modifiedAt`: a read learns the current size, not the file's mtime. */
-  readonly session: Omit<AgentSessionSummary, "modifiedAt">;
+  /** No `modifiedAt`: this is the bounded projection at the returned cursor. */
+  readonly session: PageSession;
   readonly entries: readonly AgentSessionEntry[];
-  /** Pass back as `after` for what was appended since. */
+  /** Pass back as `after`; mutable native DB projections reset on content changes. */
   readonly cursor: string;
-  /** The file shrank or was replaced under an old cursor, so this page restarted from the tail. */
+  /** File replacement/shrink or mutable native content changed; replace the displayed page. */
   readonly reset?: true;
   /** A tail stopped at the read ceiling before reaching the start of the file. */
   readonly truncated?: true;

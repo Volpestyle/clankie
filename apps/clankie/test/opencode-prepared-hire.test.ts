@@ -16,6 +16,7 @@ import {
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
+import type { SavedAgentSession } from "../src/agent-sessions.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -75,6 +76,7 @@ async function fixture() {
   const brief = vi.fn();
   const control = {
     ref,
+    verify: vi.fn(async () => structuredClone(proof)),
     send: vi.fn(async () => ({
       outcome: "accepted" as const,
       messageId: "msg_fixture123",
@@ -142,6 +144,7 @@ async function fixture() {
     store,
     request,
     brief,
+    control,
     hire: () => store.spawnSeat(request, undefined, "first brief"),
   };
 }
@@ -291,3 +294,91 @@ test("legacy unmanaged OpenCode retains existing explicit close behavior", async
   expect(await f.store.closeSeat(f.agent.terminalId)).toBe(true);
   expect(f.runner.closePane).toHaveBeenCalledWith(f.agent.paneId);
 });
+
+function savedNative(f: Awaited<ReturnType<typeof fixture>>): SavedAgentSession {
+  return {
+    ref: `local:${f.ref.sessionId}`,
+    host: "local",
+    sessionId: f.ref.sessionId,
+    workingDirectory: f.directory,
+    source: {
+      kind: "opencode-sqlite",
+      machineId: "local",
+      profileId: "owned-native",
+      database: `${f.directory}/opencode.db`,
+      databaseIdentity: "1:2",
+      sessionId: f.ref.sessionId,
+      version: "1.18.18",
+      workingDirectory: f.directory,
+    },
+  };
+}
+
+test.each([undefined, "follow-up"])(
+  "prepared resume preserves original project proof, brief %s",
+  async (brief) => {
+    const f = await fixture();
+    expect(await f.hire()).toMatchObject({ outcome: "spawned" });
+    expect(
+      await f.store.spawnSeat({ ...f.request, resume: savedNative(f).ref }, undefined, brief, savedNative(f)),
+    ).toMatchObject({ outcome: "spawned" });
+    expect(f.runner.createTab).toHaveBeenCalledOnce();
+    expect(f.prepared.start).toHaveBeenCalledOnce();
+    expect(f.control.verify).toHaveBeenCalled();
+    expect(f.policy.proof).not.toHaveBeenCalled();
+    expect(f.store.projectHireAssignment("default", f.ref.paneId, f.proof)).toMatchObject({
+      state: "assigned",
+    });
+  },
+);
+
+test.each([undefined, "follow-up"])(
+  "held resume project await cannot adopt a replacement root, brief %s",
+  async (brief) => {
+    const f = await fixture();
+    expect(await f.hire()).toMatchObject({ outcome: "spawned" });
+    let enteredResolve!: () => void;
+    let releaseResolve!: () => void;
+    const entered = {
+      promise: new Promise<void>((resolve) => {
+        enteredResolve = resolve;
+      }),
+      resolve: () => enteredResolve(),
+    };
+    const release = {
+      promise: new Promise<void>((resolve) => {
+        releaseResolve = resolve;
+      }),
+      resolve: () => releaseResolve(),
+    };
+    let calls = 0;
+    f.policy.project.mockImplementation(async () => {
+      if (++calls === 2) {
+        entered.resolve();
+        await release.promise;
+      }
+      return "game";
+    });
+    const pending = f.store.spawnSeat(
+      { ...f.request, resume: savedNative(f).ref },
+      undefined,
+      brief,
+      savedNative(f),
+    );
+    await entered.promise;
+    expect(f.control.verify).toHaveBeenCalled();
+    const original = structuredClone(f.proof);
+    Object.assign(f.proof, {
+      shell: { pid: 44, startTime: "123.456790" },
+      processes: [{ pid: 44, startTime: "123.456790" }],
+    });
+    release.resolve();
+    expect(await pending).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(f.control.send).not.toHaveBeenCalled();
+    expect(f.runner.createTab).toHaveBeenCalledOnce();
+    expect(f.store.projectHireAssignment("default", f.ref.paneId, original)).toMatchObject({
+      state: "assigned",
+    });
+    expect(f.store.projectHireAssignment("default", f.ref.paneId, f.proof).state).not.toBe("assigned");
+  },
+);

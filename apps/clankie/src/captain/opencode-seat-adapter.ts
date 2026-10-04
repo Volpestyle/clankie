@@ -1,3 +1,4 @@
+import { OpenCodeProfiles } from "../opencode-profiles.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { constants } from "node:fs";
@@ -114,6 +115,7 @@ async function discover(launch: SeatLaunch): Promise<{ executable: string; versi
 /** The one native TUI owns the SDK; there is no headless server or second writer. */
 export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAdapter {
   const controls = new Map<string, SeatControl>();
+  const profiles = new OpenCodeProfiles(deps.stateDir);
   const fence = new DeliveryFence(join(deps.stateDir, "opencode-workers", "receipts.json"));
   return {
     harness: "opencode",
@@ -139,12 +141,18 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
         throw new Error("OpenCode variant requires an explicit model");
       if (launch.resumeSessionId !== undefined && !/^ses_[A-Za-z0-9]{8,128}$/u.test(launch.resumeSessionId))
         throw new Error("Invalid exact OpenCode resume session");
+      if (launch.resumeSessionId !== undefined)
+        throw new Error(
+          "OpenCode resume unavailable: original native exit is unproven; use the existing live controller",
+        );
       const selected = await (deps.discover ?? discover)(launch);
       if (selected.version !== OPENCODE_WORKER_VERSION || !isAbsolute(selected.executable))
         throw new Error("Native OpenCode capability unavailable");
       signal?.throwIfAborted();
       const launchRoot = join(deps.stateDir, "opencode-workers");
       await mkdir(launchRoot, { recursive: true, mode: 0o700 });
+      // Native-owned persistent history survives uncertain creation and controller retirement.
+      const profile = await profiles.allocate();
       const directory = await mkdtemp(join(launchRoot, "launch-"));
       let controller: OpenCodeController | undefined;
       let root: OpenCodeNativeRoot | undefined;
@@ -211,6 +219,7 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
         const scopedEnv: Record<string, string> = {
           ...launch.env,
           OPENCODE_TUI_CONFIG: tuiPath,
+          OPENCODE_DB: profile.database,
           OPENCODE_CONFIG_CONTENT: JSON.stringify({
             ...baseConfig,
             autoupdate: false,
@@ -308,10 +317,13 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
               }
               await view.bound?.(ref);
               await verify(ref);
+              await profiles.register(profile, ref.sessionId, launch.cwd, () => verify(ref!));
+              await verify(ref);
               const selectedRef = ref;
               let lastMessageId: string | undefined;
               const control: SeatControl = {
                 ref: selectedRef,
+                verify: () => verify(selectedRef),
                 async status(): Promise<SeatStatus> {
                   try {
                     const state = Status.parse(await native.request("status"));

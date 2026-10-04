@@ -1,3 +1,6 @@
+import { redactSensitiveText } from "@clankie/observability";
+import type { OpenCodeProfiles } from "./opencode-profiles.ts";
+import type { OpenCodeHistorySource, OpenCodeHistorySnapshot } from "./opencode-history.ts";
 import { resolveAgentHost } from "@clankie/agent-hosts";
 import {
   findAgentSession,
@@ -14,12 +17,32 @@ import {
 import type { AgentHostConnection, ClankieSettings } from "@clankie/settings";
 
 /** Fresh, confined transcript metadata for the ordinary native hire path. */
-export interface SavedAgentSession {
+interface SavedAgentSessionBase {
   readonly ref: string;
   readonly host: "local" | AgentHostConnection;
-  readonly file: AgentSessionFile;
   readonly sessionId: string;
   readonly workingDirectory: string;
+}
+
+export type SavedAgentSession = SavedAgentSessionBase &
+  (
+    | { readonly file: AgentSessionFile; readonly source?: undefined }
+    | { readonly file?: never; readonly source: OpenCodeHistorySource }
+  );
+export const savedSessionHarness = (session: SavedAgentSession) =>
+  session.source ? ("opencode" as const) : session.file.harness;
+function nativeSummary(value: OpenCodeHistorySnapshot): AgentSessionSummary {
+  return {
+    ref: `local:${value.source.sessionId}`,
+    host: "local",
+    harness: "opencode",
+    sessionId: value.source.sessionId,
+    project: value.source.workingDirectory,
+    modifiedAt: value.modifiedAt,
+    source: { kind: "opencode-sqlite", profileId: value.source.profileId, scope: value.scope },
+    projectionBytes: value.projectionBytes,
+    stagedRevert: value.stagedRevert,
+  };
 }
 
 /**
@@ -49,6 +72,7 @@ export function createAgentSessions(
     id: string,
     connections: readonly AgentHostConnection[],
   ) => AgentTranscriptHost = resolveAgentHost,
+  native?: OpenCodeProfiles,
 ): AgentSessions {
   // Resolving a session means listing its host; over SSH that is a recursive
   // directory walk, so a ref that already resolved skips it on later pages.
@@ -74,6 +98,17 @@ export function createAgentSessions(
     async resolve(ref) {
       const { host: hostId, session } = parseAgentSessionRef(ref);
       if (!session || session.includes("\0")) throw new AgentSessionRequestError("Invalid session ref");
+      if (hostId === "local" && session.startsWith("ses_")) {
+        if (!native) throw new AgentSessionRequestError("Native OpenCode history unavailable", 409);
+        const source = await native.resolve(session);
+        return {
+          ref: `local:${source.sessionId}`,
+          host: "local",
+          source,
+          sessionId: source.sessionId,
+          workingDirectory: source.workingDirectory,
+        };
+      }
       const configured = await connections();
       const source = resolveKnown(hostId, configured);
       // Always resolve afresh: the read cache is not launch authority.
@@ -141,12 +176,24 @@ export function createAgentSessions(
             return {
               error: {
                 host: id,
-                error: error instanceof Error ? error.message : String(error),
+                error: redactSensitiveText(error instanceof Error ? error.message : String(error)),
               },
             };
           }
         }),
       );
+      if (native && (options.host === undefined || options.host === "local")) {
+        try {
+          results.push({ sessions: (await native.list(options.limit)).map(nativeSummary) });
+        } catch (error) {
+          results.push({
+            error: {
+              host: "local/opencode",
+              error: redactSensitiveText(error instanceof Error ? error.message : String(error)),
+            },
+          });
+        }
+      }
       return {
         sessions: results
           .flatMap((result) => result.sessions ?? [])
@@ -156,6 +203,18 @@ export function createAgentSessions(
     },
     async read(ref, options = {}) {
       const { host: hostId, session } = parseAgentSessionRef(ref);
+      if (hostId === "local" && session.startsWith("ses_")) {
+        if (!native) throw new AgentSessionRequestError("Native OpenCode history unavailable", 409);
+        const value = await native.read(session, options);
+        const { modifiedAt: _modified, ...summary } = nativeSummary(value);
+        return {
+          session: summary,
+          entries: value.entries,
+          cursor: value.cursor,
+          ...(value.reset ? { reset: true as const } : {}),
+          ...(value.truncated ? { truncated: true as const } : {}),
+        };
+      }
       const configured = await connections();
       const source = resolveKnown(hostId, configured);
       // Keyed by where the id points, so retargeting a host never reads the old one's path.

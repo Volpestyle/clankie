@@ -159,6 +159,8 @@ export type SeatEvent =
 /** Control of one live seat. */
 export interface SeatControl {
   readonly ref: SeatRef;
+  /** Original prepared controller/root observation; never a wire or saved-metadata proof. */
+  verify?(): Promise<SeatProcessIdentity>;
   send(message: string, options?: { readonly timeoutMs?: number }): Promise<SeatDelivery>;
   status(): Promise<SeatStatus>;
   /**

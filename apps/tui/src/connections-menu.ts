@@ -25,7 +25,8 @@ interface AgentSession {
   readonly harness: string;
   readonly sessionId: string;
   readonly project?: string;
-  readonly size: number;
+  readonly size?: number;
+  readonly source?: { readonly kind: "opencode-sqlite" };
   readonly modifiedAt: string;
 }
 interface AgentHost {
@@ -85,7 +86,7 @@ function sessionOption(session: AgentSession, now: number): MenuOption {
   return {
     value: session.ref,
     label: `${session.harness.padEnd(6)} ${session.project === undefined ? "—" : projectLabel(session.project)}`,
-    hint: `${relativeAge(session.modifiedAt, now)} · ${session.sessionId.slice(0, 8)}`,
+    hint: `${relativeAge(session.modifiedAt, now)} · ${session.sessionId.slice(0, 8)}${session.source ? " · stored native history" : ""}`,
   };
 }
 
@@ -201,9 +202,10 @@ async function hostSessions(
     flow.setStatus(`Listing sessions on ${host.id}…`);
     let sessions: AgentSession[];
     try {
-      sessions = array<AgentSession>(
-        record(await services.agents(["list", "--host", host.id, "--limit", "30"])).sessions,
-      );
+      const result = record(await services.agents(["list", "--host", host.id, "--limit", "30"]));
+      sessions = array<AgentSession>(result.sessions);
+      for (const error of array<{ host: string; error: string }>(result.errors))
+        flow.renderLine(`${error.host}: ${error.error}`, "error");
     } catch (error) {
       flow.renderLine(`${host.id}: ${message(error)}`, "error");
       sessions = [];
@@ -233,14 +235,35 @@ async function sessionActions(
       message: title,
       options: [
         { value: "read", label: "Read latest", hint: "last 20 entries" },
-        { value: "resume", label: "Resume in native TUI", hint: "reuse its live seat or reopen in Herdr" },
+        {
+          value: "resume",
+          label: session.source ? "Reuse live native seat" : "Resume in native TUI",
+          hint: session.source
+            ? "original controller required; no new process"
+            : "reuse its live seat or reopen in Herdr",
+        },
       ],
       allowBack: true,
     });
     if (action === undefined) return;
     try {
       if (action === "resume") {
-        const result = record(await services.agents(["resume", session.ref]));
+        const conversation = session.source
+          ? await flow.readText({
+              message: "Hiring conversation ID",
+              allowBack: true,
+              validate: (value) =>
+                value.trim() ? undefined : "Enter the conversation that hired this worker.",
+            })
+          : undefined;
+        if (session.source && conversation === undefined) continue;
+        const result = record(
+          await services.agents([
+            "resume",
+            session.ref,
+            ...(conversation ? ["--conversation", conversation.trim()] : []),
+          ]),
+        );
         if (result.outcome !== "spawned")
           throw new Error(String(result.detail ?? result.reason ?? "Could not resume session"));
         shell.insertCommandResult(
@@ -253,7 +276,7 @@ async function sessionActions(
       const page = record(await services.agents(["read", session.ref, "--tail", "20"]));
       shell.insertCommandResult(
         `/agents read ${session.ref}`,
-        formatTranscript(array(page.entries)),
+        `${session.source ? "Stored native history (staged revert may differ from the live TUI).\n" : ""}${formatTranscript(array(page.entries))}`,
         "success",
       );
     } catch (error) {

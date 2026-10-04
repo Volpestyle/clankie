@@ -1,3 +1,4 @@
+import { savedSessionHarness } from "../agent-sessions.ts";
 import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
@@ -2095,7 +2096,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (deps.agentSessions?.resolve === undefined)
           throw new Error("Saved-session resolution is unavailable");
         resume = await deps.agentSessions.resolve(request.resume);
-        if (request.harness !== resume.file.harness || request.workingDirectory !== resume.workingDirectory)
+        if (
+          request.harness !== savedSessionHarness(resume) ||
+          request.workingDirectory !== resume.workingDirectory
+        )
           throw new Error("Harness and workingDirectory must match the saved transcript");
         const fleet = savedSessionFleet(resume, request.fleet, await refreshFleets(), namedLocal);
         request = { ...request, ...(fleet === undefined ? {} : { fleet }) };

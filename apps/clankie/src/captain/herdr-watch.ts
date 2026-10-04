@@ -1,3 +1,4 @@
+import { savedSessionHarness } from "../agent-sessions.ts";
 import { realpath } from "node:fs/promises";
 import { ProjectHires, type ProjectHireProcessProof } from "./project-hires.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
@@ -26,6 +27,7 @@ import type { SavedAgentSession } from "../agent-sessions.ts";
 import type {
   HarnessSeatAdapter,
   PreparedSeatLaunch,
+  SeatControl,
   SeatEvent,
   SeatLaunch,
   SeatView,
@@ -52,7 +54,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { stripVTControlCharacters } from "node:util";
+import { isDeepStrictEqual, stripVTControlCharacters } from "node:util";
 import { redactSensitiveText } from "@clankie/observability";
 import {
   OPERATOR_CONVERSATION_SUMMARY_MAX,
@@ -1074,7 +1076,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               occupantId: occupantIdForHerdrSession(live.session),
             });
       const reserved = reused ?? this.projectHires.reserve(settings, projectId, input);
-      if (resume !== undefined && reserved.request.harness !== resume.file.harness) {
+      if (resume !== undefined && reserved.request.harness !== savedSessionHarness(resume)) {
         this.projectHires.failed(reserved.id);
         throw new Error(
           "This role now uses a different harness. Its saved session cannot be resumed with these settings.",
@@ -1401,7 +1403,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
               : this.hireOwners.owner(live.paneId, live.terminalId, occupantIdForHerdrSession(live.session));
           if (held === undefined || held.conversationId !== authority.owner.conversationId)
             throw new Error("Saved live worker has no matching persisted conversation owner");
-          await assertConversationAuthority(authority);
         }
         if (
           live.agent === "shell" ||
@@ -1419,11 +1420,68 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw new Error(
             "The saved session is already live; its launch settings cannot be changed by resuming",
           );
-        await this.observeHireIdentity(receiptKey, live, input, authority);
+        // History and Herdr metadata cannot restore a prepared controller after
+        // disconnect/restart, including a resume with no initial message.
+        const needsOriginalControl = session.source !== undefined || savedSessionHarness(session) === "pi";
+        let control: SeatControl | undefined;
+        let originalProof: ProjectHireProcessProof | undefined;
+        const original = structuredClone(live);
+        const verifyOriginal = async (): Promise<ProjectHireProcessProof | undefined> => {
+          if (!needsOriginalControl) return undefined;
+          if (this.closed || !control?.verify)
+            throw new Error(
+              "Original native controller verification is unavailable; no new seat was started",
+            );
+          const checkProof = async () => {
+            if (
+              control!.ref.paneId !== original.paneId ||
+              control!.ref.harness !== input.harness ||
+              control!.ref.sessionId !== session.sessionId
+            )
+              throw new Error("Original native controller reference changed");
+            const proof = structuredClone(await control!.verify!());
+            if (
+              control!.ref.paneId !== original.paneId ||
+              control!.ref.harness !== input.harness ||
+              control!.ref.sessionId !== session.sessionId ||
+              proof.pane !== original.paneId ||
+              proof.fleet !== (input.fleet ?? "default") ||
+              proof.nativeOccupantId !== occupantIdForHerdrSession(original.session!) ||
+              (originalProof !== undefined && !isDeepStrictEqual(proof, originalProof))
+            )
+              throw new Error("Original native process identity changed");
+            originalProof ??= proof;
+            return proof;
+          };
+          await checkProof();
+          const current = await this.runner.get(original.paneId);
+          if (
+            current.paneId !== original.paneId ||
+            current.terminalId !== original.terminalId ||
+            current.agent !== input.harness ||
+            current.status === "offline" ||
+            current.status === "unknown" ||
+            current.workingDirectory !== original.workingDirectory ||
+            !isDeepStrictEqual(current.session, original.session)
+          )
+            throw new Error("Original native pane/session changed while resuming");
+          return checkProof();
+        };
+        const guardOriginal = async () => {
+          await verifyOriginal();
+          if (authority !== undefined) await assertConversationAuthority(authority);
+          await verifyOriginal();
+          if (needsOriginalControl) await this.admitProjectLaunch(input);
+          return verifyOriginal();
+        };
+        if (needsOriginalControl) control = await this.seatControl.attach(original);
+        const proof = await guardOriginal();
+        await this.observeHireIdentity(receiptKey, original, input, authority, needsOriginalControl, proof);
+        await verifyOriginal();
         // Reuse is allowed even at capacity. Never create another writer, or
         // turn a generic settlement of its current turn into this message's reply.
         if (brief !== undefined) {
-          const control = await this.seatControl.attach(live);
+          control ??= await this.seatControl.attach(live);
           if (!control)
             throw new Error(`The session is live in ${live.paneId}; message its existing seat explicitly`);
           if (receiptKey !== undefined) {
@@ -1435,7 +1493,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               ...(before === undefined ? {} : { beforeIds: before.entries.map((entry) => entry.id) }),
             });
           }
-          if (authority !== undefined) await assertConversationAuthority(authority);
+          await guardOriginal();
           const delivery = await control
             .send(brief)
             .catch((error: unknown) => ({ outcome: "unconfirmed" as const, detail: String(error) }));
@@ -1445,6 +1503,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
               reason: delivery.outcome === "unconfirmed" ? "delivery_unconfirmed" : "not_ready",
               detail: `Existing pane ${live.paneId}: ${JSON.stringify(delivery)}; no new seat was started`,
             };
+        }
+        if (needsOriginalControl) {
+          try {
+            await guardOriginal();
+          } catch (error) {
+            if (brief === undefined) throw error;
+            return {
+              outcome: "failed",
+              reason: "delivery_unconfirmed",
+              detail:
+                "Original native control changed after dispatch; inspect the existing session before retrying",
+            };
+          }
         }
         return spawnedSeat(
           live,

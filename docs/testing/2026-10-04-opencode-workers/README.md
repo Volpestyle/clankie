@@ -43,9 +43,10 @@ actual verified lifetime so later metadata cannot retroactively prove a hire.
 
 Only the first awaited TUI plugin initialization may create and navigate to a
 fresh native session. Pinned native source waits for that initialization before
-mounting Home or Session prompts. Exact resume uses `--session` and never creates
-or navigates. Reload/reattach cannot initialize again or acquire a replacement
-controller. General saved-session resolution is still separate remaining work.
+mounting Home or Session prompts. The native initializer supports exact `--session`
+without create/navigation, but the adapter refuses a new resume process until
+original exit can be independently proven. Existing live control can be reused.
+Reload/reattach cannot initialize again or acquire a replacement controller.
 
 Every send checks the displayed route, native session, native status and pending
 permissions/questions across authority awaits. The service saves a delivery
@@ -76,8 +77,9 @@ interrupt targets only the selected session and never answers an owner decision.
   neither terminates the native process nor deletes its history.
 - Restart does not restore live control. Durable unresolved delivery claims
   survive; a saved session label cannot authorize reattachment or resend.
-- Remote configured-fleet control, general native database history discovery and
-  API/CLI saved-session continuation are not implemented by this checkpoint.
+- Remote configured-fleet control and new-process saved-session continuation remain
+  unimplemented. Native history discovery covers only registered dedicated local
+  worker profiles, not arbitrary installed profiles/channels or attached servers.
   Live SDK history uses the existing normalized projection, bounded to 100 native
   messages. It is not a parallel persisted transcript store or complete history.
 - Native executable discovery is PATH-based and requires a direct executable;
@@ -86,6 +88,53 @@ interrupt targets only the selected session and never answers an owner decision.
   another platform. Even `--version` imports modules that initialize native
   filesystem paths, so capability discovery uses a disposable cwd/HOME/XDG/DB/
   config/temp environment without inherited owner configuration or credentials.
+
+## Native stored history
+
+Each new prepared worker receives its own absolute `OPENCODE_DB` in
+`captain/opencode-workers/profiles/<random>/opencode.db`. OpenCode creates and
+migrates that native database. Clankie only records a metadata address after
+fresh original controller/root/session checks and an exact matching database
+session row. Native data survives refused/uncertain allocation and controller
+cleanup. No transcript mirror is written, and descriptors grant no control.
+
+`clankie agents list --host local` and `clankie agents read local:ses_… --tail 50`
+use the existing owner-authenticated API. The TUI identifies stored native history
+and surfaces unavailable profile errors. `agents resume … --conversation ID` can
+reuse the same live controller; missing control or unproven original exit refuses
+without creating another native process. The TUI asks for the hiring conversation
+when reusing a native OpenCode seat. Existing file-backed sessions retain their
+own resume behavior. Saved Pi live reuse also requires its original prepared
+controller verification; metadata-only reuse is refused, including without a brief.
+Live native reuse checks the exact pane, terminal, session and process lifetime
+before and after conversation/project admission awaits. It retains the original
+project-hire process proof and refuses replacement without another allocation.
+Loss after accepted dispatch stays uncertain.
+
+The reader validates the pinned native v1/export schema and migration revision.
+It bounds discovery to 100 profiles, messages to 500 (default 50), parts to 2,000
+and payload to 4 MiB before JSON allocation. Full native text/output/error is
+redacted before chunking, and published entries use the existing strict transcript
+parser. Tool refs/names are bounded; unsupported object outputs/errors refuse
+rather than being stringified. Malformed JSON does not echo record fragments. Unknown schema, foreign/aliased or
+replaced files, redirected WAL sidecars and v2-only history report unavailable.
+It uses SQL read-only mode that refuses a missing database, `trusted_schema=OFF`, normal locking and a
+short transaction. In dedicated worker profiles only, SQLite may update SHM reader marks or recreate
+WAL/SHM files as normal native reader coordination. Fixture checks distinguish
+that coordination from unchanged DB and existing WAL content; a closed-writer
+fixture checks recreated sidecars against unchanged DB bytes and logical rows.
+Filesystem preflight is not an atomic no-create guarantee. This is not a claim
+of zero filesystem writes. No owner/global
+database is read or repaired, and no native CLI, history write, migration,
+checkpoint, disabled lock or immutable-live-DB shortcut is invoked. This matches
+[SQLite read-only WAL behavior](https://www.sqlite.org/wal.html#read_only_databases)
+and [the native WAL index lifecycle](https://www.sqlite.org/walformat.html#file_lifecycles).
+
+History is stored v1 export content, which can differ from the TUI's staged revert
+view. Cursors bind the exact local profile/database identity/session/schema and
+bounded content/revert fingerprint; mutation or rewind resets the page. A native
+summary has a discriminated SQLite source and projection byte count, not a fake
+JSONL file or the whole database size attributed to one session.
 
 ## Verification and primary source
 
@@ -117,3 +166,9 @@ Herdr source was inspected at `4812c9054cfce3e294a300c60d30d78d2a447d38`:
 `src/app/api/layouts.rs` and `src/pane.rs` implement native initial argv;
 `src/api/schema/common.rs` and `src/app/api/panes.rs` confirm the close limitation.
 Source inspection and fixture results do not establish owner deployment.
+
+The history fixture DDL is a licensed excerpt of the pinned native
+[`schema.gen.ts`](https://github.com/anomalyco/opencode/blob/4643e65ad6334de3e4e68dedc201d5fbb828c9fe/packages/core/src/database/schema.gen.ts);
+the reader checks its participating table/index shapes and exact
+[`migration.gen.ts`](https://github.com/anomalyco/opencode/blob/4643e65ad6334de3e4e68dedc201d5fbb828c9fe/packages/core/src/database/migration.gen.ts)
+revision without executing either upstream module.

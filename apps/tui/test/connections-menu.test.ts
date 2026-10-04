@@ -172,3 +172,50 @@ it("puts an error that ends the menu into the chat, where it outlives the status
     { prompt: "/connections", message: "Runtime connections need the operator credential" },
   ]);
 });
+
+it("labels stored native history, exposes discovery failures, and qualifies live reuse by hiring conversation", async () => {
+  const ref = "local:ses_native1234";
+  const { shell, readSelect, results, lines } = fakeShell(
+    ["machine:pc", "transcripts", ref, "read", "resume", undefined, undefined, undefined],
+    ["original-hire"],
+  );
+  const calls: string[][] = [];
+  const { services: deps } = services({
+    agents: async (args) => {
+      calls.push([...args]);
+      if (args[0] === "list")
+        return {
+          sessions: [
+            {
+              ref,
+              harness: "opencode",
+              sessionId: "ses_native1234",
+              project: "/projects/native",
+              modifiedAt: new Date(NOW).toISOString(),
+              source: { kind: "opencode-sqlite" },
+            },
+          ],
+          errors: [{ host: "local/opencode", error: "Unsupported native profile" }],
+        };
+      if (args[0] === "read") return { entries: [{ type: "message", role: "agent", text: "stored reply" }] };
+      if (args[0] === "resume")
+        return { outcome: "failed", detail: "Original controller unavailable; no new process" };
+      return {};
+    },
+  });
+  await runMachineConnectionsMenu(shell, deps);
+  expect(lines).toContain("local/opencode: Unsupported native profile");
+  expect(lines).toContain("Original controller unavailable; no new process");
+  expect(results[0]!.message).toContain("Stored native history");
+  expect(calls).toContainEqual(["resume", ref, "--conversation", "original-hire"]);
+  const menus = readSelect.mock.calls as unknown as Array<
+    [{ options: Array<{ label: string; hint?: string }> }]
+  >;
+  expect(
+    menus.some(([menu]) =>
+      menu.options.some(
+        (option) => option.label === "Reuse live native seat" && option.hint?.includes("no new process"),
+      ),
+    ),
+  ).toBe(true);
+});

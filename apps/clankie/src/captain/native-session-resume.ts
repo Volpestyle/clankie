@@ -1,3 +1,4 @@
+import { savedSessionHarness } from "../agent-sessions.ts";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import type { CodexAccount } from "@clankie/settings";
@@ -48,9 +49,14 @@ export function existingNativeSession(
   session: SavedAgentSession,
 ): HerdrAgentSnapshot | undefined {
   const sameHarness = (pane: HerdrAgentSnapshot) =>
-    pane.session?.source === `herdr:${session.file.harness}` || pane.agent === session.file.harness;
+    pane.session?.source === `herdr:${savedSessionHarness(session)}` ||
+    pane.agent === savedSessionHarness(session);
   const matches = panes.filter(
-    (pane) => sameHarness(pane) && nativeSessionId(pane)?.toLowerCase() === session.sessionId.toLowerCase(),
+    (pane) =>
+      sameHarness(pane) &&
+      (session.source
+        ? nativeSessionId(pane) === session.sessionId
+        : nativeSessionId(pane)?.toLowerCase() === session.sessionId.toLowerCase()),
   );
   if (matches.length > 1)
     throw new Error("Several live panes hold this session; select the existing seat explicitly");
@@ -76,6 +82,7 @@ export async function savedCodexAccount(
   accounts: readonly CodexAccount[],
   requested?: string,
 ): Promise<CodexAccount> {
+  if (session.source) throw new Error("Native database history is not a Codex account transcript");
   const path = await realpath(session.file.path);
   const matches: CodexAccount[] = [];
   for (const account of accounts) {
@@ -92,6 +99,10 @@ export async function savedCodexAccount(
 
 /** Native TUI flags only. No print/exec runner and no fork flag. */
 export function nativeResumeArgs(session: SavedAgentSession): readonly string[] {
+  if (session.source)
+    throw new Error(
+      "OpenCode resume needs original controller/exit proof; stored history is not launch authority",
+    );
   switch (session.file.harness) {
     case "claude":
     case "grok":
