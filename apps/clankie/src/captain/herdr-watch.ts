@@ -2816,7 +2816,10 @@ function claudeReply(transcript: string): string | undefined {
     for (let next = index + 1; next < lines.length && /^ {2}\S/u.test(lines[next] ?? ""); next += 1) {
       parts.push((lines[next] ?? "").trim());
     }
-    const recap = parts.join(" ").replace(/\s*\(disable recaps in \/config\)\s*$/iu, "").trim();
+    const recap = parts
+      .join(" ")
+      .replace(/\s*\(disable recaps in \/config\)\s*$/iu, "")
+      .trim();
     return recap.length === 0 ? undefined : recap;
   }
   return undefined;
