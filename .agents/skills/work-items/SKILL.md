@@ -79,7 +79,7 @@ explicit acceptance criterion. The lead owns scope and assignment boundaries;
 workers publish their own results and evidence directly, following the project's
 rules for status transitions. Shared integration, disputed acceptance and scope
 changes go to their decision owner. Keep the latest scope, decisions, result and
-actionable blockers on the issue; keep live coordination in the handoff.
+actionable blockers on the issue; keep live coordination in native fleet messages.
 
 For a bug investigation where a tracker is in use, search in-progress and recent
 closed items for the symptom or related changes before forming a code hypothesis.
@@ -95,8 +95,11 @@ app identity, not an email alias or a separate Linear member. A worker bridge
 grant must pin the exact `personaId`; without that grant, send the result to
 the lead to publish. Never substitute an inherited personal tracker connector.
 
-Return a short final report: outcome, evidence links, unresolved gaps and open
-decisions. Leads start from that report and evidence and open the retained
+A worker reports through `message_clankie` to its hiring/adopting conversation:
+outcome, branch and commits, checks, evidence links, unresolved gaps and open
+decisions. Peer collaboration uses `list_fleet_seats` / `message_peer` when
+exposed; it does not replace the lead's outcome report. Return that same short
+final report at turn completion. Leads start from that report and evidence and open the retained
 thread only when needed. Keep routine coordination out of issue comments.
 For setup and supported paths, read `docs/linear-worker-posts.md` in Clankie's
 repository or the worker-posts section of the CLI reference.
@@ -104,6 +107,6 @@ repository or the worker-posts section of the CLI reference.
 ## When the backend is unavailable
 
 `backend_unavailable` names the recorded convention: Linear or GitHub is not
-connected to Clankie (`clankie accounts`), or `gh` is signed out. Report that to
+connected to Clankie (`clankie accounts`), or the configured GitHub CLI route is signed out. Report that to
 your lead. Do not fall back to
 files, which would fork the record.

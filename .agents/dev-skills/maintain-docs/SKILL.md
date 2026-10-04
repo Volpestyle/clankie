@@ -25,6 +25,12 @@ and the docs site links to them rather than copying policy text (ADR 0155).
 Hosted, business, and launch facts stay in `clankie-ops`; never move them into
 this public repo or the landing page's source comments.
 
+Skills are also product surfaces: edit `.agents/skills` here, reusable process
+skills in Volpestyle/skills, then refresh the committed export via
+`vendor/opinionated-skills.json` and `docs/bundled-skills.md`. The Herdr skill is
+binary-generated; `pnpm herdr:skill:check` verifies it. Native seat instructions
+come from their build scripts; never repair only a generated projection.
+
 Generated pages rebuild from their sources. Fix `docs/cli.md`,
 `apps/clankie/openapi.yaml`, `packages/protocol/src/public-gateway.ts`, or the
 TUI README, never `apps/docs/dist`. `how-it-works.md` is a hand-written digest
@@ -52,7 +58,7 @@ that spans repos, and list it in that table.
   the product and gets its own first-class section, never a co-equal "two ways
   in" identity (ADR 0156).
 - Retired systems stay out of current-tense prose: missions, the doctrine
-  contract, the control plane/runner split, the in-repo emulator and mGBA core
+  contract, the control plane/runner split, Swarm coordination (ADR 0213), terminal-delivered agent briefs (ADR 0207), the in-repo emulator and mGBA core
   (ADR 0145), and the app's canvas view. ADRs and dated test records may keep
   describing them as history. The garden and the commons are the same living
   room of agent sprites; either name is fine.

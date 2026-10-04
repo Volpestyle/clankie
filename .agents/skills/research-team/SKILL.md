@@ -16,8 +16,12 @@ answer a question that no longer matters; a well-executed task can serve the
 wrong priority. Research leadership considers the whole effort, connects its
 activities to the person's goal and changes direction when the evidence warrants it.
 
-For authorized dispatch, load `lead`. Local hires use `hire_agent` and
-`message_seat`; remote agents use the fleet link. Missing
+For authorized dispatch, load `lead`. Local and remote hires use `hire_agent` and `message_seat`; remote seat IDs
+retain their fleet prefix. Workers report with `message_clankie` to the hiring
+or adopting conversation. Native Codex children remain part of their parent
+seat; use them for bounded analysis when available. Workers can resolve a
+shared boundary with `list_fleet_seats` / `message_peer` while peer messages
+are enabled, without transferring scope or waking the lead. Missing
 harness control never permits automated terminal typing. Use `work-items` when
 a tracker is in play and `shared-checkout`
 before commits. An advisory check-in does not itself authorize more workers,

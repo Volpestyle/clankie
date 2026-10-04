@@ -3,7 +3,7 @@ name: c
 description: >-
   Group the working tree's uncommitted changes into one or more logical commits, create
   them, then rebase onto the fetched default branch only if the branch no longer merges
-  clean — whole files per commit, no per-hunk splitting, no push. Invoke manually as /c.
+  clean — preserve shared ownership, stage named files or owned hunks, no push. Invoke manually as /c.
 ---
 
 # c
@@ -22,8 +22,10 @@ the authorization — commit without checking in again.
    staged). Read every changed and untracked file before committing any of them.
 2. **Group.** One coherent change → one commit. Clearly separate concerns → one commit each,
    ordered so the log reads sensibly.
-   - **Whole files only.** Stage entire files (`git add <files>`); never split one file's
-     hunks across commits. A file that genuinely mixes concerns stays in a single commit.
+   - Stage your owned files by name. In a shared checkout, load `shared-checkout`
+     and preserve others' staged and unstaged work. Its scoped-hunk procedure
+     takes precedence when a file mixes owners; never commit their edits merely
+     because they share a file. Whole owned files usually need no hunk splitting.
    - **Never `git add -A`.** Stage files by name. A worktree can hold an untracked
      `node_modules` *symlink* that the repo's `node_modules/` ignore pattern misses — that
      pattern only matches directories.
@@ -42,7 +44,9 @@ the authorization — commit without checking in again.
    ```
    - Merges clean → **do not rebase.** A needless rebase rewrites every SHA and turns the
      next `/p` into a force-push for nothing. Say you skipped it.
-   - `CONFLICT` → `git rebase origin/<default>` and resolve (below).
+   - `CONFLICT` in your isolated branch → `git rebase origin/<default>` and resolve
+     (below). In a shared branch, coordinate with its owners instead; never
+     rewrite their commits or index. The task's branch/worktree choice governs.
    - Already on the default branch → skip.
    - Stacked on another feature branch (`git log --oneline origin/<default>..HEAD` shows a
      parent's commits)? Check and rebase against the **parent**, not the default branch —

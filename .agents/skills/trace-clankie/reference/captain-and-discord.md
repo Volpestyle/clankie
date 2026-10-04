@@ -35,28 +35,23 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   stay at turn acceptance while activity and tools keep appending. Judge a live
   turn by the newest `events.jsonl` event and its accepted/completed pair.
 
-- **Presence phases are edge-triggered at the event level.** `discord.presence.*`
-  and `captain.presence.*` phases persist until the owning process emits the
-  next transition, so judge liveness by the **age of the last event** for that
-  session id, never by the stored phase alone. The console keys presence rows
-  by bot binding (a successor's first event retires its predecessor's row) and
-  stamps each row `· since <t>` — a live phase with an old stamp is a dead
-  process that never got a successor.
+- **Presence phases are observations, not liveness proof.** A phase can remain
+  unchanged while its owner works. Join its exact binding/session to current
+  process health and newer events; an old timestamp alone does not establish a
+  dead process. A successor retires its predecessor's row.
 
-- **The agent roster only sees Herdr panes.** Clankie leads coding agents
-  through the herdr CLI; there is no worker protocol reporting to the service.
-  Inside Herdr the console lists panes from `herdr pane list` as
-  `[<agent> · herdr]` rows; outside Herdr an empty roster only means "no
-  visibility" — check `herdr pane list` yourself. The roster is not the limit of
-  what can be read: `clankie agents` lists, reads and resumes any Claude/Codex/Grok/Pi session by
-  its transcript, here or on a configured SSH host such as the PC, whatever
-  terminal it runs in (ADR 0189). Only the 200 newest transcripts per host
-  resolve by ref.
+- **The fleet roster and saved history answer different questions.** The roster
+  observes native occupants in connected Herdr fleets; hires and messages use
+  native harness channels/session APIs. Worker reports arrive with
+  `message_clankie` at their hiring/adopting conversation. Herdr visibility alone
+  proves neither report delivery nor completion. `clankie agents list|read`
+  inspects saved native transcripts, including configured remote hosts and local
+  registered OpenCode profiles. A saved transcript does not prove a live worker.
 
-- **A turn with no tree never answered.** Pi holds a session file back until the
-  first assistant message, so a one-shot that timed out or failed before he
-  replied leaves nothing under `turns/`. Absence is evidence; pair it with the
-  `discord.text.ingress` receipt that has no matching `discord.text.reply`.
+- **A missing Pi tree does not prove no answer.** A one-shot can fail before
+  the first assistant message creates its session file, while an attached native
+  seat writes to its own harness transcript. Join the ingress, selected execution
+  destination and delivery/reply receipts before drawing a conclusion.
 
 - **A provider failure can resolve with no reply.** For `captain_model_failed`
   or `captain_usage_limit_reached`, read the terminal assistant's `stopReason`
@@ -64,14 +59,14 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   receipts can hide the same failure; do not infer an empty successful run
   from that code alone.
 
-- **An `accepted` receipt with no terminal one is a turn still running, not a
-  lost one.** The terminal receipt lands whenever the turn settles, which for a
-  wedged turn is at the 3-minute deadline — outside any window you picked from
-  the accepted timestamp. Widen the window before concluding a turn vanished.
+- **An `accepted` receipt is admission.** Without a terminal receipt the run may
+  still be active, interrupted or failed elsewhere. Inspect current run state,
+  its configured deadline and the original receipt; a time window alone does
+  not establish loss or authorize replay.
 
-- **`absorbed` is not `declined`.** A message folded into a live run reports
-  `absorbed` (ADR 0118): he answered, the answer just rode the delivery that
-  owned the run. Only `declined` means he read it and chose silence.
+- **`absorbed` is not `declined` or answered.** It records input folded into a
+  live run (ADR 0118); inspect that run's final reply and delivery. `declined`
+  records the choice to stay silent. Neither status grants new authority.
 
 - **A restart does not clear Discord conversation context.** The next ingress
   prompt can feed Clankie his own earlier replies from channel history, so a

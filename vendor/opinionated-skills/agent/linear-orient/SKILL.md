@@ -7,7 +7,10 @@ description: Orient to a Linear project or issue before working or reporting its
 
 Build a sourced picture of what is shipping, what is in flight, and what blocks
 the next result. Start with current work; a full historical audit is opt-in.
-Resolve the workspace and team from the project or issue prefix.
+Resolve the workspace and team from the project or issue prefix. In Clankie's
+confirmed fleet, discover connected Linear tools through `clankie_tools` and
+`clankie_call`; load `clankie` for actor and admission boundaries. The unprefixed
+examples below describe `linear-server`; use the exposed schema for your route.
 
 Start from current scope, acceptance criteria and the latest result, then read
 the relevant decisions and replies, including inline comments (`quotedText`).

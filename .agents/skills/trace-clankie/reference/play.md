@@ -54,8 +54,8 @@ Traps that cost real time when reading play journals, screenshots and hosted wor
   execution or saved state. V1/V2 journals predate this join and must not be
   assigned a journey from timing alone.
 
-- **There is no current GBA possession trail.** Clankie's play host and every
-  GBA MCP process own separate emulator/runtime instances. Trace Clankie's play
+- **There is no current GBA possession trail.** Clankie's driver uses its own hosted PokeAgents seat; another harness's MCP
+  player has an independent world session. No emulator lives in Clankie's repo. Trace Clankie's play
   through `gba-play/*.jsonl` plus embodiment lifecycle events; trace an MCP
   harness through its own stdio results and configured checkpoint directory.
   Old `body.lock` and `possession-events.jsonl` files are inert and intentionally
@@ -64,7 +64,7 @@ Traps that cost real time when reading play journals, screenshots and hosted wor
 - **`world_unreachable` is usually a missing process, not a crash.** The hosted
   world is a separate `pokeagents` server reached over a unix socket, so a
   refusal milliseconds after `embodiment.session.claimed` means nothing was
-  listening. Check `ps aux | grep pokeagents` and compare its start time
+  listening. Check the configured host endpoint with `pokeagents check` (without a subject) and compare its start time
   (`ps -p <pid> -o lstart=`) against the refusal — a join that lands before the
   server is up refuses, and the retry seconds later succeeds. `refused` is not
   `failed`: he never started, so there is no journal and nothing crashed.

@@ -518,7 +518,7 @@ See [worker posts](linear-worker-posts.md) for examples, grants and limitations.
 ### `linear status` / `linear follow on|off`
 
 When a webhook is configured, accepted events appear in the **Linear inbox**
-conversation (`linear-inbox`) as **External activity** messages, including swarm
+conversation (`linear-inbox`) as **External activity** messages, including worker
 posts delivered by the webhook. Workspace webhook events are passive history. Clankie also reads the connected
 account’s actual Linear notifications once at startup and when webhooks arrive.
 There is no periodic poll. A newly persisted, signed workspace event (or a verified exact self echo) requests a
@@ -1325,7 +1325,7 @@ The notes reach him as the `fleet` prompt section, and only on lanes that hold a
 shell — a room that cannot dispatch would carry the section for nothing. They are
 preference, not authority: the section says plainly that he still reads the work
 and decides, and a note here can no more widen his reach than a warmer persona
-can. The section carries the swarm size and model mode whenever it renders. With
+can. The section carries the fleet size and model mode whenever it renders. With
 no notes and the default budget (`max`, `optimal`) there is no section at all.
 
 JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "tools": "connected", "peerMessages": "on" }, "settingsFile": "…", "restart": "clankie restart" }`.

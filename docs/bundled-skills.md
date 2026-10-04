@@ -8,8 +8,8 @@ repository and user's authorization still govern their use.
 The authoring source for reusable process skills is
 [Volpestyle/skills](https://github.com/Volpestyle/skills). The pinned revision and
 selected directories are in [the manifest](../vendor/opinionated-skills.json).
-The snapshot retains its MIT license. The manifest records the local VUH-1457
-leadership merge on top of that revision; preserve it when refreshing upstream. Clankie's own product skills remain authored in `.agents/skills`.
+The snapshot retains its MIT license. The leadership merge and native delivery guidance now live upstream; the
+current export needs no local patches. Clankie's own product skills remain authored in `.agents/skills`.
 
 ## Two classes, one switch
 
@@ -24,7 +24,7 @@ the configured selection and its catalog.
 Product/tool skills are always on: `clankie`, `this-machine`, `trace-clankie`, `work-items`,
 `research-team`, `computer-use-delegation`, `desktop-control`, `browser-use`, `herdr`,
 and every other skill authored in this repo (including `comparison-shopping`,
-`daily-digest`, `inbox-triage` and `trip-planning`). Product exclusions are refused
+`daily-digest`, `inbox-triage`, `trip-planning`, `minecraft` and `pokeagents`). Product exclusions are refused
 by the CLI and ignored by loaders if present in an older settings file.
 
 Everything selected from `vendor/opinionated-skills/` is opinionated, including
@@ -39,15 +39,15 @@ Everything selected from `vendor/opinionated-skills/` is opinionated, including
 | Working methods | solution-space               |
 
 The `clankie` skill teaches agents started by hand how to recognize his fleet,
-reach him and report through their assignment's channel or handoff. It applies
+reach him and report with `message_clankie` to their hiring/adopting conversation. It applies
 when Clankie is named or the fleet is confirmed; discovery alone does not hire
 an agent. Dotfiles can select the repo-owned source for Claude and Codex without
 copying it into the personal skills repository.
 
-The catalog contains **22 skills: 8 opinionated and 14 product/tool skills**.
+The catalog contains **23 skills: 8 opinionated and 15 product/tool skills**.
 VUH-1457 merged the three leadership entries into `lead`, with shared judgment,
-native hires and harness delivery. Its Herdr references
-use the native CLI; the vendored dashboard plugin and board-specific references
+native hires and harness delivery. Its operations reference
+uses `hire_agent`, `message_seat` and `message_clankie`; Herdr holds visible terminals. The vendored dashboard plugin and board-specific references
 were removed per cut audit C23. Other opinionated-skill evaluations remain on hold.
 
 Turning guidance off does not disable leading. `herdr` remains
@@ -84,16 +84,16 @@ Twelve process skills left the bundle: `blast-radius`, `co-w`, `conventions`,
 days of Clankie and worker transcripts each was loaded about as often as it merely
 appeared in a skill listing (cut audit C22, extended). Each one cost catalog
 context on every turn and duplicated James's global copy or a harness's own review
-command. Upstream sources and owner-global selections are unchanged. The `lead`
-skill's Herdr fallback now describes a handoff file instead of naming
-`herdr-handoff`. That upstream skill was deleted on 2026-10-04: its kickoff typed
-into the receiver's TUI, which ADR 0207 rules out for automated delivery.
+command. Upstream sources and owner-global selections are unchanged. The current
+`lead` skill has no terminal or handoff-file delivery fallback; retained files
+carry context and evidence through the native channel. The upstream
+`herdr-handoff` skill was deleted on 2026-10-04: its kickoff typed into the
+receiver's TUI, which ADR 0207 rules out for automated delivery.
 
-`reflect` stays. The pinned
-upstream text is heavier: four steps, a lesson/evidence/route ledger and a
-proposal/approval phase. That is a candidate for an upstream simplification.
-This merge does not change that skill or require its ritual. No upstream skill
-or owner-global dotfiles selection is removed by these cuts.
+`reflect` stays, with concise source-owned repairs and proposals where authority
+remains open. Updating stale commands and paths under an authorized maintenance
+task does not require a separate proposal ceremony. These cuts do not remove
+owner-global skill selections.
 
 Herdr is both a bundled tool skill and an independently selectable global skill.
 Fresh installs and hosted bodies need its instructions without any owner-global
@@ -169,9 +169,9 @@ Read `vendor/opinionated-skills.json`, check out its full revision in the skills
 repository, and export the listed directories plus `LICENSE` with `git archive`.
 Preserve the source-relative paths under `vendor/opinionated-skills/` and the
 relative links from `.agents/skills` and the Claude plugin. Never snapshot an
-uncommitted working tree. Reapply the manifest's recorded local changes, including
-the consolidated leadership skill and removal of the dashboard, before replacing
-the shipped snapshot. Update the manifest revision in the same change and
+uncommitted working tree. Reapply any recorded `localChanges` before replacing the shipped snapshot.
+The current list is empty: the consolidated lead, native delivery and landing
+helper fixes are all in the pinned upstream source. Update the manifest revision in the same change and
 review the export for personal accounts, private material and out-of-root links.
 Release assembly dereferences these links, including the worker plugin, so an
 installed body needs no sibling checkout. The vendored prose is excluded from

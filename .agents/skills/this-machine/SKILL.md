@@ -64,13 +64,17 @@ for a workspace conversation. Reopening the TUI does not reset model context.
 ## Launcher control
 
 Landed code is not live until the pinned runtime is updated. From an admitted
-machine turn, use `update_runtime` (or `clankie update [--ref REF]`) to stage the
-local landed `main`, install and detach a guarded restart. It never fetches remote
-refs implicitly. `accepted: true` means pending, not completed: finish the turn,
-then read `runtime_update_status` or `clankie update status` on your next turn and
-report the old/new commit and actual health or rollback. The TUI has `/update`
-and `/update status`. Never repeat an uncertain update; inspect its existing
-operation. A dirty pin or failed install leaves the old runtime untouched.
+machine turn, use `update_runtime` or `clankie update [--ref REF]` to stage a local
+Git ref, install and detach a guarded restart. Default is local landed `main`.
+`clankie update --ref origin/main` uses the locally fetched remote ref; fetch in
+the reported source repository first when current remote code is requested.
+Update never fetches, merges or publishes your working branch.
+
+`accepted: true` means pending, not completed. Finish the turn, then read
+`runtime_update_status` or `clankie update status` on your next turn and report
+the old/new commit and actual health or rollback. The TUI has `/update` and
+`/update status`. Never repeat an uncertain update; inspect its existing operation.
+A dirty pin or failed install leaves the old runtime untouched.
 
 Social turns cannot update the machine. Older already-loaded MCP bridges may
 need their MCP process refreshed to understand newer protocols; repinning files
@@ -102,10 +106,10 @@ index). Configure through the headless CLI:
 | Bundled skill classes and selection   | `clankie skills`; also `clankie doctor` → `skills`                                                     |
 | Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                                                |
 | Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                                         |
-| Captain + local providers             | `clankie model status`                                                                                 |
+| Service model + local providers       | `clankie model status`                                                                                 |
 | Add a local OpenAI-compatible runtime | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`                              |
-| Switch captain                        | `clankie model set provider/model`                                                                     |
-| Captain effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                             |
+| Switch service model                  | `clankie model set provider/model`                                                                     |
+| Service effort                        | `clankie effort status`, `clankie effort set high`, `clankie effort clear`                             |
 | Cheaper model for everyday turns      | `clankie model routing`, `clankie model routing set provider/model`, `… escalate on`                   |
 | When long sessions compact            | `clankie model compaction`, `clankie model compaction set 250000`, `… default`                         |
 | ElevenLabs voice model                | `clankie voice status`, `clankie voice model set eleven_v4_turbo`, `clankie voice model clear`         |
@@ -116,6 +120,10 @@ index). Configure through the headless CLI:
 | Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`                       |
 | Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                                |
 | Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                                    |
+| Desktop expressions / quiet hours     | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`    |
+| Minecraft profiles and play           | `clankie minecraft configure`, `profiles`, `status`, `join PROFILE`, `leave`; load `minecraft`         |
+| Fleet connected tools / peer messages | `clankie fleet status`, `clankie fleet set --tools off`, `clankie fleet set --peer-messages off`       |
+| Native conversation seats             | `clankie claude`, `codex`, `opencode` with `--conversation ID`; inspect with `--dry-run`               |
 | Herdr session                         | `clankie herdr status --json`, `clankie herdr use NAME`, `clankie herdr create`                        |
 | His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                          |
 | State your assignment (for agents)    | `clankie work-on "Objective" [--repo REPO_ID --issue ISSUE_ID]`, `clankie work-on clear`               |
@@ -174,7 +182,16 @@ notes. Local Codex `/goal` state appears automatically, including paused,
 blocked, budget/usage limits and completion. Remote or unsupported native goal
 stores remain unknown. Goal state and busy/idle turn status are independent.
 
-## Agents in the local fleet
+## Presence and desktop body
+
+`get_self_state` reports current activity; `clankie status` reports process
+health. Source-derived presence and a desktop expression are separate: the
+`desktop` tool can emote, move with normalized display coordinates or show a
+short bubble. It publishes an expiring expression, not keyboard or mouse input.
+Desktop clients honor quiet hours and macOS Focus; publication is not proof a
+client displayed it. For app input, use `desktop-control` or a computer-use seat.
+
+## Agents in the linked fleet
 
 `doctor.harnessBridges` reports the worker bridge separately from the operator
 seat: Claude plugin installation/enabling, Codex registration and generated config
