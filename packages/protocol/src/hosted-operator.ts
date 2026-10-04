@@ -64,6 +64,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/discord/rooms",
       "/v1/discord/room-voice",
       "/v1/discord/settings",
+      "/v1/discord/directory",
       "/v1/body-leases",
       "/health",
       "/v1/operator/persona",

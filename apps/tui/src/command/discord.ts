@@ -1,5 +1,6 @@
 import { ClankieApiClient } from "@clankie/api-client";
 import { DISCORD_SETTING_GROUPS } from "@clankie/protocol";
+import { DiscordDirectoryRequestSchema, type DiscordDirectorySnapshot } from "@clankie/protocol";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import type {
   DiscordRoomStatus,
@@ -26,6 +27,7 @@ const DISCORD_USAGE = [
   "Usage: clankie discord [status]",
   "       clankie discord rooms",
   "       clankie discord definition",
+  "       clankie discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]",
   "       clankie discord guide CONVERSATION_ID TEXT|--clear",
   "       clankie discord transcripts [--cursor CURSOR] [--limit N]",
   "       clankie discord set --field value [--field value ...]",
@@ -242,9 +244,31 @@ export async function runDiscordCommand(
   | DiscordRoomGuidance
   | DiscordRoomVoiceStatus
   | DiscordSetupSnapshot
+  | DiscordDirectorySnapshot
 > {
   const verb = args[0];
-  if (verb === "rooms" || verb === "guide" || verb === "call" || verb === "definition") {
+  if (
+    verb === "rooms" ||
+    verb === "guide" ||
+    verb === "call" ||
+    verb === "definition" ||
+    verb === "directory"
+  ) {
+    let directoryQuery;
+    if (verb === "directory") {
+      const { values, positionals } = parseArgs({
+        args: args.slice(1),
+        allowPositionals: true,
+        options: { server: { type: "string" }, limit: { type: "string" }, after: { type: "string" } },
+      });
+      if (positionals.length > 1) throw new Error(DISCORD_USAGE);
+      directoryQuery = DiscordDirectoryRequestSchema.parse({
+        kind: positionals[0] ?? "servers",
+        ...(values.server ? { guildId: values.server } : {}),
+        ...(values.limit ? { limit: values.limit } : {}),
+        ...(values.after ? { after: values.after } : {}),
+      });
+    }
     if (verb === "definition" && args.length !== 1) throw new Error(DISCORD_USAGE);
     const credential = await resolveOperatorCredential({
       env: options.env ?? process.env,
@@ -256,6 +280,7 @@ export async function runDiscordCommand(
       operatorToken: credential.token,
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     });
+    if (directoryQuery) return client.discordDirectory(directoryQuery);
     if (verb === "definition") {
       const snapshot = await client.discordSettings();
       if (!snapshot.setup)

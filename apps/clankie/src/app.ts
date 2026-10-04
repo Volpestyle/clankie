@@ -477,6 +477,7 @@ export interface ClankieAppDependencies {
   personaImages?: PersonaImageSource;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
   discordEnvironment?: NodeJS.ProcessEnv;
+  discordDirectory?: import("./discord-room-routes.ts").DiscordRoomRoutesOptions["directory"];
   roomObservations?: DiscordRoomObservations;
   roomVoice?: DiscordRoomVoice;
   settings?: {
@@ -1012,6 +1013,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       "/",
       createDiscordRoomRoutes({
         machineName: dependencies.hostedBody ? "his cloud computer" : hostDisplayName,
+        environment: dependencies.discordEnvironment ?? process.env,
+        ...(dependencies.discordDirectory ? { directory: dependencies.discordDirectory } : {}),
         authorize: authorizeRoom,
         captain: dependencies.captain,
         observations: dependencies.roomObservations,

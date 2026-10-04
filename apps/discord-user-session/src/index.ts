@@ -65,6 +65,7 @@ import {
 } from "@clankie/settings";
 import { createVoxClient, VOX_IPC_PROTOCOL_VERSION } from "@clankie/vox-client";
 import { createServer } from "node:http";
+import { tryHandleDiscordDirectoryRequest } from "@clankie/discord-presence-core";
 import { DiscordUserGateway } from "./gateway.ts";
 import { userSessionHealth, type UserSessionGatewayStatus } from "./health.ts";
 import { assertUserSessionAdmissible } from "./readiness.ts";
@@ -996,6 +997,13 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ error: "user_session_shutting_down" }));
     return;
   }
+  if (
+    tryHandleDiscordDirectoryRequest(request, response, {
+      token: bridgeToken,
+      read: (query) => gateway.readDirectory(query, gatewayStatus === "ready"),
+    })
+  )
+    return;
   if (request.method === "GET" && (url === "/" || url === "/health")) {
     const health = userSessionHealth({
       gatewayStatus,

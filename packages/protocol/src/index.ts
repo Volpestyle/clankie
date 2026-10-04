@@ -22,6 +22,7 @@ import {
 } from "./projects.ts";
 export * from "./discord-settings.ts";
 export * from "./discord-setup.ts";
+export * from "./discord-directory.ts";
 export * from "./discord-rooms.ts";
 import { BodyLeaseResultSchema } from "./body-leases.ts";
 import { DeliveryStageSchema } from "./delivery.ts";

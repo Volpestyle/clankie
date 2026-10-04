@@ -8,8 +8,13 @@ import {
   DiscordRoomGuidanceRequestSchema,
   DiscordSettingsUpdateSchema,
   DISCORD_SETUP_DEFINITION,
+  DISCORD_DIRECTORY_PATH,
+  DiscordDirectoryRequestSchema,
+  type DiscordDirectoryRequest,
+  type DiscordDirectorySnapshot,
 } from "@clankie/protocol";
 import type { ClankieSettings } from "@clankie/settings";
+import { resolveDiscordSettings } from "@clankie/settings";
 import type { CaptainPort } from "./captain/port.ts";
 import type { DiscordRoomObservations } from "./discord-room-observations.ts";
 
@@ -21,6 +26,11 @@ export interface RoomAuthorization {
 export interface DiscordRoomRoutesOptions {
   /** Host name, or “his cloud computer” for a hosted runtime. */
   machineName?: string;
+  directory?(
+    query: DiscordDirectoryRequest,
+    body: DiscordDirectorySnapshot["body"],
+  ): Promise<DiscordDirectorySnapshot>;
+  environment?: NodeJS.ProcessEnv;
   authorize(request: Request, access: RoomAccess): Promise<RoomAuthorization | undefined>;
   captain: Pick<CaptainPort, "serveOperatorConversation">;
   observations: DiscordRoomObservations;
@@ -116,6 +126,33 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
         ? { setup: { definition: DISCORD_SETUP_DEFINITION, machineName: options.machineName } }
         : {}),
     });
+  });
+  app.get(DISCORD_DIRECTORY_PATH, async (context) => {
+    const authority = await options.authorize(context.req.raw, "observe");
+    if (!authority) return context.json({ error: "room_observe_required" }, 403);
+    const query = DiscordDirectoryRequestSchema.safeParse(context.req.query());
+    if (!query.success) return context.json({ error: "invalid_discord_directory_request" }, 400);
+    const body = resolveDiscordSettings((await options.settings.load()).discord, options.environment ?? {})
+      .settings.activeBody;
+    const snapshot = options.directory
+      ? await options.directory(query.data, body)
+      : {
+          schemaVersion: 1 as const,
+          body,
+          kind: query.data.kind,
+          state: "disconnected" as const,
+          entries: [],
+          hasMore: false,
+          reason: "runtime_not_connected" as const,
+        };
+    const freshBody = resolveDiscordSettings(
+      (await options.settings.load()).discord,
+      options.environment ?? {},
+    ).settings.activeBody;
+    await authority.guard();
+    if (!authority.current()) return context.json({ error: "room_observe_required" }, 403);
+    if (freshBody !== body) return context.json({ error: "discord_body_changed" }, 409);
+    return context.json(snapshot);
   });
   app.post(DISCORD_SETTINGS_PATH, async (context) => {
     const authority = await options.authorize(context.req.raw, "settings");

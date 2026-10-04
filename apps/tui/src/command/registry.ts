@@ -387,6 +387,10 @@ const HEADLESS_COMMAND_HELP = [
   { nouns: ["discord"], lines: ["  discord set --field value […] | clear --field […]"] },
   {
     nouns: ["discord"],
+    lines: ["  discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]"],
+  },
+  {
+    nouns: ["discord"],
     lines: ["  discord definition       Read the shared Discord sentences, pickers and Advanced fields"],
   },
   {

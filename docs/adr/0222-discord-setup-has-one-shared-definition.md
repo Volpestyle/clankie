@@ -30,3 +30,14 @@ The team server stays in `discord.swarmGuildId`. Independent optional
 picker and visibility picker are separate. Old-client writes that omit this
 new field preserve the existing gate. Hiding/showing changes the gate, keeps
 the selected server and is implemented by VUH-1626 without deleting webhooks.
+
+Directory pickers read the currently connected account's observed gateway cache
+through the API and CLI. The existing active body's loopback server uses its
+own brokered bridge bearer; this read does not start a runtime or obtain an
+account credential. The API/relay retain Observe authorization and recheck it
+after awaited work. Active-body changes reject the pending result. Names, IDs
+and kinds are projected only when the account's view permits them. Missing
+permission evidence fails closed. Partial member/thread coverage and runtime
+absence are explicit states, with bounded ID-based pages. Integration tests
+exercise native discord.js caches, a real loopback user gateway, body HTTP,
+API/client/CLI and paired relay, including old-client/new-host settings reads.

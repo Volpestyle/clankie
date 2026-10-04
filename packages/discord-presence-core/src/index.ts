@@ -299,6 +299,8 @@ export {
 export { tryHandleVoiceOutputControl, type VoiceOutputControlPort } from "./voice-output-control.ts";
 
 export { voiceRoomEvidence } from "./voice-room-evidence.ts";
+export { discordDirectoryPage, discordChannelKind } from "./directory.ts";
+export { tryHandleDiscordDirectoryRequest } from "./directory-control.ts";
 export {
   createMinecraftLoginCodeDelivery,
   tryHandleMinecraftLoginCodeRequest,

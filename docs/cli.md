@@ -2575,6 +2575,16 @@ Return stored and effective non-secret Discord configuration:
 `discord` is the stored value. `effectiveDiscord` includes environment
 overrides, whose variable names appear in `overriddenByEnvironment`.
 
+### `discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]`
+
+Read the names, IDs and kinds the active Discord account can see. The default
+lists servers; channels, roles and people require `--server`. Pages contain at
+most 200 entries (default 100); pass the returned `nextCursor` as `--after`.
+`state` and `reason` distinguish a disconnected runtime, partial cache and
+failed read from a complete empty list. People and channel/thread coverage may
+be partial. No account is connected or configured by this command. Requires
+operator authentication. See [the directory contract](discord-rooms.md#discord-directory-for-settings-pickers).
+
 ### `discord definition`
 
 Read the host's shared four-sentence Discord definition, picker kinds, help text,

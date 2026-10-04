@@ -1,5 +1,10 @@
 import { parseProtocolResponse, safeParseProtocolResponse } from "@clankie/protocol";
 import {
+  DISCORD_DIRECTORY_PATH,
+  DiscordDirectoryRequestSchema,
+  DiscordDirectorySnapshotSchema,
+} from "@clankie/protocol";
+import {
   DISCORD_VOICE_OUTPUT_GUARD_PATH,
   DISCORD_ROOM_VOICE_PATH,
   DiscordRoomVoiceCommandSchema,
@@ -383,6 +388,16 @@ export class ClankieApiClient {
     return parseProtocolResponse(
       DiscordSettingsSnapshotSchema,
       await this.request(DISCORD_SETTINGS_PATH, { headers: this.operatorHeaders() }),
+    );
+  }
+  public async discordDirectory(input: unknown = {}) {
+    const query = DiscordDirectoryRequestSchema.parse(input);
+    const params = new URLSearchParams({ kind: query.kind, limit: String(query.limit) });
+    if (query.guildId) params.set("guildId", query.guildId);
+    if (query.after) params.set("after", query.after);
+    return parseProtocolResponse(
+      DiscordDirectorySnapshotSchema,
+      await this.request(`${DISCORD_DIRECTORY_PATH}?${params}`, { headers: this.operatorHeaders() }),
     );
   }
   public async updateDiscordSettings(input: unknown) {
