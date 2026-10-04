@@ -66,3 +66,56 @@ it.each(["off", "disconnect"] as const)(
     }
   },
 );
+
+// The fence awaits fleet admission; the switch and server config must still be read after it.
+it.each(["off", "server-disabled"] as const)(
+  "refuses %s during the new final host fence await",
+  async (change) => {
+    const f = await fixture("stream");
+    let release = () => {};
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const control = await f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } });
+      expect(control.isError).toBe(false);
+      expect(f.calls).toHaveBeenCalledOnce();
+      let entered!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let hostEntered = false;
+      let held = false;
+      const originalCall = f.host.call.bind(f.host);
+      f.host.call = async (input) => {
+        hostEntered = true;
+        return originalCall(input);
+      };
+      f.state.onValidate = async () => {
+        if (hostEntered && !held) {
+          held = true;
+          entered();
+          await barrier;
+        }
+      };
+      const pending = f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } });
+      await Promise.race([
+        waiting,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("new final host admission await not reached")), 5000);
+        }),
+      ]);
+      if (change === "off") f.state.tools = "off";
+      else f.state.serversEnabled = false;
+      release();
+      const result = await pending;
+      expect(result.isError).toBe(true);
+      expect(f.calls).toHaveBeenCalledOnce();
+    } finally {
+      release();
+      if (timeout) clearTimeout(timeout);
+      await f.close();
+    }
+  },
+);

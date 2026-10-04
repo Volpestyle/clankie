@@ -478,7 +478,11 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         const workerPost =
           server.id === "linear" && server.credential === "linear" && isLinearWorkerTool(input.tool);
         const credential = workerPost ? await options.credentials.get("linear") : undefined;
-        await input.fence?.();
+        // The caller's fence may await; the server's own config check comes last.
+        if (input.fence) {
+          await input.fence();
+          await assertCurrent(server, state);
+        }
         const result = workerPost
           ? await publishLinearWorker({
               tool: input.tool,
@@ -486,8 +490,8 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               credential,
               author: options.linearAuthor ?? (async () => undefined),
               beforeWrite: async () => {
-                await assertCurrent(server, state!);
                 await input.fence?.();
+                await assertCurrent(server, state!);
               },
               ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
             })

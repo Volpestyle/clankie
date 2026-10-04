@@ -553,9 +553,10 @@ export class WorkerMcp {
           ...(authorityNow.fleet === undefined
             ? {}
             : {
+                // Admission can await I/O; read the kill switch after it.
                 fence: async () => {
-                  if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
                   if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
+                  if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
                 },
               }),
         });
