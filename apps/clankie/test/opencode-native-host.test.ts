@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "node:net";
 import { afterEach, expect, test, vi } from "vitest";
+import { createPreparedNativeHost, type PreparedNativeSession } from "../src/captain/prepared-native-host.ts";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { createOpenCodeNativeHost } from "../src/captain/opencode-native-host.ts";
 
 const roots: string[] = [];
@@ -44,20 +46,33 @@ async function fixture() {
     if (method === "pane.process_info") return { result: { process_info: structuredClone(info) } };
     if (method === "agent.get") return { result: { agent: structuredClone(agent) } };
     if (method === "pane.report_agent") {
-      const value = params as { agent_session_id: string };
-      agent.agent_session = { source: "herdr:opencode", kind: "id", value: value.agent_session_id };
+      const value = params as {
+        source: string;
+        agent: string;
+        agent_session_id?: string;
+        agent_session_path?: string;
+      };
+      agent.agent = value.agent;
+      agent.agent_session = {
+        source: value.source,
+        kind: value.agent_session_path === undefined ? "id" : "path",
+        value: value.agent_session_path ?? value.agent_session_id!,
+      };
       return { result: {} };
     }
     throw new Error("Forbidden native method");
   });
-  const host = createOpenCodeNativeHost({
+  const options = {
     binding: async () => binding,
     processHelper: "/fixed/process-birth.py",
     platform: "darwin",
     run,
     request,
-  });
+  };
+  const host = createOpenCodeNativeHost(options);
+  const piHost = createPreparedNativeHost({ ...options, harness: "pi" });
   return {
+    piHost,
     host,
     cwd,
     executable,
@@ -166,3 +181,61 @@ test("missing/short process facts and absent foreground fail before binding", as
   f.info.foreground_process_group_id = 456;
   await expect(f.capture()).rejects.toThrow("not the foreground root");
 });
+
+test("Pi path descriptor reports only the native path and preserves original Node lifetime proof", async () => {
+  const f = await fixture();
+  const root = await f.piHost.capture("w1:p1", f.executable, f.cwd);
+  // A fresh native header may exist before its first JSONL write. Producer owns
+  // header/UUID/canonical path agreement; no nonexistent file is called saved history.
+  const session: PreparedNativeSession = { source: "herdr:pi", kind: "path", value: `${f.cwd}/native.jsonl` };
+  await expect(root.proof(session)).rejects.toThrow("not been bound");
+  await root.report(session, "idle");
+  const report = f.request.mock.calls.find(([, method]) => method === "pane.report_agent")!;
+  expect(report[2]).toEqual({
+    pane_id: "w1:p1",
+    source: "herdr:pi",
+    agent: "pi",
+    state: "idle",
+    agent_session_path: session.value,
+  });
+  expect(await root.proof(session)).toMatchObject({
+    nativeOccupantId: occupantIdForHerdrSession(session),
+    shell: { pid: 123, startTime: "1700000000.123456" },
+  });
+  expect(await root.check(f.socket as Socket)).toBe(true);
+  const replacement = { ...session, value: `${f.cwd}/replacement.jsonl` };
+  await expect(root.proof(replacement)).rejects.toThrow("not been bound");
+  await expect(root.report(replacement, "idle")).rejects.toThrow("retarget");
+});
+
+test.each([
+  { source: "herdr:opencode", kind: "id", value: "ses_exact1234" },
+  { source: "herdr:pi", kind: "id", value: "ses_exact1234" },
+  { source: "herdr:pi", kind: "path", value: "relative.jsonl" },
+  { source: "herdr:pi", kind: "path", value: "/tmp/../owner.jsonl" },
+  { source: "herdr:pi", kind: "path", value: "/tmp/native\0.jsonl" },
+])("Pi rejects mismatched/malformed descriptor before reporting: %j", async (session) => {
+  const f = await fixture();
+  const root = await f.piHost.capture("w1:p1", f.executable, f.cwd);
+  await expect(root.report(session as PreparedNativeSession, "idle")).rejects.toThrow();
+  expect(f.request.mock.calls.filter(([, method]) => method === "pane.report_agent")).toEqual([]);
+});
+
+test.each(["harness", "source", "kind", "path", "birth", "socket", "terminal"])(
+  "Pi %s replacement revokes the same held root",
+  async (change) => {
+    const f = await fixture();
+    const root = await f.piHost.capture("w1:p1", f.executable, f.cwd);
+    const session = { source: "herdr:pi", kind: "path", value: `${f.cwd}/native.jsonl` } as const;
+    await root.report(session, "idle");
+    if (change === "harness") f.agent.agent = "opencode";
+    if (change === "source") f.agent.agent_session!.source = "hook:pi";
+    if (change === "kind") f.agent.agent_session!.kind = "id";
+    if (change === "path") f.agent.agent_session!.value = `${f.cwd}/owner.jsonl`;
+    if (change === "birth") f.facts.birth[1] = "123457";
+    if (change === "socket") f.setOwner(456);
+    if (change === "terminal") f.agent.terminal_id = "replacement";
+    expect(await root.check(f.socket as Socket)).toBe(false);
+    if (change !== "socket") await expect(root.proof(session)).rejects.toThrow();
+  },
+);
