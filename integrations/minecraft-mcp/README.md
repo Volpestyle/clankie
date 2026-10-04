@@ -123,3 +123,9 @@ observations, bounded cancel samples and same-bot PNGs. See the script's usage;
 server occupancy and teardown remain the operator's responsibility.
 Pass `--motor /absolute/path/to/main.js` to run the same probes against a compiled
 motor and its adjacent runtime packages outside the checkout.
+
+Full release archive assembly currently stops at `vec3@0.1.10`: its published
+package and pinned upstream tag `0e571deb0d892d0ddc9f4612ec937ae113c343be` declare
+`BSD` but supply no license text or precise variant. The release license gate
+remains in force. A verified upstream notice is needed before publishing the
+archive; compiled motor conformance outside the checkout does not waive it.
