@@ -326,6 +326,9 @@ interface ConversationTurnSeat {
 
 /** Where a turn runs and who it arrived from. */
 export interface ConversationTurnContext {
+  readonly delivery?: "steer" | "queue";
+  /** Actual native admission, independent of the model turn's eventual result. */
+  readonly deliveryOutcome?: (outcome: DeliveryAdmission) => void;
   readonly ownerAuthority?: QuestionAuthority;
   readonly questionCurrent?: () => boolean;
   readonly questionBinding?: { readonly incarnationId: string; readonly workspace: QuestionWorkspace };
@@ -374,10 +377,19 @@ export type ConversationRunner = (
   context: ConversationTurnContext,
 ) => Promise<void>;
 
+type DeliveryAdmission =
+  | { readonly state: "started" | "steered" | "queued"; readonly detail?: string }
+  | { readonly state: "rejected"; readonly detail: string }
+  | { readonly state: "uncertain"; readonly detail: string };
+
 type SeatSender = (
   seatId: string,
   message: string,
-  context: { readonly conversationId: string; readonly source: string },
+  context: {
+    readonly conversationId: string;
+    readonly source: string;
+    readonly delivery?: "steer" | "queue";
+  },
 ) => Promise<boolean | FleetSeatDelivery>;
 type PersonaSeatResolver = (personaId: string) => string | undefined;
 /**
@@ -544,6 +556,8 @@ export class ConversationRefusedError extends Error {}
  * Cursors are zero-padded line counts.
  */
 export class ConversationStore {
+  /** Live outbox binding, never inferred from a remembered transcript. */
+  public nativeTurnDelivery?: (conversationId: string) => boolean;
   private readonly metas = new Map<string, ConversationMeta>();
   /**
    * Live durable-message observers, for delivery that happens outside the
@@ -554,6 +568,13 @@ export class ConversationStore {
   private readonly durableMessageListeners = new Set<(notice: DurableMessageNotice) => void>();
   private readonly chains = new Map<string, Promise<void>>();
   private readonly runs = new Map<string, Promise<boolean>>();
+  private readonly deliveryAdmissions = new Map<
+    string,
+    {
+      readonly promise: Promise<DeliveryAdmission>;
+      readonly resolve: (outcome: DeliveryAdmission) => void;
+    }
+  >();
   /** Live (accepted, unsettled) runs an operator `cancel` can interrupt. */
   private readonly runControllers = new Map<
     string,
@@ -2848,7 +2869,7 @@ export class ConversationStore {
     // In a channel the members answer, not Clankie. The run is the sequenced
     // round; everything else about an accepted turn — revision, cancellation,
     // settlement, retention — is the same as any other.
-    return this.enqueue(
+    const result = this.enqueue(
       meta,
       turn.message,
       turn.herdrPaneId,
@@ -2862,6 +2883,47 @@ export class ConversationStore {
         ...(attachments === undefined ? {} : { attachments }),
       },
     );
+    if (
+      turn.delivery === undefined ||
+      meta.scope.kind === "channel" ||
+      result.status !== "accepted" ||
+      result.seatDelivery
+    )
+      return result;
+    const admission = this.deliveryAdmissions.get(result.runId);
+    if (!admission) return result;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const outcome = await Promise.race([
+        admission.promise,
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), 10_000);
+        }),
+      ]);
+      if (outcome === undefined || outcome.state === "rejected" || outcome.state === "uncertain")
+        return {
+          schemaVersion: 1,
+          status:
+            outcome === undefined || outcome.state === "uncertain"
+              ? "seat_delivery_unconfirmed"
+              : "seat_undelivered",
+          deliveryStage: outcome === undefined || outcome.state === "uncertain" ? "uncertain" : "rejected",
+          conversationId: meta.conversationId,
+          currentRevision: meta.revision,
+          safeCursor: this.lastCursor(meta),
+          detail:
+            outcome?.detail ??
+            "The original native send has no acknowledgment. Check the thread before sending again.",
+        };
+      return {
+        ...result,
+        deliveryStage: outcome.state === "queued" ? "stored" : "delivered",
+        seatDelivery: outcome,
+      };
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      this.deliveryAdmissions.delete(result.runId);
+    }
   }
 
   /**
@@ -3198,6 +3260,7 @@ export class ConversationStore {
         : await this.sendToSeat?.(seatId, message, {
             conversationId: meta.conversationId,
             source: "operator",
+            ...(turn.delivery === undefined ? {} : { delivery: turn.delivery }),
           });
     if (typeof delivery === "object" && delivery.outcome !== "delivered" && delivery.outcome !== "offline") {
       return {
@@ -3355,6 +3418,19 @@ export class ConversationStore {
           }),
     });
 
+    const nativeDelivery =
+      provenance.delivery !== undefined && this.nativeTurnDelivery?.(meta.conversationId) === true;
+    const queued =
+      !nativeDelivery &&
+      provenance.delivery === "queue" &&
+      (this.runCounts.get(meta.conversationId) ?? 0) > 0;
+    if (provenance.delivery !== undefined && !queued) {
+      let resolve!: (outcome: DeliveryAdmission) => void;
+      const promise = new Promise<DeliveryAdmission>((settle) => {
+        resolve = settle;
+      });
+      this.deliveryAdmissions.set(runId, { promise, resolve });
+    }
     const conversationId = meta.conversationId;
     this.runCounts.set(conversationId, (this.runCounts.get(conversationId) ?? 0) + 1);
     const controller = new AbortController();
@@ -3364,9 +3440,10 @@ export class ConversationStore {
     // into autonomous turns. Merely queued work never opens a live lane.
     const joinLive =
       publishOperatorMessage &&
-      (provenance.delivery === "steer"
-        ? (this.activeInvocations.get(conversationId) ?? 0) > 0
-        : provenance.delivery !== "queue" && (this.internalRuns.get(conversationId) ?? 0) > 0);
+      (nativeDelivery ||
+        (provenance.delivery === "steer"
+          ? (this.activeInvocations.get(conversationId) ?? 0) > 0
+          : provenance.delivery !== "queue" && (this.internalRuns.get(conversationId) ?? 0) > 0));
 
     const previous = this.chains.get(conversationId) ?? Promise.resolve();
     let invoked = false;
@@ -3408,6 +3485,8 @@ export class ConversationStore {
             : { questionBinding: provenance.questionBinding }),
           ...(provenance.inputAnswer === undefined ? {} : { inputAnswer: provenance.inputAnswer }),
           acceptedAt: meta.updatedAt,
+          ...(provenance.delivery === undefined ? {} : { delivery: provenance.delivery }),
+          deliveryOutcome: (outcome) => this.deliveryAdmissions.get(runId)?.resolve(outcome),
           deliveryReceipt: (stage) => {
             deliveryStage = stage;
           },
@@ -3469,6 +3548,10 @@ export class ConversationStore {
           meta.linearWokeCursor = meta.linearWakePending.previous;
           delete meta.linearWakePending;
         }
+        this.deliveryAdmissions.get(runId)?.resolve({
+          state: "uncertain",
+          detail: turnFailureSummary(error).slice(0, OPERATOR_CONVERSATION_SUMMARY_MAX),
+        });
         // An interrupt that surfaces as a runner throw is still a cancellation,
         // not a failure.
         if (this.cancelRequests.has(runId)) {
@@ -3502,6 +3585,11 @@ export class ConversationStore {
         return false;
       })
       .finally(() => {
+        this.deliveryAdmissions.get(runId)?.resolve({
+          state: "uncertain",
+          detail:
+            "The native turn ended without acknowledging this message. Check the thread before sending again.",
+        });
         meta.updatedAt = new Date().toISOString();
         this.saveMeta(meta);
         this.trimEventLog(meta);
@@ -3537,6 +3625,7 @@ export class ConversationStore {
       schemaVersion: 1,
       status: "accepted",
       deliveryStage: "stored",
+      ...(queued ? { seatDelivery: { state: "queued" as const } } : {}),
       conversationId: meta.conversationId,
       runId,
       revision: meta.revision,

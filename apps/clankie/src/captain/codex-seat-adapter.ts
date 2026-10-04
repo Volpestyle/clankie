@@ -306,6 +306,7 @@ export function createCodexSeatAdapter(
           let initialDispatch = Boolean(launch.brief);
           const control: SeatControl = {
             ref,
+            deliveryModes: ["steer"],
             async send(message, options) {
               if (closed || state === "offline")
                 return {

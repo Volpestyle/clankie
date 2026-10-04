@@ -42,6 +42,9 @@ export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
 );
 
 export interface SeatDeliveryInput {
+  readonly delivery?: "steer" | "queue";
+  /** Queue admission or the channel's exact take acknowledgment. */
+  readonly onAdmitted?: (state: "started" | "steered" | "queued") => void;
   readonly kind: OperatorSeatEventKind;
   readonly conversationId: string;
   readonly source: string;
@@ -61,6 +64,9 @@ interface ParkedPoller {
 }
 
 interface Pending {
+  readonly holdUntilTurnEnd: boolean;
+  readonly onAdmitted?: SeatDeliveryInput["onAdmitted"];
+  admission?: "started" | "steered";
   readonly event: OperatorSeatEvent;
   readonly wantsReply: boolean;
   readonly recipientBinding?: string;
@@ -85,6 +91,20 @@ export class SeatOutbox {
   private lastPollAt: number | undefined;
   private lastPollBinding: string | undefined;
   private closed = false;
+  private turnActive = false;
+  private turnSessionId: string | undefined;
+
+  /** Authenticated seat-sync activity; an unrelated session cannot release a hold. */
+  public observeTurn(sessionId: string, activity: "responding" | "waiting", onlyIfUnknown = false): boolean {
+    if (this.closed) return false;
+    if (onlyIfUnknown && this.turnSessionId !== undefined) return false;
+    if (activity === "waiting" && this.turnSessionId !== undefined && this.turnSessionId !== sessionId)
+      return false;
+    this.turnSessionId = sessionId;
+    this.turnActive = activity === "responding";
+    if (!this.turnActive) this.wakePoller();
+    return true;
+  }
 
   public constructor(
     options: {
@@ -184,6 +204,8 @@ export class SeatOutbox {
               : { outcome: "aborted" },
         );
       const pending: Pending = {
+        holdUntilTurnEnd: input.delivery === "queue",
+        ...(input.onAdmitted === undefined ? {} : { onAdmitted: input.onAdmitted }),
         event,
         wantsReply: input.wantsReply,
         ...(input.recipientBinding === undefined ? {} : { recipientBinding: input.recipientBinding }),
@@ -223,12 +245,20 @@ export class SeatOutbox {
         },
       };
       input.signal?.addEventListener("abort", onAbort, { once: true });
-      const waitMs = this.pollers.size > 0 ? this.boundGraceMs : this.remainingGraceMs();
-      pending.timer = setTimeout(() => {
-        if (!pending.taken) pending.settle({ outcome: "unbound" });
-      }, waitMs);
-      pending.timer.unref?.();
+      const waitForReceiver = (): void => {
+        const waitMs = this.pollers.size > 0 ? this.boundGraceMs : this.remainingGraceMs();
+        pending.timer = setTimeout(() => {
+          if (pending.taken || pending.settled) return;
+          // Held messages remain admitted while their bridge is polling. A
+          // definite detach retains the existing pre-take fallback boundary.
+          if (pending.holdUntilTurnEnd && this.bound()) waitForReceiver();
+          else pending.settle({ outcome: "unbound" });
+        }, waitMs);
+        pending.timer.unref?.();
+      };
+      waitForReceiver();
       this.queued.push(pending);
+      if (pending.holdUntilTurnEnd && this.turnActive) pending.onAdmitted?.("queued");
       this.wakePoller();
     });
   }
@@ -344,6 +374,7 @@ export class SeatOutbox {
       });
       throw error;
     }
+    if (pending.admission !== undefined) pending.onAdmitted?.(pending.admission);
     if (pending.timer !== undefined) clearTimeout(pending.timer);
     if (!pending.wantsReply) {
       pending.settle({ outcome: "delivered" });
@@ -361,13 +392,17 @@ export class SeatOutbox {
   }
 
   private take(recipientBinding?: string): OperatorSeatEvent[] {
-    const taken = this.queued.splice(0);
+    const taken = [...this.queued];
     const events: OperatorSeatEvent[] = [];
     for (const pending of taken) {
       if (!this.matchesRecipient(pending, recipientBinding)) {
         pending.settle({ outcome: "unbound" });
         continue;
       }
+      if (pending.holdUntilTurnEnd && this.turnActive) continue;
+      this.queued.splice(this.queued.indexOf(pending), 1);
+      pending.admission = this.turnActive ? "steered" : "started";
+      this.turnActive = true;
       pending.taken = true;
       if (pending.timer !== undefined) clearTimeout(pending.timer);
       this.inFlight.push(pending);
@@ -391,6 +426,7 @@ export class SeatOutbox {
   private wakePoller(): void {
     const [first] = this.pollers;
     if (first === undefined) return;
-    first.finish(this.take(first.recipientBinding), "wake");
+    const ready = this.take(first.recipientBinding);
+    if (ready.length > 0) first.finish(ready, "wake");
   }
 }
