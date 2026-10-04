@@ -47,12 +47,14 @@ interface ComputerUseHarnessReport {
   readonly surfaces: readonly string[];
   readonly chromeNeedsHireFlag: boolean;
   readonly missing?: string;
+  readonly platform?: "darwin" | "win32";
+  readonly machineId?: string;
 }
 
 export interface BrowserHarnessesResult {
   readonly ok: true;
   readonly schemaVersion: 1;
-  /** False on a body with no owner desktop (hosted, or not macOS): nothing was probed. */
+  /** False when owner-machine and fleet detection are not configured (hosted). */
   readonly detected: boolean;
   readonly harnesses: readonly ComputerUseHarnessReport[];
   readonly harnessDelegation: boolean;

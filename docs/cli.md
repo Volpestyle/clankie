@@ -1254,7 +1254,7 @@ The TUI `/browser` command calls this same writer.
 
 ### `browser harnesses` / `browser delegate on|off`
 
-The computer-use harnesses on this machine that Clankie can hire for hard
+The configured computer-use harnesses here and on linked Windows fleets for hard
 computer and browser work
 ([ADR 0199](adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
 `harnesses` asks the service (`GET /v1/browser/harnesses`, operator bearer),
@@ -1262,10 +1262,13 @@ which re-probes on every read: `codex login status` and `codex features list`
 plus Codex's plugin config for Codex computer use and Chrome, and
 `claude auth status` plus `~/.claude.json` and Chrome's native host for Claude
 in Chrome. Nothing is started or driven. JSON contains `detected` (false on a
-hosted body or a non-macOS host, where nothing is probed), `harnesses` (each
+hosted body, where owner-machine probes are not configured), `harnesses` (each
 with `harness`, `signedIn`, `surfaces` of `desktop` and/or `chrome`,
 `chromeNeedsHireFlag`, and `missing` saying what the owner does when it is not
-ready) and `harnessDelegation`.
+ready), optional `platform` and fleet `machineId`, and `harnessDelegation`.
+Windows probes read Codex login, flags and its installed Windows plugin; they
+report signed-out and disabled installs. App grants and successful input remain
+separate live proof.
 
 `delegate on|off` sets `browser.harnessDelegation` (default on): whether the
 ready harnesses appear in the `reach` section of his prompt, on lanes with
@@ -3037,8 +3040,12 @@ uncertain input with a new request UUID. A busy body does not transfer ownership
 even during an input batch; its next input refuses. Recovery still needs host stop
 proof.
 
-The service currently registers a macOS Peekaboo adapter. Other hosts return
-`computer_body_unavailable`; native Codex/provider loops and hosted displays are
-not implemented. [Desktop control](desktop-control.md#shared-computer-body)
+The service registers a macOS Peekaboo adapter. A native Windows Codex
+`node_repl` can explicitly attach the read-only Windows observation host; the
+same command targets it through `CLANKIE_CONTROL_PLANE_URL` (loopback or an SSH
+forward). Its frames have `inputReady: false`; input is unavailable. Windows
+setup is in [desktop control](desktop-control.md#windows-observation-host).
+A host without an attached adapter returns `computer_body_unavailable`.
+Native reasoning/provider loops and hosted displays are not implemented. [Desktop control](desktop-control.md#shared-computer-body)
 explains capture freshness, coordinate mapping and the provider's recovery
 limitation.

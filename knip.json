@@ -58,6 +58,9 @@
     "packages/play": {
       "ignoreExportsUsedInFile": true
     },
+    "apps/clankie": {
+      "entry": ["src/computer-windows-host.ts"]
+    },
     "apps/tui": {
       "entry": ["bin/runtime-update-helper.mjs"]
     },

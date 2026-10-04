@@ -2894,6 +2894,34 @@ paths:
         "409":
           description: Typed busy with public holder and queue/ask choices, or rejected reason; no silent takeover
 
+  /v1/computer/authority:
+    post:
+      tags: [Captain]
+      operationId: authorizeComputerHost
+      summary: Recheck the owning conversation's computer authority
+      description: >-
+        Native observation hosts delegate their existing operator bearer and
+        bound conversation to this service before each operation. Uses the same
+        identity and grant checks as /v1/computer, even without a local adapter.
+        A conversation ID is not a grant. Nothing is captured, driven or leased.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [conversationId, action]
+              properties:
+                conversationId: { type: string, minLength: 1, maxLength: 256 }
+                action: { type: string, enum: [effect, recover] }
+      responses:
+        "200": { description: Matching conversationId and authorized true }
+        "400": { description: Invalid strict request }
+        "401": { description: Absent or revoked operator conversation authority }
+        "413": { description: Request exceeds 4 KiB }
+
   /v1/computer:
     post:
       tags: [Captain]
@@ -2908,8 +2936,9 @@ paths:
         bounded PNG media separately. Input is ordered and uses screenshotId plus
         a persistent requestId; identical retries reconcile, never replay. Failed
         and uncertain are distinct from confirmed. Expiry/restart/uncertainty retain
-        the lease until host stop proof. Local macOS Peekaboo only; native model and
-        hosted display routes are not implemented.
+        the lease until host stop proof. Local macOS Peekaboo and an explicitly attached
+        read-only Windows native-harness observation host; Windows input, native model
+        and hosted display routes are not implemented.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -2935,12 +2964,14 @@ paths:
     get:
       tags: [Browser]
       operationId: getBrowserHarnesses
-      summary: Computer-use harnesses on this machine
+      summary: Computer-use harnesses here and on linked Windows fleets
       description: >-
         Re-probes which installed harnesses (Codex computer use, Claude in
-        Chrome) are signed in and can drive the owner's apps or Chrome (ADR
-        0199). Detection only; nothing is started. `detected` is false on a
-        body with no owner desktop.
+        Chrome) are signed in and configured for the owner's apps or Chrome (ADR
+        0199), including Codex on linked Windows fleets. Optional platform and
+        machineId identify those reports; signed-out, disabled and unavailable
+        probes remain explicit. Configuration does not prove app grants or input.
+        Detection only; nothing is started. `detected` is false on a hosted body.
       security: [{ operatorBearer: [] }]
       responses:
         "200":
