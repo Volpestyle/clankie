@@ -3011,7 +3011,7 @@ paths:
       security: [{ operatorBearer: [] }]
       responses:
         "200":
-          description: Offer wire (deep link + code)
+          description: Offer wire (deep link + code); ordinary offers also include the existing single-use localCode for same-Mac direct pairing; review offers omit localCode
 
   /v1/pairing/redeem:
     post:

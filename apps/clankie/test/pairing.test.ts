@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createClankieApp, type TrustedOperatorIdentity } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
+import { pairingOfferWire } from "../src/pairing.ts";
 
 const tempDirs: string[] = [];
 
@@ -103,6 +104,41 @@ describe("control-plane pairing offer surface", () => {
     const second = ClientPairingOfferSchema.parse(await (await mintOffer(app, "operator-secret")).json());
     expect(second.code).not.toBe(offer.code);
     expect(second.deepLink).not.toBe(offer.deepLink);
+  });
+
+  it("keeps encrypted links while exposing the existing same-Mac short code only on ordinary offers", async () => {
+    const app = await makeApp({
+      authenticateOperator: operator,
+      deviceSessionKey: DEVICE_KEY,
+      pairingOfferPublisher: {
+        publishPairingOffer: () => Promise.resolve(),
+        protectPairingOffer: (offer) => {
+          const wire = pairingOfferWire(offer);
+          const deepLink = `${wire.deepLink}#encrypted-gateway-route`;
+          return { ...wire, deepLink, code: deepLink, gateway: true };
+        },
+      },
+    });
+    const normal = await (await mintOffer(app, "operator-secret")).json();
+    expect(normal.code).toBe(normal.deepLink);
+    expect(normal.gateway).toBe(true);
+    expect(normal.localCode).toMatch(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/u);
+    const redeemed = await redeem(app, {
+      code: normal.localCode,
+      device: { name: "This Mac", platform: "macos" },
+    });
+    expect(redeemed.status).toBe(200);
+    const pending = await redeemed.json();
+    expect(pending.completionToken).toBeTruthy();
+    expect(pending.offeredGrants).toBeDefined();
+    expect(pending.deviceToken).toBeUndefined();
+    // Local code and secure QR are the same single-use capability.
+    const offerSecret = new URL(normal.deepLink).searchParams.get("offer");
+    expect((await redeem(app, { offerSecret, device: IOS })).status).toBe(409);
+    const review = await (await mintOffer(app, "operator-secret", { review: { days: 1 } })).json();
+    expect(review.localCode).toBeUndefined();
+    expect(review.code).toBe(review.deepLink);
+    expect(review.gateway).toBe(true);
   });
 
   it("publishes a public-gateway offer before exposing it and fails closed when publication fails", async () => {

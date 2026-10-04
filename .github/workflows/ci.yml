@@ -39,6 +39,7 @@ jobs:
         run: |
           pnpm exec oxfmt --check .
           pnpm exec oxlint --deny-warnings .
+          node scripts/check-retired-claims.mjs
       - run: pnpm check
         if: github.event_name == 'workflow_dispatch'
       - run: pnpm --filter @clankie/vox build

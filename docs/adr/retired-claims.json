@@ -1,0 +1,30 @@
+{
+  "$comment": "Claims a later ADR retired. scripts/check-retired-claims.mjs fails when live code, skills or guides repeat one. ADRs, testing evidence, proposals and release notes keep history and are not scanned.",
+  "claims": [
+    {
+      "pattern": "tools (still )?requires? a verified project",
+      "adr": "0217",
+      "now": "Fleet membership gets connected tools; projects keep roles, caps, hiring and tracker binding."
+    },
+    {
+      "pattern": "\\bswarm_(assign|send|claim|sync|tasks?|wait|inbox|peers?)\\b",
+      "adr": "0213",
+      "now": "Clankie hires through hire_agent and reaches agents through native channels and message_clankie."
+    },
+    {
+      "pattern": "\\bhis swarm\\b",
+      "adr": "0213",
+      "now": "His agents form a fleet, reached through native channels."
+    },
+    {
+      "pattern": "publish(es|ing)? (to linear )?as (the )?volpestyle\\+bot",
+      "adr": "0207",
+      "now": "Workers publish to Linear through the workspace Clankie app."
+    },
+    {
+      "pattern": "headless (worker|stream worker)s?",
+      "adr": "0203",
+      "now": "Every hired worker runs its harness's native TUI in a Herdr pane."
+    }
+  ]
+}

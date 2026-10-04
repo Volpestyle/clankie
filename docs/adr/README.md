@@ -12,6 +12,9 @@ later ADRs link back to the decision they amend or replace.
 - Link amendments and superseding decisions in the status paragraph. Historical
   implementation details stay explicitly historical rather than claiming to
   describe the running system.
+- When a decision retires guidance that agents or users read, add the retired
+  phrasing to [retired-claims.json](retired-claims.json). `pnpm docs:check` then
+  fails wherever live code, skills or guides still repeat it.
 - Link ADRs by stable filename, not by number alone. Accepted ADRs are never
   renumbered.
 - Numbers 0098, 0189 and 0191 each identify two records. Use these disambiguating aliases:
@@ -59,3 +62,7 @@ fleet tool gate: admitted fleet members reach verified connected accounts throug
 [ADR 0218](0218-native-seats-drive-their-attached-conversation.md) lets native
 harness seats drive a selected conversation, preserving room grants and delivery
 receipts across handover, and routes worker reports to their persisted lead.
+
+[ADR 0220](0220-clankie-has-one-present-tense.md) adds one `presence` operator
+operation, a `desktop` tool for his own expressions, and hero pixel art in
+`branding/pet/`; the desktop pet itself lives in the private app.

@@ -171,6 +171,18 @@ export async function inspectHarnessBridges(
       ...(claudeInstalled && settings.enabledPlugins?.["clankie-worker@clankie"] !== true
         ? ["claude plugin enable clankie-worker@clankie --scope user"]
         : []),
+      // An installed but outdated plugin still loads, so it is drift doctor must name.
+      ...profiles.claude
+        .filter((profile) => profile.installed && (profile.versionMatches === false || !profile.bridge))
+        .map(
+          (profile) =>
+            `Update clankie-worker ${profile.version ?? "unknown"} in ${profile.profile} to ${profile.expectedVersion ?? "the bundled version"}: clankie harness install`,
+        ),
+      ...(profiles.codex.pluginInstalled && profiles.codex.versionMatches === false
+        ? [
+            `Update the Codex clankie-worker plugin ${profiles.codex.version ?? "unknown"} to ${profiles.codex.expectedVersion}: clankie harness install`,
+          ]
+        : []),
     ] as readonly string[],
   };
 }

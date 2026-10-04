@@ -38,7 +38,7 @@ collected without waking. Old issue bindings remain inspectable
 with `clankie linear work list` but have no routing effect. For notification
 reads and acknowledgments keep `--conversation global-default`; omit it for
 all passive history. The owner-connected tracker account is the identity of Clankie and every worker
-in his swarm. Use his connected tools or granted worker bridge for tracker writes;
+in his fleet. Use his connected tools or granted worker bridge for tracker writes;
 never fall back to a harness’s independent account. Without delegated access,
 ask the lead to perform the write. Linear is the current connector; the rule
 applies to any connected tracker.

@@ -86,7 +86,8 @@ appeared in a skill listing (cut audit C22, extended). Each one cost catalog
 context on every turn and duplicated James's global copy or a harness's own review
 command. Upstream sources and owner-global selections are unchanged. The `lead`
 skill's Herdr fallback now describes a handoff file instead of naming
-`herdr-handoff`.
+`herdr-handoff`. That upstream skill was deleted on 2026-10-04: its kickoff typed
+into the receiver's TUI, which ADR 0207 rules out for automated delivery.
 
 `reflect` stays. The pinned
 upstream text is heavier: four steps, a lesson/evidence/route ledger and a
