@@ -128,8 +128,8 @@ Codex session reference alone cannot recover its in-memory control after a
 service restart. Never replay uncertainty through another delivery path.
 
 Briefed local Claude hires use the approved `clankie-worker` channel and report
-`control.mode: "channel"`; Codex reports `adapter`. Missing structured control
-reports `unavailable` with `control.reason` (and `control.fix` when owner action
+`control.mode: "channel"`; Codex and local OpenCode report `adapter`. Missing
+structured control reports `unavailable` with `control.reason` (and `control.fix` when owner action
 is needed). `terminal` is only an unbriefed native launch. Each hire logs its
 lane. Folder trust and channel consent remain owner decisions; a visible prompt
 does not authorize sending it keystrokes or launching a replacement.
@@ -140,6 +140,31 @@ the rejecting rule. Do not assume the newest matching transcript belongs to the
 failed hire. Claude writes channel receipts as internal `isMeta`/system user
 records. A standalone `clankie-seat` bridge must not poll when only the worker
 plugin's channel is selected, or it can consume mail Claude never receives.
+
+## Local OpenCode worker control
+
+A local `hire_agent` may select `opencode` with a direct native **1.18.18** binary
+on macOS. `model` is `provider/model`; `effort` requires that model and a supported
+native variant. Account, skill, Chrome and extra-argv overrides are refused. One native
+initial argv pane is bound to its original process/socket, cwd and displayed
+session before briefing. Its worker MCP uses the fleet projection, without
+operator authority. Permissions and questions remain owner decisions.
+
+Accepted means native queue receipt; completion requires the matching finished
+native reply. Never retry an uncertain start or send. A route switch or endpoint
+loss retires control without adopting a replacement. Native interrupt stays
+exact-session. An owned live worker can exit through its original TUI; success
+requires its original terminal to disappear. Cold, replaced or switched sessions
+refuse, with no unconditional physical pane-close fallback.
+
+Use `clankie agents list` and `clankie agents read` for registered dedicated worker
+SQLite history and `clankie agents resume … --conversation ID` only with the
+original live controller and fresh identity/cwd checks. History is bounded stored
+v1 content, not proof of current TUI selection or control. General profile
+discovery, remote control, new-process resume and restart reattachment remain
+unavailable. Keep deterministic fixtures, later native persona/exit evidence and
+remaining live acceptance separate; read
+`{repoRoot}/docs/testing/2026-10-04-opencode-workers/README.md`.
 
 ## Worker execution locations
 

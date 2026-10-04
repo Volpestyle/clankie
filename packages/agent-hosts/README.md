@@ -107,7 +107,7 @@ See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md)
 for the boundary between task records, native terminals and harness delivery.
 
 The OpenCode **operator** seat is available separately through
-`clankie seat --harness opencode`. Its plugin uses the native injected SDK client
+`clankie opencode`. Its plugin uses the native injected SDK client
 for the exact interactive session; the shared dispatch implementation lives in
 `integrations/opencode-plugin/runtime.mjs`. The local worker hire adapter uses
 the separate `worker-tui.mjs` and `worker-server.mjs` entries. OpenCode 1.18.18
@@ -125,6 +125,35 @@ the [subagent verification](../../docs/testing/2026-10-04-opencode-subagents/REA
 and the
 [operator seat guide](../../integrations/opencode-plugin/README.md) for current
 capabilities and verification limits.
+
+### Prepared OpenCode workers
+
+Local worker control requires macOS and a direct native OpenCode **1.18.18**
+executable. One new Herdr tab starts its initial argv process. The controller
+proves the original foreground process lifetime, held socket, canonical cwd and
+displayed native session before briefing. Its separate TUI plugin uses the
+in-process SDKv2 client; the server plugin selects `clankie mcp --fleet` without
+operator credentials. Native permissions and questions remain owner decisions.
+Models use `provider/model`; effort selects a supported variant of that model.
+Account, skill, Chrome and extra-argv overrides are refused.
+
+Native queue acceptance does not prove the model saw a brief or finished work.
+Completion requires the matching final native reply. Lost receipts, changed
+routes and endpoint loss remain unavailable or uncertain; they never authorize
+a replacement launch or resend. Exact-session interrupt remains supported.
+
+`clankie agents list` and `clankie agents read` expose bounded stored v1 history
+from registered dedicated worker SQLite profiles. Full text is redacted before
+chunking through the existing transcript parser. Read-only SQL may still perform
+normal WAL/SHM reader coordination in those profiles; it is not a zero-filesystem-write
+guarantee. No owner-wide database, migration or parallel transcript store is used.
+`clankie agents resume … --conversation ID` can reuse only the original live
+controller after fresh process, session and cwd checks. Saved metadata grants no
+control. General profile discovery, remote control, restart reattachment and
+new-process continuation remain unavailable. The
+[worker checkpoint](../../docs/testing/2026-10-04-opencode-workers/README.md)
+separates the original deterministic proof from later native persona/exit
+verification and the remaining live acceptance checks.
 
 ### External Codex active-turn delivery
 
