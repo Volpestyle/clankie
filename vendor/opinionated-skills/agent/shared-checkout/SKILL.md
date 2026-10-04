@@ -33,6 +33,9 @@ Separate worktrees do not — they have their own index and HEAD, which is why
 a brief that hands you your own worktree is handing you the whole problem
 already solved.
 
+Never symlink or link a task worktree's dependency or cache dirs (`node_modules`, `.vite`, build caches) to shared checkout trees, even temporarily.
+Use a real install or local copies.
+
 ## Never rewrite shared history
 
 `git reset` (any mode), `git commit --amend`, `git rebase`, and
