@@ -1114,6 +1114,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           : {
               localProcess: options.localCodexProcess,
               viewEnv: async (view) => ({
+                HERDR_ENV: "1",
                 HERDR_PANE_ID: view.paneId,
                 HERDR_SOCKET_PATH: options.localCodexSocket?.() ?? "",
               }),
@@ -1200,6 +1201,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     );
                   },
                   viewEnv: async (view) => ({
+                    HERDR_ENV: "1",
                     HERDR_PANE_ID: view.paneId.replace(`${fleetId}/`, ""),
                     HERDR_SOCKET_PATH: local.socketPath ?? "",
                   }),

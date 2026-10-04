@@ -600,7 +600,13 @@ const projectGitWorktree: ObserveProjectGitWorktree = (root, cwd) =>
 
 const projectProcessObserver = (fleet: string, pane: string) =>
   fleet === "default" ? localProjectProcessObserver(fleet, pane) : remoteProjectObserver(fleet, pane);
-const localCodexSeats = new LocalCodexSeats(herdr.binding);
+const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
+  path: join(stateRoot, "local-codex-seats.json"),
+  observeOccupant: async (pane) => {
+    const proof = await localProjectProcessObserver("default", pane);
+    return proof?.nativeSessionPending ? undefined : proof?.nativeOccupantId;
+  },
+});
 const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-room-observations.json"));
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));

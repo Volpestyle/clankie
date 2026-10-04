@@ -68,7 +68,15 @@ Local briefed Codex hires use a private app-server and remain native interactive
 Codex seats in Herdr. Briefs and `message_seat` use protocol receipts; completion
 comes from turn events, and the owner can type into the same bound session.
 The app-server survives a Clankie service restart, so the native worker keeps
-running in its pane. After a restart, Clankie loses that adapter's in-memory
+running in its pane. Completed local launch registrations persist under the
+service's state root, so the same live native worker can still report with
+`message_clankie` after a restart or re-pin. Restored membership requires the
+original server PID lifetime, Herdr socket/session and current native occupant.
+New local hires also receive `HERDR_ENV=1` alongside their pane/socket identity.
+A worker hired before durable launch registration was introduced needs the
+lead's existing watch to report and a fresh hire after that work is settled;
+do not reconstruct membership from a claimed PID or switch to an operator bearer.
+After a restart, Clankie loses that adapter's in-memory
 turn state; inspect the pane and transcript before relying on a new delivery.
 Codex messages can steer an active turn; a `steered` receipt is not an after-turn
 queue. Other routes need a supported native channel or session API. Automated

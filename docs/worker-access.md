@@ -169,6 +169,16 @@ retries a mutation. Codex can retain its startup catalog despite tool-list-chang
 notifications, so the owner may need to reconnect MCP or restart a pane after
 cutover. A displayed stale tool never bypasses current service authorization.
 
+Local hired Codex servers outlive a service restart. Their completed launch
+registrations persist in `local-codex-seats.json` under `CLANKIE_STATE` (default
+`~/.clankie`), independently of the pinned code checkout. After restart, each
+request still checks the original server PID/start time, the selected Herdr
+socket/session and the current native foreground occupant, so `message_clankie`
+keeps working without transferring an old worker's identity to a replacement.
+An unreadable record file never blocks startup: it is moved aside and no seat is
+restored. Hires created before these records existed cannot recover; report
+through the lead's watch. The outbound Codex adapter's turn state stays in memory.
+
 Fleet membership doctor reports project eligibility and native observations.
 `eligibility: unsupported` or missing project proof does not deny fleet tools.
 `nativeTools: not-verified` means the diagnostic has not inspected that pane's
