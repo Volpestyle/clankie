@@ -63,7 +63,7 @@ it.each([400, 401, 403, 404, 409, 429, 503])(
 
 it.each([
   () => new Response("bad JSON"),
-  () => Response.json({ ...result, extra: "bad" }),
+  () => Response.json({ ...result, schemaVersion: 2, extra: "optional" }),
   () => Response.json({ ...result, op: "input_cancel" }),
   () => new Response("Bearer secret", { status: 500 }),
   () => new Response(null, { status: 302, headers: { location: "https://other.test" } }),
@@ -73,6 +73,28 @@ it.each([
   await expect(dispatch(request, { deviceToken: token })).rejects.toThrow();
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+it.each(["device", "captain"] as const)(
+  "projects additive upstream response fields in the %s hop",
+  async (kind) => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      Response.json({ ...result, extra: true, result: { ...result.result, extra: { optional: true } } }),
+    );
+    const actual =
+      kind === "device"
+        ? await createDeviceConversationDispatch({ baseUrl: "http://control.test", fetch: fetcher })(
+            request,
+            { deviceToken: token },
+          )
+        : await createCaptainConversationDispatch({
+            baseUrl: "http://control.test",
+            fetch: fetcher,
+            bearerToken: "fixture-captain-token",
+          })(request);
+    expect(actual).toEqual(result);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  },
+);
 
 it.each([
   "http://u:p@control.test",

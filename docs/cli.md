@@ -1804,18 +1804,21 @@ checks `herdr --session SESSION api snapshot` over ssh and refuses otherwise.
 Use `runtime disconnect ID` to disable only one connection while keeping its identity.
 Named machine connections reach the captain immediately; only default workspace changes require `clankie restart captain`.
 
-`prepare NAME` readies that machine for Claude workers (VUH-1527), once per
-machine; running it is the owner's approval. It ships this Clankie's own
-`clankie-worker` plugin there as a `clankie` marketplace holding only the
-worker (`~/.clankie/claude-plugin`), installs it disabled (each hire enables it
-for its own session), and adds the worker channel to that machine's managed
-policy (`C:\Program Files\ClaudeCode\managed-settings.json` on Windows),
-keeping every entry already there. It also registers the same bridge for Codex
-there, as a `clankie` MCP server in its config that inherits the pane's Herdr
-identity, once. Policy is machine-wide, so the ssh account
-must be that machine's administrator. Rerun it after an update to ship the
-matching plugin. Its API is the operator-only
-`POST /v1/runtime-connections/NAME/prepare`.
+`prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` readies the
+machine's Claude and Codex workers; running it is the owner's approval. It ships
+this Clankie's own worker bundle to `~/.clankie/claude-plugin`, installs/enables
+Claude in each discovered profile, and approves its worker channel in managed
+policy (`C:\Program Files\ClaudeCode\managed-settings.json` on Windows), keeping
+existing entries. Codex uses its native `clankie-worker@clankie-fleet` plugin.
+A source-managed Codex config requires its source manager, selected with the
+remote setup option; Clankie never writes through its symlink. See
+[linking native fleet harnesses](#linking-native-fleet-harnesses) for the setup
+contract and dotfiles example. Preparation reports incomplete native worker
+checks as failure, even if a legacy Codex MCP registration is present.
+
+Policy is machine-wide, so the SSH account must be that machine's administrator.
+Rerun preparation after an update to ship the matching plugin. Its API is the
+operator-only `POST /v1/runtime-connections/NAME/prepare`.
 
 What crosses the link, and what cannot:
 
@@ -2184,6 +2187,31 @@ stay visible. Existing unmanaged seats can use a supported native queue or
 channel. Automated messages never fall back to terminal typing. A `steered`
 receipt means guidance reached the active Codex turn, not an after-turn queue.
 
+When a hired Codex seat asks through native `requestUserInput`, its question text,
+question IDs, and request ID reach the hiring conversation as worker output.
+The lead answers the existing prompt with `message_seat`, omitting `message`:
+
+```json
+{
+  "seat": "term_worker",
+  "questionAnswer": {
+    "requestId": "observed-request-id",
+    "answers": { "scope": { "answers": ["Change the core package only."] } }
+  }
+}
+```
+
+Use the observed request ID exactly (including its string or numeric type) and
+answer every question ID. This uses the seat's native control channel; it never
+queues another turn or types into the terminal. Ordinary follow-up messages are
+refused while a native question is pending. The owner can still answer in the
+pane: Codex takes the first answer, and already resolved requests are refused.
+`status: answered` requires a matching native tool-output record. If resolution
+does not expose the winning answer, the result is `unconfirmed`; inspect the
+native session instead of resending or sending a replacement turn. Approvals
+and folder-trust decisions remain with the owner. Hand-started Codex panes
+without this controller do not gain a prompt-answer channel.
+
 A supplied `hire_agent` brief goes through the harness's own interface when a
 seat adapter drives that harness locally ([ADR 0187](adr/0187-clankie-hires-his-own-seats.md),
 VUH-1458). A Claude hire starts the real interactive TUI with the
@@ -2203,7 +2231,8 @@ Every hire logs its selected lane and reason. The result carries `control.mode`:
 `channel` for the Claude worker channel, `adapter` for Codex, `terminal` for an
 unbriefed native launch, or `unavailable` with `control.reason` explaining missing
 structured control. Registered remote fleets do not change the control lane of a
-local hire. Questions and folder-trust prompts remain visible owner decisions.
+local hire. Native questions remain visible in the pane; approvals and
+folder-trust prompts remain owner decisions.
 
 Failed startups log `hire_agent.startup_failed`, with its
 session ID, resolved transcript path (null when no file is found), and rejecting
@@ -3003,7 +3032,8 @@ owning source/setup; `--codex-source-setup /absolute/script` runs an explicitly
 selected source setup after consent and checks that the link is preserved.
 Setup completion still needs doctor verification; no hook trust record is written.
 
-`clankie herdr prepare NAME` is the explicit owner-approved remote installation.
+`clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` is the
+explicit owner-approved remote installation.
 It enables Claude in each discovered profile. An already enabled, installed Claude
 profile whose settings symlink points to another discovered unmanaged profile
 can update its own plugin cache without installing, enabling, or changing the
@@ -3015,7 +3045,32 @@ when a fresh read of that same regular profile confirms the plugin is enabled;
 other native errors still fail.
 Preparation uses native plugin installation for
 Codex, preserves managed Codex configuration, and compares installed Claude
-versions with the service bundle. `clankie doctor` reports local profiles and
+versions with the service bundle. A source-managed Codex config needs the owning
+setup script on that remote machine. Select it explicitly; Clankie never writes
+through the config symlink:
+
+```sh
+clankie herdr prepare pc --codex-source-setup 'C:\Users\volpe\dotfiles\scripts\codex-worker-setup.py'
+```
+
+The owner API accepts the same remote path as `codexSourceSetup` in the optional
+JSON body of `POST /v1/runtime-connections/NAME/prepare`. Node (`.js`/`.mjs`),
+Python (`.py`, Python 3.11+ for the dotfiles setup), Windows PowerShell (`.ps1`),
+and directly executable source scripts run as argument vectors. The source hook
+receives `CODEX_HOME`, `CLANKIE_CODEX_WORKER_MARKETPLACE`, and
+`CLANKIE_CODEX_NATIVE_EXECUTABLE` for this approved installation. The dotfiles-owned
+script uses a temporary regular config and the real native plugin cache, then
+renders only worker selection into its own generated source, preserving unrelated
+settings and the runtime link. No credentials are copied.
+
+When Codex is installed, preparation fails with HTTP 409 and
+`fleet_prepare_failed` if its worker version, activation, bridge, identity
+forwarding or packaged skill is missing. The error names the missing checks and
+native setup result; a legacy MCP registration cannot mark preparation complete.
+An absent Codex executable remains an absent harness. After updating the owning
+source setup and completing preparation, verify `clankie doctor --machine NAME`.
+Do not restart unrelated panes; installation alone cannot prove a live receiver.
+`clankie doctor` reports local profiles and
 connected remote fleets; `clankie doctor --machine NAME` inspects one registered
 fleet through `GET /v1/runtime-connections/NAME/harnesses` and
 `GET /v1/runtime-connections/NAME/membership`. The membership card reads native

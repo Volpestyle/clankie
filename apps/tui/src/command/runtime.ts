@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { posix, win32 } from "node:path";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 
@@ -84,9 +85,19 @@ export async function runRuntimeCommand(
     body = JSON.stringify({ action: "workspaces", id: args[1], workspaces });
   } else if (["harnesses", "membership"].includes(args[0] ?? "") && args.length === 2) {
     path = `/v1/runtime-connections/${encodeURIComponent(args[1]!)}/${args[0]}`;
-  } else if (args[0] === "prepare" && args.length === 2) {
+  } else if (args[0] === "prepare") {
+    if (args.length !== 2 && !(args.length === 4 && args[2] === "--codex-source-setup"))
+      throw new Error("Usage: clankie runtime prepare ID [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]");
+    const codexSourceSetup = args[3];
+    if (
+      codexSourceSetup !== undefined &&
+      (/\p{Cc}/u.test(codexSourceSetup) ||
+        !(posix.isAbsolute(codexSourceSetup) || win32.isAbsolute(codexSourceSetup)))
+    )
+      throw new Error("Codex source setup must be an absolute script path on the remote machine");
     path = `/v1/runtime-connections/${encodeURIComponent(args[1]!)}/prepare`;
     method = "POST";
+    if (codexSourceSetup !== undefined) body = JSON.stringify({ codexSourceSetup });
   } else if (args[0] === "disconnect" && args.length === 2) {
     method = "DELETE";
     path += `/${encodeURIComponent(args[1]!)}`;
