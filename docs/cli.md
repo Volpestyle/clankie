@@ -830,6 +830,23 @@ All return JSON; a refusal exits 1. `/rivals` exposes the same commands in the T
 Notes are context, not instructions the current scripted policy understands.
 See [Rivals setup and verification](rivals.md).
 
+### `minecraft`
+
+`minecraft configure PROFILE HOST --version VERSION [--port PORT] [--username NAME]`
+adds an offline Java server profile. `configure` shows settings; `configure remove PROFILE`
+and `configure allow-public|revoke-public HOST [PORT]` manage destinations.
+DNS/SRV targets are resolved and checked before dial; public endpoints require an
+owner allowlist. Model tools select profile ids only.
+
+`minecraft status|profiles|join PROFILE|leave|cancel [ACTION]|pause|resume|observe`
+manages the session. `chat TEXT`, `follow PLAYER [DISTANCE]`, `goto X Y Z`,
+`dig X Y Z`, `place X Y Z ITEM`, `craft ITEM COUNT`, and `action JSON` return
+prompt action handles; `action-status ACTION` separates settlement from server
+evidence. All return JSON. Use `--conversation ID` to select an existing owning
+conversation. `/minecraft` exposes the same controls and settings in the TUI.
+Minecraft and Pokémon share one play lease, released only after confirmed
+disconnect. See [Minecraft setup and limitations](minecraft.md).
+
 <a id="model-setup"></a>
 
 ### `model [status]`
@@ -1025,7 +1042,8 @@ Read the current captain model's stored effort override. JSON:
 
 Set or remove the variant for the named model. Without `--model`, the currently
 configured captain model is the target. The TUI `/effort` modal obtains the
-supported levels from Pi and calls this writer.
+supported levels from Pi and calls this writer. Paired apps read and set the running
+model's effort through the [owner model-key API](model-keys.md).
 
 The writer saves the requested effort. At execution, an unsupported effort is
 refused by name with the supported ladder, consistently across captain,
@@ -1071,17 +1089,33 @@ See [persona images](persona-images.md) for caching, voice, model support and A/
 
 Update one or more persona fields atomically:
 
-| Flag                    | Value                                |
-| ----------------------- | ------------------------------------ |
-| `--display-name`        | 1–64 characters                      |
-| `--aliases`             | Comma-separated names; `none` clears |
-| `--character-notes`     | Up to 4,000 characters               |
-| `--chattiness`          | `quiet`, `balanced`, or `chatty`     |
-| `--reply-policy`        | `addressed` or `all`                 |
-| `--live-message-window` | Whole number from 0 through 100      |
+| Flag                    | Value                                                                                    |
+| ----------------------- | ---------------------------------------------------------------------------------------- |
+| `--display-name`        | 1–64 characters                                                                          |
+| `--aliases`             | Comma-separated names; `none` clears                                                     |
+| `--character-notes`     | Up to 4,000 characters                                                                   |
+| `--chattiness`          | `quiet`, `balanced`, or `chatty`; shapes Discord and stream rooms, not the operator lane |
+| `--reply-policy`        | `addressed` or `all`                                                                     |
+| `--live-message-window` | Whole number from 0 through 100                                                          |
 
 JSON contains `{ "ok": true, "persona": { … }, "settingsFile": "…", "restart": "clankie restart captain" }`.
 The TUI `/persona` modal calls this same writer.
+
+### `desktop [status]` / `desktop quiet-hours START END TIME_ZONE|off`
+
+Read or set desktop quiet hours. Times use `HH:mm` and an IANA time zone,
+for example `clankie desktop quiet-hours 22:00 07:00 America/Chicago`.
+Overnight ranges are supported; the start is inclusive and the end exclusive.
+Equal start and end times are rejected. `clankie desktop quiet-hours off`
+removes the range. The TUI `/desktop` takes the same arguments. Changes apply
+immediately without restarting. JSON returns `desktop` and `settingsFile`.
+
+The captain's `desktop` tool can emote, move within the current display using
+normalized coordinates, or show a short bubble. Expressions carry a unique ID
+and expiry in `presence`; they last five seconds by default, up to thirty.
+Quiet hours suppress them without changing the source-derived mood. Desktop
+clients also honor macOS Focus, discard expired expressions, and show them
+without taking keyboard focus. Publishing does not confirm a client displayed it.
 
 ### `games [status]` / `games set on|off`
 
@@ -1192,9 +1226,12 @@ leads — which harness is the workhorse, which one reviews, what never goes to
 which (up to 4,000 characters of free text) — and the budget he sizes the fleet
 to, plus the fleet connected-tool switch. `set` takes any combination of the flags;
 what is left out keeps its value. `clear` restores every default, including tools
-`connected`. `--tools off` immediately removes connected tools from fleet panes and
-refuses calls; manual grants keep working. `--tools connected` restores standing
-access to verified accounts through `clankie_tools` and `clankie_call`.
+`connected`. `--tools off` stops new standing tool admissions; manual grants keep
+working. A call already past its last asynchronous check can still dispatch after
+the change; there is no proven global concurrency or cancellation bound. That is the
+chosen contract: the switch stops new calls
+([ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md), VUH-1585). `--tools connected`
+restores standing access to verified accounts through `clankie_tools` and `clankie_call`.
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the
 leadership skill (`lead`) and his prompt use them to aim.
@@ -1888,8 +1925,9 @@ The intended consumer is a per-turn hook, so a seat in another harness carries
 the same recent past his own sessions do.
 
 `--hook` reads Claude hook JSON on stdin. On `UserPromptSubmit` it prints the
-card only when that `session_id` has not seen this exact card yet, so unchanged
-turns add nothing to the conversation. `SessionStart` prints nothing and re-arms
+whole card the first time a `session_id` asks, then only the notes that session
+has not seen yet, under a short "Newer notes" header. Unchanged turns, and notes
+that merely age out of the card, add nothing to the conversation. `SessionStart` prints nothing and re-arms
 the session, so the prompt after startup, resume, `/clear`, or compaction
 injects it again. Input without a usable `session_id` prints the card every
 time.
@@ -1999,14 +2037,27 @@ control remains available; normal agent messages do not use it. See
 
 <a id="seat-commands"></a>
 
-### `claude[N]` and `seat [--harness claude|codex] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
+### `claude[N] | codex[N] | opencode [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]`
 
-Sit in Claude Code as Clankie ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
+Open Clankie in the selected native harness ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
 `clankie claude` opens this seat with `claude`; `clankie claude2` uses your
-`claude2` account command. Numbered commands are resolved through your interactive
+`claude2` account command. Numbered Claude commands are resolved through your interactive
 `$SHELL`, including shell aliases and functions. The same seat flags work with
-either command. Each numbered command keeps its own resume record. `clankie seat` remains available, including its Codex harness.
-Needs a TTY and the selected Claude command available. The launcher projects the bundled plugin
+either command. Each numbered command keeps its own resume record. `clankie codex` and `clankie opencode` open the corresponding native harness with the same flags.
+
+`clankie codex2` selects the registered account labelled exactly `codex2`:
+`clankie accounts codex add /absolute/CODEX_HOME --label codex2` registers it.
+The number is part of the label, never an account-list position. Unknown labels
+fail without selecting another account. The launcher captures the canonical home
+for native discovery, the app-server and TUI. Numbered commands keep separate
+resume records and refuse to resume after their label is rebound to another home.
+Plain `clankie codex` retains the current `CODEX_HOME` behavior. OpenCode has no
+numbered account command.
+For numbered accounts, set `CODEX_HOME` to that registered home in the environment
+of native plugin installation commands and the Codex session used to review
+`/plugins` and `/hooks`. Setup under a different home does not prepare this account.
+
+Claude launches need a TTY and the selected Claude command available. The launcher projects the bundled plugin
 (or `--plugin-dir` source) into a private launch directory with only the selected
 skills. Identity, hooks, and MCP are retained. It passes the permission allowlist
 for `clankie` commands, disables an older installed `clankie@clankie` for this
@@ -2101,7 +2152,7 @@ conversation="…" event_id="…">`; that polling is what binds the seat as his
 head, and with no bridge polling the same turns run the pi operator lane. A
 `reply` tool answers an escalation by `event_id`; the reply lands in the
 escalating conversation as his own message. Claude Code loads the channel
-only when `clankie seat` passes its development flag; without it the tools
+only when `clankie claude` passes its development flag; without it the tools
 still work without consuming events, leaving those turns with the service.
 
 ### `mcp --seat`
@@ -2138,15 +2189,45 @@ Projects retain roles, caps, hiring and tracker binding.
 The service lists exactly `clankie_tools` and `clankie_call`; the worker plugin
 adds `message_clankie`. Search with `{query}` for at most 20 names/descriptions,
 or `{names}` for up to 10 input schemas, then call with `{name, arguments}`.
-`clankie fleet set --tools off` immediately removes fleet tools and refuses calls.
-Each call rechecks live admission, account binding and the setting before effects.
-Manual grants keep their existing restrictions.
+`clankie fleet set --tools off` stops new standing tool admissions. Each call
+rechecks live admission, account binding and settings, but a call already past its
+last asynchronous check can still reach a provider after tools-off or admission
+loss. The strict refusal guarantee is not met; see
+[ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md) and VUH-1585. Manual
+grants keep their existing restrictions.
 
 `doctor.harnessBridges` reports installation, registration and invoking-process
 membership separately. Remote project `eligibility: unsupported` does not mean
 fleet tools are denied; `nativeTools: not-verified` still requires an actual native
 catalog/call check. MCP sessions bind to fleet/pane (fleet only for bearer links)
 and expire after 15 minutes idle. See [worker access](worker-access.md).
+
+### `project list` and `project update`
+
+`clankie project list` reads the current project settings and their revision.
+`clankie project update PROJECT --changes FILE.json --revision REVISION` submits
+reviewed changes for an existing project through the authenticated service API.
+The console exposes the same verbs through `/project`.
+
+The changes file may contain `name`, `roles`, `workerCap` and `trackerRef`.
+Omitted fields remain unchanged; `null` removes a worker cap or tracker binding.
+An empty roles list inherits the six built-in roles; an explicit list defines
+the available roles and may set their model, effort and concurrency cap. Zero
+prevents new hires, while an absent cap adds no limit. These settings affect
+new hire admission, not the configuration of already running agents.
+
+The service validates the whole resulting project settings document, preserving
+workspaces, roots, assignments, grants, label mappings and unrelated projects.
+Stale revisions or removal of an in-use role fail without overwriting the saved
+settings. Read the settings again and review the changes before retrying.
+
+`trackerRef` selects an existing project workspace and the fixed path
+`.clankie/tracking.json`. It does not initialize a tracker, select an account or
+register a repo. The app's existing work reader receives a read-only virtual
+repo for the binding. Only an exact canonical workspace on the current local
+machine is readable; remote, missing or changed sources report unavailable.
+Existing registered repos remain independent. Project label mappings are
+preserved but this editor does not apply them to station placement.
 
 ### `project add NAME --workspace PATH`
 
@@ -2342,9 +2423,12 @@ receiver remain unavailable.
 
 ### Native seat transcript sync
 
-`clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The `clankie seat` launcher
-sets `CLANKIE_SEAT_SESSION_ID` and its selected `CLANKIE_CONVERSATION_ID`; unlaunched
-plugin use and hooks for another session are ignored. The plugin invokes sync at
+`clankie seat-sync` consumes Claude or Codex hook JSON on stdin. The
+`clankie claude`, `clankie codex`, and `clankie opencode` launchers set their selected
+`CLANKIE_CONVERSATION_ID`. Claude supplies `CLANKIE_SEAT_SESSION_ID`; Codex’s trusted
+hook supplies it from the captured native binding. OpenCode sends transcripts
+through its per-launch bridge. Unlaunched plugin use and hooks for another session
+are ignored. The plugin invokes sync at
 session start/end, prompt submission, stop/failure and before compaction. Claude
 and Codex also upload on asynchronous `PostToolUse` hooks, throttled to one
 attempt per two seconds. Progress appears as tools finish; a long tool or a
@@ -2591,11 +2675,11 @@ goals. Native goal state remains separate from turn activity.
 
 ### OpenCode operator seat
 
-`clankie seat --harness opencode --conversation ID --dry-run` reviews the native
+`clankie opencode --conversation ID --dry-run` reviews the native
 launch, installed version, skill selection and required owner steps. Remove
 `--dry-run` to launch; `--resume` uses the exact recorded session and chat.
 Without `--conversation ID`, each fresh launch creates a separate workspace
-chat; dry-run creates none. `/seat opencode`
+chat; dry-run creates none. `/opencode`
 in the console reviews the same plan. Installation, per-launch settings,
 removal, native delivery semantics and current verification limits are in the
 [OpenCode seat guide](../integrations/opencode-plugin/README.md).
@@ -2734,3 +2818,17 @@ The owner endpoints are `POST /v1/operator/projects/add-worktree-root`
 (`projectId`, `rootId`, `expectedRevision`). Read the current revision from
 `GET /v1/operator/projects`. Both writes recheck owner authority and settings
 immediately before persistence; enrollment also re-observes the native root/repo.
+
+### Present tense
+
+`clankie status` and the TUI `/status` include the service's `presence` snapshot
+when it answers. The operator `presence` read accepts a cursor and `waitMs` up
+to 30000 ms; callers with the current cursor wait for a projected change. Mood
+priority is needs_you, thinking, in_voice, playing, leading, idle. Thinking
+includes background Discord captain turns. `activeSeats` counts all live
+registered fleet seats, including those waiting between turns. The oldest
+unanswered owner preference appears as `pendingOwnerItem`, with the conversation
+and question IDs needed to open it. `since` is a source start timestamp, or null
+when that source has no known start. An unreachable service has no mood; clients
+show that connection failure separately. The same read passes through the relay
+and hosted paired-device authority seam.

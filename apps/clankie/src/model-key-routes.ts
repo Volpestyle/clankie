@@ -7,6 +7,10 @@ import {
   MODEL_SELECT_PATH,
   MODEL_KEY_REMOVE_PATH,
   MODEL_SUBSCRIPTIONS_PATH,
+  MODEL_OPTIONS_PATH,
+  MODEL_EFFORT_SET_PATH,
+  ModelEffortSetRequestSchema,
+  ModelOptionsResponseSchema,
   ModelSubscriptionsResponseSchema,
   ModelKeySetRequestSchema,
   ModelKeyValidateRequestSchema,
@@ -30,6 +34,8 @@ export function createModelKeyRoutes(
     MODEL_SELECT_PATH,
     MODEL_KEY_REMOVE_PATH,
     MODEL_SUBSCRIPTIONS_PATH,
+    MODEL_OPTIONS_PATH,
+    MODEL_EFFORT_SET_PATH,
   ]) {
     app.use(path, async (context, next) => {
       context.header("cache-control", "no-store");
@@ -66,11 +72,20 @@ export function createModelKeyRoutes(
       return context.json({ ok: false, error: "unavailable" }, 503);
     }
   });
+  app.get(MODEL_OPTIONS_PATH, async (context) => {
+    try {
+      if (models!.options === undefined) return context.json({ ok: false, error: "unavailable" }, 503);
+      return context.json(ModelOptionsResponseSchema.parse(await models!.options()));
+    } catch {
+      return context.json({ ok: false, error: "unavailable" }, 503);
+    }
+  });
   for (const path of [
     MODEL_KEY_SET_PATH,
     MODEL_KEY_VALIDATE_PATH,
     MODEL_SELECT_PATH,
     MODEL_KEY_REMOVE_PATH,
+    MODEL_EFFORT_SET_PATH,
   ]) {
     app.post(path, async (context) => {
       try {
@@ -85,6 +100,12 @@ export function createModelKeyRoutes(
           } else if (path === MODEL_SELECT_PATH) {
             const parsed = ModelSelectRequestSchema.safeParse(body);
             if (parsed.success) return models!.select(parsed.data.model);
+          } else if (path === MODEL_EFFORT_SET_PATH) {
+            const parsed = ModelEffortSetRequestSchema.safeParse(body);
+            if (parsed.success)
+              return models!.setEffort === undefined
+                ? ({ ok: false, error: "unavailable" } as const)
+                : models!.setEffort(parsed.data.effort);
           } else {
             const parsed = ModelKeyRemoveRequestSchema.safeParse(body);
             if (parsed.success) return models!.remove(parsed.data.providerId);

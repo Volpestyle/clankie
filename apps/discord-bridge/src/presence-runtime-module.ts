@@ -205,5 +205,9 @@ function provisionGuildId(): string {
  */
 function activitySurfaces(): Partial<Record<DiscordActivitySurface, string>> {
   const emulator = process.env.DISCORD_ACTIVITY_APPLICATION_ID_GBA?.trim();
-  return emulator ? { gba_emulator: emulator } : {};
+  const minecraft = process.env.DISCORD_ACTIVITY_APPLICATION_ID_MINECRAFT?.trim() ?? emulator;
+  return {
+    ...(emulator ? { gba_emulator: emulator } : {}),
+    ...(minecraft ? { minecraft } : {}),
+  };
 }

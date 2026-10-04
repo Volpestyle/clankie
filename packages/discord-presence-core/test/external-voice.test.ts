@@ -14,7 +14,9 @@ import {
   MAX_REALTIME_RESPONSE_AUDIO_BYTES,
   type RealtimeResponseMeta,
   type RealtimeTimers,
+  type RealtimeSocket,
 } from "../src/realtime-session.ts";
+import { createVoiceRealtimePorts, parseVoiceRealtimeEnv } from "../src/voice-composition.ts";
 import type { VoiceConversationOpenInput } from "../src/voice-session.ts";
 
 class FakeRealtimePort implements ExternalVoiceRealtimePort {
@@ -827,3 +829,182 @@ it.each([
     h.port.close();
   },
 );
+
+/** Runs the real composition, realtime adapter and ElevenLabs adapter without provider I/O. */
+class RecoverySocket implements RealtimeSocket {
+  readonly sent: Record<string, unknown>[] = [];
+  closed = false;
+  onSend: ((frame: Record<string, unknown>) => void) | undefined;
+  private message: ((data: string) => void) | undefined;
+  private closing: (() => void) | undefined;
+  send(data: string | Uint8Array): void {
+    if (typeof data !== "string") throw new Error("Expected a JSON provider frame");
+    const frame = JSON.parse(data) as Record<string, unknown>;
+    this.sent.push(frame);
+    this.onSend?.(frame);
+  }
+  onMessage(handler: (data: string) => void): void {
+    this.message = handler;
+  }
+  onClose(handler: () => void): void {
+    this.closing = handler;
+  }
+  onError(_handler: (error: unknown) => void): void {}
+  close(): void {
+    if (!this.closed) {
+      this.closed = true;
+      this.closing?.();
+    }
+  }
+  emit(frame: Record<string, unknown>): void {
+    this.message?.(JSON.stringify(frame));
+  }
+  creates(): Record<string, unknown>[] {
+    return this.sent.filter((frame) => frame.type === "response.create");
+  }
+}
+
+async function openRecoveryComposition(onError?: () => void) {
+  const realtime = new RecoverySocket(),
+    tts = new RecoverySocket();
+  const opened: string[] = [],
+    heard: string[] = [],
+    done: RealtimeResponseMeta[] = [],
+    errors: string[] = [];
+  const timers = new FakeTimers();
+  const ports = createVoiceRealtimePorts({
+    apiKey: "fixture-realtime-key",
+    elevenLabsApiKey: "fixture-tts-key",
+    config: parseVoiceRealtimeEnv({
+      CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+      CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "fixture",
+    }),
+    timers,
+    socketFactory: async (url) => {
+      opened.push(url);
+      return url.includes("elevenlabs") ? tts : realtime;
+    },
+  });
+  const port = await ports.openConversation({
+    instructions: "fixture",
+    onAudioDelta: (pcm, itemId) => {
+      heard.push(itemId);
+      pcm.fill(0);
+    },
+    onFunctionCall: () => {},
+    onResponseDone: (meta) => done.push(meta),
+    onClose: () => {},
+    onError: (message) => {
+      errors.push(message);
+      onError?.();
+    },
+  });
+  const text = (responseId: string, itemId: string) =>
+    realtime.emit({
+      type: "response.output_text.delta",
+      response_id: responseId,
+      item_id: itemId,
+      delta: "A spoken sentence.",
+    });
+  return { port, realtime, tts, opened, heard, done, errors, timers, text };
+}
+
+describe("production external-voice response recovery", () => {
+  it("abandons only failed speech, admits the latest offer, and fences old terminals through TTS drain", async () => {
+    let revision = 0;
+    const h = await openRecoveryComposition(() => {
+      revision = 1;
+    });
+    h.port.createResponse("failed offer");
+    const oldEventId = h.realtime.creates()[0]!.event_id;
+    h.realtime.emit({ type: "response.created", response: { id: "old" } });
+    h.text("old", "old-item");
+    await settle();
+    h.port.createResponse("stale offer", () => revision === 0);
+    h.port.createResponse("current offer", () => revision === 1);
+    h.realtime.emit({ type: "error", error: { type: "server_error" } });
+    expect(h.realtime.creates()).toHaveLength(2);
+    expect(h.done).toEqual([]);
+    h.port.createResponse("third offer");
+    const oldDone = { type: "response.done", response: { id: "old", status: "failed" } };
+    h.realtime.emit(oldDone);
+    h.realtime.emit({ type: "response.created", response: { id: "new" } });
+    h.text("new", "new-item");
+    h.text("old", "late-old-item");
+    h.realtime.emit(oldDone);
+    h.realtime.emit({ type: "error", error: { type: "server_error", event_id: oldEventId } });
+    h.realtime.emit({ type: "response.done", response: { id: "new", status: "completed" } });
+    await settle();
+    expect(h.realtime.creates()).toHaveLength(2);
+    expect(h.done).toEqual([]);
+    h.tts.emit({ contextId: "old-item", audio: Buffer.from([1, 0]).toString("base64") });
+    h.tts.emit({ contextId: "old-item", isFinal: true });
+    h.tts.emit({ contextId: "new-item", audio: Buffer.from([1, 0]).toString("base64") });
+    expect(h.heard).toEqual(["new-item"]);
+    h.tts.emit({ contextId: "new-item", isFinal: true });
+    expect(h.done.map((meta) => [meta.responseId, meta.status])).toEqual([["new", "completed"]]);
+    expect(h.realtime.creates()).toHaveLength(3);
+    expect(h.tts.sent.some((frame) => frame.context_id === "old-item" && frame.close_context === true)).toBe(
+      true,
+    );
+    expect(h.tts.sent.some((frame) => frame.context_id === "late-old-item")).toBe(false);
+    expect(h.realtime.sent.filter((frame) => frame.type === "conversation.item.create")).toMatchObject([
+      { item: { content: [{ text: "failed offer" }] } },
+      { item: { content: [{ text: "current offer" }] } },
+      { item: { content: [{ text: "third offer" }] } },
+    ]);
+    expect(h.opened).toHaveLength(2);
+    h.port.close();
+  });
+
+  it("closes on a pre-created uncorrelated error without inventing completion or replay", async () => {
+    const h = await openRecoveryComposition();
+    h.port.createResponse("failed before created");
+    h.realtime.emit({ type: "error", error: { type: "server_error" } });
+    expect(h.port.isOpen).toBe(false);
+    expect(() => h.port.createResponse("next offer")).toThrow();
+    h.realtime.emit({ type: "response.created", response: { id: "late-old" } });
+    h.realtime.emit({ type: "response.done", response: { id: "late-old", status: "completed" } });
+    expect(h.realtime.creates()).toHaveLength(1);
+    expect(h.errors).toEqual(["Realtime session error"]);
+    expect(h.done).toEqual([]);
+    expect(h.opened).toHaveLength(2);
+    h.port.close();
+  });
+
+  it("does not abandon a completed model response whose TTS is still draining", async () => {
+    const h = await openRecoveryComposition();
+    h.port.createResponse();
+    h.realtime.emit({ type: "response.created", response: { id: "held" } });
+    h.text("held", "held-item");
+    await settle();
+    h.realtime.emit({ type: "response.done", response: { id: "held", status: "completed" } });
+    h.port.createResponse();
+    h.realtime.emit({ type: "error", error: { type: "server_error" } });
+    expect(h.realtime.creates()).toHaveLength(1);
+    expect(h.done).toEqual([]);
+    await settle();
+    h.tts.emit({ contextId: "held-item", isFinal: true });
+    expect(h.realtime.creates()).toHaveLength(2);
+    expect(h.done.map((meta) => meta.responseId)).toEqual(["held"]);
+    h.port.close();
+  });
+
+  it.each([false, true])("handles a synchronous context-send error and owner close=%s", async (close) => {
+    let fail = true;
+    const h = await openRecoveryComposition(() => {
+      h.port.createResponse("callback offer");
+      if (close) h.port.close();
+    });
+    h.realtime.onSend = (frame) => {
+      if (frame.type !== "conversation.item.create" || !fail) return;
+      fail = false;
+      h.realtime.emit({ type: "error", error: { type: "server_error" } });
+    };
+    h.port.createResponse("failed offer");
+    expect(h.realtime.creates()).toHaveLength(0);
+    expect(h.done).toEqual([]);
+    expect(h.port.isOpen).toBe(false);
+    h.port.close();
+  });
+});

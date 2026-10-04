@@ -166,6 +166,11 @@ it("searches bounded names and schemas across verified servers, excluding worker
     expect((await f.call("clankie_tools", { query: "read item 29" })).content[0].text).toContain(
       "linear_read_29",
     );
+    const loose = (await f.call("clankie_tools", { query: "linear issue read 7 create" })).content[0].text;
+    expect(loose.split("\n")[0]).toBe("linear_read_7 — Read item 7 with details");
+    expect((await f.call("clankie_tools", { query: "nothing matches this" })).content[0].text).toContain(
+      "No connected tool matches",
+    );
     expect((await f.call("clankie_tools", { names: Array(11).fill("linear_read_1") })).isError).toBe(true);
     for (const name of [
       "linear_create_worker_comment",

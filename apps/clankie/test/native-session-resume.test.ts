@@ -1,8 +1,13 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessSeatAdapter, SeatControl, SeatDelivery } from "@clankie/agent-hosts";
+import type {
+  HarnessSeatAdapter,
+  SeatControl,
+  SeatDelivery,
+  SeatProcessIdentity,
+} from "@clankie/agent-hosts";
 import type { SavedAgentSession } from "../src/agent-sessions.ts";
 import {
   HerdrWatchStore,
@@ -15,6 +20,7 @@ import {
   savedCodexAccount,
   savedSessionFleet,
 } from "../src/captain/native-session-resume.ts";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 
 const UUID = "10000000-0000-4000-8000-000000000001";
@@ -23,11 +29,11 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 async function scratch() {
-  const root = await mkdtemp(join(tmpdir(), "native-resume-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "native-resume-")));
   roots.push(root);
   return root;
 }
-function saved(root = "/work"): SavedAgentSession {
+function saved(root = "/work"): Extract<SavedAgentSession, { file: unknown }> {
   return {
     ref: `local:${UUID}`,
     host: "local",
@@ -355,4 +361,201 @@ it("uses each harness's exact interactive resume flags", () => {
     "--resume",
     UUID,
   ]);
+});
+
+describe("prepared native saved-session reuse", () => {
+  async function nativeFixture(harness: "opencode" | "pi" = "opencode") {
+    const f = await fixture();
+    const sessionId = harness === "opencode" ? "ses_nativeReuse" : UUID;
+    const session: SavedAgentSession =
+      harness === "opencode"
+        ? {
+            ref: `local:${sessionId}`,
+            host: "local",
+            sessionId,
+            workingDirectory: f.root,
+            source: {
+              kind: "opencode-sqlite",
+              machineId: "local",
+              profileId: "worker-fixture",
+              database: `${f.root}/opencode.db`,
+              databaseIdentity: "1:2",
+              sessionId,
+              version: "1.18.18",
+              workingDirectory: f.root,
+            },
+          }
+        : { ...saved(f.root), file: { ...saved(f.root).file, harness: "pi" } };
+    const live: HerdrAgentSnapshot = {
+      ...f.live,
+      agent: harness,
+      session:
+        harness === "pi"
+          ? { source: "herdr:pi", kind: "path", value: session.file!.path }
+          : { source: "herdr:opencode", kind: "id", value: sessionId },
+    };
+    const proof: SeatProcessIdentity = {
+      nativeOccupantId: occupantIdForHerdrSession(live.session!),
+      fleet: "default",
+      pane: live.paneId,
+      binding: { socketPath: "/tmp/native-owned", session: "owned" },
+      processes: [{ pid: 44, startTime: "123.456789" }],
+      shell: { pid: 44, startTime: "123.456789" },
+    };
+    const verify = vi.fn(async () => structuredClone(proof));
+    const control: SeatControl = {
+      ref: { harness: "opencode", sessionId, paneId: live.paneId },
+      verify,
+      send: f.send,
+      status: async () => "idle",
+      settled: async () => new Promise<never>(() => {}),
+      interrupt: async () => false,
+      close: async () => {},
+    };
+    const adapter: HarnessSeatAdapter = {
+      harness: "opencode",
+      attach: vi.fn(async () => control),
+      start: vi.fn(async () => ({ outcome: "started" as const, control })),
+    };
+    if (harness === "pi") {
+      // The shared production union is extended by the independent Pi producer.
+      Object.assign(control.ref, { harness: "pi" });
+      Object.assign(adapter, { harness: "pi" });
+      await writeFile(session.file!.path, JSON.stringify({ type: "session", id: UUID, cwd: f.root }) + "\n");
+    }
+    f.runner.list.mockImplementation(async () => [structuredClone(live)]);
+    f.runner.get.mockImplementation(async () => structuredClone(live));
+    const store = new HerdrWatchStore(join(f.root, "native.json"), {
+      runner: f.runner,
+      seatAdapters: [adapter],
+    });
+    const hire = (brief?: string) =>
+      store.spawnSeat(
+        { schemaVersion: 1, harness, resume: session.ref, title: "Resume", workingDirectory: f.root },
+        undefined,
+        brief,
+        session,
+      );
+    return { ...f, session, live, proof, control, verify, adapter, store, hire };
+  }
+  it.each(["opencode", "pi"] as const)(
+    "refuses metadata-only %s reuse even with no brief",
+    async (harness) => {
+      const f = await nativeFixture(harness);
+      vi.mocked(f.adapter.attach).mockResolvedValue(undefined);
+      expect(await f.hire()).toMatchObject({ outcome: "failed", reason: "not_ready" });
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+      expect(f.send).not.toHaveBeenCalled();
+    },
+  );
+  it.each([undefined, "continue"])(
+    "reuses Pi only at the exact saved canonical path with brief %s",
+    async (brief) => {
+      const f = await nativeFixture("pi");
+      expect(await f.hire(brief)).toMatchObject({ outcome: "spawned" });
+      expect(f.verify).toHaveBeenCalled();
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+      expect(f.send).toHaveBeenCalledTimes(brief === undefined ? 0 : 1);
+    },
+  );
+  it.each(["different-path", "id-only", "wrong-source"] as const)(
+    "refuses Pi saved UUID at %s even with matching live proof",
+    async (mode) => {
+      const f = await nativeFixture("pi");
+      const changed =
+        mode === "different-path"
+          ? { source: "herdr:pi", kind: "path" as const, value: `${f.root}/another/${UUID}.jsonl` }
+          : mode === "id-only"
+            ? { source: "herdr:pi", kind: "id" as const, value: UUID }
+            : { source: "herdr:claude", kind: "path" as const, value: f.session.file!.path };
+      Object.assign(f.live, { session: changed });
+      Object.assign(f.proof, { nativeOccupantId: occupantIdForHerdrSession(changed) });
+      expect(await f.hire()).toMatchObject({ outcome: "failed", reason: "not_ready" });
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+      expect(f.send).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["opencode", "pi"] as const)("refuses %s current cwd different from saved cwd", async (harness) => {
+    const f = await nativeFixture(harness);
+    await mkdir(join(f.root, "different"));
+    Object.assign(f.live, { workingDirectory: join(f.root, "different") });
+    expect(await f.hire()).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+  it.each(["path", "cwd"] as const)("refuses Pi %s replacement across a held proof await", async (field) => {
+    const f = await nativeFixture("pi");
+    let entered!: () => void;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.verify.mockImplementationOnce(async () => {
+      entered();
+      await resume;
+      return structuredClone(f.proof);
+    });
+    const pending = f.hire("continue");
+    await held;
+    if (field === "cwd") Object.assign(f.live, { workingDirectory: `${f.root}/replacement` });
+    else
+      Object.assign(f.live, {
+        session: { source: "herdr:pi", kind: "path", value: `${f.root}/replacement/${UUID}.jsonl` },
+      });
+    release();
+    expect(await pending).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+  it("requires the original verification callback, not merely an attached controller", async () => {
+    const f = await nativeFixture();
+    delete f.control.verify;
+    expect(await f.hire()).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+  });
+  it.each([undefined, "continue"])("reuses an exact held controller with brief %s", async (brief) => {
+    const f = await nativeFixture();
+    expect(await f.hire(brief)).toMatchObject({ outcome: "spawned" });
+    expect(f.verify.mock.calls.length).toBeGreaterThan(3);
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+    expect(f.send).toHaveBeenCalledTimes(brief === undefined ? 0 : 1);
+  });
+  it("preserves uncertain delivery when the original process is lost after native acceptance", async () => {
+    const f = await nativeFixture();
+    f.send.mockImplementation(async () => {
+      Object.assign(f.proof, { processes: [{ pid: 44, startTime: "123.456790" }] });
+      return { outcome: "accepted", messageId: "accepted", state: "queued" };
+    });
+    expect(await f.hire("continue")).toMatchObject({ outcome: "failed", reason: "delivery_unconfirmed" });
+    expect(f.send).toHaveBeenCalledOnce();
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+  });
+  it.each(["ref", "terminal", "session", "birth", "occupant", "pane", "fleet"] as const)(
+    "refuses changed %s without a duplicate launch or message",
+    async (field) => {
+      const f = await nativeFixture();
+      if (field === "ref") Object.assign(f.control.ref, { paneId: "w1:p2" });
+      else if (field === "occupant") Object.assign(f.proof, { nativeOccupantId: "another" });
+      else if (field === "pane") Object.assign(f.proof, { pane: "w1:p2" });
+      else if (field === "fleet") Object.assign(f.proof, { fleet: "another" });
+      else
+        f.runner.get.mockImplementation(async () => {
+          if (field === "birth")
+            Object.assign(f.proof, { processes: [{ pid: 44, startTime: "123.456790" }] });
+          return {
+            ...f.live,
+            ...(field === "terminal" ? { terminalId: "replacement" } : {}),
+            ...(field === "session"
+              ? { session: { source: "herdr:opencode", kind: "id" as const, value: "ses_other" } }
+              : {}),
+          };
+        });
+      expect(await f.hire("continue")).toMatchObject({ outcome: "failed", reason: "not_ready" });
+      expect(f.send).not.toHaveBeenCalled();
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+    },
+  );
 });

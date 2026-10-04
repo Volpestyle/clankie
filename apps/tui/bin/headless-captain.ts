@@ -1,3 +1,4 @@
+import { runDesktopCommand } from "../src/command/desktop.ts";
 import { runHarnessCommand } from "../src/command/harness.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
 import { runBodyCommand } from "../src/command/body.ts";
@@ -18,6 +19,7 @@ import { runSeatHookCommand } from "../src/command/seat-hook.ts";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
 import { runAgentsCommand } from "../src/command/agents.ts";
 import { runProjectCommand } from "../src/command/project.ts";
+import { runProjectSettingsCommand } from "../src/command/project-settings.ts";
 import { runAccessCommand } from "../src/command/access.ts";
 import { runEvaluatorCommand } from "../src/command/evaluator.ts";
 import { runConversationsCommand } from "../src/command/conversations.ts";
@@ -47,6 +49,7 @@ import { runPairCommand } from "../src/command/pair.ts";
 import { runDevicesCommand } from "../src/command/devices.ts";
 import { runPlayCommand } from "../src/command/play.ts";
 import { runRivalsCommand } from "../src/command/rivals.ts";
+import { runMinecraftCommand } from "../src/command/minecraft.ts";
 import { runStanceCommand } from "../src/command/stance.ts";
 import { runPromptCommand } from "../src/command/prompt.ts";
 import { runResetCommand } from "../src/command/reset.ts";
@@ -57,6 +60,7 @@ import { runMemoryCommand } from "../src/command/memory.ts";
 import { runMetricsCommand } from "../src/command/metrics.ts";
 import { runTelemetryCommand } from "../src/command/telemetry.ts";
 import { runSeatCommand } from "../src/command/seat.ts";
+import { operatorHarness } from "../src/command/harness-command.ts";
 import { runMcpCommand } from "../src/command/mcp.ts";
 import { runOperatorCredentialCommand } from "../src/command/operator-credential.ts";
 import { runGatewayCommand } from "../src/command/gateway.ts";
@@ -132,7 +136,7 @@ export async function runHeadlessCaptainCommand(
       (await new SettingsStore(defaultSettingsPath(env)).load()).client?.mode === "hosted" &&
       !["help", "--help", "-h"].includes(command ?? "")
     ) {
-      if (HOSTED_LOCAL_ONLY.has(command ?? ""))
+      if (HOSTED_LOCAL_ONLY.has(command ?? "") || operatorHarness(command) !== undefined)
         throw new Error(`${command} is managed by the hosted service; no local action was taken.`);
       const transport = await hostedTransportFor(env);
       // These existing commands are HTTP-only. The transport replaces their local
@@ -198,6 +202,10 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "play") return await runPlayCommand(rest, options);
+    if (command === "minecraft") {
+      outputJson(stdout, await runMinecraftCommand(rest, options));
+      return 0;
+    }
     if (command === "rivals") {
       const result = await runRivalsCommand(rest, options);
       outputJson(stdout, result);
@@ -244,6 +252,10 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, await runSkillsCommand(rest, options));
       return 0;
     }
+    if (command === "desktop") {
+      outputJson(stdout, await runDesktopCommand(rest, options));
+      return 0;
+    }
     if (command === "games") {
       const result = await runGamesCommand(rest, options);
       outputJson(stdout, result);
@@ -287,7 +299,12 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "project") {
-      outputJson(stdout, await runProjectCommand(rest, options));
+      outputJson(
+        stdout,
+        await (["list", "update", "create", "membership"].includes(rest[0] ?? "")
+          ? runProjectSettingsCommand(rest, options)
+          : runProjectCommand(rest, options)),
+      );
       return 0;
     }
     if (command === "access") {
@@ -392,12 +409,17 @@ export async function runHeadlessCaptainCommand(
     // speaks JSON-RPC on stdout, so it never goes through outputJson.
     if (command === "seat-sync") return await runSeatSyncCommand(rest, options);
     if (command === "seat-hook") return await runSeatHookCommand(rest, options);
-    if (command === "seat" || /^claude\d*$/u.test(command ?? "")) {
+    if (command === "seat" || operatorHarness(command) !== undefined) {
       return await runSeatCommand(rest, {
-        ...(command === "seat" ? {} : { claudeCommand: command }),
+        ...(command === "seat" ? {} : { harnessCommand: command }),
         repoRoot: options.repoRoot,
         ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        ...(options.host === undefined ? {} : { host: options.host }),
+        ...(options.operatorCredentialStore === undefined
+          ? {}
+          : { operatorCredentialStore: options.operatorCredentialStore }),
         stdout,
         stderr,
       });

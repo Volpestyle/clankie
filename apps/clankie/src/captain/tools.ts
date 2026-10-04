@@ -1,3 +1,6 @@
+import type { ProjectProposalDraft } from "@clankie/protocol/projects";
+import type { QuestionDraft } from "./conversation-questions.ts";
+import type { ConversationQuestionResult } from "@clankie/protocol";
 import {
   captureConversationAuthority,
   assertConversationAuthority,
@@ -46,7 +49,9 @@ import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat, MessageSeat } from "./port.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
+import { desktopTools } from "./desktop.ts";
 import { rivalsTools } from "./rivals-tools.ts";
+import { minecraftTools } from "./minecraft-tools.ts";
 import { WorkRequestSchema } from "../work-items.ts";
 
 /**
@@ -55,6 +60,8 @@ import { WorkRequestSchema } from "../work-items.ts";
  * (which scopes every room-keyed read and write a tool makes).
  */
 export interface TurnContext {
+  proposeProjectCreate?: ((draft: ProjectProposalDraft) => Promise<ConversationQuestionResult>) | undefined;
+  requestQuestion?: ((draft: QuestionDraft) => Promise<ConversationQuestionResult>) | undefined;
   /** Host-only immutable conversation ownership and current admission authority. */
   conversationAuthority?: ConversationAuthority | undefined;
   /** Immutable host binding for this turn; never populated from tool arguments. */
@@ -153,6 +160,7 @@ export function captainTools(
       : [],
   );
   return [
+    ...desktopTools(deps.desktop),
     ...(deps.bodyLeases === undefined
       ? []
       : [
@@ -187,6 +195,7 @@ export function captainTools(
           },
         ]),
     ...(deps.rivals === undefined ? [] : rivalsTools(deps.rivals)),
+    ...(deps.minecraft === undefined ? [] : minecraftTools(deps.minecraft, turn)),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     // A Discord room with a shell can start workers, so it watches and
     // harvests its own; its report belongs in the room that asked (ADR 0186).
@@ -672,22 +681,17 @@ function hireAgentTool(
     name: "hire_agent",
     label: "Hire an agent",
     description:
-      "Hire a fleet seat: Herdr opens a pane in the working directory and starts the harness there, and the " +
-      "seat lands watched and messageable as a persona the moment it exists — never a bare `herdr agent start`, " +
-      "which drops a stranger the roster has to notice. model and effort are spelled the harness's own way " +
-      "(pi, claude and codex take --model; effort is pi's --thinking, claude's --effort, codex's " +
-      "model_reasoning_effort); the selected project role overrides these choices; omit both for the harness default. Outcomes are typed: unknown_directory, " +
-      "harness_unavailable (the harness has no wired flag for what you asked), not_ready (it rejected the " +
-      "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, at_capacity (this body already runs as many hired agents " +
-      "as its plan allows; close or reuse one). Pass brief to hand it " +
-      "its first prompt (codex needs one, since its session starts with its first turn). A briefed local seat is " +
-      "driven through its harness (claude: the clankie-worker plugin's channel and Stop hooks) and " +
-      "stays interactive in its pane. control.mode says how: channel for Claude, adapter for Codex, terminal only " +
-      "for an unbriefed native launch, or unavailable when structured control cannot be used. control.reason " +
-      "explains the result; control.fix, when present, is the owner's step. Briefs and messages never fall back " +
-      "to terminal typing. A brief requires a harness receipt. An uncertain start or delivery retains its pane " +
-      "for inspection; reconcile it before retrying. Missing channel consent is an owner decision. Follow up " +
-      "with message_seat, and watch it with herdr_watch on the returned seatId.",
+      "Hire a fleet seat: Herdr opens a pane in the working directory, starts the harness there, and the seat " +
+      "lands watched and messageable as a persona — never a bare `herdr agent start`. model and effort use the " +
+      "harness's own spelling (--model; effort is pi's --thinking, claude's --effort, codex's " +
+      "model_reasoning_effort); a selected project role overrides them; omit both for the default. Typed " +
+      "outcomes: unknown_directory, harness_unavailable (no wired flag for what you asked), not_ready (rejected " +
+      "spelling or never came up), trust_required (review folder trust yourself, then retry), herdr_unreachable, " +
+      "at_capacity (close or reuse a hired agent). brief is its first prompt (codex needs one) and is delivered " +
+      "through the harness with a receipt, never by terminal typing; control.reason and control.fix explain the " +
+      "delivery result, and missing channel consent is an owner decision. An uncertain start or delivery keeps " +
+      "its pane: reconcile before retrying. Follow up with message_seat and watch the returned seatId with " +
+      "herdr_watch.",
     parameters: Type.Object({
       harness: StringEnum(OPERATOR_SEAT_HARNESSES),
       resume: Type.Optional(
@@ -1333,14 +1337,21 @@ function discordActionTools(
       description:
         "Show your live play surface in the speaker's current voice channel. The body chooses its supported " +
         "Discord surface and freshly resolves the speaker's voice channel; a refusal is a fact, not a retry cue.",
-      parameters: Type.Object({}),
-      execute: (callId) => {
+      parameters: Type.Object({
+        surface: Type.Optional(Type.Union([Type.Literal("gba_emulator"), Type.Literal("minecraft")])),
+      }),
+      execute: (callId, input) => {
         const grounded = context(callId);
         if (grounded.guildId === undefined) {
           return Promise.resolve(json({ ok: false, message: "Voice needs a server." }));
         }
         return deps
-          .discordActions!.execute({ action: "watch_start", ...grounded, guildId: grounded.guildId })
+          .discordActions!.execute({
+            action: "watch_start",
+            ...grounded,
+            guildId: grounded.guildId,
+            ...(input.surface === undefined ? {} : { surface: input.surface }),
+          })
           .then(json);
       },
     }),
@@ -1596,7 +1607,7 @@ export function mcpExtension(deps: CaptainDeps, lane: CaptainSessionLaneV2): Inl
     name: "captain-mcp",
     hidden: true,
     async factory(pi) {
-      const catalog = await deps.mcp.catalog(lane);
+      const catalog = (await deps.mcp.catalog(lane)).filter((tool) => tool.server !== "minecraft");
       if (catalog.length === 0) return;
 
       const registeredNames = new Set<string>();

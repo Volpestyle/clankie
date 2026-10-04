@@ -38,6 +38,16 @@ and `work_item_write` tools.
 
 ## Rules
 
+For an existing project's team settings, `clankie project list` returns the
+current revision. `clankie project update PROJECT --changes FILE.json --revision
+REVISION` changes only the reviewed name, roles, worker cap or tracker binding;
+`/project` exposes the same commands in the console. Follow explicit task or
+owner authorization before changing those settings. A tracker binding points
+to an already enrolled workspace's existing `.clankie/tracking.json`; it does
+not initialize tracking or choose a connected account. The app reads local
+bindings through read-only project repo references. Remote or missing sources
+remain unavailable, never a reason to select another local repo or backend.
+
 1. **Discover before creating.** If `clankie work` returns a `question`, the
    repo tracks work in more than one place or only in a single `TODO.md`. Ask
    the owner (or your lead) once, then record the answer with

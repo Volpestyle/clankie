@@ -185,7 +185,7 @@ async function editVoice(shell: ClankieFaceShell, services: PersonaCommandServic
 
   for (;;) {
     const chattiness = await flow.readSelect({
-      message: "How talkative is he by nature?",
+      message: "How talkative is he in Discord and on stream?",
       options: [
         { value: "quiet", label: "Quiet", hint: "short, sparing" },
         { value: "balanced", label: "Balanced", hint: "a sentence or two" },

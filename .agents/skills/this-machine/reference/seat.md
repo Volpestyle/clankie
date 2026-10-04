@@ -8,11 +8,11 @@ Claude Code or Codex sitting in Clankie's operator seat.
 Claude commands resolve aliases and functions through the interactive `$SHELL`
 and accept the same seat flags.
 
-`clankie claude` (also `clankie seat`) opens Claude Code as you, on your person's own plan, with your
+`clankie claude` opens Claude Code as you, on your person's own plan, with your
 tools over the `clankie` MCP server, your persona and memory card injected by
 the plugin's hooks, and these skills as `/clankie:this-machine` and
 `/clankie:trace-clankie`. Doctor's `laneTools` says whether the service's
-`/v1/mcp` route answers; `clankie seat --dry-run` prints the launch plan
+`/v1/mcp` route answers; `clankie claude --dry-run` prints the launch plan
 (`plugin.source` is `plugin-dir`, with the selected catalog and the
 `clankie@inline` channel identity). The seat's own brain is Claude Code's `/model`;
 `clankie model` changes the service lanes. Each fresh launch creates a separate
@@ -24,7 +24,7 @@ watches follow its conversation as `<channel source="clankie">` events.
 the service's herdr fleet claims the agent name `clankie` and becomes the shared
 global head.
 
-`clankie seat --harness codex --conversation ID` opens the same operator seat
+`clankie codex --conversation ID` opens the same operator seat
 in the real Codex TUI, using the Codex plugin and a dedicated app-server thread.
 In a checkout, first run `node integrations/codex-plugin/build.mjs` to materialize
 the shared skills; release bundles already contain them. Install with
@@ -39,11 +39,23 @@ binding it. Codex's `/model` selects the seat brain. Its resume record is separa
 from Claude's. For a live check, create a scratch conversation and close your own
 seat afterward; never use the owner's global-default thread.
 
+`clankie codex2` selects the registered account labelled exactly `codex2`:
+`clankie accounts codex add /absolute/CODEX_HOME --label codex2` registers it.
+The number is part of the label, never an account-list position. Unknown labels
+fail without selecting another account. The launcher captures the canonical home
+for native discovery, the app-server and TUI. Numbered commands keep separate
+resume records and refuse to resume after their label is rebound to another home.
+Plain `clankie codex` retains the current `CODEX_HOME` behavior. OpenCode has no
+numbered account command.
+For numbered accounts, set `CODEX_HOME` to that registered home in the environment
+of native plugin installation commands and the Codex session used to review
+`/plugins` and `/hooks`. Setup under a different home does not prepare this account.
+
 Checkout-only procedures (`verify-clankie`, `release-clankie`, `pnpm check`)
 exist only when doctor says `kind: checkout`.
 
 Use the `clankie` MCP server for service tools. Select a project with
-`clankie seat --conversation ID` to reuse an existing chat. A fresh launch without
+`clankie claude --conversation ID` to reuse an existing chat. A fresh launch without
 that flag creates its own chat rooted at the launch directory. Owner preferences
 and project instructions follow that conversation. Fresh Codex seats also get
 separate chats; their resume record remains independent of Claude's.
@@ -69,7 +81,9 @@ For shared Linear tools, inspect `clankie access linear`; verify an API-key
 or OAuth connection with `clankie access linear verify` and check the intended automation identity.
 Admitted fleet members discover connected tools with `clankie_tools` and invoke
 qualified names with `clankie_call`. The setting `fleet.tools` defaults to
-`connected`; `clankie fleet set --tools off` disables this access immediately.
+`connected`; `clankie fleet set --tools off` stops new standing tool admissions.
+Calls already past their last asynchronous check can still dispatch afterward;
+VUH-1585's strict refusal guarantee remains unmet (ADR 0217).
 Projects keep hiring, roles, caps and tracker policy, independently of tools.
 Unverified accounts and persona-bound worker publishing are excluded. For an individual
 manual grant, `clankie access issue REQUEST.json --out GRANT.json` creates a
@@ -86,14 +100,14 @@ Fleet admission and the connected-tools setting must permit discovery; otherwise
 only `message_clankie` remains. Later lists and every call still check current
 access. Codex currently keeps its initial catalog despite
 `notifications/tools/list_changed`; after an access change, an owner may need to
-reconnect MCP or restart that native pane. A displayed stale tool never bypasses
-revocation. Missing tools do not authorize another connector or an operator lane.
+reconnect MCP or restart that native pane. New calls from a displayed stale catalog are checked live; this is not a promise
+that calls already past a final asynchronous check cannot dispatch after revocation.
+Missing tools do not authorize another connector or an operator lane.
 Project membership proves initial and final socket/native-process checkpoints
 afresh for each request. Independent observations run together; no proof is
 cached across calls. Slow or unavailable process observations still deny access.
 
-OpenCode seats use the same isolation contract: a fresh `clankie seat --harness
-opencode` creates a separate workspace chat; `--conversation ID` reuses one,
+OpenCode seats use the same isolation contract: a fresh `clankie opencode` creates a separate workspace chat; `--conversation ID` reuses one,
 `--resume` keeps the exact native session and chat, and `--dry-run` creates none.
 See [the OpenCode seat guide](../../../../integrations/opencode-plugin/README.md).
 

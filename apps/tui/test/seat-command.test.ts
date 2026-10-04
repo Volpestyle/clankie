@@ -82,8 +82,8 @@ describe("clankie seat", () => {
       dryRun: true,
       pluginDir: "/p",
     });
-    expect(() => parseSeatArgs(["--plugin-dir"])).toThrow("Usage: clankie seat");
-    expect(() => parseSeatArgs(["status"])).toThrow("Usage: clankie seat");
+    expect(() => parseSeatArgs(["--plugin-dir"])).toThrow("Usage: clankie claude|codex|opencode");
+    expect(() => parseSeatArgs(["status"])).toThrow("Usage: clankie claude|codex|opencode");
   });
 
   it.each([
@@ -193,7 +193,7 @@ describe("clankie seat", () => {
     expect(spawned[0]!.env?.CLANKIE_SEAT_HARNESS).toBe("claude");
     expect(spawned[0]!.env?.CLANKIE_CODEX_SEAT_BINDING).toBeUndefined();
     expect(calls.at(-1)).toEqual(["herdr", "agent", "rename", "w1:p2", "--clear"]);
-    expect(stderr.text()).toContain("this seat is his head");
+    expect(stderr.text()).toContain("it receives his main chat");
     const record = JSON.parse(await readFile(join(env.XDG_STATE_HOME!, "clankie", "seat.json"), "utf8")) as {
       sessionId: string;
       cwd: string;
@@ -237,7 +237,7 @@ describe("clankie seat", () => {
       stderr: stderr.stream,
     });
     expect(exit).toBe(0);
-    expect(stderr.text()).toContain("another pane already holds the clankie seat");
+    expect(stderr.text()).toContain("another pane already receives his main chat");
     expect(stderr.text()).toContain("agent name clankie is already in use");
   });
 
@@ -269,7 +269,7 @@ describe("clankie seat", () => {
     const env = await stateEnv();
     await expect(
       planSeat({ resume: true, dryRun: true }, { repoRoot, env, execFileImpl: fakeExec({}) }),
-    ).rejects.toThrow("No seat to resume");
+    ).rejects.toThrow("No Claude chat to resume");
   });
 
   it("keeps pre-isolation resume records on their original global chat", async () => {

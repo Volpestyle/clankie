@@ -1,7 +1,11 @@
 import { createServer } from "node:http";
 import { resolveCaptainCredential } from "@clankie/credential-broker";
 import { ControlPlaneDeviceAuthorizer } from "./device-auth.ts";
-import { createCaptainConversationDispatch, createCaptainFileDownload } from "./conversation-upstream.ts";
+import {
+  createCaptainConversationDispatch,
+  createCaptainFileDownload,
+  createDeviceConversationDispatch,
+} from "./conversation-upstream.ts";
 import {
   createOperatorConversationRelayHandler,
   type RelayConversationLogger,
@@ -16,19 +20,21 @@ const conversationLogger: RelayConversationLogger = {
   info: (fields, message) => console.log(JSON.stringify({ level: "info", ...fields, message })),
   warn: (fields, message) => console.warn(JSON.stringify({ level: "warn", ...fields, message })),
 };
+const controlPlaneUrl = process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310";
 const conversationHandler = createOperatorConversationRelayHandler({
   authorizeDevice: new ControlPlaneDeviceAuthorizer({
-    baseUrl: process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310",
+    baseUrl: controlPlaneUrl,
   }),
+  deviceDispatch: createDeviceConversationDispatch({ baseUrl: controlPlaneUrl }),
   roomRequest: (path, method, token, body) =>
-    fetch(new URL(path, process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310"), {
+    fetch(new URL(path, controlPlaneUrl), {
       method,
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       ...(body === undefined ? {} : { body }),
       signal: AbortSignal.timeout(5000),
     }),
   readBodyLeases: (deviceToken) =>
-    fetch(new URL("/v1/body-leases", process.env.CLANKIE_CONTROL_PLANE_URL ?? "http://127.0.0.1:4310"), {
+    fetch(new URL("/v1/body-leases", controlPlaneUrl), {
       headers: { authorization: `Bearer ${deviceToken}` },
       signal: AbortSignal.timeout(5_000),
     }),

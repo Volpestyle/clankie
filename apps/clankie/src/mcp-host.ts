@@ -78,7 +78,15 @@ interface McpToolDescriptor {
   readonly initial: boolean;
 }
 
-type McpRefusalReason = "unknown_server" | "lane_denied" | "server_unavailable" | "result_too_large";
+type McpRefusalReason =
+  | "unknown_server"
+  | "lane_denied"
+  | "server_unavailable"
+  | "result_too_large"
+  | "body_owned";
+
+/** In-process service capability; HTTP/model arguments can never construct this symbol. */
+export const MINECRAFT_BODY_ACCESS = Symbol("minecraft-body-access");
 
 type McpCallResult =
   | { readonly outcome: "ok"; readonly content: string; readonly isError: boolean }
@@ -101,7 +109,11 @@ export interface McpHost {
     readonly arguments: Record<string, unknown>;
     /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
     readonly resultMode?: "model" | "data";
+    /** Only MinecraftMcpPort holds Clankie's motor; raw and delegated routes are denied. */
+    readonly bodyAccess?: typeof MINECRAFT_BODY_ACCESS;
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
+    /** Live authority check run after the host's own awaits, immediately before the provider call. */
+    readonly fence?: () => Promise<void>;
   }): Promise<McpCallResult>;
   close(): Promise<void>;
 }
@@ -125,14 +137,14 @@ const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
     credential: "linear",
     // Linear's server advertises far more than a room conversation needs. These
     // are the ones the authored `linear_*` tools used to cover; the rest are a
-    // `mcp_tool_search` away.
+    // `mcp_tool_search` away. Names must match the live server: it writes
+    // through `save_*` upserts, not `create_*`/`update_*`.
     initialTools: [
       "list_issues",
       "get_issue",
-      "create_issue",
-      "update_issue",
+      "save_issue",
       "list_comments",
-      "create_comment",
+      "save_comment",
       "list_teams",
       "list_projects",
     ],
@@ -141,6 +153,12 @@ const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
 ];
 
 export interface McpHostOptions {
+  /** Shipped lazy motor, reserved for the service's MinecraftPort rather than raw catalogs. */
+  readonly minecraftMotor?: {
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly cwd?: string;
+  };
   readonly credentials: CredentialStore;
   readonly settings: SettingsStore;
   readonly logger: McpHostLogger;
@@ -209,9 +227,24 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     const settings = await options.settings.load();
     // An explicitly disabled owner entry suppresses the curated default too.
     const authoredIds = new Set(settings.mcp.servers.map((server) => server.id));
+    const minecraft = options.minecraftMotor;
     const servers = [
       ...curated.filter((server) => !authoredIds.has(server.id)),
-      ...settings.mcp.servers,
+      ...settings.mcp.servers.filter((server) => minecraft === undefined || server.id !== "minecraft"),
+      ...(minecraft === undefined
+        ? []
+        : [
+            {
+              id: "minecraft",
+              transport: "stdio" as const,
+              command: minecraft.command,
+              args: [...minecraft.args],
+              ...(minecraft.cwd === undefined ? {} : { cwd: minecraft.cwd }),
+              lane: "operator" as const,
+              initialTools: [],
+              enabled: true,
+            },
+          ]),
     ].filter((server) => server.enabled);
     await Promise.all(
       [...states].map(async ([id, state]) => {
@@ -359,6 +392,14 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         // the reason a large one should name the handful worth carrying.
         initial: initial.size === 0 || initial.has(tool.name),
       }));
+    // A renamed upstream tool silently drops out of the listed set otherwise.
+    const missing = [...initial].filter((name) => !projected.some((tool) => tool.name === name));
+    if (missing.length > 0) {
+      options.logger.warn(
+        { event: "mcp.host.initial_tools_missing", server: server.id, missing },
+        "mcp server no longer offers some initial tools",
+      );
+    }
     const credential =
       server.id === "linear" && server.credential === "linear"
         ? await options.credentials.get("linear")
@@ -429,6 +470,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       const now = Date.now();
       const collected: McpToolDescriptor[] = [];
       for (const server of await activeServers()) {
+        if (server.id === "minecraft") continue;
         if (!laneAllows(server, lane)) continue;
         try {
           collected.push(...(await toolsFor(server, now)));
@@ -441,6 +483,15 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     },
 
     async call(input) {
+      if (
+        input.server === "minecraft" &&
+        (input.bodyAccess !== MINECRAFT_BODY_ACCESS || input.delegation !== undefined)
+      )
+        return {
+          outcome: "refused",
+          reason: "body_owned",
+          detail: "Clankie's Minecraft body is reachable only through the Minecraft service tools.",
+        };
       const now = Date.now();
       const server = (await activeServers()).find((entry) => entry.id === input.server);
       if (server === undefined) {
@@ -460,6 +511,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         };
       }
       let state: ServerState | undefined;
+      let dispatched = false;
       try {
         state = await stateFor(server);
         const client = await connection(server, state, now);
@@ -476,13 +528,22 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         const workerPost =
           server.id === "linear" && server.credential === "linear" && isLinearWorkerTool(input.tool);
         const credential = workerPost ? await options.credentials.get("linear") : undefined;
+        // The caller's fence may await; the server's own config check comes last.
+        if (input.fence) {
+          await input.fence();
+          await assertCurrent(server, state);
+        }
+        dispatched = true;
         const result = workerPost
           ? await publishLinearWorker({
               tool: input.tool,
               args: input.arguments,
               credential,
               author: options.linearAuthor ?? (async () => undefined),
-              beforeWrite: () => assertCurrent(server, state!),
+              beforeWrite: async () => {
+                await input.fence?.();
+                await assertCurrent(server, state!);
+              },
               ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
             })
           : await client.callTool(input.tool, input.arguments);
@@ -550,7 +611,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       } catch (error) {
         // A call that fails may have killed the process; drop the connection so
         // the next attempt reconnects instead of writing to a closed pipe.
-        if (state !== undefined && state.failure === undefined) await retire(server.id, state);
+        if (dispatched && state !== undefined && state.failure === undefined) await retire(server.id, state);
         return {
           outcome: "refused",
           reason: "server_unavailable",
@@ -717,6 +778,9 @@ async function createTransport(
   return new StdioClientTransport({
     command: server.command,
     args: [...server.args],
+    ...((server as McpServerSettings & { cwd?: string }).cwd === undefined
+      ? {}
+      : { cwd: (server as McpServerSettings & { cwd?: string }).cwd }),
     env: environment,
     // Servers chat on stderr; it must not land in the operator's console.
     stderr: "ignore",

@@ -1,3 +1,13 @@
+import { DesktopExpressions } from "./desktop.ts";
+import { projectPresence, pollPresence, captainIsThinking } from "./presence.ts";
+import { projectOnboarding } from "./project-onboarding.ts";
+import {
+  authorizeQuestion,
+  questionWorkspaceContext,
+  sameQuestionWorkspace,
+  type QuestionAuthority,
+} from "./conversation-questions.ts";
+import { savedSessionHarness } from "../agent-sessions.ts";
 import { NextTurnMailbox, nextTurnReceiverProof } from "./next-turn-mailbox.ts";
 import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
@@ -22,6 +32,8 @@ import { createRemoteCodexGoals } from "./remote-codex-goals.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
+import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
+import type { createOpenCodeNativeHost } from "./opencode-native-host.ts";
 import {
   createRemoteCodexSeatAdapter,
   remoteCodexQueue,
@@ -567,6 +579,7 @@ export interface CaptainOptions {
   readonly evalSessionBoundary?: EvalSessionBoundary;
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
+  readonly openCodeNative?: ReturnType<typeof createOpenCodeNativeHost>;
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
   readonly projectHireIdentity?: (
     fleet: string,
@@ -941,7 +954,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     })),
   ];
   const herdrRunner = routeHerdrFleets(
-    options.nativeHerdrRunner ?? createHerdrWatchRunner(deps.herdrAvailable),
+    options.nativeHerdrRunner ??
+      createHerdrWatchRunner(deps.herdrAvailable, undefined, options.openCodeNative?.createCommandTab),
     async () =>
       new Map([
         ...(await refreshFleets()).map((fleet) => {
@@ -1115,12 +1129,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           : {
               localProcess: options.localCodexProcess,
               viewEnv: async (view) => ({
+                HERDR_ENV: "1",
                 HERDR_PANE_ID: view.paneId,
                 HERDR_SOCKET_PATH: options.localCodexSocket?.() ?? "",
               }),
             },
       ),
       claudeWorkerSeats,
+      ...(options.openCodeNative === undefined
+        ? []
+        : [
+            createOpenCodeSeatAdapter({
+              repoRoot: options.repoRoot,
+              stateDir: options.stateDir,
+              native: options.openCodeNative,
+            }),
+          ]),
     ],
     // Remote seats get native channels too (VUH-1527): Codex its own app-server
     // over the fleet's ssh, Claude the worker plugin over the fleet's link.
@@ -1201,6 +1225,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     );
                   },
                   viewEnv: async (view) => ({
+                    HERDR_ENV: "1",
                     HERDR_PANE_ID: view.paneId.replace(`${fleetId}/`, ""),
                     HERDR_SOCKET_PATH: local.socketPath ?? "",
                   }),
@@ -1282,6 +1307,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return shown;
   };
   const settingsStore = options.settings ?? new SettingsStore();
+  const desktop = new DesktopExpressions(async () => (await settingsStore.load()).desktop);
+  const desktopDeps = { ...deps, desktop };
   const personaImages = options.personaImages ?? createPersonaImageSource(settingsStore, options.repoRoot);
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
@@ -1489,7 +1516,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       });
     await loader.reload();
     const authored = laneAuthoredTools(
-      deps,
+      desktopDeps,
       capture,
       laneLog,
       lane,
@@ -1618,6 +1645,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // A queued turn may start after close releases the preceding seat waiter.
       // It must not see an empty outbox and fall through into a fresh Pi turn.
       shutdown.signal.throwIfAborted();
+      if (context.inputAnswer) {
+        await authorizeQuestion(context.ownerAuthority);
+        if (!conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
+      }
       // Turning follow off also drops activity still queued behind a live turn.
       if (
         context.origin === "hook" &&
@@ -1726,6 +1757,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         current: bodyIdentity.current,
         authorize: bodyIdentity.authorize,
       };
+      lane.capture.proposeProjectCreate =
+        context.ownerAuthority && context.questionBinding
+          ? (draft) =>
+              conversations.proposeProjectCreate(conversationId, draft, {
+                ...context,
+                questionCurrent: bodyIdentity.current,
+              })
+          : undefined;
+      lane.capture.requestQuestion =
+        context.ownerAuthority && context.questionBinding
+          ? (draft) =>
+              conversations.requestQuestion(conversationId, draft, {
+                ...context,
+                questionCurrent: bodyIdentity.current,
+              })
+          : undefined;
       lane.capture.room = roomKey("operator", conversationId);
       lane.capture.targetId = conversationId;
       lane.capture.publishFile = (input) => conversations.publishFile({ conversationId, ...input });
@@ -1867,6 +1914,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           context.attachments === undefined
             ? undefined
             : await modelImagesForOwnerAttachments(context.attachments);
+        const workspaceNote =
+          context.ownerAuthority && context.questionBinding
+            ? await questionWorkspaceContext(cwd, async () => (await settings()).projects)
+            : "";
+        if (context.ownerAuthority && context.questionBinding) {
+          await authorizeQuestion(context.ownerAuthority);
+          if (!conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
+        }
         const prompt = resolveOperatorPrompt(
           attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
           invocableSkills(lane.session.resourceLoader.getSkills().skills, lane.quietSkills),
@@ -1889,12 +1944,39 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }
         // The resource loader disables discovered extensions and prompt templates;
         // exact, loaded operator skills are the only input allowed to reach Pi expansion.
-        const role = await runDurableTurn(lane, prompt.prompt, attached?.images ?? [], {
-          expandPromptTemplates: prompt.skillName !== undefined,
-          // runDurableTurn rechecks immediately before prompt/steer, including
-          // after waiting for another invocation or its startup reservation.
-          signal: AbortSignal.any([context.signal, shutdown.signal]),
-        });
+        const role = await runDurableTurn(
+          lane,
+          [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
+          attached?.images ?? [],
+          {
+            expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,
+            ...(context.inputAnswer
+              ? {
+                  // Existing admission reservation rechecks immediately before prompt().
+                  preparePrompt: async () => {
+                    await authorizeQuestion(context.ownerAuthority);
+                    return () => {
+                      if (
+                        !bodyIdentity.current() ||
+                        !context.ownerAuthority!.current() ||
+                        !conversations.questionEligible(conversationId) ||
+                        !context.questionBinding ||
+                        !sameQuestionWorkspace(cwd, context.questionBinding.workspace)
+                      )
+                        throw new Error("question_context_lost");
+                      return [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n");
+                    };
+                  },
+                  onAbsorbed: () => {
+                    throw new Error("question_continuation_busy");
+                  },
+                }
+              : {}),
+            // runDurableTurn rechecks immediately before prompt/steer, including
+            // after waiting for another invocation or its startup reservation.
+            signal: AbortSignal.any([context.signal, shutdown.signal]),
+          },
+        );
         if (role === "absorbed") return;
         const text = lane.lastAssistantText.trim();
         await laneLog.append("operator", conversationId, {
@@ -2005,6 +2087,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     workingDirectory,
     ownerAttachmentHost(),
   );
+  conversations.projectOnboarding = projectOnboarding(settingsStore);
+  conversations.questionEligible = (id) =>
+    !conversations.nativeSource(id) && !seatOutboxes.get(id)?.bound() && !seatOutboxes.get(id)?.uncertain();
 
   /**
    * Owner uploads and their way into a seat (ADR 0209). A seat receives files
@@ -2081,7 +2166,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (deps.agentSessions?.resolve === undefined)
           throw new Error("Saved-session resolution is unavailable");
         resume = await deps.agentSessions.resolve(request.resume);
-        if (request.harness !== resume.file.harness || request.workingDirectory !== resume.workingDirectory)
+        if (
+          request.harness !== savedSessionHarness(resume) ||
+          request.workingDirectory !== resume.workingDirectory
+        )
           throw new Error("Harness and workingDirectory must match the saved transcript");
         const fleet = savedSessionFleet(resume, request.fleet, await refreshFleets(), namedLocal);
         request = { ...request, ...(fleet === undefined ? {} : { fleet }) };
@@ -3050,6 +3138,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     async serveOperatorConversation(
       request: OperatorConversationServiceRequest,
+      authority?: QuestionAuthority,
     ): Promise<OperatorConversationServiceResult> {
       await personas.ready(settingsStore);
       if (
@@ -3140,6 +3229,42 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               ? [...seats]
               : seats.map(({ goal: _goal, assignment: _assignment, ...seat }) => seat),
         };
+      }
+      if (request.op === "presence") {
+        let seatCursor: string | undefined;
+        let activeSeats = 0;
+        const snapshot = await pollPresence(
+          async () => {
+            const currentSeatCursor = fleetChanges.current();
+            if (seatCursor !== currentSeatCursor) {
+              activeSeats = (await refreshFleet()).length;
+              seatCursor = currentSeatCursor;
+            }
+            const [voice, play] = await Promise.all([
+              deps.presence.listSessions(),
+              deps.embodiment.getLiveSession(),
+            ]);
+            const thinking = await captainIsThinking(sessions.values());
+            const inVoice = voice.some(
+              (session) => session.gatewayConnected && session.voiceGuildIds.length > 0,
+            );
+            return projectPresence({
+              expression: await desktop.current(),
+              thinking,
+              inVoice,
+              playing:
+                deps.hostedWorld?.inspect().outcome === "playing" ||
+                (play !== undefined && ["running", "stopping"].includes(play.state)),
+              ...(play === undefined ? {} : { playingSince: play.requestedAt }),
+              activeSeats,
+              pendingOwnerItem: conversations.pendingPresenceOwnerItem(),
+            });
+          },
+          request.cursor,
+          request.waitMs ?? 0,
+          shutdown.signal,
+        );
+        return { op: "presence", schemaVersion: 1, snapshot };
       }
       if (request.op === "fleet") {
         await fleetChanges.wait(request.cursor, request.waitMs ?? 0);
@@ -3457,7 +3582,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           }
         }
       }
-      const result = await conversations.serve(request);
+      const result = await conversations.serve(request, authority);
       if (request.op === "create" && request.scope.kind === "seat") {
         herdrWatches.trackSeat(request.scope.seatId);
       } else if (request.op === "create" && request.scope.kind === "persona") {
@@ -3500,6 +3625,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       return result;
     },
+
+    invalidateQuestionPrincipal: (deviceId) => conversations.invalidateQuestionPrincipal(deviceId),
 
     async observeLanes(): Promise<readonly ObservableCaptainLane[]> {
       return laneLog.list();
@@ -3564,6 +3691,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     bodyRoomConversation: (lane, targetId) => conversations.roomConversation(lane, targetId),
 
+    projectHireMembershipCandidate: (fleet, pane) => herdrWatches.projectHireMembershipCandidate(fleet, pane),
+    confirmedProjectHireAssignment: (fleet, pane, revision, proof) =>
+      herdrWatches.confirmedProjectHireAssignment(fleet, pane, revision, proof),
     lookupProjectHire: async (proof) => herdrWatches.projectHireAssignment(proof.fleet, proof.pane, proof),
     designatedConversationHead: (id) => {
       const head = conversations.designatedHead(id);
@@ -3606,7 +3736,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       const currentSettings = await settings();
       return buildLaneToolBank(
-        deps,
+        desktopDeps,
         capture,
         laneLog,
         lane,
@@ -3621,6 +3751,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     pollSeatEvents(waitMs, signal, conversationId) {
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
+      conversations.cancelPendingQuestion(binding.conversationId, "native_seat_takeover");
       const events = seatOutbox(binding.conversationId).poll(waitMs, signal);
       return events;
     },

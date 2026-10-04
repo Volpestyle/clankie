@@ -12,11 +12,16 @@ import {
   registerConfiguredPiProviders,
   resolvePiModelSelection,
   setCaptainModel,
+  thinkingLevelForVariant,
+  updateGlobalConfig,
 } from "@clankie/model-provider";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type {
+  ModelEffort,
   ModelKeyResult,
   ModelKeysResponse,
+  ModelOptionsResponse,
   ModelSubscriptionsResponse,
 } from "@clankie/protocol/model-keys";
 import { BrokerCredentialStore } from "./captain/model.ts";
@@ -29,9 +34,23 @@ export interface ModelKeysPort {
   remove(providerId: string): Promise<ModelKeyResult>;
   /** Account sign-ins (OAuth/subscription) in use instead of an API key. */
   subscriptions?(): Promise<ModelSubscriptionsResponse>;
+  /** Providers usable without key entry, and the running model's effort ladder. */
+  options?(): Promise<ModelOptionsResponse>;
+  /** The running model's effort; null returns it to the model's default. */
+  setEffort?(effort: ModelEffort | null): Promise<ModelKeyResult>;
 }
 
 /** The CLI's config, broker, Pi runtime and models.dev fill, with a write-only wire projection. */
+/**
+ * The model library names a few providers for its own migrations; Clankie
+ * shows the owner what they signed in to. Its "openai-codex" is the Codex
+ * subscription Clankie runs on, not a legacy path.
+ */
+const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = { "openai-codex": "OpenAI Codex" };
+export function providerDisplayName(provider: { readonly id: string; readonly name: string }): string {
+  return PROVIDER_DISPLAY_NAMES[provider.id] ?? provider.name;
+}
+
 export function createModelKeys(options: {
   store: CredentialStore;
   env?: NodeJS.ProcessEnv;
@@ -103,6 +122,26 @@ export function createModelKeys(options: {
       ? undefined
       : state;
   };
+  /**
+   * The model that runs, resolved without its stored effort so an effort the
+   * model refuses can still be read and replaced here.
+   */
+  const running = async (state: Awaited<ReturnType<typeof snapshot>>) => {
+    const credentials = await store.list();
+    try {
+      const { variant: _variant, ...config } = state.config;
+      const selection = resolvePiModelSelection(config, state.models, {
+        catalog: state.catalog,
+        hasCodexSubscription: !isHostedModelEnvironment(env) && credentials[CODEX_PROVIDER_ID] !== undefined,
+      });
+      const providerId = parseModelRef(selection.ref)?.providerId;
+      if (providerId === undefined || !modelCredentialAllowed(providerId, credentials[providerId], { env }))
+        return undefined;
+      return { ...selection, configuredRef: state.config.model ?? selection.ref, credentials };
+    } catch {
+      return undefined;
+    }
+  };
   return {
     async list() {
       const state = await snapshot();
@@ -129,7 +168,7 @@ export function createModelKeys(options: {
         providers: state.providers
           .map((provider) => ({
             id: provider.id,
-            name: provider.name,
+            name: providerDisplayName(provider),
             acceptsApiKey: provider.auth.apiKey !== undefined,
             keyConfigured: credentials[provider.id]?.type === "api",
             models: piModelsFor(state.models, provider.id, state).map(({ id, name }) => ({ id, name })),
@@ -146,9 +185,57 @@ export function createModelKeys(options: {
               credentials[provider.id]?.type === "oauth" &&
               modelCredentialAllowed(provider.id, credentials[provider.id], { env }),
           )
-          .map((provider) => ({ providerId: provider.id, name: provider.name }))
+          .map((provider) => ({ providerId: provider.id, name: providerDisplayName(provider) }))
           .sort((a, b) => a.name.localeCompare(b.name)),
       };
+    },
+    async options() {
+      const state = await snapshot();
+      const selection = await running(state);
+      const credentials = selection?.credentials ?? (await store.list());
+      const available = new Set((await state.models.getAvailable()).map((model) => model.provider));
+      const usableProviders = state.providers
+        .filter(
+          (provider) =>
+            available.has(provider.id) &&
+            modelCredentialAllowed(provider.id, credentials[provider.id], { env }),
+        )
+        .map((provider) => provider.id)
+        .sort();
+      if (selection === undefined) return { usableProviders, effort: null };
+      const stored = state.config.variant?.[selection.ref] ?? state.config.variant?.[selection.configuredRef];
+      const levels = getSupportedThinkingLevels(selection.model);
+      const current = thinkingLevelForVariant(stored);
+      return {
+        usableProviders,
+        effort: {
+          model: selection.ref,
+          current: current !== undefined && levels.includes(current) ? current : null,
+          default: clampThinkingLevel(selection.model, "medium"),
+          levels,
+        },
+      };
+    },
+    async setEffort(effort) {
+      const selection = await running(await snapshot());
+      if (selection === undefined) return { ok: false, error: "unsupported_model" };
+      if (effort !== null && !getSupportedThinkingLevels(selection.model).includes(effort))
+        return { ok: false, error: "unsupported_model" };
+      // The runtime reads the served ref first, then the configured one; keep both
+      // in step so `clankie effort` reports what runs.
+      const refs = new Set([selection.ref, selection.configuredRef]);
+      await updateGlobalConfig(
+        (current) => {
+          const variants = { ...current.variant };
+          for (const ref of refs) {
+            if (effort === null) delete variants[ref];
+            else variants[ref] = effort;
+          }
+          current.variant = variants;
+        },
+        options.env === undefined ? {} : { env: options.env },
+      );
+      return { ok: true };
     },
     async set(providerId, apiKey) {
       let action: "key-set" | "key-replaced" = "key-set";

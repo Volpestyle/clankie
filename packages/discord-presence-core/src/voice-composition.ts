@@ -283,6 +283,8 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
                   onAudioDelta: open.onAudioDelta,
                   onTextDelta: handlers.onTextDelta,
                   onFunctionCall: handlers.onFunctionCall,
+                  onResponseStarted: handlers.onResponseStarted,
+                  onResponseAbandoned: handlers.onResponseAbandoned,
                   onResponseDone: handlers.onResponseDone,
                   onClose: handlers.onClose,
                   onError: handlers.onError,
@@ -331,6 +333,10 @@ export function createVoiceRealtimePorts(input: VoiceRealtimePortsInput): Transc
               open.onOutputTranscript?.(event, "native_audio");
             },
             onFunctionCall: open.onFunctionCall,
+            ...(open.onResponseStarted === undefined ? {} : { onResponseStarted: open.onResponseStarted }),
+            ...(open.onResponseAbandoned === undefined
+              ? {}
+              : { onResponseAbandoned: open.onResponseAbandoned }),
             onResponseDone: open.onResponseDone,
             onClose: open.onClose,
             onError: open.onError,

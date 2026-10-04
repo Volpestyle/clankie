@@ -232,7 +232,7 @@ export function createCodexSeatAdapter(
           }
           if (launch.resumeSessionId !== undefined && seat.threadId !== launch.resumeSessionId)
             throw new Error("Codex resumed a different thread; no brief was sent");
-          releaseProcess?.bindSession?.(seat.threadId);
+          await releaseProcess?.bindSession?.(seat.threadId);
           ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
           report();
           await reporting;

@@ -1,0 +1,13 @@
+Clankie Minecraft MCP motor
+Copyright 2026 Clankie contributors
+
+Derived from yuniko-software/minecraft-mcp-server v2.0.4,
+commit 240c8cec337ce152cc9e058ebdef511055808406.
+Copyright 2025 Yuniko Software. Apache License 2.0 (see LICENSE).
+The upstream distribution at that commit has no NOTICE file.
+Modified: lifecycle, action handles, interruption, packet evidence, events,
+continuous follow, and browser screenshot viewing are owned by Clankie.
+
+The browser viewer uses prismarine-viewer 1.33.0 (MIT),
+gitHead 7102f49e287cab116802bc61ad03d05e2ad395db, and its distributed assets.
+Its package contains its own LICENSE and bundled dependency attribution.

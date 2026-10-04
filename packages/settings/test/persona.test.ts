@@ -50,6 +50,13 @@ describe("persona instructions", () => {
     expect(operator).toMatch(/not like a status report/u);
   });
 
+  it("tunes talkativeness for shared rooms, not the operator's working seat", () => {
+    const quiet = persona({ chattiness: "quiet" });
+    expect(personaInstructions(quiet, "social")).toContain("Speak rarely and briefly");
+    expect(personaInstructions(quiet, "gameplay")).toContain("Speak rarely and briefly");
+    expect(personaInstructions(quiet, "operator")).not.toContain("Speak rarely and briefly");
+  });
+
   it("describes each register instead of quoting a line he could say", () => {
     // A style example is a sentence in his voice, and a sentence in his voice
     // gets said. The casual example was "Yeah, I was just in the voice channel"

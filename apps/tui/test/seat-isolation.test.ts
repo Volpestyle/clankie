@@ -8,10 +8,15 @@ import { ConversationStore } from "../../clankie/src/captain/conversations.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { planSeat, runSeatCommand } from "../src/command/seat.ts";
 
-it.each(["claude", "opencode"] as const)(
-  "overlapping %s launches in one workspace get separate app chats and resume their binding",
-  async (harness) => {
-    const seatArgs = ["--harness", harness];
+it.each([
+  ["claude", "named"],
+  ["claude", "legacy"],
+  ["opencode", "named"],
+  ["opencode", "legacy"],
+] as const)(
+  "overlapping %s %s launches in one workspace get separate app chats and resume their binding",
+  async (harness, route) => {
+    const seatArgs = route === "legacy" ? ["--harness", harness] : [];
     const root = await mkdtemp(join(tmpdir(), "clankie-seat-isolation-"));
     const conversations = new ConversationStore(join(root, "conversations"), async () => {});
     const launches: Array<{ conversationId: string; sessionId: string; cwd: string }> = [];
@@ -49,6 +54,7 @@ it.each(["claude", "opencode"] as const)(
       HERDR_SOCKET_PATH: "/tmp/fleet.sock",
     };
     const options = {
+      ...(route === "named" ? { harnessCommand: harness } : {}),
       repoRoot: join(import.meta.dirname, "../../.."),
       env,
       execFileImpl: async (command: string, args: readonly string[]) => {
@@ -161,6 +167,7 @@ it.each(["claude", "opencode"] as const)(
         { harness: "codex", resume: false, dryRun: false },
         {
           ...options,
+          harnessCommand: "codex",
           execFileImpl: async () => ({ stdout: "Codex CLI", stderr: "" }),
           trackerOverrides: async () => [],
         },

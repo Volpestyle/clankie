@@ -13,6 +13,10 @@ export {
   FLEET_SIZES,
   FleetSettingsSchema,
   GameplaySettingsSchema,
+  MinecraftHostSchema,
+  MinecraftConfiguredProfileSchema,
+  MinecraftPublicEndpointSchema,
+  MinecraftSettingsSchema,
   BrowserSettingsSchema,
   HerdrSettingsSchema,
   ExecutionConnectionSchema,
@@ -42,6 +46,8 @@ export {
   type FleetSettings,
   type FleetSize,
   type GameplaySettings,
+  type MinecraftConfiguredProfile,
+  type MinecraftSettings,
   type BrowserSettings,
   type HerdrSettings,
   type LinearWebhookSettings,
@@ -98,7 +104,10 @@ export {
 } from "./codex-accounts.ts";
 
 export * from "./projects.ts";
+export * from "./project-enrollment.ts";
 export { ProjectsSettingsSchema, type ProjectsSettings } from "@clankie/protocol/projects";
 
 export * from "./project-worktrees.ts";
 export * from "./project-worktree-observer.ts";
+
+export { DesktopSettingsSchema, desktopIsQuiet, type DesktopSettings } from "./desktop.ts";

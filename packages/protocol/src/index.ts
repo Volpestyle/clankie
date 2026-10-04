@@ -1,3 +1,17 @@
+import {
+  OperatorPresenceRequestSchema,
+  OperatorPresenceResultSchema,
+  type OperatorPresenceSnapshot,
+} from "./presence.ts";
+export * from "./presence.ts";
+import {
+  ProjectProposalLocatorSchema,
+  ProjectProposalTargetSchema,
+  ProjectProposalResultSchema,
+  type ProjectProposalLocator,
+  type ProjectProposalTarget,
+  type ProjectProposalResult,
+} from "./projects.ts";
 export * from "./discord-settings.ts";
 export * from "./discord-rooms.ts";
 import { BodyLeaseResultSchema } from "./body-leases.ts";
@@ -1426,6 +1440,72 @@ export type OperatorAutonomyCommand = z.infer<typeof OperatorAutonomyCommandSche
  * impossible by schema; the captain redacts to these shapes before publishing
  * to the durable log/tail.
  */
+/** Ordinary context/preferences only. These DTOs never authorize configuration. */
+export const ConversationQuestionAnswerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("choice"), optionId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("text"), text: z.string().trim().min(1).max(4000) }).strict(),
+]);
+export type ConversationQuestionAnswer = z.infer<typeof ConversationQuestionAnswerSchema>;
+export const ConversationQuestionSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    incarnationId: z.string().uuid(),
+    conversationId: OperatorConversationIdSchema,
+    workspace: z.string().min(1).max(4096),
+    purpose: z.literal("preference"),
+    kind: z.enum(["text", "choice"]),
+    prompt: z.string().trim().min(1).max(2000),
+    options: z
+      .array(
+        z
+          .object({
+            optionId: z.string().uuid(),
+            label: z.string().trim().min(1).max(200),
+            description: z.string().max(500).optional(),
+          })
+          .strict(),
+      )
+      .max(8),
+    allowFreeform: z.boolean(),
+    createdAt: z.string().datetime(),
+    originRunId: z.string().min(1).max(256),
+    status: z.enum(["pending", "submitted", "cancelled"]),
+    resolvedAt: z.string().datetime().optional(),
+    reason: z.string().max(100).optional(),
+    answer: ConversationQuestionAnswerSchema.optional(),
+    continuation: z
+      .object({
+        runId: z.string().min(1).max(256),
+        state: z.enum(["accepted", "completed", "failed", "cancelled"]),
+        reasonCode: z.string().max(100).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type ConversationQuestion = z.infer<typeof ConversationQuestionSchema>;
+export const ConversationQuestionTargetSchema = z
+  .object({
+    conversationId: OperatorConversationIdSchema,
+    incarnationId: z.string().uuid(),
+    requestId: z.string().uuid(),
+    expectedRevision: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ConversationQuestionTarget = z.infer<typeof ConversationQuestionTargetSchema>;
+export const ConversationQuestionResultSchema = z
+  .object({
+    status: z.enum(["ready", "resolved", "revision_conflict", "refused"]),
+    conversationId: OperatorConversationIdSchema,
+    incarnationId: z.string().uuid().optional(),
+    revision: z.number().int().nonnegative().optional(),
+    safeCursor: OperatorConversationCursorSchema.optional(),
+    question: ConversationQuestionSchema.optional(),
+    reason: z.string().max(100).optional(),
+  })
+  .strict();
+export type ConversationQuestionResult = z.infer<typeof ConversationQuestionResultSchema>;
+
 const OperatorConversationEventEnvelopeSchema = z.object({
   schemaVersion: z.literal(1),
   conversationId: OperatorConversationIdSchema,
@@ -2450,6 +2530,32 @@ export const OperatorSeatReplySchema = z
 export type OperatorSeatReply = z.infer<typeof OperatorSeatReplySchema>;
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
+  ProjectProposalLocatorSchema.extend({
+    op: z.literal("project_proposal_get"),
+    schemaVersion: z.literal(1),
+  }).strict(),
+  ProjectProposalTargetSchema.extend({
+    op: z.literal("project_proposal_confirm"),
+    schemaVersion: z.literal(1),
+  }).strict(),
+  z
+    .object({
+      op: z.literal("input_get"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      requestId: z.string().uuid().optional(),
+    })
+    .strict(),
+  ConversationQuestionTargetSchema.extend({
+    op: z.literal("input_answer"),
+    schemaVersion: z.literal(1),
+    answer: ConversationQuestionAnswerSchema,
+  }).strict(),
+  ConversationQuestionTargetSchema.extend({
+    op: z.literal("input_cancel"),
+    schemaVersion: z.literal(1),
+  }).strict(),
+
   z
     .object({
       op: z.literal("connections"),
@@ -2646,6 +2752,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
    * One cursor-based live fleet read. An absent/old cursor returns now; the
    * current cursor parks until Herdr or fleet-owned state changes.
    */
+  OperatorPresenceRequestSchema,
   z
     .object({
       op: z.literal("fleet"),
@@ -2789,6 +2896,42 @@ export type OperatorWorkItemsOutcome =
   | { readonly outcome: "unavailable"; readonly message: string };
 
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
+  z
+    .object({
+      op: z.literal("project_proposal_get"),
+      schemaVersion: z.literal(1),
+      result: ProjectProposalResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("project_proposal_confirm"),
+      schemaVersion: z.literal(1),
+      result: ProjectProposalResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("input_get"),
+      schemaVersion: z.literal(1),
+      result: ConversationQuestionResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("input_answer"),
+      schemaVersion: z.literal(1),
+      result: ConversationQuestionResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("input_cancel"),
+      schemaVersion: z.literal(1),
+      result: ConversationQuestionResultSchema,
+    })
+    .strict(),
+
   z
     .object({
       op: z.literal("connections"),
@@ -2972,6 +3115,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
     })
     .strict(),
+  OperatorPresenceResultSchema,
   z
     .object({
       op: z.literal("fleet"),
@@ -3119,11 +3263,21 @@ export type OperatorConversationTailItem =
  * captain-runtime internals — so every surface calls one identical contract.
  */
 export interface OperatorConversationServiceClient {
+  projectProposalGet?(target: ProjectProposalLocator): Promise<ProjectProposalResult>;
+  projectProposalConfirm?(target: ProjectProposalTarget): Promise<ProjectProposalResult>;
+  inputGet?(conversationId: string, requestId?: string): Promise<ConversationQuestionResult>;
+  inputAnswer?(
+    target: ConversationQuestionTarget & { answer: ConversationQuestionAnswer },
+  ): Promise<ConversationQuestionResult>;
+  inputCancel?(target: ConversationQuestionTarget): Promise<ConversationQuestionResult>;
+
   connections?(command?: OperatorConnectionCommand): Promise<z.infer<typeof OperatorConnectionResultSchema>>;
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
   /** Park until the fleet cursor changes, then return one coherent snapshot. */
   fleet?(cursor?: string, signal?: AbortSignal): Promise<OperatorFleetSnapshot>;
+  /** Park until present-tense activity changes. */
+  presence?(cursor?: string, signal?: AbortSignal): Promise<OperatorPresenceSnapshot>;
   /** Commands and skills accepted by this exact conversation target. */
   composerCatalog?(conversationId: string): Promise<OperatorComposerCatalog>;
   /**
@@ -3263,6 +3417,36 @@ export function createOperatorConversationServiceClient(
   const workProjection = options.includeWork === true ? { includeWork: true } : {};
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   return {
+    async projectProposalGet(target) {
+      const result = await dispatch({ op: "project_proposal_get", schemaVersion: 1, ...target });
+      if (result.op !== "project_proposal_get") throw new Error("Unexpected proposal response");
+      return result.result;
+    },
+    async projectProposalConfirm(target) {
+      const result = await dispatch({ op: "project_proposal_confirm", schemaVersion: 1, ...target });
+      if (result.op !== "project_proposal_confirm") throw new Error("Unexpected proposal response");
+      return result.result;
+    },
+    async inputGet(conversationId, requestId) {
+      const result = await dispatch({
+        op: "input_get",
+        schemaVersion: 1,
+        conversationId,
+        ...(requestId === undefined ? {} : { requestId }),
+      });
+      if (result.op !== "input_get") throw new Error("Unexpected question response");
+      return result.result;
+    },
+    async inputAnswer(target) {
+      const result = await dispatch({ op: "input_answer", schemaVersion: 1, ...target });
+      if (result.op !== "input_answer") throw new Error("Unexpected question response");
+      return result.result;
+    },
+    async inputCancel(target) {
+      const result = await dispatch({ op: "input_cancel", schemaVersion: 1, ...target });
+      if (result.op !== "input_cancel") throw new Error("Unexpected question response");
+      return result.result;
+    },
     async connections(command = { action: "list" }) {
       const result = await dispatch({ op: "connections", schemaVersion: 1, command });
       if (result.op !== "connections") throw new Error(`Unexpected ${result.op} result for connections`);
@@ -3295,6 +3479,19 @@ export function createOperatorConversationServiceClient(
         signal,
       );
       if (result.op !== "fleet") throw new Error(`Unexpected ${result.op} result for fleet`);
+      return result.snapshot;
+    },
+    async presence(cursor, signal) {
+      const result = await dispatch(
+        {
+          op: "presence",
+          schemaVersion: 1,
+          ...(cursor === undefined ? {} : { cursor }),
+          waitMs: fleetWaitMs,
+        },
+        signal,
+      );
+      if (result.op !== "presence") throw new Error(`Unexpected ${result.op} result for presence`);
       return result.snapshot;
     },
     async composerCatalog(conversationId) {
@@ -4188,6 +4385,7 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
   }).strict(),
   DiscordCaptainActionContextSchema.extend({
     action: z.literal("watch_start"),
+    surface: z.enum(["gba_emulator", "minecraft"]).optional(),
     guildId: z.string().min(1).max(128),
   }).strict(),
   DiscordCaptainActionContextSchema.extend({
@@ -4212,7 +4410,7 @@ export type DiscordCaptainActionResult = z.infer<typeof DiscordCaptainActionResu
  * catalog: the executor maps a surface to its configured Discord application id
  * so a model can never name an arbitrary application to launch.
  */
-export const DiscordActivitySurfaceSchema = z.enum(["gba_emulator"]);
+export const DiscordActivitySurfaceSchema = z.enum(["gba_emulator", "minecraft"]);
 export type DiscordActivitySurface = z.infer<typeof DiscordActivitySurfaceSchema>;
 
 export const DiscordPresenceActionRiskClassSchema = z.enum([
@@ -6611,3 +6809,4 @@ export {
 } from "./connections.ts";
 
 export * from "./body-leases.ts";
+export * from "./minecraft.ts";

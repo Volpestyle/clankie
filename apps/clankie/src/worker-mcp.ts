@@ -184,6 +184,7 @@ export class WorkerMcp {
         "Fleet grants are retired. Admitted fleet members use connected tools; inspect clankie fleet status and revoke old records with clankie access revoke ID.",
       );
     const request = WorkerGrantRequestSchema.parse(input);
+    if (request.server === "minecraft") throw new Error("Clankie's Minecraft play seat cannot be delegated");
     if (request.project !== undefined) {
       const project = (await this.options.projects?.())?.projects.find(
         (project) => project.id === request.project,
@@ -363,7 +364,9 @@ export class WorkerMcp {
     const expiresAt = Math.floor(Date.now() / 1000) + 900;
     const records: GrantRecord[] = [];
     if (await this.fleetToolsEnabled()) {
-      const catalog = await this.options.host.catalog("operator");
+      const catalog = (await this.options.host.catalog("operator")).filter(
+        (tool) => tool.server !== "minecraft",
+      );
       for (const server of new Set(catalog.map((tool) => tool.server))) {
         try {
           const { account, binding } = await this.options.host.account(server, "operator");
@@ -497,18 +500,26 @@ export class WorkerMcp {
                       inputSchema: tool.inputSchema,
                     })),
                 )
-              : catalog
-                  .filter((tool) =>
-                    terms.every((term) =>
-                      `${tool.qualifiedName} ${tool.description ?? ""}`.toLowerCase().includes(term),
-                    ),
-                  )
-                  .slice(0, 20)
-                  .map(
-                    (tool) =>
-                      `${tool.qualifiedName} — ${(tool.description ?? "").replace(/\s+/gu, " ").trim()}`,
-                  )
-                  .join("\n");
+              : (() => {
+                  // Rank by how many query words a tool matches: agents write
+                  // several words ("linear issue create"), and requiring all of
+                  // them in one tool returned nothing.
+                  const ranked = catalog
+                    .map((tool) => {
+                      const haystack = `${tool.qualifiedName} ${tool.description ?? ""}`.toLowerCase();
+                      return { tool, hits: terms.filter((term) => haystack.includes(term)).length };
+                    })
+                    .filter(({ hits }) => terms.length === 0 || hits > 0)
+                    .sort((a, b) => b.hits - a.hits)
+                    .slice(0, 20)
+                    .map(
+                      ({ tool }) =>
+                        `${tool.qualifiedName} — ${(tool.description ?? "").replace(/\s+/gu, " ").trim()}`,
+                    );
+                  return ranked.length > 0 || catalog.length === 0
+                    ? ranked.join("\n")
+                    : "No connected tool matches those words. Try one word, such as a service name.";
+                })();
             return { content: [{ type: "text", text }], isError: false };
           }
           if (name !== "clankie_call") throw new Error("Use clankie_call for connected tools");
@@ -524,7 +535,7 @@ export class WorkerMcp {
               Object.entries(rule.arguments).every(([key, value]) => isDeepStrictEqual(args[key], value)),
           ),
         );
-        if (!current) throw new Error("Tool or arguments are not granted");
+        if (!current || current.server === "minecraft") throw new Error("Tool or arguments are not granted");
         const rule = current.tools.find((rule) => `${current.server}_${rule.name}` === name)!;
         // Manual authority stays durable; fleet authority comes from live admission and
         // the current catalog. Both retain the host's final account/config fence.
@@ -548,6 +559,17 @@ export class WorkerMcp {
             principalId: current.grant.principalId,
             workId: current.grant.missionId,
           },
+          // The host awaits credentials and connections after these checks; recheck
+          // fleet authority at its last moment before the provider call.
+          ...(authorityNow.fleet === undefined
+            ? {}
+            : {
+                // Admission can await I/O; read the kill switch after it.
+                fence: async () => {
+                  if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
+                  if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
+                },
+              }),
         });
         return {
           content: [{ type: "text", text: result.outcome === "ok" ? result.content : result.detail }],

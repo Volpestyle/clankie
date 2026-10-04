@@ -1,5 +1,8 @@
+import { DesktopSettingsSchema } from "./desktop.ts";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { MinecraftServerProfileIdSchema } from "@clankie/protocol";
+import { isIP } from "node:net";
 
 /**
  * Operator settings: **non-secret** configuration only.
@@ -349,6 +352,57 @@ export const GameplaySettingsSchema = z
   })
   .strict();
 export type GameplaySettings = z.infer<typeof GameplaySettingsSchema>;
+
+/** Exact host identities only: no URLs, credentials, paths, wildcards or IPv6 scope IDs. */
+export const MinecraftHostSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(253)
+  .transform((value) => value.toLowerCase().replace(/\.$/u, ""))
+  .refine(
+    (value) =>
+      !value.includes("%") &&
+      (isIP(value) !== 0 ||
+        value.split(".").every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(label))),
+    "must be a literal IP address or DNS hostname",
+  );
+
+/** Owner-only profile material. The captain receives only the profile's id and name. */
+export const MinecraftConfiguredProfileSchema = z.strictObject({
+  id: MinecraftServerProfileIdSchema,
+  name: z.string().trim().min(1).max(128),
+  host: MinecraftHostSchema,
+  port: z.number().int().min(1).max(65_535).default(25_565),
+  version: z
+    .string()
+    .regex(/^\d+\.\d+(?:\.\d+)?$/u)
+    .max(32),
+  username: z
+    .string()
+    .regex(/^[A-Za-z0-9_]{1,16}$/u)
+    .default("Clankie"),
+  /** Online account authentication is a later broker-backed capability. */
+  auth: z.literal("offline").default("offline"),
+});
+export type MinecraftConfiguredProfile = z.infer<typeof MinecraftConfiguredProfileSchema>;
+
+export const MinecraftPublicEndpointSchema = z.strictObject({
+  host: MinecraftHostSchema,
+  port: z.number().int().min(1).max(65_535).default(25_565),
+});
+
+export const MinecraftSettingsSchema = z
+  .strictObject({
+    profiles: z.array(MinecraftConfiguredProfileSchema).max(32).default([]),
+    /** Public destinations require approval of the actual resolved/SRV target and port. */
+    publicAllowlist: z.array(MinecraftPublicEndpointSchema).max(64).default([]),
+  })
+  .superRefine((value, context) => {
+    if (new Set(value.profiles.map((profile) => profile.id)).size !== value.profiles.length)
+      context.addIssue({ code: "custom", path: ["profiles"], message: "Profile ids must be unique" });
+  });
+export type MinecraftSettings = z.infer<typeof MinecraftSettingsSchema>;
 
 /**
  * How the owner wants work routed across the agents Clankie leads.
@@ -700,6 +754,8 @@ export const ClankieSettingsSchema = z
     projects: ProjectsSettingsSchema.default(() => ProjectsSettingsSchema.parse({})),
     captain: CaptainSettingsSchema.default(() => CaptainSettingsSchema.parse({})),
     gameplay: GameplaySettingsSchema.default(() => GameplaySettingsSchema.parse({})),
+    desktop: DesktopSettingsSchema.default(() => DesktopSettingsSchema.parse({})),
+    minecraft: MinecraftSettingsSchema.default(() => MinecraftSettingsSchema.parse({})),
     browser: BrowserSettingsSchema.default(() => BrowserSettingsSchema.parse({})),
     mcp: McpSettingsSchema.default(() => McpSettingsSchema.parse({})),
     email: EmailSettingsSchema.default(() => EmailSettingsSchema.parse({})),

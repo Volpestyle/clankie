@@ -30,7 +30,8 @@ and anyone holding a valid remote fleet bearer, can use the verified connected
 accounts, including ordinary Linear writes as Clankie. This is the owner's accepted
 trust boundary; project approval does not narrow it.
 
-`fleet.tools` defaults to `connected`. The owner can disable fleet tools immediately:
+`fleet.tools` defaults to `connected`. The owner can stop new standing tool
+admissions:
 
 ```sh
 clankie fleet status
@@ -38,12 +39,20 @@ clankie fleet set --tools off
 clankie fleet set --tools connected
 ```
 
-The console's `/fleet` editor exposes the same setting. `off` lists no fleet tools
-and refuses calls, including in sessions that still display a stale catalog. It
-does not revoke manual grants. Disconnecting a fleet removes its admission.
-Every call checks live admission, account binding and the setting again before
-outward dispatch; the MCP host also fences account and server configuration.
-An operation already dispatched to a provider cannot be recalled.
+The console's `/fleet` editor exposes the same setting. `off` lists no standing
+fleet tools and refuses new standing admissions, including calls from a stale
+catalog. It does not revoke manual grants. Disconnecting a fleet removes its
+admission. Calls recheck admission, account binding and settings; the MCP host
+also fences account and server configuration.
+
+These checks do not provide atomic revocation. A call already past its last
+asynchronous check can still reach the provider after tools-off or lost admission;
+this is not limited to operations already dispatched. No global concurrent-call
+or time bound has been proven. This is the chosen contract (VUH-1585,
+[ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md)): the switch stops new
+calls rather than promising atomic revocation. The original strict guarantee was
+not met and was replaced by this decision, not shown to pass. An operation already
+dispatched to a provider cannot be recalled.
 
 ## Discover and call
 
@@ -168,6 +177,16 @@ pane settles, including stalled HTTP requests. A persistent failure returns only
 retries a mutation. Codex can retain its startup catalog despite tool-list-change
 notifications, so the owner may need to reconnect MCP or restart a pane after
 cutover. A displayed stale tool never bypasses current service authorization.
+
+Local hired Codex servers outlive a service restart. Their completed launch
+registrations persist in `local-codex-seats.json` under `CLANKIE_STATE` (default
+`~/.clankie`), independently of the pinned code checkout. After restart, each
+request still checks the original server PID/start time, the selected Herdr
+socket/session and the current native foreground occupant, so `message_clankie`
+keeps working without transferring an old worker's identity to a replacement.
+An unreadable record file never blocks startup: it is moved aside and no seat is
+restored. Hires created before these records existed cannot recover; report
+through the lead's watch. The outbound Codex adapter's turn state stays in memory.
 
 Fleet membership doctor reports project eligibility and native observations.
 `eligibility: unsupported` or missing project proof does not deny fleet tools.

@@ -59,6 +59,18 @@ export type ProjectHireAssignment =
   | { state: "invalid" }
   | { state: "assigned"; projectId: string; role?: string; occupantId: string };
 
+/** Private display-read snapshot; never sent over HTTP or accepted from callers. */
+export type ProjectHireMembershipCandidate =
+  | { state: "none" | "unconfirmed" }
+  | {
+      state: "confirmed";
+      revision: string;
+      seat: string;
+      nativeOccupantId: string;
+      harness: string;
+      generic: boolean;
+    };
+
 /** Controller state: semantic persona assignments cannot create, finish or release these claims. */
 export class ProjectHires {
   private readonly path: string;
@@ -296,6 +308,34 @@ export class ProjectHires {
           a.gone = true;
     });
   }
+  /** Read only. A speculative observation is not a confirmed original launch. */
+  public membershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate {
+    const entry = this.read()
+      .allocations.filter((a) => (a.request.fleet ?? "default") === fleet && a.pane === pane)
+      .at(-1);
+    if (!entry) return { state: "none" };
+    if (!entry.started || !entry.confirmed || entry.gone || !entry.proof || !entry.seat || !entry.occupantId)
+      return { state: "unconfirmed" };
+    return {
+      state: "confirmed",
+      revision: createHash("sha256").update(JSON.stringify(entry)).digest("hex"),
+      seat: entry.seat,
+      nativeOccupantId: entry.occupantId,
+      harness: entry.request.harness,
+      generic: entry.proof.shell.pid !== entry.proof.processes[0]!.pid,
+    };
+  }
+  public confirmedAssignment(
+    fleet: string,
+    pane: string,
+    revision: string,
+    proof: ProjectHireProcessProof,
+  ): ProjectHireAssignment {
+    const candidate = this.membershipCandidate(fleet, pane);
+    if (candidate.state !== "confirmed" || candidate.revision !== revision) return { state: "invalid" };
+    return this.assignment(fleet, pane, proof);
+  }
+
   public assignment(fleet: string, pane: string, proof?: ProjectHireProcessProof): ProjectHireAssignment {
     const records = this.read().allocations.filter(
       (a) => (a.request.fleet ?? "default") === fleet && a.pane === pane,

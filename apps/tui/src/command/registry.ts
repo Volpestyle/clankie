@@ -1,3 +1,5 @@
+import { operatorHarness } from "./harness-command.ts";
+
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
@@ -7,6 +9,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["project"],
     lines: [
+      "  project create PROJECT --settings FILE.json --revision REVISION  Create a new local project from reviewed settings",
+      "  project list | update PROJECT --changes FILE.json --revision REVISION  Read or edit project roles, models, limits and tracker binding",
       "  project add|remove-workspace NAME --workspace PATH [--machine ID --platform windows|posix]  Manage approved project workspaces (JSON)",
       "  project add NAME --worktree-root ROOT --repo APPROVED_REPO [--machine ID --platform windows|posix]  Enroll a linked-worktree root",
       "  project remove-worktree-root NAME --worktree-root ROOT [--machine ID --platform windows|posix]  Remove a root enrollment",
@@ -91,6 +95,8 @@ const HEADLESS_COMMAND_HELP = [
       "  conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
       "                           Inspect every conversation, including Discord tools (JSON)",
       "  conversations channels | rooms | channel [ID] [--title T] [--member PERSONA_ID]...",
+      "  conversations questions ID [--request UUID]",
+      "  conversations answer|cancel-question ID REQUEST --incarnation UUID --revision N [--option UUID | --text TEXT | --stdin]",
       "                [--discord provision [--room ROOM_ID] | --discord off | --webhook-stdin] | --json-stdin",
       "                           Agent channels and their swarm-home Discord rooms (JSON)",
     ],
@@ -234,6 +240,13 @@ const HEADLESS_COMMAND_HELP = [
       "                           Bundled skill classes and selection (JSON)",
     ],
   },
+  {
+    nouns: ["desktop"],
+    lines: [
+      "  desktop [status] | quiet-hours START END TIME_ZONE | quiet-hours off",
+      "                           Desktop quiet hours (HH:mm, IANA time zone); applies immediately",
+    ],
+  },
   { nouns: ["games"], lines: ["  games status|set on|off  Read or set PokeAgent gameplay availability"] },
   {
     nouns: ["browser"],
@@ -252,6 +265,15 @@ const HEADLESS_COMMAND_HELP = [
       "  rivals objective SESSION MODE [NOTE]",
       "  rivals observe|stop SESSION | share SESSION [GUILD CHANNEL]",
       "                           Play Spider-Man through the Rivals Agent bridge (JSON)",
+    ],
+  },
+  {
+    nouns: ["minecraft"],
+    lines: [
+      "  minecraft configure [PROFILE HOST --version VERSION --port PORT]",
+      "  minecraft status|profiles|join PROFILE|leave|cancel [ACTION]|pause|resume",
+      "  minecraft observe|chat TEXT|follow PLAYER|goto X Y Z|dig X Y Z|place X Y Z ITEM",
+      "                           Play in an approved offline Java server (JSON)",
     ],
   },
   {
@@ -338,13 +360,16 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
-    nouns: ["seat", "claude", "claude2"],
+    nouns: ["claude", "claude2", "codex", "opencode"],
     lines: [
       "  claude[N]               Open a separate chat using claude or a numbered shell account command (e.g. claude2)",
-      "  seat [--harness claude|codex|opencode] [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
-      "                           Sit in Claude Code, Codex or OpenCode as Clankie (TTY); --dry-run prints the launch plan (JSON)",
+      "  codex[N]                Open Codex; a numbered command selects its exact registered account label",
+      "  opencode                Open a separate Clankie chat in OpenCode (TTY)",
+      "    [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
+      "                           All harness commands accept these flags; --dry-run prints a plan without creating a chat",
     ],
   },
+  { nouns: ["seat"], lines: [] }, // Hidden compatibility alias; internal hooks keep their separate names.
   {
     nouns: ["mcp"],
     lines: [
@@ -371,7 +396,7 @@ export const HEADLESS_NOUNS: readonly string[] = [
 
 export function isHeadlessCaptainCommand(command: string | undefined): boolean {
   return (
-    /^claude\d*$/u.test(command ?? "") ||
+    operatorHarness(command) !== undefined ||
     command === "help" ||
     command === "--help" ||
     command === "-h" ||
@@ -428,7 +453,7 @@ export function commandHelp(): string {
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",
     "prompt / memory-card print plain text, and only for the bearer's own lane:",
     "  operator, discord_voice, discord_presence, gameplay (default: operator).",
-    "seat needs a TTY and Claude Code on PATH; mcp speaks JSON-RPC on stdout and is",
+    "claude / codex / opencode need a TTY and that harness on PATH; mcp speaks JSON-RPC and is",
     "  for a harness's MCP config, not for people.",
     "Secret entry uses /auth, /discord, /connect, /voice, or rivals connect --token-stdin. The",
     "credential store is shared — what /auth writes is what this CLI's services read.",

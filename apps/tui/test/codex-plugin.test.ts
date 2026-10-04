@@ -43,6 +43,7 @@ test("Codex launcher selects its conversation and presents native trust as an ow
         CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
       },
       execFileImpl: async () => ({ stdout: "codex-cli 0.159.1", stderr: "" }),
+      trackerOverrides: async () => [],
       fetchImpl: async (url) => {
         expect(String(url)).toContain("conversationId=scratch");
         return Response.json({ conversationId: "scratch", cwd: root });
@@ -127,7 +128,7 @@ test("the root hook binds once, rearms memory, and ignores child session hooks",
     await writeFile(binding, JSON.stringify({ cwd: root, conversationId: "scratch" }));
     await writeFile(
       join(root, "clankie"),
-      `#!${process.execPath}\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({args:process.argv.slice(2), session:process.env.CLANKIE_SEAT_SESSION_ID, input:JSON.parse(fs.readFileSync(0,'utf8'))})+'\\n');\nif(process.argv[2]==='seat-sync' && process.env.TEST_SYNC_FAILURE==='1')process.exit(1);\nif(process.argv[2]==='prompt')console.log('PERSONA CONTEXT');\nif(process.argv[2]==='memory-card' && JSON.parse(fs.readFileSync(${JSON.stringify(calls)},'utf8').trim().split('\\n').at(-1)).input.hook_event_name==='UserPromptSubmit')console.log('MEMORY CARD');\n`,
+      `#!${process.execPath}\nimport fs from 'node:fs';\nconst input=JSON.parse(fs.readFileSync(0,'utf8'));\nfs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({args:process.argv.slice(2), session:process.env.CLANKIE_SEAT_SESSION_ID, input})+'\\n');\nif(process.argv[2]==='seat-sync' && process.env.TEST_SYNC_FAILURE==='1')process.exit(1);\nif(process.argv[2]==='prompt')console.log('PERSONA CONTEXT');\nif(process.argv[2]==='memory-card' && input.hook_event_name==='UserPromptSubmit')console.log('MEMORY CARD');\n`,
       { mode: 0o700 },
     );
     const invoke = (event: string, id = sessionId, extra = {}, syncFailure = false) =>
@@ -162,14 +163,15 @@ test("the root hook binds once, rearms memory, and ignores child session hooks",
       .split("\n")
       .map((line) => JSON.parse(line));
     expect(commands.every((call) => call.session === sessionId)).toBe(true);
-    expect(commands.map((call) => call.args[0])).toEqual([
-      "prompt",
-      "memory-card",
-      "seat-sync",
-      "memory-card",
-      "seat-sync",
-      "seat-sync",
-    ]);
+    // Commands within one hook run concurrently, so only each hook's set is ordered.
+    const byEvent = (event: string) =>
+      commands
+        .filter((call) => call.input.hook_event_name === event)
+        .map((call) => call.args[0])
+        .sort();
+    expect(byEvent("SessionStart")).toEqual(["memory-card", "prompt", "seat-sync"]);
+    expect(byEvent("UserPromptSubmit")).toEqual(["memory-card", "seat-sync"]);
+    expect(byEvent("PostToolUse")).toEqual(["seat-sync"]);
     const failedStart = invoke("SessionStart", sessionId, {}, true);
     expect(failedStart.status).toBe(0);
     expect(failedStart.stdout).toContain("PERSONA CONTEXT");

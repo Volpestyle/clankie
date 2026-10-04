@@ -35,6 +35,18 @@ calls while manual grants keep working. Removing a connection invalidates that
 fleet's admission. Calls recheck the account, setting and live admission immediately
 before effects; the host retains its final account/configuration fence.
 
+Turning the switch off, or losing admission, refuses every call whose final
+pre-dispatch checks run after the change. After its own credential and connection
+awaits, the host runs the fleet fence (admission, then the switch) and then its
+configuration check. A call whose last asynchronous check has already read the old
+state can still reach the provider after the change; this is not a cancellation,
+and there is no proven bound on how many concurrent calls can be in that position.
+That is the contract: the switch stops new calls, and calls already past their
+checks may finish (decided 2026-10-04 on VUH-1585, the owner delegating the choice).
+A hard stop would need a final check that does not await, such as an in-memory
+switch kept by a settings watcher plus synchronous admission; it can be added if a
+need appears.
+
 Standing records are synthesized in memory from the current verified catalog,
 not loaded from durable grant files. Audit principals include `fleet:ID:pane:PANE`,
 with `pane:unverified` for bearer links. Codex hire discovery expects the two meta

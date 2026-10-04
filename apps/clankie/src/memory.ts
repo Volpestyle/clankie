@@ -149,7 +149,7 @@ function episodeLine(episode: CaptainEpisode): string {
     ...(episode.correctedAt === undefined ? [] : [`corrected ${episode.correctedAt}`]),
   ];
   const suffix = marks.length === 0 ? "" : ` [${marks.join(", ")}]`;
-  return `${episode.lane} · ${episode.targetId}${episode.sourceConversationId === undefined ? "" : ` · source ${episode.sourceConversationId}`} · ${episode.occurredAt} · ${episode.episodeId}${suffix}: ${episode.summary}`;
+  return `${episode.lane} · ${episode.targetId}${episode.sourceConversationId === undefined || episode.sourceConversationId === episode.targetId ? "" : ` · source ${episode.sourceConversationId}`} · ${episode.occurredAt} · ${episode.episodeId}${suffix}: ${episode.summary}`;
 }
 
 export function defaultMemoryDir(env: NodeJS.ProcessEnv = process.env): string {

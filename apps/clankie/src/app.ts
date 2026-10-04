@@ -1,3 +1,5 @@
+import type { QuestionAuthority } from "./captain/conversation-questions.ts";
+import { createFleetProjectMembershipRoutes } from "./fleet-project-membership-routes.ts";
 import { createProjectRoutes } from "./project-routes.ts";
 import { createRuntimeUpdateRoutes } from "./runtime-update-routes.ts";
 import { resolveDiscordSettings } from "@clankie/settings";
@@ -21,6 +23,8 @@ import {
 } from "@clankie/protocol";
 import type { BodyVoiceStays } from "./body-voice-stays.ts";
 import type { BodyPlaySessions } from "./body-play-sessions.ts";
+import type { MinecraftService } from "./minecraft.ts";
+import { createMinecraftRoutes } from "./minecraft-routes.ts";
 import { BodyLeaseRequestSchema, BodyResourceSchema } from "@clankie/protocol";
 import type { BodyLeaseRouter, BodyConversationIdentity } from "./body-lease-router.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
@@ -441,6 +445,7 @@ export interface ClankieAppDependencies {
     identity?(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined;
   };
   localFleet?: { identity(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined };
+  fleetProjectMembership?: Pick<import("./fleet-project-membership.ts").FleetProjectMembership, "read">;
   projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
   /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
   prepareFleet?: (id: string) => Promise<unknown>;
@@ -479,6 +484,7 @@ export interface ClankieAppDependencies {
   }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
   bodyVoiceStays?: BodyVoiceStays;
   bodyPlaySessions?: BodyPlaySessions;
+  minecraft?: MinecraftService;
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;
@@ -657,6 +663,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           },
         );
         applyDeviceEvent(devices, event);
+        if (event.type === "device.revoked" && typeof event.data.deviceId === "string")
+          dependencies.captain.invalidateQuestionPrincipal?.(event.data.deviceId);
       }
       // Publish the signer last. Pairing, refresh and relay self-authorize
       // remain unavailable throughout reconciliation or any failed retry.
@@ -1105,6 +1113,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (device === "unavailable" || "denied" in device) return "authentication_required";
     return device.grants.terminalControl ? true : "forbidden";
   };
+  app.route(
+    "/",
+    createFleetProjectMembershipRoutes(dependencies.fleetProjectMembership, authorizeOwnerSecrets),
+  );
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route(
@@ -1455,6 +1467,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!binding) return context.json({ error: "herdr_binding_unavailable" }, 503);
     return context.json(binding);
   });
+
+  app.route(
+    "/",
+    createMinecraftRoutes({
+      ...(dependencies.minecraft === undefined ? {} : { service: dependencies.minecraft }),
+      settings: settingsSource,
+      authorize: async (request) => {
+        const operator = await authenticateOperator(request, dependencies);
+        if (!operator || operator === "unavailable") return undefined;
+        return operatorBodyIdentity(
+          request.headers.get("x-clankie-conversation-id") ??
+            dependencies.captain.seatContext()?.conversationId,
+          request,
+        );
+      },
+    }),
+  );
 
   app.post("/v1/rivals", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
@@ -4303,6 +4332,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           revokedBy: operator.operatorId,
         });
         applyDeviceEvent(devices, event);
+        if (event.type === "device.revoked" && typeof event.data.deviceId === "string")
+          dependencies.captain.invalidateQuestionPrincipal?.(event.data.deviceId);
         logger.info({ deviceId, operatorId: operator.operatorId }, "device revoked");
       }
       if (dependencies.hostedBody !== undefined) {
@@ -4339,13 +4370,92 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   });
 
+  /** Owner domain matches project/account writes; exact presented principal is revalidated each time. */
+  const questionOwnerAuthority = async (request: Request): Promise<QuestionAuthority | undefined> => {
+    const original = hostedOriginalRequests.get(request);
+    const deviceRequest = original ?? request;
+    const device = await authenticateDevice(deviceRequest);
+    if (device !== "unavailable" && !("denied" in device)) {
+      const eligible = () => {
+        const record = devices.get(device.deviceId);
+        return (
+          record?.status === "active" &&
+          record.grants.terminalControl &&
+          (original === undefined || record.mintedBy === "hosted-account-operator")
+        );
+      };
+      if (!eligible()) return undefined;
+      return {
+        principal: { kind: "device", id: device.deviceId },
+        current: eligible,
+        authorize: async () => {
+          const fresh = await authenticateDevice(deviceRequest);
+          return (
+            fresh !== "unavailable" &&
+            !("denied" in fresh) &&
+            fresh.deviceId === device.deviceId &&
+            fresh.grants.terminalControl &&
+            eligible()
+          );
+        },
+      };
+    }
+    // An inner hosted request cannot fall back to synthetic operator authority.
+    if (original !== undefined || hostedRequests.has(request)) return undefined;
+    const operator = await authenticateOperator(request, dependencies);
+    if (!operator || operator === "unavailable") return undefined;
+    let current = true;
+    return {
+      principal: { kind: "operator", id: operator.operatorId },
+      current: () => current,
+      authorize: async () => {
+        const fresh = await authenticateOperator(request, dependencies);
+        current = Boolean(fresh && fresh !== "unavailable" && fresh.operatorId === operator.operatorId);
+        return current;
+      },
+    };
+  };
+
   app.post(OPERATOR_CONVERSATION_DISPATCH_PATH, async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
-    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    const owner = await questionOwnerAuthority(context.req.raw);
+    if (!owner && (!captain || captain === "unavailable"))
+      return context.json(
+        {
+          error:
+            captain === "unavailable" ? "captain_execution_unavailable" : "captain_authentication_required",
+        },
+        captain === "unavailable" ? 503 : 401,
+      );
     const body = await readJson(context.req.raw);
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const questionOp =
+      parsed.data.op === "project_proposal_get" ||
+      parsed.data.op === "project_proposal_confirm" ||
+      parsed.data.op === "input_get" ||
+      parsed.data.op === "input_answer" ||
+      parsed.data.op === "input_cancel";
+    if (questionOp && !owner) return context.json({ error: "question_owner_required" }, 403);
+    if (owner && (questionOp || parsed.data.op === "send")) {
+      const binding = dependencies.herdrBinding?.();
+      const sameSession =
+        binding !== undefined
+          ? context.req.header(HERDR_SOCKET_HEADER) === binding.socketPath
+          : dependencies.herdrRuntime?.() === undefined;
+      if (!sameSession && parsed.data.op === "send") delete parsed.data.turn.herdrPaneId;
+      try {
+        return context.json(await dependencies.captain.serveOperatorConversation(parsed.data, owner));
+      } catch (error) {
+        if (error instanceof Error && error.message === "question_owner_unavailable")
+          return context.json({ error: "question_owner_required" }, 403);
+        if (error instanceof ConversationRefusedError || error instanceof ConversationResetError)
+          return context.json({ error: "refused", message: error.message }, 409);
+        throw error;
+      }
+    }
+    if (!captain || captain === "unavailable")
+      return context.json({ error: "captain_authentication_required" }, 401);
     if (parsed.data.op === "connections") {
       if (captain.steerSourceLane !== "api")
         return context.json({ error: "operator_authority_required" }, 403);

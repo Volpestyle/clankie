@@ -479,3 +479,146 @@ it("initializes an operator MCP session with native and connected tools", async 
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
+
+it("lists a connected service's initial tools and defers the rest behind search and call", async () => {
+  const call = vi.fn(async () => ({ outcome: "ok" as const, content: "labelled", isError: false }));
+  const tool = (name: string, initial: boolean, description = `${name} does a thing.`) => ({
+    server: "linear",
+    name,
+    qualifiedName: `linear_${name}`,
+    description,
+    inputSchema: { type: "object", properties: { id: { type: "string" } } },
+    initial,
+  });
+  const mcp = {
+    catalog: async () => [
+      tool("list_issues", true),
+      tool("save_project_label", false, "Create or update a project label. Long detail follows."),
+    ],
+    call,
+  };
+  const bank = await buildLaneToolBank(
+    { ...bankDeps(), mcp } as unknown as CaptainDeps,
+    {},
+    {} as LaneLog,
+    "operator",
+  );
+  const names = bank.tools.map((entry) => entry.name);
+  expect(names).toContain("linear_list_issues");
+  expect(names).not.toContain("linear_save_project_label");
+  const text = (result: { content: readonly { type: string; text?: string }[] }) =>
+    JSON.parse(result.content[0]!.text!) as Record<string, unknown>;
+
+  const search = bank.tools.find((entry) => entry.name === "mcp_tool_search")!;
+  expect(text(await search.call({ query: "project label" }))).toEqual({
+    tools: [{ name: "linear_save_project_label", summary: "Create or update a project label." }],
+  });
+  expect(text(await search.call({ names: ["linear_save_project_label", "linear_nope"] }))).toMatchObject({
+    tools: [{ name: "linear_save_project_label", inputSchema: { type: "object" } }],
+    missing: ["linear_nope"],
+  });
+
+  const invoke = bank.tools.find((entry) => entry.name === "mcp_tool_call")!;
+  await invoke.call({ name: "linear_save_project_label", arguments: { id: "l1" } });
+  expect(call).toHaveBeenLastCalledWith({
+    lane: "operator",
+    server: "linear",
+    tool: "save_project_label",
+    arguments: { id: "l1" },
+  });
+  expect((await invoke.call({ name: "linear_nope" })).isError).toBe(true);
+});
+
+it("keeps a fully listed service free of the search tools", async () => {
+  const mcp = {
+    catalog: async () => [
+      {
+        server: "notes",
+        name: "read",
+        qualifiedName: "notes_read",
+        description: "Read.",
+        inputSchema: {},
+        initial: true,
+      },
+    ],
+  };
+  const bank = await buildLaneToolBank(
+    { ...bankDeps(), mcp } as unknown as CaptainDeps,
+    {},
+    {} as LaneLog,
+    "operator",
+  );
+  expect(bank.tools.some((entry) => entry.name === "mcp_tool_search")).toBe(false);
+});
+
+it("keeps Clankie's raw Minecraft motor out of direct and deferred lane MCP calls", async () => {
+  const call = vi.fn();
+  const mcp = {
+    catalog: async () => [
+      {
+        server: "minecraft",
+        name: "join",
+        qualifiedName: "minecraft_join",
+        description: "Raw motor",
+        inputSchema: {},
+        initial: true,
+      },
+      {
+        server: "minecraft",
+        name: "act",
+        qualifiedName: "minecraft_act",
+        description: "Raw action",
+        inputSchema: {},
+        initial: false,
+      },
+      {
+        server: "notes",
+        name: "read",
+        qualifiedName: "notes_read",
+        description: "Read",
+        inputSchema: {},
+        initial: false,
+      },
+    ],
+    call,
+  };
+  const bank = await buildLaneToolBank(
+    { ...bankDeps(), mcp } as unknown as CaptainDeps,
+    {},
+    {} as LaneLog,
+    "operator",
+  );
+  expect(bank.tools.map((tool) => tool.name)).not.toContain("minecraft_join");
+  const invoke = bank.tools.find((tool) => tool.name === "mcp_tool_call")!;
+  expect((await invoke.call({ name: "minecraft_act", arguments: {} })).isError).toBe(true);
+  const search = bank.tools.find((tool) => tool.name === "mcp_tool_search")!;
+  expect((await search.call({ query: "minecraft" })).content).toEqual([
+    { type: "text", text: JSON.stringify({ tools: [] }, null, 2) },
+  ]);
+  expect(call).not.toHaveBeenCalled();
+  const app = await createClankieApp({
+    captain: createStubCaptain({ laneToolBank: async () => bank }),
+    authenticateOperator: async () => ({ operatorId: "operator" }),
+  });
+  const session = await connect(app, "operator");
+  const raw = await callRpc("minecraft_join", {});
+  expect(raw.result).toMatchObject({ isError: true });
+  const deferred = await callRpc("mcp_tool_call", { name: "minecraft_act", arguments: {} });
+  expect(deferred.result).toMatchObject({ isError: true });
+  expect(call).not.toHaveBeenCalled();
+
+  async function callRpc(name: string, args: Record<string, unknown>): Promise<Rpc> {
+    return await (
+      await app.app.request("/v1/mcp", {
+        method: "POST",
+        headers: { ...MCP_HEADERS, authorization: "Bearer operator", "mcp-session-id": session },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      })
+    ).json();
+  }
+});

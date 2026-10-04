@@ -180,7 +180,10 @@ source, and live local process membership. Use `clankie mcp --fleet` for the
 fleet connected tools. Admitted panes reach verified accounts through exactly
 `clankie_tools` and `clankie_call`; the worker plugin adds `message_clankie`.
 Search qualified names/descriptions, request selected schemas, then call with
-`{name, arguments}`. `clankie fleet set --tools off` disables fleet tools immediately.
+`{name, arguments}`. `clankie fleet set --tools off` stops new standing tool admissions.
+A call already past its last asynchronous check can still reach a provider after
+`off`; no global in-flight cancellation or concurrency bound is established. The
+strict refusal guarantee remains unmet on VUH-1585; see ADR 0217.
 Missing tools do not authorize an operator lane or another Linear connector.
 Ask the lead to inspect link admission, `fleet status` and the connected account.
 Project grants, cwd and native sessions do not gate fleet tools. Projects keep

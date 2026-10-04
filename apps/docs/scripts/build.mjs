@@ -214,6 +214,21 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/model-keys/options",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Name the providers that can serve a turn now and the running model's reasoning effort, without credentials.",
+      },
+    ],
+    [
+      "POST /v1/model-keys/effort",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Set or clear the running model's reasoning effort using the shared CLI config.",
+      },
+    ],
+    [
       "POST /v1/model-keys/remove",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
