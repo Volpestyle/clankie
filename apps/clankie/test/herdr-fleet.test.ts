@@ -208,6 +208,33 @@ describe("fleet routing", () => {
             ],
           },
         });
+      if (args[0] === "worktree")
+        return JSON.stringify({
+          result: { source: { repo_key: "fixture-repo", repo_root: "C:\\src", repo_name: "src" } },
+        });
+      if (args[0] === "api")
+        return JSON.stringify({
+          result: {
+            snapshot: {
+              workspaces: [
+                {
+                  workspace_id: "w2",
+                  label: "src",
+                  number: 2,
+                  worktree: {
+                    repo_key: "fixture-repo",
+                    repo_root: "C:\\src",
+                    repo_name: "src",
+                    is_linked_worktree: false,
+                  },
+                },
+              ],
+              tabs: [],
+              panes: [],
+            },
+          },
+        });
+      if (args[0] === "pane" && args[1] === "rename") return "{}";
       if (args[0] === "tab") return JSON.stringify({ result: { root_pane: { pane_id: "w2:p9" } } });
       return "{}";
     };
@@ -337,6 +364,33 @@ describe("watches and hires on a remote fleet", () => {
     const calls: string[][] = [];
     const run: HerdrFleetRun = async (args) => {
       calls.push([...args]);
+      if (args[0] === "worktree")
+        return JSON.stringify({
+          result: { source: { repo_key: "fixture-repo", repo_root: "C:\\src", repo_name: "src" } },
+        });
+      if (args[0] === "api")
+        return JSON.stringify({
+          result: {
+            snapshot: {
+              workspaces: [
+                {
+                  workspace_id: "w2",
+                  label: "src",
+                  number: 2,
+                  worktree: {
+                    repo_key: "fixture-repo",
+                    repo_root: "C:\\src",
+                    repo_name: "src",
+                    is_linked_worktree: false,
+                  },
+                },
+              ],
+              tabs: [],
+              panes: [],
+            },
+          },
+        });
+      if (args[0] === "pane" && args[1] === "rename") return "{}";
       if (args[0] === "tab") return JSON.stringify({ result: { root_pane: { pane_id: "w2:p9" } } });
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({ result: { panes: [pane("w2:p9", "term_new", "idle")] } });

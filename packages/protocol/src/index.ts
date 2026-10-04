@@ -1185,6 +1185,14 @@ export const SpawnOperatorSeatSchema = z
       .string()
       .regex(/^[a-z][a-z0-9_-]{0,63}$/u)
       .optional(),
+    /** Explicit shared workflow tab; split joins its last pane, never a focused/lead tab. */
+    pipeline: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .regex(/^[^\p{Cc}]+$/u, "Pipeline names cannot contain control characters")
+      .optional(),
     /** Stable work item/deliverable key, required for native-first admission. */
     deliverable: z.string().trim().min(1).max(512).optional(),
     /** The hired persona's team role (ADR 0208); absent leaves it as it was. */

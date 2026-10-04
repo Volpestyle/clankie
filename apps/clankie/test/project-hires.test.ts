@@ -257,7 +257,7 @@ describe("project hiring", () => {
     try {
       expect(await split.spawnSeat({ ...request(f.root), placement: "split" })).toMatchObject({
         outcome: "failed",
-        detail: expect.stringContaining("verified lead pane"),
+        detail: expect.stringContaining("named pipeline"),
       });
       expect(f.runner.createTab).not.toHaveBeenCalled();
     } finally {
@@ -306,21 +306,26 @@ describe("project hiring", () => {
       store.close();
     }
   });
-  it("uses an explicitly verified lead for split placement and the registered Claude account home", async () => {
+  it("uses an explicit pipeline for split placement and the registered Claude account home", async () => {
     const f = await fixture();
     f.store.close();
     const store = new HerdrWatchStore(f.path, {
       ...f.options,
       claudeAccounts: async () => [{ label: "second", home: f.root }],
-      leadPane: async () => "pLead",
     });
     try {
       expect(
-        await store.spawnSeat({ ...request(f.root), account: "second", placement: "split" }),
+        await store.spawnSeat({
+          ...request(f.root),
+          account: "second",
+          placement: "split",
+          pipeline: "Release pipeline",
+        }),
       ).toMatchObject({ outcome: "spawned", profile: { account: "second", placement: "split" } });
       expect(f.runner.createTab).toHaveBeenCalledWith(
         expect.objectContaining({
-          besidePane: "pLead",
+          pipeline: "Release pipeline",
+          placement: "split",
           env: expect.objectContaining({ CLAUDE_CONFIG_DIR: await realpath(f.root) }),
         }),
       );
