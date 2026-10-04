@@ -1,5 +1,6 @@
 import {
   MinecraftHostAdminCommandSchema,
+  MinecraftHostSettingsSchema,
   MinecraftHostUsernameSchema,
   type MinecraftHostAdminCommand,
 } from "@clankie/protocol";
@@ -11,6 +12,8 @@ import type { TurnContext } from "./tools.ts";
 
 /** Core owns identity binding and audit; integration owns server administration. */
 export interface MinecraftHostToolPort {
+  configuration(identity: BodyConversationIdentity | undefined): Promise<unknown>;
+  configure(settings: unknown, identity: BodyConversationIdentity | undefined): Promise<unknown>;
   claimStatus(identity: BodyConversationIdentity | undefined): Promise<unknown>;
   completeClaim(identity: BodyConversationIdentity | undefined): Promise<unknown>;
   status(identity: BodyConversationIdentity | undefined): Promise<unknown>;
@@ -51,6 +54,25 @@ export function minecraftHostTools(client: MinecraftHostToolPort, turn: TurnCont
     }
   };
   return [
+    defineTool({
+      name: "minecraft_host_configuration",
+      label: "Minecraft host configuration",
+      description:
+        "Read the hosting backend and bounded settings for an authenticated owner or individual machine operator. No credentials are returned.",
+      parameters: Type.Object({}),
+      execute: async () => call((identity) => client.configuration(identity)),
+    }),
+    defineTool({
+      name: "minecraft_host_configure",
+      label: "Configure Minecraft hosting",
+      description:
+        "Configure your stopped server for an authenticated owner or individual machine operator: local or an existing AWS EC2 backend, resource limits, ports and backups. Idle stop and maximum uptime remain bounded. This selects existing AWS infrastructure; it does not provision resources.",
+      parameters: Type.Object({ settings: z.toJSONSchema(MinecraftHostSettingsSchema.partial()) as TSchema }),
+      execute: async (_id, input) =>
+        call((identity) =>
+          client.configure(MinecraftHostSettingsSchema.partial().parse(input.settings), identity),
+        ),
+    }),
     defineTool({
       name: "minecraft_host_invite",
       label: "Invite to Minecraft",

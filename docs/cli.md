@@ -978,15 +978,17 @@ pre-provisioned AWS EC2 backend (account, instance and region); see [AWS setup a
 AWS starts use a scoped broker credential and SSM, and stop must confirm the
 instance is stopped. `host admin JSON` accepts typed administration; `host approve
 USERNAME` approves an existing verified Discord request. No op, raw RCON or
-account-secret arguments are accepted. `host tunnel claim` displays one playit
-browser claim and waits for approval; the permanent key goes straight to the
-broker. This Mac builds pinned playit source during setup and requires Cargo.
+account-secret arguments are accepted. `host tunnel claim` starts a background
+agent build/claim job and returns quickly with its phase. `host tunnel status` reads its
+phase and the approval URL when ready; after browser approval, `host tunnel complete` polls once and sends the
+permanent key straight to the broker. This Mac builds pinned playit source during setup and requires Cargo.
 
 `minecraft configure PROFILE HOST --version VERSION [--port PORT] [--username NAME]`
 adds an offline Java server profile. `configure` shows settings; `configure remove PROFILE`
 and `configure allow-public|revoke-public HOST [PORT]` manage destinations.
 DNS/SRV targets are resolved and checked before dial; public endpoints require an
-owner allowlist. Model tools select profile ids only.
+owner allowlist. Clankie’s setup tools can configure profiles for owners/individual
+operators; gameplay tools select approved profile ids.
 
 `minecraft status|profiles|join PROFILE|leave|cancel [ACTION]|pause|resume|observe`
 manages the session. `chat TEXT`, `follow PLAYER [DISTANCE]`, `goto X Y Z`,

@@ -717,6 +717,10 @@ const minecraft = new MinecraftService({
   store: bodyLeaseStore,
   path: join(stateRoot, "body", "minecraft-session.json"),
   onDisconnect: () => minecraftCapture?.invalidate(),
+  configuration: {
+    settings: settingsStore,
+    guard: (identity) => minecraftHostGuard(identity, { admin: true }),
+  },
 });
 minecraftCapture = new MinecraftCapture({
   source: {
