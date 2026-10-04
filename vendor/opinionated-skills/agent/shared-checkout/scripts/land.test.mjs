@@ -171,3 +171,45 @@ test("ordinary three-way merge preserves owner content and executable mode", () 
     assert.equal(lstatSync(join(root, "ordinary")).mode & 0o111, 0o111);
     assert.equal(git("diff", "--cached", "--name-only"), "");
   }));
+
+for (const kind of ["private-existing", "private-new", "group-only-execute"])
+  test(`preserves permissions: ${kind}`, () =>
+    fixture(({ root, git, put, land, commit }) => {
+      git("switch", "-qc", "reviewed");
+      put("ordinary", "reviewed\n");
+      put("new-file", "new\n");
+      put("new-executable", "#!/bin/sh\n");
+      chmodSync(join(root, "new-executable"), 0o755);
+      commit();
+      git("switch", "-q", "main");
+      if (kind === "private-existing") chmodSync(join(root, "ordinary"), 0o600);
+      if (kind === "group-only-execute") chmodSync(join(root, "ordinary"), 0o654);
+      const mask = process.umask(kind === "private-new" ? 0o077 : process.umask());
+      try {
+        const result = land();
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(readFileSync(join(root, "ordinary"), "utf8"), "reviewed\n");
+        if (kind === "private-existing") assert.equal(lstatSync(join(root, "ordinary")).mode & 0o777, 0o600);
+        if (kind === "group-only-execute") {
+          assert.equal(lstatSync(join(root, "ordinary")).mode & 0o777, 0o654);
+          assert.equal(git("diff", "--name-only"), "");
+        }
+        if (kind === "private-new") {
+          assert.equal(lstatSync(join(root, "new-file")).mode & 0o777, 0o600);
+          assert.equal(lstatSync(join(root, "new-executable")).mode & 0o777, 0o700);
+        }
+      } finally {
+        process.umask(mask);
+      }
+    }));
+test("adding executable mode keeps a private existing file private", () =>
+  fixture(({ root, git, land, commit }) => {
+    git("switch", "-qc", "reviewed");
+    chmodSync(join(root, "ordinary"), 0o755);
+    commit();
+    git("switch", "-q", "main");
+    chmodSync(join(root, "ordinary"), 0o600);
+    const result = land();
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(lstatSync(join(root, "ordinary")).mode & 0o777, 0o700);
+  }));

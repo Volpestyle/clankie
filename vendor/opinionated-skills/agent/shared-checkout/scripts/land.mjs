@@ -78,7 +78,7 @@ const read = (path) => {
   if (!info) return undefined;
   if (info.isSymbolicLink()) return { mode: "120000", content: readlinkSync(path, { encoding: "buffer" }) };
   if (!info.isFile()) fail(`${path}: unsupported working-tree type; nothing was changed.`);
-  return { mode: info.mode & 0o111 ? "100755" : "100644", content: readFileSync(path) };
+  return { mode: info.mode & 0o100 ? "100755" : "100644", content: readFileSync(path) };
 };
 const same = (a, b) =>
   a === undefined ? b === undefined : b !== undefined && a.mode === b.mode && a.content.equals(b.content);
@@ -159,13 +159,22 @@ try {
 }
 for (const { path, entry } of writes) {
   // Remove the entry itself, never write through a link (even a dangling one).
-  if (stat(path)) unlinkSync(path);
+  const previous = stat(path);
+  if (previous) unlinkSync(path);
   if (entry === undefined) continue;
   mkdirSync(dirname(path), { recursive: true });
   if (entry.mode === "120000") symlinkSync(entry.content, path);
   else {
-    writeFileSync(path, entry.content);
-    chmodSync(path, entry.mode === "100755" ? 0o755 : 0o644);
+    // Creation modes respect umask. Existing regular files keep private read/write
+    // permissions; a Git executable change adds execute only for readable classes.
+    const executable = entry.mode === "100755";
+    writeFileSync(path, entry.content, { mode: executable ? 0o755 : 0o644 });
+    if (previous?.isFile()) {
+      let permissions = previous.mode & 0o777;
+      if (Boolean(permissions & 0o100) !== executable)
+        permissions = (permissions & ~0o111) | (executable ? ((permissions & 0o444) >> 2) | 0o100 : 0);
+      chmodSync(path, permissions);
+    }
   }
 }
 spawnSync("git", ["update-index", "-q", "--refresh"]);
