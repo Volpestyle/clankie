@@ -31,9 +31,11 @@ Do not treat expiry or a process restart as proof that a send/session stopped.
 
 ## Watching workers
 
-The local console stays in the current terminal. Its live-agent strip uses the
-service fleet feed across connected machines: `Ctrl+G`, Up/Down, Enter opens a
-worker's existing conversation; Escape returns and leaves its work running.
+The local console stays in the current terminal. Its two-line live-agent dock
+below the prompt uses the service fleet feed across connected machines.
+`Ctrl+G` opens the full scrolling agent modal; Up/Down selects, Enter opens a
+worker's existing conversation, and Escape closes the modal without losing the
+draft. Escape from the worker conversation returns and leaves its work running.
 `Ctrl+Y` from that conversation opens the exact pane in the selected machine's
 Herdr workspace. It attaches to an existing server, never starts one. `/agents`
 also retains past agents with saved threads. Do not treat a visible working
@@ -190,8 +192,30 @@ Project grants, cwd and native sessions do not gate fleet tools. Projects keep
 roles, caps, hiring and tracker binding. Local discovery carries no bearer.
 Outward-facing sends still need
 the owner's instruction; the connection identity remains Clankie's connected
-account. A shared Codex app-server daemon cannot prove its pane; restart Codex in
-the pane under the existing daemon-disabled config, then check doctor again.
+account. A shared Codex app-server daemon cannot prove its pane. Inspect
+`doctor.harnessBridges.linkedSession` for per-pane `missing` / `pane-mismatch`
+observations and `unownedBridges` for actual daemon bridge PIDs and inherited
+pane claims. Save affected sessions, then the owner can run
+`codex app-server daemon stop` and resume each in its own pane with
+`codex --no-daemon resume <SESSION>`; keep `daemon_auto_start=false` in the
+source-owned config. Do not stop another agent's daemon as a diagnostic step.
+
+For a hand-started Claude/Claude2 pane with `missing`, use that pane's actual
+Claude profile: `claude plugin install clankie-worker@clankie --scope user`, then
+`claude plugin enable clankie-worker@clankie --scope user`, and restart/resume.
+An absent marketplace needs `claude plugin marketplace add
+<repoRoot>/integrations/claude-plugin` first. Preserve source-owned settings and
+symlinks; use `CLAUDE_CONFIG_DIR` for an alias profile. Verify the fresh native
+catalog lists `message_clankie`, `clankie_tools`, and `clankie_call`, then make a
+bounded connected-tool read.
+
+The roster's `harnessBridge` flags the same process facts; `Ctrl+G` in the
+console reveals the selected pane's full fix. `live-process` verifies process
+ancestry/dedicated socket and matching pane/socket environment only, not tools
+or reply delivery. `unobserved` means facts are unavailable, never "missing".
+The local host observation currently supports macOS; remote/Windows native
+acceptance remains separate. Roster samples live for at most five seconds;
+explicit doctor reads probe again.
 
 The console's `/machines` lists discovered machines and their Herdr sessions
 before asking for typed names. Named connections apply live. Its session details

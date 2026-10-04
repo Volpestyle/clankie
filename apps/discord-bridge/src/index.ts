@@ -385,6 +385,14 @@ const voiceSession =
           decayWindowMs: voiceRealtimeConfig.decayWindowMs,
         },
         presenceSessionId: () => presenceSession.record.sessionId,
+        roomNames: (guildId, channelId) => {
+          const guild = client.guilds.cache.get(guildId);
+          const channel = guild?.channels.cache.get(channelId);
+          return {
+            ...(guild === undefined ? {} : { guildName: guild.name.slice(0, 100) }),
+            ...(channel === undefined ? {} : { channelName: channel.name.slice(0, 100) }),
+          };
+        },
         emit: recordVoiceEvidence,
       });
 const voiceGateway =
@@ -756,6 +764,15 @@ async function handleDiscordMessage(message: Message, recovering = false): Promi
       authorIsBot,
       mentionsBot: client.user !== null && (await mentionsDiscordBot(message, client.user.id)),
       body: message.content,
+      room:
+        message.guild === null
+          ? { peerName: (message.author.globalName ?? message.author.username).slice(0, 100) }
+          : {
+              guildName: message.guild.name.slice(0, 100),
+              ...("name" in message.channel && message.channel.name !== null
+                ? { channelName: message.channel.name.slice(0, 100) }
+                : {}),
+            },
       attachments: selection.attachments,
       attachmentsOmitted: selection.omitted,
     };

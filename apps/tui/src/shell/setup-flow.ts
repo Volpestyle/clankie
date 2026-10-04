@@ -25,7 +25,7 @@ import {
 type FlowLineTone = "error" | "info" | "success" | "warning";
 
 /** Shared overlay contract for every Clankie modal (setup, workbench, selectors). */
-function clankieModalOverlayOptions(): OverlayOptions {
+export function clankieModalOverlayOptions(): OverlayOptions {
   return {
     anchor: "center",
     margin: { bottom: 2, left: 2, right: 2, top: 2 },

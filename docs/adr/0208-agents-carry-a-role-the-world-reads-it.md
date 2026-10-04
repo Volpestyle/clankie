@@ -38,13 +38,27 @@ foreground call is treated as ended once the main thread speaks again in a new
 message. The read is incremental, so a fleet read costs the append. A cold read
 covers at most the last 2 MiB.
 
+Codex is covered by the same reader and seat path (VUH-1531, 2026-10-04).
+Its rollout header names the child's own `id`, `parent_thread_id`, nickname
+and task path; `session_id` can name the parent. Discovery processes only
+headers in the addressed parent's Codex home, then tails only direct children.
+Labels combine nickname and task path. The parent journal's native
+`FINAL_ANSWER` envelope, targeted wait/close results, and per-child
+`list_agents` statuses settle children within that fleet read. A generic
+`wait_agent` acknowledgement identifies no child and settles none. Successful
+followup or a newer child `task_started` resets completion; interruption is
+ended. When no current parent status exists, five minutes without a child file
+write means done as a heuristic; a quiet running tool may be misclassified.
+A current explicit running status takes precedence over idleness.
+
 To respect ADR 0188, discovery alone never reads a transcript. The host reads
 only seats it already has an address for: one it hired or whose chat the owner
 opened. It reads only local seats. It stores nothing and imports no entries,
 and the derived summary contains labels, not content. Absent means unknown,
-not zero. Codex is left absent: its collaboration tools record a spawn but not
-when the spawned agent finishes. Remote fleets are left absent because each
-read would cost an SSH round trip per seat.
+not zero. Remote fleets are left absent because each read would cost an SSH
+round trip per seat. The projection is bounded to 64 recent children per parent,
+32 parent sessions, 4,096 recent rollout headers and 64 KiB per header. Older
+children or parent completion records outside these windows are not guaranteed.
 
 **A work item may carry `labels`** from its backend: Linear labels, GitHub
 labels (minus the `status: …` labels the GitHub backend writes), or Markdown
@@ -58,7 +72,7 @@ flowchart LR
   Owner[Owner: app, CLI, TUI] -->|set_persona_role| Persona[(Persona store: role)]
   Hire[hire_agent / spawn_seat role] --> Persona
   Fleet[fleet read] --> Persona
-  Fleet -->|addressed local Claude seats only| Transcript[Native transcript: incremental tail]
+  Fleet -->|addressed local Claude/Codex seats only| Transcript[Native transcript: incremental tail]
   Transcript --> Subagents[seat.subagents]
   Station[Role station] -->|work_items label=role| Tracker[Linear / GitHub / Markdown labels]
 ```
@@ -80,9 +94,11 @@ flowchart LR
 
 - The app places agents by `persona.role` and reads a station's backlog with
   `work_items { label: role }`.
-- An unaddressed, remote or Codex seat shows no subagents. The world treats
+- An unaddressed or remote seat shows no subagents. The world treats
   that as unknown.
-- A subagent started before the 2 MiB cold-read window is not counted.
+- A Claude subagent started before the 2 MiB cold-read window is not counted.
+  Codex children remain discoverable by header within the bounds above; parent
+  completion outside the cold-read window falls back to child file idleness.
 
 ## Amendment: custom roles (James, 2026-10-02)
 

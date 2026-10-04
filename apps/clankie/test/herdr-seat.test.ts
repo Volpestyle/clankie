@@ -364,3 +364,45 @@ describe("operatorPromptWithHerdrSeat", () => {
     expect(prompt.endsWith("harvest the done panes")).toBe(true);
   });
 });
+
+it("projects linked-session host bridge gaps into the roster without changing native identity", async () => {
+  const fleet = await readFleet({
+    bridgeSocket: "/test/linked.sock",
+    runCommand: async (command, args) => {
+      if (command === "/bin/ps") return { stdout: "20 10 /bin/claude", stderr: "" };
+      if (args[0] === "pane")
+        return {
+          stdout: JSON.stringify({
+            result: { process_info: { pane_id: "w1:p1", shell_pid: 10, foreground_process_group_id: 20 } },
+          }),
+          stderr: "",
+        };
+      if (args[0] === "agent")
+        return {
+          stdout: JSON.stringify({
+            result: {
+              agents: [
+                {
+                  pane_id: "w1:p1",
+                  terminal_id: "term-worker",
+                  agent: "claude",
+                  agent_status: "idle",
+                  agent_session: { source: "herdr:claude", kind: "id", value: "native-worker" },
+                },
+              ],
+            },
+          }),
+          stderr: "",
+        };
+      return { stdout: "{}", stderr: "" };
+    },
+  });
+  expect(fleet.seats[0]).toMatchObject({
+    seatId: "term-worker",
+    harness: "claude",
+    harnessBridge: { status: process.platform === "darwin" ? "missing" : "unobserved" },
+  });
+  expect(fleet.seats[0]?.harnessBridge?.remediation).toEqual(
+    process.platform === "darwin" ? expect.stringContaining("clankie-worker@clankie") : undefined,
+  );
+});

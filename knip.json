@@ -35,6 +35,7 @@
         "integrations/claude-plugin/worker/bin/harness-setup.mjs",
         "integrations/claude-plugin/worker/bin/harness-install.d.mts",
         "integrations/claude-plugin/worker/bin/harness-status.d.mts",
+        "integrations/claude-plugin/worker/bin/harness-live.d.mts",
         "integrations/claude-plugin/worker/bin/native-codex.d.mts",
         "integrations/claude-plugin/worker/bin/skill-bundle.d.mts",
         "integrations/opencode-plugin/worker-tui.mjs",

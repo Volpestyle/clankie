@@ -3519,7 +3519,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         dependencies.captain.seatContext(conversationId)?.conversationId === conversationId,
       authorize: async () => {
         const operator = await authenticateOperator(request, dependencies);
-        return operator !== undefined && operator !== "unavailable";
+        return (
+          operator !== undefined &&
+          operator !== "unavailable" &&
+          (await dependencies.captain.validateConversationOwner({ conversationId }))
+        );
       },
     };
   }

@@ -19,9 +19,11 @@ control reference, including its output formats and exceptions.
 
 ## Live agents
 
-While agents are seated, a compact strip above the editor shows their names,
-harnesses, states, current steps and remote machine names. `Ctrl+G` focuses it;
-use Up/Down to reach every agent, then Enter to open its existing conversation.
+While agents are seated, a two-line dock below the editor shows status counts
+and a selected-agent preview in the shell's colors. `Ctrl+G` opens a scrolling
+modal listing every agent. Use Up/Down to select; its full name, harness, state,
+machine and distinct current step wrap below the list. Enter opens its existing
+conversation; Escape closes the modal and preserves your draft.
 Messages use the same native delivery as `/agents`. Escape returns to the
 conversation you left without cancelling the worker. Composer drafts stay with
 their conversations. The strip disappears when no agents are live.
@@ -46,7 +48,7 @@ Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token bounda
 | Key                           | What it does                                                                                                                                                                               |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `Ctrl+/`                      | Open the command workbench                                                                                                                                                                 |
-| `Ctrl+G`                      | Focus the live-agent strip; Up/Down selects and Enter opens its conversation                                                                                                               |
+| `Ctrl+G`                      | Open the full live-agent modal; Up/Down selects, Enter opens its conversation, Escape closes                                                                                               |
 | `Ctrl+Y` in an expanded agent | Open that exact pane in its full Herdr workspace                                                                                                                                           |
 | `Esc` in an expanded agent    | Return to the previous conversation; leave the worker running                                                                                                                              |
 | `Ctrl+O`                      | Toggle every tool and bash block between preview and full output                                                                                                                           |

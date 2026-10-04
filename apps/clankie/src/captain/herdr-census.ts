@@ -1,3 +1,4 @@
+import { inspectLiveHarnessBridges } from "../../../../integrations/claude-plugin/worker/bin/harness-live.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
@@ -5,6 +6,7 @@ import { promisify } from "node:util";
 import {
   OPERATOR_HEAD_AGENT_NAME,
   type OperatorHerdrPlacement,
+  type OperatorFleetSeat,
   type OperatorTerminalSession,
 } from "@clankie/protocol";
 import { readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
@@ -123,6 +125,7 @@ function subjectForHerdrName(name: string): string | undefined {
 }
 
 export interface ObservedFleetSeat {
+  readonly harnessBridge?: OperatorFleetSeat["harnessBridge"];
   readonly account?: { label: string; home: string };
   readonly seatId: string;
   /**
@@ -444,6 +447,7 @@ export async function readFleet(
     readonly summaries?: Readonly<Record<string, HerdrAgentSummary>>;
     readonly fleets?: readonly HerdrCensusFleet[];
     readonly herdrSession?: string;
+    readonly bridgeSocket?: string;
     readonly localAvailable?: boolean;
   } = {},
 ): Promise<ObservedFleet> {
@@ -506,10 +510,17 @@ export async function readFleet(
   return remoteSeats.length === 0 ? local : { ...local, seats: [...local.seats, ...remoteSeats] };
 }
 
+// Roster polls reuse a short host observation; explicit doctor reads always probe anew.
+// The cache is display evidence only, never admission or message routing authority.
+let bridgeSample:
+  | { key: string; at: number; report: ReturnType<typeof inspectLiveHarnessBridges> }
+  | undefined;
+
 async function readLocalFleet(
   options: {
     readonly runCommand?: HerdrCensusRunner;
     readonly herdrSession?: string;
+    readonly bridgeSocket?: string;
     readonly summaries?: Readonly<Record<string, HerdrAgentSummary>>;
   } = {},
 ): Promise<ObservedFleet> {
@@ -524,6 +535,36 @@ async function readLocalFleet(
           new Map(sessions.map(({ terminalId, workspace, tab }) => [terminalId, { workspace, tab }])),
       ),
     ]);
+    let bridgeReport: Awaited<ReturnType<typeof inspectLiveHarnessBridges>> | undefined;
+    if (options.bridgeSocket) {
+      const panes = parseHerdrAgentList(stdout).map((entry) => ({
+        paneId: entry.paneId,
+        harness: entry.agent,
+      }));
+      const key = JSON.stringify([options.bridgeSocket, panes]);
+      if (options.runCommand || bridgeSample?.key !== key || Date.now() - bridgeSample.at >= 5_000) {
+        bridgeSample = {
+          key,
+          at: Date.now(),
+          report: inspectLiveHarnessBridges({
+            socket: options.bridgeSocket,
+            panes,
+            run: async (command, args) =>
+              (
+                await (
+                  options.runCommand ??
+                  ((cmd, argv) =>
+                    defaultRunner(cmd, argv, { ...process.env, HERDR_SOCKET_PATH: options.bridgeSocket }))
+                )(command, args)
+              ).stdout,
+          }),
+        };
+      }
+      bridgeReport = await bridgeSample.report;
+    }
+    const bridges = new Map(
+      bridgeReport?.panes.map(({ paneId, harness: _harness, ...observation }) => [paneId, observation]),
+    );
     const summaries = options.summaries ?? readHerdrSummariesFile().agents;
     const occupied = parseHerdrAgentList(stdout).filter(
       (
@@ -563,6 +604,7 @@ async function readLocalFleet(
         const named = entry.name === undefined ? undefined : subjectForHerdrName(entry.name);
         const placement = placements.get(entry.terminalId);
         return {
+          ...(bridges.has(entry.paneId) ? { harnessBridge: bridges.get(entry.paneId)! } : {}),
           seatId: entry.terminalId,
           paneId: entry.paneId,
           ...(entry.parentPaneId === undefined ? {} : { parentPaneId: entry.parentPaneId }),

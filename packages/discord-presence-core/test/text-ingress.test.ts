@@ -33,6 +33,7 @@ describe("DiscordTextIngress", () => {
         authorIsBot: false,
         mentionsBot: false,
         body: "secret user text",
+        room: { peerName: "James" },
         contextMessages: [
           { id: "c1", authorId: "james", body: "old", createdAt: "2026-07-12T19:00:00.000Z" },
           { id: "c2", authorId: "friend", body: "recent", createdAt: "2026-07-12T19:01:00.000Z" },
@@ -49,6 +50,7 @@ describe("DiscordTextIngress", () => {
         profileHash: "profile-1",
       },
       trigger: { kind: "dm", actorId: "james", body: "secret user text" },
+      room: { peerName: "James" },
       contextMessages: [
         { id: "c2", body: "recent" },
         { id: "c3", body: "latest" },
@@ -130,9 +132,14 @@ describe("DiscordTextIngress", () => {
         authorIsBot: false,
         mentionsBot: false,
         body: "hey clankie",
+        room: { guildName: "Friends", channelName: "general" },
         loadContextMessages: () => Promise.resolve([]),
       }),
     ).resolves.toMatchObject({ state: "settled" });
+    expect(port.turns[0]).toMatchObject({
+      room: { guildName: "Friends", channelName: "general" },
+      trigger: { guildId: "guild-1", channelId: "some-channel-never-listed" },
+    });
   });
 
   it("never lets an empty channel list widen ingress past the guild allowlist", async () => {

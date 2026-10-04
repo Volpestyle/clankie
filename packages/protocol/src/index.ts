@@ -921,8 +921,21 @@ export const OperatorSeatSubagentsSchema = z
   .strict();
 export type OperatorSeatSubagents = z.infer<typeof OperatorSeatSubagentsSchema>;
 
+const OperatorHarnessBridgeSchema = z
+  .object({
+    status: z.enum(["live-process", "missing", "pane-mismatch", "unobserved"]),
+    detail: z.string().max(1024),
+    remediation: z.string().max(1024).optional(),
+    bridgePid: z.number().int().positive().optional(),
+    claimedPane: z.string().max(128).optional(),
+    sharedDaemon: z.boolean().optional(),
+  })
+  .strict();
+
 export const OperatorFleetSeatSchema = z
   .object({
+    /** Host-observed bridge facts, not tool or message delivery acceptance. */
+    harnessBridge: OperatorHarnessBridgeSchema.optional(),
     account: OperatorCodexAccountSchema.optional(),
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     /** Harness-session identity; stable when the same agent moves panes. */
@@ -4563,6 +4576,15 @@ export const DiscordPresenceChannelTurnRequestSchema = z
     schemaVersion: z.literal(1),
     deliveryId: z.string().min(1),
     identity: DiscordPresenceChannelIdentitySchema,
+    /** Gateway-observed display names for discovery only; IDs remain the authority and route. */
+    room: z
+      .object({
+        guildName: z.string().trim().min(1).max(100).optional(),
+        channelName: z.string().trim().min(1).max(100).optional(),
+        peerName: z.string().trim().min(1).max(100).optional(),
+      })
+      .strict()
+      .optional(),
     trigger: z
       .object({
         kind: z.enum(["message", "mention", "dm", "reaction", "voice_event", "slash_handoff"]),

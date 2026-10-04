@@ -1,3 +1,4 @@
+import { inspectLiveHarnessBridges } from "../../../integrations/claude-plugin/worker/bin/harness-live.mjs";
 import { inspectHarnessProfiles } from "../../../integrations/claude-plugin/worker/bin/harness-status.mjs";
 import { readFile, realpath, access } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -42,6 +43,11 @@ export async function inspectHarnessBridges(
         /* stale install */
       }
     }
+  let linkedSession: Awaited<ReturnType<typeof inspectLiveHarnessBridges>> = {
+    state: "no-link",
+    panes: [],
+    unownedBridges: [],
+  };
   const local = {
     platform: process.platform,
     membership: "no-link",
@@ -74,11 +80,31 @@ export async function inspectHarnessBridges(
     try {
       const link = await json(join(home, ".clankie", "links", "default-local.json"));
       if (
+        typeof link.socket !== "string" ||
+        !link.socket.startsWith("/") ||
         link.schemaVersion !== 2 ||
         link.authentication !== "local-process" ||
         !/^http:\/\/127\.0\.0\.1:\d{1,5}$/u.test(link.url)
       )
         throw new Error("Invalid local discovery");
+      try {
+        const run = async (command: string, args: string[]) =>
+          (
+            await execute(
+              command === "herdr" ? "/usr/bin/env" : command,
+              command === "herdr" ? [`HERDR_SOCKET_PATH=${link.socket}`, "herdr", ...args] : args,
+            )
+          ).stdout;
+        const list = JSON.parse(await run("herdr", ["agent", "list"]));
+        const panes = (list.result?.agents ?? []).flatMap((agent: { pane_id?: string; agent?: string }) =>
+          typeof agent.pane_id === "string" && typeof agent.agent === "string"
+            ? [{ paneId: agent.pane_id, harness: agent.agent }]
+            : [],
+        );
+        linkedSession = await inspectLiveHarnessBridges({ socket: link.socket, panes, run });
+      } catch {
+        linkedSession = { state: "unavailable", panes: [], unownedBridges: [] };
+      }
       if (!env.HERDR_PANE_ID || env.HERDR_SOCKET_PATH !== link.socket) {
         local.membership = "not-in-session";
         local.detail = "This process is outside the service's connected local Herdr session.";
@@ -90,9 +116,9 @@ export async function inspectHarnessBridges(
         local.membership = response.status === 400 ? "verified" : "unavailable";
         local.detail =
           response.status === 400
-            ? "Local process membership verified. Tools still require a verified project and live owner-issued project grants (clankie access list)."
+            ? "Local process membership verified. Tools depend on the connected fleet and fleet.tools; native catalog and reply delivery remain unverified."
             : local.sharedDaemon
-              ? "Local process membership unavailable. Exit and restart Codex in this Herdr pane under the existing daemon_auto_start=false configuration; shared daemon MCP processes cannot prove pane ownership."
+              ? "Local process membership unavailable. Save sessions, stop the shared daemon with codex app-server daemon stop, and resume with codex --no-daemon resume <SESSION> in this Herdr pane; keep daemon_auto_start=false in the source-owned configuration; shared daemon MCP processes cannot prove pane ownership."
               : "Local process membership unavailable. Check clankie herdr status and the current pane. Private hires require a process registration owned by the running service; a pane ID alone grants nothing.";
       }
     } catch {
@@ -129,6 +155,7 @@ export async function inspectHarnessBridges(
       enabled: settings.enabledPlugins?.["clankie-worker@clankie"] === true,
     },
     localFleet: local,
+    linkedSession,
     remediation: [
       ...(!codexRegistered
         ? [

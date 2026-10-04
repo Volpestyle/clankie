@@ -45,6 +45,10 @@ export class HireOwners {
     );
     return held === undefined ? undefined : ConversationOwnerSchema.parse(held.owner);
   }
+  public seatOwner(seatId: string, occupantId: string): ConversationOwner | undefined {
+    const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);
+    return held === undefined ? undefined : ConversationOwnerSchema.parse(held.owner);
+  }
   /** Uncertain startup has only the pane allocated by this exact persisted intent. */
   public pendingOwner(paneId: string): ConversationOwner | undefined {
     const held = this.state.hires.find(
@@ -55,6 +59,41 @@ export class HireOwners {
   public sessionOwner(sessionKey: string): ConversationOwner | undefined {
     const entry = this.state.hires.find((item) => item.sessionKey === sessionKey);
     return entry === undefined ? undefined : ConversationOwnerSchema.parse(entry.owner);
+  }
+  /** An admitted message adopts the exact native worker, before it can report back. */
+  public adopt(
+    paneId: string,
+    seatId: string,
+    occupantId: string,
+    owner: ConversationOwner,
+    sessionKey?: string,
+  ): void {
+    const prior = this.state.hires.find((entry) => entry.paneId === paneId || entry.seatId === seatId);
+    if (
+      prior !== undefined &&
+      (prior.paneId !== paneId || prior.seatId !== seatId || prior.occupantId !== occupantId)
+    )
+      throw new Error("The adopted worker no longer matches its persisted native occupant");
+    const nativeSession = prior?.sessionKey ?? sessionKey;
+    this.save({
+      schemaVersion: 1,
+      hires: [
+        ...this.state.hires.filter(
+          (entry) =>
+            entry.paneId !== paneId &&
+            entry.seatId !== seatId &&
+            (nativeSession === undefined || entry.sessionKey !== nativeSession),
+        ),
+        {
+          id: prior?.id ?? randomUUID(),
+          paneId,
+          seatId,
+          occupantId,
+          owner,
+          ...(nativeSession === undefined ? {} : { sessionKey: nativeSession }),
+        },
+      ],
+    });
   }
   public intent(owner: ConversationOwner): string {
     const id = randomUUID();

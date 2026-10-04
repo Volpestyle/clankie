@@ -95,7 +95,7 @@ import {
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import type { EvalSessionBoundary } from "./eval-session-boundary.ts";
-import { RoomConversations } from "./room-conversations.ts";
+import { RoomConversations, roomSeatTurnResult } from "./room-conversations.ts";
 import {
   ConversationResetError,
   ConversationStore,
@@ -1360,7 +1360,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
   function seatContext(conversationId = conversations.defaultGlobalConversationId()) {
     const conversation = conversations.conversation(conversationId);
-    if (conversation === undefined || !conversations.runsCaptainTurns(conversationId)) return undefined;
+    if (
+      conversation === undefined ||
+      (!conversations.runsCaptainTurns(conversationId) && conversation.scope.kind !== "room")
+    )
+      return undefined;
     return {
       conversationId,
       cwd: conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : workingDirectory,
@@ -1638,7 +1642,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return seatEventKindFor(context, true);
   }
 
-  const conversations = new ConversationStore(
+  const conversations: ConversationStore = new ConversationStore(
     join(options.stateDir, "conversations"),
     trackHostedConversationRunner(async (conversationId, incoming, publish, context) => {
       // A queued turn may start after close releases the preceding seat waiter.
@@ -1660,354 +1664,368 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         context.origin === "hook" ? conversations.linearWakePrompt(conversationId, context.runId) : incoming;
       if (message === undefined) return;
       shutdown.signal.throwIfAborted();
-      const kind = seatEventKind(conversationId, context);
-      if (kind !== undefined) {
-        // The harness in his seat opens files by path, the way any worker does.
-        const attached =
-          context.attachments === undefined
-            ? undefined
-            : await materializeOwnerAttachments({
-                workspace: context.workspace ?? workingDirectory,
-                messageId: context.runId,
-                attachments: context.attachments,
-              });
-        shutdown.signal.throwIfAborted();
-        const delivery = await seatOutbox(conversationId).deliver({
-          kind,
-          conversationId,
-          source: context.surfaceClientId ?? "service",
-          content: attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
-          wantsReply: kind === "escalation",
-          signal: context.signal,
-        });
-        if (delivery.deliveryStage !== undefined && delivery.outcome !== "unbound")
-          context.deliveryReceipt?.(delivery.deliveryStage);
-        if (delivery.outcome === "replied") {
-          publish({ type: "message", role: "captain", text: delivery.text, streaming: false });
-          return;
-        }
-        // Taken by the seat, or the operator cancelled: either way this run is
-        // over. Only a seat that vanished before taking it hands the turn to pi.
-        if (delivery.outcome !== "unbound") return;
-      }
-      // A Linear wake is a one-shot: a fresh session sees only the new
-      // headlines, so it never resends the conversation it reports into
-      // (VUH-1382). It publishes there like any turn, and its own tree stays
-      // on disk as the record of what it ran.
-      // ponytail: one tree per wake, unbounded; prune by mtime if it grows.
-      shutdown.signal.throwIfAborted();
-      const oneShot = context.origin === "hook";
-      const cwd = context.workspace ?? workingDirectory;
-      const lane = oneShot
-        ? await buildSession(
-            "operator",
-            SessionManager.create(
-              cwd,
-              join(options.stateDir, "conversations", conversationId, "linear-wakes"),
-            ),
-            true,
-            cwd,
-            false,
-            conversationId,
-          )
-        : await durableSession(
-            `operator:${conversationId}`,
-            "operator",
-            join(options.stateDir, "conversations", conversationId, "pi"),
-            true,
-            cwd,
-            context.side === true,
-          );
-      if (shutdown.signal.aborted) {
-        if (oneShot) lane.session.dispose();
-        shutdown.signal.throwIfAborted();
-      }
-      // Operator interrupt: stop the live model turn. Aborting mid-stream makes
-      // pi settle the message as aborted; partial text still publishes below so
-      // the transcript shows what he had said before the interrupt.
-      if (context.signal.aborted) {
-        if (oneShot) lane.session.dispose();
-        return;
-      }
-      const onInterrupt = (): void => {
-        void lane.session.abort().catch(() => undefined);
-      };
-      context.signal.addEventListener("abort", onInterrupt, { once: true });
-      let releaseStarting: (() => void) | undefined;
-      if (lane.running === undefined && lane.starting === undefined && !lane.session.isStreaming) {
-        lane.starting = new Promise<void>((resolve) => {
-          releaseStarting = resolve;
-        });
-        lane.capture.media = undefined;
-        lane.capture.autonomous = context.internal === true;
-      }
-      const bodyIdentity = {
+      return conversations.runWithConversationDriver<void>(
         conversationId,
-        route: { owner: { conversationId }, mode: "machine" as const },
-        current: () =>
-          lane.capture.bodyIdentity === bodyIdentity &&
-          !context.signal.aborted &&
-          conversations.runsCaptainTurns(conversationId),
-        authorize: async () => conversations.runsCaptainTurns(conversationId),
-      };
-      lane.capture.bodyIdentity = bodyIdentity;
-      lane.capture.conversationAuthority = {
-        owner: { conversationId },
-        current: bodyIdentity.current,
-        authorize: bodyIdentity.authorize,
-      };
-      lane.capture.proposeProjectCreate =
-        context.ownerAuthority && context.questionBinding
-          ? (draft) =>
-              conversations.proposeProjectCreate(conversationId, draft, {
-                ...context,
-                questionCurrent: bodyIdentity.current,
-              })
-          : undefined;
-      lane.capture.requestQuestion =
-        context.ownerAuthority && context.questionBinding
-          ? (draft) =>
-              conversations.requestQuestion(conversationId, draft, {
-                ...context,
-                questionCurrent: bodyIdentity.current,
-              })
-          : undefined;
-      lane.capture.room = roomKey("operator", conversationId);
-      lane.capture.targetId = conversationId;
-      lane.capture.publishFile = (input) => conversations.publishFile({ conversationId, ...input });
-      if (releaseStarting === undefined && lane.starting !== undefined) await lane.starting;
-
-      const live = lane.running !== undefined || lane.session.isStreaming;
-      const operatorTokensStart = contextTokenCount(lane.session.getContextUsage());
-      const metrics = live
-        ? undefined
-        : new TurnMetrics({
+        () => {
+          const kind = seatEventKind(conversationId, context);
+          if (kind === undefined) return undefined;
+          const selectedOutbox = seatOutbox(conversationId);
+          return {
+            run: async () => {
+              // The harness in his seat opens files by path, the way any worker does.
+              const attached =
+                context.attachments === undefined
+                  ? undefined
+                  : await materializeOwnerAttachments({
+                      workspace: context.workspace ?? workingDirectory,
+                      messageId: context.runId,
+                      attachments: context.attachments,
+                    });
+              shutdown.signal.throwIfAborted();
+              const delivery = await selectedOutbox.deliver({
+                kind,
+                conversationId,
+                source: context.surfaceClientId ?? "service",
+                content:
+                  attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
+                wantsReply: kind === "escalation",
+                signal: context.signal,
+              });
+              if (delivery.deliveryStage !== undefined && delivery.outcome !== "unbound")
+                context.deliveryReceipt?.(delivery.deliveryStage);
+              if (delivery.outcome === "replied") {
+                publish({ type: "message", role: "captain", text: delivery.text, streaming: false });
+              }
+              // Taken by the seat, or the operator cancelled: either way this run is
+              // over. Only a seat that vanished before taking it hands the turn to pi.
+              return delivery.outcome === "unbound"
+                ? { handled: false as const }
+                : { handled: true as const, result: undefined };
+            },
+          };
+        },
+        async () => {
+          // A Linear wake is a one-shot: a fresh session sees only the new
+          // headlines, so it never resends the conversation it reports into
+          // (VUH-1382). It publishes there like any turn, and its own tree stays
+          // on disk as the record of what it ran.
+          // ponytail: one tree per wake, unbounded; prune by mtime if it grows.
+          shutdown.signal.throwIfAborted();
+          const oneShot = context.origin === "hook";
+          const cwd = context.workspace ?? workingDirectory;
+          const lane = oneShot
+            ? await buildSession(
+                "operator",
+                SessionManager.create(
+                  cwd,
+                  join(options.stateDir, "conversations", conversationId, "linear-wakes"),
+                ),
+                true,
+                cwd,
+                false,
+                conversationId,
+              )
+            : await durableSession(
+                `operator:${conversationId}`,
+                "operator",
+                join(options.stateDir, "conversations", conversationId, "pi"),
+                true,
+                cwd,
+                context.side === true,
+              );
+          if (shutdown.signal.aborted) {
+            if (oneShot) lane.session.dispose();
+            shutdown.signal.throwIfAborted();
+          }
+          // Operator interrupt: stop the live model turn. Aborting mid-stream makes
+          // pi settle the message as aborted; partial text still publishes below so
+          // the transcript shows what he had said before the interrupt.
+          if (context.signal.aborted) {
+            if (oneShot) lane.session.dispose();
+            return;
+          }
+          const onInterrupt = (): void => {
+            void lane.session.abort().catch(() => undefined);
+          };
+          context.signal.addEventListener("abort", onInterrupt, { once: true });
+          let releaseStarting: (() => void) | undefined;
+          if (lane.running === undefined && lane.starting === undefined && !lane.session.isStreaming) {
+            lane.starting = new Promise<void>((resolve) => {
+              releaseStarting = resolve;
+            });
+            lane.capture.media = undefined;
+            lane.capture.autonomous = context.internal === true;
+          }
+          const bodyIdentity = {
             conversationId,
-            lane: "operator",
-            runId: context.runId,
-            acceptedAt: context.acceptedAt,
-            ...(operatorTokensStart === undefined ? {} : { contextTokensStart: operatorTokensStart }),
-          });
-      if (metrics !== undefined) captureEvaluationStart(context.runId, conversationId, lane.session, message);
-      const skillCalls = new Map<string, string>();
-      const goalWasActive = autonomy.getGoal(conversationId)?.status === "active";
-      let runTokens = 0;
-      let activity: OperatorConversationActivityPhase | undefined;
-      const publishActivity = (phase: OperatorConversationActivityPhase): void => {
-        if (activity === phase) return;
-        activity = phase;
-        publish({ type: "activity", phase });
-      };
-      const drafts = createDraftPacer((text) => {
-        context.draft(text);
-      });
-      const unsubscribe = live
-        ? () => undefined
-        : lane.session.subscribe((event) => {
-            if (metrics !== undefined) recordPiTurnEvent(metrics, event);
-            if (event.type === "message_update") {
-              if (
-                event.assistantMessageEvent.type === "thinking_start" ||
-                event.assistantMessageEvent.type === "thinking_delta"
-              ) {
-                publishActivity("thinking");
-              } else if (
-                event.assistantMessageEvent.type === "text_start" ||
-                event.assistantMessageEvent.type === "text_delta"
-              ) {
-                publishActivity("responding");
-                drafts.push(assistantText(event.assistantMessageEvent.partial));
-              } else if (
-                event.assistantMessageEvent.type === "toolcall_start" ||
-                event.assistantMessageEvent.type === "toolcall_delta"
-              ) {
-                publishActivity("preparing_tool");
-              }
-            } else if (event.type === "tool_execution_start") {
-              activity = undefined;
-              const skillName = operatorSkillName(event.toolName, event.args);
-              if (skillName !== undefined) skillCalls.set(event.toolCallId, skillName);
-              publish({
-                type: "tool",
-                toolCallId: event.toolCallId,
-                name: event.toolName,
-                phase: "started",
-                detail: formatOperatorToolDetail(event.args),
-                ...(skillName === undefined ? {} : { skillName }),
-              });
-            } else if (event.type === "tool_execution_end") {
-              const skillName = skillCalls.get(event.toolCallId);
-              skillCalls.delete(event.toolCallId);
-              publish({
-                type: "tool",
-                toolCallId: event.toolCallId,
-                name: event.toolName,
-                phase: event.isError ? "failed" : "completed",
-                detail: formatOperatorToolResult(event.result),
-                ...(skillName === undefined ? {} : { skillName }),
-              });
-            } else if (event.type === "compaction_start") {
-              publishActivity("compacting");
-            } else if (event.type === "auto_retry_start") {
-              publishActivity("retrying");
-            } else if (event.type === "auto_retry_end") {
-              publishActivity("waiting");
-            } else if (event.type === "compaction_end") {
-              publishActivity("waiting");
-              const usage = oneShot ? undefined : lane.session.getContextUsage();
-              if (usage !== undefined) {
-                publish({
-                  type: "context",
-                  usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
-                });
-              }
-            } else if (event.type === "message_end" && event.message.role === "assistant") {
-              runTokens += event.message.usage.totalTokens;
-              // Every message he finishes is a message he said — including the
-              // one he says before reaching for a tool. The draft comes down
-              // here because this durable event is what replaces it.
-              context.draft(undefined);
-              drafts.reset();
-              const said = assistantText(event.message).trim();
-              if (said.length > 0)
-                publish({ type: "message", role: "captain", text: said, streaming: false });
-              const usage = oneShot ? undefined : lane.session.getContextUsage();
-              if (usage !== undefined) {
-                publish({
-                  type: "context",
-                  usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
-                });
-              }
-            }
-          });
-      let settled: TurnSettledOutcome | undefined;
-      try {
-        shutdown.signal.throwIfAborted();
-        if (!live) await syncModel(lane);
-        // After the sync, so a `/model` or `/effort` change made under a live
-        // conversation is attributed to this turn — the first one to execute it.
-        metrics?.recordExecution(sessionExecutionIdentity(lane.session));
-        await laneLog.append("operator", conversationId, {
-          at: new Date().toISOString(),
-          kind: "heard",
-          text: message,
-        });
-        const paneId = context.seat?.herdrPaneId;
-        // Seated or not, an operator turn carries the fleet of the pinned
-        // session (ADR 0149); an unseated turn with no live session attaches
-        // nothing rather than herdr noise. The Linear inbox is a reading room,
-        // not a lead room (ADR 0168): no census there.
-        const census =
-          live || oneShot || conversationId === LINEAR_INBOX_CONVERSATION_ID
+            route: { owner: { conversationId }, mode: "machine" as const },
+            current: () =>
+              lane.capture.bodyIdentity === bodyIdentity &&
+              !context.signal.aborted &&
+              conversations.runsCaptainTurns(conversationId),
+            authorize: async () => conversations.runsCaptainTurns(conversationId),
+          };
+          lane.capture.bodyIdentity = bodyIdentity;
+          lane.capture.conversationAuthority = {
+            owner: { conversationId },
+            current: bodyIdentity.current,
+            authorize: bodyIdentity.authorize,
+          };
+          lane.capture.proposeProjectCreate =
+            context.ownerAuthority && context.questionBinding
+              ? (draft) =>
+                  conversations.proposeProjectCreate(conversationId, draft, {
+                    ...context,
+                    questionCurrent: bodyIdentity.current,
+                  })
+              : undefined;
+          lane.capture.requestQuestion =
+            context.ownerAuthority && context.questionBinding
+              ? (draft) =>
+                  conversations.requestQuestion(conversationId, draft, {
+                    ...context,
+                    questionCurrent: bodyIdentity.current,
+                  })
+              : undefined;
+          lane.capture.room = roomKey("operator", conversationId);
+          lane.capture.targetId = conversationId;
+          lane.capture.publishFile = (input) => conversations.publishFile({ conversationId, ...input });
+          if (releaseStarting === undefined && lane.starting !== undefined) await lane.starting;
+
+          const live = lane.running !== undefined || lane.session.isStreaming;
+          const operatorTokensStart = contextTokenCount(lane.session.getContextUsage());
+          const metrics = live
             ? undefined
-            : await readHerdrSessionCensus(paneId, {
-                ...(options.nativeCensusRunner
-                  ? { runCommand: options.nativeCensusRunner, summaries: {} }
-                  : {}),
-                fleets: await censusFleets(),
-                localAvailable: deps.herdrAvailable?.() !== false,
+            : new TurnMetrics({
+                conversationId,
+                lane: "operator",
+                runId: context.runId,
+                acceptedAt: context.acceptedAt,
+                ...(operatorTokensStart === undefined ? {} : { contextTokensStart: operatorTokensStart }),
               });
-        // Owner attachments reach his model as images; the note numbers them
-        // and names where each original is stored (ADR 0209).
-        const attached =
-          context.attachments === undefined
-            ? undefined
-            : await modelImagesForOwnerAttachments(context.attachments);
-        const workspaceNote =
-          context.ownerAuthority && context.questionBinding
-            ? await questionWorkspaceContext(cwd, async () => (await settings()).projects)
-            : "";
-        if (context.ownerAuthority && context.questionBinding) {
-          await authorizeQuestion(context.ownerAuthority);
-          if (!conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
-        }
-        const prompt = resolveOperatorPrompt(
-          attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
-          invocableSkills(lane.session.resourceLoader.getSkills().skills, lane.quietSkills),
-          paneId,
-          census,
-        );
-        if (prompt.skillName !== undefined) {
-          publish({
-            type: "tool",
-            toolCallId: `skill-${randomUUID()}`,
-            name: "skill",
-            phase: "completed",
-            skillName: prompt.skillName,
+          if (metrics !== undefined)
+            captureEvaluationStart(context.runId, conversationId, lane.session, message);
+          const skillCalls = new Map<string, string>();
+          const goalWasActive = autonomy.getGoal(conversationId)?.status === "active";
+          let runTokens = 0;
+          let activity: OperatorConversationActivityPhase | undefined;
+          const publishActivity = (phase: OperatorConversationActivityPhase): void => {
+            if (activity === phase) return;
+            activity = phase;
+            publish({ type: "activity", phase });
+          };
+          const drafts = createDraftPacer((text) => {
+            context.draft(text);
           });
-        }
-        if (releaseStarting !== undefined) {
-          releaseStarting();
-          lane.starting = undefined;
-          releaseStarting = undefined;
-        }
-        // The resource loader disables discovered extensions and prompt templates;
-        // exact, loaded operator skills are the only input allowed to reach Pi expansion.
-        const role = await runDurableTurn(
-          lane,
-          [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
-          attached?.images ?? [],
-          {
-            expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,
-            ...(context.inputAnswer
-              ? {
-                  // Existing admission reservation rechecks immediately before prompt().
-                  preparePrompt: async () => {
-                    await authorizeQuestion(context.ownerAuthority);
-                    return () => {
-                      if (
-                        !bodyIdentity.current() ||
-                        !context.ownerAuthority!.current() ||
-                        !conversations.questionEligible(conversationId) ||
-                        !context.questionBinding ||
-                        !sameQuestionWorkspace(cwd, context.questionBinding.workspace)
-                      )
-                        throw new Error("question_context_lost");
-                      return [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n");
-                    };
-                  },
-                  onAbsorbed: () => {
-                    throw new Error("question_continuation_busy");
-                  },
+          const unsubscribe = live
+            ? () => undefined
+            : lane.session.subscribe((event) => {
+                if (metrics !== undefined) recordPiTurnEvent(metrics, event);
+                if (event.type === "message_update") {
+                  if (
+                    event.assistantMessageEvent.type === "thinking_start" ||
+                    event.assistantMessageEvent.type === "thinking_delta"
+                  ) {
+                    publishActivity("thinking");
+                  } else if (
+                    event.assistantMessageEvent.type === "text_start" ||
+                    event.assistantMessageEvent.type === "text_delta"
+                  ) {
+                    publishActivity("responding");
+                    drafts.push(assistantText(event.assistantMessageEvent.partial));
+                  } else if (
+                    event.assistantMessageEvent.type === "toolcall_start" ||
+                    event.assistantMessageEvent.type === "toolcall_delta"
+                  ) {
+                    publishActivity("preparing_tool");
+                  }
+                } else if (event.type === "tool_execution_start") {
+                  activity = undefined;
+                  const skillName = operatorSkillName(event.toolName, event.args);
+                  if (skillName !== undefined) skillCalls.set(event.toolCallId, skillName);
+                  publish({
+                    type: "tool",
+                    toolCallId: event.toolCallId,
+                    name: event.toolName,
+                    phase: "started",
+                    detail: formatOperatorToolDetail(event.args),
+                    ...(skillName === undefined ? {} : { skillName }),
+                  });
+                } else if (event.type === "tool_execution_end") {
+                  const skillName = skillCalls.get(event.toolCallId);
+                  skillCalls.delete(event.toolCallId);
+                  publish({
+                    type: "tool",
+                    toolCallId: event.toolCallId,
+                    name: event.toolName,
+                    phase: event.isError ? "failed" : "completed",
+                    detail: formatOperatorToolResult(event.result),
+                    ...(skillName === undefined ? {} : { skillName }),
+                  });
+                } else if (event.type === "compaction_start") {
+                  publishActivity("compacting");
+                } else if (event.type === "auto_retry_start") {
+                  publishActivity("retrying");
+                } else if (event.type === "auto_retry_end") {
+                  publishActivity("waiting");
+                } else if (event.type === "compaction_end") {
+                  publishActivity("waiting");
+                  const usage = oneShot ? undefined : lane.session.getContextUsage();
+                  if (usage !== undefined) {
+                    publish({
+                      type: "context",
+                      usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
+                    });
+                  }
+                } else if (event.type === "message_end" && event.message.role === "assistant") {
+                  runTokens += event.message.usage.totalTokens;
+                  // Every message he finishes is a message he said — including the
+                  // one he says before reaching for a tool. The draft comes down
+                  // here because this durable event is what replaces it.
+                  context.draft(undefined);
+                  drafts.reset();
+                  const said = assistantText(event.message).trim();
+                  if (said.length > 0)
+                    publish({ type: "message", role: "captain", text: said, streaming: false });
+                  const usage = oneShot ? undefined : lane.session.getContextUsage();
+                  if (usage !== undefined) {
+                    publish({
+                      type: "context",
+                      usage: { tokens: usage.tokens, contextWindow: usage.contextWindow },
+                    });
+                  }
                 }
-              : {}),
-            // runDurableTurn rechecks immediately before prompt/steer, including
-            // after waiting for another invocation or its startup reservation.
-            signal: AbortSignal.any([context.signal, shutdown.signal]),
-          },
-        );
-        if (role === "absorbed") return;
-        const text = lane.lastAssistantText.trim();
-        await laneLog.append("operator", conversationId, {
-          at: new Date().toISOString(),
-          kind: "said",
-          text,
-        });
-        if (goalWasActive || autonomy.getGoal(conversationId)?.status === "active") {
-          autonomy.finishTurn(conversationId, runTokens);
-        }
-        settled = context.signal.aborted ? "interrupted" : "completed";
-      } catch (error) {
-        if (metrics !== undefined) settled = context.signal.aborted ? "interrupted" : "failed";
-        throw error;
-      } finally {
-        context.signal.removeEventListener("abort", onInterrupt);
-        if (settled !== undefined) {
-          tryAppendTurnSettled(
-            turnSettled,
-            metrics,
-            settled,
-            new Date(),
-            contextTokenCount(lane.session.getContextUsage()),
-          );
-        }
-        if (releaseStarting !== undefined) {
-          releaseStarting();
-          lane.starting = undefined;
-        }
-        unsubscribe();
-        if (oneShot) lane.session.dispose();
-      }
+              });
+          let settled: TurnSettledOutcome | undefined;
+          try {
+            shutdown.signal.throwIfAborted();
+            if (!live) await syncModel(lane);
+            // After the sync, so a `/model` or `/effort` change made under a live
+            // conversation is attributed to this turn — the first one to execute it.
+            metrics?.recordExecution(sessionExecutionIdentity(lane.session));
+            await laneLog.append("operator", conversationId, {
+              at: new Date().toISOString(),
+              kind: "heard",
+              text: message,
+            });
+            const paneId = context.seat?.herdrPaneId;
+            // Seated or not, an operator turn carries the fleet of the pinned
+            // session (ADR 0149); an unseated turn with no live session attaches
+            // nothing rather than herdr noise. The Linear inbox is a reading room,
+            // not a lead room (ADR 0168): no census there.
+            const census =
+              live || oneShot || conversationId === LINEAR_INBOX_CONVERSATION_ID
+                ? undefined
+                : await readHerdrSessionCensus(paneId, {
+                    ...(options.nativeCensusRunner
+                      ? { runCommand: options.nativeCensusRunner, summaries: {} }
+                      : {}),
+                    fleets: await censusFleets(),
+                    localAvailable: deps.herdrAvailable?.() !== false,
+                  });
+            // Owner attachments reach his model as images; the note numbers them
+            // and names where each original is stored (ADR 0209).
+            const attached =
+              context.attachments === undefined
+                ? undefined
+                : await modelImagesForOwnerAttachments(context.attachments);
+            const workspaceNote =
+              context.ownerAuthority && context.questionBinding
+                ? await questionWorkspaceContext(cwd, async () => (await settings()).projects)
+                : "";
+            if (context.ownerAuthority && context.questionBinding) {
+              await authorizeQuestion(context.ownerAuthority);
+              if (!conversations.questionEligible(conversationId)) throw new Error("question_context_lost");
+            }
+            const prompt = resolveOperatorPrompt(
+              attached === undefined ? message : [message, attached.note].filter(Boolean).join("\n\n"),
+              invocableSkills(lane.session.resourceLoader.getSkills().skills, lane.quietSkills),
+              paneId,
+              census,
+            );
+            if (prompt.skillName !== undefined) {
+              publish({
+                type: "tool",
+                toolCallId: `skill-${randomUUID()}`,
+                name: "skill",
+                phase: "completed",
+                skillName: prompt.skillName,
+              });
+            }
+            if (releaseStarting !== undefined) {
+              releaseStarting();
+              lane.starting = undefined;
+              releaseStarting = undefined;
+            }
+            // The resource loader disables discovered extensions and prompt templates;
+            // exact, loaded operator skills are the only input allowed to reach Pi expansion.
+            const role = await runDurableTurn(
+              lane,
+              [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
+              attached?.images ?? [],
+              {
+                expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,
+                ...(context.inputAnswer
+                  ? {
+                      // Existing admission reservation rechecks immediately before prompt().
+                      preparePrompt: async () => {
+                        await authorizeQuestion(context.ownerAuthority);
+                        return () => {
+                          if (
+                            !bodyIdentity.current() ||
+                            !context.ownerAuthority!.current() ||
+                            !conversations.questionEligible(conversationId) ||
+                            !context.questionBinding ||
+                            !sameQuestionWorkspace(cwd, context.questionBinding.workspace)
+                          )
+                            throw new Error("question_context_lost");
+                          return [workspaceNote, prompt.prompt].filter(Boolean).join("\n\n");
+                        };
+                      },
+                      onAbsorbed: () => {
+                        throw new Error("question_continuation_busy");
+                      },
+                    }
+                  : {}),
+                // runDurableTurn rechecks immediately before prompt/steer, including
+                // after waiting for another invocation or its startup reservation.
+                signal: AbortSignal.any([context.signal, shutdown.signal]),
+              },
+            );
+            if (role === "absorbed") return;
+            const text = lane.lastAssistantText.trim();
+            await laneLog.append("operator", conversationId, {
+              at: new Date().toISOString(),
+              kind: "said",
+              text,
+            });
+            if (goalWasActive || autonomy.getGoal(conversationId)?.status === "active") {
+              autonomy.finishTurn(conversationId, runTokens);
+            }
+            settled = context.signal.aborted ? "interrupted" : "completed";
+          } catch (error) {
+            if (metrics !== undefined) settled = context.signal.aborted ? "interrupted" : "failed";
+            throw error;
+          } finally {
+            context.signal.removeEventListener("abort", onInterrupt);
+            if (settled !== undefined) {
+              tryAppendTurnSettled(
+                turnSettled,
+                metrics,
+                settled,
+                new Date(),
+                contextTokenCount(lane.session.getContextUsage()),
+              );
+            }
+            if (releaseStarting !== undefined) {
+              releaseStarting();
+              lane.starting = undefined;
+            }
+            unsubscribe();
+            if (oneShot) lane.session.dispose();
+          }
+        },
+      );
     }, deps.onWorkStarted),
     (conversationId, scope) => {
       seatOutboxes.get(conversationId)?.close();
@@ -2271,13 +2289,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   // The captain briefs a hired seat through the native channel the
   // operator would, by whichever id the hire handed back (VUH-1373).
-  const messageSeat: MessageSeat = async (target, message) => {
+  const messageSeat: MessageSeat = async (target, message, source) => {
+    const authority = captureConversationAuthority(source);
+    await assertConversationAuthority(authority);
     const seat = liveSeats.find(
       (current) =>
         current.seatId === target || current.personaId === target || current.conversationId === target,
     );
     const seatId = seat?.seatId ?? seatByPersona.get(target);
     if (seatId === undefined) return { outcome: "unknown_seat", seat: target, deliveryStage: "unavailable" };
+    try {
+      await herdrWatches.adoptSeat(seatId, authority);
+    } catch (error) {
+      return {
+        outcome: "undelivered",
+        seatId,
+        deliveryStage: "unavailable",
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
     const delivery = await deliverToSeat(seatId, message, {
       conversationId: seat?.conversationId ?? seatId,
       source: "captain",
@@ -2340,7 +2370,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ...(options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner, summaries: {} } : {}),
       fleets: await censusFleets(),
       localAvailable: deps.herdrAvailable?.() !== false,
-      ...(binding ? { herdrSession: binding.session } : {}),
+      ...(binding ? { herdrSession: binding.session, bridgeSocket: binding.socketPath } : {}),
     });
     bindHeadSeat(fleet.head);
     evaluator.observeFleet(fleet.seats);
@@ -2372,7 +2402,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           fleet.seats,
           agentWork,
         );
-    const nextWork = JSON.stringify(seats.map((seat) => [seat.goal, seat.assignment]));
+    const nextWork = JSON.stringify(seats.map((seat) => [seat.goal, seat.assignment, seat.harnessBridge]));
     if (seatWork !== nextWork) {
       seatWork = nextWork;
       fleetChanges.touch();
@@ -2487,8 +2517,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   evaluator.start();
   herdrWatches.start(
-    async (conversationId, prompt, discord) => {
-      await wakeConversation({ conversationId, ...(discord === undefined ? {} : { discord }) }, prompt);
+    async (conversationId, prompt, discord, guard) => {
+      await wakeConversation(
+        { conversationId, ...(discord === undefined ? {} : { discord }) },
+        prompt,
+        guard,
+      );
     },
     (seatId, projection) => {
       if (seatId === headSeat?.seatId && projection.kind === "transcript") {
@@ -2687,6 +2721,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     notification: string,
     guard?: () => Promise<void>,
     mode: "machine" | "social" = "machine",
+    waitForCompletion = false,
   ): Promise<boolean> {
     const origin = owner.discord!;
     // No body reply port means this route cannot accept an asynchronous turn.
@@ -2731,23 +2766,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       channelId: origin.channelId,
       messageId: origin.messageId,
     };
-    const lane = await discordLane(normalized, plan.systemTools);
     if (!(await validateConversationOwner(owner, mode))) return false;
     await guard?.();
-    void finishDiscordWatchTurn(lane, normalized, owner, mode).catch((error) =>
-      console.error("Conversation wake failed:", error),
-    );
+    const finished = finishDiscordWatchTurn(plan.systemTools, normalized, owner, mode, guard);
+    if (waitForCompletion) await finished;
+    else void finished.catch((error) => console.error("Conversation wake failed:", error));
     return true;
   }
 
   async function finishDiscordWatchTurn(
-    lane: LaneSession,
+    systemTools: boolean,
     normalized: NormalizedDiscordTurn,
     owner: ConversationOwner,
     mode: "machine" | "social" = "machine",
+    guard?: () => Promise<void>,
   ): Promise<void> {
     const origin = owner.discord!;
-    const result = await runDiscordTurn(lane, normalized, `watch-${randomUUID()}`, false, origin);
+    const result = await dispatchDiscordTurn(
+      normalized,
+      `watch-${randomUUID()}`,
+      false,
+      origin,
+      systemTools,
+      async () => {
+        if (!(await validateConversationOwner(owner, mode)))
+          throw new Error("Conversation wake authority was revoked");
+        await guard?.();
+      },
+    );
     if (
       result.state !== "settled" ||
       deps.discordActions === undefined ||
@@ -2770,6 +2816,46 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
     );
     if (!posted.ok) console.error("Herdr watch reply was not posted:", posted.message);
+  }
+
+  async function dispatchDiscordTurn(
+    normalized: NormalizedDiscordTurn,
+    deliveryId: string,
+    toolProgressEnabled: boolean,
+    origin: DiscordWatchOrigin,
+    systemTools: boolean,
+    guard?: () => Promise<void>,
+  ): Promise<CaptainChannelTurnResult> {
+    const conversationId = conversations.roomConversation(normalized.lane, normalized.targetId);
+    return conversations.runWithConversationDriver<CaptainChannelTurnResult>(
+      conversationId,
+      () => {
+        const outbox = seatOutbox(conversationId);
+        if (!outbox.bound() && !outbox.uncertain()) return undefined;
+        return {
+          run: async () => {
+            await guard?.();
+            shutdown.signal.throwIfAborted();
+            const delivery = await outbox.deliver({
+              kind: "escalation",
+              conversationId,
+              source: deliveryId.startsWith("watch-") ? "watch" : "discord",
+              content: normalized.prompt,
+              wantsReply: true,
+              signal: shutdown.signal,
+            });
+            const result = roomSeatTurnResult(delivery, normalized.sessionKey, `seat-${deliveryId}`);
+            return result === undefined ? { handled: false as const } : { handled: true as const, result };
+          },
+        };
+      },
+      async () => {
+        await guard?.();
+        shutdown.signal.throwIfAborted();
+        const lane = await discordLane(normalized, systemTools);
+        return runDiscordTurn(lane, normalized, deliveryId, toolProgressEnabled, origin);
+      },
+    );
   }
 
   async function runDiscordTurn(
@@ -3107,6 +3193,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         sessionKey: plan.sessionKey,
         durable: plan.durable,
       };
+      if (request.room !== undefined) {
+        const room = request.room;
+        const title =
+          normalized.guildId === undefined
+            ? `Discord DM · ${room.peerName ?? room.channelName ?? normalized.channelId}`
+            : `Discord ${normalized.lane === "discord_voice" ? "voice" : "text"} · ${room.guildName ?? normalized.guildId} / ${normalized.lane === "discord_presence" ? "#" : ""}${room.channelName ?? normalized.channelId}`;
+        conversations.nameRoomConversation(
+          conversations.roomConversation(normalized.lane, normalized.targetId),
+          title.slice(0, 200),
+        );
+      }
       const toolProgressEnabled =
         normalized.lane === "discord_presence" &&
         request.trigger.unprompted !== true &&
@@ -3121,10 +3218,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         messageId: normalized.messageId,
         transportKind: request.identity.transportKind,
       };
-      const lane = await discordLane(normalized, plan.systemTools);
       const finish = request.trigger.unprompted === true ? undefined : deps.onWorkStarted?.("captain-turn");
       try {
-        return await runDiscordTurn(lane, normalized, request.deliveryId, toolProgressEnabled, origin);
+        return await dispatchDiscordTurn(
+          normalized,
+          request.deliveryId,
+          toolProgressEnabled,
+          origin,
+          plan.systemTools,
+        );
       } finally {
         finish?.();
       }
@@ -3709,31 +3811,42 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // delivery, which a bare bearer does not carry, and the tools that need
       // one already say so.
       const capture: TurnContext = {};
+      let toolLane = lane;
       if (lane === "operator") {
         const binding = seatContext(conversationId);
         if (binding === undefined) throw new Error("Unknown captain conversation");
         const targetId = binding.conversationId;
-        capture.bodyIdentity = {
-          conversationId: targetId,
-          route: { owner: { conversationId: targetId }, mode: "machine" },
-          current: () => conversations.runsCaptainTurns(targetId),
-          authorize: async () => conversations.runsCaptainTurns(targetId),
-        };
-        capture.conversationAuthority = {
-          owner: { conversationId: targetId },
-          current: () => conversations.runsCaptainTurns(targetId),
-          authorize: async () => conversations.runsCaptainTurns(targetId),
-        };
-        capture.shell = true;
-        capture.room = roomKey("operator", targetId);
-        capture.targetId = targetId;
+        const scope = conversations.conversation(targetId)?.scope;
+        if (scope?.kind === "room") {
+          // A cached MCP bank has no per-event actor proof. Attachment never
+          // turns a room into an operator lane or inherits a later actor's grant.
+          toolLane = scope.lane;
+          capture.shell = false;
+          capture.room = roomKey(scope.lane, scope.targetId);
+          capture.targetId = scope.targetId;
+        } else {
+          capture.bodyIdentity = {
+            conversationId: targetId,
+            route: { owner: { conversationId: targetId }, mode: "machine" },
+            current: () => conversations.runsCaptainTurns(targetId),
+            authorize: async () => conversations.runsCaptainTurns(targetId),
+          };
+          capture.conversationAuthority = {
+            owner: { conversationId: targetId },
+            current: () => conversations.runsCaptainTurns(targetId),
+            authorize: async () => conversations.runsCaptainTurns(targetId),
+          };
+          capture.shell = true;
+          capture.room = roomKey("operator", targetId);
+          capture.targetId = targetId;
+        }
       }
       const currentSettings = await settings();
       return buildLaneToolBank(
         desktopDeps,
         capture,
         laneLog,
-        lane,
+        toolLane,
         currentSettings.gameplay,
         autonomy,
         herdrWatches,
@@ -3746,7 +3859,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
       conversations.cancelPendingQuestion(binding.conversationId, "native_seat_takeover");
-      const events = seatOutbox(binding.conversationId).poll(waitMs, signal);
+      const events = conversations.pollConversationDriver(binding.conversationId, () =>
+        seatOutbox(binding.conversationId).poll(waitMs, signal),
+      );
       return events;
     },
 
@@ -3830,7 +3945,43 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         "",
         text,
       ].join("\n");
-      return inboundReceipts.accept(agent.paneId, delivery, text, message);
+      const previous = inboundReceipts.reconcile(agent.paneId, delivery, deliveryFingerprint(text));
+      if (previous.received) return previous;
+      let owner: ConversationOwner | undefined;
+      try {
+        owner = herdrWatches.nativeOwner(agent);
+      } catch {
+        return inboundReceipts.refuse(agent.paneId, delivery, text);
+      }
+      const target: ConversationOwner =
+        owner && conversations.conversation(owner.conversationId)
+          ? ConversationOwnerSchema.parse(owner)
+          : { conversationId: conversations.defaultGlobalConversationId() };
+      if (!(await validateConversationOwner(target)))
+        return inboundReceipts.refuse(agent.paneId, delivery, text);
+      // Adoption may have happened while route authority was refreshed. Refuse
+      // before persistence; an accepted ID always keeps its original route.
+      let currentOwner: ConversationOwner | undefined;
+      try {
+        currentOwner = herdrWatches.nativeOwner(agent);
+      } catch {
+        return inboundReceipts.refuse(agent.paneId, delivery, text);
+      }
+      if (JSON.stringify(currentOwner) !== JSON.stringify(owner))
+        return inboundReceipts.refuse(agent.paneId, delivery, text);
+      return inboundReceipts.accept(
+        agent.paneId,
+        delivery,
+        text,
+        message,
+        target.conversationId,
+        target.discord === undefined
+          ? undefined
+          : async (_id, prompt) => {
+              if (!(await runDiscordWatchTurn(target, prompt, undefined, "machine", true)))
+                throw new Error("Worker report room authority is unavailable");
+            },
+      );
     },
 
     async pollFleetSeatEvents(paneId, waitMs, signal) {

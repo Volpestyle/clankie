@@ -415,6 +415,7 @@ interface HarnessOptions {
   readonly narrationMinIntervalMs?: number;
   readonly floorOverrides?: Partial<VoiceFloorOptions>;
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
+  readonly roomNames?: (guildId: string, channelId: string) => { guildName?: string; channelName?: string };
   readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
   readonly speakerTranscriptionGate?: Promise<void>;
   readonly conversationGate?: Promise<void>;
@@ -492,6 +493,7 @@ function buildHarness(options: HarnessOptions = {}) {
       ? {}
       : { narrationMinIntervalMs: options.narrationMinIntervalMs }),
     presenceSessionId: () => "presence-1",
+    ...(options.roomNames === undefined ? {} : { roomNames: options.roomNames }),
     emit: (event) => {
       // Every emission must be protocol-valid, including the fastPath/turnId
       // invariant — the schema is the reviewer here.
@@ -2396,6 +2398,7 @@ describe("ability path", () => {
   // only the authenticated-surface handoff — ambient voice cannot approve.
   it("keeps the authenticated-surface handoff for approval-shaped results", async () => {
     const harness = await joinedHarness({
+      roomNames: () => ({ guildName: "Friends", channelName: "Lobby" }),
       captain: () =>
         Promise.resolve({
           state: "waiting_user",
@@ -2411,6 +2414,7 @@ describe("ability path", () => {
     conversation.input.onFunctionCall(askClankie("call_1", '{"request":"merge the release"}'));
     conversation.input.onResponseDone(completedResponse("resp_fn"));
     await flush();
+    expect(harness.submitCalls[0]?.room).toEqual({ guildName: "Friends", channelName: "Lobby" });
     const result = at(conversation.functionResults, 0);
     expect(result.output).toContain(
       "I need you to continue that request on the authenticated operator surface.",

@@ -26,7 +26,9 @@ describe("Discord voice ingress", () => {
       { characterId: "clankie", credentialRef: "discord_bot", transportKind: "bot" },
     );
 
-    await expect(ingress.handle(turn)).resolves.toEqual({
+    await expect(
+      ingress.handle({ ...turn, room: { guildName: "Friends", channelName: "Lobby" } }),
+    ).resolves.toEqual({
       state: "settled",
       turnId: "turn-1",
       response: "Hello everyone.",
@@ -34,6 +36,7 @@ describe("Discord voice ingress", () => {
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({
         deliveryId: "utterance-1",
+        room: { guildName: "Friends", channelName: "Lobby" },
         identity: expect.objectContaining({
           presenceSessionId: "presence-1",
           profileHash: "profile-1",

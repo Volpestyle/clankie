@@ -420,6 +420,11 @@ export interface DiscordVoiceSessionOptions {
    * policy.
    */
   readonly channelOccupants?: (guildId: string, channelId: string) => readonly VoiceRoomOccupant[];
+  /** Optional gateway-observed room names, used only for conversation discovery. */
+  readonly roomNames?: (
+    guildId: string,
+    channelId: string,
+  ) => { readonly guildName?: string; readonly channelName?: string } | undefined;
   /** Monotonic milliseconds; defaults to `performance.now`. Injected by tests. */
   readonly clock?: () => number;
   /** Timer seam shared with the realtime runtimes; drives decay ticks, the hold window, and reconnect backoff. */
@@ -2844,6 +2849,7 @@ export class DiscordVoiceSession {
         channelId,
         userId,
         transcript: request,
+        ...(this.options.roomNames === undefined ? {} : { room: this.options.roomNames(guildId, channelId) }),
         roomContext: [
           ...(exchange?.sourceText === undefined
             ? []

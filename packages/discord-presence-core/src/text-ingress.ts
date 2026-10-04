@@ -269,6 +269,8 @@ export interface DiscordInboundMessage {
   readonly authorIsBot: boolean;
   readonly mentionsBot: boolean;
   readonly body: string;
+  /** Gateway display metadata, never a route or authority source. */
+  readonly room?: DiscordPresenceChannelTurnRequest["room"];
   /** Images posted with this message, already policy-filtered by {@link selectInboundImageAttachments}. */
   readonly attachments?: readonly DiscordPresenceAttachment[];
   /** How many attachments the selection left out, so he can be told (ADR 0072). */
@@ -542,6 +544,7 @@ export class DiscordTextIngress {
       schemaVersion: 1,
       deliveryId: message.id,
       identity,
+      ...(message.room === undefined ? {} : { room: message.room }),
       trigger: {
         kind: message.guildId === undefined ? "dm" : message.mentionsBot ? "mention" : "message",
         id: message.id,
