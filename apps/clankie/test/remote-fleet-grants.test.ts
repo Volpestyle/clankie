@@ -56,9 +56,15 @@ it("runs the remote admitted-pane handshake without native project proof and fen
     fleet: "pc",
     pane: "w3:p8",
     validate: async () => live,
+    current: () => live,
     projectProof,
   };
-  const worker = new WorkerMcp({ directory: join(directory, "grants"), credentials, host });
+  const worker = new WorkerMcp({
+    directory: join(directory, "grants"),
+    credentials,
+    host,
+    fleetToolsSnapshot: async () => ({ tools: "connected", assertCurrent() {} }),
+  });
   const requests = new WeakMap<Request, LocalFleetIdentity>();
   const app = await createClankieApp({
     captain: createStubCaptain(),

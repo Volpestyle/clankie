@@ -351,11 +351,13 @@ export class FleetLinks {
         if (!stream) continue;
         // Share only simultaneous reads; every later tool/membership check observes afresh.
         let pending: Promise<ProjectProcessProof | undefined> | undefined;
+        const current = () =>
+          stream.alive() && this.links.get(fleet) === link && link.status().state === "ready";
         const identity: LocalFleetIdentity = {
           fleet,
           pane,
-          validate: async () =>
-            stream.alive() && this.links.get(fleet) === link && link.status().state === "ready",
+          current,
+          validate: async () => current(),
           projectProof: () => {
             if (!stream.alive() || this.links.get(fleet) !== link) return Promise.resolve(undefined);
             return (pending ??= Promise.resolve(this.options.projectProof?.(fleet, pane, stream)).finally(
