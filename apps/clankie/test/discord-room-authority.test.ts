@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -8,6 +8,106 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { DiscordRoomObservations } from "../src/discord-room-observations.ts";
 const cleanups: (() => void)[] = [];
 afterEach(() => cleanups.splice(0).forEach((fn) => fn()));
+it("the hosted bridge keeps owner proof through inner body limits and measures constructed bodies in UTF-8 bytes", async () => {
+  const { randomBytes, randomUUID, generateKeyPairSync } = await import("node:crypto");
+  const { TAKE_CONTROL_GRANTS, DiscordSettingsSnapshotSchema } = await import("@clankie/protocol");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { DeviceSessionSigner, mintDeviceSessionClaims } = await import("../src/device-session.ts");
+  const { HostedPairing } = await import("../src/hosted-pairing.ts");
+  const { HostedBodyClient } = await import("../src/hosted-body.ts");
+  const { hostedFixture } = await import("./fixtures/hosted-body.ts");
+  const root = mkdtempSync(join(tmpdir(), "hosted-discord-write-"));
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const key = randomBytes(32);
+  const now = Date.now();
+  const signer = new DeviceSessionSigner(key);
+  const token = signer.issue(
+    mintDeviceSessionClaims({ deviceId: "owner", nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 600 }),
+  );
+  const eventLogPath = join(root, "events.jsonl");
+  const base = {
+    occurredAt: new Date(now).toISOString(),
+    missionId: "device:owner",
+    correlationId: "fixture",
+    profileHash: "fixture",
+  };
+  writeFileSync(
+    eventLogPath,
+    [
+      {
+        ...base,
+        id: randomUUID(),
+        type: "device.pairing.redeemed",
+        data: {
+          schemaVersion: 1,
+          deviceId: "owner",
+          offerId: "fixture",
+          name: "Fixture",
+          platform: "ios",
+          offeredGrants: TAKE_CONTROL_GRANTS,
+          mintedBy: "hosted-account-operator",
+          pendingExpiresAt: new Date(now + 600_000).toISOString(),
+        },
+      },
+      {
+        ...base,
+        id: randomUUID(),
+        type: "device.activated",
+        data: {
+          schemaVersion: 1,
+          deviceId: "owner",
+          grants: TAKE_CONTROL_GRANTS,
+          sessionExpiresAt: new Date(now + 3600_000).toISOString(),
+        },
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+  );
+  const hf = hostedFixture();
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    settings,
+    eventLogPath,
+    deviceSessionKey: key,
+    roomObservations: new DiscordRoomObservations(join(root, "rooms.json")),
+    discordEnvironment: {},
+    hostedPairing: new HostedPairing(
+      new HostedBodyClient(hf.bootstrap, { clock: () => hf.now }),
+      generateKeyPairSync("ed25519").privateKey,
+      { clock: () => hf.now },
+    ),
+  });
+  cleanups.push(() => {
+    app.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const bridge = (method: "GET" | "POST", body?: unknown) =>
+    app.app.request("/v1/hosted/operator", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        method,
+        path: "/v1/discord/settings",
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }),
+    });
+  const snapshot = DiscordSettingsSnapshotSchema.parse(await (await bridge("GET")).json());
+  const saved = await bridge("POST", {
+    expectedRevision: snapshot.revision,
+    settings: { ...snapshot.settings, guildId: "12345" },
+  });
+  expect(saved.status).toBe(200);
+  expect((await settings.load()).discord.guildId).toBe("12345");
+  expect(
+    (await bridge("POST", { expectedRevision: snapshot.revision, settings: snapshot.settings })).status,
+  ).toBe(409);
+  // Fewer than 32K characters, more than 32K UTF-8 bytes: the inner limit must
+  // reject it before parsing (400) or writing, despite trusted request branding.
+  // Room routes deliberately bound middleware errors to their generic denial.
+  expect((await bridge("POST", { padding: "🌱".repeat(9000) })).status).toBe(403);
+  expect((await settings.load()).discord.guildId).toBe("12345");
+});
 it("paired steer guides only its dedicated route; generic captain hints never establish owner authority; revocation expires pending guidance", async () => {
   const root = mkdtempSync(join(tmpdir(), "room-authority-"));
   const store = new DiscordRoomObservations(join(root, "rooms.json"));

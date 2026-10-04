@@ -928,7 +928,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "invalid_operator_route" }, 400);
     const inner = new Request(`http://control${parsed.data.path}`, {
       method: parsed.data.method,
-      headers: { "content-type": "application/json" },
+      // This body was constructed here, not streamed from an untrusted sender.
+      // Its exact byte length lets inner body-limit middleware keep the Request
+      // identity carrying the hosted-device proof instead of buffering a clone.
+      headers: {
+        "content-type": "application/json",
+        ...(parsed.data.method === "POST" && parsed.data.body !== undefined
+          ? { "content-length": String(Buffer.byteLength(parsed.data.body, "utf8")) }
+          : {}),
+      },
       signal: context.req.raw.signal,
       ...(parsed.data.method === "POST" && parsed.data.body !== undefined ? { body: parsed.data.body } : {}),
     });
