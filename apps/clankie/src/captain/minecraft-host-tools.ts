@@ -11,6 +11,8 @@ import type { TurnContext } from "./tools.ts";
 
 /** Core owns identity binding and audit; integration owns server administration. */
 export interface MinecraftHostToolPort {
+  claimStatus(identity: BodyConversationIdentity | undefined): Promise<unknown>;
+  completeClaim(identity: BodyConversationIdentity | undefined): Promise<unknown>;
   status(identity: BodyConversationIdentity | undefined): Promise<unknown>;
   lifecycle(
     operation: "start" | "stop" | "restart",
@@ -101,9 +103,25 @@ export function minecraftHostTools(client: MinecraftHostToolPort, turn: TurnCont
       name: "minecraft_host_claim",
       label: "Claim Minecraft tunnel",
       description:
-        "Ask for the playit account claim step for your own server, for an authenticated owner or individual machine operator. Credentials remain in the broker.",
+        "Begin a non-interactive playit account claim for an authenticated owner or individual machine operator. Returns immediately with preparing while the agent installs in the background. Poll minecraft_host_claim_status until pending with an official approval URL to share privately with the owner, then poll minecraft_host_claim_complete after approval. Repeated starts reuse the same job. Credentials remain in the broker.",
       parameters: Type.Object({}),
       execute: async () => call((identity) => client.claim(identity)),
+    }),
+    defineTool({
+      name: "minecraft_host_claim_status",
+      label: "Minecraft tunnel claim status",
+      description:
+        "Read the tunnel account claim phase for an authenticated owner or individual machine operator. Reports preparing until the background install finishes, then pending with the approval URL; terminal phases include failed/expired/rejected/claimed. Does not exchange credentials.",
+      parameters: Type.Object({}),
+      execute: async () => call((identity) => client.claimStatus(identity)),
+    }),
+    defineTool({
+      name: "minecraft_host_claim_complete",
+      label: "Complete Minecraft tunnel claim",
+      description:
+        "Poll the owner's playit approval once for an authenticated owner or individual machine operator. Returns preparing during installation or pending until approved, then exchanges the secret directly into the broker. No terminal or credentials in chat are needed.",
+      parameters: Type.Object({}),
+      execute: async () => call((identity) => client.completeClaim(identity)),
     }),
     defineTool({
       name: "minecraft_host_request_enrollment",

@@ -90,6 +90,19 @@ export const MinecraftHostSettingsSchema = z.strictObject({
 });
 export type MinecraftHostSettings = z.infer<typeof MinecraftHostSettingsSchema>;
 
+/** Transient owner claim only; permanent playit credentials never leave the broker. */
+export const MinecraftTunnelClaimStatusSchema = z.strictObject({
+  phase: z.enum(["idle", "preparing", "pending", "claimed", "expired", "rejected", "failed"]),
+  claimed: z.boolean(),
+  claimUrl: z
+    .string()
+    .regex(/^https:\/\/playit\.gg\/claim\/[a-f0-9]{10}$/u)
+    .optional(),
+  expiresAt: z.iso.datetime().optional(),
+  error: z.enum(["playit-install-failed", "playit-claim-unavailable"]).optional(),
+});
+export type MinecraftTunnelClaimStatus = z.infer<typeof MinecraftTunnelClaimStatusSchema>;
+
 /** Operator API; Discord subjects are captured by the host, never supplied in commands. */
 export const MinecraftHostCommandSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("configuration") }),
@@ -101,6 +114,7 @@ export const MinecraftHostCommandSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("backup") }),
   z.strictObject({ action: z.literal("claim") }),
   z.strictObject({ action: z.literal("claim_complete") }),
+  z.strictObject({ action: z.literal("claim_status") }),
   z.strictObject({ action: z.literal("admin"), command: MinecraftHostAdminCommandSchema }),
   z.strictObject({ action: z.literal("request_enrollment"), username: MinecraftHostUsernameSchema }),
   z.strictObject({ action: z.literal("approve_enrollment"), username: MinecraftHostUsernameSchema }),

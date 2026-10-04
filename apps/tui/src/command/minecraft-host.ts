@@ -3,7 +3,7 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { commandHost } from "./io.ts";
 
 const USAGE =
-  "Usage: clankie minecraft host status|configure [JSON]|start|stop|restart|backup|admin JSON|approve USERNAME|tunnel claim";
+  "Usage: clankie minecraft host status|configure [JSON]|start|stop|restart|backup|admin JSON|approve USERNAME|tunnel claim|status|complete";
 export async function runMinecraftHostCommand(
   args: readonly string[],
   options: {
@@ -35,7 +35,8 @@ export async function runMinecraftHostCommand(
     }
   } else if (action === "approve" && rest.length === 1)
     raw = { action: "approve_enrollment", username: rest[0] };
-  else if (action === "tunnel" && rest.length === 1 && rest[0] === "claim") raw = { action: "claim" };
+  else if (action === "tunnel" && rest.length === 1 && ["claim", "status", "complete"].includes(rest[0]!))
+    raw = { action: { claim: "claim", status: "claim_status", complete: "claim_complete" }[rest[0]!] };
   else throw new Error(USAGE);
   const command = MinecraftHostCommandSchema.safeParse(raw);
   if (!command.success) throw new Error(USAGE);
@@ -58,11 +59,7 @@ export async function runMinecraftHostCommand(
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(
-          command.data.action === "claim"
-            ? 650_000
-            : ["start", "stop", "restart"].includes(command.data.action)
-              ? 1_260_000
-              : 180_000,
+          ["start", "stop", "restart"].includes(command.data.action) ? 1_260_000 : 180_000,
         ),
       },
     );
@@ -70,7 +67,11 @@ export async function runMinecraftHostCommand(
     return (await response.json()) as Record<string, unknown>;
   };
   const result = await send(command.data);
-  if (command.data.action !== "claim" || typeof result.claimUrl !== "string") return result;
+  if (
+    !["claim", "claim_status", "claim_complete"].includes(command.data.action) ||
+    typeof result.claimUrl !== "string"
+  )
+    return result;
   const url = new URL(result.claimUrl);
   if (url.protocol !== "https:" || url.hostname !== "playit.gg" || !url.pathname.startsWith("/claim/"))
     throw new Error("Invalid playit claim response.");
@@ -78,11 +79,5 @@ export async function runMinecraftHostCommand(
     options.onClaimUrl ??
     ((value) => process.stderr.write(`Approve this claim in your personal playit account: ${value}\n`))
   )(url.href);
-  const deadline = Date.now() + 10 * 60_000;
-  while (Date.now() < deadline) {
-    const claimed = await send({ action: "claim_complete" });
-    if (claimed.outcome !== "pending") return claimed;
-    await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
-  }
-  return { outcome: "pending", reason: "claim_not_approved", claimUrl: url.href };
+  return result;
 }

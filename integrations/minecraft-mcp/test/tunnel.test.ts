@@ -80,16 +80,19 @@ async function fixture(
 describe("Minecraft playit tunnel", () => {
   test("pinned official source and claim return no permanent credential", async () => {
     const f = await fixture();
-    const claim = await f.host.prepareClaim();
+    await f.host.prepareClaim();
+    await vi.waitFor(() => expect(f.host.claimStatus().phase).toBe("pending"));
+    const claim = f.host.claimStatus();
     expect(f.api).toHaveBeenCalledWith(
       "/claim/setup",
       expect.objectContaining({ version: `playit ${PLAYIT_PIN.version}` }),
     );
     expect(claim.claimUrl).toMatch(/^https:\/\/playit.gg\/claim\/[a-f0-9]{10}$/);
-    expect(await f.host.completeClaim()).toEqual({ claimed: true });
+    expect(await f.host.completeClaim()).toEqual({ phase: "claimed", claimed: true });
     expect(f.credentials.set).toHaveBeenCalledWith(secret);
     expect(JSON.stringify([claim, f.host.status()])).not.toContain(secret);
-    await expect(f.host.completeClaim()).rejects.toThrow("playit-claim-expired");
+    expect(await f.host.completeClaim()).toEqual({ phase: "claimed", claimed: true });
+    expect(f.credentials.set).toHaveBeenCalledTimes(1);
   });
   test("never installs, allocates or starts a tunnel before the auth gate", async () => {
     const f = await fixture({ ready: false });
@@ -118,7 +121,14 @@ describe("Minecraft playit tunnel", () => {
   test("failed explicit provision creates no claim or account request", async () => {
     const f = await fixture();
     f.install.mockRejectedValue(new Error("unsafe subprocess output"));
-    await expect(f.host.prepareClaim()).rejects.toThrow("playit-install-failed");
+    expect((await f.host.prepareClaim()).phase).toBe("preparing");
+    await vi.waitFor(() =>
+      expect(f.host.claimStatus()).toEqual({
+        phase: "failed",
+        claimed: false,
+        error: "playit-install-failed",
+      }),
+    );
     expect(f.api).not.toHaveBeenCalled();
     expect(f.credentials.set).not.toHaveBeenCalled();
   });
@@ -263,7 +273,14 @@ describe("Minecraft playit tunnel", () => {
   test("remote failure containing secrets is sanitized", async () => {
     const f = await fixture();
     f.api.mockRejectedValue(new Error(secret));
-    await expect(f.host.prepareClaim()).rejects.toThrow("playit-claim-unavailable");
+    await f.host.prepareClaim();
+    await vi.waitFor(() =>
+      expect(f.host.claimStatus()).toEqual({
+        phase: "failed",
+        claimed: false,
+        error: "playit-claim-unavailable",
+      }),
+    );
     expect(await f.host.start()).toEqual({ phase: "failed", error: "playit-start-failed" });
   });
 });

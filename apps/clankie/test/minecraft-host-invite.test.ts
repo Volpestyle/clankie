@@ -58,6 +58,7 @@ it("posts two public lines with only safe status into immutable request origin",
       phase: "running",
       authReady: true,
       version: "1.21.4",
+      supportedClientVersions: ["1.21.4", "26.3"],
       tunnel: { publicAddress: "world.playit.gg:25565", password: "secret" },
       rcon: "secret",
     }),
@@ -66,6 +67,7 @@ it("posts two public lines with only safe status into immutable request origin",
   const text = execute.mock.calls[0]?.[0].text;
   expect(text.split("\n")).toHaveLength(2);
   expect(text).not.toContain("secret");
+  expect(text).toContain("supported clients: 1.21.4, 26.3 (server 1.21.4)");
   expect(await invite(identity, { phase: "running", authReady: false })).toEqual({ outcome: "refused" });
   expect(execute).toHaveBeenCalledTimes(1);
 });

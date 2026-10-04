@@ -15,6 +15,7 @@ import {
   MinecraftHostAdminCommandSchema,
   MinecraftHostUsernameSchema,
   MinecraftHostSettingsSchema,
+  MinecraftTunnelClaimStatusSchema,
   type MinecraftHostAdminCommand,
 } from "@clankie/protocol";
 import type { SettingsStore } from "@clankie/settings";
@@ -35,6 +36,11 @@ const SafeStatus = z.object({
   phase: z.enum(["stopped", "starting", "running", "stopping", "backoff", "failed", "uncertain"]),
   authReady: z.boolean(),
   version: z.literal("1.21.4"),
+  supportedClientVersions: z
+    .array(z.string().regex(/^\d+\.\d+(?:\.\d+)?$/u))
+    .min(1)
+    .max(64)
+    .optional(),
   gamePort: z.number().int().min(1024).max(65535),
   botUsername: Username,
   lastBackup: z
@@ -159,25 +165,28 @@ export class MinecraftHostService {
     });
   }
   public claim(identity?: BodyConversationIdentity) {
-    return this.run("claim", identity, true, async (id) => {
-      const result = z
-        .object({
-          claimUrl: z
-            .string()
-            .url()
-            .refine((url) => new URL(url).hostname === "playit.gg"),
-          expiresAt: z.number().optional(),
-        })
-        .parse(await this.rpc("host_claim", {}, id, true));
-      return result;
-    });
+    return this.run("claim", identity, true, async (id) =>
+      MinecraftTunnelClaimStatusSchema.parse(await this.rpc("host_claim", {}, id, true)),
+    );
+  }
+  public claimStatus(identity?: BodyConversationIdentity) {
+    return this.run("claim_status", identity, true, async (id) =>
+      MinecraftTunnelClaimStatusSchema.parse(await this.rpc("host_claim_status", {}, id, true)),
+    );
   }
   public completeClaim(identity?: BodyConversationIdentity) {
     return this.run("claim_complete", identity, true, async (id) => {
-      const result = z
-        .object({ claimed: z.boolean() })
-        .parse(await this.rpc("host_claim_complete", {}, id, true));
-      return { outcome: result.claimed ? "completed" : "pending", claimed: result.claimed };
+      const result = MinecraftTunnelClaimStatusSchema.parse(
+        await this.rpc("host_claim_complete", {}, id, true),
+      );
+      return {
+        ...result,
+        outcome: result.claimed
+          ? "completed"
+          : ["preparing", "pending"].includes(result.phase)
+            ? "pending"
+            : "refused",
+      };
     });
   }
   public requestEnrollment(username: string, identity?: BodyConversationIdentity) {
@@ -352,7 +361,7 @@ export class MinecraftHostService {
       arguments: args,
       bodyAccess: MINECRAFT_BODY_ACCESS,
       resultMode: "data",
-      timeoutMs: tool === "host_claim" ? 600_000 : tool === "host_lifecycle" ? 1_200_000 : 60_000,
+      timeoutMs: tool === "host_lifecycle" ? 1_200_000 : 60_000,
       fence: async () => {
         const current = await this.options.guard(identity, { admin });
         return () => {
@@ -360,6 +369,7 @@ export class MinecraftHostService {
           if (
             tool !== "host_status" &&
             tool !== "host_configuration" &&
+            tool !== "host_claim_status" &&
             !(tool === "host_admin" && (args.command as { operation?: string })?.operation === "list")
           )
             this.effectStarted = true;
