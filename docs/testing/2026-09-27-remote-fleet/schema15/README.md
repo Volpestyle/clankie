@@ -40,8 +40,9 @@ Managed Swarm owner: `b62a68f`, schema 15. No Rivals runtime or lead changed.
 The named fleet retains its explicit canary directory grant. The desktop bridge
 is running. The scratch agent is idle after completion. The relay remains
 service-supervised. No lead migration or crash test was executed; that is the
-remaining scheduled acceptance criterion, with the [runbook](../../../fleet-lead-handoff.md)
-prepared earlier.
+acceptance criterion that remained at the time, with a runbook prepared earlier.
+The coordinator handoff procedure was later retired by
+[ADR 0213](../../../adr/0213-clankie-retires-swarm.md).
 
 ## Validation
 

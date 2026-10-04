@@ -47,6 +47,7 @@ coordinator runs the final full check and release build.
 Acceptance gaps for the broader VUH-1381 issue: scratch agent prompt/wait;
 desktop bridge session proof; remote hire; persisted watch surviving a
 coordinated service restart; and the scheduled lead migration/crash proof.
-The [handoff runbook](../../fleet-lead-handoff.md) is written, not executed.
+The coordinator handoff runbook was written, not executed; that procedure was
+later retired by [ADR 0213](../../adr/0213-clankie-retires-swarm.md).
 The repair's narrower PC fleet reachability and authenticated relay round-trip
 requirements are proven. No acceptance claim covers the remaining gaps.

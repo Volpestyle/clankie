@@ -1,7 +1,12 @@
 # Ruthless cut audit
 
-Status: proposal for James to decide line by line (VUH-1475). Nothing here has been
-deleted.
+Status: historical proposal at `2eb2608d` (VUH-1475), not a current inventory or
+an instruction to delete features. Later decisions in
+[ADR 0203](../adr/0203-clankie-keeps-what-better-models-cannot-absorb.md),
+[ADR 0207](../adr/0207-work-records-and-native-agent-delivery.md), and
+[ADR 0213](../adr/0213-clankie-retires-swarm.md) retain both Discord bodies,
+retire the menu bar and embedded Swarm, and require native agent delivery.
+The recommendations and counts below describe the original audit.
 
 Date: 2026-09-30, at `2eb2608d`.
 
