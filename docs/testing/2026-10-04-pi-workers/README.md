@@ -76,7 +76,10 @@ per-hire profile roots are unavailable before allocation.
 Saved-file discovery alone cannot adopt a live session. The existing resume path
 requires a fresh complete inventory of the selected Herdr fleet before allocating
 a new saved-session process. An exact live match reuses only its original proved
-controller; missing control, offline/unknown state, ambiguous matches, a matching
+controller, including resumes with no brief. Its verification callback rechecks
+the exact saved canonical file/cwd, native UUID, original process birth, pane and
+session around awaited admission; the same UUID at another path cannot qualify.
+Missing control or proof callbacks, offline/unknown state, ambiguous matches, a matching
 resume label or an unidentified same-harness pane in the same cwd refuse the
 launch. An unreadable inventory also refuses. Only a complete inventory without
 those possible writers reaches a new launch, followed by the same file/header

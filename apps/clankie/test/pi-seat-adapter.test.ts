@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SeatLaunch, SeatProcessIdentity, SeatView } from "@clankie/agent-hosts";
@@ -9,6 +9,7 @@ import type { PiNativeCapability } from "../src/captain/pi-native-capability.ts"
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { connectPiWorker } from "../../../integrations/pi-plugin/worker-connection.mjs";
 import { createPiWorkerRuntime } from "../../../integrations/pi-plugin/worker-runtime.mjs";
+import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import { DeliveryFence } from "../src/captain/delivery-fence.ts";
 
 const cleanup: (() => Promise<unknown> | void)[] = [];
@@ -227,3 +228,148 @@ test("unsupported options fail before allocating a controller and old start entr
   expect((await f.adapter.start(f.launch, f.view)).outcome).toBe("failed");
   expect(f.view.run).not.toHaveBeenCalled();
 });
+
+async function liveResumeFixture() {
+  const f = await fixture();
+  const { prepared } = await f.prepare();
+  const started = await prepared.start(f.view);
+  if (started.outcome !== "started") throw new Error("fixture failed");
+  f.finish();
+  await writeFile(
+    f.file,
+    JSON.stringify({ type: "session", version: 3, id: f.sessionId, cwd: f.directory }) + "\n",
+  );
+  const agent: HerdrAgentSnapshot = {
+    paneId: f.view.paneId,
+    terminalId: "terminal",
+    agent: "pi",
+    title: "Pi",
+    status: "idle",
+    workingDirectory: f.directory,
+    session: f.session,
+  };
+  const runner = {
+    createTab: vi.fn(async () => "forbidden"),
+    startAgent: vi.fn(async () => {}),
+    runInPane: vi.fn(async () => {}),
+    get: vi.fn(async () => structuredClone(agent)),
+    list: vi.fn(async () => [structuredClone(agent)]),
+    wait: vi.fn(async () => structuredClone(agent)),
+    resolveTerminal: vi.fn(async () => structuredClone(agent)),
+  };
+  const saved = {
+    ref: `local:${f.sessionId}`,
+    host: "local" as const,
+    sessionId: f.sessionId,
+    workingDirectory: f.directory,
+    file: { harness: "pi" as const, path: f.file, size: 1, mtimeMs: 1 },
+  };
+  const resume = async (adapter = f.adapter) => {
+    const store = new HerdrWatchStore(join(f.directory, "resume.json"), { runner, seatAdapters: [adapter] });
+    cleanup.push(() => store.close());
+    return store.spawnSeat(
+      { schemaVersion: 1, harness: "pi", title: "resume", workingDirectory: f.directory },
+      undefined,
+      undefined,
+      saved,
+    );
+  };
+  return { ...f, control: started.control, runner, agent, saved, resume };
+}
+
+test("real Pi control exposes original verification and exact no-brief saved reuse sends nothing", async () => {
+  const f = await liveResumeFixture();
+  expect(f.control.verify).toBeTypeOf("function");
+  expect(await f.control.verify!()).toMatchObject({
+    pane: f.view.paneId,
+    nativeOccupantId: occupantIdForHerdrSession(f.session),
+  });
+  expect(await f.resume()).toMatchObject({ outcome: "spawned" });
+  expect(f.sendMessage).toHaveBeenCalledOnce();
+  expect(f.native.capture).toHaveBeenCalledOnce();
+  expect(f.runner.createTab).not.toHaveBeenCalled();
+});
+
+test.each(["lost", "missing-callback", "recreated"])(
+  "no-brief native Pi reuse refuses %s control without adoption",
+  async (mode) => {
+    const f = await liveResumeFixture();
+    let adapter = f.adapter;
+    if (mode === "lost") await f.control.close();
+    if (mode === "missing-callback") {
+      const control = {
+        ref: f.control.ref,
+        status: f.control.status,
+        send: f.control.send,
+        settled: f.control.settled,
+        interrupt: f.control.interrupt,
+        close: f.control.close,
+      };
+      adapter = { ...f.adapter, attach: async () => control };
+    }
+    if (mode === "recreated")
+      adapter = createPiSeatAdapter({
+        repoRoot: f.directory,
+        stateDir: f.directory,
+        native: f.native,
+        discover: f.discover,
+      });
+    expect(await f.resume(adapter)).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+    expect(f.runner.startAgent).not.toHaveBeenCalled();
+    expect(f.runner.runInPane).not.toHaveBeenCalled();
+    expect(f.native.capture).toHaveBeenCalledOnce();
+    expect(f.sendMessage).toHaveBeenCalledOnce();
+  },
+);
+
+test.each(["path", "cwd"])(
+  "same UUID with different saved %s cannot reuse real Pi control",
+  async (field) => {
+    const f = await liveResumeFixture();
+    if (field === "path") {
+      f.saved.file.path = join(f.directory, `another_${f.sessionId}.jsonl`);
+      await writeFile(f.saved.file.path, "saved elsewhere");
+    } else f.saved.workingDirectory = await realpath(tmpdir());
+    expect(await f.resume()).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+    expect(f.sendMessage).toHaveBeenCalledOnce();
+  },
+);
+
+test.each(["birth", "pane", "path", "cwd", "cli"])(
+  "no-brief Pi reuse rejects %s change across held original proof",
+  async (field) => {
+    const f = await liveResumeFixture();
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = structuredClone(await f.root.proof());
+    // attach first checks status; hold the following proof in the resume gate.
+    f.root.proof.mockResolvedValueOnce(original).mockImplementationOnce(async () => {
+      entered();
+      await gate;
+      return original;
+    });
+    const result = f.resume();
+    await held;
+    if (field === "birth")
+      f.root.proof.mockResolvedValue({ ...original, processes: [{ pid: 44, startTime: "changed" }] });
+    if (field === "pane") Object.assign(f.agent, { paneId: "w1:p2" });
+    if (field === "path")
+      Object.assign(f.agent, {
+        session: { ...f.session, value: join(f.directory, `elsewhere_${f.sessionId}.jsonl`) },
+      });
+    if (field === "cwd") Object.assign(f.agent, { workingDirectory: await realpath(tmpdir()) });
+    if (field === "cli") vi.mocked(f.capability.verify).mockRejectedValue(new Error("selected CLI replaced"));
+    release();
+    expect(await result).toMatchObject({ outcome: "failed", reason: "not_ready" });
+    expect(f.runner.createTab).not.toHaveBeenCalled();
+    expect(f.sendMessage).toHaveBeenCalledOnce();
+  },
+);

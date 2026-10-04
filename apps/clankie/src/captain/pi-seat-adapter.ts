@@ -220,6 +220,7 @@ export function createPiSeatAdapter(deps: {
             let lastMessageId: string | undefined;
             const control: SeatControl = {
               ref: selected,
+              verify: () => verify(selected),
               async status() {
                 try {
                   await verify(selected);
