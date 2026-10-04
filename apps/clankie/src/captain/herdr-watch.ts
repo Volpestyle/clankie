@@ -127,8 +127,6 @@ export interface HerdrWatchRunner {
   waitUntilIdle?(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   transcript?(agent: HerdrAgentSnapshot): Promise<HerdrSeatTranscript | undefined>;
   read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
-  sendText?(target: string, text: string): Promise<void>;
-  pressEnter?(target: string): Promise<void>;
   /** `herdr pane process-info --pane` → `foreground_processes`. */
   paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
   /** `lsof -p <pid> -Fn` via execFile (no shell). */
@@ -157,11 +155,6 @@ export interface HerdrWatchRunner {
     readonly args?: readonly string[];
   }): Promise<void>;
   /**
-   * `herdr agent prompt`: submits a prompt through herdr's own agent-aware
-   * submit and resolves once the agent is seen working.
-   */
-  promptAgent?(paneId: string, text: string): Promise<void>;
-  /**
    * `herdr integration install pi`: the pi extension that reports each pi
    * session to herdr. Without it herdr never learns a pi pane's session, so a pi
    * hire has no durable identity. Idempotent.
@@ -172,11 +165,6 @@ export interface HerdrWatchRunner {
    * every other provider there. An unreadable file is left alone and fails the hire.
    */
   configurePiProvider?(id: string, config: Readonly<Record<string, unknown>>): Promise<void>;
-  /**
-   * `herdr agent send-keys`, falling back to `herdr pane send-keys` when the
-   * pane is not classified as an agent yet.
-   */
-  sendKeys?(target: string, key: string): Promise<void>;
   /**
    * `herdr pane run`: one shell command line in a pane at its prompt. A seat
    * adapter uses it to put its view there (VUH-1458).
@@ -464,8 +452,6 @@ export function createHerdrWatchRunner(
         ...(source === "visible" ? [] : ["--lines", String(SEAT_REPLY_READ_LINES)]),
         ...(harness === "pi" ? ["--format", "ansi"] : []),
       ]),
-    sendText: (target, text) => runHerdr(["pane", "send-text", target, text]).then(() => undefined),
-    pressEnter: (target) => runHerdr(["pane", "send-keys", target, "Enter"]).then(() => undefined),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
     openFiles: async (pid) => {
@@ -484,13 +470,6 @@ export function createHerdrWatchRunner(
       );
       if (result.status !== 0) return false;
       return !/no active session/iu.test(`${result.stdout}\n${result.stderr}`);
-    },
-    sendKeys: async (target, key) => {
-      try {
-        await runHerdr(["agent", "send-keys", target, key]);
-      } catch {
-        await runHerdr(["pane", "send-keys", target, key]);
-      }
     },
     closePane: (target) => runHerdr(["pane", "close", target]).then(() => undefined),
     runInPane: (paneId, argv) =>
@@ -553,24 +532,6 @@ export function createHerdrWatchRunner(
         undefined,
         // Let Herdr return its typed startup failure before the process watchdog fires.
         SPAWN_READY_WAIT_MS + HERDR_COMMAND_TIMEOUT_MS,
-      ).then(() => undefined),
-    promptAgent: (paneId, text) =>
-      runHerdr(
-        [
-          "agent",
-          "prompt",
-          paneId,
-          text,
-          "--wait",
-          "--until",
-          "working",
-          "--until",
-          "blocked",
-          "--timeout",
-          String(SPAWN_SESSION_WAIT_MS),
-        ],
-        undefined,
-        SPAWN_SESSION_WAIT_MS + HERDR_COMMAND_TIMEOUT_MS,
       ).then(() => undefined),
   };
 }

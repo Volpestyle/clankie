@@ -158,12 +158,13 @@ test("a remote Codex hire is briefed and messaged through its fleet's own adapte
 test("a granted remote workspace does not authorize terminal brief injection", async () => {
   const createTab = vi.fn(async () => "pc/w1:p1");
   const promptAgent = vi.fn(async () => undefined);
+  const terminalInput = { promptAgent };
   const store = new HerdrWatchStore(join(tmpdir(), "remote-brief-safety.json"), {
     remoteWorkspace: async () => true,
     runner: {
       createTab,
       startAgent: vi.fn(async () => undefined),
-      promptAgent,
+      ...terminalInput,
       get: vi.fn(),
       resolveTerminal: vi.fn(),
       wait: vi.fn(),

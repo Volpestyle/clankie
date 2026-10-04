@@ -266,6 +266,7 @@ describe("HerdrWatchStore", () => {
     const changed = deferred<HerdrAgentSnapshot>();
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const closePane = vi.fn((_target: string) => Promise.resolve());
     const read = vi.fn((_target: string, _harness: string, source: string) =>
       Promise.resolve(source === "recent-unwrapped" ? "※ recap: Tests are green." : ""),
@@ -281,8 +282,7 @@ describe("HerdrWatchStore", () => {
               signal.addEventListener("abort", () => reject(new Error("aborted"))),
             ),
       read,
-      promptAgent,
-      pressEnter,
+      ...terminalInput,
       closePane,
     };
     const project = vi.fn();
@@ -347,6 +347,7 @@ describe("HerdrWatchStore", () => {
     const codexQueue = vi.fn(() => Promise.resolve(true));
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
         get: () => Promise.resolve(codex),
@@ -355,8 +356,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        promptAgent,
-        pressEnter,
+        ...terminalInput,
       },
     });
 
@@ -388,6 +388,7 @@ describe("HerdrWatchStore", () => {
     const codexQueue = vi.fn(() => Promise.resolve(true));
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
         get: () => Promise.resolve(codex),
@@ -396,8 +397,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        promptAgent,
-        pressEnter,
+        ...terminalInput,
       },
     });
 
@@ -420,6 +420,7 @@ describe("HerdrWatchStore", () => {
     };
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
         get: () => Promise.resolve(codex),
@@ -431,8 +432,7 @@ describe("HerdrWatchStore", () => {
             "n/Users/james/.codex/sessions/2026/09/05/rollout-2026-09-05T19-12-09-01a0740e-ea76-7aa2-8795-524c00368e71.jsonl\n",
           ),
         codexQueue: vi.fn(() => Promise.resolve(false)),
-        promptAgent,
-        pressEnter,
+        ...terminalInput,
       },
     });
 
@@ -452,6 +452,7 @@ describe("HerdrWatchStore", () => {
     const codexQueue = vi.fn(() => Promise.resolve(true));
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
         get: () => Promise.resolve(working),
@@ -460,8 +461,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        promptAgent,
-        pressEnter,
+        ...terminalInput,
       },
     });
 
@@ -1874,6 +1874,7 @@ describe("hiring a seat", () => {
     const pressEnter = vi.fn(() => Promise.resolve());
     const sendText = vi.fn(() => Promise.resolve());
     const promptAgent = vi.fn(() => Promise.resolve());
+    const terminalInput = { sendKeys, pressEnter, sendText, promptAgent };
     const waitUntilIdle = vi.fn(() => Promise.resolve(blockedClaude));
     const closePane = vi.fn(() => Promise.resolve());
     const runner: HerdrWatchRunner = {
@@ -1882,10 +1883,7 @@ describe("hiring a seat", () => {
       wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
       waitUntilIdle,
       read,
-      sendKeys,
-      pressEnter,
-      sendText,
-      promptAgent,
+      ...terminalInput,
       closePane,
       createTab: vi.fn(() => Promise.resolve("w1C:p9")),
       startAgent,
@@ -1918,13 +1916,14 @@ describe("hiring a seat", () => {
       const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
       const read = vi.fn(() => Promise.resolve(prompt));
       const sendKeys = vi.fn(() => Promise.resolve());
+      const terminalInput = { sendKeys };
       const closePane = vi.fn(() => Promise.resolve());
       const runner: HerdrWatchRunner = {
         get: vi.fn(() => Promise.resolve(hired)),
         resolveTerminal: vi.fn(() => Promise.resolve(hired)),
         wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
         read,
-        sendKeys,
+        ...terminalInput,
         closePane,
         createTab: vi.fn(() => Promise.resolve("w1C:p9")),
         startAgent,
