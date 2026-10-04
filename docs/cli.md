@@ -1821,6 +1821,16 @@ inspect the conversation before resubmitting. Observe replies with
 `clankie --chat ID` or the conversation API. The running service and a local
 captain credential are required.
 
+Service preparation and execution have a five-minute inactivity watchdog,
+including cold startup before a Pi session exists. Host-observed preparation
+progress and Pi events renew it; healthy work has no total duration cap, and
+queued runs do not consume the timeout while waiting. A stalled stored run fails
+with `conversation_turn_stalled`; the service log names its conversation, run ID
+and stalled phase. The host releases its admission so later inputs can proceed, but its
+original receipt remains and the request is never replayed. Earlier effects may
+have an unknown outcome; inspect the original run before retrying. See
+[ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md#stalled-service-preparation-and-execution-vuh-1613).
+
 `--attach PATH` (repeatable, at most eight) sends images or video with the
 message: PNG, JPEG, HEIC/HEIF, GIF and WebP up to 20 MiB, and MP4 or MOV up to
 200 MiB. The message may then be empty. Each file is uploaded through the
@@ -2132,6 +2142,9 @@ escalations, wakes and watches instead of starting a service model turn. Closing
 the seat returns new inputs to the service runner. A turn already accepted by
 either destination keeps that destination; uncertain native delivery is never
 replayed automatically. Existing Pi goal continuations retain their service loop.
+Stalled service preparation releases its admission so the attached seat can take
+later queued inputs. Native delivery keeps its existing acknowledgment deadlines
+and ten-minute escalation reply wait; it has no new five-minute reply cutoff.
 Selecting `global-default` affects only that chat. To drive a Discord room,
 select its conversation; replies return through the original room delivery and
 authority checks. Rooms remain read-only to ordinary `send` and `reset` commands.

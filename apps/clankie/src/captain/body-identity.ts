@@ -8,13 +8,14 @@ export function captureDiscordBodyIdentity(
   conversationId: string,
   inputOrigin: DiscordWatchOrigin,
   settings: () => Promise<Parameters<typeof planDiscordTurnSession>[0]["settings"]>,
+  signal?: AbortSignal,
 ): BodyConversationIdentity {
   const requiresShell = capture.shell === true;
   const origin = Object.freeze({ ...inputOrigin });
   const identity: BodyConversationIdentity = {
     conversationId,
     route: { owner: { conversationId, discord: origin }, mode: requiresShell ? "machine" : "social" },
-    current: () => capture.bodyIdentity === identity,
+    current: () => signal?.aborted !== true && capture.bodyIdentity === identity,
     authorize: async () => {
       const currentPlan = planDiscordTurnSession({
         baseSessionKey: origin.baseSessionKey,
@@ -25,7 +26,7 @@ export function captureDiscordBodyIdentity(
         transportKind: origin.transportKind,
         settings: await settings(),
       });
-      return !requiresShell || currentPlan.systemTools;
+      return signal?.aborted !== true && (!requiresShell || currentPlan.systemTools);
     },
   };
   return identity;

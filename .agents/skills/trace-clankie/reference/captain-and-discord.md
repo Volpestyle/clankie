@@ -53,10 +53,12 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   terminal it runs in (ADR 0189). Only the 200 newest transcripts per host
   resolve by ref.
 
-- **A turn with no tree never answered.** Pi holds a session file back until the
-  first assistant message, so a one-shot that timed out or failed before he
-  replied leaves nothing under `turns/`. Absence is evidence; pair it with the
-  `discord.text.ingress` receipt that has no matching `discord.text.reply`.
+- **A missing Pi tree does not identify the execution destination or outcome.**
+  Pi holds a session file back until the first assistant message; stalled cold
+  preparation or a one-shot failure can leave no tree. An attached native seat
+  can execute the input without any Pi tree. Match the conversation's run and
+  delivery receipts to its native transcript or service log. Absence alone does
+  not prove that no external effects occurred or authorize resending.
 
 - **A provider failure can resolve with no reply.** For `captain_model_failed`
   or `captain_usage_limit_reached`, read the terminal assistant's `stopReason`
@@ -64,10 +66,16 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   receipts can hide the same failure; do not infer an empty successful run
   from that code alone.
 
-- **An `accepted` receipt with no terminal one is a turn still running, not a
-  lost one.** The terminal receipt lands whenever the turn settles, which for a
-  wedged turn is at the 3-minute deadline — outside any window you picked from
-  the accepted timestamp. Widen the window before concluding a turn vanished.
+- **An `accepted` receipt establishes admission, not execution or liveness.**
+  The input may be queued, preparing, executing or awaiting native delivery.
+  Service preparation and execution fail after five minutes without host-observed
+  preparation progress or Pi events; queued runs do not consume that timeout.
+  For `conversation_turn_stalled`, match the run ID to the service log's
+  conversation and stalled phase. Healthy runs have no total duration cap.
+  Discord Pi stream stalls use `captain_turn_stalled`; native acknowledgments
+  and escalation replies retain their own deadlines. A stall can leave earlier
+  effects unknown. Inspect the original receipt before retrying; accepted or
+  uncertain native delivery is never replayed into the service runner.
 
 - **`absorbed` is not `declined`.** A message folded into a live run reports
   `absorbed` (ADR 0118): he answered, the answer just rode the delivery that
