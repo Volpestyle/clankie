@@ -4207,6 +4207,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       "pairing offer minted",
     );
     const protectedWire = publisher?.protectPairingOffer?.(offer) ?? pairingOfferWire(offer);
+    // Preserve encrypted/default links and the existing single-use redemption;
+    // only this authenticated ordinary operator response exposes the short code.
     const wire =
       parsed.data.review === undefined ? { ...protectedWire, localCode: offer.code } : protectedWire;
     return context.json(direct === undefined ? wire : withDirectPairingRoute(wire, direct));
