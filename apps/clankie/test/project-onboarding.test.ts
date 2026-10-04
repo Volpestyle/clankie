@@ -133,7 +133,7 @@ async function fixture(patch: Partial<ProjectProposalDraft> = {}, setup?: (works
 it("proposal tool persists one immutable artifact; explicit create preserves caps/preferences and consumed receipt survives issuer loss", async () => {
   const f = await fixture({
     workerCap: 0,
-    roles: [{ role: "Builder", concurrencyCap: null, model: "fixture/model", effort: "high" }],
+    roles: [{ role: "Builder", concurrencyCap: null, model: "gpt-6-astra", effort: "high" }],
     fleet: { size: "large", models: "efficient" },
   });
   expect(f.update).not.toHaveBeenCalled();

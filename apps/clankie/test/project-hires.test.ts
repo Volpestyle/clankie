@@ -7,7 +7,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectSchema, ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { OPERATOR_AGENT_ROLES, type SpawnOperatorSeat } from "@clankie/protocol";
-import { ProjectHires, type ProjectHireProcessProof } from "../src/captain/project-hires.ts";
+import {
+  ProjectHires,
+  projectHireRequest,
+  type ProjectHireProcessProof,
+} from "../src/captain/project-hires.ts";
 import {
   HerdrWatchStore,
   type HerdrAgentSnapshot,
@@ -38,12 +42,9 @@ const settings = () =>
   });
 const request = (dir: string): SpawnOperatorSeat => ({
   schemaVersion: 1,
-  harness: "pi",
   workingDirectory: dir,
   title: "Implement",
   role: "Engineer",
-  model: "wrong-model",
-  effort: "low",
 });
 const proof: ProjectHireProcessProof = {
   nativeOccupantId: occupantIdForHerdrSession({ source: "claude", kind: "id", value: "s1" }),
@@ -95,6 +96,256 @@ async function fixture(harness: "claude" | "codex" = "claude") {
 }
 
 describe("project hiring", () => {
+  it("applies every role field, with explicit fields above role above fleet and nested inheritance", () => {
+    const s = settings();
+    Object.assign(s.projects[0]!.roles[0]!, {
+      harness: "codex",
+      model: "sol 6.1",
+      effort: "xhigh",
+      subagents: { model: "sol 6.1", effort: "medium" },
+      delegation: "native-first",
+      account: "second",
+      placement: "new-tab",
+    });
+    const input = request("/repo");
+    expect(
+      projectHireRequest(s, "game", input, { model: "fleet-model", account: "default", placement: "split" }),
+    ).toMatchObject({
+      harness: "codex",
+      model: "sol 6.1",
+      effort: "xhigh",
+      subagents: { model: "sol 6.1", effort: "medium" },
+      delegation: "native-first",
+      account: "second",
+      placement: "new-tab",
+    });
+    expect(
+      projectHireRequest(s, "game", {
+        ...input,
+        harness: "claude",
+        model: "Opus",
+        effort: "high",
+        subagents: { effort: "low" },
+        account: "default",
+        placement: "split",
+        delegation: "panes",
+      }),
+    ).toMatchObject({
+      harness: "claude",
+      model: "Opus",
+      effort: "high",
+      subagents: { model: "sol 6.1", effort: "low" },
+      account: "default",
+      placement: "split",
+      delegation: "panes",
+    });
+    expect(
+      projectHireRequest(s, "game", { ...input, harness: "claude", model: "Opus", subagents: null })
+        .subagents,
+    ).toBeUndefined();
+  });
+  it("requires a deliverable key and blocks another native-first pane across fleet/workspace and ledger instances", async () => {
+    const f = await fixture();
+    f.projectSettings.projects[0]!.workerCap = 10;
+    Object.assign(f.projectSettings.projects[0]!.roles[0]!, {
+      delegation: "native-first",
+      concurrencyCap: 10,
+    });
+    const path = join(f.root, "native-first.json");
+    const ledger = new ProjectHires(path);
+    try {
+      expect(() => ledger.reserve(f.projectSettings, "game", request(f.root))).toThrow(
+        "stable deliverable key",
+      );
+      const input = { ...request(f.root), deliverable: "VUH-1596" };
+      const first = ledger.reserve(f.projectSettings, "game", input);
+      expect(ledger.reserve(f.projectSettings, "game", input)).toMatchObject({ id: first.id, reused: true });
+      const other = new ProjectHires(path);
+      expect(() =>
+        other.reserve(f.projectSettings, "game", { ...input, workingDirectory: tmpdir(), fleet: "pc" }),
+      ).toThrow("already has a pane under native-first");
+      ledger.launch(first.id, f.projectSettings);
+      ledger.pane(first.id, "p1");
+      ledger.confirmed(first.id);
+      expect(() => other.reserve(f.projectSettings, "game", input)).toThrow("native subagents");
+      expect(other.reserve(f.projectSettings, "game", { ...input, deliverable: "VUH-other" }).id).not.toBe(
+        first.id,
+      );
+    } finally {
+      f.store.close();
+    }
+  });
+  it("passes the complete inherited Codex profile to a new tab and its first native brief", async () => {
+    const f = await fixture("codex");
+    f.store.close();
+    Object.assign(f.projectSettings.projects[0]!.roles[0]!, {
+      model: "sol 6.1",
+      effort: "xhigh",
+      subagents: { model: "sol 6.1", effort: "medium" },
+      delegation: "native-first",
+      placement: "new-tab",
+      account: "fixture",
+    });
+    f.runner.runInPane = vi.fn(async () => {});
+    const start = vi.fn<HarnessSeatAdapter["start"]>(async (_launch, view) => {
+      await view.start?.("codex", []);
+      const ref = { harness: "codex" as const, paneId: "p1", sessionId: "s1" };
+      await view.bound?.(ref);
+      await view.guard?.();
+      return { outcome: "started" as const, control: { ref } as SeatControl };
+    });
+    const store = new HerdrWatchStore(f.path, {
+      ...f.options,
+      resolveHireModel: async (_h, m) => (m === "sol 6.1" ? "gpt-6.1-sol" : m),
+      seatAdapters: [{ harness: "codex", attach: async () => undefined, start }],
+    });
+    try {
+      const result = await store.spawnSeat(
+        { ...request(f.root), deliverable: "VUH-1596" },
+        undefined,
+        "Implement X",
+      );
+      expect(result).toMatchObject({
+        outcome: "spawned",
+        profile: {
+          harness: "codex",
+          model: "sol 6.1",
+          subagents: { model: "sol 6.1", effort: "medium" },
+          account: "fixture",
+          placement: "new-tab",
+          delegation: "native-first",
+        },
+      });
+      expect(f.runner.createTab).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: await realpath(f.root),
+          env: expect.objectContaining({ CODEX_HOME: f.root }),
+        }),
+      );
+      expect(start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-6.1-sol",
+          effort: "xhigh",
+          brief: expect.stringContaining("model gpt-6.1-sol; effort medium"),
+        }),
+        expect.anything(),
+      );
+      expect(start.mock.calls[0]![0].brief).toContain("native-first");
+    } finally {
+      store.close();
+    }
+  });
+  it("refuses unknown models and unsupported split placement before native effects", async () => {
+    const f = await fixture();
+    f.store.close();
+    const store = new HerdrWatchStore(f.path, {
+      ...f.options,
+      resolveHireModel: async () => {
+        throw new Error("unavailable or retired");
+      },
+    });
+    try {
+      expect(await store.spawnSeat(request(f.root))).toMatchObject({
+        outcome: "failed",
+        detail: expect.stringContaining("unavailable or retired"),
+      });
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+    }
+    const split = new HerdrWatchStore(f.path, f.options);
+    try {
+      expect(await split.spawnSeat({ ...request(f.root), placement: "split" })).toMatchObject({
+        outcome: "failed",
+        detail: expect.stringContaining("verified lead pane"),
+      });
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+    } finally {
+      split.close();
+    }
+  });
+  it("launches an explicit Opus override above a Codex role and fleet profile", async () => {
+    const f = await fixture();
+    f.store.close();
+    Object.assign(f.projectSettings.projects[0]!.roles[0]!, {
+      harness: "codex",
+      model: "sol 6.1",
+      effort: "xhigh",
+      subagents: { model: "sol 6.1", effort: "medium" },
+    });
+    f.runner.runInPane = vi.fn(async () => {});
+    const start = vi.fn<HarnessSeatAdapter["start"]>(async (_launch, view) => {
+      await view.start?.("claude", []);
+      const ref = { harness: "claude" as const, paneId: "p1", sessionId: "s1" };
+      await view.bound?.(ref);
+      await view.guard?.();
+      return { outcome: "started" as const, control: { ref } as SeatControl };
+    });
+    const store = new HerdrWatchStore(f.path, {
+      ...f.options,
+      hireDefaults: async () => ({ model: "fleet-model", effort: "low" }),
+      resolveHireModel: async (h, m) => {
+        if (h !== "claude" || m !== "Opus") throw new Error("wrong override");
+        return "claude-opus-5-5";
+      },
+      seatAdapters: [{ harness: "claude", attach: async () => undefined, start }],
+    });
+    try {
+      expect(
+        await store.spawnSeat(
+          { ...request(f.root), harness: "claude", model: "Opus", effort: "high", subagents: null },
+          undefined,
+          "Use Opus for this one",
+        ),
+      ).toMatchObject({ outcome: "spawned", profile: { harness: "claude", model: "Opus", effort: "high" } });
+      expect(start).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "claude-opus-5-5", effort: "high", brief: "Use Opus for this one" }),
+        expect.anything(),
+      );
+    } finally {
+      store.close();
+    }
+  });
+  it("uses an explicitly verified lead for split placement and the registered Claude account home", async () => {
+    const f = await fixture();
+    f.store.close();
+    const store = new HerdrWatchStore(f.path, {
+      ...f.options,
+      claudeAccounts: async () => [{ label: "second", home: f.root }],
+      leadPane: async () => "pLead",
+    });
+    try {
+      expect(
+        await store.spawnSeat({ ...request(f.root), account: "second", placement: "split" }),
+      ).toMatchObject({ outcome: "spawned", profile: { account: "second", placement: "split" } });
+      expect(f.runner.createTab).toHaveBeenCalledWith(
+        expect.objectContaining({
+          besidePane: "pLead",
+          env: expect.objectContaining({ CLAUDE_CONFIG_DIR: await realpath(f.root) }),
+        }),
+      );
+    } finally {
+      store.close();
+    }
+  });
+  it("refuses a registered Claude profile whose directory disappeared without an account fallback", async () => {
+    const f = await fixture();
+    f.store.close();
+    const store = new HerdrWatchStore(f.path, {
+      ...f.options,
+      claudeAccounts: async () => [{ label: "second", home: join(f.root, "gone") }],
+    });
+    try {
+      expect(await store.spawnSeat({ ...request(f.root), account: "second" })).toMatchObject({
+        outcome: "failed",
+        reason: "harness_unavailable",
+        detail: expect.stringContaining("profile home is unavailable"),
+      });
+      expect(f.runner.createTab).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+    }
+  });
   it.each(["same", "other"])(
     "hires into an existing workspace despite a missing %s project approval",
     async (scope) => {
@@ -283,7 +534,7 @@ describe("project hiring", () => {
     },
   );
 
-  it("passes role harness, model and effort to the actual native launch, overriding requests", async () => {
+  it("inherits role harness, model and effort at the actual native launch", async () => {
     const f = await fixture();
     expect((await f.store.spawnSeat(request(f.root))).outcome).toBe("spawned");
     expect(f.runner.startAgent).toHaveBeenCalledWith(

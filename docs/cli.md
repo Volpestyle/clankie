@@ -1499,6 +1499,50 @@ in any casing is stored lowercase. A custom role keeps the casing you typed
 and compares case-insensitively, so `Sound Designer` and `sound designer` are
 one role. `none` clears it. It prints the updated persona.
 
+`clankie agents role ROLE --project PROJECT` edits a project hire profile through
+its revision-bearing owner API. Set any of `--harness`, `--model`, `--effort`,
+`--subagent-model`, `--subagent-effort`, `--delegation native-first|panes`,
+`--account LABEL`, `--placement new-tab|split`, `--cap N` and `--naming TEXT`.
+`inherit` clears one preference; omitted fields remain unchanged. The console's
+`/agents roles` menu sets the same fields.
+
+```sh
+clankie agents role implementer --project clankie --harness codex --model "sol 6.1" --effort xhigh --subagent-model "sol 6.1" --subagent-effort medium --delegation native-first --placement new-tab
+```
+
+Explicit hire fields expressing the owner's words win over the role, then
+`fleet.hire` defaults, then the harness default. Omit fields to inherit; a model
+family override includes its harness (for example `claude` / `Opus`) and
+`subagents: null` clears incompatible inherited children for that hire. Friendly
+names resolve to exact IDs against the current model registry. Missing, retired,
+or incompatible models refuse instead of silently selecting a replacement.
+Subagent settings inherit independently and travel in the first native brief;
+the worker passes them to its harness's native spawn calls.
+
+A `native-first` hire supplies a stable `deliverable` key, such as its issue ID.
+All slices keep that key. Another pane for that project/deliverable is refused
+while the original hire is live, starting or uncertain; message that worker and
+use its native children. `panes` assigns independent slices to separate hires.
+Closing a pane releases its admission only after successful inventory confirms
+it absent. Retry reconciliation retains the original profile.
+
+`new-tab` is the normal placement. `split` opens a sibling of the verified lead
+pane in the target fleet, preserving focus. It refuses when that native lead
+cannot be verified; prepared initial-command Pi/OpenCode launches currently
+require `new-tab`. It never uses another client's focused pane as a fallback.
+Local Codex accounts use the registered account labels and homes; local Claude
+accounts use `claudeAccounts` entries (`{label, home}`) plus the implicit
+`default` profile. The owner registers their existing alternate directory with
+`clankie accounts claude add /absolute/config/home --label second` (also
+`/accounts claude` in the console); no login or profile path is guessed. Remote
+account overrides remain unsupported. Profile selection confers no grants.
+
+`clankie fleet set --hire-profile FILE.json` sets fleet hire defaults with the
+same profile keys (`subagents` is `{model, effort}`); `fleet status` includes the
+defaults and effective project role profiles. The hire result's `profile` shows
+the effective launch preferences. These settings affect new hires, not running
+agents. James's global agent instructions remain owner-authored.
+
 `clankie agents rename NAME|PERSONA_ID NEW_NAME` changes an agent's saved display
 name. Quote names containing spaces. `/agents rename NAME "NEW NAME"` is the
 same TUI action. It uses the existing `update_persona` operation with only the
@@ -1516,7 +1560,7 @@ include offline personas. The role is semantic, unlike the cosmetic
 settings are the `set_persona_role` operator op (`{ personaId, role: ROLE |
 null }`, steer grant), the `roles` op (read), and `hire_agent`'s and
 `spawn_seat`'s `role` (required in the model-facing hire tool, optional for older API clients). In the TUI, `/agents role NAME "ROLE"` and
-`/agents roles` honour quotes. The `/agents` picker shows each live agent's role.
+`/agents roles` opens the project hire-profile editor. The `/agents` picker shows each live agent's role.
 
 The TUI separates `/chats` (personal/workspace chats with Clankie), `/agents`
 (known identities), `/rooms` (group channels and Discord inspection), and
@@ -2308,7 +2352,8 @@ The console exposes the same verbs through `/project`.
 The changes file may contain `name`, `roles`, `workerCap` and `trackerRef`.
 Omitted fields remain unchanged; `null` removes a worker cap or tracker binding.
 An empty roles list inherits the six built-in roles; an explicit list defines
-the available roles and may set their model, effort and concurrency cap. Zero
+the available roles and may set their whole hire profile (harness, model, effort,
+subagents, delegation, account, placement), naming rule and concurrency cap. Zero
 prevents new hires, while an absent cap adds no limit. These settings affect
 new hire admission, not the configuration of already running agents.
 

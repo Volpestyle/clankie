@@ -1432,6 +1432,7 @@ describe("hiring a seat", () => {
 
     expect(result).toEqual({
       outcome: "spawned",
+      profile: { harness: "codex" },
       control: { mode: "terminal", reason: "no_brief", detail: "No harness adapter selected: no_brief." },
       seat: {
         account: { label: "default", home: codexHome },

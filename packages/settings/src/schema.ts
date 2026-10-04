@@ -1,4 +1,5 @@
 import { DesktopSettingsSchema } from "./desktop.ts";
+import { HireProfileSchema } from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { MinecraftServerProfileIdSchema } from "@clankie/protocol";
@@ -449,6 +450,7 @@ export const FLEET_MODEL_GUIDANCE: Readonly<Record<FleetModelMode, string>> = {
 
 export const FleetSettingsSchema = z
   .object({
+    hire: HireProfileSchema.optional(),
     notes: z.string().max(4_000).default(""),
     size: z.enum(FLEET_SIZES).default("max"),
     models: z.enum(FLEET_MODEL_MODES).default("optimal"),
@@ -682,6 +684,20 @@ export const ClankieSettingsSchema = z
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
+    claudeAccounts: z
+      .array(
+        z
+          .object({ label: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u), home: z.string().min(1).max(4096) })
+          .strict(),
+      )
+      .max(32)
+      .default([])
+      .refine(
+        (accounts) =>
+          new Set(accounts.map((a) => a.label)).size === accounts.length &&
+          accounts.every((a) => a.label !== "default"),
+        "Claude accounts need unique non-default labels",
+      ),
     codexAccounts: z
       .array(
         z

@@ -48,6 +48,7 @@ const REMOTE_VERBS: Readonly<Record<string, ReadonlySet<string> | true>> = {
     "close",
     "process-info",
     "layout",
+    "split",
     "report-agent",
   ]),
   tab: new Set(["create", "list"]),

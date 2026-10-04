@@ -65,12 +65,12 @@ mode**. Read them where the runtime states them (Clankie: his "Your fleet" promp
 section, or `clankie fleet status` as `fleet.size` and `fleet.models`); otherwise
 use what the user said. With neither, assume `max` and `optimal`.
 
-| Size | Fits | Aim for |
-| --- | --- | --- |
-| `max` | several top-tier plans | one worker per separable deliverable plus independent reviewers; no ceiling |
-| `large` | one or two top-tier plans | around six concurrent workers, reviewers included |
-| `small` | one mid-tier plan | one or two workers at a time; sequence the rest |
-| `solo` | pay-per-token API | no standing workers: work yourself or through short native children; ask before a long or parallel run |
+| Size    | Fits                      | Aim for                                                                                                |
+| ------- | ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `max`   | several top-tier plans    | one worker per separable deliverable plus independent reviewers; no ceiling                            |
+| `large` | one or two top-tier plans | around six concurrent workers, reviewers included                                                      |
+| `small` | one mid-tier plan         | one or two workers at a time; sequence the rest                                                        |
+| `solo`  | pay-per-token API         | no standing workers: work yourself or through short native children; ask before a long or parallel run |
 
 - **`optimal`:** the strongest model and the effort each job needs; cost is not a
   reason to downgrade.
@@ -81,6 +81,24 @@ use what the user said. With neither, assume `max` and `optimal`.
 Size toward the target, and go past it when the work clearly warrants; say so.
 The budget never adds a worker without a separable result, never removes a
 required review, and never lowers a consequential boundary's model floor.
+
+## Inherit the project's hire profile
+
+With Clankie, `hire_agent` resolves explicit hire fields (the owner's words),
+then the project role, then `fleet.hire`. Omit model/effort/harness/account/placement
+to inherit; a cross-family override specifies the matching harness. Friendly
+model names are registry-validated; unavailable or retired models refuse.
+`clankie agents role ROLE --project PROJECT` and `/agents roles` edit the profile.
+The hire result and `clankie fleet status` show effective profiles.
+
+A `native-first` role uses one stable `deliverable` key (normally the issue ID).
+The worker owns its slices through native subagents, with the configured model
+and effort in its first native brief. Another pane for that same deliverable is
+refused; message the existing worker rather than assigning a different key to
+bypass it. `panes` gives each independently owned slice its own authorized hire.
+`new-tab` is normal placement; `split` needs a verified native lead pane in the
+same fleet and refuses without one. Local accounts use registered profile labels;
+selection never changes login, grants, or the owner's global instructions.
 
 ## Inspect enough to decide
 

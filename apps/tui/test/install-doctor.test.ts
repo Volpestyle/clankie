@@ -221,7 +221,11 @@ describe("install doctor", () => {
 
   it("names where a harness reaches his tools, on the evidence of the route's own 401", async () => {
     const root = await installRoot();
-    const env = { HOME: join(root, "home"), CLANKIE_CONTROL_PLANE_URL: "http://127.0.0.1:4310/" };
+    const env = {
+      HOME: join(root, "home"),
+      XDG_CONFIG_HOME: join(root, "config"),
+      CLANKIE_CONTROL_PLANE_URL: "http://127.0.0.1:4310/",
+    };
     const store = new FileCredentialStore(join(root, "credentials.json"));
     const served = await inspectInstall({
       repoRoot: root,
@@ -245,7 +249,7 @@ describe("install doctor", () => {
 
   it("asks for a sign-in when the Mac is shut out of its own doorway", async () => {
     const root = await installRoot();
-    const env = { HOME: join(root, "home") };
+    const env = { HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config") };
     const store = new FileCredentialStore(join(root, "credentials.json"));
     const signedOut = await inspectInstall({
       repoRoot: root,
@@ -363,7 +367,7 @@ describe("install doctor", () => {
 
     const report = await inspectInstall({
       repoRoot: root,
-      env: { HOME: join(root, "home"), PATH: bin },
+      env: { HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config"), PATH: bin },
       execFileImpl,
       fetchImpl: offline,
     });

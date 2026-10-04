@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
+import { HireProfileSchema, HireEffortSchema } from "./hire-profile.ts";
 import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
@@ -23,9 +23,8 @@ export type ProjectWorktreeRoot = z.infer<typeof ProjectWorktreeRootSchema>;
 export const ProjectRoleSchema = z
   .object({
     role: OperatorAgentRoleSchema,
-    harness: z.enum(OPERATOR_SEAT_HARNESSES).optional(),
-    model: RefSchema.optional(),
-    effort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+    ...HireProfileSchema.shape,
+    effort: HireEffortSchema.optional(),
     concurrencyCap: z.number().int().min(0).max(1000).optional(),
     hireNaming: z.string().trim().min(1).max(500).optional(),
   })
@@ -178,7 +177,11 @@ export const SetProjectRoleAssignmentSchema = z
   })
   .strict();
 export const ProjectsSnapshotSchema = z
-  .object({ settings: ProjectsSettingsSchema, revision: z.string().regex(/^[a-f0-9]{64}$/u) })
+  .object({
+    settings: ProjectsSettingsSchema,
+    hireDefaults: HireProfileSchema.optional(),
+    revision: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
   .strict();
 export type Project = z.infer<typeof ProjectSchema>;
 export type ProjectWorkspace = z.infer<typeof ProjectWorkspaceSchema>;
