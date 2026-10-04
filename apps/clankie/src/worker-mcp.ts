@@ -63,6 +63,7 @@ type WorkerAuthorization = {
   /** Standing fleet records are synthesized from the current connected catalog, never persisted. */
   fleet?: string;
   validateFleet?(): boolean | Promise<boolean>;
+  currentFleet?: (() => boolean) | undefined;
 };
 const FleetSearchSchema = z
   .object({
@@ -102,6 +103,8 @@ export class WorkerMcp {
     host: McpHost;
     projects?(): Promise<ProjectsSettings>;
     fleetTools?(): Promise<FleetSettings["tools"]>;
+    /** Canonical settings generation, checked without yielding at provider dispatch. */
+    fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
   };
   private readonly sessions = new Map<
     string,
@@ -329,7 +332,12 @@ export class WorkerMcp {
       return await this.handleAuthorized(new Request(request, { headers }), async (token) => {
         const current = this.localRequests.get(token);
         if (!current || !(await current.validate())) throw new Error("Local fleet membership unavailable");
-        return this.fleetAuthorization(current.fleet ?? "default", () => current.validate(), current.pane);
+        return this.fleetAuthorization(
+          current.fleet ?? "default",
+          () => current.validate(),
+          current.current === undefined ? undefined : () => current.current!(),
+          current.pane,
+        );
       });
     } finally {
       this.localRequests.delete(proof);
@@ -340,7 +348,11 @@ export class WorkerMcp {
   async handleFleet(fleet: string, request: Request, linked: (token: string) => boolean): Promise<Response> {
     return this.handleAuthorized(request, async (token) => {
       if (!linked(token)) throw new Error("Not this fleet's link");
-      return this.fleetAuthorization(fleet, () => linked(token));
+      return this.fleetAuthorization(
+        fleet,
+        () => linked(token),
+        () => linked(token),
+      );
     });
   }
 
@@ -356,6 +368,7 @@ export class WorkerMcp {
   private async fleetAuthorization(
     fleet: string,
     validateFleet: NonNullable<WorkerAuthorization["validateFleet"]>,
+    currentFleet: WorkerAuthorization["currentFleet"],
     pane?: string,
   ): Promise<WorkerAuthorization> {
     FleetIdSchema.parse(fleet);
@@ -404,6 +417,7 @@ export class WorkerMcp {
       expiresAt,
       fleet,
       validateFleet,
+      currentFleet,
     };
   }
 
@@ -564,7 +578,15 @@ export class WorkerMcp {
                 // Admission can await I/O; read the kill switch after it.
                 fence: async () => {
                   if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
-                  if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
+                  const snapshot = await this.options.fleetToolsSnapshot?.();
+                  if (snapshot?.tools !== "connected") throw new Error("Fleet tools are off or unavailable");
+                  // The host still has account/configuration I/O to finish. These
+                  // canonical checks must not yield after that last awaited read.
+                  return () => {
+                    snapshot.assertCurrent();
+                    if (authorityNow.currentFleet?.() !== true)
+                      throw new Error("Fleet admission unavailable");
+                  };
                 },
               }),
         });

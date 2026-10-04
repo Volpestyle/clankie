@@ -52,7 +52,7 @@ it.each(["off", "disconnect"] as const)(
         }),
       ]);
       expect(validationsAtHostEntry).toBe(3);
-      if (change === "off") f.state.tools = "off";
+      if (change === "off") await f.setTools("off");
       else f.state.live = false;
       release();
       const result = await pending;
@@ -106,8 +106,8 @@ it.each(["off", "server-disabled"] as const)(
           timeout = setTimeout(() => reject(new Error("new final host admission await not reached")), 5000);
         }),
       ]);
-      if (change === "off") f.state.tools = "off";
-      else f.state.serversEnabled = false;
+      if (change === "off") await f.setTools("off");
+      else await f.disableServers();
       release();
       const result = await pending;
       expect(result.isError).toBe(true);

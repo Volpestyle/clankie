@@ -917,6 +917,10 @@ const workerMcp = new WorkerMcp({
   host: mcpHost,
   projects: async () => (await settingsStore.load()).projects,
   fleetTools: async () => (await settingsStore.load()).fleet.tools,
+  fleetToolsSnapshot: async () => {
+    const snapshot = await settingsStore.loadFenced();
+    return { tools: snapshot.settings.fleet.tools, assertCurrent: snapshot.assertCurrent };
+  },
 });
 
 const clankie = await createClankieApp({

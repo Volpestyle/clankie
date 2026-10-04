@@ -23,6 +23,7 @@
  * - **Untrusted text.** A server's own tool descriptions become prompt text, so
  *   they are length-capped here rather than trusted to be reasonable.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -51,6 +52,10 @@ const MAX_DATA_RESULT_BYTES = 8 * 1024 * 1024;
 const MAX_DESCRIPTION_CHARACTERS = 4_000;
 const CONNECT_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 60_000;
+/** Per invocation, including the SDK's later credential/header awaits; never connection-global. */
+const dispatchFence = new AsyncLocalStorage<(() => void) | undefined>();
+/** Refusal before a wire effect does not mean the shared provider connection failed. */
+class DispatchRefused extends Error {}
 /**
  * How long a failed connection is remembered before the next call retries.
  *
@@ -102,8 +107,8 @@ export interface McpHost {
     /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
     readonly resultMode?: "model" | "data";
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
-    /** Live authority check run after the host's own awaits, immediately before the provider call. */
-    readonly fence?: () => Promise<void>;
+    /** Async admission may return a synchronous revocation check run after the final host reads. */
+    readonly fence?: () => Promise<void | (() => void)>;
   }): Promise<McpCallResult>;
   close(): Promise<void>;
 }
@@ -470,6 +475,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         };
       }
       let state: ServerState | undefined;
+      let dispatched = false;
       try {
         state = await stateFor(server);
         const client = await connection(server, state, now);
@@ -486,11 +492,20 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         const workerPost =
           server.id === "linear" && server.credential === "linear" && isLinearWorkerTool(input.tool);
         const credential = workerPost ? await options.credentials.get("linear") : undefined;
-        // The caller's fence may await; the server's own config check comes last.
-        if (input.fence) {
-          await input.fence();
-          await assertCurrent(server, state);
-        }
+        // Admission may await; retain the account/config fence after it, then
+        // check revocation without yielding again before provider dispatch.
+        const current = input.fence ? await input.fence() : undefined;
+        if (input.fence) await assertCurrent(server, state);
+        const assertDispatch = () => {
+          try {
+            if (closed || states.get(server.id) !== state) throw new Error(`${server.id} connection changed`);
+            current?.();
+          } catch (error) {
+            throw new DispatchRefused(error instanceof Error ? error.message : "MCP dispatch refused");
+          }
+        };
+        assertDispatch();
+        dispatched = true;
         const result = workerPost
           ? await publishLinearWorker({
               tool: input.tool,
@@ -498,12 +513,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               credential,
               author: options.linearAuthor ?? (async () => undefined),
               beforeWrite: async () => {
-                await input.fence?.();
+                const current = await input.fence?.();
                 await assertCurrent(server, state!);
+                current?.();
               },
               ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
             })
-          : await client.callTool(input.tool, input.arguments);
+          : await dispatchFence.run(assertDispatch, () => client.callTool(input.tool, input.arguments));
         options.logger.info(
           {
             event: "mcp.host.call",
@@ -568,7 +584,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       } catch (error) {
         // A call that fails may have killed the process; drop the connection so
         // the next attempt reconnects instead of writing to a closed pipe.
-        if (state !== undefined && state.failure === undefined) await retire(server.id, state);
+        if (
+          dispatched &&
+          !(error instanceof DispatchRefused) &&
+          state !== undefined &&
+          state.failure === undefined
+        )
+          await retire(server.id, state);
         return {
           outcome: "refused",
           reason: "server_unavailable",
@@ -718,6 +740,7 @@ async function createTransport(
         if (providerId !== undefined) {
           headers.set("authorization", `Bearer ${await selectedBearer()}`);
         }
+        dispatchFence.getStore()?.();
         return fetch(url, { ...init, headers });
       },
     });
@@ -732,11 +755,17 @@ async function createTransport(
   if (server.credential !== undefined && server.credentialEnv !== undefined) {
     environment[server.credentialEnv] = await selectedBearer();
   }
-  return new StdioClientTransport({
+  const transport = new StdioClientTransport({
     command: server.command,
     args: [...server.args],
     env: environment,
     // Servers chat on stderr; it must not land in the operator's console.
     stderr: "ignore",
   });
+  const send = transport.send.bind(transport);
+  transport.send = (message) => {
+    dispatchFence.getStore()?.();
+    return send(message);
+  };
+  return transport;
 }

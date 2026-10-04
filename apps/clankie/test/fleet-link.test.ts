@@ -306,6 +306,7 @@ describe("a fleet link (VUH-1527)", () => {
         admitted = links.identity(current);
         expect(admitted).toMatchObject({ fleet: "pc", pane: "w8:p1" });
         expect(await admitted!.validate()).toBe(true);
+        expect(admitted!.current?.()).toBe(true);
         return new Response("admitted");
       });
       expect((await fetch(request, { incoming: { socket: sockets[0]! } } as HttpBindings)).status).toBe(200);
@@ -314,6 +315,7 @@ describe("a fleet link (VUH-1527)", () => {
       remote.emit("exit", 1);
       expect(links.status("pc")).toMatchObject({ state: "unreachable" });
       expect(await admitted!.validate()).toBe(false);
+      expect(admitted!.current?.()).toBe(false);
     } finally {
       response.destroy();
       links.close();

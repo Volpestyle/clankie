@@ -1,3 +1,4 @@
+import { statSync, type BigIntStats } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -47,6 +48,55 @@ export class SettingsStore {
       // Permission and I/O failures must not replace narrowed authority with defaults.
       throw error;
     }
+    return this.parse(raw);
+  }
+
+  /** Read one file generation; its final freshness check must run without an intervening await. */
+  public async loadFenced(): Promise<{ settings: ClankieSettings; assertCurrent(): void }> {
+    const changed = () => new Error(`settings_changed: ${this.filePath}`);
+    const same = (a: BigIntStats, b: BigIntStats) =>
+      a.dev === b.dev &&
+      a.ino === b.ino &&
+      a.size === b.size &&
+      a.mtimeNs === b.mtimeNs &&
+      a.ctimeNs === b.ctimeNs;
+    let file;
+    try {
+      file = await open(this.filePath, "r");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return {
+        settings: emptySettings(),
+        assertCurrent: () => {
+          try {
+            statSync(this.filePath);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+            throw error;
+          }
+          throw changed();
+        },
+      };
+    }
+    try {
+      // The identity belongs to the descriptor that supplied the bytes, not
+      // the path, which an atomic settings update may already have replaced.
+      const before = await file.stat({ bigint: true });
+      const raw = await file.readFile("utf8");
+      const after = await file.stat({ bigint: true });
+      if (!same(before, after)) throw changed();
+      return {
+        settings: this.parse(raw),
+        assertCurrent: () => {
+          if (!same(after, statSync(this.filePath, { bigint: true }))) throw changed();
+        },
+      };
+    } finally {
+      await file.close();
+    }
+  }
+
+  private parse(raw: string): ClankieSettings {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
