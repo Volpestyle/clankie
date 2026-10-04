@@ -47,6 +47,7 @@ import type { AutonomyStore } from "./autonomy.ts";
 import type { DiscordWatchOrigin, HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat, MessageSeat } from "./port.ts";
+import { SeatQuestionAnswerSchema } from "./codex-user-input.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { desktopTools } from "./desktop.ts";
@@ -840,10 +841,22 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
       "channel or session API and never types into the owner's terminal draft. A steered receipt means " +
       "guidance reached the active turn, not an after-turn queue. deliveryStage reports stored, delivered, consumed or responded; native queue acceptance is consumed, never model-seen. Uncertain blocks every retry until the original receipt is reconciled. " +
       "This conversation adopts the seat as its lead; its future message_clankie reports return here. " +
+      "To answer an observed native Codex question, supply questionAnswer with its exact requestId and an answers map keyed by question ID ({answers: [text]} per ID), and omit message. This responds on the existing control channel; it never queues a new turn. The first native answer wins. Resolved IDs are refused, and uncertain acceptance must not be retried or replaced with an ordinary message. " +
       "Linked agents can initiate messages with message_clankie.",
     parameters: Type.Object({
       seat: Type.String({ minLength: 1, maxLength: 200 }),
-      message: Type.String({ minLength: 1, maxLength: SEAT_MESSAGE_MAX }),
+      message: Type.Optional(Type.String({ minLength: 1, maxLength: SEAT_MESSAGE_MAX })),
+      questionAnswer: Type.Optional(
+        Type.Object({
+          requestId: Type.Union([Type.String({ minLength: 1, maxLength: 200 }), Type.Integer()]),
+          answers: Type.Record(
+            Type.String(),
+            Type.Object({
+              answers: Type.Array(Type.String({ maxLength: 32768 }), { minItems: 1, maxItems: 16 }),
+            }),
+          ),
+        }),
+      ),
     }),
     executionMode: "sequential",
     // A watch wake is an internal turn, and answering the seat it woke for is
@@ -851,7 +864,16 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
     execute: async (_id, params) => {
       const authority = captureConversationAuthority(turn.conversationAuthority);
       await assertConversationAuthority(authority);
-      const result = await message(params.seat, params.message, authority);
+      if ((params.message === undefined) === (params.questionAnswer === undefined))
+        return json({
+          outcome: "undelivered",
+          deliveryStage: "unavailable",
+          detail: "Supply exactly one of message or questionAnswer; nothing was sent.",
+        });
+      const result =
+        params.questionAnswer === undefined
+          ? await message(params.seat, params.message!, authority)
+          : await message(params.seat, "", authority, SeatQuestionAnswerSchema.parse(params.questionAnswer));
       return json({ ...result, deliveryStage: fleetDeliveryStage(result) });
     },
   });

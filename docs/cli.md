@@ -2181,6 +2181,31 @@ stay visible. Existing unmanaged seats can use a supported native queue or
 channel. Automated messages never fall back to terminal typing. A `steered`
 receipt means guidance reached the active Codex turn, not an after-turn queue.
 
+When a hired Codex seat asks through native `requestUserInput`, its question text,
+question IDs, and request ID reach the hiring conversation as worker output.
+The lead answers the existing prompt with `message_seat`, omitting `message`:
+
+```json
+{
+  "seat": "term_worker",
+  "questionAnswer": {
+    "requestId": "observed-request-id",
+    "answers": { "scope": { "answers": ["Change the core package only."] } }
+  }
+}
+```
+
+Use the observed request ID exactly (including its string or numeric type) and
+answer every question ID. This uses the seat's native control channel; it never
+queues another turn or types into the terminal. Ordinary follow-up messages are
+refused while a native question is pending. The owner can still answer in the
+pane: Codex takes the first answer, and already resolved requests are refused.
+`status: answered` requires a matching native tool-output record. If resolution
+does not expose the winning answer, the result is `unconfirmed`; inspect the
+native session instead of resending or sending a replacement turn. Approvals
+and folder-trust decisions remain with the owner. Hand-started Codex panes
+without this controller do not gain a prompt-answer channel.
+
 A supplied `hire_agent` brief goes through the harness's own interface when a
 seat adapter drives that harness locally ([ADR 0187](adr/0187-clankie-hires-his-own-seats.md),
 VUH-1458). A Claude hire starts the real interactive TUI with the
@@ -2200,7 +2225,8 @@ Every hire logs its selected lane and reason. The result carries `control.mode`:
 `channel` for the Claude worker channel, `adapter` for Codex, `terminal` for an
 unbriefed native launch, or `unavailable` with `control.reason` explaining missing
 structured control. Registered remote fleets do not change the control lane of a
-local hire. Questions and folder-trust prompts remain visible owner decisions.
+local hire. Native questions remain visible in the pane; approvals and
+folder-trust prompts remain owner decisions.
 
 Failed startups log `hire_agent.startup_failed`, with its
 session ID, resolved transcript path (null when no file is found), and rejecting

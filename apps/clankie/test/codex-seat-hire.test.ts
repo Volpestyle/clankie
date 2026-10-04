@@ -5,19 +5,50 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import type { CodexSeatEvent } from "../src/captain/codex-app-server.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
+import type { ConversationAuthority } from "../src/captain/conversation-owner.ts";
+import type { SeatQuestionAnswer } from "@clankie/agent-hosts";
+
+const authority = (conversationId = "lead-a"): ConversationAuthority => ({
+  owner: { conversationId },
+  current: () => true,
+  authorize: async () => true,
+});
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-async function fixture() {
+async function fixture(owner?: ConversationAuthority) {
   const root = await mkdtemp(join(tmpdir(), "codex-hire-test-"));
   // The controller is a fixture; never depend on or probe the developer's sign-in.
   await writeFile(join(root, "auth.json"), "fixture presence only");
   let event: (event: CodexSeatEvent) => void = () => undefined;
   const emit = (method: string, turn: Record<string, unknown>) =>
     event({ method, params: { threadId: "thread", turn } });
+  const question = (requestId: string | number = "question-1") =>
+    event({
+      method: "item/tool/requestUserInput",
+      requestId,
+      params: {
+        threadId: "thread",
+        turnId: "turn",
+        itemId: "call1",
+        isBlocking: true,
+        questions: [
+          { id: "scope", header: "Scope", question: "Which package should I change?", options: null },
+        ],
+      },
+    });
+  const answerQuestion = vi.fn(async (answer: SeatQuestionAnswer, guard?: () => Promise<void>) => {
+    try {
+      await guard?.();
+    } catch (error) {
+      return { outcome: "refused" as const, detail: String(error) };
+    }
+    event({ method: "serverRequest/resolved", params: { threadId: "thread", requestId: answer.requestId } });
+    return { outcome: "answered" as const, deliveryStage: "responded" as const };
+  });
   const close = vi.fn(async () => undefined);
   const send = vi.fn(async () => {
     emit("turn/started", { id: "turn" });
@@ -33,13 +64,14 @@ async function fixture() {
         viewArgs: ["--remote", "unix:///owned", "resume", "thread"],
         send,
         close,
+        answerQuestion,
         interrupt: async () => true,
       };
     },
     herdr: async () => undefined,
   });
   // The native TUI can still look idle while the app-server is working.
-  const agent: HerdrAgentSnapshot = {
+  let agent: HerdrAgentSnapshot = {
     paneId: "w1:p1",
     terminalId: "term_test",
     agent: "codex",
@@ -77,10 +109,83 @@ async function fixture() {
     { schemaVersion: 1, harness: "codex", title: "Test", workingDirectory: root },
     undefined,
     "first brief",
+    undefined,
+    owner,
   );
   expect(hired).toMatchObject({ outcome: "spawned" });
-  return { store, agent, emit, close, send, promptAgent, runInPane, startAgent, wake };
+  return {
+    store,
+    get agent() {
+      return agent;
+    },
+    replaceOccupant() {
+      agent = { ...agent, session: { source: "herdr:codex", kind: "id", value: "replacement" } };
+    },
+    emit,
+    close,
+    send,
+    promptAgent,
+    runInPane,
+    startAgent,
+    wake,
+    question,
+    answerQuestion,
+  };
 }
+
+it("forwards question text and exact answer address to the hiring conversation, then answers through control", async () => {
+  const owner = authority();
+  const f = await fixture(owner);
+  f.question();
+  await vi.waitFor(() => expect(f.wake).toHaveBeenCalled());
+  expect(f.wake).toHaveBeenCalledWith(
+    "lead-a",
+    expect.stringContaining("Which package should I change?"),
+    undefined,
+    expect.any(Function),
+  );
+  const text = f.wake.mock.calls.flat().join(" ");
+  expect(text).toContain("term_test");
+  expect(text).toContain("question-1");
+  expect(text).toContain("questionAnswer");
+  const answer = { requestId: "question-1", answers: { scope: { answers: ["clankie"] } } };
+  expect(await f.store.answerSeatQuestion("term_test", answer, owner)).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "responded",
+  });
+  expect(f.answerQuestion).toHaveBeenCalledWith(answer, expect.any(Function));
+  expect(f.send).toHaveBeenCalledOnce();
+  expect(f.promptAgent).not.toHaveBeenCalled();
+  f.emit("turn/completed", {
+    id: "turn",
+    status: "completed",
+    items: [{ type: "agentMessage", text: "finished after answer" }],
+  });
+  await vi.waitFor(() => expect(f.wake.mock.calls.flat().join(" ")).toContain("finished after answer"));
+});
+
+it.each(["owner", "occupant", "grant"])(
+  "refuses an answer when the %s changes before native dispatch",
+  async (changed) => {
+    let allowed = true;
+    const owner = { ...authority(), authorize: async () => allowed };
+    const f = await fixture(owner);
+    f.question();
+    await vi.waitFor(() => expect(f.wake).toHaveBeenCalled());
+    if (changed === "owner") await f.store.adoptSeat("term_test", authority("lead-b"));
+    if (changed === "occupant") f.replaceOccupant();
+    if (changed === "grant") allowed = false;
+    const promise = f.store.answerSeatQuestion(
+      "term_test",
+      { requestId: "question-1", answers: { scope: { answers: ["clankie"] } } },
+      owner,
+    );
+    if (changed === "grant") await expect(promise).rejects.toThrow();
+    else expect(await promise).toMatchObject({ outcome: "undelivered" });
+    expect(f.send).toHaveBeenCalledOnce();
+    expect(f.promptAgent).not.toHaveBeenCalled();
+  },
+);
 
 it("hires, messages, and waits for Codex protocol completion even while the native view looks idle", async () => {
   const f = await fixture();

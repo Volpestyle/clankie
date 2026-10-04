@@ -71,6 +71,8 @@ export interface SeatView {
   readonly expectedToolNames?: readonly string[];
   /** Trusted controller callback after native identity is reported, before the first brief. */
   readonly bound?: (ref: SeatRef) => Promise<void | { readonly expectedToolNames: readonly string[] }>;
+  /** Native worker questions, projected only after the controller binds this exact hire. */
+  readonly question?: (ref: SeatRef, question: SeatQuestion) => Promise<void>;
   /** Run one command in the pane's shell. The argv is quoted for the shell. */
   run(argv: readonly string[]): Promise<void>;
   /**
@@ -139,6 +141,32 @@ export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
 
 export type SeatStatus = "working" | "idle" | "blocked" | "released" | "offline";
 
+export interface SeatQuestion {
+  readonly requestId: string | number;
+  readonly turnId: string;
+  readonly itemId: string;
+  readonly isBlocking: boolean;
+  readonly questions: readonly {
+    readonly id: string;
+    readonly header: string;
+    readonly question: string;
+    readonly isOther: boolean;
+    readonly isSecret: boolean;
+    readonly options: readonly { readonly label: string; readonly description: string }[] | null;
+  }[];
+}
+
+export interface SeatQuestionAnswer {
+  readonly requestId: string | number;
+  readonly answers: Readonly<Record<string, { readonly answers: readonly string[] }>>;
+}
+
+export type SeatQuestionResult =
+  | { readonly outcome: "answered"; readonly deliveryStage: "responded" }
+  | { readonly outcome: "refused"; readonly detail: string }
+  | { readonly outcome: "unconfirmed"; readonly detail: string }
+  | { readonly outcome: "offline"; readonly detail: string };
+
 export type SeatEvent =
   | { readonly type: "turn_started"; readonly at: string; readonly messageId?: string }
   | {
@@ -189,12 +217,19 @@ export interface SeatControl {
     },
   ): Promise<SeatDelivery>;
   status(): Promise<SeatStatus>;
+  /** Answer one pending native request; never enqueue a turn or fall back to a terminal. */
+  answerQuestion?(
+    answer: SeatQuestionAnswer,
+    beforeDispatch?: () => Promise<void>,
+  ): Promise<SeatQuestionResult>;
   /**
    * The next settlement at or after now: `turn_completed`, `blocked`,
    * `released`, `exited`, or an explicitly unconfirmed observation. Resolves
    * at once with the latest eligible observation when the seat is not working.
    * Settlement is not per-message completion; adapters must preserve missing
    * native correlation. Rejects only when `signal` aborts.
+   * Codex user-input questions use SeatView.question and keep this wait armed;
+   * owner-only approval prompts still settle as blocked.
    */
   settled(signal?: AbortSignal): Promise<SeatEvent>;
   /** Interrupt the running turn. False when there is nothing to interrupt or no control. */

@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
 import { PassThrough } from "node:stream";
 import { afterEach, expect, it, vi } from "vitest";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket } from "ws";
 import { startCodexAppServerSeat } from "../src/captain/codex-app-server.ts";
 
 const { spawn } = vi.hoisted(() => ({ spawn: vi.fn() }));
@@ -13,10 +13,17 @@ afterEach(async () => {
   spawn.mockReset();
 });
 
-function fixture(persisted = false, missingRollout = "no rollout found", beforeResume?: () => Promise<void>) {
+function fixture(
+  persisted = false,
+  missingRollout = "no rollout found",
+  beforeResume?: () => Promise<void>,
+  receipt?: { winner?: Record<string, { answers: string[] }>; omitOutput?: boolean },
+) {
   const requests: { method: string; params: Record<string, unknown> }[] = [];
   let nativeLoaded = false;
   const id = "native-thread";
+  let peer: WebSocket | undefined;
+  let nativeAnswer: Record<string, { answers: string[] }> | undefined;
   spawn.mockImplementation((_command: string, args: string[]) => {
     const endpoint = args[args.indexOf("--listen") + 1]!;
     const http = createServer();
@@ -25,15 +32,39 @@ function fixture(persisted = false, missingRollout = "no rollout found", beforeR
       server.handleUpgrade(request, socket, head, (socket) => server.emit("connection", socket));
     });
     http.listen(endpoint.slice("unix://".length));
-    server.on("connection", (socket) =>
+    server.on("connection", (socket) => {
+      peer = socket;
       socket.on("message", async (bytes) => {
         const message = JSON.parse(bytes.toString());
         requests.push(message);
         if (message.id === undefined) return;
+        if (message.id === "question-1" && message.method === undefined) {
+          if (!receipt?.omitOutput) nativeAnswer = receipt?.winner ?? message.result.answers;
+          socket.send(
+            JSON.stringify({
+              method: "serverRequest/resolved",
+              params: { threadId: id, requestId: "question-1" },
+            }),
+          );
+          return;
+        }
         let result: unknown = {};
-        const turn = { id: "turn-one", status: "inProgress", items: [] };
+        const turn = {
+          id: "turn-one",
+          status: "inProgress",
+          items: nativeAnswer
+            ? [
+                {
+                  type: "functionCallOutput",
+                  id: "call1",
+                  name: "request_user_input",
+                  output: JSON.stringify({ answers: nativeAnswer }),
+                },
+              ]
+            : [],
+        };
         if (message.method === "thread/loaded/list") result = { data: nativeLoaded ? [id] : [] };
-        if (message.method === "thread/read") result = { thread: { id } };
+        if (message.method === "thread/read") result = { thread: { id, turns: [turn] } };
         if (message.method === "thread/resume") {
           await beforeResume?.();
           if (!persisted) {
@@ -48,8 +79,8 @@ function fixture(persisted = false, missingRollout = "no rollout found", beforeR
         }
         if (message.method === "turn/steer") result = { turnId: turn.id };
         socket.send(JSON.stringify({ id: message.id, result }));
-      }),
-    );
+      });
+    });
     const child = Object.assign(new EventEmitter(), {
       stderr: new PassThrough(),
       pid: 12345,
@@ -71,6 +102,29 @@ function fixture(persisted = false, missingRollout = "no rollout found", beforeR
   return {
     requests,
     id,
+    ask: () =>
+      peer!.send(
+        JSON.stringify({
+          id: "question-1",
+          method: "item/tool/requestUserInput",
+          params: {
+            threadId: id,
+            turnId: "turn-one",
+            itemId: "call1",
+            isBlocking: true,
+            questions: [
+              {
+                id: "docs",
+                header: "Docs",
+                question: "Which worktree?",
+                isOther: true,
+                isSecret: false,
+                options: null,
+              },
+            ],
+          },
+        }),
+      ),
     startView: async () => {
       nativeLoaded = true;
     },
@@ -214,3 +268,40 @@ it("keeps the socket alive past discovery deadline and continues after native ow
   await seat.close();
   expect(onServerStopped).toHaveBeenCalledOnce();
 });
+
+it.each([
+  { receipt: {}, outcome: "answered" },
+  { receipt: { winner: { docs: { answers: ["owner choice"] } } }, outcome: "refused" },
+  { receipt: { omitOutput: true }, outcome: "unconfirmed" },
+])(
+  "verifies the native winning answer instead of guessing from a resolved notification ($outcome)",
+  async ({ receipt, outcome }) => {
+    const f = fixture(false, "no rollout found", undefined, receipt);
+    const events = vi.fn();
+    const seat = await startCodexAppServerSeat({ cwd: "/tmp", startView: f.startView, onEvent: events });
+    cleanup.push(seat.close);
+    await seat.send("initial brief");
+    f.ask();
+    await vi.waitFor(() =>
+      expect(events).toHaveBeenCalledWith(expect.objectContaining({ method: "item/tool/requestUserInput" })),
+    );
+    const result = await seat.answerQuestion!({
+      requestId: "question-1",
+      answers: { docs: { answers: ["lead choice"] } },
+    });
+    expect(result).toMatchObject({ outcome });
+    if (outcome === "answered") expect(result).toHaveProperty("deliveryStage", "responded");
+    if (outcome === "refused")
+      expect(result).toHaveProperty("detail", expect.stringContaining("first native answer won"));
+    expect(f.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
+    expect(f.requests.filter((r) => r.method === "turn/steer")).toHaveLength(0);
+    expect(
+      f.requests.filter(
+        (r) => r.method === undefined && (r as unknown as { id: string }).id === "question-1",
+      ),
+    ).toHaveLength(1);
+    expect(
+      await seat.answerQuestion!({ requestId: "question-1", answers: { docs: { answers: ["retry"] } } }),
+    ).toMatchObject({ outcome: "refused" });
+  },
+);

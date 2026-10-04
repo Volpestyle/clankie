@@ -7,6 +7,9 @@ import { dirname, join } from "node:path";
 import WebSocket from "ws";
 import type { Duplex } from "node:stream";
 import { isolatedCodexConfig, watchCodexCatalog } from "./codex-catalog-refresh.ts";
+import type { SeatQuestion, SeatQuestionAnswer, SeatQuestionResult } from "@clankie/agent-hosts";
+import { isDeepStrictEqual } from "node:util";
+import { codexQuestion, recordedCodexAnswer, SeatQuestionAnswerSchema } from "./codex-user-input.ts";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue =>
@@ -15,6 +18,7 @@ const record = (value: unknown): RecordValue =>
 export interface CodexSeatEvent {
   method: string;
   params: RecordValue;
+  requestId?: string | number;
 }
 
 /** Reads from this exact native server; callers cannot dispatch through this facade. */
@@ -56,6 +60,15 @@ export class CodexAppServerClient {
     { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
   >();
   private failure?: Error;
+  private readonly questions = new Map<
+    string | number,
+    {
+      threadId: string;
+      question: SeatQuestion;
+      answering: boolean;
+      resolved?: (error?: Error) => void;
+    }
+  >();
 
   constructor(socket: WebSocket, event: (event: CodexSeatEvent) => void, timeoutMs = 30_000) {
     this.socket = socket;
@@ -72,7 +85,32 @@ export class CodexAppServerClient {
       if (typeof message.method === "string") {
         // Approval requests are also delivered to the attached native TUI. Do
         // not approve them or manufacture answers on the owner's behalf.
-        this.event({ method: message.method, params: record(message.params) });
+        const params = record(message.params);
+        if (message.method === "item/tool/requestUserInput") {
+          const question = codexQuestion(message.id, params);
+          if (question && !this.questions.has(question.requestId))
+            this.questions.set(question.requestId, {
+              threadId: String(params.threadId),
+              question,
+              answering: false,
+            });
+        } else if (message.method === "serverRequest/resolved") {
+          const id = params.requestId;
+          if (typeof id === "string" || typeof id === "number") {
+            const pending = this.questions.get(id);
+            if (pending && pending.threadId === params.threadId) {
+              this.questions.delete(id);
+              pending.resolved?.();
+            }
+          }
+        }
+        this.event({
+          method: message.method,
+          params,
+          ...(typeof message.id === "string" || typeof message.id === "number"
+            ? { requestId: message.id }
+            : {}),
+        });
         return;
       }
       const pending = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
@@ -115,6 +153,77 @@ export class CodexAppServerClient {
     this.socket.close();
   }
 
+  pendingQuestion(threadId: string, requestId: string | number): SeatQuestion | undefined {
+    const pending = this.questions.get(requestId);
+    return pending?.threadId === threadId ? pending.question : undefined;
+  }
+
+  hasPendingQuestion(threadId: string): boolean {
+    return [...this.questions.values()].some((question) => question.threadId === threadId);
+  }
+
+  async answerQuestion(
+    threadId: string,
+    answer: SeatQuestionAnswer,
+    beforeDispatch?: () => Promise<void>,
+  ): Promise<{ outcome: "resolved" } | Exclude<SeatQuestionResult, { outcome: "answered" }>> {
+    const parsed = SeatQuestionAnswerSchema.safeParse(answer);
+    if (!parsed.success) return { outcome: "refused", detail: "native_question_answer_invalid" };
+    answer = parsed.data;
+    const pending = this.questions.get(answer.requestId);
+    if (!pending || pending.threadId !== threadId)
+      return {
+        outcome: "refused",
+        detail: "native_question_already_resolved_or_unknown: no answer was sent",
+      };
+    if (pending.answering)
+      return {
+        outcome: "refused",
+        detail: "native_question_answer_already_dispatched: no second answer was sent",
+      };
+    const ids = pending.question.questions.map((question) => question.id).sort();
+    if (!isDeepStrictEqual(ids, Object.keys(answer.answers).sort()))
+      return {
+        outcome: "refused",
+        detail: "native_question_answer_ids_mismatch: answer every question exactly once",
+      };
+    try {
+      await beforeDispatch?.();
+    } catch (error) {
+      return { outcome: "refused", detail: String(error) };
+    }
+    if (this.failure) return { outcome: "offline", detail: this.failure.message };
+    // Owner replies and concurrent lead replies may resolve it during the guard.
+    if (this.questions.get(answer.requestId) !== pending || pending.answering)
+      return {
+        outcome: "refused",
+        detail: "native_question_already_resolved_or_answering: no answer was sent",
+      };
+    pending.answering = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        pending.resolved = (error) => (error ? reject(error) : resolve());
+        timer = setTimeout(
+          () => reject(new Error("native_question_resolution_unconfirmed: do not resend")),
+          this.timeoutMs,
+        );
+        // This is the response to the server's request, not a new turn RPC.
+        this.socket.send(
+          JSON.stringify({ id: answer.requestId, result: { answers: answer.answers } }),
+          (error) => {
+            if (error) reject(error);
+          },
+        );
+      });
+      return { outcome: "resolved" };
+    } catch (error) {
+      return { outcome: "unconfirmed", detail: String(error) };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private fail(error: Error): void {
     if (this.failure) return;
     this.failure = error;
@@ -123,6 +232,8 @@ export class CodexAppServerClient {
       pending.reject(this.failure);
     }
     this.pending.clear();
+    for (const question of this.questions.values()) question.resolved?.(error);
+    this.questions.clear();
     this.event({ method: "connection/closed", params: { code: null } });
   }
 }
@@ -138,6 +249,10 @@ export interface CodexAppServerSeat {
   ): Promise<{ turnId: string; state: "started" | "steered" }>;
   /** Controller-owned catalog expectation; never an authorization credential. */
   expectTools?(names: readonly string[]): void;
+  answerQuestion?(
+    answer: SeatQuestionAnswer,
+    beforeDispatch?: () => Promise<void>,
+  ): Promise<SeatQuestionResult>;
   interrupt(): Promise<boolean>;
   close(): Promise<void>;
 }
@@ -621,6 +736,44 @@ export async function startCodexAppServerSeat(options: {
     let firstDispatch = true;
     let sending: Promise<unknown> = Promise.resolve();
     return {
+      async answerQuestion(answer, guard) {
+        const parsed = SeatQuestionAnswerSchema.safeParse(answer);
+        if (!parsed.success) return { outcome: "refused", detail: "native_question_answer_invalid" };
+        answer = parsed.data;
+        const request = client!.pendingQuestion(threadId!, answer.requestId);
+        if (!request)
+          return {
+            outcome: "refused",
+            detail: "native_question_already_resolved_or_unknown: no answer was sent",
+          };
+        const result = await client!.answerQuestion(threadId!, answer, async () => {
+          await checkPolicy();
+          await guard?.();
+        });
+        if (result.outcome !== "resolved") return result;
+        // Resolution alone does not identify which client won. Check Codex's
+        // persisted tool output before calling our requested answer accepted.
+        const deadline = Date.now() + 2_000;
+        while (!closed && Date.now() < deadline) {
+          const record = await client!
+            .request("thread/read", { threadId, includeTurns: true }, Math.max(1, deadline - Date.now()))
+            .catch(() => undefined);
+          const accepted = recordedCodexAnswer(record, request, threadId!);
+          if (accepted !== undefined)
+            return isDeepStrictEqual(accepted, answer.answers)
+              ? { outcome: "answered", deliveryStage: "responded" }
+              : {
+                  outcome: "refused",
+                  detail: "native_question_resolved_with_different_answer: the first native answer won",
+                };
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return {
+          outcome: "unconfirmed",
+          detail:
+            "native_question_resolved_but_winning_answer_unobserved: do not resend or queue a replacement",
+        };
+      },
       expectTools(names) {
         expectedTools = [...new Set(["message_clankie", ...names])];
         catalogReady = !server.waitForClankieCatalog;
@@ -651,6 +804,10 @@ export async function startCodexAppServerSeat(options: {
           if (firstDispatch) await server.validateCatalog?.();
           // Initial brief authority expires independently of later follow-up turns.
           await guard?.();
+          if (client!.hasPendingQuestion(threadId!))
+            throw new Error(
+              "Codex has a pending native question; answer its request instead of sending a new turn.",
+            );
           const steering = activeTurn;
           try {
             const result: unknown = options.policy?.dispatch?.({

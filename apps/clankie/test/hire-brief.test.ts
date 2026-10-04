@@ -137,6 +137,33 @@ test.each([
         });
       }
       expect(send).toHaveBeenCalledTimes(3);
+      const answer = vi
+        .spyOn(HerdrWatchStore.prototype, "answerSeatQuestion")
+        .mockResolvedValue({ outcome: "delivered", deliveryStage: "responded" });
+      const pickup = vi.mocked(HerdrWatchStore.prototype.awaitPickup);
+      pickup.mockClear();
+      const questionAnswer = { requestId: "request-7", answers: { scope: { answers: ["core only"] } } };
+      expect(await call(bank, "message_seat", { seat: seat.conversationId, questionAnswer })).toMatchObject({
+        outcome: "delivered",
+        deliveryStage: "responded",
+        status: "answered",
+        seatId: "term_one",
+      });
+      expect(answer).toHaveBeenCalledExactlyOnceWith(
+        "term_one",
+        questionAnswer,
+        expect.objectContaining({ owner: { conversationId: "global-default" } }),
+      );
+      expect(pickup).not.toHaveBeenCalled();
+      expect(send).toHaveBeenCalledTimes(3);
+      expect(
+        await call(bank, "message_seat", { seat: seat.seatId, message: "duplicate turn", questionAnswer }),
+      ).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+      expect(await call(bank, "message_seat", { seat: seat.seatId })).toMatchObject({
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+      });
+      expect(answer).toHaveBeenCalledOnce();
       expect(await call(bank, "message_seat", { seat: "nobody", message: "hello" })).toEqual({
         outcome: "unknown_seat",
         deliveryStage: "unavailable",
