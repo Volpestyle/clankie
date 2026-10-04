@@ -71,7 +71,10 @@ export function personaInstructions(persona: PersonaSettings, register: PersonaR
 
   lines.push("", "# How you talk here", "");
   for (const line of REGISTER[register]) lines.push(`- ${line}`);
-  lines.push(`- ${CHATTINESS[persona.chattiness]}`);
+  // Chattiness tunes him for rooms he shares with other people. The operator
+  // register is one person getting work done, where a sentence cap would fight
+  // the work; his character is the same either way.
+  if (register !== "operator") lines.push(`- ${CHATTINESS[persona.chattiness]}`);
 
   lines.push(
     "",

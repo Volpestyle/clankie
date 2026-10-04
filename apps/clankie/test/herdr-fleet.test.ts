@@ -228,10 +228,6 @@ describe("fleet routing", () => {
     expect(await runner.wait("pc/w2:p1J", new AbortController().signal)).toMatchObject({ status: "idle" });
     // No long-held `agent wait`: the remote side is only ever polled.
     expect(calls.every((call) => call[0] === "pane" && call[1] === "list")).toBe(true);
-    await runner.sendText!("pc/w2:p1J", "hello");
-    expect(calls.at(-1)).toEqual(["pane", "send-text", "w2:p1J", "hello"]);
-    await runner.promptAgent!("pc/w2:p1J", "remote first brief");
-    expect(calls.at(-1)?.slice(0, 4)).toEqual(["agent", "prompt", "w2:p1J", "remote first brief"]);
     expect(await runner.createTab!({ cwd: "C:\\src", label: "x", fleet: "pc" })).toBe("pc/w2:p9");
     expect(await runner.createTab!({ cwd: "/src", label: "x" })).toBe("w1:p1");
     await expect(runner.get("laptop/w1:p1")).rejects.toThrow(/Unknown Herdr fleet laptop/u);

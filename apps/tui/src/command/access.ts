@@ -42,7 +42,7 @@ export async function runAccessCommand(
     method = "POST";
   } else if (args[0] === "fleet") {
     throw new Error(
-      "Fleet grants are retired. Use clankie access project NAME SERVER, then clankie access revoke ID for each old grant.",
+      "Fleet grants are retired. Admitted fleet members use connected tools; inspect clankie fleet status and revoke old records with clankie access revoke ID.",
     );
   } else if (args.length === 4 && args[0] === "issue" && args[2] === "--out") {
     body = JSON.stringify(JSON.parse(await readFile(args[1]!, "utf8")));

@@ -92,11 +92,12 @@ export interface ResolvedTracker {
 export async function resolveTracker(
   root: string,
   deps: TrackerDeps,
-  options: { readonly record?: boolean } = {},
+  options: { readonly record?: boolean; readonly requireRecorded?: boolean } = {},
 ): Promise<ResolvedTracker> {
   const recorded = await readConvention(root);
   if (recorded !== undefined)
     return { convention: recorded, recorded: true, backend: backendFor(root, recorded, deps) };
+  if (options.requireRecorded) throw new Error("A saved work tracker is required");
   const discovery = await discoverConvention(root, deps.run);
   if (discovery.suggestion === undefined) throw new ConventionNeededError(discovery);
   const convention: WorkConvention = {

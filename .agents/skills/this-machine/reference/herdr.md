@@ -78,7 +78,7 @@ provider audio, and actual Discord audibility when reporting verification.
 
 ### OpenCode operator seat
 
-Use `clankie seat --harness opencode --conversation ID --dry-run` to inspect the
+Use `clankie opencode --conversation ID --dry-run` to inspect the
 native launch before sitting as Clankie; `--resume` binds the exact saved native
 session. It is an operator seat, not an OpenCode `hire_agent` adapter. Native
 wakes use the bound session API, wait while busy, and never type into an owner's

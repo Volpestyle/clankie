@@ -72,7 +72,7 @@ export function createFleetSeatControl(
       if (process !== undefined) {
         endpoint = codexControlEndpoint(process);
         const files = await openFiles(process.pid);
-        const resolved = resolveCodexSessionId(processes, files);
+        const resolved = resolveCodexSessionId(processes, files, sessionId);
         if (sessionId !== undefined && resolved !== undefined && sessionId !== resolved)
           return {
             outcome: "undelivered",

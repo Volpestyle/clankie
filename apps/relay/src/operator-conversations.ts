@@ -1,3 +1,4 @@
+import { DeviceConversationRefusal, type DeviceConversationDispatch } from "./conversation-upstream.ts";
 import {
   DISCORD_VOICE_TRANSCRIPTS_PATH,
   DiscordVoiceTranscriptPageSchema,
@@ -50,6 +51,8 @@ export interface RelayConversationLogger {
 export interface OperatorConversationRelayOptions {
   readonly authorizeDevice: RelayDeviceAuthorizer;
   readonly dispatch: OperatorConversationServiceDispatch;
+  /** Original signed device; only owner-capable send and preference input operations. */
+  readonly deviceDispatch?: DeviceConversationDispatch;
   /** Forwards the original paired-device token; never substitutes captain authority. */
   readonly roomRequest?: (
     path: string,
@@ -266,10 +269,16 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeJson(response, 403, { error: "op_is_local_to_the_machine" });
       return true;
     }
+    const questionOp =
+      serviceRequest.op === "project_proposal_get" ||
+      serviceRequest.op === "project_proposal_confirm" ||
+      serviceRequest.op === "input_get" ||
+      serviceRequest.op === "input_answer" ||
+      serviceRequest.op === "input_cancel";
     const grant =
       serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
         ? "terminalObserve"
-        : serviceRequest.op === "terminal_control" || serviceRequest.op === "terminal_input"
+        : questionOp || serviceRequest.op === "terminal_control" || serviceRequest.op === "terminal_input"
           ? "terminalControl"
           : serviceRequest.op === "connections" ||
               serviceRequest.op === "reset" ||
@@ -327,22 +336,81 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       return true;
     }
 
+    // This lifetime cancels unary HTTP work, never an already committed answer/run.
+    const abort = new AbortController();
+    const disconnected = () => abort.abort();
+    request.once("aborted", disconnected);
+    response.once("close", disconnected);
+    if (request.aborted || response.destroyed) abort.abort();
+    const ownerRoute =
+      questionOp || (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
     try {
+      if (abort.signal.aborted) return true;
+      if (
+        currentAuthorization.device.deviceId !== authorization.device.deviceId ||
+        currentAuthorization.device.controlScope !== authorization.device.controlScope
+      ) {
+        writeAuthDenial(response, "invalid");
+        return true;
+      }
+      if (ownerRoute && options.deviceDispatch === undefined) {
+        writeJson(response, 503, { error: "conversation_owner_upstream_unavailable" });
+        return true;
+      }
+      const dispatch = () =>
+        ownerRoute &&
+        (serviceRequest.op === "project_proposal_get" ||
+          serviceRequest.op === "project_proposal_confirm" ||
+          serviceRequest.op === "input_get" ||
+          serviceRequest.op === "input_answer" ||
+          serviceRequest.op === "input_cancel" ||
+          serviceRequest.op === "send")
+          ? options.deviceDispatch!(
+              serviceRequest,
+              {
+                deviceToken: token,
+                ...(currentAuthorization.device.controlScope === undefined
+                  ? {}
+                  : { controlScope: currentAuthorization.device.controlScope }),
+              },
+              abort.signal,
+            )
+          : serviceRequest.op === "send"
+            ? options.dispatch(serviceRequest, abort.signal)
+            : options.dispatch(serviceRequest);
       const result =
         serviceRequest.op === "send"
-          ? await idempotency.run(currentAuthorization.device.deviceId, serviceRequest, () =>
-              options.dispatch(serviceRequest),
-            )
-          : await options.dispatch(serviceRequest);
-      // A pending upstream request can also span a wake. Do not release its
-      // result (including a retained idempotent result) to a revoked device.
-      if (!(await authorizeGrant(options, token, response, grant))) return true;
+          ? await idempotency.run(currentAuthorization.device.deviceId, serviceRequest, dispatch)
+          : await dispatch();
+      if (abort.signal.aborted) return true;
+      // Recheck even a retained send receipt. Never downgrade owner authority
+      // after a dispatch, or route/retry a write under another principal.
+      const fresh = await authorizeGrant(options, token, response, grant);
+      if (fresh === undefined || abort.signal.aborted) return true;
+      if (
+        fresh.device.deviceId !== currentAuthorization.device.deviceId ||
+        fresh.device.controlScope !== currentAuthorization.device.controlScope
+      ) {
+        writeAuthDenial(response, "invalid");
+        return true;
+      }
+      if (ownerRoute && !fresh.device.grants.terminalControl) {
+        writeGrantDenial(response, "terminalControl");
+        return true;
+      }
       const publicResult = publicServiceResult(result);
       writeJson(response, 200, publicResult);
       logger.info(logFields(authorization, serviceRequest, 200, publicResult), "conversation relay request");
-    } catch {
-      writeJson(response, 502, { error: "conversation_upstream_unavailable" });
-      logger.warn(logFields(authorization, serviceRequest, 502), "conversation relay upstream failure");
+    } catch (error) {
+      if (abort.signal.aborted) return true;
+      const status = ownerRoute && error instanceof DeviceConversationRefusal ? error.status : 502;
+      writeJson(response, status, {
+        error: status === 502 ? "conversation_upstream_unavailable" : "conversation_owner_upstream_refused",
+      });
+      logger.warn(logFields(authorization, serviceRequest, status), "conversation relay upstream failure");
+    } finally {
+      request.off("aborted", disconnected);
+      response.off("close", disconnected);
     }
     return true;
   };

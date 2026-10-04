@@ -1,3 +1,5 @@
+import type { QuestionAuthority } from "./captain/conversation-questions.ts";
+import { createFleetProjectMembershipRoutes } from "./fleet-project-membership-routes.ts";
 import { createProjectRoutes } from "./project-routes.ts";
 import { createRuntimeUpdateRoutes } from "./runtime-update-routes.ts";
 import { resolveDiscordSettings } from "@clankie/settings";
@@ -282,6 +284,7 @@ const CaptainLanePromptQuerySchema = z
   .object({
     lane: CaptainSessionLaneV2Schema.optional(),
     conversationId: z.string().trim().min(1).max(256).optional(),
+    harness: z.enum(["claude"]).optional(),
     sections: z
       .string()
       .transform((raw) =>
@@ -440,6 +443,7 @@ export interface ClankieAppDependencies {
     identity?(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined;
   };
   localFleet?: { identity(request: Request): import("./local-fleet-link.ts").LocalFleetIdentity | undefined };
+  fleetProjectMembership?: Pick<import("./fleet-project-membership.ts").FleetProjectMembership, "read">;
   projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
   /** `clankie herdr prepare NAME` (VUH-1527): ship and approve the worker plugin on that fleet. */
   prepareFleet?: (id: string) => Promise<unknown>;
@@ -656,6 +660,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           },
         );
         applyDeviceEvent(devices, event);
+        if (event.type === "device.revoked" && typeof event.data.deviceId === "string")
+          dependencies.captain.invalidateQuestionPrincipal?.(event.data.deviceId);
       }
       // Publish the signer last. Pairing, refresh and relay self-authorize
       // remain unavailable throughout reconciliation or any failed retry.
@@ -1104,6 +1110,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (device === "unavailable" || "denied" in device) return "authentication_required";
     return device.grants.terminalControl ? true : "forbidden";
   };
+  app.route(
+    "/",
+    createFleetProjectMembershipRoutes(dependencies.fleetProjectMembership, authorizeOwnerSecrets),
+  );
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route(
@@ -1345,7 +1355,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? dependencies.workerMcp.handle(context.req.raw)
       : context.json({ error: "worker_mcp_unavailable" }, 503),
   );
-  // Only an observed local socket or authenticated SSH relay stream proves an agent.
+  // Local/relay admission proves a pane. A bearer link admits its fleet's tools
+  // without claiming a pane; it still confers no native project or mailbox proof.
   app.all("/v1/fleet/mcp", async (context) => {
     const identity =
       dependencies.localFleet?.identity(context.req.raw) ??
@@ -1381,7 +1392,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
               ...record,
               status: "retired",
               detail:
-                "This fleet grant no longer gives tools. Reissue selected tools with clankie access project NAME SERVER, then revoke this old grant.",
+                "This fleet grant no longer gives tools. Admitted fleet members use connected tools independently; inspect clankie fleet status and explicitly revoke this old record.",
             },
       ),
     ),
@@ -1393,7 +1404,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         {
           error: "fleet_grants_retired",
           detail:
-            "Fleet grants are retired. Use clankie access project NAME SERVER, then clankie access revoke ID for each old grant.",
+            "Fleet grants are retired. Admitted fleet members use connected tools; inspect clankie fleet status and revoke old records with clankie access revoke ID.",
         },
         400,
       );
@@ -1552,6 +1563,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         lane,
         ...(sections === undefined ? {} : { sections }),
         ...(query.data.conversationId === undefined ? {} : { conversationId: binding.conversationId! }),
+        ...(query.data.harness === undefined ? {} : { harness: query.data.harness }),
       }),
     );
   });
@@ -4300,6 +4312,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           revokedBy: operator.operatorId,
         });
         applyDeviceEvent(devices, event);
+        if (event.type === "device.revoked" && typeof event.data.deviceId === "string")
+          dependencies.captain.invalidateQuestionPrincipal?.(event.data.deviceId);
         logger.info({ deviceId, operatorId: operator.operatorId }, "device revoked");
       }
       if (dependencies.hostedBody !== undefined) {
@@ -4336,13 +4350,92 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     });
   });
 
+  /** Owner domain matches project/account writes; exact presented principal is revalidated each time. */
+  const questionOwnerAuthority = async (request: Request): Promise<QuestionAuthority | undefined> => {
+    const original = hostedOriginalRequests.get(request);
+    const deviceRequest = original ?? request;
+    const device = await authenticateDevice(deviceRequest);
+    if (device !== "unavailable" && !("denied" in device)) {
+      const eligible = () => {
+        const record = devices.get(device.deviceId);
+        return (
+          record?.status === "active" &&
+          record.grants.terminalControl &&
+          (original === undefined || record.mintedBy === "hosted-account-operator")
+        );
+      };
+      if (!eligible()) return undefined;
+      return {
+        principal: { kind: "device", id: device.deviceId },
+        current: eligible,
+        authorize: async () => {
+          const fresh = await authenticateDevice(deviceRequest);
+          return (
+            fresh !== "unavailable" &&
+            !("denied" in fresh) &&
+            fresh.deviceId === device.deviceId &&
+            fresh.grants.terminalControl &&
+            eligible()
+          );
+        },
+      };
+    }
+    // An inner hosted request cannot fall back to synthetic operator authority.
+    if (original !== undefined || hostedRequests.has(request)) return undefined;
+    const operator = await authenticateOperator(request, dependencies);
+    if (!operator || operator === "unavailable") return undefined;
+    let current = true;
+    return {
+      principal: { kind: "operator", id: operator.operatorId },
+      current: () => current,
+      authorize: async () => {
+        const fresh = await authenticateOperator(request, dependencies);
+        current = Boolean(fresh && fresh !== "unavailable" && fresh.operatorId === operator.operatorId);
+        return current;
+      },
+    };
+  };
+
   app.post(OPERATOR_CONVERSATION_DISPATCH_PATH, async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (captain === "unavailable") return context.json({ error: "captain_execution_unavailable" }, 503);
-    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    const owner = await questionOwnerAuthority(context.req.raw);
+    if (!owner && (!captain || captain === "unavailable"))
+      return context.json(
+        {
+          error:
+            captain === "unavailable" ? "captain_execution_unavailable" : "captain_authentication_required",
+        },
+        captain === "unavailable" ? 503 : 401,
+      );
     const body = await readJson(context.req.raw);
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const questionOp =
+      parsed.data.op === "project_proposal_get" ||
+      parsed.data.op === "project_proposal_confirm" ||
+      parsed.data.op === "input_get" ||
+      parsed.data.op === "input_answer" ||
+      parsed.data.op === "input_cancel";
+    if (questionOp && !owner) return context.json({ error: "question_owner_required" }, 403);
+    if (owner && (questionOp || parsed.data.op === "send")) {
+      const binding = dependencies.herdrBinding?.();
+      const sameSession =
+        binding !== undefined
+          ? context.req.header(HERDR_SOCKET_HEADER) === binding.socketPath
+          : dependencies.herdrRuntime?.() === undefined;
+      if (!sameSession && parsed.data.op === "send") delete parsed.data.turn.herdrPaneId;
+      try {
+        return context.json(await dependencies.captain.serveOperatorConversation(parsed.data, owner));
+      } catch (error) {
+        if (error instanceof Error && error.message === "question_owner_unavailable")
+          return context.json({ error: "question_owner_required" }, 403);
+        if (error instanceof ConversationRefusedError || error instanceof ConversationResetError)
+          return context.json({ error: "refused", message: error.message }, 409);
+        throw error;
+      }
+    }
+    if (!captain || captain === "unavailable")
+      return context.json({ error: "captain_authentication_required" }, 401);
     if (parsed.data.op === "connections") {
       if (captain.steerSourceLane !== "api")
         return context.json({ error: "operator_authority_required" }, 403);

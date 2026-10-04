@@ -27,13 +27,13 @@ Harnesses and models keep absorbing layers that projects build on top of them
 (skills, custom loops, memory, subagents). Extra layers can cost tokens and
 make results worse once the underlying tools improve.
 
-## Decision
+## Decision (including later amendments)
 
 Clankie is a workspace extension, not a custom agent harness. He bridges the
 tried-and-tested harnesses (Claude Code, Codex and others) into one simple
 system for the owner, and adds what they don't: a living character with rich
 Discord and voice presence, the garden view and art, direct terminal
-connections, and fun on top of productive swarm management. The agents do what
+connections, and fun on top of productive agent work. The agents do what
 they do best in their own harnesses; Clankie gives them what they need to
 succeed inside his system.
 
@@ -49,15 +49,16 @@ both and is cut. As a check on the second criterion, each part must also pass:
 
 - **Keep and invest:** his identity and memory across rooms; his bodies (Discord
   text and voice, the app, play); communication across vendors and machines
-  (Swarm); trust boundaries; one tracker identity.
+  through native channels and the fleet link; trust boundaries; one tracker identity.
 - **Make thin:** control of other harnesses and process scaffolding. Clankie
   hires, briefs, messages and learns completion through the harness's own
   extension points while the worker stays the real interactive harness in its
   herdr pane: Clankie's Claude Code plugin (channel notifications in, Stop hooks
   out) and the app-server of the pane's own Codex session. Workers are never
   replaced by a headless process with herdr as a mere view, so everything the
-  labs ship keeps working and the owner can type into any seat. Terminal typing
-  remains only a fallback. (Amended 2026-09-30 at James's direction.)
+  labs ship keeps working and the owner can type into any seat. Automated briefs
+  and messages never fall back to terminal typing (ADR 0207). Clankie is the
+  cross-vendor hub; the embedded Swarm is retired (ADR 0213).
 - **Delete:** duplicated instructions, rules written for older models, and
   surfaces nobody uses weekly.
 
@@ -82,8 +83,9 @@ the owner's existing Claude and Codex subscriptions, not metered API budget.
 
 - An eval set and runner come first; instruction and skill cuts follow its
   results rather than taste.
-- `lead`, `swarm-lead` and `herdr-lead` merge into one leadership skill.
+- `lead` is the merged leadership skill; the former `swarm-lead` and
+  `herdr-lead` skills no longer ship separately.
 - Files over roughly 3,000 lines split by domain as their areas are touched.
 - Superseded ADRs are marked archived, and one current-state architecture
   document is maintained, so agents stop reading dead designs.
-- Work is tracked in the Linear project "Clankie overhaul".
+- Work is tracked in the [Clankie Linear project](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/overview).

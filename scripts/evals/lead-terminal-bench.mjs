@@ -267,19 +267,36 @@ export class TerminalBenchBridge {
       "/bin/bash",
       "/tests/test.sh",
     ];
-    await container.create(argv, {
-      memoryMb: 8192,
-      cpus: 2,
-    });
-    let cancelledStop;
+    let cancelledStop,
+      starting = false,
+      activationUnconfirmed = false;
     const cancel = () => {
-      cancelledStop ??= container.stop("official verification cancelled");
-      void cancelledStop.catch(() => {});
+      if (container.id && !starting) {
+        cancelledStop ??= container.stop("official verification cancelled");
+        void cancelledStop.catch(() => {});
+      }
     };
     signal?.addEventListener("abort", cancel, { once: true });
+    let result, completionError, stopReceipt, stopFailure;
     try {
       signal?.throwIfAborted();
-      await container.start();
+      await container.create(argv, {
+        memoryMb: 8192,
+        cpus: 2,
+      });
+      signal?.throwIfAborted();
+      // Do not latch a stopped receipt while the bounded start command can still activate.
+      starting = true;
+      try {
+        await container.start();
+      } catch (error) {
+        // A lost start reply cannot prove that the daemon will not activate later.
+        activationUnconfirmed = true;
+        throw error;
+      } finally {
+        starting = false;
+      }
+      signal?.throwIfAborted();
       const exitCode = await this.command(["wait", container.id], {
         timeout: this.#staged.taskId === "html-js-filter" ? 1_800_000 : 300_000,
         ...(signal ? { signal } : {}),
@@ -298,11 +315,11 @@ export class TerminalBenchBridge {
       }
       const reportBytes = ownedFile(logs, join(logs, "ctrf.json"));
       const reward = ownedFile(logs, join(logs, "reward.txt"), 64).toString();
-      const result = terminalBenchResult(JSON.parse(reportBytes), reward, this.#staged.expectedTests);
-      if (exitCode.trim() !== "0" && result.status === "passed")
+      const report = terminalBenchResult(JSON.parse(reportBytes), reward, this.#staged.expectedTests);
+      if (exitCode.trim() !== "0" && report.status === "passed")
         throw Error("Official verifier exited unsuccessfully");
-      return {
-        ...result,
+      result = {
+        ...report,
         containerId: container.id,
         image,
         artifactSha256: hash(bytes),
@@ -310,10 +327,60 @@ export class TerminalBenchBridge {
         ...(mediation ? { mediation } : {}),
         sourceCommit: this.#staged.commit,
       };
+    } catch (error) {
+      completionError = error instanceof Error ? error : Error(String(error));
     } finally {
       signal?.removeEventListener("abort", cancel);
-      if (cancelledStop) await cancelledStop;
-      else await container.stop("official verification settled");
+      if (container.id) {
+        let stopError = activationUnconfirmed
+          ? Error("Official verifier activation outcome unconfirmed")
+          : undefined;
+        try {
+          stopReceipt = await (cancelledStop ?? container.stop("official verification settled"));
+        } catch (error) {
+          stopError = error instanceof Error ? error : Error(String(error));
+        }
+        if (stopError) {
+          stopFailure = Object.assign(
+            Error("Official verifier container stop unconfirmed", { cause: stopError }),
+            {
+              code: "terminal-bench-stop-unconfirmed",
+              containerId: container.id,
+              verifierStopConfirmed: false,
+            },
+          );
+        }
+        // Cancellation during cleanup also prevents accepting an otherwise valid report.
+        try {
+          signal?.throwIfAborted();
+        } catch (error) {
+          completionError ??= error instanceof Error ? error : Error(String(error));
+        }
+        try {
+          writeFileSync(
+            join(output, "container-stop.json"),
+            JSON.stringify({
+              containerId: container.id,
+              stop: stopReceipt ?? { confirmed: false },
+              activationUnconfirmed,
+              verifierStopConfirmed: stopReceipt?.stopped === true && !stopFailure,
+              cancelled: signal?.aborted === true,
+              completionError: completionError?.message ?? null,
+              stopError: stopFailure?.cause instanceof Error ? stopFailure.cause.message : null,
+            }),
+            { flag: "wx", mode: 0o600 },
+          );
+        } catch (error) {
+          completionError ??= error instanceof Error ? error : Error(String(error));
+        }
+      }
     }
+    if (stopFailure) throw stopFailure;
+    if (completionError)
+      throw Object.assign(completionError, {
+        ...(container.id ? { containerId: container.id } : {}),
+        verifierStopConfirmed: stopReceipt?.stopped === true,
+      });
+    return { ...result, stopReceipt, verifierStopConfirmed: true };
   }
 }

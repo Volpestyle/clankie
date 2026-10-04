@@ -7,10 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { loadConfig } from "@clankie/model-provider";
 import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS, type DeviceGrantSet } from "@clankie/protocol";
-import { ModelKeysResponseSchema } from "@clankie/protocol/model-keys";
+import { ModelKeysResponseSchema, ModelOptionsResponseSchema } from "@clankie/protocol/model-keys";
 import { bodyTelemetryFromEnv } from "@clankie/observability/body-telemetry";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { createModelKeys } from "../src/model-keys.ts";
+import { createModelKeys, providerDisplayName } from "../src/model-keys.ts";
 import { applyHostedModelPolicy } from "../src/hosted-body.ts";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -43,7 +43,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-async function setup(options: { modelId?: string } = {}) {
+async function setup(options: { modelId?: string; reasoning?: boolean } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "model-keys-"));
   dirs.push(dir);
   const env = {
@@ -58,7 +58,8 @@ async function setup(options: { modelId?: string } = {}) {
     name: "Test",
     provider: "openai",
     api: "openai-responses",
-    reasoning: false,
+    reasoning: options.reasoning ?? false,
+    ...(options.reasoning ? { thinkingLevelMap: { minimal: null, xhigh: "xhigh" } } : {}),
   };
   const complete = vi.fn(async () => ({ stopReason: "stop" }));
   const runtime = {
@@ -71,6 +72,7 @@ async function setup(options: { modelId?: string } = {}) {
     getModel: (provider: string, id: string) =>
       provider === "openai" && id === model.id ? model : undefined,
     registerProvider: vi.fn(),
+    getAvailable: async () => ((await store.get("openai")) === undefined ? [] : [model]),
     complete,
   } as unknown as ModelRuntime;
   await mkdir(join(dir, "clankie"));
@@ -297,6 +299,8 @@ describe("owner model keys", () => {
       ["/v1/model-keys/validate", { providerId: "openai", modelId: "test/model" }],
       ["/v1/model-keys/select", { model: "openai/test/model" }],
       ["/v1/model-keys/remove", { providerId: "openai" }],
+      ["/v1/model-keys/options", undefined],
+      ["/v1/model-keys/effort", { effort: "low" }],
     ] as const;
     for (let mask = 0; mask < 8; mask++) {
       const device = await pair({
@@ -461,6 +465,36 @@ describe("owner model keys", () => {
   });
 });
 
+it("reads and sets the running model's effort, and names only providers that can serve now", async () => {
+  const { call, store, env, dir } = await setup({ reasoning: true });
+  expect(await (await call("/v1/model-keys/options")).json()).toEqual({ usableProviders: [], effort: null });
+  expect(await (await call("/v1/model-keys/effort", { effort: "high" })).json()).toEqual({
+    ok: false,
+    error: "unsupported_model",
+  });
+  await store.set("openai", { type: "api", key: "sk-marker" });
+  await call("/v1/model-keys/select", { model: "openai/test/model" });
+  const response = await call("/v1/model-keys/options");
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(ModelOptionsResponseSchema.parse(await response.json())).toEqual({
+    usableProviders: ["openai"],
+    effort: {
+      model: "openai/test/model",
+      current: null,
+      default: "medium",
+      levels: ["off", "low", "medium", "high", "xhigh"],
+    },
+  });
+  expect(await (await call("/v1/model-keys/effort", { effort: "xhigh" })).json()).toEqual({ ok: true });
+  expect((await loadConfig({ env, cwd: dir })).config.variant).toEqual({ "openai/test/model": "xhigh" });
+  expect((await (await call("/v1/model-keys/options")).json()).effort.current).toBe("xhigh");
+  for (const effort of ["max", "minimal", "ultra"])
+    expect((await call("/v1/model-keys/effort", { effort })).status).toBe(400);
+  expect((await loadConfig({ env, cwd: dir })).config.variant).toEqual({ "openai/test/model": "xhigh" });
+  expect(await (await call("/v1/model-keys/effort", { effort: null })).json()).toEqual({ ok: true });
+  expect((await loadConfig({ env, cwd: dir })).config.variant).toEqual({});
+});
+
 it("keeps subscription APIs honest and rejects token-shaped keys before provider calls", async () => {
   const { store, env, dir } = await setup();
   const hostedEnv = { ...env, CLANKIE_HOSTED_BOOTSTRAP_FILE: "/scratch/bootstrap.json" };
@@ -495,4 +529,9 @@ it("keeps subscription APIs honest and rejects token-shaped keys before provider
   expect((await local.subscriptions?.())?.subscriptions.map((entry) => entry.providerId)).toContain(
     "openai-codex",
   );
+});
+
+it("shows the Codex subscription by its own name, not the model library's legacy label", () => {
+  expect(providerDisplayName({ id: "openai-codex", name: "OpenAI Codex (legacy)" })).toBe("OpenAI Codex");
+  expect(providerDisplayName({ id: "anthropic", name: "Anthropic" })).toBe("Anthropic");
 });

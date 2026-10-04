@@ -287,6 +287,17 @@ function flatEntries(
   return agent === "codex" ? codexEntries(records, state) : grokEntries(records, state);
 }
 
+/** Claude config homes, most specific first: CLAUDE_CONFIG_DIR, ~/.claude, then any ~/.claude-*. */
+function claudeConfigRoots(): string[] {
+  const configured = process.env.CLAUDE_CONFIG_DIR?.trim();
+  const roots = [
+    ...(configured ? [configured] : []),
+    join(homedir(), ".claude"),
+    ...globSync(join(homedir(), ".claude-*")).sort(),
+  ];
+  return [...new Set(roots)];
+}
+
 /** Native lookup used by the reader and failed-delivery diagnostics. No match means no file yet. */
 export function resolveHerdrSeatTranscriptPath(
   agent: string,
@@ -295,7 +306,14 @@ export function resolveHerdrSeatTranscriptPath(
   if (session.kind === "path")
     return isAbsolute(session.value) && existsSync(session.value) ? session.value : undefined;
   if (agent === "claude") {
-    return globSync(join(homedir(), ".claude/projects/*", `${session.value}.jsonl`))[0];
+    // Claude keeps sessions under its config dir, and an owner may run more
+    // than one (CLAUDE_CONFIG_DIR, ~/.claude-<name>). Session ids are UUIDs, so
+    // searching every home cannot pick up another session.
+    for (const root of claudeConfigRoots()) {
+      const found = globSync(join(root, "projects/*", `${session.value}.jsonl`))[0];
+      if (found !== undefined) return found;
+    }
+    return undefined;
   }
   if (agent === "grok") {
     return globSync(join(homedir(), ".grok/sessions/*", session.value, "chat_history.jsonl"))[0];

@@ -62,6 +62,8 @@ it("delegates one verified account to isolated workers, with durable revocation 
     directory: join(root, "grants"),
     credentials,
     host,
+    // The fleet kill switch must not weaken or revoke manual grant behavior.
+    fleetTools: async () => "off" as const,
   };
   let worker = new WorkerMcp(options);
   const app = await createClankieApp({

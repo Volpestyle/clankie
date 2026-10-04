@@ -1,3 +1,5 @@
+import { FleetProjectMembership } from "./fleet-project-membership.ts";
+import { fleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
 import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { DiscordRoomVoice } from "./discord-room-voice.ts";
@@ -17,6 +19,7 @@ import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorwa
 import { HostedHeartbeat } from "./hosted-heartbeat.ts";
 import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
 import { WorkerMcp } from "./worker-mcp.ts";
+import { OpenCodeProfiles } from "./opencode-profiles.ts";
 import { createAgentSessions } from "./agent-sessions.ts";
 /**
  * Composition root for the merged Clankie service: the surviving control-plane
@@ -91,7 +94,8 @@ import { createEmailPort } from "./email.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
-import { createProjectMembershipResolver, createProjectWorkspaceResolver } from "./project-membership.ts";
+import { createOpenCodeNativeHost } from "./captain/opencode-native-host.ts";
+import { createProjectWorkspaceResolver } from "./project-membership.ts";
 import {
   createRemoteProjectObserver,
   createRemoteWorkspaceCanonical,
@@ -549,12 +553,18 @@ const runtimes = new ExecutionConnections({
 });
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
-const agentSessions = createAgentSessions(settingsStore);
+const agentSessions = createAgentSessions(
+  settingsStore,
+  undefined,
+  new OpenCodeProfiles(join(stateRoot, "captain")),
+);
 // Work items in each repo's own convention (ADR 0191): Linear rides his
 // connected account, GitHub the owner's GitHub connection or gh login (a
 // hosted body has only the connection, ADR 0196), files the repo itself.
 const workItems = createWorkItemsService({
   stateDirectory: stateRoot,
+  projects: async () => (await settingsStore.load()).projects,
+  localMachineId: "local",
   workspace: () => startupSettings.captain.workingDirectory ?? process.cwd(),
   mcpHost,
   githubToken: () => githubConnectionToken(operatorCredentialStore),
@@ -600,7 +610,14 @@ const projectGitWorktree: ObserveProjectGitWorktree = (root, cwd) =>
 
 const projectProcessObserver = (fleet: string, pane: string) =>
   fleet === "default" ? localProjectProcessObserver(fleet, pane) : remoteProjectObserver(fleet, pane);
-const localCodexSeats = new LocalCodexSeats(herdr.binding);
+const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
+  path: join(stateRoot, "local-codex-seats.json"),
+  observeOccupant: async (pane) => {
+    const proof = await localProjectProcessObserver("default", pane);
+    return proof?.nativeSessionPending ? undefined : proof?.nativeOccupantId;
+  },
+  warn: (message) => logger.warn({ event: "local_codex_seats.unreadable" }, message),
+});
 const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-room-observations.json"));
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
@@ -820,6 +837,10 @@ const captain = createCaptain(
       remoteCodexSeats.register(launch, proofFleetLinks?.lifetime(launch.fleet) ?? (() => false)),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
+    openCodeNative: createOpenCodeNativeHost({
+      binding: localFleetBinding,
+      processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
+    }),
     repoRoot,
     ...(startupSettings.captain.workingDirectory === undefined
       ? {}
@@ -895,16 +916,16 @@ const workerMcp = new WorkerMcp({
   credentials: operatorCredentialStore,
   host: mcpHost,
   projects: async () => (await settingsStore.load()).projects,
-  membership: createProjectMembershipResolver({
-    settings: async () => (await settingsStore.load()).projects,
-    hire: (proof) => captain.lookupProjectHire(proof),
-    remoteCanonical,
-    worktreeRoot: projectWorktreeRoot,
-    gitWorktree: projectGitWorktree,
-  }),
+  fleetTools: async () => (await settingsStore.load()).fleet.tools,
 });
 
 const clankie = await createClankieApp({
+  fleetProjectMembership: new FleetProjectMembership({
+    settings: async () => (await settingsStore.load()).projects,
+    binding: localFleetBinding,
+    hires: captain,
+    ...fleetMembershipNative(localFleetBinding),
+  }),
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
   roomObservations,

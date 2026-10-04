@@ -118,7 +118,7 @@ process session ID. A successful SSH call or an Active console in
 A plain shell pane cannot satisfy `agent prompt`, `agent wait`, or an agent
 completion watch; prepare a recognized disposable agent before that proof.
 
-The [lead handoff runbook](../fleet-lead-handoff.md) is an optional procedure,
+The former coordinator lead handoff runbook was an optional procedure,
 not part of the rescoped oversight proof or authorization to retire the PC lead.
 
 ## Alternatives

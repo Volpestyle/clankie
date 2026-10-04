@@ -1,19 +1,23 @@
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import type { SavedAgentSession } from "../src/agent-sessions.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
-import type { SpawnOperatorSeat } from "@clankie/protocol";
+import { ProjectSchema, ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { OPERATOR_AGENT_ROLES, type SpawnOperatorSeat } from "@clankie/protocol";
 import { ProjectHires, type ProjectHireProcessProof } from "../src/captain/project-hires.ts";
 import {
   HerdrWatchStore,
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
-import { selectHireProject, nativeHireProject } from "../src/captain/project-hire-context.ts";
+import {
+  localWorkspaceProject,
+  selectHireProject,
+  nativeHireProject,
+} from "../src/captain/project-hire-context.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -80,7 +84,7 @@ async function fixture(harness: "claude" | "codex" = "claude") {
     projectHirePolicy: {
       settings: async () => projectSettings,
       tools: async () => ["linear_get_issue"],
-      project: async () => "game",
+      project: async (): Promise<string | undefined> => "game",
       proof: vi.fn(async (fleet: string, pane: string) =>
         fleet === "default" && pane === "p1" ? processProof : undefined,
       ),
@@ -91,6 +95,109 @@ async function fixture(harness: "claude" | "codex" = "claude") {
 }
 
 describe("project hiring", () => {
+  it.each(["same", "other"])(
+    "hires into an existing workspace despite a missing %s project approval",
+    async (scope) => {
+      const f = await fixture();
+      const path = await realpath(f.root);
+      const stale = {
+        id: "removed",
+        machineId: "local",
+        platform: "posix" as const,
+        path: join(path, "removed"),
+      };
+      f.projectSettings.projects[0]!.workspaces = [
+        { id: "repo", machineId: "local", platform: "posix", path },
+      ];
+      if (scope === "same") f.projectSettings.projects[0]!.workspaces.push(stale);
+      else
+        f.projectSettings.projects.push(
+          ProjectSchema.parse({ id: "other", name: "Other", workspaces: [stale] }),
+        );
+      const original = structuredClone(f.projectSettings);
+      f.options.projectHirePolicy.project = () => localWorkspaceProject(f.projectSettings, f.root);
+      try {
+        expect((await f.store.spawnSeat(request(f.root))).outcome).toBe("spawned");
+        expect(f.runner.startAgent).toHaveBeenCalledOnce();
+        expect(f.projectSettings).toEqual(original);
+      } finally {
+        f.store.close();
+      }
+    },
+  );
+
+  it("still refuses a missing hire destination and a changed approved path", async () => {
+    const f = await fixture();
+    try {
+      const path = await realpath(f.root);
+      const alias = join(path, "alias");
+      await symlink(path, alias);
+      f.projectSettings.projects[0]!.workspaces = [
+        { id: "alias", machineId: "local", platform: "posix", path: alias },
+      ];
+      await expect(localWorkspaceProject(f.projectSettings, join(path, "missing"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(localWorkspaceProject(f.projectSettings, path)).rejects.toThrow(
+        "workspace path has changed",
+      );
+    } finally {
+      f.store.close();
+    }
+  });
+
+  it.each(OPERATOR_AGENT_ROLES)(
+    "inherits host launch choices for the built-in %s role when project roles are unset",
+    async (role) => {
+      const f = await fixture();
+      f.projectSettings.projects[0]!.roles = [];
+      const input = {
+        ...request(f.root),
+        harness: "claude" as const,
+        role,
+        model: "host-model",
+        effort: "medium" as const,
+      };
+      try {
+        expect((await f.store.spawnSeat(input)).outcome).toBe("spawned");
+        expect(f.runner.startAgent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            kind: "claude",
+            args: expect.arrayContaining(["--model", "host-model", "--effort", "medium"]),
+          }),
+        );
+        await expect(
+          nativeHireProject(
+            f.projectSettings,
+            proof.nativeOccupantId,
+            proof,
+            () => f.store.projectHireAssignment("default", "p1", proof),
+            undefined,
+          ),
+        ).resolves.toBe("game");
+        expect(f.projectSettings.projects[0]!.roles).toEqual([]);
+      } finally {
+        f.store.close();
+      }
+    },
+  );
+
+  it("does not inherit custom roles or bypass an explicitly configured role list", async () => {
+    const f = await fixture();
+    const ledger = new ProjectHires(join(f.root, "ledger.json"));
+    try {
+      expect(() =>
+        ledger.reserve(f.projectSettings, "game", { ...request(f.root), role: "builder" }),
+      ).toThrow("has no builder role");
+      f.projectSettings.projects[0]!.roles = [];
+      expect(() => ledger.reserve(f.projectSettings, "game", request(f.root))).toThrow(
+        "has no Engineer role",
+      );
+    } finally {
+      f.store.close();
+    }
+  });
+
   it.each([
     "bound",
     "wrong-pane",

@@ -15,6 +15,8 @@ import {
   MODEL_SELECT_PATH,
   MODEL_KEY_REMOVE_PATH,
   MODEL_SUBSCRIPTIONS_PATH,
+  MODEL_OPTIONS_PATH,
+  MODEL_EFFORT_SET_PATH,
 } from "./model-keys.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -57,6 +59,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: MODEL_SELECT_PATH, target: "control" },
   { method: "POST", path: MODEL_KEY_REMOVE_PATH, target: "control" },
   { method: "GET", path: MODEL_SUBSCRIPTIONS_PATH, target: "control" },
+  { method: "GET", path: MODEL_OPTIONS_PATH, target: "control" },
+  { method: "POST", path: MODEL_EFFORT_SET_PATH, target: "control" },
   { method: "GET", path: ACCOUNTS_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_GITHUB_START_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_GITHUB_POLL_PATH, target: "control" },

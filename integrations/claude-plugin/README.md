@@ -22,13 +22,13 @@ plugin can uniquely declare. Everything else lives in the service and the
 
 ## What the plugin carries
 
-| Piece                                                                                                                                                                              | File                       | What it does                                                                                                                                                 |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Output style `Clankie`                                                                                                                                                             | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`. |
-| `SessionStart` hook                                                                                                                                                                | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,fleet,address,model`: the owner persona, reach, address, model card                                 |
-| `UserPromptSubmit` hook                                                                                                                                                            | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card, once per session and again when it changes                                             |
-| MCP server `clankie`                                                                                                                                                               | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                               |
-| Skills `/clankie:clankie`, `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:work-items`, `/clankie:computer-use-delegation`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                            |
+| Piece                                                                                                                                                                              | File                       | What it does                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Output style `Clankie`                                                                                                                                                             | `output-styles/clankie.md` | His identity on top of Claude Code's engineering instructions (`keep-coding-instructions: true`); forced on while enabled. Generated from `instructions.md`.                                                |
+| `SessionStart` hook                                                                                                                                                                | `hooks/hooks.json`         | `clankie prompt --lane operator --sections persona,reach,address,model --harness claude`: the owner persona, reach, address, model card, and only the project instructions Claude Code does not load itself |
+| `UserPromptSubmit` hook                                                                                                                                                            | `hooks/hooks.json`         | `clankie memory-card --lane operator --hook`: the newest memory card once per session, then only its new notes                                                                                              |
+| MCP server `clankie`                                                                                                                                                               | `.mcp.json`                | `clankie mcp --lane operator`: his tool bank over stdio, bearer read from the broker, never from a config file                                                                                              |
+| Skills `/clankie:clankie`, `/clankie:this-machine`, `/clankie:trace-clankie`, `/clankie:lead`, `/clankie:work-items`, `/clankie:computer-use-delegation`, `/clankie:research-team` | `skills/`                  | Links to the shipped skills, available from any working directory                                                                                                                                           |
 
 The output style is generated: edit `apps/clankie/src/captain/instructions.md`
 and run `node integrations/claude-plugin/build.mjs`. `node
@@ -52,12 +52,15 @@ clankie claude --dry-run    # print the launch plan as JSON without starting Cla
 clankie claude2           # use your claude2 shell alias/function for another account
 ```
 
-`clankie seat` is also supported. Numbered Claude commands load your interactive
+Numbered Claude commands load your interactive
 `$SHELL` to resolve account aliases and functions.
 
-`clankie seat` needs Claude Code on `PATH` and a TTY. It projects this plugin into
+`clankie claude` needs Claude Code on `PATH` and a TTY. It projects this plugin into
 a fresh private directory, linking the same identity, hooks and MCP config with
-only skills included by `skills.opinionated` and `skills.exclude`. This supports
+only skills included by `skills.opinionated` and `skills.exclude`. A bundled skill
+whose name is already installed in the Claude profile's own `skills/` is left
+out too, so the owner's copy wins and each skill is listed once (plain `claude`
+only; a numbered command's profile is not visible to the launcher). This supports
 arbitrary exclusions as well as a product-only seat without generating a separate
 build for every combination. The output-style generator remains the single source
 for both settings.
@@ -111,7 +114,7 @@ to ordinary Claude sessions too. The launcher only changes session settings.
 
 ```bash
 claude plugin disable clankie@clankie  # if previously installed
-clankie seat --dry-run                # projected plugin, selected skills, channel: true
+clankie claude --dry-run                # projected plugin, selected skills, channel: true
 ```
 
 In the session, `/mcp` lists the `clankie` server, `/clankie:this-machine`
@@ -197,7 +200,7 @@ bank, not the harness.
 
 | Symptom                                    | Fix                                                                                        |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| He answers as Claude Code                  | The seat was not launched by `clankie seat`, which enables the plugin for its session      |
+| He answers as Claude Code                  | The seat was not launched by `clankie claude`, which enables the plugin for its session    |
 | Every Claude Code session answers as him   | The plugin is enabled at user scope; `claude plugin disable clankie@clankie`               |
 | `/mcp` shows `clankie` failed              | The service is down or the operator credential is missing: `clankie status`                |
 | No persona or memory card at session start | `clankie` is not on the hook's `PATH`; `pnpm cli:install` symlinks it into `~/.local/bin`  |
@@ -288,7 +291,7 @@ native session proof; installation alone supplies neither.
 
 ### Working beside Clankie
 
-The `clankie` skill teaches native fleet agents how to use project-granted tools,
+The `clankie` skill teaches native fleet agents how to use fleet connected tools through the two-tool bridge,
 check their connected actor, inspect conversations and sessions, and interpret
 delivery receipts. Its authored source is `.agents/skills/clankie/SKILL.md`.
 The operator Claude plugin links it; `worker-skills` links the canonical catalog.

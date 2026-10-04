@@ -14,7 +14,7 @@ import {
 import { dirname } from "node:path";
 import { z } from "zod";
 import { operatorAgentRoleKey, SpawnOperatorSeatSchema, type SpawnOperatorSeat } from "@clankie/protocol";
-import { type ProjectsSettings } from "@clankie/protocol/projects";
+import { projectRolePolicy, type ProjectsSettings } from "@clankie/protocol/projects";
 
 const ProcessSchema = z.object({ pid: z.number().int().positive(), startTime: z.string().min(1) }).strict();
 const ProofSchema = z
@@ -58,6 +58,18 @@ export type ProjectHireAssignment =
   | { state: "none" }
   | { state: "invalid" }
   | { state: "assigned"; projectId: string; role?: string; occupantId: string };
+
+/** Private display-read snapshot; never sent over HTTP or accepted from callers. */
+export type ProjectHireMembershipCandidate =
+  | { state: "none" | "unconfirmed" }
+  | {
+      state: "confirmed";
+      revision: string;
+      seat: string;
+      nativeOccupantId: string;
+      harness: string;
+      generic: boolean;
+    };
 
 /** Controller state: semantic persona assignments cannot create, finish or release these claims. */
 export class ProjectHires {
@@ -196,9 +208,7 @@ export class ProjectHires {
       throw new Error(
         `${project.name} allows ${project.workerCap} running agents. ${project.workerCap === 0 ? "Raise this limit in project settings before hiring." : "Close an agent’s Herdr pane before hiring another."}`,
       );
-    const selected = project.roles.find(
-      (r) => role !== undefined && operatorAgentRoleKey(r.role) === operatorAgentRoleKey(role),
-    );
+    const selected = role === undefined ? undefined : projectRolePolicy(project, role);
     if (
       selected?.concurrencyCap !== undefined &&
       live.filter(
@@ -298,6 +308,34 @@ export class ProjectHires {
           a.gone = true;
     });
   }
+  /** Read only. A speculative observation is not a confirmed original launch. */
+  public membershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate {
+    const entry = this.read()
+      .allocations.filter((a) => (a.request.fleet ?? "default") === fleet && a.pane === pane)
+      .at(-1);
+    if (!entry) return { state: "none" };
+    if (!entry.started || !entry.confirmed || entry.gone || !entry.proof || !entry.seat || !entry.occupantId)
+      return { state: "unconfirmed" };
+    return {
+      state: "confirmed",
+      revision: createHash("sha256").update(JSON.stringify(entry)).digest("hex"),
+      seat: entry.seat,
+      nativeOccupantId: entry.occupantId,
+      harness: entry.request.harness,
+      generic: entry.proof.shell.pid !== entry.proof.processes[0]!.pid,
+    };
+  }
+  public confirmedAssignment(
+    fleet: string,
+    pane: string,
+    revision: string,
+    proof: ProjectHireProcessProof,
+  ): ProjectHireAssignment {
+    const candidate = this.membershipCandidate(fleet, pane);
+    if (candidate.state !== "confirmed" || candidate.revision !== revision) return { state: "invalid" };
+    return this.assignment(fleet, pane, proof);
+  }
+
   public assignment(fleet: string, pane: string, proof?: ProjectHireProcessProof): ProjectHireAssignment {
     const records = this.read().allocations.filter(
       (a) => (a.request.fleet ?? "default") === fleet && a.pane === pane,
@@ -339,10 +377,7 @@ function projectHireRequest(
 ): SpawnOperatorSeat {
   const project = settings.projects.find((p) => p.id === projectId);
   if (!project) throw new Error("Choose an existing project before hiring.");
-  const role =
-    request.role === undefined
-      ? undefined
-      : project.roles.find((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(request.role!));
+  const role = request.role === undefined ? undefined : projectRolePolicy(project, request.role);
   if (request.role !== undefined && !role)
     throw new Error(`${project.name} has no ${request.role} role. Choose one of its roles before hiring.`);
   return {
@@ -354,8 +389,7 @@ function projectHireRequest(
 }
 
 function launchPolicy(settings: ProjectsSettings, projectId: string, role?: string): string {
-  const selected = settings.projects
-    .find((p) => p.id === projectId)
-    ?.roles.find((r) => role !== undefined && operatorAgentRoleKey(r.role) === operatorAgentRoleKey(role));
+  const project = settings.projects.find((p) => p.id === projectId);
+  const selected = project === undefined || role === undefined ? undefined : projectRolePolicy(project, role);
   return JSON.stringify([selected?.harness, selected?.model, selected?.effort]);
 }

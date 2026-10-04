@@ -156,7 +156,7 @@ even in the same directory or account. `--resume` retains the last seat's bindin
 `--conversation ID` selects an existing chat, including `global-default` for the
 shared global head. Dry runs create no conversation.
 
-`clankie seat --harness codex` selects the [Codex plugin](../integrations/codex-plugin/README.md).
+`clankie codex` selects the [Codex plugin](../integrations/codex-plugin/README.md).
 Its trusted native hooks add the shared identity, service context and memory card,
 and sync redacted transcript entries to the selected conversation. The real Codex
 TUI creates a thread on its owned app-server; the launcher reuses the same Codex
@@ -165,17 +165,20 @@ escalations. Hook trust is an owner step in `/hooks`. Until those hooks run, the
 launcher does not bind the outbox. Claude remains the default harness.
 
 The operator seat is a place any harness can sit
-([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)). `clankie seat`
+([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)). `clankie claude`
 opens Claude Code, on the owner's own plan, as Clankie: the plugin at
 [`integrations/claude-plugin`](../integrations/claude-plugin/README.md) forces
 his identity as the output style, injects the owner persona, reach, address,
 and service model card at session start (`clankie prompt`) and the newest
-memory card once per session and again when it changes (`clankie memory-card --hook`), and names one stdio MCP
+memory card once per session and then only its new notes (`clankie memory-card --hook`), and names one stdio MCP
 server, `clankie mcp`, that bridges to the service's lane tool bank at
 `/v1/mcp` with the operator bearer read from the broker. The bank is the same
 authored registry the pi session is built from, wrapped once at runtime and
 scoped by the bearer's lane, so a Codex pane with the same entry is the same
-seat. A herdr pane named `clankie` is his head: the census binds it to his own
+seat. A connected service lists only its `initialTools`; the rest of its catalog
+is reached through `mcp_tool_search` and `mcp_tool_call`, so a harness does not
+carry every tracker schema on each request. Per-turn hook commands
+(`memory-card`, `seat-sync`, `seat-hook`) skip the launcher's import graph. A herdr pane named `clankie` is his head: the census binds it to his own
 persona rather than a fleet contact and projects its transcript into the
 conversation the app pins. While a seat is bound, self-wakes, herdr completion
 watches, and room escalations reach it as channel events pushed by `clankie

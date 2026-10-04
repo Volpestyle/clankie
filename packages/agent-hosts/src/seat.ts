@@ -17,7 +17,28 @@ import type { DeliveryStage } from "@clankie/protocol";
  * blocked or uncertain delivery without typing into the owner's terminal.
  */
 
-export type SeatHarness = "claude" | "codex";
+export type SeatHarness = "claude" | "codex" | "opencode";
+
+/** Internal controller observation. Never accepted from a request or plugin payload. */
+export interface SeatProcessIdentity {
+  readonly nativeOccupantId: string;
+  readonly fleet: string;
+  readonly pane: string;
+  readonly binding: { readonly socketPath: string; readonly session?: string };
+  readonly processes: readonly { readonly pid: number; readonly startTime: string }[];
+  readonly shell: { readonly pid: number; readonly startTime: string };
+}
+
+/** A harness requiring a true initial argv process, before its native pane exists. */
+export interface PreparedSeatLaunch {
+  readonly command: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  start(view: SeatView, signal?: AbortSignal): Promise<SeatStartResult>;
+  /** Exact allocated native root/controller, rechecked across host admission awaits. */
+  verify(ref: SeatRef): Promise<SeatProcessIdentity>;
+  /** Retires only this controller and its temporary config, never an unproved pane. */
+  dispose(): Promise<void>;
+}
 
 /** What a hire asks for, in harness-neutral terms. */
 export interface SeatLaunch {
@@ -129,6 +150,23 @@ export type SeatEvent =
       readonly text?: string;
       readonly stopReason?: string;
     }
+  /** An observation wake without evidence that the dispatched message completed. */
+  | {
+      readonly type: "settlement_unconfirmed";
+      readonly at: string;
+      readonly reason:
+        | "no_native_completion"
+        | "message_correlation_unavailable"
+        | "dispatch_boundary_unknown"
+        | "status_unavailable";
+      /** Authentic native Stop data only; never correlated by time or equal text. */
+      readonly observedStop?: {
+        readonly at: string;
+        readonly ok: boolean;
+        readonly text?: string;
+        readonly stopReason?: string;
+      };
+    }
   /** Waiting on the owner in the view, such as a permission prompt. */
   | { readonly type: "blocked"; readonly at: string; readonly reason: string }
   /** Programmatic control ended (its channel is gone); the owner can still use the pane. */
@@ -138,12 +176,16 @@ export type SeatEvent =
 /** Control of one live seat. */
 export interface SeatControl {
   readonly ref: SeatRef;
+  /** Original prepared controller/root observation; never a wire or saved-metadata proof. */
+  verify?(): Promise<SeatProcessIdentity>;
   send(message: string, options?: { readonly timeoutMs?: number }): Promise<SeatDelivery>;
   status(): Promise<SeatStatus>;
   /**
    * The next settlement at or after now: `turn_completed`, `blocked`,
-   * `released` or `exited`. Resolves at once with the latest settlement when
-   * the seat is not working. Rejects only when `signal` aborts.
+   * `released`, `exited`, or an explicitly unconfirmed observation. Resolves
+   * at once with the latest eligible observation when the seat is not working.
+   * Settlement is not per-message completion; adapters must preserve missing
+   * native correlation. Rejects only when `signal` aborts.
    */
   settled(signal?: AbortSignal): Promise<SeatEvent>;
   /** Interrupt the running turn. False when there is nothing to interrupt or no control. */
@@ -154,6 +196,7 @@ export interface SeatControl {
 
 export interface HarnessSeatAdapter {
   readonly harness: SeatHarness;
+  prepare?(launch: SeatLaunch, signal?: AbortSignal): Promise<PreparedSeatLaunch>;
   start(launch: SeatLaunch, view: SeatView, signal?: AbortSignal): Promise<SeatStartResult>;
   /**
    * Control of a seat this adapter started, possibly before a service restart.

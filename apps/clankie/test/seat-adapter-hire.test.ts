@@ -61,6 +61,8 @@ async function fixture(
     start: vi.fn((_launch, view) => start(view)),
     attach: vi.fn(async () => control),
   };
+  // Probe the retired input path: even a supplied implementation must never run.
+  const terminalInput = { promptAgent: vi.fn(async () => undefined) };
   const runner = {
     createTab: vi.fn(async () => agent.paneId),
     startAgent: vi.fn(async () => undefined),
@@ -68,7 +70,7 @@ async function fixture(
     resolveTerminal: vi.fn(async () => agent),
     wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
     runInPane: vi.fn(async () => undefined),
-    promptAgent: vi.fn(async () => undefined),
+    ...terminalInput,
     closePane: vi.fn(async () => undefined),
     transcript: vi.fn(async () => ({
       sessionKey: "k",

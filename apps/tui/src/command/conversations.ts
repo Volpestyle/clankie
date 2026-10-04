@@ -1,3 +1,4 @@
+import { ProjectProposalLocatorSchema, ProjectProposalTargetSchema } from "@clankie/protocol/projects";
 import { ClankieApiClient } from "@clankie/api-client";
 import { parseArgs } from "node:util";
 import {
@@ -11,6 +12,8 @@ import {
 } from "../session/operator-conversations.ts";
 import {
   UpsertOperatorChannelSchema,
+  ConversationQuestionTargetSchema,
+  ConversationQuestionAnswerSchema,
   type OperatorConversationServiceClient,
   type UpsertOperatorChannel,
 } from "@clankie/protocol";
@@ -18,6 +21,8 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 
 const USAGE = [
   "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
+  "       clankie conversations project-proposal ID --request UUID --incarnation UUID",
+  "       clankie conversations confirm-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
   "       clankie conversations channels | rooms",
   "       clankie conversations head OWNER HEAD|none",
   "       clankie conversations channel [CHANNEL_ID] [--title TITLE] [--member PERSONA_ID]...",
@@ -41,6 +46,10 @@ export async function runConversationsCommand(
     readonly stdin?: AsyncIterable<unknown> & { readonly isTTY?: boolean };
   },
 ): Promise<number> {
+  if (
+    ["questions", "answer", "cancel-question", "project-proposal", "confirm-project"].includes(args[0] ?? "")
+  )
+    return runQuestionAction(args, options);
   if (args[0] === "head") {
     if (args.length !== 3 || !args[1] || !args[2]) throw new Error(USAGE);
     const env = options.env ?? process.env;
@@ -241,4 +250,104 @@ async function runChannelAction(
   }
   outputJson(stdout, await client.channel(request));
   return 0;
+}
+
+async function runQuestionAction(
+  args: readonly string[],
+  options: ConversationsCommandOptions,
+): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: {
+      proposal: { type: "string" },
+      artifact: { type: "string" },
+      "projects-revision": { type: "string" },
+      request: { type: "string" },
+      incarnation: { type: "string" },
+      revision: { type: "string" },
+      option: { type: "string" },
+      text: { type: "string" },
+      stdin: { type: "boolean" },
+    },
+  });
+  const [action, conversationId, requestId] = positionals;
+  if (!conversationId || positionals.length > 3)
+    throw new Error("Question action requires an exact conversation ID");
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  if (!credential) throw new Error("Owner operator credential required for preference questions");
+  const client = createCaptainOperatorConversationClient(
+    createCaptainRouteClient({
+      host: commandHost({ ...options, env }),
+      captainToken: credential.token,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    }),
+  );
+  if (action === "project-proposal" || action === "confirm-project") {
+    if (positionals.length !== 2 || values.option || values.text || values.stdin)
+      throw new Error("Project confirmation accepts an exact proposal target only");
+    const locator = ProjectProposalLocatorSchema.parse({
+      conversationId,
+      requestId: values.request,
+      incarnationId: values.incarnation,
+    });
+    if (
+      action === "project-proposal" &&
+      (values.revision || values.proposal || values.artifact || values["projects-revision"])
+    )
+      throw new Error("Proposal read accepts request and incarnation only");
+    const result =
+      action === "project-proposal"
+        ? await client.projectProposalGet!(locator)
+        : await client.projectProposalConfirm!(
+            ProjectProposalTargetSchema.parse({
+              ...locator,
+              expectedRevision: values.revision === undefined ? undefined : Number(values.revision),
+              proposalId: values.proposal,
+              artifactSha256: values.artifact,
+              expectedProjectsRevision: values["projects-revision"],
+            }),
+          );
+    outputJson(options.stdout ?? process.stdout, result);
+    return result.status === "pending" || result.status === "created" ? 0 : 1;
+  }
+  if (values.proposal || values.artifact || values["projects-revision"])
+    throw new Error("Project target flags require a project action");
+  let result;
+  if (action === "questions") {
+    if (requestId || Object.keys(values).some((k) => k !== "request"))
+      throw new Error("Usage: conversations questions ID [--request UUID]");
+    result = await client.inputGet!(conversationId, values.request);
+  } else {
+    const target = ConversationQuestionTargetSchema.parse({
+      conversationId,
+      requestId,
+      incarnationId: values.incarnation,
+      expectedRevision: values.revision === undefined ? undefined : Number(values.revision),
+    });
+    if (action === "cancel-question") {
+      if (values.option !== undefined || values.text !== undefined || values.stdin || values.request)
+        throw new Error("Cancel takes a request, incarnation and revision only");
+      result = await client.inputCancel!(target);
+    } else {
+      if (
+        [values.option !== undefined, values.text !== undefined, values.stdin === true].filter(Boolean)
+          .length !== 1 ||
+        values.request
+      )
+        throw new Error("Answer needs exactly one of --option UUID, --text TEXT, or --stdin");
+      const answer = ConversationQuestionAnswerSchema.parse(
+        values.option !== undefined
+          ? { kind: "choice", optionId: values.option }
+          : { kind: "text", text: values.stdin ? await readStdin(options, "answer text") : values.text },
+      );
+      result = await client.inputAnswer!({ ...target, answer });
+    }
+  }
+  outputJson(options.stdout ?? process.stdout, result);
+  return result.status === "ready" || result.status === "resolved" ? 0 : 1;
 }

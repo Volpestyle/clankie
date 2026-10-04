@@ -53,12 +53,41 @@ function fixture() {
 
 it("reads the exact remote native session on demand and observes later appends", async () => {
   const { host, append } = fixture();
-  const read = remoteHerdrTranscriptReader(host);
+  let time = 0;
+  const read = remoteHerdrTranscriptReader(host, () => time);
   expect(host.list).not.toHaveBeenCalled();
   expect(await read(agent)).toMatchObject({ entries: [{ type: "message", text: "Remote answer" }] });
   append();
+  time += 5_000;
   expect((await read(agent))?.entries).toHaveLength(2);
   expect(host.list).toHaveBeenCalledTimes(1);
+});
+
+it("serves a recent read as is, then re-reads the tail only when the file grew", async () => {
+  const { host, append } = fixture();
+  let time = 0;
+  const read = remoteHerdrTranscriptReader(host, () => time);
+  await read(agent);
+  const afterFirst = vi.mocked(host.readBytes).mock.calls.length;
+  // Within the fresh window: no round trip at all.
+  await read(agent);
+  expect(host.readBytes).toHaveBeenCalledTimes(afterFirst);
+  // Past it, unchanged: one size probe, no tail read.
+  time += 5_000;
+  expect((await read(agent))?.entries).toHaveLength(1);
+  expect(host.readBytes).toHaveBeenCalledTimes(afterFirst + 1);
+  // Grown: the probe sees it and the tail is read again.
+  append();
+  time += 5_000;
+  expect((await read(agent))?.entries).toHaveLength(2);
+  expect(vi.mocked(host.readBytes).mock.calls.length).toBeGreaterThan(afterFirst + 2);
+});
+
+it("shares one remote read between concurrent opens of a session", async () => {
+  const { host } = fixture();
+  const read = remoteHerdrTranscriptReader(host, () => 0);
+  const [first, second] = await Promise.all([read(agent), read(agent)]);
+  expect(first).toBe(second);
 });
 
 it("does not read a prefix match, another harness, an ambiguous id, or an unlisted path", async () => {

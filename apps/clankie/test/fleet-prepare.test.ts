@@ -75,7 +75,19 @@ describe("preparing a machine for Claude workers (VUH-1527)", () => {
         "C:\\Users\\volpe\\other": { mcpServers: { "other-linear": { url: "https://mcp.linear.app/x" } } },
       },
     };
-    const shell = vi.fn(async (_command: string) => JSON.stringify(state));
+    const shell = vi.fn(async (_command: string) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        sources: [
+          state.mcpServers,
+          {
+            "work-linear": {
+              command: state.projects["C:\\Users\\volpe\\repos"].mcpServers["work-linear"].args[0],
+            },
+          },
+        ],
+      }),
+    );
     expect(await remoteClaudeTrackerDeny(pc, shell)("c:\\users\\volpe\\repos\\kh2")).toEqual([
       "mcp__claude_ai_Linear",
       "mcp__linear",

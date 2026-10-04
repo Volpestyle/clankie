@@ -1,4 +1,6 @@
-import { createConnection } from "node:net";
+import { createConnection, createServer, type Socket } from "node:net";
+import type { HttpBindings } from "@hono/node-server";
+import type { LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, spawn } from "node:child_process";
@@ -197,7 +199,7 @@ describe("a fleet link (VUH-1527)", () => {
     expect(posix).toContain("umask 077");
   });
 
-  it("writes the link once ssh allocates the remote port, and authenticates only that link's token", async () => {
+  it.each(["disconnect", "ssh-loss"])("writes a bearer link and invalidates it on %s", async (loss) => {
     const child = new EventEmitter() as ChildProcess & EventEmitter;
     const stderr = new PassThrough();
     Object.assign(child, { stderr, kill: vi.fn(() => true) });
@@ -227,14 +229,25 @@ describe("a fleet link (VUH-1527)", () => {
     expect(decoded(shell.mock.calls[1]![0])).toContain("'pc.json'");
     expect(links.authenticate(written.token)).toBe("pc");
     expect(links.authenticate(`${written.token}x`)).toBeUndefined();
+    if (loss === "ssh-loss") {
+      child.emit("exit", 1);
+      expect(links.authenticate(written.token)).toBeUndefined();
+    }
     links.start([], 4567);
     expect(links.status("pc")).toBeUndefined();
     expect(links.authenticate(written.token)).toBeUndefined();
-    expect(child.kill).toHaveBeenCalledTimes(1); // only our SSH tunnel, never a Herdr worker
+    expect(child.kill).toHaveBeenCalledTimes(loss === "disconnect" ? 1 : 0); // only our SSH tunnel
     expect(shell).toHaveBeenCalledTimes(2); // session read and link metadata write, no stop
     links.close();
   });
   it("publishes credential-free PC discovery only after the SSH-bound response channel is ready", async () => {
+    const sockets: Socket[] = [];
+    const service = createServer((socket) => {
+      sockets.push(socket);
+    });
+    await new Promise<void>((resolve) => service.listen(0, "127.0.0.1", resolve));
+    const address = service.address();
+    if (!address || typeof address === "string") throw new Error("No service listener");
     const forward = Object.assign(new EventEmitter(), { stderr: new PassThrough(), kill: vi.fn() });
     const remote = Object.assign(new EventEmitter(), {
       stdin: new PassThrough(),
@@ -249,16 +262,20 @@ describe("a fleet link (VUH-1527)", () => {
         ? JSON.stringify({ sessions: [{ name: "default", socket_path: "C:\\herdr.sock" }] })
         : "",
     );
-    const links = new FleetLinks({ shell: () => shell, stream: () => stream, spawn: launch });
-    links.start([pc], 4567);
+    const projectProof = vi.fn(async () => {
+      throw new Error("No project proof needed for admitted tools");
+    });
+    const links = new FleetLinks({ shell: () => shell, stream: () => stream, spawn: launch, projectProof });
+    links.start([pc], address.port);
     await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce());
     const argv = vi.mocked(launch).mock.calls[0]![1] as string[];
     const reverse = argv[argv.indexOf("-R") + 1]!;
     const returnPort = Number(reverse.split(":").at(-1));
     forward.stderr.write("Allocated port 55000 for remote forward\n");
-    const frame = (kind: number, payload: Buffer) => {
+    const frame = (kind: number, payload: Buffer, id = 0) => {
       const value = Buffer.alloc(9 + payload.length);
       value[0] = kind;
+      value.writeUInt32LE(id, 1);
       value.writeUInt32LE(payload.length, 5);
       payload.copy(value, 9);
       return value;
@@ -278,11 +295,30 @@ describe("a fleet link (VUH-1527)", () => {
       expect(written).toContain('"schemaVersion":2');
       expect(written).toContain('"authentication":"local-process"');
       expect(written).not.toContain('"token"');
+      const tuple = Buffer.alloc(8);
+      tuple.writeUInt32LE(4321);
+      tuple.writeUInt32LE(55001, 4);
+      remote.stdout.write(frame(1, tuple, 1));
+      await vi.waitFor(() => expect(sockets).toHaveLength(1));
+      let admitted: LocalFleetIdentity | undefined;
+      const request = new Request("http://local/v1/fleet/mcp", { headers: { "x-clankie-pane": "w8:p1" } });
+      const fetch = links.fetch(async (current) => {
+        admitted = links.identity(current);
+        expect(admitted).toMatchObject({ fleet: "pc", pane: "w8:p1" });
+        expect(await admitted!.validate()).toBe(true);
+        return new Response("admitted");
+      });
+      expect((await fetch(request, { incoming: { socket: sockets[0]! } } as HttpBindings)).status).toBe(200);
+      expect(links.identity(request)).toBeUndefined();
+      expect(projectProof).not.toHaveBeenCalled();
       remote.emit("exit", 1);
       expect(links.status("pc")).toMatchObject({ state: "unreachable" });
+      expect(await admitted!.validate()).toBe(false);
     } finally {
       response.destroy();
       links.close();
+      sockets.forEach((socket) => socket.destroy());
+      service.close();
     }
   });
 });

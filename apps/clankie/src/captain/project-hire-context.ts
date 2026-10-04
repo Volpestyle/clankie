@@ -8,15 +8,27 @@ export async function localWorkspaceProject(
   directory: string,
 ): Promise<string | undefined> {
   const canonicalPath = await realpath(directory);
-  for (const project of settings.projects)
-    for (const workspace of project.workspaces)
-      if (
-        workspace.machineId === "local" &&
-        workspace.platform === "posix" &&
-        (await realpath(workspace.path)) !== workspace.path
-      )
-        throw new Error("A project's workspace path has changed. Check its approved folder before hiring.");
-  const membership = resolveProjectMembership(settings, {
+  const eligible: ProjectsSettings = { ...settings, projects: [] };
+  for (const project of settings.projects) {
+    const workspaces = [];
+    for (const workspace of project.workspaces) {
+      if (workspace.machineId === "local" && workspace.platform === "posix") {
+        try {
+          if ((await realpath(workspace.path)) !== workspace.path)
+            throw new Error(
+              "A project's workspace path has changed. Check its approved folder before hiring.",
+            );
+        } catch (error) {
+          // A removed approval cannot match; it must not block an existing workspace.
+          if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+          throw error;
+        }
+      }
+      workspaces.push(workspace);
+    }
+    eligible.projects.push({ ...project, workspaces });
+  }
+  const membership = resolveProjectMembership(eligible, {
     occupantId: "workspace-selection",
     workspace: { machineId: "local", canonicalPath, platform: "posix" },
   });

@@ -28,13 +28,14 @@ export async function inspectFleetMembership(options: Options): Promise<FleetMem
       hire: "unobserved",
       eligibility: "unproven",
       reason:
-        "Native process, lifetime, and actual cwd could not be proven; bridge and tools are unverified.",
+        "Native project membership could not be proven. Fleet tools depend on link admission and fleet.tools, not project eligibility; the native bridge/catalog were not verified.",
     };
     if (!options.supportedHarnesses.includes(entry.harness))
       return {
         ...row,
         eligibility: "unsupported",
-        reason: "Native host proof does not support this harness.",
+        reason:
+          "Native host proof does not support this harness. This does not deny fleet tools; fleet admission and fleet.tools govern them, and the native catalog was not verified.",
       };
     try {
       const proof = await options.observe(options.machine, entry.pane);
@@ -57,7 +58,7 @@ export async function inspectFleetMembership(options: Options): Promise<FleetMem
         row.reason =
           "Native session reporting is pending; a hired/private seat cannot use startup eligibility.";
       } else {
-        // Reuse the tool policy, with host connection/proof checks explicitly substituting
+        // Reuse project membership policy, with host connection/proof checks substituting
         // for transport checks ONLY in this read-only report. No request identity is admitted.
         membership = await resolve({
           pane: entry.pane,
@@ -66,7 +67,7 @@ export async function inspectFleetMembership(options: Options): Promise<FleetMem
         });
         row.eligibility = membership ? "eligible" : "ineligible";
         row.reason = membership
-          ? "Host-observed project eligibility only; the native bridge socket and tool catalog were not verified."
+          ? "Host-observed project eligibility only. Fleet tools do not require project eligibility; the native bridge socket and tool catalog were not verified."
           : "Project workspace/root or hire policy did not match, or a required observation was unavailable.";
       }
       if (

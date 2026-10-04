@@ -11,7 +11,7 @@ import { fleetLinkFetch } from "../src/fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
-it("retires fleet grants without copying or mutating them and denies remote pane claims", async () => {
+it("retires fleet grants without copying or mutating them and admits bearer fleets without claiming a pane", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-fleet-grants-"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const account: ProviderAccount = {
@@ -101,10 +101,29 @@ it("retires fleet grants without copying or mutating them and denies remote pane
     }),
   });
   expect(issued.status).toBe(400);
+  let firstSession: string | undefined;
   for (const token of ["kh2-link", "pc-link"]) {
-    expect((await rpc(token, "initialize", {})).status).toBe(403);
-    expect((await rpc(token, "tools/call", { name: "linear_get_issue", arguments: {} })).status).toBe(403);
+    const init = await rpc(token, "initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "test", version: "1" },
+    });
+    expect(init.status).toBe(200);
+    const session = init.headers.get("mcp-session-id")!;
+    firstSession ??= session;
+    const listedTools = (await (await rpc(token, "tools/list", {}, session)).json()).result.tools;
+    expect(listedTools.map((tool: { name: string }) => tool.name)).toEqual(["clankie_tools", "clankie_call"]);
+    const called = await (
+      await rpc(
+        token,
+        "tools/call",
+        { name: "clankie_call", arguments: { name: "linear_get_issue", arguments: { id: "A-1" } } },
+        session,
+      )
+    ).json();
+    expect(called.result.isError).toBe(false);
   }
+  expect((await rpc("pc-link", "tools/list", {}, firstSession)).status).toBe(403);
   expect((await rpc("nope", "initialize", {})).status).toBe(401);
   expect(
     (
@@ -122,9 +141,9 @@ it("retires fleet grants without copying or mutating them and denies remote pane
     headers: { authorization: "Bearer owner" },
   });
   expect(await listed.json()).toMatchObject([
-    { fleet: "kh2", status: "retired", detail: expect.stringContaining("access project") },
+    { fleet: "kh2", status: "retired", detail: expect.stringContaining("fleet status") },
   ]);
-  expect(calls).toEqual([]);
+  expect(calls).toHaveLength(2);
   await worker.revoke(grant.grant.grantId);
   expect((await worker.list())[0]!.revokedAt).toBeDefined();
   await worker.close();

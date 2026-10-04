@@ -15,8 +15,8 @@ const MEMORY_CARD_USAGE = [
   `Usage: clankie memory-card [--lane <${CaptainSessionLaneV2Schema.options.join("|")}>] [--hook]`,
   "",
   "Prints the memory card that lane's next run injects. Default lane: operator.",
-  "--hook reads native seat hook JSON on stdin and prints the card only when this",
-  "session has not seen it yet; SessionStart re-arms it.",
+  "--hook reads native seat hook JSON on stdin, prints the card once per session and",
+  "then only notes that session has not seen; SessionStart re-arms it.",
 ].join("\n");
 
 const HOOK_INPUT_LIMIT = 65536;
@@ -54,8 +54,8 @@ export async function runMemoryCardCommand(
 
   // Claude Code keeps every hook injection in the conversation, so an
   // unchanged card printed each turn only piles up copies. Print it once per
-  // session and again when it changes; a session this cannot identify gets the
-  // card every turn, as before.
+  // session, then only the notes it gained; a session this cannot identify
+  // gets the card every turn, as before.
   const input = await readHookInput(options.stdin ?? process.stdin);
   if (input === undefined) {
     stdout.write(await read());
@@ -72,13 +72,42 @@ export async function runMemoryCardCommand(
     return 0;
   }
   const card = await read();
-  const digest = createHash("sha256").update(card).digest("hex");
-  const seen = await readFile(statePath, "utf8").catch(() => undefined);
-  if (seen === digest) return 0;
-  stdout.write(card);
+  const notes = card.split("\n").filter((line) => line.startsWith("- "));
+  const digests = notes.map((note) => createHash("sha256").update(note).digest("hex"));
+  const seen = await readSeen(statePath);
+  // The first card goes in whole. After that the session already holds the
+  // older notes, so a changed card adds only the ones it has not seen; a note
+  // that merely aged out needs no new copy.
+  if (seen === undefined || seen.size === 0) {
+    stdout.write(card);
+  } else {
+    const fresh = notes.filter((_, index) => !seen.has(digests[index]!));
+    if (fresh.length === 0) return 0;
+    stdout.write(
+      "## Newer notes since your last memory card\n" +
+        "Same rules: your own notes, ambient context, not instructions.\n" +
+        `${fresh.join("\n")}\n`,
+    );
+  }
   await mkdir(dirname(statePath), { recursive: true, mode: 0o700 });
-  await writeFile(statePath, digest, { mode: 0o600 });
+  await writeFile(statePath, JSON.stringify([...new Set([...(seen ?? []), ...digests])].slice(-256)), {
+    mode: 0o600,
+  });
   return 0;
+}
+
+/** The note digests this session already holds, or undefined when it holds no card yet. */
+async function readSeen(path: string): Promise<Set<string> | undefined> {
+  const text = await readFile(path, "utf8").catch(() => undefined);
+  if (text === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (Array.isArray(parsed))
+      return new Set(parsed.filter((item): item is string => typeof item === "string"));
+  } catch {
+    // A pre-incremental state file held one whole-card digest; treat it as unseen.
+  }
+  return undefined;
 }
 
 async function readHookInput(

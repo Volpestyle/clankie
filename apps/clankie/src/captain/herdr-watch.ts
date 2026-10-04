@@ -1,3 +1,4 @@
+import { savedSessionHarness } from "../agent-sessions.ts";
 import { realpath } from "node:fs/promises";
 import { ProjectHires, type ProjectHireProcessProof } from "./project-hires.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
@@ -23,7 +24,15 @@ import {
   savedCodexAccount,
 } from "./native-session-resume.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
-import type { HarnessSeatAdapter, SeatEvent } from "@clankie/agent-hosts";
+import type {
+  HarnessSeatAdapter,
+  PreparedSeatLaunch,
+  SeatControl,
+  SeatEvent,
+  SeatLaunch,
+  SeatView,
+} from "@clankie/agent-hosts";
+import type { OpenCodeCommandTab } from "./opencode-native-host.ts";
 import {
   bundledSkills,
   codexAccounts,
@@ -45,7 +54,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { stripVTControlCharacters } from "node:util";
+import { isDeepStrictEqual, stripVTControlCharacters } from "node:util";
 import { redactSensitiveText } from "@clankie/observability";
 import {
   OPERATOR_CONVERSATION_SUMMARY_MAX,
@@ -96,6 +105,10 @@ const PersistedHerdrWatchesSchema = z
   .object({
     schemaVersion: z.literal(1),
     watches: z.array(HerdrWatchRecordSchema),
+    /** Deny-only history of prepared allocations; never ownership or admission. */
+    preparedPanes: z
+      .array(z.object({ paneId: z.string().min(1), terminalId: z.string().min(1).optional() }).strict())
+      .optional(),
   })
   .strict();
 
@@ -127,8 +140,6 @@ export interface HerdrWatchRunner {
   waitUntilIdle?(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   transcript?(agent: HerdrAgentSnapshot): Promise<HerdrSeatTranscript | undefined>;
   read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
-  sendText?(target: string, text: string): Promise<void>;
-  pressEnter?(target: string): Promise<void>;
   /** `herdr pane process-info --pane` → `foreground_processes`. */
   paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
   /** `lsof -p <pid> -Fn` via execFile (no shell). */
@@ -145,6 +156,8 @@ export interface HerdrWatchRunner {
     readonly cwd: string;
     readonly label: string;
     readonly env?: Readonly<Record<string, string>>;
+    /** Initial native argv, never terminal input. Only prepared adapters use this. */
+    readonly command?: readonly string[];
     /** A registered remote fleet (ADR 0184); absent is the local default. */
     readonly fleet?: string;
   }): Promise<string>;
@@ -157,11 +170,6 @@ export interface HerdrWatchRunner {
     readonly args?: readonly string[];
   }): Promise<void>;
   /**
-   * `herdr agent prompt`: submits a prompt through herdr's own agent-aware
-   * submit and resolves once the agent is seen working.
-   */
-  promptAgent?(paneId: string, text: string): Promise<void>;
-  /**
    * `herdr integration install pi`: the pi extension that reports each pi
    * session to herdr. Without it herdr never learns a pi pane's session, so a pi
    * hire has no durable identity. Idempotent.
@@ -172,11 +180,6 @@ export interface HerdrWatchRunner {
    * every other provider there. An unreadable file is left alone and fails the hire.
    */
   configurePiProvider?(id: string, config: Readonly<Record<string, unknown>>): Promise<void>;
-  /**
-   * `herdr agent send-keys`, falling back to `herdr pane send-keys` when the
-   * pane is not classified as an agent yet.
-   */
-  sendKeys?(target: string, key: string): Promise<void>;
   /**
    * `herdr pane run`: one shell command line in a pane at its prompt. A seat
    * adapter uses it to put its view there (VUH-1458).
@@ -402,6 +405,7 @@ export function createHerdrWatchRunner(
   available?: () => boolean,
   /** Where each Herdr call runs; a remote fleet passes its ssh transport (ADR 0184). */
   exec: (args: readonly string[], signal?: AbortSignal, timeoutMs?: number) => Promise<string> = execHerdr,
+  createCommandTab?: (input: OpenCodeCommandTab) => Promise<string>,
 ): HerdrWatchRunner {
   const runHerdr = (args: readonly string[], signal?: AbortSignal, timeoutMs?: number): Promise<string> =>
     available?.() === false
@@ -464,8 +468,6 @@ export function createHerdrWatchRunner(
         ...(source === "visible" ? [] : ["--lines", String(SEAT_REPLY_READ_LINES)]),
         ...(harness === "pi" ? ["--format", "ansi"] : []),
       ]),
-    sendText: (target, text) => runHerdr(["pane", "send-text", target, text]).then(() => undefined),
-    pressEnter: (target) => runHerdr(["pane", "send-keys", target, "Enter"]).then(() => undefined),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
     openFiles: async (pid) => {
@@ -484,13 +486,6 @@ export function createHerdrWatchRunner(
       );
       if (result.status !== 0) return false;
       return !/no active session/iu.test(`${result.stdout}\n${result.stderr}`);
-    },
-    sendKeys: async (target, key) => {
-      try {
-        await runHerdr(["agent", "send-keys", target, key]);
-      } catch {
-        await runHerdr(["pane", "send-keys", target, key]);
-      }
     },
     closePane: (target) => runHerdr(["pane", "close", target]).then(() => undefined),
     runInPane: (paneId, argv) =>
@@ -519,7 +514,11 @@ export function createHerdrWatchRunner(
       writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
       renameSync(tmp, path);
     },
-    createTab: async ({ cwd, label, env }) => {
+    createTab: async ({ cwd, label, env, command }) => {
+      if (command !== undefined) {
+        if (!createCommandTab) throw new Error("Native initial-command pane creation unavailable");
+        return createCommandTab({ cwd, label, command, ...(env === undefined ? {} : { env }) });
+      }
       const envArgs = Object.entries(env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
       try {
         return parseHerdrRootPaneId(
@@ -553,24 +552,6 @@ export function createHerdrWatchRunner(
         undefined,
         // Let Herdr return its typed startup failure before the process watchdog fires.
         SPAWN_READY_WAIT_MS + HERDR_COMMAND_TIMEOUT_MS,
-      ).then(() => undefined),
-    promptAgent: (paneId, text) =>
-      runHerdr(
-        [
-          "agent",
-          "prompt",
-          paneId,
-          text,
-          "--wait",
-          "--until",
-          "working",
-          "--until",
-          "blocked",
-          "--timeout",
-          String(SPAWN_SESSION_WAIT_MS),
-        ],
-        undefined,
-        SPAWN_SESSION_WAIT_MS + HERDR_COMMAND_TIMEOUT_MS,
       ).then(() => undefined),
   };
 }
@@ -1039,6 +1020,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return requested?.startsWith(`${hosted.provider.id}/`) === true ? requested : hosted.model;
   }
 
+  public projectHireMembershipCandidate(fleet: string, pane: string) {
+    return this.projectHires.membershipCandidate(fleet, pane);
+  }
+  public confirmedProjectHireAssignment(
+    fleet: string,
+    pane: string,
+    revision: string,
+    proof: ProjectHireProcessProof,
+  ) {
+    return this.projectHires.confirmedAssignment(fleet, pane, revision, proof);
+  }
+
   public projectHireAssignment(fleet: string, pane: string, proof?: ProjectHireProcessProof) {
     return this.projectHires.assignment(fleet, pane, proof);
   }
@@ -1095,7 +1088,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               occupantId: occupantIdForHerdrSession(live.session),
             });
       const reserved = reused ?? this.projectHires.reserve(settings, projectId, input);
-      if (resume !== undefined && reserved.request.harness !== resume.file.harness) {
+      if (resume !== undefined && reserved.request.harness !== savedSessionHarness(resume)) {
         this.projectHires.failed(reserved.id);
         throw new Error(
           "This role now uses a different harness. Its saved session cannot be resumed with these settings.",
@@ -1422,7 +1415,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
               : this.hireOwners.owner(live.paneId, live.terminalId, occupantIdForHerdrSession(live.session));
           if (held === undefined || held.conversationId !== authority.owner.conversationId)
             throw new Error("Saved live worker has no matching persisted conversation owner");
-          await assertConversationAuthority(authority);
         }
         if (
           live.agent === "shell" ||
@@ -1440,11 +1432,84 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw new Error(
             "The saved session is already live; its launch settings cannot be changed by resuming",
           );
-        await this.observeHireIdentity(receiptKey, live, input, authority);
+        // History and Herdr metadata cannot restore a prepared controller after
+        // disconnect/restart, including a resume with no initial message.
+        const needsOriginalControl = session.source !== undefined || savedSessionHarness(session) === "pi";
+        let control: SeatControl | undefined;
+        let originalProof: ProjectHireProcessProof | undefined;
+        const original = structuredClone(live);
+        const verifyOriginal = async (): Promise<ProjectHireProcessProof | undefined> => {
+          if (!needsOriginalControl) return undefined;
+          if (this.closed || !control?.verify)
+            throw new Error(
+              "Original native controller verification is unavailable; no new seat was started",
+            );
+          const checkProof = async () => {
+            if (
+              control!.ref.paneId !== original.paneId ||
+              control!.ref.harness !== input.harness ||
+              control!.ref.sessionId !== session.sessionId
+            )
+              throw new Error("Original native controller reference changed");
+            const proof = structuredClone(await control!.verify!());
+            if (
+              control!.ref.paneId !== original.paneId ||
+              control!.ref.harness !== input.harness ||
+              control!.ref.sessionId !== session.sessionId ||
+              proof.pane !== original.paneId ||
+              proof.fleet !== (input.fleet ?? "default") ||
+              proof.nativeOccupantId !== occupantIdForHerdrSession(original.session!) ||
+              (originalProof !== undefined && !isDeepStrictEqual(proof, originalProof))
+            )
+              throw new Error("Original native process identity changed");
+            originalProof ??= proof;
+            return proof;
+          };
+          await checkProof();
+          // A matching UUID is not the saved native session: cwd and Pi's
+          // independently resolved transcript address must also stay exact.
+          if (session.host !== "local" || input.fleet !== undefined)
+            throw new Error("Prepared native saved-session reuse is local only");
+          const savedCwd = await realpath(session.workingDirectory);
+          const savedPath = session.source === undefined ? await realpath(session.file.path) : undefined;
+          const matchesSaved = (agent: HerdrAgentSnapshot) =>
+            savedCwd === session.workingDirectory &&
+            agent.workingDirectory === savedCwd &&
+            (savedPath === undefined ||
+              (savedPath === session.file!.path &&
+                agent.session?.source === "herdr:pi" &&
+                agent.session.kind === "path" &&
+                agent.session.value === savedPath));
+          const current = await this.runner.get(original.paneId);
+          if (
+            !matchesSaved(original) ||
+            !matchesSaved(current) ||
+            current.paneId !== original.paneId ||
+            current.terminalId !== original.terminalId ||
+            current.agent !== input.harness ||
+            current.status === "offline" ||
+            current.status === "unknown" ||
+            current.workingDirectory !== original.workingDirectory ||
+            !isDeepStrictEqual(current.session, original.session)
+          )
+            throw new Error("Original native pane/session changed while resuming");
+          return checkProof();
+        };
+        const guardOriginal = async () => {
+          await verifyOriginal();
+          if (authority !== undefined) await assertConversationAuthority(authority);
+          await verifyOriginal();
+          if (needsOriginalControl) await this.admitProjectLaunch(input);
+          return verifyOriginal();
+        };
+        if (needsOriginalControl) control = await this.seatControl.attach(original);
+        const proof = await guardOriginal();
+        await this.observeHireIdentity(receiptKey, original, input, authority, needsOriginalControl, proof);
+        await verifyOriginal();
         // Reuse is allowed even at capacity. Never create another writer, or
         // turn a generic settlement of its current turn into this message's reply.
         if (brief !== undefined) {
-          const control = await this.seatControl.attach(live);
+          control ??= await this.seatControl.attach(live);
           if (!control)
             throw new Error(`The session is live in ${live.paneId}; message its existing seat explicitly`);
           if (receiptKey !== undefined) {
@@ -1456,7 +1521,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               ...(before === undefined ? {} : { beforeIds: before.entries.map((entry) => entry.id) }),
             });
           }
-          if (authority !== undefined) await assertConversationAuthority(authority);
+          await guardOriginal();
           const delivery = await control
             .send(brief)
             .catch((error: unknown) => ({ outcome: "unconfirmed" as const, detail: String(error) }));
@@ -1466,6 +1531,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
               reason: delivery.outcome === "unconfirmed" ? "delivery_unconfirmed" : "not_ready",
               detail: `Existing pane ${live.paneId}: ${JSON.stringify(delivery)}; no new seat was started`,
             };
+        }
+        if (needsOriginalControl) {
+          try {
+            await guardOriginal();
+          } catch (error) {
+            if (brief === undefined) throw error;
+            return {
+              outcome: "failed",
+              reason: "delivery_unconfirmed",
+              detail:
+                "Original native control changed after dispatch; inspect the existing session before retrying",
+            };
+          }
         }
         return spawnedSeat(
           live,
@@ -1488,6 +1566,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     input: SpawnOperatorSeat,
     authority?: HireAuthority,
     requireProof = false,
+    preparedProof?: ProjectHireProcessProof,
   ): Promise<void> {
     if (agent.session === undefined) throw new Error("Native hire identity has not been observed");
     const occupantId = occupantIdForHerdrSession(agent.session);
@@ -1495,9 +1574,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const allocation = this.projectAllocations.get(input);
     if (allocation) {
       this.projectHires.pane(allocation, agent.paneId);
-      const proof = await this.projectPolicy
-        ?.proof?.(input.fleet ?? "default", agent.paneId)
-        .catch(() => undefined);
+      const proof =
+        preparedProof ??
+        (await this.projectPolicy?.proof?.(input.fleet ?? "default", agent.paneId).catch(() => undefined));
       if (
         requireProof &&
         (!proof ||
@@ -1578,9 +1657,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
     }
     const adapters = remote === undefined ? this.seatAdapters : this.remoteSeatAdapters?.(remote);
+    const candidate = adapters?.get(input.harness);
     const adapter =
-      (brief !== undefined || resume !== undefined) && this.runner.runInPane !== undefined
-        ? adapters?.get(input.harness)
+      (brief !== undefined || resume !== undefined || candidate?.prepare !== undefined) &&
+      (candidate?.prepare !== undefined || this.runner.runInPane !== undefined)
+        ? candidate
         : undefined;
     const unavailableReason =
       remote !== undefined && adapters?.get(input.harness) === undefined
@@ -1588,7 +1669,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         : this.runner.runInPane === undefined
           ? "pane_run_unavailable"
           : "adapter_unavailable";
-    if (brief !== undefined && adapter === undefined) {
+    if ((brief !== undefined || input.harness === "opencode") && adapter === undefined) {
       const detail = `No structured harness adapter is available (${unavailableReason}); no seat was started and no terminal input was sent.`;
       return {
         outcome: "failed",
@@ -1653,6 +1734,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
     }
     let paneId: string;
+    let nativePrepared: PreparedSeatLaunch | undefined;
+    let commandAttempted = false;
+    let nativeLaunch: SeatLaunch | undefined;
     let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = prepared ?? {
       args: [],
       ...(account ? { env: { CODEX_HOME: account.home } } : {}),
@@ -1676,21 +1760,63 @@ export class HerdrWatchStore implements HerdrWatchPort {
       });
       if (authority !== undefined) await assertConversationAuthority(authority);
       await this.admitProjectLaunch(input);
+      if (adapter?.prepare) {
+        const allocation = this.projectAllocations.get(input);
+        const required = allocation === undefined ? undefined : this.projectHires.requiredModel(allocation);
+        if (required !== undefined && input.model !== required)
+          throw new Error("This role's required model is unavailable");
+        if (input.chrome) throw new Error("OpenCode has no supported Chrome launch option");
+        nativeLaunch = {
+          harness: adapter.harness,
+          cwd: input.workingDirectory,
+          brief: brief ?? "",
+          ...(resume === undefined ? {} : { resumeSessionId: resume.sessionId }),
+          ...(input.model === undefined ? {} : { model: input.model }),
+          ...(input.effort === undefined ? {} : { effort: input.effort }),
+          ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
+          harnessArgs: skillLaunch.args,
+        };
+        nativePrepared = await adapter.prepare(nativeLaunch);
+        if (authority !== undefined) await assertConversationAuthority(authority);
+        await this.admitProjectLaunch(input);
+      }
+      commandAttempted = nativePrepared !== undefined;
       paneId = await createTab({
         cwd: input.workingDirectory,
         label: resume === undefined ? input.title : resumePaneLabel(resume),
-        ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
+        ...(nativePrepared === undefined
+          ? skillLaunch.env === undefined
+            ? {}
+            : { env: skillLaunch.env }
+          : { command: nativePrepared.command, env: { ...skillLaunch.env, ...nativePrepared.env } }),
         ...(remote === undefined ? {} : { fleet: remote }),
       });
     } catch (caught) {
-      return { outcome: "failed", reason: "herdr_unreachable", detail: reasonDetail(caught) };
+      await nativePrepared?.dispose();
+      return {
+        outcome: "failed",
+        reason: commandAttempted
+          ? "start_unconfirmed"
+          : adapter?.prepare
+            ? "harness_unavailable"
+            : "herdr_unreachable",
+        detail: reasonDetail(caught),
+      };
     }
     const projectAllocation = this.projectAllocations.get(input);
-    if (projectAllocation) this.projectHires.pane(projectAllocation, paneId);
-    if (authority !== undefined) this.hireOwners.bind(paneId, authority.owner, undefined, authority.intentId);
     let control: SeatControlMode | undefined;
-    let startAttempted = false;
+    let startAttempted = nativePrepared !== undefined;
     try {
+      if (nativePrepared) {
+        this.state.preparedPanes ??= [];
+        if (!this.state.preparedPanes.some((entry) => entry.paneId === paneId)) {
+          this.state.preparedPanes.push({ paneId });
+          this.save();
+        }
+      }
+      if (projectAllocation) this.projectHires.pane(projectAllocation, paneId);
+      if (authority !== undefined)
+        this.hireOwners.bind(paneId, authority.owner, undefined, authority.intentId);
       // A pi seat's durable identity is the session its herdr extension
       // reports; make sure the extension is there before starting one.
       if (input.harness === "pi" && remote === undefined) await this.runner.installPiIntegration?.();
@@ -1709,9 +1835,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // A model or effort the harness cannot take fails the hire typed, before
       // herdr is asked to start anything — the alternative is a hire that
       // silently launches the default the operator did not pick (ADR 0185).
-      const modelArgs = model === undefined ? [] : fleetSeatModelArgs(input.harness, model);
+      const modelArgs =
+        model === undefined || nativePrepared !== undefined ? [] : fleetSeatModelArgs(input.harness, model);
       if (modelArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired model flag`);
-      const effortArgs = input.effort === undefined ? [] : fleetSeatEffortArgs(input.harness, input.effort);
+      const effortArgs =
+        input.effort === undefined || nativePrepared !== undefined
+          ? []
+          : fleetSeatEffortArgs(input.harness, input.effort);
       if (effortArgs === undefined) throw new Error(`unsupported: ${input.harness} has no wired effort flag`);
       const chromeArgs = input.chrome === true ? fleetSeatChromeArgs(input.harness) : [];
       if (chromeArgs === undefined)
@@ -1733,7 +1863,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
             }
           : { mode: input.harness === "claude" ? "channel" : "adapter" };
       if (authority !== undefined) await assertConversationAuthority(authority);
-      if (adapter !== undefined && (brief !== undefined || resume !== undefined)) {
+      if (
+        adapter !== undefined &&
+        (brief !== undefined || resume !== undefined || nativePrepared !== undefined)
+      ) {
         const runInPane = this.runner.runInPane!;
         const expectedToolNames =
           adapter.harness === "codex" ? await this.expectedHireTools(input) : undefined;
@@ -1745,69 +1878,87 @@ export class HerdrWatchStore implements HerdrWatchPort {
             throw new Error("Project granted tools changed during native startup; no brief was sent");
         };
         startAttempted = true;
-        const started = await adapter.start(
-          {
-            harness: adapter.harness,
-            cwd: input.workingDirectory,
-            brief: brief ?? "",
-            ...(resume === undefined ? {} : { resumeSessionId: resume.sessionId }),
-            ...(model === undefined ? {} : { model }),
-            ...(input.effort === undefined ? {} : { effort: input.effort }),
-            ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
-            harnessArgs: [...skillLaunch.args, ...chromeArgs],
+        const launchView: SeatView = {
+          paneId,
+          name: subject,
+          ...(expectedToolNames === undefined ? {} : { expectedToolNames }),
+          guard: async () => {
+            if (authority !== undefined) await assertConversationAuthority(authority);
+            await this.admitProjectLaunch(input);
+            await checkExpectedTools();
           },
-          {
-            paneId,
-            name: subject,
-            ...(expectedToolNames === undefined ? {} : { expectedToolNames }),
-            guard: async () => {
-              if (authority !== undefined) await assertConversationAuthority(authority);
-              await this.admitProjectLaunch(input);
-              await checkExpectedTools();
-            },
-            bound: async (ref) => {
-              if (ref.paneId !== paneId || ref.harness !== input.harness || !ref.sessionId)
-                throw new Error("Native hire binding does not match the allocated pane and harness");
-              if (authority !== undefined) await assertConversationAuthority(authority);
-              await this.admitProjectLaunch(input);
-              const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
-              const matches = (current: HerdrAgentSnapshot) =>
-                current.paneId === paneId &&
-                current.agent === ref.harness &&
-                current.status !== "offline" &&
-                current.status !== "unknown" &&
-                nativeSessionId(current) === ref.sessionId;
-              if (!matches(agent)) throw new Error("Native hire binding does not match the live session");
-              await this.observeHireIdentity(receiptKey, agent, input, authority, true);
-              const currentToolNames = await this.expectedHireTools(input);
-              await checkExpectedTools();
-              const final = await this.runner.get(paneId);
-              if (!matches(final) || final.terminalId !== agent.terminalId)
-                throw new Error("Native hire changed while binding; no brief was sent");
-              if (authority !== undefined) await assertConversationAuthority(authority);
-              await this.admitProjectLaunch(input);
-              return { expectedToolNames: currentToolNames };
-            },
-            run: async (argv) => {
-              if (authority !== undefined) await assertConversationAuthority(authority);
-              await this.admitProjectLaunch(input);
-              return runInPane(paneId, argv);
-            },
-            start: async (harness, argv) => {
-              if (authority !== undefined) await assertConversationAuthority(authority);
-              await this.admitProjectLaunch(input);
-              return startAgent({
-                name: subject,
-                kind: harness,
-                paneId,
-                ...(argv.length === 0 ? {} : { args: argv }),
-              });
-            },
+          bound: async (ref) => {
+            if (ref.paneId !== paneId || ref.harness !== input.harness || !ref.sessionId)
+              throw new Error("Native hire binding does not match the allocated pane and harness");
+            if (authority !== undefined) await assertConversationAuthority(authority);
+            await this.admitProjectLaunch(input);
+            const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
+            const matches = (current: HerdrAgentSnapshot) =>
+              current.paneId === paneId &&
+              current.agent === ref.harness &&
+              current.status !== "offline" &&
+              current.status !== "unknown" &&
+              nativeSessionId(current) === ref.sessionId;
+            if (!matches(agent)) throw new Error("Native hire binding does not match the live session");
+            const nativeProof = await nativePrepared?.verify(ref);
+            if (nativePrepared) {
+              const allocated = this.state.preparedPanes?.find((entry) => entry.paneId === paneId);
+              if (!allocated) throw new Error("Prepared native allocation record unavailable");
+              allocated.terminalId = agent.terminalId;
+              this.save();
+            }
+            await this.observeHireIdentity(receiptKey, agent, input, authority, true, nativeProof);
+            const currentToolNames = await this.expectedHireTools(input);
+            await checkExpectedTools();
+            const final = await this.runner.get(paneId);
+            if (!matches(final) || final.terminalId !== agent.terminalId)
+              throw new Error("Native hire changed while binding; no brief was sent");
+            if (authority !== undefined) await assertConversationAuthority(authority);
+            await this.admitProjectLaunch(input);
+            if (nativePrepared) {
+              const finalProof = await nativePrepared.verify(ref);
+              await this.observeHireIdentity(receiptKey, final, input, authority, true, finalProof);
+            }
+            return { expectedToolNames: currentToolNames };
           },
-        );
+          run: async (argv) => {
+            if (authority !== undefined) await assertConversationAuthority(authority);
+            await this.admitProjectLaunch(input);
+            if (nativePrepared || !runInPane)
+              throw new Error("Prepared native launch has no terminal input fallback");
+            return runInPane(paneId, argv);
+          },
+          start: async (harness, argv) => {
+            if (authority !== undefined) await assertConversationAuthority(authority);
+            await this.admitProjectLaunch(input);
+            if (nativePrepared) throw new Error("Prepared native launch cannot start a second process");
+            return startAgent({
+              name: subject,
+              kind: harness,
+              paneId,
+              ...(argv.length === 0 ? {} : { args: argv }),
+            });
+          },
+        };
+        const started = nativePrepared
+          ? await nativePrepared.start(launchView)
+          : await adapter.start(
+              {
+                harness: adapter.harness,
+                cwd: input.workingDirectory,
+                brief: brief ?? "",
+                ...(resume === undefined ? {} : { resumeSessionId: resume.sessionId }),
+                ...(model === undefined ? {} : { model }),
+                ...(input.effort === undefined ? {} : { effort: input.effort }),
+                ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
+                harnessArgs: [...skillLaunch.args, ...chromeArgs],
+              },
+              launchView,
+            );
         if (started.outcome === "failed") {
+          await nativePrepared?.dispose();
           const failure = await this.startupFailure(paneId, input.harness, started.detail, started.reason);
-          if (started.reason === "harness_unavailable") {
+          if (started.reason === "harness_unavailable" && !nativePrepared) {
             await this.runner.closePane?.(paneId).catch(() => undefined);
             return { ...failure, control };
           }
@@ -1850,15 +2001,24 @@ export class HerdrWatchStore implements HerdrWatchPort {
               started.control.ref.sessionId !== nativeSessionId(agent))
           )
             throw new Error("Native hire result does not match its original adapter session");
-          await this.observeHireIdentity(receiptKey, agent, input, authority);
+          const finalNativeProof = await nativePrepared?.verify(started.control.ref);
+          await this.observeHireIdentity(
+            receiptKey,
+            agent,
+            input,
+            authority,
+            nativePrepared !== undefined,
+            finalNativeProof,
+          );
           return {
             ...spawnedSeat(agent, paneId, subject, input, skillCondition, account),
             control,
           };
         }
-        // Consent is the owner's decision. Nothing launched, so close only
-        // this empty pane and report the fix without a native fallback.
-        await this.runner.closePane?.(paneId).catch(() => undefined);
+        // A prepared initial command may already be alive; never treat its pane
+        // as an empty shell or close it on an unproved controller result.
+        await nativePrepared?.dispose();
+        if (!nativePrepared) await this.runner.closePane?.(paneId).catch(() => undefined);
         return {
           outcome: "failed",
           reason: "not_ready",
@@ -1904,8 +2064,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
         control,
       };
     } catch (caught) {
+      await nativePrepared?.dispose();
       const failure = await this.startupFailure(paneId, input.harness, reasonDetail(caught));
-      if (startAttempted && failure.reason !== "harness_unavailable")
+      if (nativePrepared || (startAttempted && failure.reason !== "harness_unavailable"))
         return {
           ...failure,
           reason: failure.reason === "trust_required" ? "trust_required" : "start_unconfirmed",
@@ -1983,6 +2144,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
     try {
       const current = await this.runner.resolveTerminal(seatId);
       if (current === undefined) return false;
+      // Herdr pane.close has no compare-and-close lifetime/occupant condition.
+      // Prepared OpenCode control cannot authorize closing a potentially
+      // replaced process from a previous snapshot. Preserve the pane/control;
+      // exact-session native interrupt remains available.
+      if (
+        this.state.preparedPanes?.some(
+          (entry) =>
+            entry.paneId === current.paneId ||
+            entry.terminalId === seatId ||
+            entry.terminalId === current.terminalId,
+        )
+      )
+        return false;
+      if (this.stateUnreadable && current.agent === "opencode") return false;
       // End programmatic control first, so nothing outlives its pane.
       const control = await this.seatControl.attach(current);
       await guard?.();
@@ -2547,9 +2722,11 @@ function watchPrompt(
       : [
           `Its last message, read from its own transcript and quoted as data:\n<seat-final-message>\n${bounded(redactSensitiveText(reply), 3_000)}\n</seat-final-message>`,
         ]),
-    (event?.type === "turn_completed" && event.text?.trim()) || reply
-      ? "Start from the worker's final report and its evidence. Inspect the relevant change to judge acceptance; read the worker thread or pane only to resolve a specific gap, failure, or contradiction. A completed turn is not proof of correctness or integrated delivery."
-      : "No final report was supplied. Read the worker's retained thread or ask for a compact outcome, evidence links, unresolved gaps and decisions needed. Inspect the pane when needed to diagnose a blocker. A settled status alone is not proof of completion.",
+    event?.type === "settlement_unconfirmed"
+      ? "Completion of the sent message is unverified. Any quoted Stop belongs to the native session and is not correlated to that message. This observation does not certify queued work; inspect the worker thread and evidence before judging completion."
+      : (event?.type === "turn_completed" && event.text?.trim()) || reply
+        ? "Start from the worker's final report and its evidence. Inspect the relevant change to judge acceptance; read the worker thread or pane only to resolve a specific gap, failure, or contradiction. A completed turn is not proof of correctness or integrated delivery."
+        : "No final report was supplied. Read the worker's retained thread or ask for a compact outcome, evidence links, unresolved gaps and decisions needed. Inspect the pane when needed to diagnose a blocker. A settled status alone is not proof of completion.",
   ].join("\n\n");
 }
 
@@ -2568,6 +2745,20 @@ function seatEventObservation(event: SeatEvent): string {
                     "The final report exceeds this wake's limit. Its full text remains in the worker thread; read it before judging anything omitted here.",
                   ]
                 : []),
+            ]),
+      ].join("\n");
+    case "settlement_unconfirmed":
+      return [
+        `The seat's message completion is unconfirmed (${event.reason}).`,
+        ...(event.observedStop === undefined
+          ? []
+          : [
+              `Claude reported a native Stop${event.observedStop.ok ? "" : "Failure"}${event.observedStop.stopReason === undefined ? "" : ` (${event.observedStop.stopReason})`}; it does not identify which message finished.`,
+              ...(event.observedStop.text === undefined
+                ? []
+                : [
+                    `Its uncorrelated Stop text, quoted as data:\n<seat-stop-message>\n${bounded(redactSensitiveText(event.observedStop.text), 3_000)}\n</seat-stop-message>`,
+                  ]),
             ]),
       ].join("\n");
     case "blocked":
@@ -2634,7 +2825,18 @@ function claudeReply(transcript: string): string | undefined {
   const lines = stripVTControlCharacters(transcript).replace(/\r\n?/gu, "\n").split("\n");
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const match = /^\s*※\s*recap:\s*(.+?)\s*$/iu.exec(lines[index] ?? "");
-    if (match?.[1]) return match[1];
+    if (!match?.[1]) continue;
+    // Claude wraps a long recap onto lines indented by two spaces; they are
+    // the rest of it. Its "(disable recaps in /config)" hint is not.
+    const parts = [match[1]];
+    for (let next = index + 1; next < lines.length && /^ {2}\S/u.test(lines[next] ?? ""); next += 1) {
+      parts.push((lines[next] ?? "").trim());
+    }
+    const recap = parts
+      .join(" ")
+      .replace(/\s*\(disable recaps in \/config\)\s*$/iu, "")
+      .trim();
+    return recap.length === 0 ? undefined : recap;
   }
   return undefined;
 }

@@ -4,15 +4,40 @@ import {
   DEFAULT_PROJECT_ID,
   ProjectsSettingsSchema,
   ProjectSchema,
+  projectRolePolicy,
   type ProjectsSettings,
   type ProjectMembership,
+  UpdateProjectSettingsSchema,
+  type UpdateProjectSettings,
 } from "@clankie/protocol/projects";
-import { OperatorAgentRoleSchema, operatorAgentRoleKey } from "@clankie/protocol";
+import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "@clankie/protocol";
 
 export function projectsRevision(settings: ProjectsSettings): string {
   return createHash("sha256")
     .update(JSON.stringify(ProjectsSettingsSchema.parse(settings)))
     .digest("hex");
+}
+
+/** Edit only project policy; full validation preserves assignments, labels and unrelated authority. */
+export function updateProjectSettings(
+  settings: ProjectsSettings,
+  command: UpdateProjectSettings,
+): ProjectsSettings {
+  const input = UpdateProjectSettingsSchema.parse(command);
+  if (projectsRevision(settings) !== input.expectedRevision) throw new Error("Project settings changed");
+  const original = settings.projects.find((project) => project.id === input.projectId);
+  if (!original) throw new Error("Unknown project");
+  const project = { ...original };
+  if (input.changes.name !== undefined) project.name = input.changes.name;
+  if (input.changes.roles !== undefined) project.roles = input.changes.roles;
+  if (input.changes.workerCap === null) delete project.workerCap;
+  else if (input.changes.workerCap !== undefined) project.workerCap = input.changes.workerCap;
+  if (input.changes.trackerRef === null) delete project.trackerRef;
+  else if (input.changes.trackerRef !== undefined) project.trackerRef = input.changes.trackerRef;
+  return ProjectsSettingsSchema.parse({
+    ...settings,
+    projects: settings.projects.map((saved) => (saved.id === project.id ? project : saved)),
+  });
 }
 
 /** Retains exact legacy role spelling and associations; migration creates no workspace or grant. */
@@ -68,8 +93,11 @@ export function setDefaultProjectRole(
     (a) => a.projectId !== DEFAULT_PROJECT_ID || a.personaId !== personaId,
   );
   if (parsed !== null) {
-    if (!project.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(parsed)))
+    if (projectRolePolicy(project, parsed) === undefined) {
+      // Extending an inherited list must retain its roles and existing assignments.
+      if (project.roles.length === 0) project.roles.push(...OPERATOR_AGENT_ROLES.map((role) => ({ role })));
       project.roles.push({ role: parsed });
+    }
     next.assignments.push({ projectId: DEFAULT_PROJECT_ID, personaId, role: parsed });
   }
   return ProjectsSettingsSchema.parse(next);
@@ -108,8 +136,7 @@ export function resolveProjectMembership(
     if (
       input.hire.occupantId !== input.occupantId ||
       !project ||
-      (input.hire.role !== undefined &&
-        !project.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(input.hire!.role!)))
+      (input.hire.role !== undefined && projectRolePolicy(project, input.hire.role) === undefined)
     )
       return { outcome: "invalid_assignment" };
     return {

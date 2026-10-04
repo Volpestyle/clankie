@@ -102,6 +102,8 @@ export interface McpHost {
     /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
     readonly resultMode?: "model" | "data";
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
+    /** Live authority check run after the host's own awaits, immediately before the provider call. */
+    readonly fence?: () => Promise<void>;
   }): Promise<McpCallResult>;
   close(): Promise<void>;
 }
@@ -125,14 +127,14 @@ const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
     credential: "linear",
     // Linear's server advertises far more than a room conversation needs. These
     // are the ones the authored `linear_*` tools used to cover; the rest are a
-    // `mcp_tool_search` away.
+    // `mcp_tool_search` away. Names must match the live server: it writes
+    // through `save_*` upserts, not `create_*`/`update_*`.
     initialTools: [
       "list_issues",
       "get_issue",
-      "create_issue",
-      "update_issue",
+      "save_issue",
       "list_comments",
-      "create_comment",
+      "save_comment",
       "list_teams",
       "list_projects",
     ],
@@ -359,6 +361,14 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         // the reason a large one should name the handful worth carrying.
         initial: initial.size === 0 || initial.has(tool.name),
       }));
+    // A renamed upstream tool silently drops out of the listed set otherwise.
+    const missing = [...initial].filter((name) => !projected.some((tool) => tool.name === name));
+    if (missing.length > 0) {
+      options.logger.warn(
+        { event: "mcp.host.initial_tools_missing", server: server.id, missing },
+        "mcp server no longer offers some initial tools",
+      );
+    }
     const credential =
       server.id === "linear" && server.credential === "linear"
         ? await options.credentials.get("linear")
@@ -476,13 +486,21 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         const workerPost =
           server.id === "linear" && server.credential === "linear" && isLinearWorkerTool(input.tool);
         const credential = workerPost ? await options.credentials.get("linear") : undefined;
+        // The caller's fence may await; the server's own config check comes last.
+        if (input.fence) {
+          await input.fence();
+          await assertCurrent(server, state);
+        }
         const result = workerPost
           ? await publishLinearWorker({
               tool: input.tool,
               args: input.arguments,
               credential,
               author: options.linearAuthor ?? (async () => undefined),
-              beforeWrite: () => assertCurrent(server, state!),
+              beforeWrite: async () => {
+                await input.fence?.();
+                await assertCurrent(server, state!);
+              },
               ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
             })
           : await client.callTool(input.tool, input.arguments);

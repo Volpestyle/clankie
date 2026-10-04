@@ -54,7 +54,7 @@ async function fakeService(
       });
       response.setHeader("content-type", "application/json");
       if (path === "/v1/fleet/mcp") {
-        // The fleet's granted tools, as Clankie's worker endpoint answers them.
+        // The fleet two-tool catalog, as Clankie's worker endpoint answers it.
         const message = JSON.parse(body) as { id?: number; method: string; params?: { name?: string } };
         const reply = mcpReply?.(message.method);
         if (reply === "deny") {
@@ -79,7 +79,12 @@ async function fakeService(
             : message.method === "tools/list"
               ? {
                   tools:
-                    reply === "empty" ? [] : [{ name: "linear_get_issue", inputSchema: { type: "object" } }],
+                    reply === "empty"
+                      ? []
+                      : ["clankie_tools", "clankie_call"].map((name) => ({
+                          name,
+                          inputSchema: { type: "object" },
+                        })),
                 }
               : { content: [{ type: "text", text: `ran ${String(message.params?.name)}` }], isError: false };
         response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
@@ -214,12 +219,16 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     });
     write({ id: 2, method: "tools/list" });
     expect(await waitFor((line) => line.id === 2)).toMatchObject({
-      result: { tools: [{ name: "message_clankie" }, { name: "linear_get_issue" }] },
+      result: { tools: [{ name: "message_clankie" }, { name: "clankie_tools" }, { name: "clankie_call" }] },
     });
-    // A granted tool is proxied to Clankie's service over the link.
-    write({ id: 4, method: "tools/call", params: { name: "linear_get_issue", arguments: { id: "A-1" } } });
+    // A meta call is proxied to Clankie's service over the link.
+    write({
+      id: 4,
+      method: "tools/call",
+      params: { name: "clankie_call", arguments: { name: "linear_get_issue", arguments: { id: "A-1" } } },
+    });
     expect(await waitFor((line) => line.id === 4)).toMatchObject({
-      result: { isError: false, content: [{ text: "ran linear_get_issue" }] },
+      result: { isError: false, content: [{ text: "ran clankie_call" }] },
     });
     expect(
       service.seen
@@ -366,9 +375,13 @@ describe("the local link after a service restart", () => {
         authentication: "local-process",
       }),
     );
-    write({ id: 2, method: "tools/call", params: { name: "linear_get_issue", arguments: { id: "A-1" } } });
+    write({
+      id: 2,
+      method: "tools/call",
+      params: { name: "clankie_call", arguments: { name: "linear_get_issue", arguments: { id: "A-1" } } },
+    });
     expect(await waitFor(2)).toMatchObject({
-      result: { isError: false, content: [{ text: "ran linear_get_issue" }] },
+      result: { isError: false, content: [{ text: "ran clankie_call" }] },
     });
     const calls = service.seen.filter(
       (request) => request.path === "/v1/fleet/mcp" && request.body.includes("tools/call"),
@@ -553,7 +566,8 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
       await bridge.init();
       expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
         "message_clankie",
-        "linear_get_issue",
+        "clankie_tools",
+        "clankie_call",
       ]);
       expect(attempts).toBe(3);
       expect(
@@ -566,7 +580,7 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
     },
   );
 
-  it("reopens a startup session whose occupant changed, sharing one lookup across concurrent first lists", async () => {
+  it("reopens a refused startup session, sharing one lookup across concurrent first lists", async () => {
     let initializes = 0;
     const service = await fakeService(false, (method) => {
       if (method === "initialize") initializes += 1;
@@ -576,7 +590,11 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
     await bridge.init();
     const replies = await Promise.all([bridge.list(), bridge.list()]);
     for (const reply of replies)
-      expect(reply.result.tools.map((tool) => tool.name)).toEqual(["message_clankie", "linear_get_issue"]);
+      expect(reply.result.tools.map((tool) => tool.name)).toEqual([
+        "message_clankie",
+        "clankie_tools",
+        "clankie_call",
+      ]);
     expect(initializes).toBe(2);
   });
 

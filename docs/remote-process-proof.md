@@ -1,9 +1,10 @@
 # Windows fleet process proof
 
-A Windows agent reaches project-granted tools through Clankie's configured fleet
-SSH connection. Hand-started agents and pane-native Claude hires use the same proof. A project grant
-still binds the connected account, and every request and tool call checks current
-membership, settings and revocation.
+A Windows fleet admits connected tools through its live service-owned SSH relay
+stream. Fleet tools use the two-tool bridge described in [worker access](worker-access.md),
+without native project proof. The process observations below remain the proof for
+project/hire and mailbox identity. Hand-started agents and native hires use those
+observations where those policies require identity.
 
 ## Binding a request to a process
 
@@ -37,7 +38,7 @@ sequenceDiagram
   SSH->>Service: Trusted stream metadata and framed HTTP bytes
   Service->>Relay: Fresh process observation through bound return channel
   Relay->>Service: Initial and final OS / Herdr observations
-  Service->>Service: Check project, account and revocation
+  Service->>Service: Check native project and mailbox identity
   Service->>Relay: Framed response on the same stream
   Relay->>Agent: Response bytes
 ```
@@ -99,7 +100,7 @@ observer also proves the pane's installed native foreground view, shell, native
 session and cwd; the server's cwd must agree. Listener ownership is checked before
 and after the controller connects and again in each process snapshot. It does
 not replace caller socket ancestry. Initial and final snapshots, the registry,
-allocation and fleet must still agree before project grants apply.
+allocation and fleet must still agree before native project/hire proof applies.
 
 Closing the server or its controller link releases registration. Cleanup opens
 the original PID and checks its full creation timestamp on the held handle before
@@ -122,32 +123,28 @@ Only the service-owned dedicated remote launch overrides
 `mcp_servers.clankie.required=false` in both server and view arguments. Other
 servers retain their required flags; owner configuration is unchanged. An
 optional asynchronous connection lets the native thread bind while its bridge
-still receives denied responses. There is no pre-thread private authority.
+still receives denied responses for native project/mailbox identity. Fleet tools
+use transport admission independently of thread binding.
 
 After the thread binds and Herdr reports it, the trusted controller's `bound`
 callback checks the exact pane, harness, session, fresh process proof, project
 admission and allocation before recording project membership. It repeats host
 identity and admission checks after that observation. The first brief then waits
 at most 20 seconds for thread-specific `mcpServerStatus/list` to report Clankie
-connected with every tool expected from the assigned project's current grants,
-plus the worker bridge's `message_clankie` tool. The service reads expected names
-from its grant records and account-bound provider catalog; this produces no
-request identity or grant. A connected fallback-only catalog cannot satisfy a
-project with granted tools. Generic hires and projects without grants explicitly
-expect only the bridge tool. Missing granted catalog entries or unavailable
-account bindings fail startup. Project admission is rechecked after readiness,
-immediately before dispatch. A missing or failed catalog prevents the first turn;
-this readiness state never substitutes for fresh per-tool authorization.
+connected with `clankie_tools` and `clankie_call` while `fleet.tools` is on,
+plus the worker bridge's `message_clankie`. With fleet tools off, no connected-tool
+names are expected. Expected names are independent of project grants and account
+catalog contents; this creates no identity or grant. Project admission is rechecked
+after readiness, immediately before the first brief. This readiness check does
+not prove a live provider call or substitute for per-call authorization.
 
-The controller also captures expected granted tool names before launch and
-passes `CLANKIE_EXPECTED_TOOL_NAMES` only to that dedicated Clankie MCP bridge.
-This is a deny-only hint: malformed JSON refuses discovery and no value adds a
-grant. A nonempty expectation requires every successful `tools/list` to contain
-all expected tools. Missing, denied, malformed or incomplete paginated discovery
-returns an MCP error after the bounded startup lookup instead of a fallback-only
-success. Generic/no-grant bridges keep the existing fallback. Fresh expectations
-must still equal the captured set after binding and after readiness; changed
-project grants or account bindings prevent the brief.
+The controller captures the expected names before launch and passes
+`CLANKIE_EXPECTED_TOOL_NAMES` only to the dedicated bridge. It is a deny-only hint:
+malformed JSON refuses discovery and no value adds authority. Nonempty expectations
+require all expected names in `tools/list`; missing, denied or incomplete discovery
+reports an MCP error after its bounded startup lookup. Fresh expectations must
+still equal the captured set after binding and readiness; a changed fleet tool
+setting prevents the brief. Generic bridges keep their existing fallback behavior.
 
 Codex's status API combines a live-thread connection status with a separate
 catalog snapshot. The fixed bridge contract is what closes that gap: Codex
@@ -163,9 +160,8 @@ therefore remains an explicit part of owner acceptance. As before, arbitrary Mac
 unsupported. The full encoded PowerShell command is capped at 32,000 characters before SSH,
 reserving 767 characters below the Windows limit for shell wrapping and the NUL.
 The native argument string is checked separately before `CreateProcessW`. An
-oversized configuration fails with no agent created. The actual 21 qualified
-Linear names plus model, provider, effort, account-storage and other-server
-configuration measured 30,266 characters (1,734 below the transport cap); its
+oversized configuration fails with no agent created. The earlier 21-qualified-Linear-name configuration, before the two-tool bridge,
+plus model, provider, effort, account-storage and other-server configuration measured 30,266 characters (1,734 below the transport cap); its
 full script passed a read-only Windows parser control. The Herdr socket path is
 resolved on the PC rather than embedded in that encoded command, and remains
 covered by the native argument bound.
@@ -191,6 +187,6 @@ from a legacy machine token.
 
 A deployment is not a native acceptance result. The owner must prepare the
 machine's bridge, register the intended machine workspaces or repository roots,
-apply the intended project grant, and verify fresh hand-started Claude and Codex
-catalogs and a granted read call after service/pane cutover. Isolated relay and
+verify that fleet tools are on and the connected account is verified, then inspect
+fresh native catalogs and a read through `clankie_call` after service/pane cutover. Isolated relay and
 host-observer evidence does not claim those steps happened.

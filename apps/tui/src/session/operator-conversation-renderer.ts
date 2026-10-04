@@ -62,9 +62,9 @@ export function renderOperatorConversationNotice(event: OperatorConversationStre
     case "input_requested":
       return `**Input requested**\n\n${event.prompt}${
         event.options.length === 0 ? "" : `\n\n${event.options.map((option) => `- ${option}`).join("\n")}`
-      }`;
+      }\n\nRequest ${event.requestId}. Use /question to read and answer or cancel.`;
     case "input_resolved":
-      return `**Input ${event.outcome}**\n\nRequest ${event.requestId}`;
+      return `**Input ${event.outcome}**\n\nRequest ${event.requestId}. Use /question to read its current receipt.`;
     case "auth":
       return `**Authorization ${event.phase}**${event.summary === undefined ? "" : `\n\n${event.summary}`}`;
     case "session":

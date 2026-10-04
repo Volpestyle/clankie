@@ -48,6 +48,7 @@ async function fixture() {
     session: { source: "herdr:codex", kind: "id", value: "thread" },
   };
   const promptAgent = vi.fn(async () => undefined);
+  const terminalInput = { promptAgent };
   const runInPane = vi.fn(async () => undefined);
   const startAgent = vi.fn(async () => undefined);
   const wake = vi.fn(async () => undefined);
@@ -61,7 +62,7 @@ async function fixture() {
       resolveTerminal: async () => agent,
       wait: async () => agent,
       runInPane,
-      promptAgent,
+      ...terminalInput,
       closePane: async () => undefined,
     },
     summariesPath: join(root, "summaries.json"),

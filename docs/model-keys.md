@@ -23,6 +23,8 @@ An authenticated direct local API remains available on self-hosted Macs.
 | POST   | `/v1/model-keys/validate` | `{ "providerId": "openai", "modelId": "gpt-4.1-mini" }` |
 | POST   | `/v1/model-keys/select`   | `{ "model": "openai/gpt-4.1-mini" }`                    |
 | POST   | `/v1/model-keys/remove`   | `{ "providerId": "openai" }`                            |
+| GET    | `/v1/model-keys/options`  | none                                                    |
+| POST   | `/v1/model-keys/effort`   | `{ "effort": "high" }` or `{ "effort": null }`          |
 
 GET returns this secret-free projection (the example model is illustrative;
 always populate pickers from the response):
@@ -72,6 +74,32 @@ Select takes effect on the captain's next turn; an in-flight turn keeps its
 current model. API keys are read from the broker for subsequent requests. No
 terminal or restart is required for these operations. Declaring a new local
 provider or refreshing catalogs still follows the [CLI configuration flow](cli.md).
+Options answers what the owner can switch to without entering a key, and the
+reasoning effort of the model that runs:
+
+```json
+{
+  "usableProviders": ["anthropic", "openai-codex"],
+  "effort": {
+    "model": "openai-codex/gpt-6-astra",
+    "current": "high",
+    "default": "medium",
+    "levels": ["low", "medium", "high", "xhigh", "max"]
+  }
+}
+```
+
+`usableProviders` are the providers Pi can authenticate now (a stored key, an
+allowed account sign-in, an environment key or a local endpoint). `effort` is
+null when no model resolves; `current` is null when the model uses its own
+`default`, and a model with fewer than two `levels` has no adjustable
+reasoning. Effort writes the same `variant` config as `clankie effort set` for
+the running model (and its configured reference, when a subscription serves
+it). An effort outside `levels`, or no running model, is `unsupported_model`;
+`null` returns the model to its default. Like Select, it applies from the next
+turn. These are separate reads so apps parsing the strict catalog above are
+unaffected.
+
 Remove is idempotent and removes only a stored API key, not OAuth, environment
 variables or the selected model. A Mac's existing environment fallback can still
 authenticate that provider after removal.

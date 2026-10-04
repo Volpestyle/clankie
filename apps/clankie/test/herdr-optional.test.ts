@@ -167,7 +167,6 @@ test("existing watches refuse process operations after execution becomes unavail
   const runner = createHerdrWatchRunner(() => available);
   available = false;
   await expect(runner.get("w1:p1")).rejects.toThrow("Herdr execution is unavailable");
-  await expect(runner.sendText!("w1:p1", "do work")).rejects.toThrow("Herdr execution is unavailable");
   await expect(runner.closePane!("w1:p1")).rejects.toThrow("Herdr execution is unavailable");
 });
 

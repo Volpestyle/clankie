@@ -11,6 +11,17 @@ import {
 import { isDeliveredImagePath, namedImagePaths } from "../delivered-files.ts";
 import type { HerdrSeatTranscript } from "./herdr-transcript.ts";
 
+/**
+ * A tool's detail (its output, mostly) is shown in a collapsed card on a phone;
+ * at its 16 KB cap a page of them is mostly bytes nobody reads. The page sends
+ * the head of it; cursors still hash the whole entry, so they stay stable.
+ */
+const NATIVE_TOOL_DETAIL_MAX = 4_096;
+const trimDetail = (detail: string): string =>
+  detail.length <= NATIVE_TOOL_DETAIL_MAX
+    ? detail
+    : `${detail.slice(0, NATIVE_TOOL_DETAIL_MAX)}\n… (trimmed)`;
+
 /** A read-through view. Native history never enters Clankie's durable event log. */
 export async function nativeConversationPage(
   conversation: OperatorConversation,
@@ -54,7 +65,7 @@ export async function nativeConversationPage(
             toolCallId: entry.toolCallId,
             name: entry.name,
             phase: entry.phase,
-            ...(entry.detail === undefined ? {} : { detail: entry.detail }),
+            ...(entry.detail === undefined ? {} : { detail: trimDetail(entry.detail) }),
           };
     add(JSON.stringify(entry), at, body);
     if (entry.type === "message" && entry.role === "agent")

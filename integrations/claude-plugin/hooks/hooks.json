@@ -7,7 +7,15 @@
           {
             "type": "command",
             "command": "clankie",
-            "args": ["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model"],
+            "args": [
+              "prompt",
+              "--lane",
+              "operator",
+              "--sections",
+              "persona,reach,address,model",
+              "--harness",
+              "claude"
+            ],
             "timeout": 60
           },
           {

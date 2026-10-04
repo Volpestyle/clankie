@@ -16,6 +16,11 @@ it.each([
   "discord",
   "gateway",
   "seat",
+  "claude",
+  "claude2",
+  "codex",
+  "codex2",
+  "opencode",
   "mcp",
 ])("hosted %s never reaches Mac processes, sockets or credentials", async (command) => {
   const root = await mkdtemp(join(tmpdir(), "hosted-command-"));

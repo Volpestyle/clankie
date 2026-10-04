@@ -1,6 +1,9 @@
 # ADR 0216: Projects own agent roles and tool policy
 
 Status: accepted for engineering (2026-10-03; VUH-1535 root source review).
+Fleet tool gating is superseded by [ADR 0217](0217-fleet-membership-gets-connected-tools.md)
+(2026-10-04); the membership/tool-cutover text below preserves the historical decision.
+Project roles, caps, hiring and tracker binding remain current.
 Deterministic foundation evidence covers schema, migration and compatibility; live
 project hiring and grant enforcement remain the subsequent issue boundaries below.
 
@@ -24,7 +27,12 @@ defaults. A role can select a harness, model, effort, concurrency cap and naming
 rule. Roles retain the existing built-ins and validated custom names; comparison
 is case-insensitive while custom display spelling is preserved. Worker caps and
 role concurrency caps are independent limits, with zero meaning no new hires.
-Unset values inherit host policy. VUH-1536 enforces configured role harness,
+Unset values inherit host policy. An omitted or empty roles list inherits the six
+built-in roles (planner, designer, builder, tester, reviewer, researcher) without
+adding project launch overrides. A nonempty roles list defines the project's
+available roles. Hire admission, native assignment membership, persona associations
+and tracker role mappings use the same effective policy.
+VUH-1536 enforces configured role harness,
 model and effort at the native launch, overriding conflicting hire inputs. The
 hiring conversation's verified native assignment or canonical effective workspace
 pins its project; otherwise the canonical destination workspace selects it. An
@@ -139,10 +147,26 @@ merely by schema parsing.
 
 ## Delivery boundaries
 
+VUH-1539 adds the bounded existing-project editor: a strict revision-bearing
+POST to `/v1/operator/projects/update`, CLI/console entry and app Settings.
+Only name, roles, worker cap and tracker binding can change through that route.
+Omission preserves a field; null clears optional cap/binding. Full resulting
+settings validation retains assignments and label-map invariants. The existing
+operator/Take Control authorization and SettingsStore final source/authority
+guard remain in force; this is not a cross-process compare-and-swap guarantee.
+
+The work reader exposes project bindings as read-only virtual repos without
+writing its registry. It rechecks the current project, exact local machine,
+canonical directory and existing fixed convention around adapter I/O. Remote
+or unavailable bindings stay explicit. Existing account adapters and registered
+repos are unchanged. App save refreshes prioritize that project within the
+existing eight-repo bound, serialize pending reads and fence stale publication.
+No persistent selected-project layout or label-role-map interpretation is added.
+
 This change provides node-free project contracts, owner settings validation,
 migration, legacy compatibility and a membership selector with deterministic tests.
 The new assignment request is a contract, not a newly exposed endpoint. Project
-API/CLI/TUI editors, app selected-project views, onboarding and project-grant
+Broader app selected-project views, onboarding and project-grant
 enforcement retain their separate issue boundaries. VUH-1536 adds deterministic
 per-hire project recording and cap execution; live acceptance remains unrun.
 Neither live owner settings nor real grants/hires are changed by this engineering
@@ -155,7 +179,7 @@ Fleet grants now remain readable/revocable but confer no tools. Reissue is an
 explicit owner action; no owner grant or settings migration is performed by the
 implementation. `project add` provides only the narrow local workspace
 registration prerequisite and requires broker-consistent owner authentication.
-General project editing/onboarding remains separate.
+Project editing is added by VUH-1539 above; onboarding remains separate.
 
 The local service resolves actual native process and session identity before
 consulting the host hire ledger or canonical approved workspace. Settings and

@@ -51,3 +51,7 @@ leases for parallel conversations belonging to one Clankie.
 [ADR 0216](0216-projects-own-agent-roles-and-tool-policy.md) moves agent roles and
 project policy into owner settings, with lossless persona migration and per-agent
 membership rules.
+
+[ADR 0217](0217-fleet-membership-gets-connected-tools.md) supersedes ADR 0216's
+fleet tool gate: admitted fleet members reach verified connected accounts through
+`clankie_tools` and `clankie_call`, with an owner kill switch.

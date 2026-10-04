@@ -61,8 +61,9 @@ context they already loaded: start a fresh seat, reset a service conversation,
 and reopen the console to refresh its initial autocomplete catalog. A service
 restart is not needed for a new selection once this code is running.
 
-`clankie-mode` and `clankie-perf` are checkout-only links in `.agents/dev-skills`,
-excluded from releases. They require the sibling skills checkout.
+`clankie-mode` and `clankie-perf` live in the owner's skills repository and reach
+Clankie through `~/.agents/skills`; the repo carries no links outside itself, which
+`clankie update` refuses to stage.
 
 ## Whole-skill cuts (2026-09-28)
 

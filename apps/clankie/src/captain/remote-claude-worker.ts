@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { posix, win32 } from "node:path";
+import { LINEAR_MCP_RESOURCE } from "@clankie/credential-broker";
+import { z } from "zod";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import { CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
 import {
@@ -6,6 +9,7 @@ import {
   posixScriptCommand,
   powershellLiteral,
   powershellScriptCommand,
+  remoteProgramCommand,
   type FleetShellRun,
   type HerdrFleet,
 } from "../herdr-fleet.ts";
@@ -100,38 +104,147 @@ export function remoteClaudeConsent(fleet: HerdrFleet, shell: FleetShellRun) {
   };
 }
 
-/** Whether `cwd` is `root` or inside it, by that machine's path rules. */
-function within(fleet: HerdrFleet, root: string, cwd: string): boolean {
-  if (fleet.ssh.shell === "powershell") {
-    const normal = (path: string) => path.replaceAll("/", "\\").replace(/\\+$/u, "").toLowerCase();
-    const [base, path] = [normal(root), normal(cwd)];
-    return path === base || path.startsWith(`${base}\\`);
-  }
-  const base = root.replace(/\/+$/u, "");
-  return cwd === base || cwd.startsWith(`${base}/`);
-}
+const TRACKER_READ_TIMEOUT_MS = 10_000;
+const TRACKER_OUTPUT_BYTES = 512 * 1024;
+const TRACKER_HOST = new URL(LINEAR_MCP_RESOURCE).hostname.replace(/^mcp\./u, "");
+const TrackerSources = z
+  .object({
+    schemaVersion: z.literal(1),
+    sources: z
+      .array(
+        z.preprocess(
+          // z.record drops this own JSON key; omission could silently lose a deny rule.
+          (source) =>
+            source !== null && typeof source === "object" && Object.hasOwn(source, "__proto__")
+              ? undefined
+              : source,
+          z.record(
+            z.string().max(512),
+            z
+              .object({
+                url: z.string().max(512).optional(),
+                command: z.string().max(512).optional(),
+              })
+              .strict(),
+          ),
+        ),
+      )
+      .max(128),
+  })
+  .strict();
 
-/** Tracker deny rules from that machine's own `~/.claude.json` (user and project scopes). */
+// Runs once through the remote worker's existing Node prerequisite. Only server
+// identifiers, URL hosts and a fixed classifier marker leave the machine.
+const TRACKER_READ = String.raw`
+const fs = require("node:fs"), path = require("node:path");
+try {
+  const input = JSON.parse(process.argv[1]);
+  if ((process.platform === "win32") !== input.windows) throw Error();
+  const absolute = value => {
+    if (typeof value !== "string" || !value || value.length > 4096 || value.includes("\0") || !path.isAbsolute(value)) throw Error();
+    if (input.windows && (!/^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i.test(value) || /^\\\\[?.]\\/.test(value))) throw Error();
+    return path.normalize(value);
+  };
+  const key = value => {
+    const normalized = path.normalize(value);
+    const clean = normalized === path.parse(normalized).root ? normalized : normalized.replace(/[\\/]+$/, "");
+    return input.windows ? clean.toLowerCase() : clean;
+  };
+  const cwd = absolute(input.cwd), home = absolute(input.windows ? process.env.USERPROFILE : process.env.HOME);
+  const parents = [];
+  for (let p = cwd;; p = path.dirname(p)) {
+    if (parents.length === 64) throw Error();
+    parents.push(p);
+    if (path.dirname(p) === p) break;
+  }
+  const parentKeys = new Set(parents.map(key)), files = new Set(), sources = [];
+  let bytes = 0;
+  const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  const read = name => {
+    if (files.has(key(name))) return;
+    if (files.size === 66) throw Error();
+    files.add(key(name));
+    let fd;
+    try { fd = fs.openSync(name, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK); }
+    catch (error) {
+      if (error.code !== "ENOENT") throw Error();
+      try { fs.lstatSync(name); } catch (missing) { if (missing.code === "ENOENT") return; }
+      throw Error();
+    }
+    try {
+      const before = fs.fstatSync(fd);
+      if (!before.isFile() || before.size > 262144 || bytes + before.size > 2097152) throw Error();
+      const buffer = Buffer.alloc(262145);
+      let length = 0, got;
+      do { got = fs.readSync(fd, buffer, length, buffer.length - length, null); length += got; } while (got && length < buffer.length);
+      bytes += length;
+      const after = fs.fstatSync(fd);
+      if (length > 262144 || bytes > 2097152 || length !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw Error();
+      const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, length)));
+      if (!object(value)) throw Error();
+      return value;
+    } finally { fs.closeSync(fd); }
+  };
+  const add = servers => {
+    if (servers === undefined) return;
+    if (!object(servers) || Object.keys(servers).length > 1024) throw Error();
+    const result = Object.create(null);
+    for (const [name, entry] of Object.entries(servers)) {
+      if (!name || name.length > 512 || !object(entry)) throw Error();
+      if (entry.url !== undefined && typeof entry.url !== "string") throw Error();
+      if (entry.command !== undefined && typeof entry.command !== "string") throw Error();
+      if (entry.args !== undefined && (!Array.isArray(entry.args) || entry.args.some(arg => typeof arg !== "string"))) throw Error();
+      const safe = {};
+      if (entry.url) { try { safe.url = "https://" + new URL(entry.url).hostname; } catch {} }
+      const command = [entry.command, ...(entry.args || [])].filter(value => typeof value === "string").join(" ");
+      if (command.includes(input.trackerHost) || /\blinear-mcp\b|@linear\//i.test(command)) safe.command = "linear-mcp";
+      result[name] = safe;
+    }
+    sources.push(result);
+  };
+  const configs = [path.join(home, ".claude.json")];
+  if (process.env.CLAUDE_CONFIG_DIR) configs.push(path.join(absolute(process.env.CLAUDE_CONFIG_DIR), ".claude.json"));
+  for (const file of configs) {
+    const config = read(file);
+    if (!config) continue;
+    add(config.mcpServers);
+    if (config.projects !== undefined) {
+      if (!object(config.projects)) throw Error();
+      for (const [root, project] of Object.entries(config.projects)) {
+        if (!parentKeys.has(key(absolute(root)))) continue;
+        if (!object(project)) throw Error();
+        add(project.mcpServers);
+      }
+    }
+  }
+  for (const parent of parents) add(read(path.join(parent, ".mcp.json"))?.mcpServers);
+  const output = JSON.stringify({ schemaVersion: 1, sources });
+  if (sources.length > 128 || Buffer.byteLength(output) > 524288) throw Error();
+  process.stdout.write(output);
+} catch { process.stderr.write("Claude tracker configuration unavailable\n"); process.exitCode = 1; }
+`.replace(/\n[ \t]*/gu, " ");
+
+/** Read the supported SSH profile and ancestor configs; never select another account. */
 export function remoteClaudeTrackerDeny(fleet: HerdrFleet, shell: FleetShellRun) {
   return async (cwd: string): Promise<readonly string[]> => {
-    const raw = await shell(
-      fleet.ssh.shell === "powershell"
-        ? powershellScriptCommand(
-            "$path = Join-Path $env:USERPROFILE '.claude.json'; if (Test-Path -LiteralPath $path) { [IO.File]::ReadAllText($path) }",
-          )
-        : posixScriptCommand('cat "$HOME/.claude.json" 2>/dev/null || true'),
-    );
-    let state: { mcpServers?: unknown; projects?: Record<string, { mcpServers?: unknown }> } = {};
     try {
-      state = raw.trim() === "" ? {} : (JSON.parse(raw) as typeof state);
+      const windows = fleet.ssh.shell === "powershell";
+      const native = windows ? win32 : posix;
+      if (!native.isAbsolute(cwd) || cwd.length > 4096 || cwd.includes("\0")) throw new Error();
+      const command = remoteProgramCommand(fleet.ssh.shell, "node", [
+        "-e",
+        TRACKER_READ,
+        JSON.stringify({ cwd, windows, trackerHost: TRACKER_HOST }),
+      ]);
+      // Leave room for the Windows OpenSSH/default-shell command wrapper.
+      if (windows && command.length > 30_000) throw new Error();
+      const raw = await shell(command, TRACKER_READ_TIMEOUT_MS);
+      if (Buffer.byteLength(raw) > TRACKER_OUTPUT_BYTES) throw new Error();
+      return claudeTrackerRulesFor(TrackerSources.parse(JSON.parse(raw)).sources);
     } catch {
-      // Launch configuration that cannot be read cannot be proven isolated.
+      // FleetShellRun failures can contain config/stderr; never forward their content.
       throw new Error(`Could not read Claude's configuration on ${fleet.id} to switch off Linear connectors`);
     }
-    const projects = Object.entries(state.projects ?? {})
-      .filter(([root]) => within(fleet, root, cwd))
-      .map(([, project]) => project?.mcpServers);
-    return claudeTrackerRulesFor([state.mcpServers, ...projects]);
   };
 }
 

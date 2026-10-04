@@ -98,12 +98,12 @@ const tool = (name: string) => ({ name, inputSchema: { type: "object" } });
 it("requires all expected paginated tools before a native Connected surrogate can succeed, and never grants from the hint", async () => {
   let admitted = false;
   const pages: string[] = [];
-  const f = await bridge(JSON.stringify(["linear_get_issue", "linear_get_team"]), (cursor) => {
+  const f = await bridge(JSON.stringify(["clankie_tools", "clankie_call"]), (cursor) => {
     if (!admitted) return undefined;
     pages.push(cursor ?? "first");
     return cursor
-      ? { tools: [tool("linear_get_team")] }
-      : { tools: [tool("linear_get_issue")], nextCursor: "second" };
+      ? { tools: [tool("clankie_call")] }
+      : { tools: [tool("clankie_tools")], nextCursor: "second" };
   });
   let connected = false;
   try {
@@ -116,14 +116,14 @@ it("requires all expected paginated tools before a native Connected surrogate ca
     admitted = true;
     expect((await pending).tools.map((t) => t.name)).toEqual([
       "message_clankie",
-      "linear_get_issue",
-      "linear_get_team",
+      "clankie_tools",
+      "clankie_call",
     ]);
     expect(pages).toEqual(["first", "second"]);
     expect(connected).toBe(true);
-    expect(
-      (await f.client.callTool({ name: "linear_get_issue", arguments: { id: "fixture" } })).isError,
-    ).toBe(true);
+    expect((await f.client.callTool({ name: "clankie_tools", arguments: { id: "fixture" } })).isError).toBe(
+      true,
+    );
     expect(f.calls()).toBe(1);
     admitted = false;
     await expect(f.client.listTools()).rejects.toThrow("expected granted catalog");
@@ -132,10 +132,10 @@ it("requires all expected paginated tools before a native Connected surrogate ca
   }
 });
 
-it.each(["{", "null", '"linear_get_issue"', '[""]', "[42]"])(
+it.each(["{", "null", '"clankie_tools"', '[""]', "[42]"])(
   "fails malformed deny-only expectations without exposing a successful catalog: %s",
   async (expected) => {
-    const f = await bridge(expected, () => ({ tools: [tool("linear_get_issue")] }));
+    const f = await bridge(expected, () => ({ tools: [tool("clankie_tools")] }));
     try {
       await expect(f.client.listTools()).rejects.toThrow("Invalid Clankie tool catalog expectation");
       expect(f.calls()).toBe(0);
@@ -147,9 +147,9 @@ it.each(["{", "null", '"linear_get_issue"', '[""]', "[42]"])(
 
 it("bounds denied and incomplete-page startup with MCP errors, while no expectation retains the generic fallback", async () => {
   const rows = await Promise.all([
-    bridge('["linear_get_issue"]', () => undefined),
-    bridge('["linear_get_issue"]', (cursor) =>
-      cursor ? undefined : { tools: [tool("linear_get_issue")], nextCursor: "denied-page" },
+    bridge('["clankie_tools"]', () => undefined),
+    bridge('["clankie_tools"]', (cursor) =>
+      cursor ? undefined : { tools: [tool("clankie_tools")], nextCursor: "denied-page" },
     ),
     bridge(undefined, () => undefined),
   ]);

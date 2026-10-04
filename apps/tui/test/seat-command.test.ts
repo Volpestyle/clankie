@@ -82,8 +82,8 @@ describe("clankie seat", () => {
       dryRun: true,
       pluginDir: "/p",
     });
-    expect(() => parseSeatArgs(["--plugin-dir"])).toThrow("Usage: clankie seat");
-    expect(() => parseSeatArgs(["status"])).toThrow("Usage: clankie seat");
+    expect(() => parseSeatArgs(["--plugin-dir"])).toThrow("Usage: clankie claude|codex|opencode");
+    expect(() => parseSeatArgs(["status"])).toThrow("Usage: clankie claude|codex|opencode");
   });
 
   it.each([
@@ -113,6 +113,19 @@ describe("clankie seat", () => {
       allow: ["Bash(clankie)", "Bash(clankie *)"],
       deny: ["mcp__linear-server", "mcp__claude_ai_Linear"],
     });
+  });
+
+  it("leaves out bundled skills the owner already installs for Claude Code", async () => {
+    const env = await stateEnv();
+    await mkdir(join(env.CLAUDE_CONFIG_DIR!, "skills", "lead"), { recursive: true });
+    await writeFile(join(env.CLAUDE_CONFIG_DIR!, "skills", "lead", "SKILL.md"), "---\nname: lead\n---\n");
+    const plan = await planSeat(
+      { resume: false, dryRun: true },
+      { repoRoot, env, execFileImpl: fakeExec({ plugins: [{ id: SEAT_PLUGIN_ID, enabled: true }] }) },
+    );
+    const names = await readdir(join(plan.plugin.path, "skills"));
+    expect(names).not.toContain("lead");
+    expect(names).toContain("this-machine");
   });
 
   it("refuses without Claude Code on PATH", async () => {
@@ -180,7 +193,7 @@ describe("clankie seat", () => {
     expect(spawned[0]!.env?.CLANKIE_SEAT_HARNESS).toBe("claude");
     expect(spawned[0]!.env?.CLANKIE_CODEX_SEAT_BINDING).toBeUndefined();
     expect(calls.at(-1)).toEqual(["herdr", "agent", "rename", "w1:p2", "--clear"]);
-    expect(stderr.text()).toContain("this seat is his head");
+    expect(stderr.text()).toContain("it receives his main chat");
     const record = JSON.parse(await readFile(join(env.XDG_STATE_HOME!, "clankie", "seat.json"), "utf8")) as {
       sessionId: string;
       cwd: string;
@@ -224,7 +237,7 @@ describe("clankie seat", () => {
       stderr: stderr.stream,
     });
     expect(exit).toBe(0);
-    expect(stderr.text()).toContain("another pane already holds the clankie seat");
+    expect(stderr.text()).toContain("another pane already receives his main chat");
     expect(stderr.text()).toContain("agent name clankie is already in use");
   });
 
@@ -256,7 +269,7 @@ describe("clankie seat", () => {
     const env = await stateEnv();
     await expect(
       planSeat({ resume: true, dryRun: true }, { repoRoot, env, execFileImpl: fakeExec({}) }),
-    ).rejects.toThrow("No seat to resume");
+    ).rejects.toThrow("No Claude chat to resume");
   });
 
   it("keeps pre-isolation resume records on their original global chat", async () => {

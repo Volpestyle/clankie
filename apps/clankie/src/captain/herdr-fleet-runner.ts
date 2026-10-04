@@ -198,21 +198,6 @@ export function routeHerdrFleets(
       if (runner.read === undefined) throw new Error("Herdr read is unavailable");
       return runner.read(id, harness, source);
     },
-    sendText: async (target, text) => {
-      const { runner, id } = await route(target);
-      if (runner.sendText === undefined) throw new Error("Herdr send is unavailable");
-      await runner.sendText(id, text);
-    },
-    pressEnter: async (target) => {
-      const { runner, id } = await route(target);
-      if (runner.pressEnter === undefined) throw new Error("Herdr send is unavailable");
-      await runner.pressEnter(id);
-    },
-    sendKeys: async (target, key) => {
-      const { runner, id } = await route(target);
-      if (runner.sendKeys === undefined) throw new Error("Herdr send-keys is unavailable");
-      await runner.sendKeys(id, key);
-    },
     paneProcesses: async (paneId) => {
       const { runner, id } = await route(paneId);
       if (runner.paneProcesses === undefined) throw new Error("Herdr process info is unavailable");
@@ -233,11 +218,6 @@ export function routeHerdrFleets(
       if (runner?.createTab === undefined) throw new Error(`Unknown Herdr fleet ${String(options.fleet)}`);
       const paneId = await runner.createTab(options);
       return options.fleet === undefined ? paneId : fleetQualified(options.fleet, paneId);
-    },
-    promptAgent: async (target, text) => {
-      const { runner, id } = await route(target);
-      if (runner.promptAgent === undefined) throw new Error("Herdr agent prompt is unavailable");
-      await runner.promptAgent(id, text);
     },
     startAgent: async (options) => {
       const { runner, id } = await route(options.paneId);

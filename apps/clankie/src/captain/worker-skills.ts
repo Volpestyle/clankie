@@ -62,11 +62,21 @@ export async function workerSkills(
         // Hook trust is keyed by hooks.json's location. Carry the owner's
         // existing hash to the identical copied file, never invent a hash or
         // bypass review of an untrusted/changed hook.
-        const config = await readFile(destination, "utf8");
-        await writeFile(
-          destination,
-          config.replaceAll(`${join(codexHome, "hooks.json")}:`, `${join(overlay, "hooks.json")}:`),
+        // Accounts can share one config whose keys name another home's
+        // hooks.json, so match by the file the copy came from.
+        let config = await readFile(destination, "utf8");
+        const hooks = await realpath(join(codexHome, "hooks.json")).catch(() => undefined);
+        const keyed = new Set(
+          [...config.matchAll(/"?hooks"?\."?state"?\."([^"]*\/hooks\.json):/gu)].map((match) => match[1]!),
         );
+        keyed.add(join(codexHome, "hooks.json"));
+        for (const path of keyed) {
+          const same =
+            path === join(codexHome, "hooks.json") ||
+            (hooks !== undefined && (await realpath(path).catch(() => undefined)) === hooks);
+          if (same) config = config.replaceAll(`${path}:`, `${join(overlay, "hooks.json")}:`);
+        }
+        await writeFile(destination, withoutRepeatedTables(config));
       }
     } else {
       await symlink(source, destination);
@@ -82,4 +92,26 @@ export async function workerSkills(
       await symlink(join(codexHome, "skills", name), join(overlay, "skills", name));
   }
   return { args: [], env: { CODEX_HOME: overlay } };
+}
+
+/**
+ * Two homes that share one hooks file (`~/.codex` and `~/.codex-james`) both
+ * map onto the copied file, which would repeat a table and make Codex refuse
+ * the whole config. Keep the first table under each header.
+ */
+function withoutRepeatedTables(config: string): string {
+  const seen = new Set<string>();
+  let skipping = false;
+  return config
+    .split("\n")
+    .filter((line) => {
+      const header = /^\s*\[(?!\[)(.*)\]\s*$/u.exec(line)?.[1];
+      if (header !== undefined) {
+        const key = header.replace(/["\s]/gu, "");
+        skipping = seen.has(key);
+        seen.add(key);
+      }
+      return !skipping;
+    })
+    .join("\n");
 }

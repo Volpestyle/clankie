@@ -1,33 +1,37 @@
-import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { randomUUID } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { FileCredentialStore, type ProviderAccount } from "@clankie/credential-broker";
+import { FileCredentialStore } from "@clankie/credential-broker";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import type { SettingsStore } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
-
 import type { HttpBindings } from "@hono/node-server";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
-it("binds local MCP sessions and mailbox routes to proven panes and rechecks scope and revocation", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clankie-fleet-grants-"));
+
+it("gives proven local panes the two-tool bridge without project proof and rechecks admission and the kill switch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-fleet-tools-"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
-  const account: ProviderAccount = {
-    provider: "linear",
-    connectionId: randomUUID(),
-    userId: "bot-user",
-    workspaceId: "workspace",
-    email: "bot@example.com",
-    name: "Bot",
-    workspaceName: "Team",
-    verifiedAt: new Date().toISOString(),
-  };
-  await credentials.set("linear", { type: "api", key: "provider-secret", account });
-  const calls: { name: string; args: unknown }[] = [];
+  await credentials.set("linear", {
+    type: "api",
+    key: "test-only",
+    account: {
+      provider: "linear",
+      connectionId: randomUUID(),
+      userId: "bot",
+      workspaceId: "workspace",
+      email: "bot@example.test",
+      name: "Bot",
+      workspaceName: "Test",
+      verifiedAt: new Date().toISOString(),
+    },
+  });
+  const calls = vi.fn(async () => ({ content: "issue", isError: false }));
+  const observed: unknown[] = [];
   const host = createMcpHost({
     credentials,
     settings: { load: async () => ({ mcp: { servers: [] } }) } as unknown as SettingsStore,
@@ -43,46 +47,40 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
         initialTools: [],
       },
     ],
-    logger: { info: () => undefined, warn: () => undefined },
+    logger: { info() {}, warn() {} },
     connect: async () => ({
-      listTools: async () =>
-        ["get_issue", "save_comment", "create_worker_comment"].map((name) => ({
-          name,
-          inputSchema: { type: "object" },
-        })),
-      callTool: async (name, args) => {
-        calls.push({ name, args });
-        return { content: `ran ${name}`, isError: false };
-      },
-      close: async () => undefined,
+      listTools: async () => [
+        { name: "get_issue", description: "Read an issue", inputSchema: { type: "object" } },
+      ],
+      callTool: calls,
+      close: async () => {},
     }),
+    observeCall: (call) => {
+      observed.push(call);
+    },
   });
-  let project = "kh2";
-  let occupant = "first";
+  let tools: "connected" | "off" = "connected";
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,
     host,
-    projects: async () => ProjectsSettingsSchema.parse({ projects: [{ id: "kh2", name: "KH2" }] }),
-    membership: async (identity) => ({ projectId: project, occupantId: `${identity.pane}:${occupant}` }),
+    fleetTools: async () => tools,
+    projects: async () => ProjectsSettingsSchema.parse({ projects: [{ id: "test", name: "Test" }] }),
   });
   let live = true;
   let checks = 0;
   let failAfter = Infinity;
+  const projectProof = vi.fn(async () => {
+    throw new Error("Tools must not need native project proof");
+  });
   const local = new LocalFleetLink({
     directory: join(root, "links"),
     binding: async () => ({ runtime: "external", session: "default", socketPath: "/test/herdr.sock" }),
     prove: async (_socket, pane) => live && ++checks <= failAfter && ["w1:p1", "w1:p2"].includes(pane),
+    projectProof,
   });
-  let mailboxPane: string | undefined;
   const clankie = await createClankieApp({
-    captain: {
-      ...createStubCaptain(),
-      pollFleetSeatEvents: async (pane) => {
-        mailboxPane = pane;
-        return [];
-      },
-    },
+    captain: createStubCaptain(),
     workerMcp: worker,
     localFleet: local,
     authenticateOperator: async (request) =>
@@ -103,110 +101,86 @@ it("binds local MCP sessions and mailbox routes to proven panes and rechecks sco
     });
   const rpc = (pane: string, method: string, params: unknown, session?: string) =>
     linked(request(pane, method, params, session), { incoming: { socket: {} } } as HttpBindings);
-  const grantRequest = {
-    principalId: "project:kh2",
-    workId: "project:kh2",
-    server: "linear",
-    project: "kh2",
-    tools: [{ name: "get_issue", arguments: { id: "A-1" }, forbiddenArguments: ["alternateId"] }],
-  };
-  await expect(worker.issue({ ...grantRequest, project: "missing" })).rejects.toThrow("Create this project");
-  await expect(worker.issue({ ...grantRequest, principalId: "project:rivals" })).rejects.toThrow(
-    "must name their project",
-  );
-  const issueResponse = await clankie.app.request("/v1/worker-grants/", {
-    method: "POST",
-    headers: { authorization: "Bearer owner", "content-type": "application/json" },
-    body: JSON.stringify(grantRequest),
-  });
-  expect(issueResponse.status).toBe(201);
-  const issued = await issueResponse.json();
-  expect(issued.token).toBeUndefined();
-  expect(issued.project).toBe("kh2");
-  expect(await worker.expectedProjectToolNames("kh2")).toEqual(["linear_get_issue"]);
-  expect(await worker.expectedProjectToolNames("ungranted")).toEqual([]);
-  const unavailableCatalog = vi.spyOn(host, "catalog").mockResolvedValueOnce([]);
-  await expect(worker.expectedProjectToolNames("kh2")).rejects.toThrow("project-granted tool is unavailable");
-  unavailableCatalog.mockRestore();
-  const initialized = await rpc("w1:p1", "initialize", {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "test", version: "1" },
-  });
-  expect(initialized.status).toBe(200);
-  let session = initialized.headers.get("mcp-session-id")!;
-  const list = async () => (await (await rpc("w1:p1", "tools/list", {}, session)).json()).result.tools;
-  expect(await list()).toMatchObject([{ name: "linear_get_issue" }]);
-  expect((await rpc("w1:p2", "tools/list", {}, session)).status).toBe(403);
-  // Even an operator header cannot manufacture the listener's private request identity.
-  expect((await clankie.app.fetch(request("w1:p1", "tools/list", {}, session))).status).toBe(401);
-  const call = async (args: unknown) =>
-    (await (await rpc("w1:p1", "tools/call", { name: "linear_get_issue", arguments: args }, session)).json())
-      .result;
-  expect((await call({ id: "OTHER" })).isError).toBe(true);
-  expect((await call({ id: "A-1", alternateId: null })).isError).toBe(true);
-  expect(calls).toHaveLength(0);
-  expect((await call({ id: "A-1" })).isError).toBe(false);
-  expect(calls).toHaveLength(1);
-  project = "rivals";
-  expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
-  project = "kh2";
-  occupant = "replacement";
-  expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
-  occupant = "first";
-  await credentials.set("linear", {
-    type: "api",
-    key: "rotated",
-    account: { ...account, connectionId: randomUUID() },
-  });
-  expect(await list()).toEqual([]);
-  await expect(worker.expectedProjectToolNames("kh2")).rejects.toThrow("account changed");
-  expect((await call({ id: "A-1" })).isError).toBe(true);
-  await credentials.set("linear", { type: "api", key: "provider-secret", account });
-  // Membership can disappear after listener admission but before the SDK invokes the tool.
-  checks = 0;
-  failAfter = 2;
-  expect((await call({ id: "A-1" })).isError).toBe(true);
-  expect(calls).toHaveLength(1);
-  failAfter = Infinity;
-  const seat = (pane: string, path: string) =>
-    linked(
-      new Request(`http://127.0.0.1/v1/fleet/seats/${path}/events`, { headers: { "x-clankie-pane": pane } }),
-      { incoming: { socket: {} } } as HttpBindings,
+  try {
+    // Legacy project records keep their owner/account validation, but do not
+    // constrain or revoke the fleet's standing tools.
+    const legacy = {
+      principalId: "project:test",
+      workId: "project:test",
+      project: "test",
+      server: "linear",
+      tools: [{ name: "get_issue", arguments: { id: "RESTRICTED" } }],
+    };
+    await expect(worker.issue({ ...legacy, project: "missing" })).rejects.toThrow("Create this project");
+    await expect(worker.issue({ ...legacy, principalId: "project:other" })).rejects.toThrow(
+      "must name their project",
     );
-  expect((await seat("w1:p1", "w1:p1")).status).toBe(200);
-  expect(mailboxPane).toBe("w1:p1");
-  expect((await seat("w1:p1", "w1:p2")).status).toBe(403);
-  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 901_000);
-  expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(404);
-  clock.mockRestore();
-  const reopened = await rpc("w1:p1", "initialize", {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "test", version: "1" },
-  });
-  session = reopened.headers.get("mcp-session-id")!;
-  expect(await worker.expectedProjectToolNames("kh2")).toContain("linear_get_issue");
-  const originalAccount = host.account.bind(host);
-  let bindingChecks = 0;
-  const bindingSpy = vi.spyOn(host, "account").mockImplementation(async (...args) => {
-    const result = await originalAccount(...args);
-    // Revoke after the handler has loaded its grant snapshot, before dispatch.
-    if (++bindingChecks === 2) await worker.revoke(issued.grant.grantId);
-    return result;
-  });
-  expect((await call({ id: "A-1" })).isError).toBe(true);
-  expect(calls).toHaveLength(1);
-  bindingSpy.mockRestore();
-  expect(await worker.expectedProjectToolNames("kh2")).toEqual([]);
-  expect(await list()).toEqual([]);
-  expect((await call({ id: "A-1" })).isError).toBe(true);
-  live = false;
-  expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
-  live = true;
-  await local.close();
-  expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
-  await worker.close();
+    const issued = await clankie.app.request("/v1/worker-grants/", {
+      method: "POST",
+      headers: { authorization: "Bearer owner", "content-type": "application/json" },
+      body: JSON.stringify(legacy),
+    });
+    expect(issued.status).toBe(201);
+    const projectGrant = await issued.json();
+    expect(projectGrant.token).toBeUndefined();
+    expect(projectGrant.project).toBe("test");
+    await worker.revoke(projectGrant.grant.grantId);
+    expect(await worker.expectedProjectToolNames("ungranted")).toEqual(["clankie_tools", "clankie_call"]);
+    const initialized = await rpc("w1:p1", "initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "test", version: "1" },
+    });
+    expect(initialized.status).toBe(200);
+    const session = initialized.headers.get("mcp-session-id")!;
+    const list = async () => (await (await rpc("w1:p1", "tools/list", {}, session)).json()).result.tools;
+    expect((await list()).map((tool: { name: string }) => tool.name)).toEqual([
+      "clankie_tools",
+      "clankie_call",
+    ]);
+    expect((await rpc("w1:p2", "tools/list", {}, session)).status).toBe(403);
+    expect((await clankie.app.fetch(request("w1:p1", "tools/list", {}, session))).status).toBe(401);
+    const call = async (name = "clankie_call") =>
+      (
+        await (
+          await rpc(
+            "w1:p1",
+            "tools/call",
+            { name, arguments: { name: "linear_get_issue", arguments: { id: "A-1" } } },
+            session,
+          )
+        ).json()
+      ).result;
+    expect((await call()).isError).toBe(false);
+    expect(observed).toMatchObject([
+      { worker: { principalId: "fleet:default:pane:w1:p1", workId: "fleet:default" } },
+    ]);
+    expect(projectProof).not.toHaveBeenCalled();
+    expect((await call("linear_get_issue")).isError).toBe(true);
+    tools = "off";
+    expect(await list()).toEqual([]);
+    expect(await worker.expectedProjectToolNames("anything")).toEqual([]);
+    expect((await call()).isError).toBe(true);
+    expect(calls).toHaveBeenCalledOnce();
+    tools = "connected";
+    checks = 0;
+    failAfter = 2;
+    expect((await call()).isError).toBe(true);
+    expect(calls).toHaveBeenCalledOnce();
+    failAfter = Infinity;
+    expect((await call()).isError).toBe(false);
+    live = false;
+    expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
+    live = true;
+    await local.close();
+    expect((await rpc("w1:p1", "tools/list", {}, session)).status).toBe(403);
+  } finally {
+    clankie.close();
+    await worker.close();
+    await host.close();
+    await local.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 it("admits exact linked receipt and ACK routes only with the same proven local pane and live membership", async () => {
   let live = true;

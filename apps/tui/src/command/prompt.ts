@@ -14,13 +14,15 @@ import { CaptainSessionLaneV2Schema, type CaptainSessionLaneV2 } from "@clankie/
 import { commandHost, type Writable } from "./io.ts";
 
 const PROMPT_SECTIONS = ["identity", "persona", "reach", "fleet", "address", "model"] as const;
+const HARNESSES = ["claude"] as const;
 const LANES = CaptainSessionLaneV2Schema.options;
 const LANE_READ_TIMEOUT_MS = 10_000;
 
 const PROMPT_USAGE = [
-  `Usage: clankie prompt [--lane <${LANES.join("|")}>] [--sections <${PROMPT_SECTIONS.join(",")}>] [--conversation ID]`,
+  `Usage: clankie prompt [--lane <${LANES.join("|")}>] [--sections <${PROMPT_SECTIONS.join(",")}>] [--conversation ID] [--harness <${HARNESSES.join("|")}>]`,
   "",
   "Prints the system prompt that lane's session starts from. Default lane: operator.",
+  "--harness leaves out project instructions that harness already loads itself.",
 ].join("\n");
 
 export interface LaneReadCommandOptions {
@@ -92,6 +94,7 @@ export async function runPromptCommand(
 ): Promise<number> {
   let lane: CaptainSessionLaneV2 = "operator";
   let sections: string | undefined;
+  let harness: string | undefined;
   let conversationId = (options.env ?? process.env).CLANKIE_CONVERSATION_ID;
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
@@ -106,6 +109,11 @@ export async function runPromptCommand(
       conversationId = value.trim();
       continue;
     }
+    if (flag === "--harness") {
+      if (!HARNESSES.includes(value as (typeof HARNESSES)[number])) throw new Error(PROMPT_USAGE);
+      harness = value;
+      continue;
+    }
     if (flag === "--sections") {
       sections = parseSections(value);
       continue;
@@ -118,6 +126,7 @@ export async function runPromptCommand(
       lane,
       ...(sections === undefined ? {} : { sections }),
       ...(conversationId === undefined ? {} : { conversationId }),
+      ...(harness === undefined ? {} : { harness }),
     },
     options,
   );

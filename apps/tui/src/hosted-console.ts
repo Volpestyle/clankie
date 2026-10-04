@@ -1,3 +1,4 @@
+import { questionConsoleCommand } from "./question-commands.ts";
 import { runAccountsCommand } from "./command/accounts.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
@@ -172,7 +173,26 @@ export async function runHostedConsole() {
       JSON.stringify(await hostedCommand(args, transport), null, 2),
       "success",
     );
+  const questionCommand = questionConsoleCommand(client, () => selection.conversationId);
   const commands: FaceShellCommand[] = [
+    {
+      name: "question",
+      aliases: [],
+      description: "Read, answer or cancel the current preference question",
+      takesArgument: true,
+      argumentHint: "[answer NUMBER | text TEXT | cancel]",
+      async run(argument, active) {
+        try {
+          active.insertCommandResult("/question", await questionCommand(argument), "success");
+        } catch (error) {
+          active.insertCommandResult(
+            "/question",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
     ...buildHostedConnectionCommands(settings),
     {
       name: "settings",

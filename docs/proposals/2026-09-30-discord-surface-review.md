@@ -1,6 +1,8 @@
 # Surface review: the Discord Activity and the user-session lab body
 
-Status: proposal for James to decide (VUH-1460). Nothing here has been carried out.
+Status: retirement proposal declined by James on 2026-09-30 in
+[ADR 0203](../adr/0203-clankie-keeps-what-better-models-cannot-absorb.md).
+Both Discord surfaces remain supported. The audit below is historical.
 
 Date: 2026-09-30
 

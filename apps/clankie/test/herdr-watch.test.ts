@@ -1,3 +1,8 @@
+import {
+  SeatHookLog,
+  createClaudeWorkerSeatAdapter,
+  type WorkerSeatAgent,
+} from "../src/captain/claude-worker-seat.ts";
 import { HireOwners } from "../src/captain/hire-owners.ts";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -73,6 +78,76 @@ describe("HerdrWatchStore", () => {
     expect(wake.mock.calls[0]?.[1]).toContain("agent status done");
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ schemaVersion: 1, watches: [] });
     store.close();
+  });
+
+  it("a newly attached Claude watch wakes with uncorrelated Stop data, never a completed followup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-claude-settlement-watch-"));
+    roots.push(root);
+    const path = join(root, "hooks.json");
+    const hooks = new SeatHookLog(path);
+    const agent = {
+      ...working,
+      session: { source: "herdr:claude", kind: "id" as const, value: "10000000-0000-4000-8000-000000000001" },
+    };
+    const entries: { type: "message"; id: string; role: "operator"; text: string }[] = [];
+    const deps = {
+      consent: async () => ({ approved: true as const }),
+      hooks,
+      agent: async (): Promise<WorkerSeatAgent> => agent,
+      transcript: async () => ({ sessionKey: "claude", entries }),
+      mailbox: {
+        bound: () => true,
+        deliver: vi.fn(async (_seat: string, text: string) => {
+          entries.push({ type: "message", id: "native-receipt", role: "operator", text });
+          return true;
+        }),
+      },
+      timing: { readyMs: 20, receiptMs: 20, pollMs: 1 },
+      trackerDeny: () => [],
+    };
+    const original = createClaudeWorkerSeatAdapter(deps);
+    const started = await original.start(
+      { harness: "claude", cwd: root, brief: "queued followup" },
+      { paneId: agent.paneId, run: async () => undefined, start: async () => undefined },
+    );
+    expect(started.outcome).toBe("started");
+    // Watch constructs another control through the reopened persisted log.
+    const reopened = new SeatHookLog(path);
+    const next = vi.spyOn(reopened, "next");
+    const adapter = createClaudeWorkerSeatAdapter({ ...deps, hooks: reopened });
+    const attach = vi.spyOn(adapter, "attach");
+    const wake = vi.fn(async (_conversation: string, _prompt: string) => undefined);
+    const runner: HerdrWatchRunner = {
+      get: async () => agent,
+      resolveTerminal: async () => agent,
+      wait: vi.fn(async () => agent),
+    };
+    const store = new HerdrWatchStore(join(root, "watches.json"), { runner, seatAdapters: [adapter] });
+    store.start(wake);
+    try {
+      expect(await store.watch("global-default", agent.paneId, "Followup completion")).toMatchObject({
+        outcome: "watching",
+      });
+      await vi.waitFor(() => expect(next).toHaveBeenCalled());
+      reopened.record(agent.paneId, {
+        schemaVersion: 1,
+        event: "Stop",
+        sessionId: agent.session.value,
+        lastMessage: "Earlier busy turn report",
+      });
+      await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce());
+      expect(attach).toHaveBeenCalled();
+      expect(runner.wait).not.toHaveBeenCalled();
+      const prompt = wake.mock.calls[0]![1];
+      expect(prompt).toContain("Completion of the sent message is unverified");
+      expect(prompt).toContain("Earlier busy turn report");
+      expect(prompt).toContain("not correlated");
+      expect(prompt).not.toContain("reported its turn completed");
+      expect(prompt).not.toContain("Start from the worker's final report");
+      expect(deps.mailbox.deliver).toHaveBeenCalledOnce();
+    } finally {
+      store.close();
+    }
   });
 
   it("quotes an unhired pane's last message from its own transcript when it settles", async () => {
@@ -266,6 +341,7 @@ describe("HerdrWatchStore", () => {
     const changed = deferred<HerdrAgentSnapshot>();
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const closePane = vi.fn((_target: string) => Promise.resolve());
     const read = vi.fn((_target: string, _harness: string, source: string) =>
       Promise.resolve(source === "recent-unwrapped" ? "※ recap: Tests are green." : ""),
@@ -281,8 +357,7 @@ describe("HerdrWatchStore", () => {
               signal.addEventListener("abort", () => reject(new Error("aborted"))),
             ),
       read,
-      promptAgent,
-      pressEnter,
+      ...terminalInput,
       closePane,
     };
     const project = vi.fn();
@@ -347,6 +422,7 @@ describe("HerdrWatchStore", () => {
     const codexQueue = vi.fn(() => Promise.resolve(true));
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
         get: () => Promise.resolve(codex),
@@ -355,8 +431,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        promptAgent,
-        pressEnter,
+        ...terminalInput,
       },
     });
 
@@ -388,6 +463,7 @@ describe("HerdrWatchStore", () => {
     const codexQueue = vi.fn(() => Promise.resolve(true));
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
         get: () => Promise.resolve(codex),
@@ -396,8 +472,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        promptAgent,
-        pressEnter,
+        ...terminalInput,
       },
     });
 
@@ -420,6 +495,7 @@ describe("HerdrWatchStore", () => {
     };
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
         get: () => Promise.resolve(codex),
@@ -431,8 +507,7 @@ describe("HerdrWatchStore", () => {
             "n/Users/james/.codex/sessions/2026/09/05/rollout-2026-09-05T19-12-09-01a0740e-ea76-7aa2-8795-524c00368e71.jsonl\n",
           ),
         codexQueue: vi.fn(() => Promise.resolve(false)),
-        promptAgent,
-        pressEnter,
+        ...terminalInput,
       },
     });
 
@@ -452,6 +527,7 @@ describe("HerdrWatchStore", () => {
     const codexQueue = vi.fn(() => Promise.resolve(true));
     const promptAgent = vi.fn(() => Promise.resolve());
     const pressEnter = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter };
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
         get: () => Promise.resolve(working),
@@ -460,8 +536,7 @@ describe("HerdrWatchStore", () => {
         paneProcesses,
         openFiles,
         codexQueue,
-        promptAgent,
-        pressEnter,
+        ...terminalInput,
       },
     });
 
@@ -1203,6 +1278,20 @@ describe("seat reply distillation", () => {
     expect(distillHerdrSeatReply("claude", "⏺ raw Claude scrollback")).toBeUndefined();
   });
 
+  it("keeps a Claude recap that wraps onto indented lines, without its config hint", () => {
+    const pane = [
+      "※ recap: I'm leading `w3Z:p2` through the Clankie Linear projects; fleet tools (VUH-1585) is done and working on your PC. Next, tell me",
+      "  whether the review agent lands its own changes or whether I review and land them. (disable recaps in",
+      "  /config)",
+      "                                                       new task? /clear to save 572.1k tokens · ◎ /goal active (12h)",
+      "──────────────────────────── Clankie ─",
+      "❯",
+    ].join("\n");
+    expect(distillHerdrSeatReply("claude", pane)).toBe(
+      "I'm leading `w3Z:p2` through the Clankie Linear projects; fleet tools (VUH-1585) is done and working on your PC. Next, tell me whether the review agent lands its own changes or whether I review and land them.",
+    );
+  });
+
   it("bounds a recognized reply to the public conversation limit", () => {
     const reply = distillHerdrSeatReply("claude", `※ recap: ${"x".repeat(20_000)}`);
     expect(reply).toHaveLength(OPERATOR_CONVERSATION_TEXT_MAX);
@@ -1874,6 +1963,7 @@ describe("hiring a seat", () => {
     const pressEnter = vi.fn(() => Promise.resolve());
     const sendText = vi.fn(() => Promise.resolve());
     const promptAgent = vi.fn(() => Promise.resolve());
+    const terminalInput = { sendKeys, pressEnter, sendText, promptAgent };
     const waitUntilIdle = vi.fn(() => Promise.resolve(blockedClaude));
     const closePane = vi.fn(() => Promise.resolve());
     const runner: HerdrWatchRunner = {
@@ -1882,10 +1972,7 @@ describe("hiring a seat", () => {
       wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
       waitUntilIdle,
       read,
-      sendKeys,
-      pressEnter,
-      sendText,
-      promptAgent,
+      ...terminalInput,
       closePane,
       createTab: vi.fn(() => Promise.resolve("w1C:p9")),
       startAgent,
@@ -1918,13 +2005,14 @@ describe("hiring a seat", () => {
       const startAgent = vi.fn(() => Promise.reject(new Error("blocked during startup")));
       const read = vi.fn(() => Promise.resolve(prompt));
       const sendKeys = vi.fn(() => Promise.resolve());
+      const terminalInput = { sendKeys };
       const closePane = vi.fn(() => Promise.resolve());
       const runner: HerdrWatchRunner = {
         get: vi.fn(() => Promise.resolve(hired)),
         resolveTerminal: vi.fn(() => Promise.resolve(hired)),
         wait: vi.fn(() => new Promise<HerdrAgentSnapshot>(() => undefined)),
         read,
-        sendKeys,
+        ...terminalInput,
         closePane,
         createTab: vi.fn(() => Promise.resolve("w1C:p9")),
         startAgent,

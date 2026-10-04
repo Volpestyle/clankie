@@ -1,3 +1,31 @@
+import {
+  ProjectProposalDraftSchema,
+  ProjectProposalTargetSchema,
+  type ProjectProposalDraft,
+  type ProjectProposalResult,
+} from "@clankie/protocol/projects";
+import { projectsRevision, ProjectTrackerUnavailable } from "@clankie/settings";
+import {
+  ProjectCreationSchema,
+  proposalHash,
+  proposalResult,
+  type projectOnboarding,
+} from "./project-onboarding.ts";
+import {
+  authorizeQuestion,
+  QuestionDraftSchema,
+  QuestionStateSchema,
+  newQuestionState,
+  questionWorkspace,
+  sameQuestionWorkspace,
+  answerMessage,
+  type QuestionAuthority,
+  type QuestionDraft,
+  type QuestionState,
+  type QuestionRecord,
+  type QuestionWorkspace,
+} from "./conversation-questions.ts";
+import type { ConversationQuestionResult, ConversationQuestionAnswer } from "@clankie/protocol";
 import { SeatLinkInterruptedError } from "./seat-outbox.ts";
 import { fleetDeliveryStage, type DeliveryStage } from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
@@ -191,6 +219,7 @@ const InboundAcceptanceSchema = z
 type InboundAcceptance = z.infer<typeof InboundAcceptanceSchema>;
 
 interface ConversationMeta {
+  questions?: QuestionState;
   designatedHeadConversationId?: string;
   /** Retained accepted inbound payloads; independent of event-log trimming. */
   inboundAcceptances?: Record<string, InboundAcceptance>;
@@ -257,6 +286,11 @@ interface ConversationTurnSeat {
 
 /** Where a turn runs and who it arrived from. */
 export interface ConversationTurnContext {
+  readonly ownerAuthority?: QuestionAuthority;
+  readonly questionCurrent?: () => boolean;
+  readonly questionBinding?: { readonly incarnationId: string; readonly workspace: QuestionWorkspace };
+  readonly inputAnswer?: { readonly requestId: string; readonly answer: ConversationQuestionAnswer };
+
   /**
    * Absolute directory the conversation's session works in, from a workspace
    * scope. Absent for a global conversation, which works in the service repo.
@@ -270,7 +304,7 @@ export interface ConversationTurnContext {
    * rather than another wake because the turn it opens is about something that
    * happened outside this machine, and the prompt says so.
    */
-  readonly origin?: "goal" | "wake" | "watch" | "hook";
+  readonly origin?: "goal" | "wake" | "watch" | "hook" | "input";
   /** The surface a human send arrived from, as it named itself. */
   readonly surfaceClientId?: string;
   /** Side conversations inherit a Pi branch but never continue their parent's active task. */
@@ -525,6 +559,11 @@ export class ConversationStore {
   private readonly pendingTranscriptImages = new Set<string>();
   private readonly transcriptImageAttempts = new Map<string, number>();
   private draftSequence = 0;
+  private readonly questionIssuers = new Map<string, QuestionAuthority>();
+  private readonly corruptQuestions = new Set<string>();
+  /** Native seat binding is owned by captain; no native question continuation. */
+  public questionEligible: (id: string) => boolean = () => true;
+  public projectOnboarding: ReturnType<typeof projectOnboarding> | undefined;
 
   public constructor(
     root: string,
@@ -592,6 +631,29 @@ export class ConversationStore {
           }
         }
         this.metas.set(meta.conversationId, meta);
+        if (meta.questions !== undefined) {
+          const checked = QuestionStateSchema.safeParse(meta.questions);
+          if (!checked.success) this.corruptQuestions.add(meta.conversationId);
+          else {
+            meta.questions = checked.data;
+            const cancelledQuestions: QuestionRecord[] = [];
+            for (const record of meta.questions.records) {
+              const q = record.question;
+              if (q.status === "pending") {
+                q.status = "cancelled";
+                q.resolvedAt = new Date().toISOString();
+                q.reason = "service_restarted";
+                cancelledQuestions.push(record);
+              }
+              if (q.continuation?.state === "accepted") {
+                q.continuation.state = "failed";
+                q.continuation.reasonCode = "service_restarted";
+              }
+            }
+            this.saveQuestionMeta(meta);
+            for (const record of cancelledQuestions) this.publishQuestionResolution(meta, record);
+          }
+        }
       } catch {
         // An unreadable conversation is skipped, never fatal to boot.
       }
@@ -681,6 +743,13 @@ export class ConversationStore {
         accepted.push(value.runId);
       }
     }
+    const questions = QuestionStateSchema.safeParse(meta.questions);
+    if (questions.success)
+      for (const record of questions.data.records) {
+        const receipt = record.question.continuation;
+        if (receipt && receipt.state !== "accepted") terminal.add(receipt.runId);
+        else if (receipt && !accepted.includes(receipt.runId)) accepted.push(receipt.runId);
+      }
     const orphans = accepted.filter((id) => !terminal.has(id));
     for (const runId of orphans) {
       this.append(meta, {
@@ -695,8 +764,23 @@ export class ConversationStore {
     return orphans.length;
   }
 
-  public async serve(request: ConversationServiceRequest): Promise<ConversationServiceResult> {
+  public async serve(
+    request: ConversationServiceRequest,
+    authority?: QuestionAuthority,
+  ): Promise<ConversationServiceResult> {
     switch (request.op) {
+      case "project_proposal_get":
+      case "project_proposal_confirm":
+        return {
+          op: request.op,
+          schemaVersion: 1,
+          result: await this.projectProposalOperation(request, authority),
+        };
+      case "input_get":
+      case "input_answer":
+      case "input_cancel":
+        return { op: request.op, schemaVersion: 1, result: await this.questionOperation(request, authority) };
+
       case "list": {
         const conversations = [...this.metas.values()]
           .filter((meta) => request.scope === undefined || sameScope(meta.scope, request.scope))
@@ -801,7 +885,7 @@ export class ConversationStore {
         return { op: "tail", schemaVersion: 1, result };
       }
       case "send":
-        return { op: "send", schemaVersion: 1, result: await this.send(request.turn) };
+        return { op: "send", schemaVersion: 1, result: await this.send(request.turn, authority) };
       case "upload_begin":
         return {
           op: "upload_begin",
@@ -853,6 +937,7 @@ export class ConversationStore {
   public cancel(conversationId: string, runId: string): boolean {
     const entry = this.runControllers.get(runId);
     if (entry === undefined || entry.conversationId !== conversationId) return false;
+    this.cancelPendingQuestion(conversationId, "operator_interrupt", runId);
     this.cancelRequests.add(runId);
     entry.controller.abort();
     return true;
@@ -1402,6 +1487,7 @@ export class ConversationStore {
   public rememberNativeSource(conversationId: string, source: HerdrAgentSnapshot): void {
     const meta = this.metas.get(conversationId);
     if (meta === undefined || JSON.stringify(meta.nativeSource) === JSON.stringify(source)) return;
+    this.cancelPendingQuestion(conversationId, "native_seat_takeover");
     meta.nativeSource = source;
     this.saveMeta(meta);
   }
@@ -2108,7 +2194,10 @@ export class ConversationStore {
     };
   }
 
-  private async send(turn: SubmitOperatorConversationTurn): Promise<SubmitOperatorConversationTurnResult> {
+  private async send(
+    turn: SubmitOperatorConversationTurn,
+    authority?: QuestionAuthority,
+  ): Promise<SubmitOperatorConversationTurnResult> {
     const meta = this.metas.get(turn.conversationId);
     if (meta === undefined) {
       throw new Error(`Unknown conversation ${turn.conversationId}`);
@@ -2137,6 +2226,26 @@ export class ConversationStore {
         safeCursor,
       };
     }
+    let questionBinding: ConversationTurnContext["questionBinding"];
+    if (!authority && meta.questions?.records.some((r) => r.question.status === "pending"))
+      this.cancelPendingQuestion(meta.conversationId, "owner_context_lost");
+    if (
+      authority &&
+      meta.scope.kind === "workspace" &&
+      !meta.parentConversationId &&
+      !meta.nativeSource &&
+      this.questionEligible(meta.conversationId)
+    ) {
+      await authorizeQuestion(authority);
+      if (this.metas.get(meta.conversationId) !== meta || turn.expectedRevision !== meta.revision)
+        throw new Error("Conversation changed during owner admission");
+      this.validQuestionState(meta);
+      meta.questions ??= newQuestionState();
+      questionBinding = {
+        incarnationId: meta.questions.incarnationId,
+        workspace: questionWorkspace(meta.scope.workspaceId),
+      };
+    }
     // In a channel the members answer, not Clankie. The run is the sequenced
     // round; everything else about an accepted turn — revision, cancellation,
     // settlement, retention — is the same as any other.
@@ -2148,6 +2257,8 @@ export class ConversationStore {
       meta.scope.kind === "channel" ? this.channelRound(true) : this.runner,
       {
         surfaceClientId: turn.surfaceClientId,
+        ...(authority === undefined ? {} : { ownerAuthority: authority }),
+        ...(questionBinding === undefined ? {} : { questionBinding }),
         ...(turn.delivery === undefined || meta.scope.kind === "channel" ? {} : { delivery: turn.delivery }),
         ...(attachments === undefined ? {} : { attachments }),
       },
@@ -2563,17 +2674,40 @@ export class ConversationStore {
     herdrPaneId: string | undefined,
     publishOperatorMessage: boolean,
     runner: ConversationRunner = this.runner,
-    provenance: Pick<ConversationTurnContext, "origin" | "surfaceClientId" | "attachments"> & {
+    provenance: Pick<
+      ConversationTurnContext,
+      "origin" | "surfaceClientId" | "attachments" | "ownerAuthority" | "questionBinding" | "inputAnswer"
+    > & {
+      questionAnswer?: {
+        readonly record: QuestionRecord;
+        readonly answer: ConversationQuestionAnswer;
+        readonly authority: QuestionAuthority;
+      };
       delivery?: SubmitOperatorConversationTurn["delivery"];
       inboundReceipt?: Omit<InboundAcceptance, "message" | "runId" | "acceptedCursor">;
     } = {},
   ): SubmitOperatorConversationTurnResult {
+    if (provenance.questionAnswer?.record.projectCreation?.claim)
+      throw new Error("project_confirmation_consumed");
     const workspace = workspaceOf(meta.scope);
     const safeCursor = this.lastCursor(meta);
+    const questionBefore = provenance.questionAnswer ? structuredClone(meta) : undefined;
     meta.revision += 1;
     meta.sessionState = "active";
     meta.updatedAt = new Date().toISOString();
     const runId = `run-${randomUUID()}`;
+    if (provenance.questionAnswer) {
+      const { record, answer, authority } = provenance.questionAnswer;
+      record.question = {
+        ...record.question,
+        status: "submitted",
+        answer,
+        resolvedAt: new Date().toISOString(),
+        continuation: { runId, state: "accepted" },
+      };
+      record.responder = { ...authority.principal };
+      record.message = message;
+    }
     const previousAcceptances = meta.inboundAcceptances;
     if (provenance.inboundReceipt) {
       // This atomic conversation write is the acceptance boundary. A crash after
@@ -2589,12 +2723,17 @@ export class ConversationStore {
       };
     }
     try {
-      this.saveMeta(meta);
+      if (provenance.questionAnswer) this.saveQuestionMeta(meta);
+      else this.saveMeta(meta);
     } catch (error) {
+      if (questionBefore && !(error instanceof QuestionCommitError && error.committed)) {
+        Object.assign(meta, questionBefore);
+      }
       if (previousAcceptances === undefined) delete meta.inboundAcceptances;
       else meta.inboundAcceptances = previousAcceptances;
       throw error;
     }
+    if (provenance.questionAnswer) this.publishQuestionResolution(meta, provenance.questionAnswer.record);
     if (publishOperatorMessage) {
       this.append(meta, {
         type: "message",
@@ -2624,7 +2763,11 @@ export class ConversationStore {
     const previous = this.chains.get(conversationId) ?? Promise.resolve();
     let invoked = false;
     let deliveryStage: DeliveryStage | undefined;
-    const invoke = (): Promise<void> => {
+    const invoke = async (): Promise<void> => {
+      if (provenance.questionAnswer) {
+        await authorizeQuestion(provenance.questionAnswer.authority);
+        this.assertQuestionContext(meta, provenance.questionAnswer.record);
+      }
       if (provenance.origin === "hook") this.linearHookQueued.delete(conversationId);
       // Cancelled while still queued: settle without ever invoking the runner.
       if (controller.signal.aborted) return Promise.resolve();
@@ -2643,6 +2786,11 @@ export class ConversationStore {
         },
         {
           runId,
+          ...(provenance.ownerAuthority === undefined ? {} : { ownerAuthority: provenance.ownerAuthority }),
+          ...(provenance.questionBinding === undefined
+            ? {}
+            : { questionBinding: provenance.questionBinding }),
+          ...(provenance.inputAnswer === undefined ? {} : { inputAnswer: provenance.inputAnswer }),
           acceptedAt: meta.updatedAt,
           deliveryReceipt: (stage) => {
             deliveryStage = stage;
@@ -2707,11 +2855,15 @@ export class ConversationStore {
           runId,
           phase: "failed",
           reasonCode:
-            error instanceof SeatLinkInterruptedError
-              ? "service_restarted"
-              : error instanceof Error
-                ? error.constructor.name
-                : "run_failed",
+            provenance.questionAnswer &&
+            error instanceof Error &&
+            ["question_owner_unavailable", "question_context_lost"].includes(error.message)
+              ? "owner_context_lost"
+              : error instanceof SeatLinkInterruptedError
+                ? "service_restarted"
+                : error instanceof Error
+                  ? error.constructor.name
+                  : "run_failed",
           summary: turnFailureSummary(error),
         });
         if ((this.runCounts.get(conversationId) ?? 0) <= 1) meta.sessionState = "failed";
@@ -2761,6 +2913,19 @@ export class ConversationStore {
   }
 
   private append(meta: ConversationMeta, body: OperatorConversationEventBody, occurredAt?: string): void {
+    if (
+      body.type === "turn" &&
+      body.phase !== "accepted" &&
+      !this.corruptQuestions.has(meta.conversationId)
+    ) {
+      const record = meta.questions?.records.find((r) => r.question.continuation?.runId === body.runId);
+      if (record?.question.continuation) {
+        record.question.continuation.state = body.phase;
+        if ("reasonCode" in body && body.reasonCode)
+          record.question.continuation.reasonCode = body.reasonCode.slice(0, 100);
+        this.saveQuestionMeta(meta);
+      }
+    }
     const retainedCount = this.retainedEventCount(meta.conversationId);
     const sequence = this.eventSequence(meta) + 1;
     const cursor = String(sequence).padStart(CURSOR_WIDTH, "0");
@@ -3002,6 +3167,488 @@ export class ConversationStore {
     return this.journal.read(conversationId, conversationId === LINEAR_INBOX_CONVERSATION_ID);
   }
 
+  private validQuestionState(meta: ConversationMeta): void {
+    if (this.corruptQuestions.has(meta.conversationId)) throw new Error("question_state_unavailable");
+    if (meta.questions !== undefined) {
+      const parsed = QuestionStateSchema.safeParse(meta.questions);
+      if (
+        !parsed.success ||
+        parsed.data.records.some((r) => r.question.conversationId !== meta.conversationId)
+      ) {
+        this.corruptQuestions.add(meta.conversationId);
+        throw new Error("question_state_unavailable");
+      }
+    }
+  }
+
+  private assertQuestionContext(meta: ConversationMeta, record: QuestionRecord): void {
+    if (
+      this.metas.get(meta.conversationId) !== meta ||
+      meta.scope.kind !== "workspace" ||
+      meta.parentConversationId ||
+      meta.nativeSource ||
+      !this.questionEligible(meta.conversationId) ||
+      meta.questions?.incarnationId !== record.question.incarnationId ||
+      !sameQuestionWorkspace(meta.scope.workspaceId, record.workspace)
+    )
+      throw new Error("question_context_lost");
+  }
+
+  public async requestQuestion(
+    conversationId: string,
+    draft: QuestionDraft,
+    context: ConversationTurnContext,
+    projectDraft?: ProjectProposalDraft,
+  ): Promise<ConversationQuestionResult> {
+    const input = QuestionDraftSchema.parse(draft);
+    await authorizeQuestion(context.ownerAuthority);
+    const meta = this.metas.get(conversationId);
+    if (
+      !meta ||
+      !context.questionBinding ||
+      context.signal.aborted ||
+      context.questionCurrent?.() === false ||
+      this.runControllers.get(context.runId)?.conversationId !== conversationId ||
+      (context.internal && context.origin !== "input")
+    )
+      throw new Error("question_turn_unavailable");
+    this.validQuestionState(meta);
+    const record: QuestionRecord = {
+      issuer: { ...context.ownerAuthority!.principal },
+      workspace: { ...context.questionBinding.workspace },
+      question: {
+        requestId: randomUUID(),
+        incarnationId: context.questionBinding.incarnationId,
+        conversationId,
+        workspace: context.questionBinding.workspace.path,
+        purpose: "preference",
+        kind: input.kind,
+        prompt: input.prompt,
+        options: input.options.map((o) => ({ ...o, optionId: randomUUID() })),
+        allowFreeform: input.kind === "text" || input.allowFreeform,
+        createdAt: new Date().toISOString(),
+        originRunId: context.runId,
+        status: "pending",
+      },
+    };
+    this.assertQuestionContext(meta, record);
+    const existing = meta.questions!.records.find((r) => r.question.status === "pending");
+    if (existing) return this.questionResult(meta, existing, "ready", "already_pending");
+    if (meta.questions!.records.some((r) => r.projectCreation?.status === "committing"))
+      throw new Error("project_confirmation_consumed");
+    if (projectDraft) {
+      const onboarding = this.projectOnboarding;
+      if (!onboarding) throw new Error("project_onboarding_unavailable");
+      const revision = meta.revision;
+      const parsed = ProjectProposalDraftSchema.parse(projectDraft);
+      const { prompt: _prompt, evidence, ...policy } = parsed;
+      const settings = await onboarding.load();
+      const command = {
+        ...policy,
+        workspacePath: record.workspace.path,
+        expectedRevision: projectsRevision(settings.projects),
+      };
+      let prepared: Awaited<ReturnType<typeof onboarding.prepare>>;
+      try {
+        prepared = await onboarding.prepare(command);
+      } catch (error) {
+        return this.questionResult(
+          meta,
+          undefined,
+          "refused",
+          error instanceof ProjectTrackerUnavailable
+            ? "project_tracker_unavailable"
+            : "project_proposal_conflict",
+        );
+      }
+      await authorizeQuestion(context.ownerAuthority);
+      this.assertQuestionContext(meta, record);
+      if (
+        meta.revision !== revision ||
+        context.signal.aborted ||
+        context.questionCurrent?.() === false ||
+        this.runControllers.get(context.runId)?.conversationId !== conversationId ||
+        meta.questions!.records.some(
+          (r) => r.question.status === "pending" || r.projectCreation?.status === "committing",
+        )
+      )
+        throw new Error("project_proposal_context_changed");
+      const immutable = {
+        version: 1 as const,
+        proposalId: randomUUID(),
+        requestId: record.question.requestId,
+        incarnationId: record.question.incarnationId,
+        conversationId,
+        originRunId: context.runId,
+        workspace: record.workspace,
+        command,
+        ...prepared,
+        evidence,
+      };
+      record.projectCreation = ProjectCreationSchema.parse({
+        immutable,
+        artifactSha256: proposalHash(immutable),
+        status: "pending",
+      });
+    }
+    const previous = meta.questions;
+    const next = {
+      ...previous!,
+      records: [...previous!.records.filter((r) => r.question.status !== "pending").slice(-32), record],
+    };
+    // Pure validation before publishing the in-memory slot: bounded-state refusal has no IO.
+    if (projectDraft) QuestionStateSchema.parse(next);
+    meta.questions = next;
+    try {
+      this.saveQuestionMeta(meta);
+    } catch (error) {
+      // Project artifacts retain their slot after ANY uncertain writer outcome. No issuer
+      // closure is installed on failure, so neither an in-process nor cold retry can CREATE.
+      if (!projectDraft && !(error instanceof QuestionCommitError && error.committed))
+        meta.questions = previous!;
+      throw error;
+    }
+    this.questionIssuers.set(record.question.requestId, context.ownerAuthority!);
+    this.append(meta, {
+      type: "input_requested",
+      requestId: record.question.requestId,
+      prompt: input.prompt,
+      inputKind: input.kind,
+      options: input.options.map((o) => o.label),
+    });
+    return this.questionResult(meta, record, "ready");
+  }
+
+  public async proposeProjectCreate(
+    conversationId: string,
+    draft: ProjectProposalDraft,
+    context: ConversationTurnContext,
+  ): Promise<ConversationQuestionResult> {
+    const parsed = ProjectProposalDraftSchema.parse(draft);
+    return this.requestQuestion(
+      conversationId,
+      QuestionDraftSchema.parse({ kind: "text", prompt: parsed.prompt }),
+      context,
+      parsed,
+    );
+  }
+
+  private async projectProposalOperation(
+    request: Extract<ConversationServiceRequest, { op: "project_proposal_get" | "project_proposal_confirm" }>,
+    authority: QuestionAuthority | undefined,
+  ): Promise<ProjectProposalResult> {
+    await authorizeQuestion(authority);
+    const meta = this.metas.get(request.conversationId);
+    if (!meta) return { status: "refused", reason: "unknown_conversation" };
+    this.validQuestionState(meta);
+    const record = meta.questions?.records.find((r) => r.question.requestId === request.requestId);
+    const creation = record?.projectCreation;
+    const sameRecord = () =>
+      this.metas.get(request.conversationId) === meta &&
+      meta.questions?.incarnationId === request.incarnationId &&
+      meta.questions.records.find((r) => r.question.requestId === request.requestId) === record &&
+      record?.projectCreation === creation;
+    if (!record || !creation || !sameRecord()) return { status: "refused", reason: "stale_proposal" };
+    const originalPrincipal = () =>
+      authority?.principal.kind === record.issuer.kind && authority.principal.id === record.issuer.id;
+    if (!originalPrincipal()) throw new Error("question_owner_unavailable");
+    const target =
+      request.op === "project_proposal_confirm"
+        ? ProjectProposalTargetSchema.parse({
+            conversationId: request.conversationId,
+            incarnationId: request.incarnationId,
+            requestId: request.requestId,
+            expectedRevision: request.expectedRevision,
+            proposalId: request.proposalId,
+            artifactSha256: request.artifactSha256,
+            expectedProjectsRevision: request.expectedProjectsRevision,
+          })
+        : undefined;
+    const exactTarget = () =>
+      !target ||
+      proposalHash(target) === proposalHash(proposalResult(creation, meta.revision).proposal!.target);
+    // Consumed receipts deliberately outlive the original request/JWT closure.
+    if (creation.claim || creation.status !== "pending") {
+      await authorizeQuestion(authority);
+      if (!sameRecord() || !originalPrincipal() || !exactTarget())
+        return { status: "refused", reason: "stale_proposal" };
+      return proposalResult(creation, meta.revision);
+    }
+    const issuer = this.questionIssuers.get(record.question.requestId);
+    const revision = meta.revision;
+    const assertCurrent = () => {
+      this.assertQuestionContext(meta, record);
+      if (
+        !sameRecord() ||
+        !originalPrincipal() ||
+        record.question.status !== "pending" ||
+        meta.revision !== revision ||
+        this.questionIssuers.get(record.question.requestId) !== issuer ||
+        !exactTarget()
+      )
+        throw new Error("project_proposal_context_changed");
+    };
+    const guard = async () => {
+      assertCurrent();
+      await authorizeQuestion(issuer);
+      assertCurrent();
+      await authorizeQuestion(authority);
+      assertCurrent();
+    };
+    try {
+      await guard();
+    } catch {
+      return { status: "refused", reason: "owner_context_lost" };
+    }
+    if (!target) return proposalResult(creation, meta.revision);
+    // Another caller may have claimed while this caller was awaiting authorization.
+    if (creation.claim) return proposalResult(creation, meta.revision);
+    if (!this.projectOnboarding) return { status: "refused", reason: "project_onboarding_unavailable" };
+    creation.claim = target;
+    creation.status = "committing";
+    try {
+      this.saveQuestionMeta(meta);
+    } catch {
+      // A throwing rename does not prove no OS effect. Consume every ambiguous claim write;
+      // a cold pending record without its live issuer also cannot restart this mutation.
+      creation.status = "uncertain";
+      return { ...proposalResult(creation, meta.revision), reason: "claim_persistence_unavailable" };
+    }
+    try {
+      const result = await this.projectOnboarding.apply(creation, guard);
+      await guard();
+      creation.status = "created";
+      creation.receipt = {
+        projectId: creation.immutable.command.projectId,
+        projectsRevision: result.revision,
+      };
+      record.question.status = "cancelled";
+      record.question.reason = "project_created";
+      record.question.resolvedAt = new Date().toISOString();
+      meta.revision += 1;
+      this.saveQuestionMeta(meta);
+      this.questionIssuers.delete(record.question.requestId);
+      this.publishQuestionResolution(meta, record);
+      return proposalResult(creation, meta.revision);
+    } catch {
+      // A generic settings/receipt error may follow rename. Never replay or claim no write.
+      if (
+        sameRecord() &&
+        ((record.question.status === "pending" && meta.revision === revision) ||
+          (creation.status === "created" && record.question.reason === "project_created"))
+      ) {
+        creation.status = "uncertain";
+        delete creation.receipt;
+        try {
+          this.saveQuestionMeta(meta);
+        } catch {
+          /* durable committing is already consumed */
+        }
+      }
+      if (!sameRecord()) return { status: "uncertain", reason: "receipt_context_lost" };
+      // Do not report an unpersisted success receipt from the catch path.
+      return {
+        ...proposalResult(creation, meta.revision),
+        status: "uncertain",
+        receipt: undefined,
+        reason: "confirmation_uncertain",
+      };
+    }
+  }
+
+  private questionResult(
+    meta: ConversationMeta,
+    record: QuestionRecord | undefined,
+    status: ConversationQuestionResult["status"],
+    reason?: string,
+  ): ConversationQuestionResult {
+    return {
+      status,
+      conversationId: meta.conversationId,
+      revision: meta.revision,
+      safeCursor: this.lastCursor(meta),
+      ...(meta.questions ? { incarnationId: meta.questions.incarnationId } : {}),
+      ...(record ? { question: structuredClone(record.question) } : {}),
+      ...(reason ? { reason } : {}),
+    };
+  }
+
+  public cancelPendingQuestion(conversationId: string, reason: string, originRunId?: string): void {
+    const meta = this.metas.get(conversationId);
+    if (!meta) return;
+    this.validQuestionState(meta);
+    const record = meta.questions?.records.find(
+      (r) =>
+        r.question.status === "pending" &&
+        (originRunId === undefined || r.question.originRunId === originRunId),
+    );
+    if (!record) return;
+    const before = structuredClone(meta);
+    record.question.status = "cancelled";
+    record.question.reason = reason;
+    record.question.resolvedAt = new Date().toISOString();
+    meta.revision += 1;
+    try {
+      this.saveQuestionMeta(meta);
+    } catch (error) {
+      if (!(error instanceof QuestionCommitError && error.committed)) Object.assign(meta, before);
+      throw error;
+    }
+    this.questionIssuers.delete(record.question.requestId);
+    this.publishQuestionResolution(meta, record);
+  }
+
+  public invalidateQuestionPrincipal(deviceId: string): void {
+    for (const meta of this.metas.values()) {
+      if (
+        meta.questions?.records.some(
+          (r) => r.question.status === "pending" && r.issuer.kind === "device" && r.issuer.id === deviceId,
+        )
+      )
+        this.cancelPendingQuestion(meta.conversationId, "owner_context_lost");
+    }
+  }
+
+  private publishQuestionResolution(meta: ConversationMeta, record: QuestionRecord): void {
+    this.append(meta, {
+      type: "input_resolved",
+      requestId: record.question.requestId,
+      outcome: record.question.status === "submitted" ? "submitted" : "cancelled",
+    });
+  }
+
+  private async questionOperation(
+    request: Extract<ConversationServiceRequest, { op: "input_get" | "input_answer" | "input_cancel" }>,
+    authority: QuestionAuthority | undefined,
+  ): Promise<ConversationQuestionResult> {
+    await authorizeQuestion(authority);
+    let meta = this.metas.get(request.conversationId);
+    if (!meta)
+      return { status: "refused", conversationId: request.conversationId, reason: "unknown_conversation" };
+    this.validQuestionState(meta);
+    let record = meta.questions?.records.find((r) =>
+      request.requestId ? r.question.requestId === request.requestId : r.question.status === "pending",
+    );
+    if (record?.question.status === "pending") {
+      const checkedRequestId = record.question.requestId;
+      const issuer = this.questionIssuers.get(checkedRequestId);
+      let lost = false;
+      try {
+        this.assertQuestionContext(meta, record);
+        if (issuer) await authorizeQuestion(issuer);
+        else lost = true;
+      } catch {
+        lost = true;
+      }
+      await authorizeQuestion(authority);
+      meta = this.metas.get(request.conversationId);
+      if (!meta)
+        return { status: "refused", conversationId: request.conversationId, reason: "unknown_conversation" };
+      this.validQuestionState(meta);
+      record = meta.questions?.records.find((r) =>
+        request.requestId ? r.question.requestId === request.requestId : r.question.status === "pending",
+      );
+      if (record && record.question.requestId !== checkedRequestId)
+        return this.questionResult(meta, undefined, "refused", "context_changed");
+      if (lost && record?.question.status === "pending")
+        this.cancelPendingQuestion(meta.conversationId, "owner_context_lost");
+    }
+    if (request.op === "input_get")
+      return this.questionResult(meta, record, "ready", record ? undefined : "unknown_request");
+    if (!record || request.incarnationId !== meta.questions?.incarnationId)
+      return this.questionResult(meta, undefined, "refused", "stale_request");
+    if (record.projectCreation?.claim)
+      return this.questionResult(meta, record, "refused", "project_confirmation_consumed");
+    // Authenticated duplicate reconciliation precedes revision checks, never enqueue.
+    if (record.question.status !== "pending") {
+      if (
+        request.op === "input_answer" &&
+        record.question.status === "submitted" &&
+        JSON.stringify(request.answer) !== JSON.stringify(record.question.answer)
+      )
+        return this.questionResult(meta, record, "refused", "conflicting_answer");
+      return this.questionResult(meta, record, "resolved");
+    }
+    try {
+      this.assertQuestionContext(meta, record);
+    } catch {
+      this.cancelPendingQuestion(meta.conversationId, "owner_context_lost");
+      return this.questionResult(meta, record, "refused", "owner_context_lost");
+    }
+    if (request.expectedRevision !== meta.revision)
+      return this.questionResult(meta, record, "revision_conflict");
+    if (request.op === "input_cancel") {
+      this.cancelPendingQuestion(meta.conversationId, "owner_cancelled");
+      return this.questionResult(meta, record, "resolved");
+    }
+    const answer = request.answer;
+    if (
+      (answer.kind === "choice" && !record.question.options.some((o) => o.optionId === answer.optionId)) ||
+      (answer.kind === "text" && !record.question.allowFreeform)
+    )
+      return this.questionResult(meta, record, "refused", "invalid_answer");
+    const message = answerMessage(record.question, answer);
+    try {
+      this.enqueue(meta, message, undefined, false, this.runner, {
+        origin: "input",
+        delivery: "queue",
+        ownerAuthority: authority!,
+        questionBinding: { incarnationId: request.incarnationId, workspace: record.workspace },
+        inputAnswer: { requestId: request.requestId, answer },
+        questionAnswer: { record, answer, authority: authority! },
+      });
+    } catch (error) {
+      // Read the durable boundary. An uncertain post-rename answer is consumed, never resubmitted.
+      const stored = JSON.parse(
+        readFileSync(join(this.root, meta.conversationId, "meta.json"), "utf8"),
+      ) as ConversationMeta;
+      const checked = QuestionStateSchema.parse(stored.questions);
+      const receipt = checked.records.find((r) => r.question.requestId === request.requestId);
+      if (!receipt || receipt.question.status !== "submitted") throw error;
+      meta.questions = checked;
+      record = receipt;
+      meta.sessionState = (this.runCounts.get(meta.conversationId) ?? 0) > 0 ? "active" : "failed";
+      if (record.question.continuation) {
+        record.question.continuation.state = "failed";
+        record.question.continuation.reasonCode = "acceptance_interrupted";
+      }
+      this.saveQuestionMeta(meta);
+      this.wakeTails(meta.conversationId);
+      return this.questionResult(meta, record, "resolved", "acceptance_interrupted");
+    }
+    this.questionIssuers.delete(request.requestId);
+    return this.questionResult(meta, record, "resolved");
+  }
+
+  /** Narrow durable question commit; failure after rename is consumption uncertainty. */
+  private saveQuestionMeta(meta: ConversationMeta): void {
+    if (meta.questions) QuestionStateSchema.parse(meta.questions);
+    const path = join(this.root, meta.conversationId, "meta.json");
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    let committed = false;
+    try {
+      const file = openSync(temporary, "wx", 0o600);
+      try {
+        writeFileSync(file, JSON.stringify(meta, null, 2));
+        fsyncSync(file);
+      } finally {
+        closeSync(file);
+      }
+      renameSync(temporary, path);
+      committed = true;
+      const directory = openSync(join(this.root, meta.conversationId), "r");
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
+    } catch (error) {
+      throw new QuestionCommitError(committed, error);
+    } finally {
+      rmSync(temporary, { force: true });
+    }
+  }
+
   private saveMeta(meta: ConversationMeta): void {
     const path = join(this.root, meta.conversationId, "meta.json");
     writeFileSync(path + ".tmp", JSON.stringify(meta, null, 2), { mode: 0o600 });
@@ -3062,6 +3709,10 @@ export class ConversationStore {
   }
 
   private remove(meta: ConversationMeta): void {
+    if (!this.corruptQuestions.has(meta.conversationId))
+      for (const record of meta.questions?.records ?? [])
+        this.questionIssuers.delete(record.question.requestId);
+    this.corruptQuestions.delete(meta.conversationId);
     this.discardProjection(meta.channelDiscord);
     rmSync(join(this.root, meta.conversationId), { recursive: true, force: true });
     this.metas.delete(meta.conversationId);
@@ -3093,6 +3744,7 @@ export class ConversationStore {
         "Wait for the current turn to finish and close side conversations before resetting context",
       );
     }
+    this.cancelPendingQuestion(conversationId, "context_reset");
     const archiveId = `reset-${randomUUID()}`;
     const archiveRoot = join(dirname(this.root), "conversation-archives");
     const archive = join(archiveRoot, archiveId);
@@ -3110,6 +3762,7 @@ export class ConversationStore {
       revision: meta.revision + 1,
       sessionState: "unbound",
       retainedFromCursor: String(boundary).padStart(CURSOR_WIDTH, "0"),
+      questions: newQuestionState(),
       ...(meta.linearReadCursor === undefined ? {} : { linearReadCursor: meta.linearReadCursor }),
       ...(meta.linearWokeCursor === undefined ? {} : { linearWokeCursor: meta.linearWokeCursor }),
       ...(meta.linearAckVersion === undefined ? {} : { linearAckVersion: meta.linearAckVersion }),
@@ -3168,6 +3821,7 @@ export class ConversationStore {
         }),
       );
     }
+    this.cancelPendingQuestion(conversationId, "conversation_closed");
     this.remove(meta);
     return true;
   }
@@ -3270,4 +3924,12 @@ function publicConversation(meta: ConversationMeta): OperatorConversation {
     ...(meta.contextUsage === undefined ? {} : { contextUsage: meta.contextUsage }),
     ...(meta.parentConversationId === undefined ? {} : { parentConversationId: meta.parentConversationId }),
   };
+}
+
+class QuestionCommitError extends Error {
+  readonly committed: boolean;
+  constructor(committed: boolean, cause: unknown) {
+    super("Question persistence unavailable; read its receipt before any further action", { cause });
+    this.committed = committed;
+  }
 }

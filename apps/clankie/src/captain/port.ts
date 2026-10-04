@@ -1,5 +1,10 @@
+import type { QuestionAuthority } from "./conversation-questions.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
-import type { ProjectHireAssignment, ProjectHireProcessProof } from "./project-hires.ts";
+import type {
+  ProjectHireAssignment,
+  ProjectHireProcessProof,
+  ProjectHireMembershipCandidate,
+} from "./project-hires.ts";
 import type { ConversationOwner, ConversationAuthority } from "./conversation-owner.ts";
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
@@ -37,6 +42,9 @@ import type { LinearActivityEvent, LinearWorkOwner } from "../linear-webhook.ts"
  */
 export const CAPTAIN_PROMPT_SECTIONS = ["identity", "persona", "reach", "fleet", "address", "model"] as const;
 export type CaptainPromptSection = (typeof CAPTAIN_PROMPT_SECTIONS)[number];
+
+/** A seat harness that loads some project instruction files itself. */
+export type PromptHarness = "claude";
 
 /**
  * One authored tool as a harness that is not pi sees it: a name, a description,
@@ -102,6 +110,13 @@ export interface LaneToolBank {
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  projectHireMembershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate;
+  confirmedProjectHireAssignment(
+    fleet: string,
+    pane: string,
+    revision: string,
+    proof: ProjectHireProcessProof,
+  ): ProjectHireAssignment;
   lookupProjectHire(proof: ProjectHireProcessProof): Promise<ProjectHireAssignment>;
   /** Host-only persisted ownership. Inspection and caller-supplied IDs grant no route authority. */
   designatedConversationHead(conversationId: string): ConversationOwner | undefined;
@@ -136,7 +151,9 @@ export interface CaptainPort {
   /** Callable operator service for conversations and read-only terminal tails. */
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
+    authority?: QuestionAuthority,
   ): Promise<OperatorConversationServiceResult>;
+  invalidateQuestionPrincipal?(deviceId: string): void;
   /** Lane transcript snapshots for the TUI lanes view. */
   observeLanes(): Promise<readonly ObservableCaptainLane[]>;
   /**
@@ -161,6 +178,8 @@ export interface CaptainPort {
     readonly lane: CaptainSessionLaneV2;
     readonly sections?: readonly CaptainPromptSection[];
     readonly conversationId?: string;
+    /** The seat's harness, so instructions it already loads natively are left out. */
+    readonly harness?: PromptHarness;
   }): Promise<string>;
   /** The memory card that lane's next run would inject, filtered the same way. */
   laneMemoryCard(lane: CaptainSessionLaneV2): Promise<string>;
@@ -253,6 +272,8 @@ export interface LaneObservation {
 /** Test stand-in so the app layer can be exercised without a model. */
 export function createStubCaptain(overrides: Partial<CaptainPort> = {}): CaptainPort {
   return {
+    projectHireMembershipCandidate: () => ({ state: "none" }),
+    confirmedProjectHireAssignment: () => ({ state: "invalid" }),
     lookupProjectHire: async () => ({ state: "none" }),
     evaluatorStatus: () => ({
       schemaVersion: 1,

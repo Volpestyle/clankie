@@ -64,14 +64,11 @@ source setup and checks.
   [quality gates](testing/quality-gates.md) define the recurring checks.
 - [Desktop runtime design](desktop-runtime-design.md) is a dated proposal, not an
   implemented replacement for the desktop-control path.
-- [Discord surface review](proposals/2026-09-30-discord-surface-review.md) is a
-  dated proposal on retiring the Activity and the user-session lab body, awaiting
-  a decision.
+- [Discord surface review](proposals/2026-09-30-discord-surface-review.md) preserves
+  the declined proposal to retire the Activity and the user-session lab body.
 - [Ruthless cut audit](proposals/2026-09-30-ruthless-cut-audit.md) is a dated
-  keep, cut or fold proposal for every surface under ADR 0203, awaiting James's
-  line-by-line decision.
-- [Fleet-lead transfer](fleet-lead-handoff.md) records the retired coordinator
-  runbook and directs current work to native hires.
+  keep, cut or fold proposal under ADR 0203; later ADRs own the accepted decisions
+  and current references own what ships.
 
 Every fact has an owning source. The public site renders canonical command and
 API references rather than maintaining another copy. Its user guides explain

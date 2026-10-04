@@ -1,0 +1,108 @@
+import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { afterEach, expect, test, vi } from "vitest";
+import { createOpenCodeController } from "../src/captain/opencode-worker-controller.ts";
+
+// Exercise the actual loader/protocol against a mock native API, not a native
+// OpenCode invocation. Only host-provided Solid is replaced; its real batching
+// compatibility remains an explicit live-acceptance boundary.
+const cleanups: (() => Promise<unknown>)[] = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
+
+test("awaited first TUI plugin initialization binds before prompt mounting, then sends via its native SDK", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-tui-fixture-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const controller = await createOpenCodeController({
+    receiptsPath: join(directory, "receipts.json"),
+    timeoutMs: 1000,
+  });
+  cleanups.push(() => controller.close());
+  controller.bind(
+    async () => true,
+    async () => {},
+  );
+  const moduleUrl = new URL("../../../integrations/opencode-plugin/worker-tui.mjs", import.meta.url);
+  const runtimeUrl = new URL("./worker-runtime.mjs", moduleUrl).href;
+  const source = (await readFile(fileURLToPath(moduleUrl), "utf8"))
+    .replace(
+      'import { createComputed, createRoot } from "solid-js";',
+      "const createComputed = (fn) => fn(); const createRoot = (fn) => fn(() => {});",
+    )
+    .replace('from "./worker-runtime.mjs"', `from ${JSON.stringify(runtimeUrl)}`);
+  // A temporary module keeps Node's normal relative runtime loading intact.
+  const { writeFile } = await import("node:fs/promises");
+  const loader = join(directory, "worker-tui.mjs");
+  await writeFile(loader, source);
+  const { tui } = (await import(pathToFileURL(loader).href)) as {
+    tui(api: unknown, options: unknown): Promise<void>;
+  };
+  const sessionId = "ses_nativeWorker123";
+  let mounted = false;
+  let route: { name: string; params?: { sessionID: string } } = { name: "home" };
+  let dispose = () => {};
+  const api = {
+    app: { version: "1.18.18" },
+    lifecycle: {
+      signal: new AbortController().signal,
+      onDispose(fn: () => void) {
+        dispose = fn;
+      },
+    },
+    route: {
+      get current() {
+        return route;
+      },
+      navigate: vi.fn((name: string, params: { sessionID: string }) => {
+        route = { name, params };
+      }),
+    },
+    state: {
+      get ready() {
+        return mounted;
+      },
+      config: { mcp: { clankie: { type: "local", command: ["clankie", "mcp", "--fleet"], enabled: true } } },
+      session: { permission: () => [], question: () => [], status: () => ({ type: "idle" }) },
+    },
+    client: {
+      session: {
+        create: vi.fn(async () => {
+          expect(mounted).toBe(false);
+          return { data: { id: sessionId } };
+        }),
+        get: vi.fn(async () => ({ data: { id: sessionId, directory } })),
+        status: async () => ({ data: {} }),
+        promptAsync: vi.fn(async () => ({ response: { status: 204 } })),
+      },
+      permission: { list: async () => ({ data: [] }) },
+      question: { list: async () => ({ data: [] }) },
+    },
+  };
+  cleanups.push(async () => dispose());
+  const initialization = tui(api, { endpoint: controller.endpoint, token: controller.token }).then(() => {
+    mounted = true;
+  });
+  expect(mounted).toBe(false);
+  expect(await controller.request("initialize", { cwd: directory }, 1000)).toEqual({
+    sessionId,
+    version: "1.18.18",
+  });
+  controller.select(sessionId);
+  await initialization;
+  expect(mounted).toBe(true);
+  expect(api.client.session.create).toHaveBeenCalledOnce();
+  const messageId = "msg_controllerRequest123";
+  expect(await controller.request("send", { messageId, text: "Review" })).toMatchObject({
+    outcome: "accepted",
+    messageId,
+  });
+  expect(api.client.session.promptAsync).toHaveBeenCalledOnce();
+  await controller.acknowledge(messageId);
+  await expect(controller.request("initialize", { cwd: directory })).rejects.toThrow();
+  expect(api.client.session.create).toHaveBeenCalledOnce();
+  dispose();
+  await expect(controller.request("status")).rejects.toThrow();
+});

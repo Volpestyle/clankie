@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { OPERATOR_SEAT_HARNESSES } from "./seat-harnesses.ts";
-import { OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
+import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -30,6 +30,16 @@ export const ProjectRoleSchema = z
     hireNaming: z.string().trim().min(1).max(500).optional(),
   })
   .strict();
+/** Empty or omitted project roles inherit the built-ins without persisting overrides (ADR 0216). */
+export function projectRolePolicy(
+  project: Pick<Project, "roles">,
+  role: string,
+): z.infer<typeof ProjectRoleSchema> | undefined {
+  const key = operatorAgentRoleKey(role);
+  if (project.roles.length === 0 && OPERATOR_AGENT_ROLES.some((builtIn) => builtIn === key))
+    return { role: key };
+  return project.roles.find((entry) => operatorAgentRoleKey(entry.role) === key);
+}
 /** References constrain later grants; these records cannot replace broker/link/account checks. */
 export const ProjectGrantRuleSchema = z
   .object({
@@ -103,7 +113,7 @@ export const ProjectSchema = z
     if (project.trackerRef && !project.workspaces.some((w) => w.id === project.trackerRef?.workspaceId))
       ctx.addIssue({ code: "custom", message: "Tracker workspace must belong to the project" });
     for (const mapping of project.labelRoleMap)
-      if (!project.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(mapping.role)))
+      if (projectRolePolicy(project, mapping.role) === undefined)
         ctx.addIssue({ code: "custom", message: "Tracker role must belong to the project" });
   });
 /** Semantic association only. Never use this record as proof of a live hire or pane's membership. */
@@ -148,9 +158,7 @@ export const ProjectsSettingsSchema = z
     for (const assignment of value.assignments)
       if (
         !value.projects.some(
-          (p) =>
-            p.id === assignment.projectId &&
-            p.roles.some((r) => operatorAgentRoleKey(r.role) === operatorAgentRoleKey(assignment.role)),
+          (p) => p.id === assignment.projectId && projectRolePolicy(p, assignment.role) !== undefined,
         )
       )
         ctx.addIssue({ code: "custom", message: "Assignment must reference an existing project role" });
@@ -193,6 +201,115 @@ export const ProjectMembershipSchema = z.discriminatedUnion("outcome", [
 export type ProjectMembership = z.infer<typeof ProjectMembershipSchema>;
 
 export const PROJECTS_PATH = "/v1/operator/projects";
+export const PROJECT_UPDATE_SETTINGS_PATH = "/v1/operator/projects/update";
+export const PROJECT_CREATE_SETTINGS_PATH = "/v1/operator/projects/create";
+/** Owner-confirmed NEW local project only. No remote enrollment or runtime authority. */
+export const CreateProjectSettingsSchema = z
+  .object({
+    projectId: ProjectIdSchema,
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    name: z.string().trim().min(1).max(100),
+    workspacePath: z.string().min(1).max(4096),
+    roles: z
+      .array(
+        ProjectRoleSchema.extend({
+          concurrencyCap: ProjectRoleSchema.shape.concurrencyCap.unwrap().nullable().optional(),
+        }).strict(),
+      )
+      .max(256)
+      .optional(),
+    workerCap: z.number().int().min(0).max(1000).nullable().optional(),
+    trackerRef: z
+      .object({ workspaceId: z.literal("primary"), path: z.literal(".clankie/tracking.json") })
+      .strict()
+      .nullable()
+      .optional(),
+    /** Preference only; neither field implies or changes a numeric hire cap. */
+    fleet: z
+      .object({
+        size: z.enum(["max", "large", "small", "solo"]).optional(),
+        models: z.enum(["optimal", "efficient"]).optional(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+  })
+  .strict();
+export type CreateProjectSettings = z.infer<typeof CreateProjectSettingsSchema>;
+
+/** Proposal data is untrusted; only the separate owner confirmation can apply it. */
+export const ProjectProposalDraftSchema = CreateProjectSettingsSchema.omit({
+  workspacePath: true,
+  expectedRevision: true,
+})
+  .extend({
+    prompt: z.string().trim().min(1).max(2000),
+    evidence: z.array(z.string().max(500)).max(8).default([]),
+  })
+  .strict();
+export type ProjectProposalDraft = z.infer<typeof ProjectProposalDraftSchema>;
+export const ProjectProposalLocatorSchema = z
+  .object({
+    conversationId: z.string().min(1).max(256),
+    incarnationId: z.string().uuid(),
+    requestId: z.string().uuid(),
+  })
+  .strict();
+export type ProjectProposalLocator = z.infer<typeof ProjectProposalLocatorSchema>;
+export const ProjectProposalTargetSchema = ProjectProposalLocatorSchema.extend({
+  expectedRevision: z.number().int().nonnegative(),
+  proposalId: z.string().uuid(),
+  artifactSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  expectedProjectsRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
+export type ProjectProposalTarget = z.infer<typeof ProjectProposalTargetSchema>;
+export const ProjectProposalResultSchema = z
+  .object({
+    status: z.enum(["pending", "committing", "created", "uncertain", "refused"]),
+    reason: z.string().max(100).optional(),
+    proposal: z
+      .object({
+        target: ProjectProposalTargetSchema,
+        command: CreateProjectSettingsSchema,
+        project: ProjectSchema,
+        effectiveRoles: z.array(ProjectRoleSchema).max(256),
+        evidence: z.array(z.string().max(500)).max(8),
+      })
+      .strict()
+      .optional(),
+    receipt: z
+      .object({ projectId: ProjectIdSchema, projectsRevision: z.string().regex(/^[a-f0-9]{64}$/u) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type ProjectProposalResult = z.infer<typeof ProjectProposalResultSchema>;
+
+/** Omitted fields stay unchanged; null removes an optional limit or tracker binding. */
+export const UpdateProjectSettingsSchema = z
+  .object({
+    projectId: ProjectIdSchema,
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    changes: z
+      .object({
+        name: z.string().trim().min(1).max(100).optional(),
+        roles: z.array(ProjectRoleSchema).max(256).optional(),
+        workerCap: z.number().int().min(0).max(1000).nullable().optional(),
+        trackerRef: z
+          .object({ workspaceId: ProjectIdSchema, path: z.literal(".clankie/tracking.json") })
+          .strict()
+          .nullable()
+          .optional(),
+      })
+      .strict()
+      .refine(
+        (value) => Object.values(value).some((field) => field !== undefined),
+        "No project changes supplied",
+      ),
+  })
+  .strict();
+export type UpdateProjectSettings = z.infer<typeof UpdateProjectSettingsSchema>;
+export type ProjectsSnapshot = z.infer<typeof ProjectsSnapshotSchema>;
 export const PROJECT_REMOVE_WORKSPACE_PATH = "/v1/operator/projects/remove-workspace";
 export const RemoveProjectWorkspaceSchema = z
   .object({
@@ -242,4 +359,122 @@ export interface FleetMembershipReport {
   totalPanes: number;
   truncated: boolean;
   panes: FleetPaneMembership[];
+}
+
+/** Optional owner-read display projection. Never control, admission or tool authority. */
+export const FLEET_PROJECT_MEMBERSHIP_PATH = "/v1/operator/fleet-membership/read";
+const FleetMembershipSeatSchema = z
+  .object({
+    seatId: z.string().trim().min(1).max(512),
+    occupantId: z.string().trim().min(1).max(512),
+    fleet: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,63}$/u)
+      .optional(),
+  })
+  .strict();
+export const ReadFleetProjectMembershipSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    seats: z
+      .array(FleetMembershipSeatSchema)
+      .min(1)
+      .max(8)
+      .refine(
+        (seats) =>
+          new Set(seats.map((seat) => JSON.stringify([seat.fleet ?? "default", seat.seatId]))).size ===
+          seats.length,
+        "Duplicate seat",
+      ),
+  })
+  .strict();
+export const FleetProjectMembershipSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    projectsRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    observedAt: z.iso.datetime(),
+    seats: z
+      .array(
+        FleetMembershipSeatSchema.extend({
+          membership: z.discriminatedUnion("outcome", [
+            z
+              .object({
+                outcome: z.literal("member"),
+                source: z.literal("hire"),
+                projectId: ProjectIdSchema,
+                role: OperatorAgentRoleSchema.optional(),
+              })
+              .strict(),
+            z
+              .object({
+                outcome: z.literal("unknown"),
+                reason: z.enum([
+                  "no_confirmed_hire",
+                  "observation_unavailable",
+                  "identity_changed",
+                  "invalid_assignment",
+                  "unsupported_host",
+                  "timeout",
+                ]),
+              })
+              .strict(),
+          ]),
+        }).strict(),
+      )
+      .max(8),
+  })
+  .strict();
+export type ReadFleetProjectMembership = z.infer<typeof ReadFleetProjectMembershipSchema>;
+export type FleetProjectMembershipSnapshot = z.infer<typeof FleetProjectMembershipSnapshotSchema>;
+
+/** An older host is unavailable, never an empty successful membership projection. */
+export async function readFleetProjectMembership(
+  request: ReadFleetProjectMembership,
+  send: (
+    path: string,
+    body: ReadFleetProjectMembership,
+    signal?: AbortSignal,
+  ) => Promise<{ status: number; json(): Promise<unknown> }>,
+  signal?: AbortSignal,
+): Promise<FleetProjectMembershipSnapshot | undefined> {
+  signal?.throwIfAborted();
+  const input = ReadFleetProjectMembershipSchema.parse(request);
+  const response = await send(FLEET_PROJECT_MEMBERSHIP_PATH, input, signal);
+  signal?.throwIfAborted();
+  if ([404, 405, 501].includes(response.status)) return undefined;
+  if (response.status !== 200) throw new Error(`Membership read refused (${response.status})`);
+  const result = FleetProjectMembershipSnapshotSchema.parse(await response.json());
+  signal?.throwIfAborted();
+  if (
+    JSON.stringify(result.seats.map(({ membership: _membership, ...seat }) => seat)) !==
+    JSON.stringify(input.seats)
+  )
+    throw new Error("Membership response does not match the requested seats");
+  return result;
+}
+
+/** Call with monotonic request age and the CURRENT connection/roster/settings generation.
+ * A display receipt is not a lease. Disconnect/unknown callers discard old membership. */
+export function fleetProjectMembershipApplies(
+  result: FleetProjectMembershipSnapshot | undefined,
+  request: ReadFleetProjectMembership,
+  current: {
+    connected: boolean;
+    sameGeneration: boolean;
+    projectsRevision: string;
+    ageMs: number;
+    seats: ReadFleetProjectMembership["seats"];
+  },
+): boolean {
+  return (
+    result !== undefined &&
+    current.connected &&
+    current.sameGeneration &&
+    current.ageMs >= 0 &&
+    current.ageMs <= 5000 &&
+    result.projectsRevision === current.projectsRevision &&
+    JSON.stringify(current.seats) === JSON.stringify(request.seats) &&
+    JSON.stringify(result.seats.map(({ membership: _membership, ...seat }) => seat)) ===
+      JSON.stringify(request.seats)
+  );
 }

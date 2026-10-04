@@ -28,7 +28,15 @@ describe("clankie claude plugin", () => {
     expect(hooks.hooks.SessionStart?.[0]?.hooks[0]).toMatchObject({
       type: "command",
       command: "clankie",
-      args: ["prompt", "--lane", "operator", "--sections", "persona,reach,fleet,address,model"],
+      args: [
+        "prompt",
+        "--lane",
+        "operator",
+        "--sections",
+        "persona,reach,address,model",
+        "--harness",
+        "claude",
+      ],
     });
     // The card injects once per session and on change; SessionStart re-arms it.
     for (const event of ["SessionStart", "UserPromptSubmit"]) {

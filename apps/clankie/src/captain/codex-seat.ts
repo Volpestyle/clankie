@@ -1,6 +1,6 @@
 /**
- * A Codex fleet seat's session: Herdr does not report one, so the uuid lives in
- * the rollout file the process keeps open
+ * A Codex fleet seat's session: use Herdr's exact session report when available,
+ * otherwise the uuid lives in the rollout file the process keeps open
  * (`~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`). `codex
  * queue --thread` takes that uuid. An exact Herdr session report is also usable;
  * delivery never falls back to terminal input.
@@ -14,7 +14,7 @@ export interface HerdrForegroundProcess {
 }
 
 const ROLLOUT_SESSION =
-  /rollout-[^/\s]*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl/iu;
+  /rollout-[^/\s]*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl/giu;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -60,15 +60,20 @@ export function codexProcess(
 }
 
 /**
- * ponytail: lsof of the open rollout file is the session id; herdr
- * `report-agent-session` for Codex would replace it.
+ * A TUI can also keep its native subagents' rollouts open. Prefer Herdr's exact
+ * session when it is among them; otherwise resolve the first rollout so callers
+ * can detect a replacement, or discover a session without a Herdr report.
  */
 export function resolveCodexSessionId(
   processes: readonly HerdrForegroundProcess[],
   openFiles: string,
+  reportedSessionId?: string,
 ): string | undefined {
   if (codexProcess(processes) === undefined) return undefined;
-  return ROLLOUT_SESSION.exec(openFiles)?.[1];
+  const sessions = [...openFiles.matchAll(ROLLOUT_SESSION)].map((match) => match[1]);
+  return reportedSessionId !== undefined && sessions.includes(reportedSessionId)
+    ? reportedSessionId
+    : sessions[0];
 }
 
 /** The rollout's actual home also owns Codex's queue and session database. */

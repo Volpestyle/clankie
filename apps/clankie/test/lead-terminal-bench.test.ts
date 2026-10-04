@@ -233,3 +233,325 @@ it("owner cancellation stops the exact active verifier and never accepts its lat
   await rejected;
   expect(f.command.mock.calls.filter(([args]) => args[0] === "kill")).toHaveLength(1);
 });
+
+it("cleans up the exact created ID when its first inspection fails, retaining the completion error", async () => {
+  const f = await fixture(),
+    built = await f.bridge.build("tests");
+  const original = f.command.getMockImplementation()!;
+  let inspections = 0;
+  f.command.mockImplementation(async (args) => {
+    if (args[0] === "inspect" && ++inspections === 1) throw Error("first inspection unavailable");
+    return original(args);
+  });
+  const output = join(f.root, "verification");
+  await expect(
+    f.bridge.verify({ image: built.image, candidateRoot: f.candidateRoot, output }),
+  ).rejects.toMatchObject({
+    message: "first inspection unavailable",
+    containerId: "c".repeat(64),
+    verifierStopConfirmed: true,
+  });
+  expect(inspections).toBe(3);
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "start")).toHaveLength(0);
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "create")).toHaveLength(1);
+  expect(
+    f.command.mock.calls
+      .filter(([args]) => args[0] === "inspect")
+      .every(([args]) => args[1] === "c".repeat(64)),
+  ).toBe(true);
+  expect(JSON.parse(readFileSync(join(output, "container-stop.json"), "utf8"))).toMatchObject({
+    containerId: "c".repeat(64),
+    stop: { stopped: true },
+    cancelled: false,
+    completionError: "first inspection unavailable",
+  });
+});
+
+it.each(["inspect", "kill"])(
+  "retains uncertain exact-ID cleanup after create inspection failure: %s",
+  async (failure) => {
+    const f = await fixture(),
+      built = await f.bridge.build("tests");
+    const original = f.command.getMockImplementation()!;
+    let inspections = 0;
+    f.command.mockImplementation(async (args) => {
+      if (args[0] === "inspect") {
+        if (++inspections === 1) throw Error("first inspection unavailable");
+        if (failure === "inspect") throw Error("cleanup inspection unavailable");
+        const rows = JSON.parse(await original(args));
+        rows[0].State.Running = true;
+        return JSON.stringify(rows);
+      }
+      if (args[0] === "kill") throw Error("kill unavailable");
+      return original(args);
+    });
+    const output = join(f.root, "verification");
+    await expect(
+      f.bridge.verify({ image: built.image, candidateRoot: f.candidateRoot, output }),
+    ).rejects.toMatchObject({
+      code: "terminal-bench-stop-unconfirmed",
+      containerId: "c".repeat(64),
+      verifierStopConfirmed: false,
+    });
+    expect(f.command.mock.calls.filter(([args]) => args[0] === "create")).toHaveLength(1);
+    expect(f.command.mock.calls.filter(([args]) => args[0] === "start")).toHaveLength(0);
+    expect(f.command.mock.calls.filter(([args]) => args[0] === "kill")).toEqual(
+      failure === "kill" ? [[["kill", "--signal=KILL", "c".repeat(64)]]] : [],
+    );
+    expect(JSON.parse(readFileSync(join(output, "container-stop.json"), "utf8"))).toMatchObject({
+      containerId: "c".repeat(64),
+      stop: { confirmed: false },
+      completionError: "first inspection unavailable",
+    });
+  },
+);
+
+it("aborting pending create never starts its later exact ID and still confirms cleanup", async () => {
+  const f = await fixture(),
+    built = await f.bridge.build("tests"),
+    abort = new AbortController();
+  const original = f.command.getMockImplementation()!;
+  let release!: () => void;
+  f.command.mockImplementation(async (args) => {
+    const result = await original(args);
+    if (args[0] === "create")
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    return result;
+  });
+  const output = join(f.root, "verification");
+  const pending = f.bridge.verify({
+    image: built.image,
+    candidateRoot: f.candidateRoot,
+    output,
+    signal: abort.signal,
+  });
+  const rejected = expect(pending).rejects.toMatchObject({ verifierStopConfirmed: true });
+  await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+  abort.abort(Error("owner cancelled during create"));
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "inspect")).toHaveLength(0);
+  release();
+  await rejected;
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "start")).toHaveLength(0);
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "create")).toHaveLength(1);
+  expect(JSON.parse(readFileSync(join(output, "container-stop.json"), "utf8"))).toMatchObject({
+    containerId: "c".repeat(64),
+    stop: { stopped: true },
+    cancelled: true,
+  });
+});
+
+it("ambiguous create cannot authorize cleanup, start or another create", async () => {
+  const f = await fixture(),
+    built = await f.bridge.build("tests");
+  const original = f.command.getMockImplementation()!;
+  f.command.mockImplementation(async (args) => (args[0] === "create" ? "unknown" : original(args)));
+  const output = join(f.root, "verification");
+  await expect(
+    f.bridge.verify({ image: built.image, candidateRoot: f.candidateRoot, output }),
+  ).rejects.toThrow("Ambiguous Docker create");
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "create")).toHaveLength(1);
+  expect(
+    f.command.mock.calls.filter(([args]) => ["start", "inspect", "kill"].includes(args[0]!)),
+  ).toHaveLength(0);
+  expect(() => readFileSync(join(output, "container-stop.json"))).toThrow();
+});
+
+it("a passing report cannot pass when the exact verifier stop is unconfirmed", async () => {
+  const f = await fixture(),
+    built = await f.bridge.build("tests");
+  const original = f.command.getMockImplementation()!;
+  let inspections = 0;
+  f.command.mockImplementation(async (args) => {
+    if (args[0] === "inspect" && ++inspections === 4) throw Error("cleanup inspection unavailable");
+    return original(args);
+  });
+  const output = join(f.root, "verification");
+  await expect(
+    f.bridge.verify({ image: built.image, candidateRoot: f.candidateRoot, output }),
+  ).rejects.toMatchObject({ code: "terminal-bench-stop-unconfirmed", verifierStopConfirmed: false });
+  expect(JSON.parse(readFileSync(join(output, "container-stop.json"), "utf8"))).toMatchObject({
+    containerId: "c".repeat(64),
+    stop: { confirmed: false },
+    completionError: null,
+  });
+});
+
+it("an invalid report retains its own failure with confirmed cleanup", async () => {
+  const f = await fixture(true),
+    built = await f.bridge.build("tests");
+  const output = join(f.root, "verification");
+  const error = await f.bridge
+    .verify({ image: built.image, candidateRoot: f.candidateRoot, output })
+    .catch((value: Error) => value);
+  expect(error).toMatchObject({ verifierStopConfirmed: true, containerId: "c".repeat(64) });
+  expect(error.code).not.toBe("terminal-bench-stop-unconfirmed");
+  expect(JSON.parse(readFileSync(join(output, "container-stop.json"), "utf8"))).toMatchObject({
+    stop: { stopped: true },
+  });
+});
+
+it.each(["missing", "malformed"])("a %s report is unavailable with confirmed cleanup", async (failure) => {
+  const f = await fixture(),
+    built = await f.bridge.build("tests");
+  const original = f.command.getMockImplementation()!;
+  const output = join(f.root, "verification");
+  f.command.mockImplementation(async (args) => {
+    const result = await original(args);
+    if (args[0] === "wait") {
+      const report = join(output, "logs/ctrf.json");
+      if (failure === "missing") rmSync(report);
+      else writeFileSync(report, "{");
+    }
+    return result;
+  });
+  await expect(
+    f.bridge.verify({ image: built.image, candidateRoot: f.candidateRoot, output }),
+  ).rejects.toMatchObject({ verifierStopConfirmed: true, containerId: "c".repeat(64) });
+  const receipt = JSON.parse(readFileSync(join(output, "container-stop.json"), "utf8"));
+  expect(receipt.stop.stopped).toBe(true);
+  expect(receipt.completionError).toBeTypeOf("string");
+  expect(receipt.stopError).toBeNull();
+});
+
+it("cancellation during cleanup cannot accept an already passing report", async () => {
+  const f = await fixture(),
+    built = await f.bridge.build("tests"),
+    abort = new AbortController();
+  const original = f.command.getMockImplementation()!;
+  let inspections = 0,
+    release!: () => void;
+  f.command.mockImplementation(async (args) => {
+    if (args[0] === "inspect" && ++inspections === 4)
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    return original(args);
+  });
+  const output = join(f.root, "verification");
+  const pending = f.bridge.verify({
+    image: built.image,
+    candidateRoot: f.candidateRoot,
+    output,
+    signal: abort.signal,
+  });
+  const rejected = expect(pending).rejects.toMatchObject({
+    message: "cancelled during cleanup",
+    verifierStopConfirmed: true,
+  });
+  await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+  abort.abort(Error("cancelled during cleanup"));
+  release();
+  await rejected;
+  expect(JSON.parse(readFileSync(join(output, "container-stop.json"), "utf8"))).toMatchObject({
+    stop: { stopped: true },
+    cancelled: true,
+    completionError: "cancelled during cleanup",
+  });
+});
+
+it.each([false, true])(
+  "pending activation cannot outlive confirmed cleanup (kill fails: %s)",
+  async (killFails) => {
+    const f = await fixture(),
+      built = await f.bridge.build("tests"),
+      abort = new AbortController();
+    const original = f.command.getMockImplementation()!;
+    let release!: () => void;
+    f.command.mockImplementation(async (args) => {
+      if (args[0] === "start") {
+        // The daemon has received start, but has not activated the exact container yet.
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      if (args[0] === "kill" && killFails) throw Error("late activation kill unavailable");
+      return original(args);
+    });
+    const output = join(f.root, "verification");
+    const pending = f.bridge.verify({
+      image: built.image,
+      candidateRoot: f.candidateRoot,
+      output,
+      signal: abort.signal,
+    });
+    const settled = pending.then(
+      (result: unknown) => ({ passed: result }),
+      (error: Error) => ({ error }),
+    );
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    abort.abort(Error("owner cancelled pending activation"));
+    // Let an incorrectly eager stop finish both inspections while Running is still false.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    release();
+    const result = await settled;
+    expect(result).not.toHaveProperty("passed");
+    const error = (result as { error: Error & { verifierStopConfirmed: boolean; code?: string } }).error;
+    const running = JSON.parse(await original(["inspect", "c".repeat(64)]))[0].State.Running;
+    expect({ running, confirmed: error.verifierStopConfirmed }).toEqual({
+      running: killFails,
+      confirmed: !killFails,
+    });
+    expect(error.code === "terminal-bench-stop-unconfirmed").toBe(killFails);
+    expect(f.command.mock.calls.filter(([args]) => args[0] === "kill")).toEqual([
+      [["kill", "--signal=KILL", "c".repeat(64)]],
+    ]);
+    expect(f.command.mock.calls.filter(([args]) => args[0] === "wait")).toHaveLength(0);
+    expect(f.command.mock.calls.filter(([args]) => args[0] === "create")).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(output, "container-stop.json"), "utf8"))).toMatchObject({
+      containerId: "c".repeat(64),
+      stop: killFails ? { confirmed: false } : { stopped: true },
+      cancelled: true,
+    });
+  },
+);
+
+it("a rejected activation transport cannot prove cleanup against later daemon activation", async () => {
+  const f = await fixture(),
+    built = await f.bridge.build("tests"),
+    abort = new AbortController();
+  const original = f.command.getMockImplementation()!;
+  let reject!: (error: Error) => void, activateLate!: () => Promise<string>;
+  f.command.mockImplementation(async (args) => {
+    if (args[0] === "start") {
+      activateLate = () => original(args);
+      await new Promise<void>((_resolve, fail) => {
+        reject = fail;
+      });
+    }
+    return original(args);
+  });
+  const output = join(f.root, "verification");
+  const pending = f.bridge.verify({
+    image: built.image,
+    candidateRoot: f.candidateRoot,
+    output,
+    signal: abort.signal,
+  });
+  const settled = pending.then(
+    (result: unknown) => ({ passed: result }),
+    (error: Error) => ({ error }),
+  );
+  await vi.waitFor(() => expect(reject).toBeTypeOf("function"));
+  abort.abort(Error("owner cancelled pending activation"));
+  reject(Error("activation transport timeout"));
+  const result = await settled;
+  expect(result).not.toHaveProperty("passed");
+  // Losing the start reply does not prevent the daemon from processing that request later.
+  await activateLate();
+  const running = JSON.parse(await original(["inspect", "c".repeat(64)]))[0].State.Running;
+  const error = (result as { error: Error & { verifierStopConfirmed: boolean; code?: string } }).error;
+  expect({ running, confirmed: error.verifierStopConfirmed }).toEqual({ running: true, confirmed: false });
+  expect(error.code).toBe("terminal-bench-stop-unconfirmed");
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "start")).toHaveLength(1);
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "wait")).toHaveLength(0);
+  expect(f.command.mock.calls.filter(([args]) => args[0] === "create")).toHaveLength(1);
+  expect(JSON.parse(readFileSync(join(output, "container-stop.json"), "utf8"))).toMatchObject({
+    containerId: "c".repeat(64),
+    stop: { stopped: true },
+    activationUnconfirmed: true,
+    verifierStopConfirmed: false,
+    completionError: "activation transport timeout",
+  });
+});
