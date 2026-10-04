@@ -1,12 +1,13 @@
 # ADR 0219: Minecraft is an MCP-connected body
 
-Status: Proposed (2026-10-04), for [VUH-1584](https://linear.app/vuhlp/issue/VUH-1584/let-clankie-play-minecraft-with-friends).
+Status: Accepted for the offline body slice (2026-10-04), for [VUH-1584](https://linear.app/vuhlp/issue/VUH-1584/let-clankie-play-minecraft-with-friends).
 Extends [service-owned MCP connections](0109-mcp-is-how-he-reaches-a-service.md)
 and [conversation body leases](0215-conversations-lease-one-body.md). The retired
 [Mineflayer runner](0044-runner-owned-mineflayer-private-paper-gameplay.md) and
 [environment contract](0016-versioned-interactive-environment-contract.md) are
-historical precedents. This proposal does not ship a Minecraft body; wave 1
-freezes contracts and evaluates a stock server before service wiring.
+historical precedents. Wave 1 froze contracts and evaluated the stock server;
+wave 2 implements the service-owned offline body. Online account authentication
+and live Discord acceptance remain deferred.
 
 ## Context
 
@@ -23,7 +24,7 @@ and loopback-only profile do not describe today's architecture or multiplayer
 requirement. Minecraft needs its own domain contracts; it does not fit Pokémon's
 GBA actions or require a second model identity.
 
-## Proposed decision
+## Decision
 
 Clankie's existing service session remains the sole model decision-maker. It
 chooses goals, words and reactions through native goals and wakes. A
@@ -164,23 +165,46 @@ Minecraft acceptance criterion is marked complete by these subsystem checks.
 **AC6 recommendation: patch/adapt the pinned MCP baseline.** Stock yuniko
 demonstrably falls short on actual cancellation and honest effect verification,
 and lacks follow and the account/viewer integration needed for the feature.
-Add the small domain/lifecycle adapter at that boundary, reusing Mineflayer and
+The owned domain/lifecycle adapter at that boundary reuses Mineflayer and
 selectively recovered motor mechanics. Full runner revival or a new movement
-engine is not justified by these results. The later implementation must verify
-the patched behavior before this proposal becomes an accepted shipping claim.
+engine is not justified by these results.
+
+## Owned offline implementation — 2026-10-04
+
+`integrations/minecraft-mcp` preserves the pinned upstream's Apache-2.0 license
+and provenance. Join is lazy; cancellable action handles, server-packet evidence,
+bounded world events and a same-bot browser viewer sit beneath the service's
+exact conversation/generation guard. The service persists ownership in the
+shared play lease, denies raw MCP bypasses, and rechecks approved destinations
+before dispatch. API, CLI and TUI controls configure offline profiles.
+
+Manual Node 26.7.0 conformance against the same Paper 1.21.4 fixture measured
+navigation stopping within 527.4 ms of cancellation through independent RCON
+samples. Dig cancellation replied in 1.3 ms; RCON confirmed the iron remained
+through the former 7.5-second late-effect window. Adventure-mode digging settled
+with refuted evidence while RCON still found dirt. Follow, two-way chat and
+server-verified survival dig/place passed. The compiled motor and copied runtime
+packages also passed outside the checkout (513.7 ms navigation stop, 1.5 ms dig
+cancel reply). Reply latency alone is not a motor-stop measurement.
+
+The isolated real HTTP app and CLI command module joined, followed a second
+scripted player, exchanged chat, dug and placed blocks, captured three inspected
+320×180 PNGs, and released the lease only after confirmed leave. The real browser
+viewer avoids native canvas/GL builds. These are local offline subsystem and
+integration proofs; they establish neither a human friend session nor live
+Discord Activity delivery.
 
 ## Consequences and remaining verification
 
-Wave 1 is limited to the small domain contract and test fake, without service wiring.
-Later implementation must prove broker auth, endpoint refusal, exact lease and
-restart handling, every raw MCP path, responsive cancellation with late-effect
-checks, and bounded continuous viewing. Manual live acceptance then uses a
-friend/second player, both console and admitted Discord requests, and a recorded
-session attached to VUH-1584 with the landing-page comparison. The isolated
-offline spike cannot prove authenticated online multiplayer or Discord viewing.
+Broker-backed Microsoft auth remains unimplemented. Focused tests cover endpoint
+refusal, exact lease/restart handling, raw MCP denial and bounded capture. Manual
+live acceptance still needs a human friend, admitted Discord requests, continuous
+Activity viewing, and a recorded session attached to VUH-1584 with the landing-page
+comparison. The isolated offline checks cannot prove authenticated online
+multiplayer or Discord viewing.
 
-Current setup belongs in a future `docs/minecraft.md` and shipped Minecraft skill,
-with API/CLI/TUI behavior documented when it ships. Keep procedures out of the
+Current setup lives in `docs/minecraft.md` and the shipped Minecraft skill,
+with API/CLI/TUI behavior in `docs/cli.md`. Keep procedures out of the
 standing identity instructions. No hosted provisioning or production records
 move into this public repo. Ordinary CI stays narrow; live checks are manual
 and evals are excluded.

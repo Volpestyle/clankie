@@ -47,6 +47,9 @@
     "apps/discord-user-session": {
       "entry": ["src/presence-runtime-module.ts"]
     },
+    "integrations/minecraft-mcp": {
+      "entry": ["test/**/*.test.ts"]
+    },
     "packages/play": {
       "ignoreExportsUsedInFile": true
     },

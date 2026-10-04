@@ -23,6 +23,9 @@ if (outputIndex === -1 || !args[outputIndex + 1])
 const output = resolve(args[outputIndex + 1]!);
 const spikeIndex = args.indexOf("--spike");
 const spike = resolve(spikeIndex < 0 ? join(homedir(), "dev/minecraft-spike") : args[spikeIndex + 1]!);
+const motorIndex = args.indexOf("--motor");
+const motorEntry =
+  motorIndex < 0 ? fileURLToPath(new URL("../src/main.ts", import.meta.url)) : resolve(args[motorIndex + 1]!);
 const { rcon } = (await import(pathToFileURL(join(spike, "rcon.mjs")).href)) as {
   rcon(command: string): Promise<string>;
 };
@@ -38,7 +41,7 @@ const initialList = await command("before-catalog", "list");
 assert.match(initialList, /There are 0 of/u, "Refuse to modify a world occupied by another player");
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
+  args: [motorEntry],
   cwd: dirname(fileURLToPath(new URL("../package.json", import.meta.url))),
   stderr: "pipe",
 });

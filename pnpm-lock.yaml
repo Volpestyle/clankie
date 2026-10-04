@@ -145,6 +145,9 @@ importers:
       '@types/ws':
         specifier: 8.18.1
         version: 8.18.1
+      mineflayer:
+        specifier: 4.35.0
+        version: 4.35.0
       tsx:
         specifier: 4.23.0
         version: 4.23.0

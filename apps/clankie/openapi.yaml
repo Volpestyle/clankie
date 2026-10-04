@@ -2473,6 +2473,78 @@ paths:
         "204":
           description: Forgotten
 
+  /v1/minecraft:
+    get:
+      tags: [Operator]
+      operationId: getMinecraftStatus
+      summary: Read the current Minecraft body session
+      description: Operator-authenticated read of the approved offline Java body. Account material and raw endpoints are excluded. x-clankie-conversation-id selects an existing owning conversation.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Current exact session and bounded action state }
+        "403": { description: Operator authority required }
+        "503": { description: Minecraft unavailable }
+    post:
+      tags: [Operator]
+      operationId: commandMinecraft
+      summary: Join, act, inspect, pause, cancel or leave Minecraft
+      description: Select an approved profile id or submit a typed Minecraft action. Long work returns a handle. The shared play lease is retained until exact confirmed disconnect. Completion is distinct from server-verified effects.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  {
+                    type: string,
+                    enum: [status, profiles, join, observe, act, action_status, pause, resume, cancel, leave],
+                  }
+                profileId: { type: string }
+                actionId: { type: string }
+                request: { type: object, description: Domain action including its type and bounded arguments }
+      responses:
+        "200": { description: Session or action handle with settlement and evidence }
+        "400": { description: Invalid typed command }
+        "403": { description: Operator authority required }
+        "409": { description: Busy play lease, stale identity or refused operation }
+        "503": { description: Motor unavailable }
+
+  /v1/minecraft/configuration:
+    get:
+      tags: [Operator]
+      operationId: getMinecraftConfiguration
+      summary: Read owner Minecraft profiles and destination allowlist
+      description: Offline host, port, version, username and explicit public destination grants. This operator configuration does not appear in model tools.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Offline profiles and public allowlist }
+        "403": { description: Operator authority required }
+    put:
+      tags: [Operator]
+      operationId: configureMinecraft
+      summary: Replace offline Minecraft profiles and public destination grants
+      description: Owner-only settings write. DNS and SRV destinations are checked again before dial; model calls cannot supply raw host or authentication arguments.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profiles, publicAllowlist]
+              properties:
+                profiles: { type: array, maxItems: 32, items: { type: object } }
+                publicAllowlist: { type: array, maxItems: 64, items: { type: object } }
+      responses:
+        "200": { description: Updated offline profiles and public allowlist }
+        "400": { description: Invalid settings }
+        "403": { description: Operator authority required }
+        "503": { description: Settings unavailable }
+
   /v1/embodiment/intents:
     post:
       tags: [Embodiment]

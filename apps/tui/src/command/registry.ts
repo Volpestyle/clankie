@@ -268,6 +268,15 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["minecraft"],
+    lines: [
+      "  minecraft configure [PROFILE HOST --version VERSION --port PORT]",
+      "  minecraft status|profiles|join PROFILE|leave|cancel [ACTION]|pause|resume",
+      "  minecraft observe|chat TEXT|follow PLAYER|goto X Y Z|dig X Y Z|place X Y Z ITEM",
+      "                           Play in an approved offline Java server (JSON)",
+    ],
+  },
+  {
     nouns: ["fleet"],
     lines: [
       "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",

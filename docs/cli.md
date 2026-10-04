@@ -830,6 +830,23 @@ All return JSON; a refusal exits 1. `/rivals` exposes the same commands in the T
 Notes are context, not instructions the current scripted policy understands.
 See [Rivals setup and verification](rivals.md).
 
+### `minecraft`
+
+`minecraft configure PROFILE HOST --version VERSION [--port PORT] [--username NAME]`
+adds an offline Java server profile. `configure` shows settings; `configure remove PROFILE`
+and `configure allow-public|revoke-public HOST [PORT]` manage destinations.
+DNS/SRV targets are resolved and checked before dial; public endpoints require an
+owner allowlist. Model tools select profile ids only.
+
+`minecraft status|profiles|join PROFILE|leave|cancel [ACTION]|pause|resume|observe`
+manages the session. `chat TEXT`, `follow PLAYER [DISTANCE]`, `goto X Y Z`,
+`dig X Y Z`, `place X Y Z ITEM`, `craft ITEM COUNT`, and `action JSON` return
+prompt action handles; `action-status ACTION` separates settlement from server
+evidence. All return JSON. Use `--conversation ID` to select an existing owning
+conversation. `/minecraft` exposes the same controls and settings in the TUI.
+Minecraft and Pokémon share one play lease, released only after confirmed
+disconnect. See [Minecraft setup and limitations](minecraft.md).
+
 <a id="model-setup"></a>
 
 ### `model [status]`

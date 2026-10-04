@@ -232,6 +232,11 @@ pixels or publish Go Live.
 
 ## Then the plumbing
 
+Minecraft's first local slice uses approved offline Java server profiles and
+shares Clankie's play body with Pokémon. Configure it through `clankie minecraft`
+or `/minecraft`; see the [Minecraft reference](../../../docs/minecraft.md) for
+destination policy, action evidence, Chrome rendering and current limitations.
+
 ### Choose his models
 
 `/setup` gets the first model working. Return to `/model` to change it,

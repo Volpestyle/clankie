@@ -23,6 +23,8 @@ import {
 } from "@clankie/protocol";
 import type { BodyVoiceStays } from "./body-voice-stays.ts";
 import type { BodyPlaySessions } from "./body-play-sessions.ts";
+import type { MinecraftService } from "./minecraft.ts";
+import { createMinecraftRoutes } from "./minecraft-routes.ts";
 import { BodyLeaseRequestSchema, BodyResourceSchema } from "@clankie/protocol";
 import type { BodyLeaseRouter, BodyConversationIdentity } from "./body-lease-router.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
@@ -482,6 +484,7 @@ export interface ClankieAppDependencies {
   }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
   bodyVoiceStays?: BodyVoiceStays;
   bodyPlaySessions?: BodyPlaySessions;
+  minecraft?: MinecraftService;
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;
@@ -1464,6 +1467,23 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!binding) return context.json({ error: "herdr_binding_unavailable" }, 503);
     return context.json(binding);
   });
+
+  app.route(
+    "/",
+    createMinecraftRoutes({
+      ...(dependencies.minecraft === undefined ? {} : { service: dependencies.minecraft }),
+      settings: settingsSource,
+      authorize: async (request) => {
+        const operator = await authenticateOperator(request, dependencies);
+        if (!operator || operator === "unavailable") return undefined;
+        return operatorBodyIdentity(
+          request.headers.get("x-clankie-conversation-id") ??
+            dependencies.captain.seatContext()?.conversationId,
+          request,
+        );
+      },
+    }),
+  );
 
   app.post("/v1/rivals", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
