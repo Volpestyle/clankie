@@ -65,7 +65,7 @@
         width: auto;
         height: 100%;
         max-width: 100%;
-        aspect-ratio: 3 / 2;
+        aspect-ratio: var(--surface-aspect, auto);
         object-fit: contain;
         background: #000;
       }
@@ -282,7 +282,7 @@
             max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
         }
         #stage {
-          aspect-ratio: 3 / 2;
+          aspect-ratio: var(--surface-aspect, auto);
         }
         canvas {
           width: 100%;
@@ -420,6 +420,7 @@
         if (frame.sequence <= lastFrameSequence) return;
         if (lastFrameSequence >= 0) stats.lostUpstream += frame.sequence - lastFrameSequence - 1;
         lastFrameSequence = frame.sequence;
+        document.documentElement.style.setProperty("--surface-aspect", `${frame.width} / ${frame.height}`);
         if (canvas.width !== frame.width || canvas.height !== frame.height) {
           canvas.width = frame.width;
           canvas.height = frame.height;
