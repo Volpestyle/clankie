@@ -42,14 +42,25 @@ function statusText(status: LiveAgent["seat"]["status"], text: string, { ansi }:
   }
 }
 
-function agentMetadata({ seat }: LiveAgent, theme: AgentTheme): string {
+/** A pane whose harness bridge is missing or claims another pane, as doctor observed it (VUH-1587). */
+function bridgeWarning({ seat }: LiveAgent, { ansi }: AgentTheme): string | undefined {
+  const bridge = seat.harnessBridge;
+  if (!bridge || bridge.status === "live-process" || bridge.status === "unobserved") return undefined;
+  return ansi.red(`bridge ${clean(bridge.status)}`);
+}
+
+function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
+  const { seat } = agent;
   const harness = clean(seat.harness);
   const paintHarness = harness === "claude" ? theme.ansi.yellow : theme.ansi.blue;
   return [
     paintHarness(harness),
     statusText(seat.status, clean(seat.status), theme),
     theme.ansi.dim(clean(seat.machine ?? seat.fleet ?? "local")),
-  ].join(theme.ansi.dim(" · "));
+    bridgeWarning(agent, theme),
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(theme.ansi.dim(" · "));
 }
 
 /** The compact preview and the modal share a qualified seat identity, never a row index. */
@@ -163,6 +174,9 @@ export class LiveAgentPicker implements Component {
           this.theme.ansi.bold(clean(selected.name)),
           `${agentMetadata(selected, this.theme)} · ${this.theme.ansi.dim(clean(selected.seat.seatId))}`,
           step ?? this.theme.ansi.dim("Step unavailable"),
+          ...(selected.seat.harnessBridge?.remediation && bridgeWarning(selected, this.theme)
+            ? [`${this.theme.ansi.red("Fix:")} ${clean(selected.seat.harnessBridge.remediation)}`]
+            : []),
         ].flatMap((line) => wrapTextWithAnsi(line, contentWidth))
       : [];
     // Reserve chrome and selected detail before allocating the scrolling list.

@@ -243,3 +243,35 @@ it("renders a remote agent refusal as a readable message without its JSON envelo
   );
   expect(shell.tui.hasOverlay()).toBe(false);
 });
+
+it("flags a missing bridge and reveals the entire selected fix within narrow widths", () => {
+  const worker = agent("gap");
+  const agents = [
+    {
+      ...worker,
+      seat: {
+        ...worker.seat,
+        harnessBridge: {
+          status: "missing" as const,
+          detail: "No bridge process",
+          remediation: "Save sessions; codex app-server daemon stop; codex --no-daemon resume <SESSION>",
+        },
+      },
+    },
+  ];
+  const strip = new LiveAgentStrip(() => agents, theme);
+  expect(plain(strip.render(120))).toContain("bridge missing");
+  const picker = new LiveAgentPicker(() => agents, strip, theme, {
+    maxHeight: () => 30,
+    onOpen: () => {},
+    onClose: () => {},
+    onRender: () => {},
+  });
+  const narrow = picker.render(40);
+  expect(narrow.every((row) => visibleWidth(row) <= 40)).toBe(true);
+  expect(
+    plain(narrow)
+      .replace(/[│\n]/gu, " ")
+      .replace(/\s+/gu, " "),
+  ).toContain("codex --no-daemon resume");
+});

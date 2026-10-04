@@ -78,6 +78,7 @@ describe("canonical owner command layer", () => {
       commands: {},
       herdrPlugin: { bundled: false },
       harnessBridges: {
+        linkedSession: { state: "no-link", panes: [], unownedBridges: [] },
         profiles: {
           machine: { platform: "darwin", home: "/home" },
           claude: [],
