@@ -247,3 +247,16 @@ it("never emits a seat reply twice when a surface replays or resumes (VUH-1027)"
     ]);
   }
 });
+
+it("sends the head of an oversized tool detail and keeps cursors on the whole entry", async () => {
+  const long = "x".repeat(16_000);
+  const make = (detail: string): HerdrSeatTranscript => ({
+    sessionKey: "codex:session",
+    entries: [{ type: "tool", id: "t1", toolCallId: "call", name: "bash", phase: "completed", detail }],
+  });
+  const page = await nativeConversationPage(conversation, make(long), "idle", request);
+  const tool = page.events.find((event) => event.type === "tool");
+  expect(tool?.type === "tool" ? tool.detail : undefined).toBe(`${"x".repeat(4_096)}\n… (trimmed)`);
+  const other = await nativeConversationPage(conversation, make(`${long}y`), "idle", request);
+  expect(other.events.find((event) => event.type === "tool")?.cursor).not.toBe(tool?.cursor);
+});
