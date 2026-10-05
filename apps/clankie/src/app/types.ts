@@ -43,6 +43,7 @@ import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
 import type { HostedBodyClient } from "../hosted-body.ts";
+import type { ComposerTranscriptions } from "../composer-transcription.ts";
 import type { HostedDeviceSecurity } from "../hosted-device-security.ts";
 import type { HostedDiscordOperator } from "../hosted-discord.ts";
 import type { HostedPairing } from "../hosted-pairing.ts";
@@ -155,8 +156,10 @@ export interface ClankieAppDependencies {
   supportDeviceRefKey?: Uint8Array;
   /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */
   hostedCredits?: Pick<HostedBodyClient, "readCredits">;
+  composerTranscriptions?: ComposerTranscriptions;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;
-  hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice">;
+  hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice"> &
+    Partial<Pick<HostedDeviceSecurity, "publishSupportDevice">>;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */

@@ -74,6 +74,7 @@ import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../even
 import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-routes.ts";
 import { ExecutionConnectSchema } from "../herdr-session.ts";
 import { createHostedCreditsRoutes } from "../hosted-credits-routes.ts";
+import { createComposerTranscriptionRoutes } from "../composer-transcription.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
@@ -229,6 +230,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? undefined
       : new DeviceSessionSigner(dependencies.deviceSessionKey);
   let securityClosed = false;
+  let composerAuthKeyId: string | undefined;
+  const publishHostedSupportDevice = async (record: DeviceRecord) => {
+    if (record.supportGrantId === undefined || dependencies.hostedBody === undefined) return;
+    if (dependencies.hostedDeviceSecurity?.publishSupportDevice === undefined)
+      throw new Error("Hosted support device publication unavailable");
+    await dependencies.hostedDeviceSecurity.publishSupportDevice(record.deviceId, record.supportGrantId);
+  };
   const reconcileHostedSecurity = async () => {
     if (securityClosed || deviceSessionSigner !== undefined) return;
     try {
@@ -239,6 +247,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           .filter((record) => record.status === "revoked")
           .map((record) => record.deviceId),
       );
+      for (const record of devices.values()) await publishHostedSupportDevice(record);
       if (securityClosed) return;
       for (const tombstone of restored.revocations) {
         const record = devices.get(tombstone.dev);
@@ -260,6 +269,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       // Publish the signer last. Pairing, refresh and relay self-authorize
       // remain unavailable throughout reconciliation or any failed retry.
       deviceSessionSigner = new DeviceSessionSigner(restored.key);
+      composerAuthKeyId = restored.keyId;
     } catch {
       logger.warn({ event: "hosted.security.unavailable" }, "hosted device admission unavailable");
     }
@@ -426,7 +436,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const header = request.headers.get("authorization");
     const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
     if (token === undefined || token.length === 0) return { denied: "invalid" };
-    const now = clock();
+    let now = clock();
     let claims;
     try {
       claims = deviceSessionSigner.verify(token, Math.floor(now.getTime() / 1000));
@@ -434,10 +444,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (error instanceof DeviceSessionError && error.code === "expired") return { denied: "expired" };
       return { denied: "invalid" };
     }
-    const record = devices.get(claims.deviceId);
+    let record = devices.get(claims.deviceId);
     if (record === undefined || isDevicePendingExpired(record, now)) return { denied: "invalid" };
     if (record.status === "revoked") return { denied: "revoked" };
     if (record.status !== "active") return { denied: "invalid" };
+    try {
+      await publishHostedSupportDevice(record);
+    } catch {
+      return "unavailable";
+    }
+    now = clock();
+    record = devices.get(claims.deviceId);
+    if (record === undefined || isDevicePendingExpired(record, now)) return { denied: "invalid" };
+    if (record.status === "revoked") return { denied: "revoked" };
+    if (record.status !== "active") return { denied: "invalid" };
+    if (claims.expiresAt <= Math.floor(now.getTime() / 1000)) return { denied: "expired" };
     if (record.supportGrantId !== undefined) {
       const grant = supportGrants.active(record.supportGrantId);
       if (grant === undefined) return { denied: "revoked" };
@@ -889,6 +910,42 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
   app.route("/", createHostedCreditsRoutes(dependencies.hostedCredits, authorizeOwnerDevice));
+  app.route(
+    "/",
+    createComposerTranscriptionRoutes(dependencies.composerTranscriptions, async (request) => {
+      const original = hostedOriginalRequests.get(request) ?? request;
+      const identity = await authenticateDevice(original);
+      if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
+      const eligible = () => {
+        const record = devices.get(identity.deviceId);
+        return (
+          record?.status === "active" &&
+          record.grants.chat &&
+          record.supportGrantId === undefined &&
+          !original.signal.aborted &&
+          clock().getTime() < Date.parse(identity.sessionExpiresAt)
+        );
+      };
+      if (!eligible()) return undefined;
+      return {
+        deviceId: identity.deviceId,
+        sessionExpiresAtMs: Date.parse(identity.sessionExpiresAt),
+        support: devices.get(identity.deviceId)?.supportGrantId !== undefined,
+        ...(composerAuthKeyId === undefined ? {} : { authKeyId: composerAuthKeyId }),
+        current: eligible,
+        authorize: async () => {
+          const fresh = await authenticateDevice(original);
+          return (
+            fresh !== "unavailable" &&
+            !("denied" in fresh) &&
+            fresh.deviceId === identity.deviceId &&
+            fresh.grants.chat &&
+            eligible()
+          );
+        },
+      };
+    }),
+  );
 
   /** Captain or authenticated operator, for reads the owner should never have to authorize. */
   const authenticateCaptainOrOperator = async (
@@ -2193,6 +2250,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     get authenticateDevice() {
       return authenticateDevice;
     },
+    get publishHostedSupportDevice() {
+      return publishHostedSupportDevice;
+    },
     get deviceDenialResponse() {
       return deviceDenialResponse;
     },
@@ -2319,6 +2379,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       securityClosed = true;
       supportSyncClosed = true;
       clearInterval(supportTimer);
+      dependencies.composerTranscriptions?.close();
       if (securityRetryTimer !== undefined) clearInterval(securityRetryTimer);
       if (wakeRevocationTimer !== undefined) clearInterval(wakeRevocationTimer);
       stopObservingMessages?.();

@@ -30,6 +30,25 @@ import { HostedDiscordAuthorizationClaimsSchema } from "@clankie/protocol/hosted
 import { verifyHostedDiscordPermit } from "@clankie/protocol/hosted-discord-crypto";
 import type { DiscordDirectoryRequest, DiscordPermissionsRequest } from "@clankie/protocol";
 import {
+  HostedDevicePurposeRequestSchema,
+  HostedSupportDeviceStateSchema,
+} from "@clankie/protocol/hosted-device-security";
+import { parseProtocolResponse, safeParseProtocolResponse } from "@clankie/protocol";
+import {
+  HOSTED_COMPOSER_STATUS_PATH,
+  HOSTED_COMPOSER_TRANSCRIBE_PATH,
+  HOSTED_COMPOSER_RECEIPT_PATH,
+  ComposerTranscriptionDeviceSchema,
+  HostedComposerTranscriptionSchema,
+  HostedComposerReceiptSchema,
+  ComposerTranscriptionStatusSchema,
+  ComposerTranscriptionReceiptSchema,
+  ComposerTranscriptionErrorSchema,
+  type ComposerTranscriptionDevice,
+  type HostedComposerTranscription,
+  type HostedComposerReceipt,
+} from "@clankie/protocol/composer-transcription";
+import {
   loadConfig,
   parseModelRef,
   subscriptionRefFor,
@@ -343,11 +362,12 @@ const SecurityStateClaimsSchema = z
       .object({ key: z.string().regex(/^[A-Za-z0-9_-]{43}$/u), gen: z.number().int().nonnegative() })
       .strict()
       .nullable(),
+    sp: z.array(HostedSupportDeviceStateSchema).max(1024).optional(),
   })
   .strict();
 export type HostedSecurityState = Pick<
   z.infer<typeof SecurityStateClaimsSchema>,
-  "gen" | "rev" | "ak" | "pk"
+  "gen" | "rev" | "ak" | "pk" | "sp"
 >;
 
 /** Resource/key refusal is not revocation of this body's entitlement. */
@@ -398,6 +418,25 @@ export class HostedBodyDeniedError extends Error {
     this.name = "HostedBodyDeniedError";
   }
 }
+
+/** A validated composer admission refusal; it contains no upstream response text. */
+export class HostedComposerRefusedError extends Error {
+  readonly code: z.infer<typeof ComposerTranscriptionErrorSchema>["error"];
+  constructor(code: HostedComposerRefusedError["code"]) {
+    super(code);
+    this.name = "HostedComposerRefusedError";
+    this.code = code;
+  }
+}
+const COMPOSER_ADMISSION_REFUSALS = new Set([
+  "authentication_required",
+  "forbidden",
+  "ineligible",
+  "allowance_exhausted",
+  "invalid_request",
+  "invalid_audio",
+  "capacity",
+]);
 
 /** One renewable credential for the connector and every fleet call. Secrets stay in the broker. */
 export class HostedBodyClient {
@@ -692,7 +731,8 @@ export class HostedBodyClient {
       | "discord-key"
       | "devices/revoke"
       | "auth-key"
-      | "support-grants",
+      | "support-grants"
+      | "device-purpose",
     body: Readonly<Record<string, unknown>>,
   ): Promise<Response> {
     const credential = await this.resolveHostToken();
@@ -769,7 +809,7 @@ export class HostedBodyClient {
       credential.token,
       async (response, nonce) => {
         const wire = z
-          .object({ state: z.string().max(256_000) })
+          .object({ state: z.string().max(1_048_576) })
           .strict()
           .parse(await response.json());
         const claims = SecurityStateClaimsSchema.parse(
@@ -785,11 +825,20 @@ export class HostedBodyClient {
           claims.exp <= claims.iat ||
           claims.exp - claims.iat > 60 ||
           claims.rev.some((entry) => entry.gen > claims.gen) ||
+          claims.sp?.some(
+            (entry) => entry.gen > claims.gen || entry.inst !== this.bootstrap.installationId,
+          ) ||
           (claims.ak !== null && claims.ak.gen > claims.gen) ||
           (claims.pk !== null && claims.pk.gen > claims.gen)
         )
           throw new Error("Invalid hosted security state");
-        state = { gen: claims.gen, rev: claims.rev, ak: claims.ak, pk: claims.pk };
+        state = {
+          gen: claims.gen,
+          rev: claims.rev,
+          ak: claims.ak,
+          pk: claims.pk,
+          ...(claims.sp === undefined ? {} : { sp: claims.sp }),
+        };
       },
     );
     if (state === undefined) throw new Error("Hosted security state unavailable");
@@ -800,6 +849,15 @@ export class HostedBodyClient {
     z.object({ generation: z.number().int().nonnegative() })
       .strict()
       .parse(await response.json());
+  }
+  async declareSupportDevice(deviceId: string, supportGrantId: string): Promise<void> {
+    const input = HostedDevicePurposeRequestSchema.parse({
+      installationId: this.bootstrap.installationId,
+      deviceId,
+      supportGrantId,
+    });
+    const response = await this.post("device-purpose", input);
+    await response.body?.cancel();
   }
   async declareAuthKey(keyId: string, previousKeyId?: string): Promise<void> {
     const response = await this.post("auth-key", {
@@ -870,6 +928,64 @@ export class HostedBodyClient {
       return response;
     }
   }
+  /** Signed, one-attempt paired-device composer transport. No audio resend after uncertainty. */
+  private async composerRequest(path: string, input: unknown, signal?: AbortSignal) {
+    await this.pairingRegistration;
+    const { token } = await this.resolveHostToken();
+    const bytes = JSON.stringify(input);
+    const digest = createHash("sha256").update(bytes).digest("base64url");
+    // An uncertain upload is never resent, even when a model forwarder would retry it.
+    const response = await this.fetcher(new URL(path, this.bootstrap.gatewayOrigin), {
+      method: "POST",
+      redirect: "error",
+      body: bytes,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        ...this.signature(path, digest),
+      },
+      signal: signal ?? AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      if ([400, 401, 403, 429].includes(response.status)) {
+        const refusal = safeParseProtocolResponse(
+          ComposerTranscriptionErrorSchema,
+          await response.json().catch(() => undefined),
+        );
+        if (refusal.success && COMPOSER_ADMISSION_REFUSALS.has(refusal.data.error))
+          throw new HostedComposerRefusedError(refusal.data.error);
+      }
+      await response.body?.cancel();
+      throw new Error("Composer transcription unavailable");
+    }
+    return response.json() as Promise<unknown>;
+  }
+  async composerTranscriptionStatus(device: ComposerTranscriptionDevice) {
+    return parseProtocolResponse(
+      ComposerTranscriptionStatusSchema,
+      await this.composerRequest(
+        HOSTED_COMPOSER_STATUS_PATH,
+        ComposerTranscriptionDeviceSchema.parse(device),
+      ),
+    );
+  }
+  async composerTranscribe(input: HostedComposerTranscription, signal: AbortSignal) {
+    return parseProtocolResponse(
+      ComposerTranscriptionReceiptSchema,
+      await this.composerRequest(
+        HOSTED_COMPOSER_TRANSCRIBE_PATH,
+        HostedComposerTranscriptionSchema.parse(input),
+        signal,
+      ),
+    );
+  }
+  async composerTranscriptionReceipt(input: HostedComposerReceipt) {
+    return parseProtocolResponse(
+      ComposerTranscriptionReceiptSchema,
+      await this.composerRequest(HOSTED_COMPOSER_RECEIPT_PATH, HostedComposerReceiptSchema.parse(input)),
+    );
+  }
+
   /** Signed, read-only account default; no other account fields leave the fleet. */
   async readAccountSettings(): Promise<
     import("@clankie/protocol/account-diagnostics").AccountDiagnosticsDefault

@@ -161,6 +161,7 @@ import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./publi
 import { startHostedModelForwarder } from "./hosted-model-forwarder.ts";
 import { hostedPiSeatModel } from "./hosted-seat-model.ts";
 import { createHostedCustomerModels, customerSeatModel } from "./hosted-customer-model.ts";
+import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import { createLocalTracker } from "@clankie/work-items";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
@@ -1251,6 +1252,15 @@ const clankie = await createClankieApp({
         hostedBody,
         supportGrantSync: hostedBody,
         hostedCredits: hostedBody,
+        composerTranscriptions: new ComposerTranscriptions({
+          root: join(stateRoot, "composer-transcription"),
+          installationId: hostedBody.bootstrap.installationId,
+          cloud: {
+            status: (device) => hostedBody.composerTranscriptionStatus(device),
+            transcribe: (input, signal) => hostedBody.composerTranscribe(input, signal),
+            receipt: (input) => hostedBody.composerTranscriptionReceipt(input),
+          },
+        }),
         accountSettings: hostedBody,
         hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),
       }),

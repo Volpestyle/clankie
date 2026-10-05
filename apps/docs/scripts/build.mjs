@@ -514,6 +514,17 @@ function buildNetworkRows() {
         purpose: "Read the Discord rooms and their routing state on the paired host.",
       },
     ],
+    ...[
+      ["GET", "status", "Read composer transcription availability and included recording allowance."],
+      ["POST", "begin", "Begin a bounded, device-scoped composer recording."],
+      ["POST", "chunk", "Append a bounded recording chunk at an exact byte offset."],
+      ["POST", "commit", "Request one transcription for an editable draft; sending stays explicit."],
+      ["POST", "cancel", "Discard that recording and prevent late draft delivery."],
+      ["POST", "receipt", "Recover the same draft receipt without repeating provider dispatch."],
+    ].map(([method, action, purpose]) => [
+      `${method} /v1/composer/transcription/${action}`,
+      { access: "Active ordinary paired device bearer with chat access; encrypted exchange only", purpose },
+    ]),
     [
       "GET /v1/discord/settings",
       {

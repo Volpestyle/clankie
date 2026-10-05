@@ -323,6 +323,175 @@ paths:
           description: Durable inbox is at capacity
         "503":
           description: Durable admission unavailable
+  /v1/composer/transcription/status:
+    get:
+      tags: [Devices]
+      operationId: composerTranscriptionStatus
+      summary: Read local or managed availability and included allowance
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      responses:
+        "200":
+          description: Availability and bounds
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionStatus" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/begin:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionBegin
+      summary: Begin one bounded composer recording
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionBegin" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/chunk:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionChunk
+      summary: Append one recording chunk at an exact byte offset
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionChunk" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/commit:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionCommit
+      summary: Transcribe a completed recording once
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionRequest" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/cancel:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionCancel
+      summary: Discard a recording and prevent late draft delivery
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionRequest" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/receipt:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionReceipt
+      summary: Reconcile the same recording without repeating provider dispatch
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionRequest" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
   /v1/model-keys:
     get:
       tags: [Operator]
@@ -4261,6 +4430,83 @@ components:
       oneOf:
         - { $ref: "#/components/schemas/FleetReleasePolicy" }
         - { type: object, nullable: true, enum: [null] }
+    ComposerTranscriptionRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId]
+      properties:
+        requestId: { type: string, format: uuid }
+    ComposerTranscriptionBegin:
+      type: object
+      additionalProperties: false
+      required: [requestId, audioBytes]
+      properties:
+        requestId: { type: string, format: uuid }
+        audioBytes: { type: integer, minimum: 46, maximum: 5825580 }
+    ComposerTranscriptionChunk:
+      type: object
+      additionalProperties: false
+      required: [requestId, offset, dataBase64]
+      properties:
+        requestId: { type: string, format: uuid }
+        offset: { type: integer, minimum: 0, maximum: 5825580 }
+        dataBase64:
+          type: string
+          contentEncoding: base64
+          minLength: 4
+          maxLength: 349528
+          description: Canonical base64 of at most 256 KiB; offset must append or repeat identical acknowledged bytes.
+    ComposerTranscriptionStatus:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, mode, state, maxDurationMs, maxAudioBytes, maxChunkBytes]
+      properties:
+        schemaVersion: { const: 1 }
+        mode: { enum: [local, managed] }
+        state: { enum: [available, unavailable, ineligible, allowance_exhausted] }
+        maxDurationMs: { type: integer, minimum: 1, maximum: 180000 }
+        maxAudioBytes: { type: integer, minimum: 1, maximum: 5825580 }
+        maxChunkBytes: { type: integer, minimum: 1, maximum: 262144 }
+        allowance:
+          type: object
+          additionalProperties: false
+          required: [limitMs, remainingMs, resetsAt]
+          properties:
+            limitMs: { type: integer, minimum: 0 }
+            remainingMs: { type: integer, minimum: 0 }
+            resetsAt: { type: string, format: date-time }
+    ComposerTranscriptionReceipt:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, requestId, state]
+      properties:
+        schemaVersion: { const: 1 }
+        requestId: { type: string, format: uuid }
+        state: { enum: [uploading, transcribing, complete, cancelled, failed, uncertain] }
+        receivedBytes: { type: integer, minimum: 0, maximum: 5825580 }
+        text:
+          {
+            type: string,
+            maxLength: 16000,
+            description: Present exactly when state is complete; transient editable draft only.,
+          }
+        error:
+          enum:
+            [
+              authentication_required,
+              forbidden,
+              unavailable,
+              ineligible,
+              allowance_exhausted,
+              invalid_request,
+              invalid_audio,
+              capacity,
+              not_found,
+              conflict,
+              cancelled,
+              uncertain,
+              provider_failed,
+            ]
     DeployHoldOverride:
       type: object
       additionalProperties: false
