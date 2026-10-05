@@ -10,6 +10,7 @@ import {
   type NativeSocketOwner,
   type NativeSocketProcess,
   type NativeProcessDiagnostic,
+  nativeProcessStart,
 } from "./local-fleet-process.ts";
 
 const exec = promisify(execFile);
@@ -180,10 +181,17 @@ export function localFleetProof(options: LocalFleetProofOptions) {
 /** Project access additionally needs the live native foreground agent, not just its pane shell. */
 export function localProjectProof(options: LocalFleetProofOptions) {
   const observe = createProjectProcessObserver(options);
-  const observeSocket: NonNullable<LocalFleetProofOptions["observeSocket"]> =
-    options.observeSocket ??
-    ((socket, expected) =>
-      observeSocketProcess(socket, options.processHelper ?? fleetProcessHelper(), expected));
+  const observeSocket = (socket: Socket, checkpoint: "initial" | "final", expected?: NativeSocketOwner) =>
+    options.observeSocket !== undefined
+      ? options.observeSocket(socket, expected)
+      : observeSocketProcess(
+          socket,
+          options.processHelper ?? fleetProcessHelper(),
+          expected,
+          options.diagnostics === undefined
+            ? undefined
+            : (event) => diagnostic(options, { source: "native", checkpoint, event }),
+        );
   const owners = new WeakMap<Socket, NativeSocketOwner>();
   return async (socket: Socket, pane: string): Promise<ProjectProcessProof | undefined> => {
     if ((options.platform ?? process.platform) !== "darwin" || !/^w[\w]+:p[\w]+$/u.test(pane))
@@ -202,10 +210,16 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     try {
       const binding = await options.binding();
       if (!binding) return undefined;
-      const [proof, initial] = await Promise.all([
-        observe("default", pane),
-        observeSocket(socket, options.expectedOwner?.(socket) ?? owners.get(socket)),
-      ]);
+      // Keep the full-census phases clear of our own short-lived Herdr/helper
+      // children. Project observations bracket both socket checkpoints, while
+      // those socket checkpoints bracket the private-registry checks below.
+      const proof = await observe("default", pane);
+      if (!proof) return undefined;
+      const initial = await observeSocket(
+        socket,
+        "initial",
+        options.expectedOwner?.(socket) ?? owners.get(socket),
+      );
       const chain = initial?.ancestors.map((ancestor) => ancestor.pid) ?? [];
       if (
         !proof ||
@@ -218,18 +232,29 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         return undefined;
       // Native proof already brackets executable/session/foreground/lifetime reads.
       // Bind its shell to the socket ancestry without repeating the entire fleet proof.
-      if (!chain.includes(proof.shell.pid) && (await options.privateSeat?.(chain, pane, binding)) !== true)
+      const hasLifetime = (snapshot: NativeSocketProcess, process: { pid: number; startTime: string }) =>
+        snapshot.ancestors.some(
+          (ancestor) =>
+            ancestor.pid === process.pid && nativeProcessStart(ancestor.birth) === process.startTime,
+        );
+      const directShell = hasLifetime(initial, proof.shell);
+      if (!directShell && (await options.privateSeat?.(chain, pane, binding)) !== true) return undefined;
+      // A private registry may supply an alternate server ancestry; it never
+      // excuses conflicting kernel lifetimes for a PID already in this chain.
+      if (
+        (chain.includes(proof.shell.pid) && !directShell) ||
+        proof.processes.some((process) => chain.includes(process.pid) && !hasLifetime(initial, process))
+      )
         return undefined;
-      const direct = proof.processes.some((process) => chain.includes(process.pid));
+      const direct = proof.processes.some((process) => hasLifetime(initial, process));
       const privateSeat =
         !direct &&
         !proof.nativeSessionPending &&
         (await options.privateProjectSeat?.(chain, pane, binding, proof)) === true;
       if (!direct && !privateSeat) return undefined;
-      const [final, finalProof] = await Promise.all([
-        observeSocket(socket, initial.owner),
-        observe("default", pane),
-      ]);
+      const final = await observeSocket(socket, "final", initial.owner);
+      if (!final) return undefined;
+      const finalProof = await observe("default", pane);
       const finalChain = final?.ancestors.map((ancestor) => ancestor.pid) ?? [];
       if (
         !final ||
@@ -239,7 +264,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       )
         return undefined;
       if (
-        !finalChain.includes(proof.shell.pid) &&
+        !hasLifetime(final, proof.shell) &&
         (await options.privateSeat?.(finalChain, pane, binding)) !== true
       )
         return undefined;

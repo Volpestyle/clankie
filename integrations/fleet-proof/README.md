@@ -32,9 +32,63 @@ The body takes two fresh snapshots around live Herdr and private-seat checks and
 requires agreement. Its per-connection identity pin adds a refusal fence against
 PID or socket replacement. It never caches authority, skips the census, or
 accepts a caller-supplied PID. A missing helper or unsupported platform refuses
-admission; there is no legacy socket-scan fallback. Existing project identity
-checks still inspect the foreground harness separately, including executable
-observations; this change does not relax those checks.
+admission; there is no legacy socket-scan fallback. Project identity separately
+checks the shell and foreground harness through the process mode below.
+
+## Shell and foreground process observations
+
+```sh
+native-process-proof --processes SHELL_PID AGENT_PID [--diagnostics]
+```
+
+Success returns one JSON object, with the two processes in the supplied order:
+
+```json
+{
+  "schemaVersion": 1,
+  "processes": [
+    {
+      "pid": 123,
+      "ppid": 122,
+      "uid": 501,
+      "birth": ["1791220000", "123456"],
+      "executable": "/absolute/path/to/executable",
+      "argv": ["argv[0]", "argv[1]"]
+    }
+  ]
+}
+```
+
+The example abbreviates the array; successful output always contains exactly two
+records. Both require full `PROC_PIDTBSDINFO` observations with effective UID
+equal to the body's `getuid()`, a live 64-bit process, and an absolute
+`proc_pidpath` executable. Birth seconds and microseconds remain decimal strings.
+Each executable and argument must be valid UTF-8; JSON escapes controls, quotes
+and backslashes. Each retained argument is bounded to 4096 bytes. The `argv`
+array contains exactly the first `min(argc, 2)` arguments, including empty
+strings; fewer arguments yield a shorter array, and zero arguments yield `[]`.
+Later arguments and environment values never enter output or diagnostics.
+
+`KERN_PROCARGS2` supplies the argument bytes. The helper reads the bounded kernel
+argument area, verifies size observations and erases its temporary buffer. It
+uses the LP64 executable-path alignment established by XNU's
+[`exec_extract_strings`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_exec.c)
+and [`sysctl_procargsx`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_sysctl.c)
+to locate arguments; skipping all NUL padding would incorrectly consume an empty
+`argv[0]`. Unsupported widths, truncation, malformed data, inaccessible or exited
+targets, and exceeded bounds refuse the entire observation with zero stdout.
+
+The helper captures both processes twice, brackets each executable/argument read
+with full process identities, compares executable and argument observations, and
+rechecks both identities before emitting. It shares the bounded attempt/time
+limits with socket mode, without scanning unrelated processes. The body repeats
+the batch around current Herdr and binding checks; executable observations do
+not grant membership by themselves. There is no `ps` or `lsof` process fallback.
+
+Kernel argument observations read the process's user stack. They do not provide
+immutable exec-time attestation or an atomic snapshot of both processes.
+Repeated reads refuse observed changes, but cannot establish that no change
+occurred and reverted between observations.
 
 ## Build
 

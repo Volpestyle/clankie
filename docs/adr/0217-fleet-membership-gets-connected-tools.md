@@ -36,6 +36,21 @@ may still refuse under sustained churn; an explicit current-request admission
 403 precedes dispatch, while earlier uncertain receipts remain subject to
 reconciliation.
 
+Foreground project identity uses the same native helper for same-user executable,
+exact first launcher arguments and microsecond process births. It reads the shell
+and native process together at both checkpoints, then binds their lifetimes to
+the socket's kernel ancestry. This replaces the repeated foreground `ps`/`lsof`
+spawns without caching an admission result. The two project observations enclose
+both socket censuses; socket censuses enclose the private-registry checks. Keeping
+each census clear of our own short-lived proof children avoids causing process-list
+churn during that census. This remains a pair of observations, not an atomic
+kernel snapshot. Restored private-seat checks still
+observe the current occupant on each request; roster reads and provider write
+checks retain their independent revocation fences. Existing generic hire receipts
+with second-resolution display timestamps do not match the new kernel lifetime
+format: they fail closed until a fresh hire records the full birth. No legacy
+timestamp conversion grants an old receipt authority.
+
 Fleet discovery lists exactly `clankie_tools` and `clankie_call`.
 `clankie_tools` searches up to 20 qualified names/descriptions or retrieves up to
 10 selected input schemas. It never dumps every server's catalog. `clankie_call`

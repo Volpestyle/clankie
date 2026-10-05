@@ -8,6 +8,7 @@ import { OPERATOR_SEAT_HARNESSES, type HerdrBinding } from "@clankie/protocol";
 import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession, recoverLocalCodexSession } from "./captain/herdr-census.ts";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
+import { fleetProcessHelper, nativeProcessStart, observeNativeProcesses } from "./local-fleet-process.ts";
 
 type Run = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
 const exec = promisify(execFile);
@@ -75,6 +76,7 @@ export function createProjectProcessObserver(options: {
   platform?: string;
   launcher?(harness: string): Promise<NativeLauncher | undefined>;
   canonical?(path: string): Promise<string>;
+  processHelper?: string;
 }) {
   const execute = options.run ?? run;
   const canonical = options.canonical ?? realpath;
@@ -138,29 +140,22 @@ export function createProjectProcessObserver(options: {
       const agentPid: number = initial.foreground_process_group_id;
       if (![shellPid, agentPid].every((pid) => Number.isSafeInteger(pid) && pid > 1) || shellPid === agentPid)
         return undefined;
-      const observeProcess = async (pid: number) => {
-        const output = await execute("/bin/ps", ["-p", String(pid), "-o", "lstart=,comm="]);
-        const match =
-          /^\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/u.exec(
-            output,
-          );
-        if (!match) throw new Error("Process unavailable");
-        return { pid, startTime: match[1]!, executable: match[2]! };
-      };
-      const shell = await observeProcess(shellPid);
-      const agent = await observeProcess(agentPid);
-      const matchesLauncher = async () => {
-        const mapped = await execute("/usr/sbin/lsof", ["-a", "-p", String(agentPid), "-d", "txt", "-Fn"]);
-        const executable = mapped
-          .split("\n")
-          .find((line) => line.startsWith("n"))
-          ?.slice(1);
-        if (!executable || (await canonical(executable)) !== launcher.executable) return false;
+      const snapshot = () =>
+        observeNativeProcesses(
+          shellPid,
+          agentPid,
+          options.processHelper ?? fleetProcessHelper(),
+          options.run,
+        );
+      const initialProcesses = await snapshot();
+      if (!initialProcesses) return undefined;
+      const [shell, agent] = initialProcesses.processes;
+      const matchesLauncher = async (observed: NonNullable<typeof agent>) => {
+        if ((await canonical(observed.executable)) !== launcher.executable) return false;
         if (!launcher.script) return true;
-        const command = (await execute("/bin/ps", ["-p", String(agentPid), "-o", "command="])).trim();
         // Interpreter launches need the exact installed script as argv[1], never an arbitrary
         // command containing its name. Unsupported wrappers/process-title rewrites deny.
-        const [interpreter, script] = command.split(/\s+/u);
+        const [interpreter, script] = observed.argv;
         return (
           !!interpreter &&
           !!script &&
@@ -170,15 +165,26 @@ export function createProjectProcessObserver(options: {
           (await canonical(script)) === launcher.script
         );
       };
-      if (!(await matchesLauncher())) return undefined;
-      const latest = await info();
+      if (!shell || !agent || !(await matchesLauncher(agent))) return undefined;
+      // Keep a roster read's permit until every owned native child has closed,
+      // even when another observation fails or cancellation arrives first.
+      const [paneRead, nativeRead, processRead] = await Promise.allSettled([info(), native(), snapshot()]);
       if (
-        !(await matchesLauncher()) ||
-        JSON.stringify(await native()) !== JSON.stringify(nativeInitial) ||
+        paneRead.status !== "fulfilled" ||
+        nativeRead.status !== "fulfilled" ||
+        processRead.status !== "fulfilled"
+      )
+        return undefined;
+      const latest = paneRead.value;
+      const latestNative = nativeRead.value;
+      const finalProcesses = processRead.value;
+      if (
+        !finalProcesses ||
+        !(await matchesLauncher(finalProcesses.processes[1]!)) ||
+        JSON.stringify(latestNative) !== JSON.stringify(nativeInitial) ||
         latest.shell_pid !== shellPid ||
         latest.foreground_process_group_id !== agentPid ||
-        JSON.stringify(await observeProcess(shellPid)) !== JSON.stringify(shell) ||
-        JSON.stringify(await observeProcess(agentPid)) !== JSON.stringify(agent)
+        JSON.stringify(finalProcesses) !== JSON.stringify(initialProcesses)
       )
         return undefined;
       const current = await options.binding();
@@ -200,8 +206,8 @@ export function createProjectProcessObserver(options: {
           socketPath: binding.socketPath,
           ...(binding.session === undefined ? {} : { session: binding.session }),
         },
-        shell: { pid: shell.pid, startTime: shell.startTime },
-        processes: [{ pid: agent.pid, startTime: agent.startTime }],
+        shell: { pid: shell.pid, startTime: nativeProcessStart(shell.birth) },
+        processes: [{ pid: agent.pid, startTime: nativeProcessStart(agent.birth) }],
       };
     } catch {
       return undefined;

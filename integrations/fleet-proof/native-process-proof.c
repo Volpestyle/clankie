@@ -43,6 +43,13 @@ struct owner {
   uint64_t pcb;
   uint64_t generation;
 };
+enum { MAX_ARG_BLOB = 1024 * 1024, MAX_HEAD_ARG = 4096 };
+struct process_record {
+  struct identity process;
+  char executable[PROC_PIDPATHINFO_MAXSIZE];
+  char argv[2][MAX_HEAD_ARG + 1];
+  int argc;
+};
 static struct timespec began;
 static struct timespec overall_began;
 static int diagnostics;
@@ -229,6 +236,208 @@ static void print_identity(const struct identity *p, int include_uid) {
   if (include_uid) printf(",\"uid\":%u", (unsigned)p->uid);
   else printf(",\"ppid\":%d", p->ppid);
   printf(",\"birth\":[\"%" PRIu64 "\",\"%" PRIu64 "\"]", p->sec, p->usec);
+}
+
+/* JSON only accepts Unicode scalar values, not arbitrary filesystem bytes. */
+static int valid_utf8(const char *text, size_t length) {
+  const unsigned char *p = (const unsigned char *)text;
+  for (size_t i = 0; i < length;) {
+    unsigned char first = p[i++];
+    if (first < 0x80) continue;
+    uint32_t scalar;
+    int count;
+    if (first >= 0xc2 && first <= 0xdf) { scalar = first & 0x1f; count = 1; }
+    else if (first >= 0xe0 && first <= 0xef) { scalar = first & 0x0f; count = 2; }
+    else if (first >= 0xf0 && first <= 0xf4) { scalar = first & 0x07; count = 3; }
+    else return 0;
+    if ((size_t)count > length - i) return 0;
+    for (int j = 0; j < count; ++j) {
+      unsigned char next = p[i++];
+      if ((next & 0xc0) != 0x80) return 0;
+      scalar = (scalar << 6) | (next & 0x3f);
+    }
+    if ((count == 2 && scalar < 0x800) || (count == 3 && scalar < 0x10000) ||
+        (scalar >= 0xd800 && scalar <= 0xdfff) || scalar > 0x10ffff) return 0;
+  }
+  return 1;
+}
+
+static void print_string(const char *text) {
+  putchar('"');
+  for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
+    if (*p == '"' || *p == '\\') { putchar('\\'); putchar(*p); }
+    else if (*p < 0x20) printf("\\u%04x", (unsigned)*p);
+    else putchar(*p);
+  }
+  putchar('"');
+}
+
+/* These are both observed owners, not ancestry candidates. Never substitute
+ * KERN_PROC_PID for an unavailable full same-user BSD observation. */
+static int target_identity(pid_t pid, struct identity *out) {
+  if (!within_budget()) return refuse();
+  struct proc_bsdinfo b;
+  errno = 0;
+  if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &b, sizeof(b)) != sizeof(b))
+    return refuse_at("process", "process_unavailable", errno);
+  if (b.pbi_pid != (uint32_t)pid || b.pbi_ppid > INT_MAX ||
+      b.pbi_start_tvsec == 0 || b.pbi_start_tvusec >= 1000000 ||
+      b.pbi_status == SZOMB || (b.pbi_flags & PROC_FLAG_INEXIT))
+    return refuse_at("process", "process_unavailable", 0);
+  if (b.pbi_uid != getuid()) return refuse_at("socket_owner", "owner_mismatch", 0);
+  /* KERN_PROCARGS2 does not expose pointer width. Its alignment below is
+   * supported only when the full BSD snapshot confirms a 64-bit process. */
+  if (!(b.pbi_flags & PROC_FLAG_LP64)) return refuse_at("argv", "argv_invalid", 0);
+  *out = (struct identity){pid, (pid_t)b.pbi_ppid, b.pbi_uid, b.pbi_ruid,
+                           b.pbi_start_tvsec, b.pbi_start_tvusec};
+  return 0;
+}
+
+static int executable_path(pid_t pid, char *path, size_t capacity) {
+  if (!within_budget()) return refuse();
+  errno = 0;
+  int length = proc_pidpath(pid, path, (uint32_t)capacity);
+  if (length <= 0 || (size_t)length >= capacity ||
+      strnlen(path, capacity) != (size_t)length || path[0] != '/' ||
+      !valid_utf8(path, (size_t)length))
+    return refuse_at("executable", "executable_unavailable", errno);
+  return 0;
+}
+
+static int argument_head(pid_t pid, struct process_record *out) {
+  if (!within_budget()) return refuse();
+  int maximum;
+  size_t maximum_size = sizeof(maximum);
+  int limit_mib[] = {CTL_KERN, KERN_ARGMAX};
+  errno = 0;
+  if (sysctl(limit_mib, 2, &maximum, &maximum_size, NULL, 0) != 0 ||
+      maximum_size != sizeof(maximum) || maximum <= 0 || maximum > MAX_ARG_BLOB)
+    return refuse_at("argv", "argv_unavailable", errno);
+  size_t capacity = (size_t)maximum + sizeof(int);
+  int mib[] = {CTL_KERN, KERN_PROCARGS2, pid};
+  size_t needed = 0;
+  if (!within_budget()) return refuse();
+  errno = 0;
+  if (sysctl(mib, 3, NULL, &needed, NULL, 0) != 0)
+    return refuse_at("argv", "argv_unavailable", errno);
+  if (needed <= sizeof(int) || needed > capacity)
+    return refuse_at("argv", "argv_invalid", 0);
+  /* Smaller buffers can yield a legacy truncated tail rather than an error.
+   * Read up to the kernel limit and reject a full/truncated or changed result. */
+  char *blob = calloc(capacity, 1);
+  if (blob == NULL) return refuse_at("argv", "allocation_failed", errno);
+  size_t bytes = capacity;
+  int result = 0;
+  if (!within_budget()) { result = refuse(); goto finish; }
+  errno = 0;
+  if (sysctl(mib, 3, blob, &bytes, NULL, 0) != 0) {
+    result = refuse_at("argv", "argv_unavailable", errno); goto finish;
+  }
+  if (bytes <= sizeof(int) || bytes >= capacity ||
+      ((bytes + sizeof(int) - 1) & ~(sizeof(int) - 1)) != needed) {
+    result = refuse_at("argv", "argv_invalid", 0); goto finish;
+  }
+  size_t after = 0;
+  if (!within_budget()) { result = refuse(); goto finish; }
+  errno = 0;
+  if (sysctl(mib, 3, NULL, &after, NULL, 0) != 0) {
+    result = refuse_at("argv", "argv_unavailable", errno); goto finish;
+  }
+  if (after != needed) { result = refuse_at("argv", "argv_changed", 0); goto finish; }
+  int argc;
+  memcpy(&argc, blob, sizeof(argc));
+  if (argc < 0 || (size_t)argc > bytes - sizeof(int)) {
+    result = refuse_at("argv", "argv_invalid", 0); goto finish;
+  }
+  size_t path_length = strnlen(blob + sizeof(int), bytes - sizeof(int));
+  if (path_length == 0 || path_length >= PROC_PIDPATHINFO_MAXSIZE ||
+      path_length == bytes - sizeof(int)) {
+    result = refuse_at("argv", "argv_invalid", 0); goto finish;
+  }
+  /* XNU exec_extract_strings pads executable_path= + path to the target
+   * pointer width. KERN_PROCARGS2 strips the 16-byte key, preserving alignment.
+   * Calculate that padding: skipping arbitrary NULs would lose empty argv[0]. */
+  size_t offset = sizeof(int) + ((path_length + 1 + 7) & ~(size_t)7);
+  if (offset > bytes) { result = refuse_at("argv", "argv_invalid", 0); goto finish; }
+  for (size_t i = sizeof(int) + path_length + 1; i < offset; ++i)
+    if (blob[i] != '\0') { result = refuse_at("argv", "argv_invalid", 0); goto finish; }
+  out->argc = argc > 2 ? 2 : argc;
+  for (int i = 0; i < out->argc; ++i) {
+    size_t length = strnlen(blob + offset, bytes - offset);
+    if (length == bytes - offset || length > MAX_HEAD_ARG ||
+        !valid_utf8(blob + offset, length)) {
+      result = refuse_at("argv", "argv_invalid", 0); goto finish;
+    }
+    memcpy(out->argv[i], blob + offset, length + 1);
+    offset += length + 1;
+  }
+finish:
+  /* The syscall may return additional arguments/environment. They are never
+   * parsed, emitted or logged, and the entire temporary buffer is erased. */
+  for (size_t i = 0; i < capacity; ++i) ((volatile unsigned char *)blob)[i] = 0;
+  free(blob);
+  return result;
+}
+
+static int capture_process(pid_t pid, struct process_record *out) {
+  int result = target_identity(pid, &out->process);
+  if (result != 0) return result;
+  result = executable_path(pid, out->executable, sizeof(out->executable));
+  if (result != 0) return result;
+  result = argument_head(pid, out);
+  if (result != 0) return result;
+  struct identity after;
+  result = target_identity(pid, &after);
+  if (result != 0) return result;
+  if (!same_process(&out->process, &after)) return refuse_at("process", "process_changed", 0);
+  return 0;
+}
+
+static int prove_processes(int argc, char **argv) {
+  uint64_t pids[2];
+  if (argc != 4 || !decimal(argv[2], INT_MAX, &pids[0]) || pids[0] <= 1 ||
+      !decimal(argv[3], INT_MAX, &pids[1]) || pids[1] <= 1)
+    return refuse_at("arguments", "invalid_arguments", 0);
+  struct process_record first[2] = {0}, second[2] = {0};
+  for (int i = 0; i < 2; ++i) {
+    int result = capture_process((pid_t)pids[i], &first[i]);
+    if (result != 0) return result;
+  }
+  for (int i = 0; i < 2; ++i) {
+    int result = capture_process((pid_t)pids[i], &second[i]);
+    if (result != 0) return result;
+    if (!same_process(&first[i].process, &second[i].process))
+      return refuse_at("process", "process_changed", 0);
+    if (strcmp(first[i].executable, second[i].executable) != 0)
+      return refuse_at("executable", "executable_changed", 0);
+    if (first[i].argc != second[i].argc)
+      return refuse_at("argv", "argv_changed", 0);
+    for (int j = 0; j < first[i].argc; ++j)
+      if (strcmp(first[i].argv[j], second[i].argv[j]) != 0)
+        return refuse_at("argv", "argv_changed", 0);
+  }
+  for (int i = 0; i < 2; ++i) {
+    struct identity after;
+    int result = target_identity((pid_t)pids[i], &after);
+    if (result != 0) return result;
+    if (!same_process(&first[i].process, &after)) return refuse_at("process", "process_changed", 0);
+  }
+  if (!within_budget()) return refuse();
+  printf("{\"schemaVersion\":1,\"processes\":[");
+  for (int i = 0; i < 2; ++i) {
+    if (i) putchar(',');
+    print_identity(&first[i].process, 1);
+    printf(",\"ppid\":%d,\"executable\":", first[i].process.ppid);
+    print_string(first[i].executable);
+    printf(",\"argv\":[");
+    for (int j = 0; j < first[i].argc; ++j) {
+      if (j) putchar(',');
+      print_string(first[i].argv[j]);
+    }
+    printf("]}");
+  }
+  puts("]}");
+  return 0;
 }
 
 /* Return 2 only for census churn or an expired attempt. Retrying starts the entire census again;
@@ -419,7 +628,8 @@ int main(int argc, char **argv) {
       diagnostic("startup", "clock_unavailable", errno, 0);
       return final_refusal();
     }
-    int result = prove(argc, argv);
+    int result = argc > 1 && strcmp(argv[1], "--processes") == 0 ?
+                   prove_processes(argc, argv) : prove(argc, argv);
     if (result == 0) return 0;
     if (result != 2) return final_refusal();
   }

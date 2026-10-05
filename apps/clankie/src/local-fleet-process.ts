@@ -26,6 +26,68 @@ const SnapshotSchema = z
   })
   .strict();
 
+const ProcessSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    processes: z
+      .array(
+        z
+          .object({
+            pid,
+            ppid: z.number().int().min(0).max(2_147_483_647),
+            uid: z.number().int().min(0),
+            birth,
+            executable: z.string().min(1).max(4096).refine(isAbsolute),
+            argv: z.array(z.string().max(4096)).max(2),
+          })
+          .strict(),
+      )
+      .length(2),
+  })
+  .strict();
+
+export type NativeProcessSnapshot = z.infer<typeof ProcessSnapshotSchema>;
+
+/** Lossless kernel birth, including microseconds; never a display timestamp. */
+export function nativeProcessStart(birth: readonly [string, string]): string {
+  return `${birth[0]}.${birth[1].padStart(6, "0")}`;
+}
+
+/** Fresh same-user kernel executable/argv/lifetime observations, never a shell fallback. */
+export async function observeNativeProcesses(
+  shellPid: number,
+  agentPid: number,
+  processHelper = fleetProcessHelper(),
+  execute?: (command: string, args: string[]) => Promise<string>,
+): Promise<NativeProcessSnapshot | undefined> {
+  if (
+    (execute === undefined && process.platform !== "darwin") ||
+    !isAbsolute(processHelper) ||
+    !pid.safeParse(shellPid).success ||
+    !pid.safeParse(agentPid).success ||
+    shellPid === agentPid
+  )
+    return undefined;
+  try {
+    const args = ["--processes", String(shellPid), String(agentPid)];
+    const stdout = execute
+      ? await execute(processHelper, args)
+      : (await exec(processHelper, args, { timeout: 1_000, maxBuffer: 1_048_576, encoding: "utf8" })).stdout;
+    const parsed = ProcessSnapshotSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return undefined;
+    const snapshot = parsed.data;
+    if (
+      snapshot.processes[0]!.pid !== shellPid ||
+      snapshot.processes[1]!.pid !== agentPid ||
+      snapshot.processes.some((processIdentity) => processIdentity.uid !== process.getuid?.())
+    )
+      return undefined;
+    return snapshot;
+  } catch {
+    return undefined;
+  }
+}
+
 const DiagnosticSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -41,6 +103,8 @@ const DiagnosticSchema = z
       "ancestry",
       "final_socket",
       "completion",
+      "executable",
+      "argv",
     ]),
     reason: z.enum([
       "clock_unavailable",
@@ -65,6 +129,11 @@ const DiagnosticSchema = z
       "ancestry_unavailable",
       "ancestry_changed",
       "attempts_exhausted",
+      "executable_unavailable",
+      "argv_unavailable",
+      "argv_invalid",
+      "executable_changed",
+      "argv_changed",
     ]),
     errno: z.number().int().min(0),
     attempt: z.number().int().min(0).max(3),
