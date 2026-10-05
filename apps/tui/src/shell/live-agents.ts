@@ -46,6 +46,8 @@ function statusText(status: LiveAgent["seat"]["status"], text: string, { ansi }:
 
 /** A pane whose harness bridge is missing or claims another pane, as doctor observed it (VUH-1587). */
 function bridgeWarning({ seat }: LiveAgent, { ansi }: AgentTheme): string | undefined {
+  const catalog = seat.toolCatalog;
+  if (catalog && catalog.status !== "matched") return ansi.red(`Clankie tools ${clean(catalog.status)}`);
   const bridge = seat.harnessBridge;
   if (
     bridge?.freshness === "older-than-runtime" ||
@@ -57,6 +59,7 @@ function bridgeWarning({ seat }: LiveAgent, { ansi }: AgentTheme): string | unde
 }
 
 function bridgeRemediation({ seat }: LiveAgent): string | undefined {
+  if (seat.toolCatalog && seat.toolCatalog.status !== "matched") return seat.toolCatalog.remediation;
   const bridge = seat.harnessBridge;
   return bridge?.operatorBridge?.freshness === "older-than-runtime"
     ? bridge.operatorBridge.remediation
@@ -300,11 +303,21 @@ export class LiveAgentPicker implements Component {
     const agents = this.agents();
     const selected = this.selection.selected();
     const step = selected && currentStep(selected);
+    const catalogDetail =
+      selected?.seat.toolCatalog && selected.seat.toolCatalog.status !== "matched"
+        ? wrapTextWithAnsi(this.theme.ansi.red(clean(selected.seat.toolCatalog.detail)), contentWidth)
+        : [];
+    // A whole rejected catalog can name dozens of tools. Keep the fixing
+    // action visible; doctor retains the complete missing-tool list.
+    const shownCatalogDetail = catalogDetail.slice(0, 3);
+    if (catalogDetail.length > 3)
+      shownCatalogDetail[2] = `${truncateToWidth(shownCatalogDetail[2]!, Math.max(1, contentWidth - 1))}…`;
     const details = selected
       ? [
           this.theme.ansi.bold(clean(selected.name)),
           `${agentMetadata(selected, this.theme)} · ${this.theme.ansi.dim(clean(selected.seat.seatId))}`,
           step ?? this.theme.ansi.dim("Step unavailable"),
+          ...shownCatalogDetail,
           ...(bridgeRemediation(selected) && bridgeWarning(selected, this.theme)
             ? [`${this.theme.ansi.red("Fix:")} ${clean(bridgeRemediation(selected)!)}`]
             : []),

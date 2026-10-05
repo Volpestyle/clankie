@@ -1,5 +1,6 @@
 {
   "description": "A fleet seat's lifecycle and next-turn replies, for hired or hand-started native Claude sessions. A no-op outside a linked Herdr pane.",
+  "modules": ["../mods/tool-catalog.mjs"],
   "hooks": {
     "SessionStart": [
       {

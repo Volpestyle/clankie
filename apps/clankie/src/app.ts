@@ -1,3 +1,9 @@
+import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
+import {
+  FLEET_SEAT_TOOL_CATALOG_PATH,
+  FLEET_TOOL_CATALOG_HEALTH_PATH,
+  FleetSeatToolCatalogSchema,
+} from "@clankie/protocol/tool-catalog";
 import { registerComputerRoutes } from "./computer-http.ts";
 import { ISSUE_METRICS_PATH, IssueMetricsQuerySchema } from "@clankie/protocol";
 import type { WorkWriteAuthority } from "./work-write-target.ts";
@@ -1962,6 +1968,34 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return received
       ? context.json({ schemaVersion: 1 as const, received: true as const, deliveryStage: "stored" as const })
       : context.json({ error: "unknown_seat", deliveryStage: "unavailable" }, 404);
+  });
+
+  app.get(FLEET_TOOL_CATALOG_HEALTH_PATH, async (context) => {
+    context.header("cache-control", "no-store");
+    const auth = await authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    return context.json(await dependencies.captain.toolCatalogHealth());
+  });
+  app.post(FLEET_SEAT_TOOL_CATALOG_PATH, bodyLimit({ maxSize: 1024 * 1024 }), async (context) => {
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    const parsed = FleetSeatToolCatalogSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const identity =
+      dependencies.localFleet?.identity(context.req.raw) ??
+      dependencies.fleetLinks?.identity?.(context.req.raw);
+    const proof = identity && (await identity.validate()) ? await identity.projectProof?.() : undefined;
+    if (identity && (!proof || !(await identity.validate())))
+      return context.json({ error: "native_session_required" }, 403);
+    const workerTools = (await dependencies.workerMcp?.expectedProjectToolNames(DEFAULT_PROJECT_ID)) ?? [];
+    const health = await dependencies.captain.recordSeatToolCatalog(
+      pane.paneId,
+      parsed.data,
+      workerTools,
+      proof,
+    );
+    return health ? context.json(health) : context.json({ error: "native_session_required" }, 403);
   });
 
   // A hired seat's worker plugin reports each settled turn (VUH-1458), from

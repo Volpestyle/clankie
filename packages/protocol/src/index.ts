@@ -1,3 +1,4 @@
+import { FleetSeatToolCatalogHealthSchema } from "./tool-catalog.ts";
 import { HireProfileSchema } from "./hire-profile.ts";
 export {
   HireProfileSchema,
@@ -992,6 +993,8 @@ export const OperatorFleetSeatSchema = z
   .object({
     /** Host-observed bridge facts, not tool or message delivery acceptance. */
     harnessBridge: OperatorHarnessBridgeSchema.optional(),
+    /** Native client acceptance for this exact occupying session. */
+    toolCatalog: FleetSeatToolCatalogHealthSchema.optional(),
     account: OperatorCodexAccountSchema.optional(),
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     /** Harness-session identity; stable when the same agent moves panes. */

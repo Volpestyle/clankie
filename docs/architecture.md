@@ -220,7 +220,14 @@ checked by `pnpm mcp:check` in the fast push/PR gate, using Claude Code's strict
 MCP SDK contract and Codex's input-schema conversion shape. Failures identify
 the tool and field. Connected catalogs validate each tool before admission;
 `mcp.host.tool_rejected` records the provider, tool and reason, leaving healthy
-tools available even when a provider returns one incompatible entry. Per-turn hook commands
+tools available even when a provider returns one incompatible entry.
+Native catalog health is a separate session-bound observation: Claude's trusted
+plugin mod reads its accepted tools; managed Codex reads the original thread's
+native MCP status. The service compares that list to the bridge expectations
+and projects `toolCatalog` into the roster and `toolCatalogHealth` into doctor.
+A live process never substitutes for this evidence. Embedded hand-started Codex
+has no introspection endpoint and stays explicitly unverified with the managed
+hire action; its native introspection remains future work. Per-turn hook commands
 (`memory-card`, `seat-sync`, `seat-hook`) skip the launcher's import graph. A herdr pane named `clankie` is his head: the census binds it to his own
 persona rather than a fleet contact and projects its transcript into the
 conversation the app pins. While a seat is bound, self-wakes, herdr completion

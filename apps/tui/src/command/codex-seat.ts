@@ -13,6 +13,7 @@ import { resolveSeatContext } from "./seat-context.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import { startCodexAppServerSeat } from "../../../clankie/src/captain/codex-app-server.ts";
 import { codexTrackerOverrides } from "../../../clankie/src/captain/tracker-isolation.ts";
+import { fleetSeatToolCatalogPath } from "@clankie/protocol/tool-catalog";
 
 const PLUGIN = "clankie@clankie-seat";
 const exec = promisify(execFileCallback);
@@ -214,6 +215,30 @@ export async function runCodexSeat(
         child.once("exit", (code) => resolve(code ?? 1));
       }));
   const stop = new AbortController();
+  const showCatalogStatus = async (status: string) => {
+    const paneId = env.HERDR_PANE_ID?.trim();
+    if (!paneId) return;
+    try {
+      await run(
+        "herdr",
+        [
+          "pane",
+          "report-metadata",
+          paneId,
+          "--source",
+          "clankie:tool-catalog",
+          "--applies-to-source",
+          "herdr:codex",
+          ...(status === "matched"
+            ? ["--clear-title"]
+            : ["--title", `Clankie tools ${status}; restart with clankie ${command}`]),
+        ],
+        env,
+      );
+    } catch (error) {
+      stderr.write(`Clankie catalog pane notice failed: ${String(error)}\n`);
+    }
+  };
   let seat: Awaited<ReturnType<typeof startCodexAppServerSeat>>;
   try {
     seat = await (options.startImpl ?? startCodexAppServerSeat)({
@@ -222,6 +247,49 @@ export async function runCodexSeat(
         Object.entries(seatEnv).filter((entry): entry is [string, string] => entry[1] !== undefined),
       ),
       config: plan.args.filter((_value, index) => index % 2 === 1),
+      catalogBridge: "operator",
+      ...(env.HERDR_PANE_ID?.trim()
+        ? {
+            onCatalog: async (report) => {
+              const credential = await resolveOperatorCredential({
+                env,
+                ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+              });
+              if (!credential) throw new Error("Codex catalog report needs the operator credential");
+              const response = await (options.fetchImpl ?? fetch)(
+                new URL(
+                  fleetSeatToolCatalogPath(env.HERDR_PANE_ID!.trim()),
+                  commandHost({ ...options, env }),
+                ),
+                {
+                  method: "POST",
+                  headers: {
+                    authorization: `Bearer ${credential.token}`,
+                    "content-type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    ...report,
+                    ...(plan.conversationId ? { conversationId: plan.conversationId } : {}),
+                  }),
+                  signal: AbortSignal.timeout(5_000),
+                },
+              );
+              if (!response.ok) throw new Error(`Codex catalog report was refused (${response.status})`);
+              const verdict = (await response.json()) as {
+                status?: string;
+                detail?: string;
+                remediation?: string;
+              };
+              await showCatalogStatus(
+                verdict.status === "matched" || verdict.status === "mismatch" ? verdict.status : "unverified",
+              );
+              if (verdict.status !== "matched")
+                stderr.write(
+                  `Clankie tools: ${[verdict.detail, verdict.remediation].filter(Boolean).join(" ")}\n`,
+                );
+            },
+          }
+        : {}),
       threadStartTimeoutMs: 600_000,
       signal: stop.signal,
       ...(plan.resumed ? { resumeThreadId: plan.sessionId } : {}),
@@ -242,6 +310,10 @@ export async function runCodexSeat(
   // Record the server's thread even if its hooks still need owner trust.
   writeFileSync(recordPath(env, command), JSON.stringify({ ...binding, sessionId: seat.threadId }), {
     mode: 0o600,
+  });
+  void seat.checkTools?.().catch(async (error) => {
+    await showCatalogStatus("unverified");
+    stderr.write(`Clankie tool check failed: ${String(error)}\n`);
   });
   let upstream: Awaited<ReturnType<typeof connectLaneUpstream>> | undefined;
   const delivery = (async () => {

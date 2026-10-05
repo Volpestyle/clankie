@@ -97,3 +97,11 @@ Fleet workers use the separate `clankie-worker@clankie-fleet` package under
 `integrations/claude-plugin/worker`; its regular skill snapshot is built before
 owner installation and checked by content hash and package version. Neither
 skill presence nor plugin installation proves live project access.
+
+At startup, a Clankie-managed Codex seat reads the MCP status of its original
+loaded native thread and reports the accepted bridge tools. `clankie doctor`
+and the roster show missing tools with one fixing action. The worker plugin's
+native SessionStart hook explicitly marks embedded hand-started Codex as
+unverified and displays that fact in the pane. For a verified catalog, ask
+Clankie to launch the work with `hire_agent`; switching to the shared daemon is
+not a fix. Embedded native catalog introspection remains a follow-up.

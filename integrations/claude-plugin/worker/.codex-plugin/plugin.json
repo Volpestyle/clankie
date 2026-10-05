@@ -4,6 +4,7 @@
   "description": "Clankie's project-scoped tools for native fleet agents; no operator authority.",
   "author": { "name": "James Volpe" },
   "license": "Apache-2.0",
+  "hooks": "./hooks/codex-hooks.json",
   "mcpServers": "./codex-mcp.json",
   "skills": "./skills/"
 }

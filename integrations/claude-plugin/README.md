@@ -123,6 +123,15 @@ loads his install skill, and `clankie model status` runs without a prompt.
 ## Worker channel plugin (`clankie-worker`)
 
 [`worker/`](worker/) is a second plugin in the same marketplace,
+Current Claude Code (mods support, 2.1.287 or newer) checks its accepted Clankie
+tool catalog after native session start through a trusted plugin module. It uses
+the native server namespace, reports only that session's tools through the pane
+link, and shows a mismatch with one fixing action. The same verdict appears in
+the roster and `clankie doctor`; a live bridge process alone remains separate
+evidence. Operator and worker bridges report independently. Plugin reload,
+clear, resume and compaction trigger a fresh check. No native evidence stays
+explicitly unverified. See [doctor](../../docs/cli.md#doctor).
+
 `clankie-worker@clankie` serves native hired seats and linked fleet agents.
 Its MCP server key is `clankie`; older `swarm` registrations require updating.
 it runs the native seat mailbox or fleet link, with no coordinator runtime.

@@ -22,6 +22,8 @@ import {
 } from "./codex-app-server.ts";
 import { codexTrackerOverrides } from "./tracker-isolation.ts";
 import { codexQuestion } from "./codex-user-input.ts";
+import type { CodexToolCatalogReport } from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
+import type { FleetSeatToolCatalogHealth } from "@clankie/protocol/tool-catalog";
 
 const exec = promisify(execFile);
 const object = (value: unknown): Record<string, unknown> =>
@@ -46,6 +48,11 @@ export function createCodexSeatAdapter(
     nativePolicy?: (input: SeatLaunch, view: SeatView) => CodexNativePolicy;
     /** Extra server environment from the pane the seat is viewed in (a remote pane's Herdr identity). */
     viewEnv?: (view: SeatView) => Promise<Readonly<Record<string, string>>>;
+    /** Persist evidence from this hired pane's exact native thread. */
+    catalogObserved?: (
+      ref: SeatRef,
+      report: CodexToolCatalogReport,
+    ) => Promise<FleetSeatToolCatalogHealth | void> | FleetSeatToolCatalogHealth | void;
   } = {},
 ): HarnessSeatAdapter {
   const controls = new Map<string, SeatControl>();
@@ -257,8 +264,16 @@ export function createCodexSeatAdapter(
             ...(launch.resumeSessionId ? { resumeThreadId: launch.resumeSessionId } : {}),
             ...(launch.model ? { model: launch.model } : {}),
             ...(launch.effort ? { effort: launch.effort } : {}),
-            ...(launch.env || options.viewEnv
-              ? { env: { ...launch.env, ...(await options.viewEnv?.(view)) } }
+            ...(launch.env || options.viewEnv || options.catalogObserved
+              ? {
+                  env: {
+                    ...launch.env,
+                    ...(await options.viewEnv?.(view)),
+                    ...(options.catalogObserved && !options.server && !options.serverForView
+                      ? { CLANKIE_CODEX_CATALOG_OBSERVED: "1" }
+                      : {}),
+                  },
+                }
               : {}),
             ...(options.serverForView
               ? { server: options.serverForView(view) }
@@ -279,6 +294,36 @@ export function createCodexSeatAdapter(
               await (view.start ? view.start("codex", args) : view.run(["codex", ...args]));
             },
             onEvent: observe,
+            ...(options.catalogObserved
+              ? {
+                  onCatalog: async (report: CodexToolCatalogReport) => {
+                    const health = await options.catalogObserved!(
+                      {
+                        harness: "codex",
+                        sessionId: report.sessionId,
+                        paneId: view.paneId,
+                      },
+                      report,
+                    );
+                    if (!health || closed) return;
+                    // Herdr renders effective metadata titles in the actual
+                    // pane header. Scope this title to our Codex occupant's
+                    // source instead of typing a diagnostic into its terminal.
+                    await herdr([
+                      "pane",
+                      "report-metadata",
+                      view.paneId,
+                      "--source",
+                      "clankie:tool-catalog",
+                      "--applies-to-source",
+                      "herdr:codex",
+                      ...(health.status === "matched"
+                        ? ["--clear-title"]
+                        : ["--title", `Clankie tools ${health.status}; ask Clankie to rehire`]),
+                    ]);
+                  },
+                }
+              : {}),
           });
           if (startupSignal.aborted) {
             await seat.close();
@@ -303,6 +348,11 @@ export function createCodexSeatAdapter(
           seat.expectTools?.(binding?.expectedToolNames ?? []);
           bound = true;
           forwardQuestions();
+          // Read-only startup evidence runs alongside the existing native
+          // readiness gate; it never dispatches or retries a tool or turn.
+          void seat
+            .checkTools?.()
+            .catch((error) => console.warn("Codex native catalog check failed:", view.paneId, String(error)));
           let initialDispatch = Boolean(launch.brief);
           const control: SeatControl = {
             ref,

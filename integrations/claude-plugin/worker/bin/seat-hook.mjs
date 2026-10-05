@@ -5,6 +5,7 @@
 // A session outside a pane has nothing to report here.
 import { spawn } from "node:child_process";
 import { authorization, hasLinks, readLink, seatRoute, SUMMARY_MAX, TEXT_MAX } from "./link.mjs";
+import { codexToolCatalogReport } from "./codex-tool-catalog.mjs";
 
 const paneId = process.env.HERDR_PANE_ID?.trim();
 if (!paneId) process.exit(0);
@@ -81,8 +82,49 @@ async function reportOverLink(link, pane) {
       }
     }
     if (!response.ok) process.stderr.write(`clankie-worker: seat hook answered ${String(response.status)}\n`);
+    if (
+      event === "SessionStart" &&
+      process.argv.includes("--codex") &&
+      !process.env.CLANKIE_CODEX_CATALOG_OBSERVED
+    ) {
+      const report = await codexToolCatalogReport({ sessionId: hook.session_id });
+      const catalog = await fetch(seatRoute(link, pane, "tool-catalog"), {
+        method: "POST",
+        headers: { ...authorization(link), "content-type": "application/json" },
+        body: JSON.stringify(report),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!catalog.ok) throw new Error(`Codex catalog report answered ${catalog.status}`);
+      const verdict = await catalog.json();
+      const message = [verdict.detail, verdict.remediation]
+        .filter((part) => typeof part === "string" && part)
+        .join(" ");
+      if (message && verdict.status !== "matched") {
+        process.stderr.write(`Clankie tools: ${message}\n`);
+        process.stdout.write(
+          JSON.stringify({
+            systemMessage: `Clankie tools: ${message}`,
+            hookSpecificOutput: {
+              hookEventName: "SessionStart",
+              additionalContext: `Clankie tools: ${message}`,
+            },
+          }) + "\n",
+        );
+      }
+    }
   } catch (error) {
     process.stderr.write(`clankie-worker: ${error instanceof Error ? error.message : String(error)}\n`);
+    if (
+      event === "SessionStart" &&
+      process.argv.includes("--codex") &&
+      !process.env.CLANKIE_CODEX_CATALOG_OBSERVED
+    )
+      process.stdout.write(
+        JSON.stringify({
+          systemMessage:
+            "Clankie tools are unverified: the startup catalog check failed. Ask Clankie to rehire this worker to verify its tools.",
+        }) + "\n",
+      );
   }
   process.exit(0);
 }

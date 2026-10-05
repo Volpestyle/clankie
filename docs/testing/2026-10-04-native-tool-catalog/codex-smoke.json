@@ -1,0 +1,42 @@
+{
+  "issue": "VUH-1653",
+  "client": "codex-cli 0.160.0",
+  "outcome": "passed",
+  "runAt": "2026-10-05T02:43:49.177Z",
+  "setup": "Own disposable native Codex TUI in Herdr pane w2H:p8Q, own private app-server and real MCP SDK stdio server. Isolated ignored CODEX_HOME. No model prompt, turn/start, tool call, live Clankie service contact, or real account credentials.",
+  "command": "pnpm exec tsx .local/vuh1653-native-codex/run.ts",
+  "nativeReads": [
+    "thread/loaded/list",
+    "mcpServerStatus/list with threadId=01a109f2-2dd5-7f60-9e2c-59d769396664 and detail=toolsAndAuthOnly"
+  ],
+  "report": {
+    "schemaVersion": 1,
+    "harness": "codex",
+    "sessionId": "01a109f2-2dd5-7f60-9e2c-59d769396664",
+    "bridge": "worker",
+    "tools": ["message_clankie"],
+    "checkedAt": "2026-10-05T02:43:49.177Z"
+  },
+  "cleanup": "Closed only our own private app-server and pane w2H:p8Q. Removed disposable test-only authentication record. No live service restart.",
+  "earlierSetupAttempts": [
+    "Initial isolated home reached native sign-in and produced no original thread; default 15-second startup timed out.",
+    "A 55-second attempt also remained on native sign-in. A disposable test-only API-key authentication record was needed to let the model-free TUI create its thread. No real credentials were copied."
+  ],
+  "limitations": [
+    "The native fixture advertised one tool; this proves exact original-thread observation and raw tool naming, not a live fleet's current expected bank.",
+    "Embedded or --no-daemon hand-started Codex sessions expose no attachable native catalog endpoint. They report unverified with the managed-hire fixing action; an independent observer runtime is never substituted.",
+    "Native systemMessage pane rendering is supported by the installed client contract and covered through the hook subprocess/HTTP/output boundary; this smoke did not load the production worker plugin or contact its service."
+  ],
+  "focusedChecks": [
+    "pnpm exec vitest run --config vitest.config.ts apps/clankie/test/codex-tool-catalog.test.ts apps/clankie/test/codex-app-server.test.ts apps/clankie/test/codex-seat-adapter.test.ts apps/clankie/test/remote-codex-app-server.test.ts apps/tui/test/codex-plugin.test.ts",
+    "pnpm --filter @clankie/clankie typecheck",
+    "pnpm --filter @clankie/tui typecheck",
+    "pnpm exec knip --workspace @clankie/clankie --workspace @clankie/tui --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers --no-config-hints"
+  ],
+  "primarySources": [
+    "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/request_processors/mcp_processor.rs",
+    "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/codex-mcp/src/mcp/mod.rs",
+    "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/hooks/src/events/session_start.rs",
+    "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/tui/src/history_cell/hook_cell.rs"
+  ]
+}

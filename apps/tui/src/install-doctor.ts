@@ -1,3 +1,4 @@
+import type { FleetToolCatalogHealthPage } from "@clankie/protocol/tool-catalog";
 import { listHerdrSessions } from "./session/herdr-report.ts";
 import { execFile as execFileCallback } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -108,6 +109,9 @@ export interface InstallDoctorReport {
   readonly ownerHerdrSessions?: readonly string[];
   readonly herdrPlugin: HerdrPluginReport;
   readonly remoteHarnesses?: readonly unknown[];
+  readonly toolCatalogHealth?:
+    | FleetToolCatalogHealthPage
+    | { readonly status: "unavailable"; readonly detail: string };
   readonly harnessBridges: Awaited<ReturnType<typeof inspectHarnessBridges>>;
   /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
   readonly laneTools: { readonly url: string; readonly reachable: boolean };

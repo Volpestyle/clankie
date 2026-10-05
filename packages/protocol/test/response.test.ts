@@ -10,7 +10,7 @@ import { parseProtocolResponse, safeParseProtocolResponse } from "../src/respons
 
 // Freeze the client shape from before VUH-1587/VUH-1607; do not extend it when
 // hosts grow more optional fields. This client must keep reading schema v1.
-const oldSeat = OperatorFleetSeatSchema.omit({ harnessBridge: true }).extend({
+const oldSeat = OperatorFleetSeatSchema.omit({ harnessBridge: true, toolCatalog: true }).extend({
   subagents: OperatorSeatSubagentsSchema.extend({
     recent: z
       .array(z.object({ label: z.string().max(120), status: z.enum(["running", "done"]) }).strict())
@@ -36,6 +36,14 @@ const seat = {
 const newSeat = {
   ...seat,
   harnessBridge: { status: "live-process", detail: "Fixture bridge" },
+  toolCatalog: {
+    status: "unverified",
+    harness: "codex",
+    bridge: "worker",
+    missing: [],
+    detail: "Embedded Codex exposes no native catalog endpoint.",
+    remediation: "Ask Clankie to launch a managed hire for a verified catalog.",
+  },
   futureSeatField: { optional: true },
   subagents: {
     ...seat.subagents,

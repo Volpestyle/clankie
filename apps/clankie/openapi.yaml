@@ -2441,6 +2441,60 @@ paths:
         "404":
           description: That pane holds no Claude seat with this session
 
+  /v1/fleet/seats/{paneId}/tool-catalog:
+    post:
+      tags: [Captain, Operator]
+      operationId: recordFleetNativeToolCatalog
+      summary: Report the occupying native harness's accepted Clankie tools
+      description: |
+        A linked Claude mod or Codex startup probe reports raw Clankie bridge
+        names from the actual native session catalog. The service verifies the
+        current pane, harness and session against Herdr, compares the bridge's
+        served expectations and retains a matched/mismatch/unverified diagnostic.
+        This report never grants tools or routes messages. Native probe failures
+        carry error and remain unverified; process liveness is separate evidence.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schemaVersion, harness, sessionId, bridge, tools, checkedAt]
+              properties:
+                schemaVersion: { type: integer, const: 1 }
+                harness: { type: string, enum: [claude, codex] }
+                sessionId: { type: string, minLength: 1, maxLength: 256 }
+                bridge: { type: string, enum: [worker, operator] }
+                tools:
+                  type: array
+                  maxItems: 4096
+                  items: { type: string, minLength: 1, maxLength: 256 }
+                checkedAt: { type: string, format: date-time }
+                error: { type: string, maxLength: 2048 }
+                conversationId: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "200": { description: Session-bound status, missing tools, detail and one remediation }
+        "400": { description: Invalid native catalog report }
+        "403": { description: Fleet admission or native pane/session identity refused }
+
+  /v1/fleet/tool-catalog-health:
+    get:
+      tags: [Operator]
+      operationId: readFleetNativeToolCatalogHealth
+      summary: Read native catalog health for every current Claude and Codex seat
+      description: Includes the operator head. Reports from a previous occupant are never reused.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200": { description: Session-bound catalog health and remediation in seats }
+        "401": { description: Operator authentication required }
+
   /v1/operator/projects/add-worktree-root:
     post:
       tags: [Operator]

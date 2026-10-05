@@ -1,3 +1,9 @@
+import {
+  FLEET_TOOL_CATALOG_HEALTH_PATH,
+  FleetToolCatalogHealthPageSchema,
+} from "@clankie/protocol/tool-catalog";
+import { resolveOperatorCredential } from "@clankie/credential-broker";
+import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
 import {
   inspectInstall,
@@ -56,6 +62,28 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 
 export async function doctorCommand(options: InspectInstallOptions): Promise<InstallDoctorReport> {
   const report = await inspectInstall(options);
+  let toolCatalogHealth: NonNullable<InstallDoctorReport["toolCatalogHealth"]>;
+  try {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (!credential) throw new Error("Native tool catalog health needs the operator credential");
+    const response = await (options.fetchImpl ?? fetch)(
+      `${commandHost(options)}${FLEET_TOOL_CATALOG_HEALTH_PATH}`,
+      {
+        headers: { authorization: `Bearer ${credential.token}` },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) throw new Error(`Native tool catalog health unavailable (HTTP ${response.status})`);
+    toolCatalogHealth = FleetToolCatalogHealthPageSchema.parse(await response.json());
+  } catch (error) {
+    toolCatalogHealth = {
+      status: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
   let remoteHarnesses: readonly unknown[];
   try {
     const inventory = await runRuntimeCommand(["list"], options);
@@ -82,7 +110,7 @@ export async function doctorCommand(options: InspectInstallOptions): Promise<Ins
       { status: "unavailable", detail: error instanceof Error ? error.message : String(error) },
     ];
   }
-  return { ...report, remoteHarnesses };
+  return { ...report, remoteHarnesses, toolCatalogHealth };
 }
 
 /** Inspect only the selected registered machine; no local executable/config probes. */

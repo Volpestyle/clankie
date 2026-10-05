@@ -355,6 +355,7 @@ export function createRemoteCodexSeatAdapter(
   shell: FleetShellRun,
   herdr: HerdrFleetRun,
   register?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration,
+  catalogObserved?: NonNullable<Parameters<typeof createCodexSeatAdapter>[0]>["catalogObserved"],
 ): HarnessSeatAdapter {
   const bare = (arg: string) => {
     const qualified = splitFleetQualified(arg);
@@ -377,6 +378,7 @@ export function createRemoteCodexSeatAdapter(
         throw error;
       }));
   return createCodexSeatAdapter({
+    ...(catalogObserved ? { catalogObserved } : {}),
     herdr: (args) => herdr(args.map(bare)),
     trackerOverrides: remoteCodexTrackerOverrides(fleet, shell),
     ...(register && fleet.ssh.shell === "powershell"

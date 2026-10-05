@@ -1,3 +1,8 @@
+import type {
+  FleetSeatToolCatalog,
+  FleetSeatToolCatalogHealth,
+  FleetToolCatalogHealthPage,
+} from "@clankie/protocol/tool-catalog";
 import type { QuestionAuthority } from "./conversation-questions.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import type {
@@ -246,6 +251,14 @@ export interface CaptainPort {
     waitMs: number,
     signal?: AbortSignal,
   ): Promise<readonly OperatorSeatEvent[] | undefined>;
+  /** Session-bound native acceptance evidence. Reports grant no tool authority. */
+  recordSeatToolCatalog(
+    paneId: string,
+    report: FleetSeatToolCatalog,
+    workerTools: readonly string[],
+    proof?: ProjectProcessProof,
+  ): Promise<FleetSeatToolCatalogHealth | undefined>;
+  toolCatalogHealth(): Promise<FleetToolCatalogHealthPage>;
   /**
    * One lifecycle hook from a hired seat's worker plugin (VUH-1458). False
    * when the pane holds no seat with that session.
@@ -400,6 +413,8 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     acknowledgeFleetSeatEvent: async () => false,
     pollSeatEvents: async () => [],
     pollFleetSeatEvents: async () => undefined,
+    recordSeatToolCatalog: async () => undefined,
+    toolCatalogHealth: async () => ({ schemaVersion: 1, seats: [] }),
     recordSeatHook: async () => false,
     fleetSeatMessageBinding: async () => undefined,
     reconcileFleetSeatMessage: async (_pane, delivery, fingerprint) => ({

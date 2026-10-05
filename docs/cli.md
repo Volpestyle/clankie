@@ -154,6 +154,23 @@ environment. The roster carries the same observation in each seat's
 selected pane's full fix when focused with `Ctrl+G`. Roster polls reuse these
 bounded process observations for up to five seconds; doctor takes a fresh sample.
 
+`toolCatalogHealth` reads the service's native catalog diagnostics for current
+Claude and Codex panes, including the operator head. The roster carries the
+same `toolCatalog` verdict; a mismatch or unverified catalog appears in the
+agent dock and its full reason and one fixing action appear in `Ctrl+G`.
+`matched` means the harness actually listed the tools its Clankie bridge serves
+for that native session. It does not prove a tool call or message delivery.
+
+Current Claude Code's trusted plugin mod reads its actual tool list after
+session start (and after clear/resume/compact); MCP discovery can settle for
+up to 20 seconds. Clankie-managed Codex launches read `mcpServerStatus/list`
+for their original loaded thread. Embedded hand-started Codex has no native
+introspection endpoint and explicitly reports `unverified`; ask Clankie to hire
+a managed Codex seat with `hire_agent` to get a verified catalog. This action
+never recommends the shared daemon, whose pane identity inheritance can break
+worker bridges. Native introspection for embedded Codex remains a follow-up.
+Plugin hook/mod trust is required; an absent probe remains unverified.
+
 Doctor observes operator bridges separately from worker bridges; an operator
 bridge does not prove worker readiness. Process age is separate from transport
 status. `freshness: older-than-runtime` means the observed bridge started before

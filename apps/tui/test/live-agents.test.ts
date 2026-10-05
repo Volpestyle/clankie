@@ -477,3 +477,84 @@ it.each(["worker", "both"])("shows the seat restart action when %s bridge proces
   expect(text).toContain("restart the seat to reload its bridge");
   expect(text).toContain(`${older === "both" ? "Operator" : "Worker"} seat bridge older than runtime`);
 });
+
+it.each(["mismatch", "unverified"] as const)(
+  "shows %s native tools above healthy workers and the one fix at narrow widths",
+  (status) => {
+    const worker = agent("native-gap");
+    const agents: LiveAgent[] = [
+      agent("healthy"),
+      {
+        ...worker,
+        seat: {
+          ...worker.seat,
+          harnessBridge: { status: "live-process", detail: "Bridge exists" },
+          toolCatalog: {
+            status,
+            harness: "codex",
+            bridge: "worker",
+            sessionId: worker.seat.occupantId,
+            detail:
+              status === "mismatch"
+                ? "Codex is missing clankie_call."
+                : "Embedded Codex catalog cannot be verified.",
+            missing: status === "mismatch" ? ["clankie_call"] : [],
+            remediation: "Ask Clankie to hire this Codex seat with hire_agent for a verified catalog.",
+          },
+        },
+      },
+    ];
+    const strip = new LiveAgentStrip(() => agents, theme);
+    expect(strip.selected()?.seat.seatId).toBe("native-gap");
+    expect(plain(strip.render(120))).toContain(`Clankie tools ${status}`);
+    const picker = new LiveAgentPicker(() => agents, strip, theme, {
+      maxHeight: () => 30,
+      onOpen() {},
+      onClose() {},
+      onRender() {},
+    });
+    const narrow = picker.render(40);
+    expect(narrow.every((row) => visibleWidth(row) <= 40)).toBe(true);
+    const text = plain(narrow)
+      .replace(/[│\n]/gu, " ")
+      .replace(/\s+/gu, " ");
+    expect(text).toContain(agents[1]!.seat.toolCatalog!.detail);
+    expect(text).toContain("Ask Clankie to hire this Codex seat with hire_agent for a verified catalog.");
+    expect(text).not.toContain("daemon");
+  },
+);
+
+it("keeps the catalog fixing action visible when the entire server was rejected", () => {
+  const worker = agent("whole-server");
+  const agents: LiveAgent[] = [
+    {
+      ...worker,
+      seat: {
+        ...worker.seat,
+        toolCatalog: {
+          status: "mismatch",
+          harness: "claude",
+          bridge: "operator",
+          missing: ["hire_agent", "reply"],
+          detail: `Native Claude is missing its catalog: ${"missing_tool_name ".repeat(150)}`,
+          remediation: "Run /reload-plugins in this pane to recheck its tools.",
+        },
+      },
+    },
+  ];
+  const strip = new LiveAgentStrip(() => agents, theme);
+  const picker = new LiveAgentPicker(() => agents, strip, theme, {
+    maxHeight: () => 30,
+    onOpen() {},
+    onClose() {},
+    onRender() {},
+  });
+  const rendered = picker.render(40);
+  expect(rendered.length).toBeLessThanOrEqual(30);
+  expect(rendered.every((row) => visibleWidth(row) <= 40)).toBe(true);
+  expect(
+    plain(rendered)
+      .replace(/[│\n]/gu, " ")
+      .replace(/\s+/gu, " "),
+  ).toContain("Run /reload-plugins in this pane to recheck its tools.");
+});

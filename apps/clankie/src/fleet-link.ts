@@ -30,7 +30,8 @@ import {
  */
 
 /** The only paths the link listener answers (seat routes and the fleet's granted tools); everything else is 404. */
-const LINK_ROUTE = /^\/v1\/fleet\/(?:seats\/[^/]+\/(?:events|hook|messages|peers|peer-messages)|mcp)$/u;
+const LINK_ROUTE =
+  /^\/v1\/fleet\/(?:seats\/[^/]+\/(?:events|hook|messages|peers|peer-messages|tool-catalog)|mcp)$/u;
 const LINK_RECEIPT =
   /^\/v1\/fleet\/seats\/[^/]+\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 const LINK_EVENT_ACK = /^\/v1\/fleet\/seats\/[^/]+\/events\/[^/]+\/ack$/u;

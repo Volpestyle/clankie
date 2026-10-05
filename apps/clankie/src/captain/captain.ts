@@ -1,3 +1,5 @@
+import type { FleetSeatToolCatalog } from "@clankie/protocol/tool-catalog";
+import { ToolCatalogHealthStore, type ToolCatalogIdentity } from "./tool-catalog-health.ts";
 import { readIssueMetrics } from "./issue-metrics.ts";
 import { FleetMembershipReadError, type FleetProjectMembership } from "../fleet-project-membership.ts";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
@@ -1068,6 +1070,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // Claude seats stay interactive in their pane and are driven through the
   // clankie-worker plugin: its channel carries the mailbox, its hooks report
   // each settled turn (VUH-1458).
+  const toolCatalogHealth = new ToolCatalogHealthStore();
   const seatHooks = new SeatHookLog(join(options.stateDir, "claude-worker-hooks.json"));
   // The seat-side half every Claude worker shares, local or on a linked fleet (VUH-1527).
   const claudeWorkerDeps = {
@@ -1193,8 +1196,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
     ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
     seatAdapters: options.seatAdapters ?? [
-      createCodexSeatAdapter(
-        options.localCodexProcess === undefined
+      createCodexSeatAdapter({
+        catalogObserved: observeCodexToolCatalog,
+        ...(options.localCodexProcess === undefined
           ? {}
           : {
               localProcess: options.localCodexProcess,
@@ -1203,8 +1207,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 HERDR_PANE_ID: view.paneId,
                 HERDR_SOCKET_PATH: options.localCodexSocket?.() ?? "",
               }),
-            },
-      ),
+            }),
+      }),
       claudeWorkerSeats,
       ...(options.grokNative === undefined
         ? []
@@ -1300,6 +1304,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             if (local !== undefined)
               return [
                 createCodexSeatAdapter({
+                  catalogObserved: observeCodexToolCatalog,
                   herdr: async (args) => {
                     await guard();
                     return deps.runtimes!.runNamed!(
@@ -1334,6 +1339,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   return deps.fleets!.run(fleet)(...args);
                 },
                 options.remoteCodexProcess,
+                observeCodexToolCatalog,
               ),
               createRemoteClaudeWorkerSeatAdapter(fleet, shell, claudeWorkerDeps),
             ].map((adapter) => fenceFleetSeatAdapter(adapter, current));
@@ -2732,6 +2738,170 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     });
   }
 
+  async function laneToolBankFor(lane: CaptainSessionLaneV2, conversationId?: string) {
+    // One turn context per bank, so a seat's attachments and room stay its
+    // own. The selected operator conversation is the room `remember_episode`,
+    // `schedule_wake`, and `herdr_watch` attribute to. A social lane gets none:
+    // its attribution comes from a Discord
+    // delivery, which a bare bearer does not carry, and the tools that need
+    // one already say so.
+    const capture: TurnContext = {};
+    let toolLane = lane;
+    if (lane === "operator") {
+      const binding = seatContext(conversationId);
+      if (binding === undefined) throw new Error("Unknown captain conversation");
+      const targetId = binding.conversationId;
+      const scope = conversations.conversation(targetId)?.scope;
+      if (scope?.kind === "room") {
+        // A cached MCP bank has no per-event actor proof. Attachment never
+        // turns a room into an operator lane or inherits a later actor's grant.
+        toolLane = scope.lane;
+        capture.shell = false;
+        capture.room = roomKey(scope.lane, scope.targetId);
+        capture.targetId = scope.targetId;
+      } else {
+        capture.bodyIdentity = {
+          conversationId: targetId,
+          route: { owner: { conversationId: targetId }, mode: "machine" },
+          current: () => conversations.runsCaptainTurns(targetId),
+          authorize: async () => conversations.runsCaptainTurns(targetId),
+        };
+        capture.conversationAuthority = {
+          owner: { conversationId: targetId },
+          current: () => conversations.runsCaptainTurns(targetId),
+          authorize: async () => conversations.runsCaptainTurns(targetId),
+        };
+        capture.shell = true;
+        capture.room = roomKey("operator", targetId);
+        capture.targetId = targetId;
+      }
+    }
+    const currentSettings = await settings();
+    return buildLaneToolBank(
+      desktopDeps,
+      capture,
+      laneLog,
+      toolLane,
+      currentSettings.gameplay,
+      autonomy,
+      herdrWatches,
+      hireSeat,
+      messageSeat,
+    );
+  }
+
+  async function recordNativeToolCatalog(
+    paneId: string,
+    report: FleetSeatToolCatalog,
+    workerTools: readonly string[],
+    proof?: ProjectProcessProof,
+    operatorTools?: readonly string[],
+  ) {
+    if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return undefined;
+    const agent = await herdrRunner.get(paneId).catch(() => undefined);
+    if (!agent?.session) return undefined;
+    const identity = catalogIdentity(
+      {
+        paneId,
+        occupantId: occupantIdForHerdrSession(agent.session),
+        harness: agent.agent,
+        session: agent.session,
+      },
+      report.bridge,
+    );
+    if (!identity || identity.sessionId !== report.sessionId || identity.harness !== report.harness)
+      return undefined;
+    const qualified = splitFleetQualified(paneId);
+    if (
+      proof &&
+      (proof.nativeSessionPending ||
+        proof.nativeOccupantId !== identity.occupantId ||
+        proof.pane !== (qualified?.id ?? paneId) ||
+        proof.fleet !== (qualified?.fleet ?? "default"))
+    )
+      return undefined;
+    const currentSettings = await settings();
+    const expected =
+      report.bridge === "worker"
+        ? [
+            "message_clankie",
+            ...workerTools,
+            ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
+          ]
+        : operatorTools;
+    if (expected === undefined) return undefined;
+    const health = toolCatalogHealth.record(identity, report, expected);
+    fleetChanges.touch();
+    return health;
+  }
+
+  async function observeCodexToolCatalog(ref: { paneId: string }, report: FleetSeatToolCatalog) {
+    const workerTools = (await options.projectHireTools?.(DEFAULT_PROJECT_ID)) ?? [];
+    return recordNativeToolCatalog(ref.paneId, report, workerTools);
+  }
+
+  function catalogIdentity(
+    observed: {
+      paneId: string;
+      occupantId: string;
+      harness: string;
+      session?: { kind: "id" | "path"; value: string };
+    },
+    bridge: "worker" | "operator",
+  ): ToolCatalogIdentity | undefined {
+    if (observed.harness !== "claude" && observed.harness !== "codex") return undefined;
+    const sessionId =
+      observed.session === undefined
+        ? undefined
+        : observed.session.kind === "id"
+          ? observed.session.value
+          : basename(observed.session.value, ".jsonl");
+    return {
+      paneId: observed.paneId,
+      occupantId: observed.occupantId,
+      harness: observed.harness,
+      ...(sessionId === undefined ? {} : { sessionId }),
+      bridge,
+    };
+  }
+
+  async function currentCatalogHealth(identity: ToolCatalogIdentity) {
+    const operatorIdentity = { ...identity, bridge: "operator" as const };
+    const workerIdentity = { ...identity, bridge: "worker" as const };
+    if (!toolCatalogHealth.hasReport(operatorIdentity) && !toolCatalogHealth.hasReport(workerIdentity))
+      return toolCatalogHealth.readPane(identity);
+    try {
+      const currentSettings = await settings();
+      const worker = [
+        "message_clankie",
+        ...((await options.projectHireTools?.(DEFAULT_PROJECT_ID)) ?? []),
+        ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
+      ];
+      const operator = toolCatalogHealth.hasReport(operatorIdentity)
+        ? [
+            ...(
+              await laneToolBankFor("operator", toolCatalogHealth.conversationId(operatorIdentity))
+            ).tools.map((tool) => tool.name),
+            "reconcile_seat_call",
+            "reply",
+          ]
+        : undefined;
+      return toolCatalogHealth.readPane(identity, { worker, ...(operator ? { operator } : {}) });
+    } catch (error) {
+      const health = toolCatalogHealth.readPane(identity);
+      return {
+        ...health,
+        status: "unverified" as const,
+        missing: [],
+        detail:
+          `The current bridge catalog could not be read: ${error instanceof Error ? error.message : String(error)}`.slice(
+            0,
+            4096,
+          ),
+      };
+    }
+  }
+
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
     await personas.ready(settingsStore);
     const fleet = await observeFleet();
@@ -2836,6 +3006,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ...(lastOutcome === undefined ? {} : { lastOutcome }),
           ...(parentSeatId === undefined ? {} : { parentSeatId }),
           ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
+          ...(await (async () => {
+            const identity = observed && catalogIdentity(observed, "worker");
+            return identity ? { toolCatalog: await currentCatalogHealth(identity) } : {};
+          })()),
         };
       }),
     );
@@ -4711,57 +4885,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return renderEpisodeCard(await deps.memory.recallEpisodeCard(lane));
     },
 
-    async laneToolBank(lane, conversationId) {
-      // One turn context per bank, so a seat's attachments and room stay its
-      // own. The selected operator conversation is the room `remember_episode`,
-      // `schedule_wake`, and `herdr_watch` attribute to. A social lane gets none:
-      // its attribution comes from a Discord
-      // delivery, which a bare bearer does not carry, and the tools that need
-      // one already say so.
-      const capture: TurnContext = {};
-      let toolLane = lane;
-      if (lane === "operator") {
-        const binding = seatContext(conversationId);
-        if (binding === undefined) throw new Error("Unknown captain conversation");
-        const targetId = binding.conversationId;
-        const scope = conversations.conversation(targetId)?.scope;
-        if (scope?.kind === "room") {
-          // A cached MCP bank has no per-event actor proof. Attachment never
-          // turns a room into an operator lane or inherits a later actor's grant.
-          toolLane = scope.lane;
-          capture.shell = false;
-          capture.room = roomKey(scope.lane, scope.targetId);
-          capture.targetId = scope.targetId;
-        } else {
-          capture.bodyIdentity = {
-            conversationId: targetId,
-            route: { owner: { conversationId: targetId }, mode: "machine" },
-            current: () => conversations.runsCaptainTurns(targetId),
-            authorize: async () => conversations.runsCaptainTurns(targetId),
-          };
-          capture.conversationAuthority = {
-            owner: { conversationId: targetId },
-            current: () => conversations.runsCaptainTurns(targetId),
-            authorize: async () => conversations.runsCaptainTurns(targetId),
-          };
-          capture.shell = true;
-          capture.room = roomKey("operator", targetId);
-          capture.targetId = targetId;
-        }
-      }
-      const currentSettings = await settings();
-      return buildLaneToolBank(
-        desktopDeps,
-        capture,
-        laneLog,
-        toolLane,
-        currentSettings.gameplay,
-        autonomy,
-        herdrWatches,
-        hireSeat,
-        messageSeat,
-      );
-    },
+    laneToolBank: laneToolBankFor,
 
     pollSeatEvents(waitMs, signal, conversationId) {
       const binding = seatContext(conversationId);
@@ -4778,6 +4902,40 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           if (pollSignal.aborted) return [];
           throw error;
         });
+    },
+
+    async recordSeatToolCatalog(paneId, report, workerTools, proof) {
+      const operatorTools =
+        report.bridge === "operator"
+          ? [
+              ...(await this.laneToolBank("operator", report.conversationId)).tools.map((tool) => tool.name),
+              "reconcile_seat_call",
+              "reply",
+            ]
+          : undefined;
+      return recordNativeToolCatalog(paneId, report, workerTools, proof, operatorTools);
+    },
+
+    async toolCatalogHealth() {
+      const fleet = await observeFleet();
+      const seats = await Promise.all(
+        [
+          ...fleet.seats.map((seat) => ({ seat, bridge: "worker" as const })),
+          ...(fleet.head ? [{ seat: fleet.head, bridge: "operator" as const }] : []),
+        ].map(async ({ seat, bridge }) => {
+          const identity = catalogIdentity(seat, bridge);
+          return identity
+            ? [
+                {
+                  paneId: seat.paneId,
+                  seatId: seat.seatId,
+                  toolCatalog: await currentCatalogHealth(identity),
+                },
+              ]
+            : [];
+        }),
+      );
+      return { schemaVersion: 1, seats: seats.flat() };
     },
 
     async recordSeatHook(paneId, hook, proof) {

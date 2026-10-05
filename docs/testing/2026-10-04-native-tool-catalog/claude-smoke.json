@@ -1,0 +1,82 @@
+{
+  "recordedAt": "2026-10-05T02:46:12Z",
+  "harness": "Claude Code 2.1.289",
+  "execution": "Native interactive TUI in an owned disposable Herdr pane; no model prompt. Real MCP SDK stdio server and loopback HTTP report endpoint. No live Clankie service contact.",
+  "module": "integrations/claude-plugin/worker/mods/tool-catalog.mjs",
+  "nativeRegistration": "plugin:clankie-worker:clankie",
+  "nativeToolName": "mcp__plugin_clankie-worker_clankie__native_catalog_probe",
+  "accepted": {
+    "servedTool": {
+      "name": "native_catalog_probe",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "report": {
+      "schemaVersion": 1,
+      "harness": "claude",
+      "sessionId": "e75bca9d-1087-4159-aa9e-362d3cd1b6ea",
+      "bridge": "worker",
+      "tools": ["native_catalog_probe"],
+      "checkedAt": "2026-10-05T02:44:32.419Z"
+    },
+    "verdict": "matched",
+    "nativeStatusTrace": "$.ui.status (clankie-worker): (cleared)"
+  },
+  "reload": {
+    "method": "A separate fixture plugin invoked native $.command.run({command:\"reload-plugins\"}); the unchanged Clankie module observed command.run, awaited next(), and rescheduled the probe.",
+    "report": {
+      "schemaVersion": 1,
+      "harness": "claude",
+      "sessionId": "e75bca9d-1087-4159-aa9e-362d3cd1b6ea",
+      "bridge": "worker",
+      "tools": ["native_catalog_probe"],
+      "checkedAt": "2026-10-05T02:44:33.950Z"
+    },
+    "nativeTrace": [
+      "$.command.run (catalog-smoke-driver): 15 chars queued",
+      "hooks module clankie-worker@inline: command.run nested in catalog-smoke-driver",
+      "hooks module clankie-worker@inline command.run settled in 76.5ms (worker hop, next() included)"
+    ],
+    "paneTranscript": "/reload-plugins\nReloaded: 2 plugins \u00b7 0 skills \u00b7 6 agents \u00b7 0 hooks \u00b7 1 plugin MCP server \u00b7 0 plugin LSP servers"
+  },
+  "mismatch": {
+    "acceptedTools": ["native_catalog_probe"],
+    "expectedMissing": ["native_expected_probe"],
+    "verdict": "mismatch",
+    "nativeStatusAt": "2026-10-05T02:44:56.630Z",
+    "paneTranscript": "clankie-worker: Claude is missing native_expected_probe. Run /reload-plugins in this pane to reload the Clankie bridge and recheck its tools.",
+    "nativeStatusTrace": "$.ui.status (clankie-worker): Claude is missing native_expected_probe. Run /reload-plugins in this pane to reload the Clankie bridge and recheck its tools.",
+    "nativeLogTrace": "[clankie-worker] $.ui.log: Claude is missing native_expected_probe. Run /reload-plugins in this pane to reload the Clankie bridge and recheck its tools."
+  },
+  "rejectedRoot": {
+    "servedTool": {
+      "name": "native_catalog_probe",
+      "inputSchema": {
+        "type": "string",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "nativeError": "Invalid result for tools/list: tools.0.inputSchema.type: Invalid input: expected \"object\"",
+    "report": {
+      "schemaVersion": 1,
+      "harness": "claude",
+      "sessionId": "9af5ccfd-0cf2-44ec-bcce-50ce60f1059a",
+      "bridge": "worker",
+      "tools": [],
+      "checkedAt": "2026-10-05T02:45:51.496Z"
+    },
+    "verdict": "mismatch",
+    "missing": ["native_catalog_probe"],
+    "nativeStatusAt": "2026-10-05T02:46:11.972Z",
+    "paneTranscript": "clankie-worker: Claude is missing native_catalog_probe. Run /reload-plugins in this pane to reload the Clankie bridge and recheck its tools."
+  },
+  "limits": [
+    "The reporter and UI were exercised against a real isolated HTTP endpoint; production roster and doctor are verified separately.",
+    "Operator plugin module discovery passes the actual native validator; an operator TUI smoke was not run.",
+    "The status-clear API ran on successful reports. Recovery from an already displayed warning was not separately exercised."
+  ]
+}

@@ -10,6 +10,10 @@ import { isolatedCodexConfig, watchCodexCatalog } from "./codex-catalog-refresh.
 import type { SeatQuestion, SeatQuestionAnswer, SeatQuestionResult } from "@clankie/agent-hosts";
 import { isDeepStrictEqual } from "node:util";
 import { codexQuestion, recordedCodexAnswer, SeatQuestionAnswerSchema } from "./codex-user-input.ts";
+import {
+  codexToolCatalogReport,
+  type CodexToolCatalogReport,
+} from "../../../../integrations/claude-plugin/worker/bin/codex-tool-catalog.mjs";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue =>
@@ -249,6 +253,8 @@ export interface CodexAppServerSeat {
   ): Promise<{ turnId: string; state: "started" | "steered" }>;
   /** Controller-owned catalog expectation; never an authorization credential. */
   expectTools?(names: readonly string[]): void;
+  /** Observe this original thread after its bridge binding is in place. */
+  checkTools?(): Promise<void>;
   answerQuestion?(
     answer: SeatQuestionAnswer,
     beforeDispatch?: () => Promise<void>,
@@ -437,6 +443,9 @@ export async function startCodexAppServerSeat(options: {
   /** Start the native TUI on this server before sending any model input. */
   startView: (args: readonly string[]) => Promise<void>;
   onEvent?: (event: CodexSeatEvent) => void;
+  /** Native startup evidence; report failure without taking away the pane's agency. */
+  onCatalog?: (report: CodexToolCatalogReport) => Promise<void> | void;
+  catalogBridge?: "worker" | "operator";
   policy?: CodexNativePolicy;
 }): Promise<CodexAppServerSeat> {
   options.signal?.throwIfAborted();
@@ -696,6 +705,32 @@ export async function startCodexAppServerSeat(options: {
     if (options.resumeThreadId) await subscribe();
     let catalogReady = !server.waitForClankieCatalog;
     let expectedTools: readonly string[] = ["message_clankie"];
+    const checkTools = async () => {
+      if (!options.onCatalog) return;
+      const deadline = Date.now() + 20_000;
+      let report: CodexToolCatalogReport;
+      do {
+        report = await codexToolCatalogReport({
+          sessionId: threadId!,
+          bridge: options.catalogBridge ?? "worker",
+          request: (method, params) =>
+            client!.request(method, params, Math.max(1, Math.min(2_000, deadline - Date.now()))),
+        });
+        if (closed || stopped || options.signal?.aborted) return;
+        if (
+          !report.error &&
+          report.tools.length > 0 &&
+          (options.catalogBridge === "operator" || expectedTools.every((name) => report.tools.includes(name)))
+        )
+          break;
+        if (Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 250));
+      } while (Date.now() < deadline);
+      try {
+        await options.onCatalog(report);
+      } catch (error) {
+        console.warn("Codex native catalog report failed:", threadId, String(error));
+      }
+    };
     const waitForCatalog = async () => {
       if (catalogReady) return;
       await server.validateCatalog?.();
@@ -736,6 +771,7 @@ export async function startCodexAppServerSeat(options: {
     let firstDispatch = true;
     let sending: Promise<unknown> = Promise.resolve();
     return {
+      checkTools,
       async answerQuestion(answer, guard) {
         const parsed = SeatQuestionAnswerSchema.safeParse(answer);
         if (!parsed.success) return { outcome: "refused", detail: "native_question_answer_invalid" };
