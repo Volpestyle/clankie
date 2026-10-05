@@ -2504,7 +2504,15 @@ While its channel is live, the seat receives that conversation's worker reports,
 escalations, wakes and watches instead of starting a service model turn. Closing
 the seat returns new inputs to the service runner. A turn already accepted by
 either destination keeps that destination; uncertain native delivery is never
-replayed automatically. Existing Pi goal continuations retain their service loop.
+replayed automatically. Service goals require a Pi-owned conversation. Native
+harness MCP seats refuse `create_goal` with `native_goal_unsupported`; owner
+activation or resume also refuses while a native head owns the conversation.
+Queued or restored service goals pause on finding a native head, so they cannot
+start another Pi lead alongside the seat. Model calls in Pi create inactive
+proposals; `/goal accept` confirms one. `/goal <objective>` creates an active goal
+directly. Every service goal defaults to a 1,000,000 model-token budget, overridden
+with `/goal --tokens <n> <objective>`. Recorded usage survives budget migration
+for older goals, and exhausted goals stop before another provider request.
 Stalled service preparation releases its admission so the attached seat can take
 later queued inputs. Native delivery keeps its existing acknowledgment deadlines
 and ten-minute escalation reply wait; it has no new five-minute reply cutoff.

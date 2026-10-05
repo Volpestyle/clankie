@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 
 const MAX_TIMER_MS = 2_147_483_647;
+export const DEFAULT_GOAL_TOKEN_BUDGET = 1_000_000;
 
 const PersistedAutonomySchema = z
   .object({
@@ -26,7 +27,12 @@ const PersistedAutonomySchema = z
 
 type PersistedAutonomy = z.infer<typeof PersistedAutonomySchema>;
 /** A goal continuation loops until the goal settles; a wake is one turn Clankie asked for. */
-type InternalRun = (conversationId: string, prompt: string, origin: "goal" | "wake") => Promise<void>;
+type InternalRun = (
+  conversationId: string,
+  prompt: string,
+  origin: "goal" | "wake",
+  expectedGoal?: OperatorGoal,
+) => Promise<void>;
 
 const GoalDecisionSchema = z
   .object({
@@ -53,6 +59,23 @@ export class AutonomyStore {
   public constructor(path: string) {
     this.path = path;
     this.state = this.read();
+    let migrated = false;
+    for (const record of Object.values(this.state.conversations)) {
+      const goal = record.goal;
+      if (goal === undefined) continue;
+      if (goal.tokenBudget === undefined) {
+        goal.tokenBudget = DEFAULT_GOAL_TOKEN_BUDGET;
+        migrated = true;
+      }
+      if (
+        (goal.status === "active" || goal.status === "paused" || goal.status === "proposed") &&
+        goal.tokensUsed >= goal.tokenBudget
+      ) {
+        migrated = true;
+        goal.status = "budget_limited";
+      }
+    }
+    if (migrated) this.save();
   }
 
   public start(run: InternalRun): void {
@@ -85,6 +108,10 @@ export class AutonomyStore {
         this.createGoal(conversationId, command.objective, command.tokenBudget);
         this.resumeGoal(conversationId);
         break;
+      case "accept_goal":
+        this.acceptGoal(conversationId);
+        this.resumeGoal(conversationId);
+        break;
       case "set_goal_status":
         this.setGoalStatus(conversationId, command.status);
         if (command.status === "active") this.resumeGoal(conversationId);
@@ -100,6 +127,20 @@ export class AutonomyStore {
   }
 
   public createGoal(conversationId: string, objective: string, tokenBudget?: number): OperatorGoal {
+    return this.saveGoal(conversationId, objective, "active", tokenBudget);
+  }
+
+  /** Model proposals stay inert until an owner accepts the persisted objective and budget. */
+  public proposeGoal(conversationId: string, objective: string, tokenBudget?: number): OperatorGoal {
+    return this.saveGoal(conversationId, objective, "proposed", tokenBudget);
+  }
+
+  private saveGoal(
+    conversationId: string,
+    objective: string,
+    status: "active" | "proposed",
+    tokenBudget = DEFAULT_GOAL_TOKEN_BUDGET,
+  ): OperatorGoal {
     const existing = this.state.conversations[conversationId]?.goal;
     if (existing !== undefined && existing.status !== "complete") {
       throw new Error("This conversation already has an unfinished goal");
@@ -107,8 +148,8 @@ export class AutonomyStore {
     const now = new Date().toISOString();
     const goal: OperatorGoal = {
       objective: objective.trim(),
-      status: "active",
-      ...(tokenBudget === undefined ? {} : { tokenBudget }),
+      status,
+      tokenBudget,
       tokensUsed: 0,
       createdAt: now,
       updatedAt: now,
@@ -135,16 +176,61 @@ export class AutonomyStore {
     return goal;
   }
 
-  public finishTurn(conversationId: string, tokens: number): void {
+  /** Persist usage as model calls finish, without admitting another continuation mid-turn. */
+  public recordUsage(
+    conversationId: string,
+    tokens: number,
+    expectedGoal?: OperatorGoal,
+  ): OperatorGoal | undefined {
     const goal = this.state.conversations[conversationId]?.goal;
-    if (goal === undefined) return;
-    goal.tokensUsed += Math.max(0, Math.trunc(tokens));
+    if (goal === undefined || (expectedGoal !== undefined && goal !== expectedGoal)) return undefined;
+    if (goal.status === "proposed") return goal;
+    if (!Number.isSafeInteger(tokens) || tokens < 0 || !Number.isSafeInteger(goal.tokensUsed + tokens)) {
+      return this.limitUsage(conversationId, goal);
+    }
+    if (tokens === 0) return goal;
+    goal.tokensUsed += tokens;
     goal.updatedAt = new Date().toISOString();
-    if (goal.tokenBudget !== undefined && goal.tokensUsed >= goal.tokenBudget) {
+    if (
+      (goal.status === "active" || goal.status === "paused") &&
+      goal.tokenBudget !== undefined &&
+      goal.tokensUsed >= goal.tokenBudget
+    ) {
       goal.status = "budget_limited";
     }
     this.save();
+    return goal;
+  }
+
+  /** Unknown provider usage cannot authorize another autonomous model call. */
+  public limitUsage(conversationId: string, expectedGoal?: OperatorGoal): OperatorGoal | undefined {
+    const goal = this.state.conversations[conversationId]?.goal;
+    if (goal === undefined || (expectedGoal !== undefined && goal !== expectedGoal)) return undefined;
+    if (goal.status === "active" || goal.status === "paused") {
+      goal.status = "usage_limited";
+      goal.updatedAt = new Date().toISOString();
+      this.save();
+    }
+    return goal;
+  }
+
+  /** Incremental callers pass zero here; legacy callers can still account the settled turn once. */
+  public finishTurn(conversationId: string, tokens = 0, expectedGoal?: OperatorGoal): void {
+    const goal = this.recordUsage(conversationId, tokens, expectedGoal);
+    if (goal === undefined) return;
     if (this.state.enabled && goal.status === "active") this.queueGoal(conversationId, goal);
+  }
+
+  /** Refuse an unsafe continuation durably without admitting a replacement turn. */
+  public pauseGoal(conversationId: string, expectedGoal?: OperatorGoal): OperatorGoal | undefined {
+    const goal = this.state.conversations[conversationId]?.goal;
+    if (goal === undefined || (expectedGoal !== undefined && goal !== expectedGoal)) return undefined;
+    if (goal.status === "active") {
+      goal.status = "paused";
+      goal.updatedAt = new Date().toISOString();
+      this.save();
+    }
+    return goal;
   }
 
   /** Append one model-authored decision to the conversation's goal journal (ADR 0132). */
@@ -241,11 +327,23 @@ export class AutonomyStore {
 
   private setGoalStatus(conversationId: string, status: "active" | "paused"): void {
     const goal = this.requireGoal(conversationId);
+    if (goal.status === "proposed") throw new Error("Accept the proposed goal before resuming it");
     if (goal.status === "complete") throw new Error("A completed goal cannot be resumed");
     if (status === "active" && goal.tokenBudget !== undefined && goal.tokensUsed >= goal.tokenBudget) {
       throw new Error("This goal has exhausted its token budget");
     }
     goal.status = status;
+    goal.updatedAt = new Date().toISOString();
+    this.save();
+  }
+
+  private acceptGoal(conversationId: string): void {
+    const goal = this.requireGoal(conversationId);
+    if (goal.status !== "proposed") throw new Error("This conversation has no proposed goal to accept");
+    if (goal.tokenBudget === undefined || goal.tokensUsed >= goal.tokenBudget) {
+      throw new Error("This goal has exhausted its token budget");
+    }
+    goal.status = "active";
     goal.updatedAt = new Date().toISOString();
     this.save();
   }
@@ -273,15 +371,32 @@ export class AutonomyStore {
   }
 
   private queueGoal(conversationId: string, goal: OperatorGoal): void {
+    if (
+      !this.state.enabled ||
+      this.state.conversations[conversationId]?.goal !== goal ||
+      goal.status !== "active"
+    )
+      return;
+    if (goal.tokenBudget === undefined || goal.tokensUsed >= goal.tokenBudget) {
+      goal.status = "budget_limited";
+      goal.updatedAt = new Date().toISOString();
+      this.save();
+      return;
+    }
     if (this.run === undefined || this.goalRuns.has(conversationId)) return;
     this.goalRuns.add(conversationId);
-    void this.run(conversationId, goalPrompt(goal), "goal")
+    void this.run(conversationId, goalPrompt(goal), "goal", goal)
       .then(() => {
         this.goalRuns.delete(conversationId);
         const current = this.state.conversations[conversationId]?.goal;
         if (this.state.enabled && current?.status === "active") this.queueGoal(conversationId, current);
       })
-      .catch(() => this.goalRuns.delete(conversationId));
+      .catch(() => {
+        this.goalRuns.delete(conversationId);
+        const current = this.state.conversations[conversationId]?.goal;
+        if (this.state.enabled && current?.status === "active" && current !== goal)
+          this.queueGoal(conversationId, current);
+      });
   }
 
   private arm(): void {

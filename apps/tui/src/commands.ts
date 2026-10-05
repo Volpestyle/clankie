@@ -848,8 +848,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "goal",
       aliases: [],
-      description: "Show, start, pause, resume, or clear this conversation's goal",
-      argumentHint: "[pause|resume|clear|--tokens <n> <objective>|<objective>]",
+      description: "Show, accept, start, pause, resume, or clear this conversation's goal",
+      argumentHint: "[accept|pause|resume|clear|--tokens <n> <objective>|<objective>]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         if (conversations?.autonomy === undefined) {
@@ -859,6 +859,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         const input = argument.trim();
         let command: OperatorAutonomyCommand;
         if (input.length === 0 || input === "status") command = { action: "status" };
+        else if (input === "accept") command = { action: "accept_goal" };
         else if (input === "pause" || input === "resume") {
           command = { action: "set_goal_status", status: input === "pause" ? "paused" : "active" };
         } else if (input === "clear") command = { action: "clear_goal" };
@@ -1766,6 +1767,7 @@ function formatAutonomyStatus(status: OperatorAutonomyStatus): string {
     `Autonomy: ${status.enabled ? "on" : "off"}`,
     ...(status.error === undefined ? [] : ["State: unreadable · autonomy is fail-closed"]),
     goal === undefined ? "Goal: none" : `Goal: ${goal.status} · ${goal.objective}`,
+    ...(goal?.status === "proposed" ? ["Confirm: /goal accept"] : []),
     ...(goal?.tokenBudget === undefined
       ? []
       : [`Budget: ${String(goal.tokensUsed)} / ${String(goal.tokenBudget)} tokens`]),

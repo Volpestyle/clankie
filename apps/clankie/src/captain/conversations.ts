@@ -76,6 +76,7 @@ import {
   type OperatorChannel,
   type OperatorChannelMember,
   type OperatorConversation,
+  type OperatorGoal,
   type OperatorConversationContextUsage,
   type OperatorConversationEventBody,
   type OperatorDeliveredFile,
@@ -348,6 +349,8 @@ export interface ConversationTurnContext {
    * concerns something outside this machine, and the prompt says so.
    */
   readonly origin?: "goal" | "wake" | "watch" | "message" | "hook" | "input";
+  /** Host-only goal identity; queued work cannot claim a replacement goal. */
+  readonly expectedGoal?: OperatorGoal;
   /** The surface a human send arrived from, as it named itself. */
   readonly surfaceClientId?: string;
   /** Side conversations inherit a Pi branch but never continue their parent's active task. */
@@ -1134,6 +1137,23 @@ export class ConversationStore {
   public conversation(conversationId: string): OperatorConversation | undefined {
     const meta = this.metas.get(conversationId);
     return meta === undefined ? undefined : publicConversation(meta);
+  }
+
+  /** A native head remains native while its channel is offline. */
+  public hasNativeSeat(conversationId: string): boolean {
+    const meta = this.metas.get(conversationId);
+    return (
+      meta?.nativeSource !== undefined ||
+      Object.values(meta?.nativeSeatSessions ?? {}).some((state) => state === "current")
+    );
+  }
+
+  /** Retain host-observed head ownership without changing transcript checkpoints. */
+  public rememberNativeHead(conversationId: string, occupantId: string): void {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined || meta.nativeSeatSessions?.[occupantId] === "current") return;
+    (meta.nativeSeatSessions ??= {})[occupantId] = "current";
+    this.saveMeta(meta);
   }
 
   /**
@@ -2407,13 +2427,17 @@ export class ConversationStore {
     conversationId: string,
     message: string,
     origin: NonNullable<ConversationTurnContext["origin"]>,
+    expectedGoal?: OperatorGoal,
   ): SubmitOperatorConversationTurnResult {
     const meta = this.metas.get(conversationId);
     if (meta === undefined) throw new Error(`Unknown conversation ${conversationId}`);
     if (!this.runsCaptainTurns(conversationId)) {
       throw new Error(`Conversation ${conversationId} does not run captain turns`);
     }
-    return this.enqueue(meta, message, undefined, false, this.runner, { origin });
+    return this.enqueue(meta, message, undefined, false, this.runner, {
+      origin,
+      ...(expectedGoal === undefined ? {} : { expectedGoal }),
+    });
   }
 
   /** Read actual on-disk acceptance, never an in-memory success guess. */
@@ -3338,7 +3362,13 @@ export class ConversationStore {
     runner: ConversationRunner = this.runner,
     provenance: Pick<
       ConversationTurnContext,
-      "origin" | "surfaceClientId" | "attachments" | "ownerAuthority" | "questionBinding" | "inputAnswer"
+      | "origin"
+      | "expectedGoal"
+      | "surfaceClientId"
+      | "attachments"
+      | "ownerAuthority"
+      | "questionBinding"
+      | "inputAnswer"
     > & {
       questionAnswer?: {
         readonly record: QuestionRecord;
@@ -3496,6 +3526,7 @@ export class ConversationStore {
           },
           ...(publishOperatorMessage ? {} : { internal: true as const }),
           ...(provenance.origin === undefined ? {} : { origin: provenance.origin }),
+          ...(provenance.expectedGoal === undefined ? {} : { expectedGoal: provenance.expectedGoal }),
           ...(provenance.surfaceClientId === undefined
             ? {}
             : { surfaceClientId: provenance.surfaceClientId }),
