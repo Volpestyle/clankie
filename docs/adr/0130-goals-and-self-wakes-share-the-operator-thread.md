@@ -53,15 +53,24 @@ The model can finish or block an active goal. Completion remains a model audit
 against the fixed objective and concrete evidence; it is not a second model
 pretending to be an independent verifier.
 
-Activation must remain an explicit owner action. The dispatch endpoint currently
-accepts the same captain bearer that the owner TUI uses for autonomy `set_goal`
-and `accept_goal`; it does not distinguish a human command from a shell-capable
-turn using that credential. Such a turn can therefore activate or accept a goal
-through the API itself. [VUH-1676](https://linear.app/vuhlp/issue/VUH-1676)
-separates model-tool proposals from activation and enforces budgets and native
-seat refusal, but does not redesign this authentication boundary. A follow-up
-must bind activation to an owner-authenticated action independently of the
-machine execution credential before exclusive human confirmation is enforced.
+Activation requires owner authority. The dispatch endpoint refuses the shared
+captain bearer with HTTP 403 `goal_owner_required` for `set_goal`, `accept_goal`,
+resuming a goal, and enabling autonomy. The console and CLI use the separate
+operator credential; an active paired device with `terminalControl` may also
+authorize these commands. The captain revalidates that authority after any
+asynchronous fleet census, immediately before changing durable autonomy state.
+[VUH-1686](https://linear.app/vuhlp/issue/VUH-1686) closes the ambient captain
+bearer's activation path, building on VUH-1676's model proposals, budgets and
+native seat refusal.
+
+This raises the bar by requiring a deliberate owner/device credential rather
+than the ambient captain bearer. It does **not** isolate activation against a
+same-UID shell that reads Keychain or `device-session.key`. Native bridges also
+use the operator bearer, and local device sessions rely on that host-readable
+signing key. Exclusive human confirmation still needs a separate OS principal
+or a non-exportable owner signer requiring user presence, such as Secure
+Enclave. That protected signing boundary is a separate follow-up; this change
+does not provide it.
 
 Every service goal has a finite model-token budget, defaulting to 1,000,000.
 The owner can override it with `/goal --tokens <positive integer> <objective>`.

@@ -7,11 +7,13 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OperatorAutonomyCommandSchema,
   OperatorConversationServiceResultSchema,
+  operatorAutonomyCommandRequiresOwner,
 } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { expect, it } from "vitest";
-import { createClankieApp } from "../src/app.ts";
+import { createBearerAuthenticator, createClankieApp } from "../src/app.ts";
 import { AutonomyStore, DEFAULT_GOAL_TOKEN_BUDGET } from "../src/captain/autonomy.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
@@ -53,14 +55,13 @@ async function fixture(root: string) {
   );
   const app = await createClankieApp({
     captain,
-    authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer fixture"
-        ? { operatorId: "goal-integration-owner" }
-        : undefined,
-    authenticateCaptain: async (request) =>
-      request.headers.get("authorization") === "Bearer fixture"
-        ? { captainId: "goal-integration-owner", steerSourceLane: "api" }
-        : undefined,
+    authenticateOperator: createBearerAuthenticator("owner-fixture", {
+      operatorId: "goal-integration-owner",
+    }),
+    authenticateCaptain: createBearerAuthenticator("captain-fixture", {
+      captainId: "goal-integration-captain",
+      steerSourceLane: "api",
+    }),
   });
   const server = serve({ fetch: app.app.fetch, hostname: "127.0.0.1", port: 0 });
   await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -77,15 +78,18 @@ async function fixture(root: string) {
       await client.connect(
         new StreamableHTTPClientTransport(
           new URL(`/v1/mcp?conversationId=${encodeURIComponent(conversationId)}`, host),
-          { requestInit: { headers: { authorization: "Bearer fixture" } } },
+          { requestInit: { headers: { authorization: "Bearer captain-fixture" } } },
         ) as unknown as Transport,
       );
       return client;
     },
     async command(conversationId: string, command: Record<string, unknown>) {
+      const token = operatorAutonomyCommandRequiresOwner(OperatorAutonomyCommandSchema.parse(command))
+        ? "owner-fixture"
+        : "captain-fixture";
       return await fetch(new URL(OPERATOR_CONVERSATION_DISPATCH_PATH, host), {
         method: "POST",
-        headers: { authorization: "Bearer fixture", "content-type": "application/json" },
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ op: "autonomy", schemaVersion: 1, conversationId, command }),
       });
     },

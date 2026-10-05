@@ -85,6 +85,7 @@ import {
   operatorFleetHome,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
   OPERATOR_SEAT_HARNESSES,
+  operatorAutonomyCommandRequiresOwner,
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
   type DiscordPresenceChannelTurnRequest,
@@ -4159,6 +4160,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
       if (request.op === "autonomy") {
+        const requiresOwner = operatorAutonomyCommandRequiresOwner(request.command);
+        if (requiresOwner && (!authority || !authority.current())) throw new Error("goal_owner_required");
         if (!conversations.has(request.conversationId)) {
           throw new Error(`Unknown conversation ${request.conversationId}`);
         }
@@ -4174,6 +4177,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           const reason = goalExecutionReason(request.conversationId);
           if (reason !== undefined) throw new ConversationRefusedError(reason);
         }
+        // Revalidate the presented owner/device after asynchronous census, at
+        // the activation boundary. A captain credential supplies no authority.
+        if (requiresOwner && (!(await authority!.authorize()) || !authority!.current()))
+          throw new Error("goal_owner_required");
         return Promise.resolve({
           op: "autonomy",
           schemaVersion: 1,

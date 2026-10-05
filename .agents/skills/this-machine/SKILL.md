@@ -203,6 +203,13 @@ continuations or usage. Every service goal has a finite token budget (default
 goals. A refused native goal is a boundary to explain, not a cue to start a
 second lead through another conversation.
 
+Starting, accepting or resuming service goals and enabling autonomy require the
+owner/device transport; the ambient captain bearer receives `goal_owner_required`
+(HTTP 403). Owners may also use `clankie conversations goal ID accept|resume` or
+`clankie conversations goal ID set --tokens N <objective>`. This separates API
+authority, not local OS identities: a same-UID shell can still read the operator
+credential or device signing key. See ADR 0130 for that remaining boundary.
+
 ## Presence and desktop body
 
 `get_self_state` reports current activity; `clankie status` reports process

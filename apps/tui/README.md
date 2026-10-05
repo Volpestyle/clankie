@@ -187,6 +187,10 @@ credential holder.
   `/goal accept` activates Clankie's inactive proposal, and `pause|resume|clear`
   remain owner controls. Native harness heads refuse service goals because the
   service cannot enforce their continuation or usage budget.
+- Goal activation, acceptance, resume and `/autonomy on` use the owner
+  credential; the captain bearer receives HTTP 403. The headless equivalents
+  are `clankie conversations goal ID accept|resume` and
+  `clankie conversations goal ID set --tokens N <objective>`.
 - `/autonomy on|off` controls autonomous goal continuations and scheduled
   self-wakes globally. `/autonomy clear` removes the selected conversation's
   pending wake without changing its goal.

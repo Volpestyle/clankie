@@ -1,5 +1,9 @@
 import { registerComputerRoutes } from "./computer-http.ts";
-import { ISSUE_METRICS_PATH, IssueMetricsQuerySchema } from "@clankie/protocol";
+import {
+  ISSUE_METRICS_PATH,
+  IssueMetricsQuerySchema,
+  operatorAutonomyCommandRequiresOwner,
+} from "@clankie/protocol";
 import type { WorkWriteAuthority } from "./work-write-target.ts";
 import type {
   WorkItemWriteRequest,
@@ -4821,6 +4825,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         captain === "unavailable" ? 503 : 401,
       );
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const goalOwnerOp =
+      parsed.data.op === "autonomy" && operatorAutonomyCommandRequiresOwner(parsed.data.command);
+    if (goalOwnerOp && !owner) return context.json({ error: "goal_owner_required" }, 403);
     const questionOp =
       parsed.data.op === "project_proposal_get" ||
       parsed.data.op === "project_proposal_confirm" ||
@@ -4828,7 +4835,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       parsed.data.op === "input_answer" ||
       parsed.data.op === "input_cancel";
     if (questionOp && !owner) return context.json({ error: "question_owner_required" }, 403);
-    if (owner && (questionOp || parsed.data.op === "send" || parsed.data.op === "set_persona_role")) {
+    if (
+      owner &&
+      (goalOwnerOp || questionOp || parsed.data.op === "send" || parsed.data.op === "set_persona_role")
+    ) {
       const binding = dependencies.herdrBinding?.();
       const sameSession =
         binding !== undefined
@@ -4838,6 +4848,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       try {
         return context.json(await dependencies.captain.serveOperatorConversation(parsed.data, owner));
       } catch (error) {
+        if (error instanceof Error && error.message === "goal_owner_required")
+          return context.json({ error: "goal_owner_required" }, 403);
         if (error instanceof Error && error.message === "question_owner_unavailable")
           return context.json({ error: "question_owner_required" }, 403);
         if (error instanceof ConversationRefusedError || error instanceof ConversationResetError)
@@ -4956,6 +4968,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }
       return context.json(await dependencies.captain.serveOperatorConversation(parsed.data, roleAuthority));
     } catch (error) {
+      if (error instanceof Error && error.message === "goal_owner_required")
+        return context.json({ error: "goal_owner_required" }, 403);
       if (error instanceof Error && error.message === "question_owner_unavailable")
         return context.json({ error: "captain_authentication_required" }, 403);
       if (error instanceof HerdrUnavailableError)

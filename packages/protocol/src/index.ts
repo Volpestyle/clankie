@@ -1506,6 +1506,16 @@ export const OperatorAutonomyCommandSchema = z.discriminatedUnion("action", [
 ]);
 export type OperatorAutonomyCommand = z.infer<typeof OperatorAutonomyCommandSchema>;
 
+/** Starting or re-enabling autonomous work requires the owner transport. */
+export function operatorAutonomyCommandRequiresOwner(command: OperatorAutonomyCommand): boolean {
+  return (
+    command.action === "set_goal" ||
+    command.action === "accept_goal" ||
+    (command.action === "set_goal_status" && command.status === "active") ||
+    (command.action === "set_enabled" && command.enabled)
+  );
+}
+
 /**
  * Strict discriminated public event union. Every app-renderable VUH-745 session
  * event (activity, message, reasoning, context occupancy, tool, typed input,
