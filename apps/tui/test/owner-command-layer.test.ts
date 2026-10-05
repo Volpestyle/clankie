@@ -153,10 +153,13 @@ describe("canonical owner command layer", () => {
 
     await commands.find((command) => command.name === "status")?.run("", shell);
     await commands.find((command) => command.name === "doctor")?.run("", shell);
+    await commands.find((command) => command.name === "doctor")?.run("json", shell);
 
     expect(results[0]?.text).toContain("status: ready");
     expect(results[0]?.text).toContain("clankie: healthy");
-    expect(JSON.parse(results[1]?.text ?? "")).toEqual(doctor);
+    expect(results[1]?.text).toContain("✓ Captain · xai/grok-4.6 via credential");
+    expect(results[1]?.text).toContain("Next: Pair a phone or tablet");
+    expect(JSON.parse(results[2]?.text ?? "")).toEqual(doctor);
   });
 
   it("sets when long sessions compact through argv", async () => {

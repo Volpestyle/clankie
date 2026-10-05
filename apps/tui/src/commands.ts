@@ -1,6 +1,13 @@
 import { runDesktopCommand } from "./command/desktop.ts";
 import { runClaudeAccountsCommand } from "./command/claude-accounts.ts";
 import { runProjectRolesMenu } from "./project-role-menu.ts";
+import { runProjectsMenu } from "./project-menu.ts";
+import { runAccessMenu } from "./access-menu.ts";
+import { runAccountsMenu } from "./accounts-menu.ts";
+import { formatDoctorReport } from "./doctor-report.ts";
+import { formatUpdateState, runUpdateMenu } from "./update-menu.ts";
+import { runMinecraftMenu } from "./minecraft-menu.ts";
+import { runProjectCommand } from "./command/project.ts";
 import { runMachinesCommand } from "./command/machines.ts";
 import { runProjectSettingsCommand } from "./command/project-settings.ts";
 import { planSeat, parseSeatArgs } from "./command/seat.ts";
@@ -183,10 +190,16 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         shell.insertCommandResult("/update", "Runtime update is unavailable on this connection", "error");
         return;
       }
+      const args = argument.trim().split(/\s+/u).filter(Boolean);
+      if (!args.length) {
+        await runUpdateMenu(shell, context.commandUpdate);
+        return;
+      }
       try {
+        const result = await context.commandUpdate(args);
         shell.insertCommandResult(
           "/update",
-          JSON.stringify(await context.commandUpdate(argument.trim().split(/\s+/u).filter(Boolean)), null, 2),
+          args[0] === "status" ? formatUpdateState(result) : JSON.stringify(result, null, 2),
           "success",
         );
       } catch (error) {
@@ -354,16 +367,23 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     },
     {
       name: "project",
-      aliases: [],
+      aliases: ["projects"],
       description: "Create or edit projects, roles, limits and tracked work; read live membership",
       takesArgument: true,
       argumentHint:
-        "list | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
+        "[list | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID]",
       async run(argument, shell): Promise<void> {
+        if (!argument.trim()) {
+          await runProjectsMenu(shell, {
+            settings: (args) => runProjectSettingsCommand(args),
+            workspace: (args) => runProjectCommand(args, settings ? { settings } : {}),
+            roles: (projectId) => runProjectRolesMenu(shell, projectId),
+            cwd: process.cwd(),
+          });
+          return;
+        }
         try {
-          const result = await runProjectSettingsCommand(
-            argument.trim() ? splitQuotedArguments(argument) : ["list"],
-          );
+          const result = await runProjectSettingsCommand(splitQuotedArguments(argument));
           shell.insertCommandResult("/project", JSON.stringify(result, null, 2), "success");
         } catch (error) {
           shell.insertCommandResult(
@@ -525,6 +545,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       takesArgument: true,
       argumentHint: "[list | revoke ID | linear [verify]]",
       async run(argument, shell): Promise<void> {
+        if (!argument.trim()) {
+          await runAccessMenu(shell, (args) => runAccessCommand(args));
+          return;
+        }
         try {
           const args = argument.trim().split(/\s+/u).filter(Boolean);
           if (args[0] === "issue")
@@ -1015,10 +1039,22 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       name: "accounts",
       aliases: [],
       description: "Register local Claude profiles and Codex accounts/headroom",
-      argumentHint: "codex|claude [list | add HOME --label LABEL | remove LABEL]",
+      argumentHint: "[codex|claude [list | add HOME --label LABEL | remove LABEL]]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         const words = splitQuotedArguments(argument);
+        if (words.length <= 1 && (words[0] === undefined || words[0] === "codex" || words[0] === "claude")) {
+          const options = settings ? { settings } : {};
+          await runAccountsMenu(
+            shell,
+            {
+              claude: (args) => runClaudeAccountsCommand(args, options),
+              codex: (args) => runCodexAccountsCommand(args, options),
+            },
+            words[0],
+          );
+          return;
+        }
         if (!["codex", "claude"].includes(words[0] ?? ""))
           throw new Error("Use /accounts codex|claude [list | add HOME --label LABEL | remove LABEL]");
         const result = await (words[0] === "claude" ? runClaudeAccountsCommand : runCodexAccountsCommand)(
@@ -1245,13 +1281,18 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint: "[configure|status|join PROFILE|leave|cancel|pause|resume|chat|follow]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
+        const options = {
+          ...(settings === undefined ? {} : { settings }),
+          ...(conversations?.conversationId === undefined
+            ? {}
+            : { conversationId: conversations.conversationId }),
+        };
+        if (!argument.trim()) {
+          await runMinecraftMenu(shell, (args) => runMinecraftCommand(args, options));
+          return;
+        }
         try {
-          const result = await runMinecraftCommand(argument.trim().split(/\s+/u).filter(Boolean), {
-            ...(settings === undefined ? {} : { settings }),
-            ...(conversations?.conversationId === undefined
-              ? {}
-              : { conversationId: conversations.conversationId }),
-          });
+          const result = await runMinecraftCommand(argument.trim().split(/\s+/u).filter(Boolean), options);
           shell.insertCommandResult("/minecraft", JSON.stringify(result, null, 2), "success");
         } catch (error) {
           shell.insertCommandResult(
@@ -1498,15 +1539,20 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       name: "doctor",
       aliases: [],
       description: "Show this install's canonical doctor report",
-      takesArgument: false,
+      argumentHint: "[json]",
+      takesArgument: true,
       availableInSideConversation: true,
-      async run(_argument, shell): Promise<void> {
+      async run(argument, shell): Promise<void> {
         if (context.commandDoctor === undefined) {
           shell.insertCommandResult("/doctor", "Install doctor is unavailable.", "error");
           return;
         }
         const report = await context.commandDoctor();
-        shell.insertCommandResult("/doctor", JSON.stringify(report, null, 2), "success");
+        shell.insertCommandResult(
+          "/doctor",
+          argument.trim() === "json" ? JSON.stringify(report, null, 2) : formatDoctorReport(report),
+          report.captain.ready && report.remediations.length === 0 ? "success" : "error",
+        );
       },
     },
     {
