@@ -2799,7 +2799,7 @@ Read the host's shared Discord setup definition, check kinds, Advanced groups,
 choice labels and role-correct invitation URL as JSON. Requires operator
 authentication, like `discord rooms`. The host supplies its computer name.
 See [Discord settings](discord-rooms.md) and
-[ADR 0226](adr/0226-discord-connects-a-server-with-a-role.md).
+[ADR 0227](adr/0227-discord-connects-a-server-with-a-role.md).
 
 ### `discord setup`
 

@@ -1,4 +1,4 @@
-# ADR 0226: Discord connects a server with a role
+# ADR 0227: Discord connects a server with a role
 
 Status: accepted (James, 2026-10-04), [VUH-1622](https://linear.app/vuhlp/issue/VUH-1622).
 Supersedes the four-sentence setup and separate managed-server choice in

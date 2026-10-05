@@ -1,7 +1,7 @@
 # VUH-1622: Discord server roles and projections
 
 [Issue](https://linear.app/vuhlp/issue/VUH-1622) ·
-[role decision](../../adr/0226-discord-connects-a-server-with-a-role.md) ·
+[role decision](../../adr/0227-discord-connects-a-server-with-a-role.md) ·
 [setup contract](../../cli.md#discord-setup)
 
 The core is ready for Pell's integration batch on `feat/vuh-1622` in

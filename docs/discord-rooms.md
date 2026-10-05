@@ -65,7 +65,7 @@ the connected account's directory. Participant has no setup channel list:
 Discord permissions and overwrites decide which rooms Clankie can use.
 Admin grants full control of a dedicated server, with server deletion and
 ownership transfer refused at the adapter. Machine grants remain separate.
-[ADR 0226](adr/0226-discord-connects-a-server-with-a-role.md) supersedes the
+[ADR 0227](adr/0227-discord-connects-a-server-with-a-role.md) supersedes the
 four-sentence setup.
 
 The role-correct invitation requests Administrator for Admin and normal member
