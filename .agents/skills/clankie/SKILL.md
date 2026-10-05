@@ -162,6 +162,11 @@ threads; `clankie conversations show ID --limit 10` reads the selected thread.
 Confirm the destination before writing. Discord conversation records are
 read-only views; sending to an operator thread does not post in Discord.
 
+Before sending into someone else's Clankie thread, present the exact draft and
+destination and ask the owner for approval unless the existing go-ahead already
+covers both. Reading the thread or holding a sending tool does not authorize a
+message there.
+
 For an authorized operator-thread message:
 
 ```sh

@@ -9,15 +9,22 @@ import type { ProjectProcessProof } from "./project-process-proof.ts";
 export interface LocalFleetIdentity {
   readonly fleet?: string;
   readonly pane: string;
+  /** Fresh socket/process admission; current() alone never grants authority. */
   validate(): Promise<boolean>;
   /** Synchronous link revocation only; never substitutes for async process admission. */
   current?(): boolean;
   projectProof?(): Promise<ProjectProcessProof | undefined>;
 }
 
-/** Authority exists only for a request admitted by the separate local listener. */
+/**
+ * Bind each request to its local listener socket. Seat routes are admitted here;
+ * the MCP route receives a candidate identity that only WorkerMcp may consume,
+ * after its own fresh validate(). This avoids doing the same expensive OS proof
+ * twice before an MCP request reaches authentication. No proof is cached, and
+ * provider dispatch still validates again after asynchronous discovery.
+ */
 export class LocalFleetLink {
-  private readonly admitted = new WeakMap<Request, LocalFleetIdentity>();
+  private readonly identities = new WeakMap<Request, LocalFleetIdentity>();
   private open = true;
   private published: string | undefined;
   private readonly options: {
@@ -30,8 +37,9 @@ export class LocalFleetLink {
     this.options = options;
   }
 
+  /** MCP identities are candidates: validate() must succeed before they grant authority. */
   identity(request: Request): LocalFleetIdentity | undefined {
-    return this.admitted.get(request);
+    return this.identities.get(request);
   }
 
   fetch(forward: (request: Request) => Response | Promise<Response>) {
@@ -59,13 +67,13 @@ export class LocalFleetLink {
         projectProof: async () =>
           this.open ? this.options.projectProof?.(env.incoming.socket, pane) : undefined,
       };
-      if (!(await identity.validate()))
+      if (path !== "/v1/fleet/mcp" && !(await identity.validate()))
         return Response.json({ error: "local_process_membership_required" }, { status: 403 });
-      this.admitted.set(request, identity);
+      this.identities.set(request, identity);
       try {
         return await forward(request);
       } finally {
-        this.admitted.delete(request);
+        this.identities.delete(request);
       }
     };
   }
