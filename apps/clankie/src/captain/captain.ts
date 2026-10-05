@@ -3030,8 +3030,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   messageId: normalized.messageId,
                   transportKind: request.identity.transportKind,
                 };
-                const finish =
-                  options.runtimeProvider?.heartbeat?.begin(request.trigger.unprompted === true ? "wake" : undefined);
+                const finish = options.runtimeProvider?.heartbeat?.begin(
+                  request.trigger.unprompted === true ? "wake" : undefined,
+                );
                 try {
                   conversations.updateRoomHandoff(child.conversationId, {
                     state: "running",

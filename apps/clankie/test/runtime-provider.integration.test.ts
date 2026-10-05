@@ -174,7 +174,7 @@ it("injected quota routes keep paired-device authorization and heartbeat tracks 
         };
       },
       interactive() {},
-      authenticatedRequest() {},
+      authenticatedWork() {},
       start() {},
       close() {},
     },

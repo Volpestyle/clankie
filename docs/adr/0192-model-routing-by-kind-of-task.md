@@ -60,10 +60,15 @@ Two tiers and a fixed purpose table, plus one volitional escape hatch.
    from the default model at high effort once the plan's escalation budget is
    spent.
 
-6. **Hosted bodies take routing from their bootstrap.** The fleet's optional
-   `modelRouting` bootstrap field is written over the body's routing at every
-   start. Plan gating (escalation on Pro only) is enforced by the fleet's model
-   proxy; the body's setting is a convenience, not the boundary.
+6. **The private managed provider applies bootstrap routing to included usage.**
+   At startup and after model/key changes, the installed provider applies the
+   fleet's optional `modelRouting` only when the selected model has no supported
+   customer credential. A customer model keeps its own routing, with earlier
+   included-model references cleared; removing that credential returns to the
+   included path. The public bootstrap reader validates these optional fields
+   but does not apply plan policy ([ADR 0183](0183-the-harness-is-public-the-hosted-service-is-private.md)).
+   Plan gating is enforced by the private model proxy; the body's setting is a
+   convenience, not the boundary.
 
 ## Consequences
 

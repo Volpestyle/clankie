@@ -66,10 +66,12 @@ a tool argument or model-selected module.
 
 The hooks are generic: optional routes receive the existing owner/device
 authorizer and declare exact gateway routes; heartbeat hooks observe raw turn
-origins, authenticated activity and service lifetime; model hooks supply worker
-models and react to model changes. None grants a new device, tool, account or
-machine authority. The ordinary public service, transport and lifecycle remain
-the implementation used by both deployments.
+origins, a boolean authenticated-work signal and service lifetime. The public
+encrypted gateway classifies successful device work before emitting that
+boolean; decrypted request paths and bodies do not enter the provider. Model
+hooks supply worker models and react to model changes. None grants a new device,
+tool, account or machine authority. The ordinary public service, transport and
+lifecycle remain the implementation used by both deployments.
 
 Private `clankie-ops/apps/body` supplies credit routes, quotas, control-plane
 heartbeat accounting, the included-usage forwarder and customer-model policy.
@@ -80,9 +82,22 @@ the private `@clankie/hosted-protocol` package. The companion app keeps the wire
 decoder it consumes locally in its private repo, so its CI does not require
 access to the operations checkout.
 
+Composer dictation keeps its device API, paired-device authority checks,
+bounded ephemeral audio and request receipts public. Its optional cloud port
+accepts the existing device principal and returns a receipt or a validated
+admission refusal; it carries no fleet endpoint or managed billing rule. The
+private provider supplies the signed composer adapter, adds the body installation
+identity and owns fleet admission, allowance reservations and metering. The
+public body's one-shot signed JSON primitive supplies transport without upload
+retries. An uncertain answer can be reconciled through a receipt read; it never
+authorizes another audio upload.
+
 Signed body requests, credential renewal, pairing and
 [`hosted-device-security`](../../apps/clankie/src/hosted-device-security.ts)
-remain public remote-access client code. They keep keys on the host, bind
+remain public remote-access client code. The generic body module is an explicit
+external entry for dependency analysis because the private provider imports its
+bootstrap schema and transport; those contracts remain checked by the composed
+runtime integration. They keep keys on the host, bind
 requests and replies to the correct identity, prevent pairing replay, and
 recover device revocations safely after a disk restore. Owners need these
 boundaries to inspect or run remote access; their presence does not select a

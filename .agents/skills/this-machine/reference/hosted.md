@@ -54,11 +54,13 @@ renewal and signs each request. `pairing_key_required` triggers one
 re-registration attempt. Persistent `body_signature_invalid` after three
 attempts indicates clock skew beyond five minutes or a pairing-key mismatch;
 inspect those conditions without exposing tokens, signatures or private keys.
-A hired pi worker runs on the body's own model path (ADR 0197): on included
-usage, `clankie/default` through the loopback forwarder; on the owner's supported provider key, `clankie-customer/<model>` through the same loopback's
-`/customer` route, which attaches the credential from the broker. Pi holds no
-key there. Do not log pi into a provider or put a key in its `models.json`; if
-a worker cannot reach the model, check the owner's selection and credential.
+The installed managed provider supplies a hired Pi worker's model configuration
+(ADR 0197). Its forwarding and included/customer policy live in private
+`clankie-ops/apps/body`; bootstrap identity alone does not configure a worker's
+model. Do not log Pi into a provider or put a key in its `models.json`. If a
+worker cannot reach its model, inspect the installed provider and the owner's
+selection with `clankie doctor` and `clankie model`; manage the credential through
+the owner model-key API above.
 Clankie's Claude subscription auth is removed; `/auth anthropic` is API-key-only.
 Hosted ChatGPT login and forwarding refuse pending OpenAI approval; offer a
 provider API key or included usage. Never submit the waitlist, invent an approval

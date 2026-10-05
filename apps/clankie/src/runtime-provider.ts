@@ -9,9 +9,7 @@ import type { PiSeatModel } from "./captain/herdr-watch.ts";
 import type { HostedBodyClient } from "./hosted-body.ts";
 import type { ComposerTranscriptionCloud } from "./composer-transcription.ts";
 
-export type RuntimeAuthorization = (
-  request: Request,
-) => Promise<true | "authentication_required" | "forbidden">;
+type RuntimeAuthorization = (request: Request) => Promise<true | "authentication_required" | "forbidden">;
 
 /** Optional host policy. An ordinary installation supplies none of these hooks. */
 export interface RuntimeProvider {
@@ -54,8 +52,6 @@ export interface RuntimeProviderContext {
     desired: "running" | "sleeping" | "suspended";
   }) => void;
 }
-
-export type RuntimeProviderFactory = (context: RuntimeProviderContext) => Promise<RuntimeProvider>;
 
 /**
  * The host selects this installed module, never a tool argument or model output.
@@ -106,6 +102,7 @@ export function validateRuntimeGatewayRoutes(value: unknown): readonly PublicGat
   const routes = value.map((route: unknown): PublicGatewayRoute => {
     if (
       !record(route) ||
+      typeof route !== "object" ||
       Object.keys(route).some((key) => !["method", "path", "target"].includes(key)) ||
       (route.method !== "GET" && route.method !== "POST") ||
       (route.target !== "control" && route.target !== "relay") ||
@@ -115,7 +112,8 @@ export function validateRuntimeGatewayRoutes(value: unknown): readonly PublicGat
       /^\/(?:operator|captain|admin|internal)(?:\/|$)/u.test(route.path) ||
       /^\/v1\/(?:gateway|hooks|admin|internal)(?:\/|$)/u.test(route.path) ||
       /^\/(?:fleet|account|gateway)\//u.test(route.path) ||
-      publicGatewayTargetFor(route.method, route.path) !== undefined
+      publicGatewayTargetFor("GET", route.path) !== undefined ||
+      publicGatewayTargetFor("POST", route.path) !== undefined
     )
       throw new Error("runtime_provider_gateway_routes_invalid");
     const key = `${route.method} ${route.path}`;

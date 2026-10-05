@@ -280,6 +280,7 @@ describe("device-to-host encryption security boundary", () => {
     });
     expect(refreshed.status).toBe(200);
     expect(refreshed.headers.get("x-clankie-encryption-ticket")).toBeTruthy();
+    expect(actor.onAuthenticatedRequest).toHaveBeenLastCalledWith(false);
     const revoked = await actor.app.app.request(`/v1/devices/${actor.device.deviceId}/revoke`, {
       method: "POST",
       headers: { authorization: "Bearer owner" },
@@ -332,6 +333,22 @@ it("passes only work classification across the runtime boundary and excludes rev
   expect(
     own.onAuthenticatedRequest.mock.calls.every((args) => args.length === 1 && typeof args[0] === "boolean"),
   ).toBe(true);
+  for (const [input, expected] of [
+    [{ schemaVersion: 1, op: "cancel", conversationId: "conversation-1", runId: "run-1" }, true],
+    [{ schemaVersion: 1, op: "list" }, false],
+    [{ schemaVersion: 1, op: "fleet" }, false],
+    ["bad", false],
+  ] as const) {
+    await own.client(`${own.base}/operator/v1/dispatch`, {
+      method: "POST",
+      headers: own.headers,
+      body: typeof input === "string" ? input : JSON.stringify(input),
+    });
+    expect(own.onAuthenticatedRequest).toHaveBeenLastCalledWith(expected);
+  }
+  await own.client(`${own.base}/operator/v1/tail`, { method: "POST", headers: own.headers, body: "{}" });
+  expect(own.onAuthenticatedRequest).toHaveBeenLastCalledWith(false);
+  const observations = own.onAuthenticatedRequest.mock.calls.length;
   await own.app.app.request(`/v1/devices/${own.device.deviceId}/revoke`, {
     method: "POST",
     headers: { authorization: "Bearer owner" },
@@ -342,7 +359,7 @@ it("passes only work classification across the runtime boundary and excludes rev
     body,
   });
   expect(denied.status).toBe(401);
-  expect(own.onAuthenticatedRequest).toHaveBeenCalledTimes(4);
+  expect(own.onAuthenticatedRequest).toHaveBeenCalledTimes(observations);
 });
 
 it("carries model keys only in the encrypted envelope and still checks machine authority", async () => {
