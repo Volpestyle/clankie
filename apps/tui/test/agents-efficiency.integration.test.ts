@@ -64,6 +64,8 @@ async function fixture() {
       fleetEfficiency: async (conversationId, review) => {
         reviews.push({ conversationId, ...(review ? { review } : {}) });
         if (conversationId !== "global-default") throw new Error("Conversation does not lead this seat");
+        if (review?.seatId === "unadopted-seat")
+          throw new Error("The native occupant must be re-adopted before recording a review");
         return { conversationId, seats };
       },
       tidyWorktrees: (repository, mergedInto) =>
@@ -198,6 +200,27 @@ it("rejects stdin authority overrides before HTTP and surfaces server validation
     runAgentsCommand(["efficiency", "--conversation", "other-lead"], { env: f.env }),
   ).rejects.toThrow("Fleet request failed: 409");
   expect(f.reviews).toEqual([{ conversationId: "other-lead" }]);
+});
+
+it("preserves a 409 re-adoption refusal through the real CLI HTTP boundary", async () => {
+  const f = await fixture();
+  const review = { seatId: "unadopted-seat", evidence: "Inspected the exact native session" };
+  await expect(
+    runAgentsCommand(
+      ["efficiency", "review", review.seatId, "--conversation", "global-default", "--json-stdin"],
+      { env: f.env, stdin: Readable.from([JSON.stringify({ evidence: review.evidence })]) },
+    ),
+  ).rejects.toThrow(
+    "Fleet request failed: 409: The native occupant must be re-adopted before recording a review",
+  );
+  expect(f.requests).toEqual([
+    {
+      path: "/v1/fleet/efficiency",
+      authorization: "Bearer cli-owner",
+      body: { action: "review", conversationId: "global-default", ...review },
+    },
+  ]);
+  expect(f.reviews).toEqual([{ conversationId: "global-default", review }]);
 });
 
 it("requires an operator credential and refuses a captain bearer without dispatching a review", async () => {

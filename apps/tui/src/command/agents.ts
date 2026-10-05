@@ -130,7 +130,20 @@ export async function runAgentsCommand(
       headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
       signal: AbortSignal.timeout(30_000),
     });
-    if (!response.ok) throw new Error(`Fleet request failed: ${response.status}`);
+    if (!response.ok) {
+      const failure: unknown = await response.json().catch(() => undefined);
+      const detail =
+        typeof failure === "object" && failure !== null
+          ? "message" in failure && typeof failure.message === "string"
+            ? failure.message
+            : "error" in failure && typeof failure.error === "string"
+              ? failure.error
+              : undefined
+          : undefined;
+      throw new Error(
+        `Fleet request failed: ${response.status}${detail ? `: ${detail.slice(0, 2048)}` : ""}`,
+      );
+    }
     return response.json();
   }
   if (args[0] === "readopt" || args[0] === "reports") {
