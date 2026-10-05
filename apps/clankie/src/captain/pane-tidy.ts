@@ -29,6 +29,7 @@ import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { HireSeat } from "./port.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import { paneDraftState } from "./pane-draft.ts";
+import { listTidyWorktrees, type TidyWorktreesResult } from "./tidy-worktrees.ts";
 
 const UNDO_MS = 5 * 60_000;
 const EntrySchema = ClosedWorkerPaneSchema.extend({
@@ -111,6 +112,10 @@ export class PaneTidy {
   }
   history(): readonly ClosedWorkerPane[] {
     return this.state.entries.slice(-128).map(publicEntry).reverse();
+  }
+  /** List merged, clean, unused linked worktrees; never remove one. */
+  worktrees(repositoryPath: string, mergedInto = "origin/main"): Promise<TidyWorktreesResult> {
+    return listTidyWorktrees(repositoryPath, mergedInto, this.ports.runner);
   }
   private now(): number {
     return this.ports.now?.() ?? Date.now();

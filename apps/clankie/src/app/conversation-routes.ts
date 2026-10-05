@@ -27,6 +27,8 @@ import { type DeviceRegistry } from "../devices.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { WorkRequestError } from "../work-items.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
+import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
+import { z } from "zod";
 import { authenticateCaptain, authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { type ClankieAppDependencies, type DeviceAuthDenial, type TrustedDeviceIdentity } from "./types.ts";
@@ -50,6 +52,49 @@ export interface RegisterConversationRoutesContext {
 }
 
 export function registerConversationRoutes(ctx: RegisterConversationRoutesContext) {
+  ctx.app.post("/v1/fleet/efficiency", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!identity || identity === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = FleetEfficiencyRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!ctx.dependencies.captain.fleetEfficiency)
+      return context.json({ error: "fleet_efficiency_unavailable" }, 503);
+    try {
+      const { action, conversationId } = parsed.data;
+      const review =
+        action === "review"
+          ? (() => {
+              const { action: _action, conversationId: _conversation, ...finding } = parsed.data;
+              return finding;
+            })()
+          : undefined;
+      return context.json(await ctx.dependencies.captain.fleetEfficiency(conversationId, review));
+    } catch (error) {
+      return context.json(
+        { error: "refused", message: error instanceof Error ? error.message : "Review unavailable" },
+        409,
+      );
+    }
+  });
+  ctx.app.post("/v1/fleet/tidy-worktrees", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (!identity || identity === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    const parsed = z
+      .strictObject({
+        repository: z.string().min(1).max(4096),
+        mergedInto: z.string().min(1).max(512).optional(),
+      })
+      .safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!ctx.dependencies.captain.tidyWorktrees)
+      return context.json({ error: "tidy_worktrees_unavailable" }, 503);
+    return context.json(
+      await ctx.dependencies.captain.tidyWorktrees(parsed.data.repository, parsed.data.mergedInto),
+    );
+  });
+
   // The operator conversation contract (TUI direct, relay in front for
   // devices) and the lanes view — the captain's HTTP face. Both clients send
   // the shared captain token, the same credential the channel-turn door takes.

@@ -124,12 +124,12 @@ mode**. Read them where the runtime states them (Clankie: his "Your fleet" promp
 section, or `clankie fleet status` as `fleet.size` and `fleet.models`); otherwise
 use what the user said. With neither, assume `max` and `optimal`.
 
-| Size | Fits | Aim for |
-| --- | --- | --- |
-| `max` | several top-tier plans | one worker per separable deliverable plus independent reviewers; no ceiling |
-| `large` | one or two top-tier plans | around six concurrent workers, reviewers included |
-| `small` | one mid-tier plan | one or two workers at a time; sequence the rest |
-| `solo` | pay-per-token API | no standing workers: work yourself or through short native children; ask before a long or parallel run |
+| Size    | Fits                      | Aim for                                                                                                |
+| ------- | ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `max`   | several top-tier plans    | one worker per separable deliverable plus independent reviewers; no ceiling                            |
+| `large` | one or two top-tier plans | around six concurrent workers, reviewers included                                                      |
+| `small` | one mid-tier plan         | one or two workers at a time; sequence the rest                                                        |
+| `solo`  | pay-per-token API         | no standing workers: work yourself or through short native children; ask before a long or parallel run |
 
 - **`optimal`:** the strongest model and the effort each job needs; cost is not a
   reason to downgrade.
@@ -203,9 +203,10 @@ current schema on older installs; do not assume new profile fields are present.
 ## Inspect enough to decide
 
 Read the affected worker, checkout and resource owner before changing its work.
-Use a fleet census only when ownership or capacity is unclear; otherwise read
-only the relevant lane. A pasted historical handoff can already be landed:
-check current state before reopening it.
+Outside the all-owned-seat efficiency rounds below, use a fleet census only
+when ownership or capacity is unclear; otherwise read only the relevant lane.
+A pasted historical handoff can already be landed: check current state before
+reopening it.
 
 Use current evidence already in context. Refresh it when inputs, ownership or
 state may have changed in a way that affects the decision, not merely to obtain
@@ -268,7 +269,10 @@ across handoffs:** a recipient or ticket split cannot add a recording, review or
 other gate. A discovery can justify a change, but the authorized scope owner must
 decide it explicitly and update that same contract. Ask for a final report the
 lead can act on without the transcript: outcome, evidence links and any open
-decision, in a few lines. It is what the completion event carries.
+decision, in a few lines. It is what the completion event carries. A worker that
+acknowledges a queued message with only a plan still owns the unfinished work:
+it must continue the authorized next action or name an actionable blocker and
+what would unblock it. Acknowledgment or a settled turn is not completion.
 
 Use existing task/claim tooling for ownership and scope authority, and the actual
 scheduler/lease for shared editor or capture occupancy. Inspect what the tools
@@ -317,27 +321,84 @@ work from this thread while existing productive jobs remain safe.
 
 ## Keep workers efficient
 
-Keeping the fleet efficient is a standing part of leading. A pane that says
-`working` can be working on the wrong thing. Whenever a wake, report or roster
-read brings a seat in front of you, and on a cheap roster pass when you return
-to the fleet, check every seat you lead:
+On every watch wake and each periodic lead round, check **all seats you own**
+in the selected runtime. For Clankie, that is every seat in your hiring/adopting
+conversation across local and linked fleets; supporting installs run the periodic
+check every 30 minutes by default. Skip a periodic review when the owned-set
+evidence is unchanged and has no flags; coalesce while a review turn is
+outstanding.
+Wake prompts carry bounded summaries; use `fleet_efficiency` for the full owned
+roster and inspect every owned seat. Include working seats, not only the seat that
+woke you or those marked idle. Use the current roster, efficiency flags
+and report signals; unknown model, effort, context or status is unknown, not
+healthy. A pane that says `working` can be working
+on the wrong thing.
 
-- **On task:** its current work matches its assignment, and that assignment is
-  not paused, canceled or superseded. Drift onto adjacent or paused work is the
-  common failure.
-- **Reporting:** its reports reach you. A failed `message_clankie`, or a result
-  sitting only in the pane, is a delivery fault: fix the route or harvest it.
-- **Right-sized:** its effort and model fit the job (routine lanes don't need the
-  top effort), its context isn't near full (hand off to a fresh session first),
-  and it hasn't gone long without a commit, finding or report.
-- **Done or idle:** harvest it, then close it or give it the next ready item.
-- **No overlap:** two seats aren't covering the same ground.
+- **On task:** current work matches the accepted assignment, checkout and owned
+  paths; the assignment is not paused, canceled or superseded. Redirect drift
+  or stop retired scope through the native channel.
+- **Reporting:** reports reach this lead through the proven current route. A
+  failed `message_clankie`, wrong recipient, or result left only in the pane is
+  a delivery fault. Reconcile the original receipt, repair the route, or harvest
+  the retained report; do not replay an uncertain send through another channel.
+- **Right-sized:** actual model and supported effort fit the current job and
+  owner's fleet mode. Routine work need not use the highest effort; keep the
+  model floors for consequential boundaries in [roles and effort](reference/roles.md).
+  A requested profile or pane label is not proof of current configuration.
+- **Context:** at 80% of the reported context window, prepare a fresh-session
+  handoff before the next substantial step. Keep acceptance, owned checkout,
+  current branch/commit, evidence, gaps and next action. The latest native Codex
+  model-input snapshot may age between responses; Claude context/effort and
+  OpenCode or remote telemetry stay unknown. Token spend or transcript length is
+  not context occupancy.
+- **Progress:** two hours without a commit, substantive finding or reporting
+  attempt needs intervention. Verify commit evidence against this worker's
+  assigned branch, worktree and deliverable; another worker's commit or a
+  repository-wide HEAD change is not its progress. Use the source timestamp. A
+  failed report still counts as an attempt, while its route needs repair. An
+  unread or unacknowledged
+  report does not prove missing progress. Original report acceptance or attempt
+  remains progress after a later acknowledgment; acknowledgment adds no new
+  progress. Obtain a concrete result or actionable
+  blocker and shorten the path to it; `working`, tool chatter and another plan
+  do not establish progress.
+- **Done or idle:** harvest a completed result once, decide its destination, then
+  tidy or assign the next ready item. An idle worker with unfinished authorized
+  work must continue or state its blocker; a plan-only acknowledgment does not
+  finish that assignment.
+- **No overlap:** compare deliverables and owned paths across the entire owned
+  set. Give each result one producer and route shared boundaries through their
+  owners; reuse native children for slices that their parent will integrate.
 
-Act on what you can: redirect, lower effort, hand off, re-task or tidy. Tell the
-owner only what needs them. Use roster signals and the seat's own reports; read a
-pane only when a signal is wrong or missing. This is not a timer on worker output.
-When you can't reach a seat, say so and name the fix; never fall back to typing
-into it.
+On supporting installs, `fleet_efficiency` shows the owned set and records
+inspected scope/status or progress evidence for an exact native occupant. Use
+`review` when that evidence changes; it does not update the tracker, change
+ownership or configure a harness. Keep unavailable observations unknown.
+
+Act in the same round: redirect, ask the worker or re-hire with the needed
+model/effort, hand off, unblock, re-task or tidy. No lead tool lowers a running
+worker's effort. Let productive workers continue. Tell the owner only
+what needs their decision, naming the exact blocker and next action. Start from
+roster signals and worker reports; read a bounded part of native history or a
+pane only when a signal is missing, contradictory or stale. Periodic rounds do
+not authorize a timer that rereads every worker's output, another completion
+watcher, or repeated checks of unchanged accepted work. Never type messages into
+a terminal to compensate for a missing native route.
+
+When using linked worktrees, keep one owned worktree per deliverable. Its native
+slices and reviews share that checkout under distinct path ownership; do not
+create another worktree for each turn or review. After landing, retain needed
+reports and ignored evidence, verify the branch is merged at the requested
+remote destination and the tree is clean, then remove the owned worktree.
+Every tidy result also lists remaining merged-and-clean worktrees with their
+paths and merge/clean evidence, so the cleanup owner can act. On supporting
+Clankie installs, `list_tidy_worktrees` provides read-only candidates and
+exclusion reasons; listing a candidate does not remove it. Dirty, unmerged,
+active or another owner's worktree is not a cleanup candidate. Follow the
+repository's shared-checkout rule when it does not use isolated worktrees.
+
+See [native efficiency and cleanup operations](reference/operations.md#efficiency-rounds-and-cleanup)
+for the supported reads, report recovery and pane cleanup boundary.
 
 ## Keep the durable record small
 

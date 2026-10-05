@@ -87,7 +87,7 @@ function workerToolsBroken({ seat }: LiveAgent): boolean {
   return seat.workerTools?.status === "missing" || seat.workerTools?.status === "stalled";
 }
 
-function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
+function agentMetadata(agent: LiveAgent, theme: AgentTheme, showEfficiency = true): string {
   const { seat } = agent;
   const harness = clean(seat.harness);
   const paintHarness = harness === "claude" ? theme.ansi.yellow : theme.ansi.blue;
@@ -104,6 +104,7 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
     seat.fleet === undefined ? undefined : theme.ansi.dim(clean(seat.machine ?? seat.fleet)),
     bridgeWarning(agent, theme),
     workerToolsText(agent, theme),
+    ...(showEfficiency ? (seat.efficiency?.flags.map((flag) => theme.ansi.red(clean(flag))) ?? []) : []),
   ]
     .filter((part): part is string => part !== undefined)
     .join(theme.ansi.dim(" · "));
@@ -113,6 +114,7 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
 function attentionRank(agent: LiveAgent, theme: AgentTheme): number {
   if (
     agent.seat.workerReports?.length ||
+    agent.seat.efficiency?.flags.length ||
     agent.seat.status === "blocked" ||
     bridgeWarning(agent, theme) !== undefined ||
     workerToolsBroken(agent)
@@ -367,7 +369,8 @@ export class LiveAgentPicker implements Component {
     const details = selected
       ? [
           this.theme.ansi.bold(clean(selected.name)),
-          `${agentMetadata(selected, this.theme)} · ${this.theme.ansi.dim(clean(selected.seat.seatId))}`,
+          `${agentMetadata(selected, this.theme, false)} · ${this.theme.ansi.dim(clean(selected.seat.seatId))}`,
+          ...(selected.seat.efficiency?.flags.map((flag) => this.theme.ansi.red(clean(flag))) ?? []),
           step ?? this.theme.ansi.dim("Step unavailable"),
           ...shownCatalogDetail,
           ...(selected.seat.workerTools

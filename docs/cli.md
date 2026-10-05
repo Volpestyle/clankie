@@ -1902,6 +1902,66 @@ resumes a harness. Workers retain their native identity and
 ownership; a native resume does not enroll or replace them. Headless continuation
 remains retired (ADR 0203).
 
+### `agents efficiency` / `agents tidy-worktrees`
+
+`clankie agents efficiency --conversation ID` returns `{ conversationId, seats }`
+for every seat that conversation leads, including linked fleets. Each existing
+roster seat may carry `efficiency`: observed assignment, native model and effort,
+context occupancy, progress and reporting evidence, and plain-text `flags`.
+Context percentage is the latest native Codex model-input snapshot and may age
+between responses. Claude context/effort and OpenCode or remote telemetry remain
+unknown. Original report acceptance or a reporting attempt remains progress after
+a later acknowledgment; acknowledgment creates no new progress. The TUI shows
+these flags in the agent dock. Every watch wake calls for reviewing all owned
+seats. Periodic checks default to every 30 minutes; unchanged, unflagged evidence
+skips a model turn, and pending reviews coalesce. Wake prompts carry bounded summaries; use
+`fleet_efficiency` or the CLI to inspect the full owned roster. Clankie chooses
+interventions using the `lead` skill and his existing native worker tools.
+Automatic commit evidence requires an advanced descendant HEAD on the seat's
+captured branch in an exclusive linked worktree. Primary checkouts, shared
+worktrees and commits predating admission do not establish that seat's progress.
+Native transcript snapshots are cached by file identity, size and modification
+time; unchanged branch HEADs reuse Git evidence. Discovery runs once in the
+background instead of walking transcript directories during roster refreshes.
+To change an external worker's effort, ask that worker or re-hire with a retained
+handoff; captain model settings do not change the worker.
+
+After inspecting a worker's actual assignment, tracker status or progress evidence,
+record the finding with:
+
+```bash
+clankie agents efficiency review SEAT --conversation ID --json-stdin < review.json
+```
+
+The JSON object requires `evidence` (1–2048 trimmed characters). Optional fields
+are `offScope` (boolean), `assignmentStatus` (`active`, `paused`, `canceled` or
+`done`), `deliverable` (1–512 trimmed characters), and `progressAt` (a UTC ISO
+8601 timestamp for the substantive finding or commit). The CLI supplies the
+action, seat ID and conversation; extra JSON keys are refused. A review applies
+to that exact owned native session and records inspected evidence. It does not
+change tracker state, harness settings, ownership or report receipts.
+
+The authenticated operator API is POST `/v1/fleet/efficiency` with
+`{ action: "show", conversationId }`, or the review fields plus
+`{ action: "review", conversationId, seatId }`. The model's `fleet_efficiency`
+tool uses the current leading conversation. Ownership changes or unavailable
+evidence refuse a review; there is no default-conversation fallback.
+
+`clankie agents tidy-worktrees --repo /canonical/repository/path
+[--merged-into REF]` lists linked worktrees that are clean and merged into the
+locally saved ref (`origin/main` by default). The API is POST
+`/v1/fleet/tidy-worktrees` with `{ repository, mergedInto? }`, and the lead tool
+is `list_tidy_worktrees({ repository, mergedInto? })`. All return
+`{ outcome, mergedInto, candidates, excluded }`; candidates contain `path`,
+optional `branch`, and `sha`, while excluded entries contain `path` and a reason.
+
+Listing is read-only. It excludes the main checkout, locked or prunable entries,
+dirty or unmerged worktrees, and directories occupied by any observed local pane,
+including idle agents and shells. Unknown or changing pane inventory returns
+`outcome: "unavailable"` with no candidates. The command does not fetch refs or
+prove ownership. Use the `tidy` skill to harvest results, verify ownership and
+fresh merge/clean evidence, then remove finished owned worktrees after landing.
+
 ### `herdr` / `herdr status [--json]` / `herdr use NAME`
 
 Bare `clankie herdr` attaches the full workspace, as `clankie-herdr` does.

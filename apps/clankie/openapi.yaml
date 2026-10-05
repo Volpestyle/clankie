@@ -2755,6 +2755,92 @@ paths:
         "404":
           description: Nothing is waiting on that event
 
+  /v1/fleet/efficiency:
+    post:
+      tags: [Operator]
+      operationId: reviewFleetEfficiency
+      summary: Inspect owned seats or record a worker review
+      description: |
+        `show` returns every seat led by the exact conversation, including
+        linked fleets, with optional factual efficiency evidence. `review`
+        records inspected scope, tracker status or substantive progress for
+        one exact owned native session. It changes no tracker state, harness
+        settings, ownership or report receipts. Unknown telemetry is omitted,
+        never treated as healthy. Flags are observations for the lead skill;
+        they do not prescribe or perform worker actions. Every watch wake calls
+        for reviewing all owned seats; periodic lead rounds default to 30 minutes
+        and coalesce while a review turn is outstanding. Prompts carry bounded
+        summaries; use show for full details and every-owned inspection. Original
+        report acceptance or attempt remains progress after acknowledgment;
+        acknowledgment creates no new progress. Context percentage is the latest
+        native Codex model-input snapshot and may age between responses. Claude
+        context/effort and OpenCode or remote telemetry remain unknown.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FleetEfficiencyRequest" }
+            examples:
+              show:
+                value: { action: show, conversationId: global-default }
+              review:
+                value:
+                  action: review
+                  conversationId: global-default
+                  seatId: worker-seat
+                  assignmentStatus: active
+                  deliverable: VUH-1662
+                  evidence: "Reviewed the assigned issue and current worker report."
+      responses:
+        "200":
+          description: Current owned roster, after recording the review when requested
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetEfficiencyResponse" }
+        "400":
+          description: Invalid strict request (invalid_request)
+        "401":
+          description: Operator authentication required (operator_authentication_required)
+        "409":
+          description: Conversation, native ownership or review observation unavailable (refused)
+        "503":
+          description: Fleet efficiency service unavailable (fleet_efficiency_unavailable)
+
+  /v1/fleet/tidy-worktrees:
+    post:
+      tags: [Operator]
+      operationId: listTidyWorktrees
+      summary: List merged, clean worktree cleanup candidates
+      description: |
+        Read-only listing from the exact canonical repository root and locally
+        saved merge ref (origin/main by default); it never fetches refs or
+        removes worktrees. Main, locked, prunable, dirty, unmerged and live-pane
+        worktrees are excluded. Idle agents and shells also protect their
+        directories. Unverified paths, unavailable or changing refs, and an
+        incomplete or changing local pane inventory return outcome unavailable
+        with no candidates. Candidate status does not prove ownership; the tidy
+        skill verifies ownership, preserved results and fresh landing evidence
+        before any separately authorized removal.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TidyWorktreesRequest" }
+      responses:
+        "200":
+          description: Read-only candidates and exclusions, or an unavailable listing with no candidates
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TidyWorktreesResponse" }
+        "400":
+          description: Invalid strict request (invalid_request)
+        "401":
+          description: Operator authentication required (operator_authentication_required)
+        "503":
+          description: Worktree listing service unavailable (tidy_worktrees_unavailable)
+
   /v1/fleet/seats/{paneId}/events:
     get:
       tags: [Captain, Operator]
@@ -4136,6 +4222,105 @@ components:
             enum: [present, gone, unknown, person],
             description: Gone/unknown holds remain in force until explicitly released,
           }
+    FleetEfficiencyRequest:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [action, conversationId]
+          properties:
+            action: { const: show }
+            conversationId: { type: string, minLength: 1, maxLength: 256 }
+        - type: object
+          additionalProperties: false
+          required: [action, conversationId, seatId, evidence]
+          properties:
+            action: { const: review }
+            conversationId: { type: string, minLength: 1, maxLength: 256 }
+            seatId: { type: string, minLength: 1, maxLength: 512, description: Trimmed exact owned seat ID }
+            offScope: { type: boolean }
+            assignmentStatus: { type: string, enum: [active, paused, canceled, done] }
+            deliverable:
+              { type: string, minLength: 1, maxLength: 512, description: Trimmed inspected deliverable }
+            progressAt:
+              type: string
+              format: date-time
+              description: UTC ISO 8601 timestamp of the substantive finding or commit, not the review time
+            evidence: { type: string, minLength: 1, maxLength: 2048, description: Trimmed inspected evidence }
+    FleetEfficiencyResponse:
+      type: object
+      required: [conversationId, seats]
+      properties:
+        conversationId: { type: string }
+        seats:
+          type: array
+          items:
+            type: object
+            description: Existing OperatorFleetSeat from @clankie/protocol; other roster metadata is retained
+            required: [seatId, occupantId, personaId, harness, status, title]
+            properties:
+              seatId: { type: string, minLength: 1, maxLength: 512 }
+              occupantId: { type: string, minLength: 1, maxLength: 512 }
+              personaId: { type: string, minLength: 1, maxLength: 512 }
+              harness: { type: string, minLength: 1, maxLength: 128 }
+              status: { type: string, minLength: 1, maxLength: 128 }
+              title: { type: string, maxLength: 256 }
+              efficiency: { $ref: "#/components/schemas/OperatorSeatEfficiency" }
+    OperatorSeatEfficiency:
+      type: object
+      additionalProperties: false
+      required: [checkedAt, ownerConversationId, flags]
+      description: Observed evidence for the owning lead; optional telemetry is unknown when absent
+      properties:
+        checkedAt: { type: string, format: date-time }
+        ownerConversationId: { type: string, minLength: 1, maxLength: 256 }
+        flags:
+          type: array
+          maxItems: 12
+          items: { type: string, minLength: 1, maxLength: 128 }
+        assignedDeliverable: { type: string, minLength: 1, maxLength: 16384 }
+        objective: { type: string, minLength: 1, maxLength: 16384 }
+        currentIssue: { type: string, minLength: 1, maxLength: 64 }
+        model: { type: string, minLength: 1, maxLength: 256 }
+        effort: { type: string, minLength: 1, maxLength: 64 }
+        contextPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Latest native Codex model-input snapshot; may age between responses, never lifetime or summed turn usage
+        lastProgressAt: { type: string, format: date-time }
+        lastReportAt: { type: string, format: date-time }
+        reportFailures: { type: integer, minimum: 0 }
+    TidyWorktreesRequest:
+      type: object
+      additionalProperties: false
+      required: [repository]
+      properties:
+        repository:
+          { type: string, minLength: 1, maxLength: 4096, description: Exact canonical repository root }
+        mergedInto: { type: string, minLength: 1, maxLength: 512, default: origin/main }
+    TidyWorktreesResponse:
+      type: object
+      required: [outcome, mergedInto, candidates, excluded]
+      properties:
+        outcome: { type: string, enum: [listed, unavailable] }
+        mergedInto: { type: string }
+        candidates:
+          type: array
+          items:
+            type: object
+            required: [path, sha]
+            properties:
+              path: { type: string }
+              branch: { type: string }
+              sha: { type: string }
+        excluded:
+          type: array
+          items:
+            type: object
+            required: [path, reason]
+            properties:
+              path: { type: string }
+              reason: { type: string }
     LinearWakeRules:
       type: object
       additionalProperties: false

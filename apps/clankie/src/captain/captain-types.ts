@@ -41,6 +41,7 @@ export interface CaptainOptions {
   readonly nativeHerdrRunner?: HerdrWatchRunner;
   readonly nativeCensusRunner?: HerdrCensusRunner;
   readonly nativeSummariesPath?: string;
+  readonly fleetRoundIntervalMs?: number;
   readonly localCodexProcess?: (pid: number, pane: string) => LocalCodexRegistration;
   readonly localCodexSocket?: () => string | undefined;
   readonly remoteCodexProcess?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration;

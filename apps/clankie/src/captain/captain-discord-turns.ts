@@ -173,8 +173,9 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     guard?: () => Promise<void>,
     mode: "machine" | "social" = "machine",
     allowHeadFallback = true,
+    waitForCompletion = false,
   ): Promise<boolean> {
-    if (await wakeExactConversation(input, notification, guard, mode)) return true;
+    if (await wakeExactConversation(input, notification, guard, mode, waitForCompletion)) return true;
     if (!allowHeadFallback || !(await validateConversationOwner(input, mode))) return false;
     const head = ctx.conversations.designatedHead(input.conversationId);
     if (head === undefined) return false;
@@ -188,7 +189,13 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       )
         throw new Error("Designated head authority changed");
     };
-    return wakeExactConversation({ conversationId: head }, notification, finalGuard, "machine");
+    return wakeExactConversation(
+      { conversationId: head },
+      notification,
+      finalGuard,
+      "machine",
+      waitForCompletion,
+    );
   }
 
   async function wakeExactConversation(
@@ -196,17 +203,28 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     notification: string,
     guard?: () => Promise<void>,
     mode: "machine" | "social" = "machine",
+    waitForCompletion = false,
   ): Promise<boolean> {
     const owner = ConversationOwnerSchema.parse(input);
     if (!(await validateConversationOwner(owner, mode))) return false;
     if (owner.discord !== undefined) {
       // Once the exact room accepts the turn, never replay a failed harvest.
-      return runDiscordWatchTurn(owner, notification, guard, mode);
+      return runDiscordWatchTurn(owner, notification, guard, mode, waitForCompletion);
     }
     await guard?.();
     if (!ctx.conversations.runsCaptainTurns(owner.conversationId)) return false;
-    const result = ctx.conversations.submitInternal(owner.conversationId, notification, "watch");
-    return result.status === "accepted";
+    const result = ctx.conversations.submitInternal(
+      owner.conversationId,
+      notification,
+      "watch",
+      undefined,
+      waitForCompletion ? "queue" : undefined,
+    );
+    if (result.status !== "accepted") return false;
+    // Never redirect an accepted delivery, including one whose turn fails.
+    if (waitForCompletion && !(await ctx.conversations.awaitRunResult(result.runId)))
+      throw new Error("Fleet review turn did not complete");
+    return true;
   }
 
   async function runDiscordWatchTurn(

@@ -1169,6 +1169,7 @@ export class ConversationStore {
     message: string,
     origin: NonNullable<ConversationTurnContext["origin"]>,
     expectedGoal?: OperatorGoal,
+    delivery?: ConversationTurnContext["delivery"],
   ): SubmitOperatorConversationTurnResult {
     const meta = this.metas.get(conversationId);
     if (meta === undefined) throw new Error(`Unknown conversation ${conversationId}`);
@@ -1178,6 +1179,7 @@ export class ConversationStore {
     return this.enqueue(meta, message, undefined, false, this.runner, {
       origin,
       ...(expectedGoal === undefined ? {} : { expectedGoal }),
+      ...(delivery === undefined ? {} : { delivery }),
     });
   }
 

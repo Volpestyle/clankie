@@ -139,6 +139,14 @@ export interface LaneToolBank {
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  fleetEfficiency?(
+    conversationId: string,
+    review?: import("./fleet-efficiency-tools.ts").FleetEfficiencyReview,
+  ): Promise<{ conversationId: string; seats: readonly import("@clankie/protocol").OperatorFleetSeat[] }>;
+  tidyWorktrees?(
+    repository: string,
+    mergedInto?: string,
+  ): ReturnType<import("./pane-tidy.ts").PaneTidy["worktrees"]>;
   /** A live native operator bridge can answer independently of the fallback model. */
   operatorSeatReady?(): boolean;
   /** Current host-bound persona for the exact native seat and occupant. */

@@ -558,3 +558,24 @@ it("keeps the catalog fixing action visible when the entire server was rejected"
       .replace(/\s+/gu, " "),
   ).toContain("Run /reload-plugins in this pane to recheck its tools.");
 });
+
+it("prioritizes efficiency concerns and shows every plain flag in narrow selected-seat details", () => {
+  const flagged = agent("flagged");
+  flagged.seat.efficiency = {
+    checkedAt: "2026-10-05T12:00:00.000Z",
+    ownerConversationId: "global-default",
+    flags: ["off-scope", "reports failing", "context 80%", "no progress in 2h"],
+  };
+  const agents = [agent("ordinary"), flagged];
+  const strip = new LiveAgentStrip(() => agents, theme);
+  expect(strip.selected()?.seat.seatId).toBe("flagged");
+  const picker = new LiveAgentPicker(() => agents, strip, theme, {
+    maxHeight: () => 30,
+    onOpen: () => {},
+    onClose: () => {},
+    onRender: () => {},
+  });
+  const rendered = plain(picker.render(40));
+  for (const flag of flagged.seat.efficiency.flags) expect(rendered).toContain(flag);
+  expect(picker.render(40).every((line) => visibleWidth(line) <= 40)).toBe(true);
+});

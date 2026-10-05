@@ -57,6 +57,7 @@ import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { desktopTools } from "./desktop.ts";
 import { rivalsTools } from "./rivals-tools.ts";
 import { minecraftTools } from "./minecraft-tools.ts";
+import { fleetEfficiencyTools } from "./fleet-efficiency-tools.ts";
 import { minecraftHostTools } from "./minecraft-host-tools.ts";
 
 /**
@@ -220,6 +221,9 @@ export function captainTools(
       ? [
           ...herdrWatchTools(herdrWatches, turn, deps.herdrAvailable),
           ...(herdrWatches.readoptSeat === undefined ? [] : [readoptSeatTool(herdrWatches, turn)]),
+          ...(herdrWatches.efficiency === undefined
+            ? []
+            : fleetEfficiencyTools(herdrWatches.efficiency, turn)),
         ]
       : []),
     // Hiring starts a process on the operator's machine, so it rides the same
@@ -1033,6 +1037,24 @@ function herdrWatchTools(
   return [
     ...(watches.tidy
       ? [
+          defineTool({
+            name: "list_tidy_worktrees",
+            label: "List landed worktrees for tidy",
+            description:
+              "Read linked Git worktrees that are clean and merged into the supplied ref (origin/main by default). " +
+              "Excludes the main checkout, dirty/unmerged/locked trees and every live local pane's working tree. " +
+              "An incomplete Git or pane inventory returns unavailable. Lists candidates and exclusion reasons; removes nothing. " +
+              "Use the lead/tidy skills for ownership, evidence and post-landing cleanup decisions.",
+            parameters: Type.Object({
+              repository: Type.String({ minLength: 1, maxLength: 4096 }),
+              mergedInto: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+            }),
+            execute: async (_id, input) => {
+              const authority = captureConversationAuthority(turn.conversationAuthority);
+              await assertConversationAuthority(authority);
+              return json(await watches.tidy!.worktrees(input.repository, input.mergedInto));
+            },
+          }),
           defineTool({
             name: "close_worker_pane",
             label: "Close a finished worker pane",
