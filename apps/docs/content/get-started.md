@@ -18,6 +18,10 @@ part of the hosted app experience advertised there.
 
 ## Hosted: start in the app
 
+New hosted signup is currently closed. The steps below describe the journey
+when signup opens and the app can be installed; existing accounts can still
+sign in.
+
 1. Check the [official app link](https://clankie.bot/#app) to make sure you can
    install the iPhone or iPad app before buying a plan. That page names the
    current distribution channel.
