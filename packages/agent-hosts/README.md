@@ -182,8 +182,10 @@ verification and the remaining live acceptance checks.
 
 For an owner-started Codex session with a known Herdr thread identity, the service
 tries the existing app-server connection on that machine before the native queue.
-Windows Herdr launches keep a dedicated backend with the native TUI attached by
-`--remote`; both inherit the pane's private environment, cwd and configuration.
+Windows control supports an existing dedicated backend with the native TUI
+attached by `--remote`; both must retain the pane's private environment, cwd and
+configuration. This adapter does not establish automatic supervision of new
+Windows launches; native launcher verification remains open.
 Control uses the fleet's SSH link only after proving current native ancestry,
 lifetimes, pane/session and the actual connected TCP owner's backend. It does not
 enable or select the account's shared daemon. Embedded `--no-daemon` sessions and

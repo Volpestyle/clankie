@@ -127,9 +127,10 @@ do not reconstruct membership from a claimed PID or switch to an operator bearer
 After a restart, Clankie loses that adapter's in-memory
 turn state; inspect the pane and transcript before relying on a new delivery.
 Codex messages can steer an active turn; a `steered` receipt is not an after-turn
-queue. New Windows Herdr Codex launches share a private loopback backend with
-their native TUI (`--remote`), preserving the pane's environment and MCP instead
-of joining the shared daemon. Fleet SSH control requires fresh native process,
+queue. Windows control supports an existing private loopback backend with its
+native TUI (`--remote`), preserving the pane's environment and MCP. Automatic
+supervision of new Windows launches is not established by this adapter.
+Fleet SSH control requires fresh native process,
 pane/session, private-home and exact connected TCP ownership proof. Existing
 embedded `--no-daemon` sessions and explicit named profiles retain their launch
 mode; pane-targeted delivery refuses until a private endpoint can be proven. An unavailable endpoint grants no tools or authority to another

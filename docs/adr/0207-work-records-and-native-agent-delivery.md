@@ -107,26 +107,27 @@ native delivery, uncertainty and completed work.
 
 ## Private Windows Codex control (VUH-1563)
 
-Windows Herdr Codex panes keep a private app-server. Joining the account's shared
-daemon loses the launch's private environment and can disconnect the worker MCP
-bridge from its pane. Elevated shells therefore used `--no-daemon`; that embedded
-server offers no external control endpoint, so active-turn sends had to queue.
+Windows control must preserve a pane's private environment. Joining the account's
+shared daemon can disconnect the worker MCP bridge from its pane. Existing
+elevated-shell `--no-daemon` sessions use an embedded server with no external
+control endpoint, so pane-targeted delivery must refuse until one is proven.
 
-The native launcher now supervises one dedicated app-server and the original
-interactive TUI in the same pane's foreground process tree. The server inherits
-the launch's environment, `CODEX_HOME`, cwd and configuration. It binds only
-`ws://127.0.0.1:0`; the TUI uses `--remote` with the OS-assigned endpoint. Codex
-rejects `--no-daemon` together with `--remote`, so the private server replaces
-that flag for this launch without enabling the shared daemon. Other launches
-retain their existing behavior. Cleanup owns only these child processes.
+The adapter supports an existing dedicated app-server and the original
+interactive TUI in the same pane's foreground process tree. The server must
+inherit the launch's environment, `CODEX_HOME`, cwd and configuration, bind only
+to loopback, and expose its OS-assigned endpoint to the TUI's `--remote` argument.
+Codex rejects `--no-daemon` together with `--remote`; neither this adapter nor its
+protocol tests implement or prove the native launch supervisor that would select
+that launch shape. New Windows launch supervision and live Windows acceptance
+remain open verification gaps.
 
 The native app-server cannot select a CLI named profile (`-p`/`--profile`),
 whose separate configuration file may carry different MCP and model settings.
 Those launches retain the native embedded `--no-daemon` path. Pane-targeted
 steer and queue delivery refuse until an endpoint and the same private home can
-be proven; they never fall through to an account-default queue. The launcher forwards only
-configuration flags accepted by both native commands; it preserves the TUI's
-prompt, model, approval, sandbox and resume arguments.
+be proven; they never fall through to an account-default queue. A future launcher
+must forward only configuration flags accepted by both native commands and
+preserve the TUI's prompt, model, approval, sandbox and resume arguments.
 
 Before opening the fleet's SSH transport, Clankie independently proves the
 current Herdr pane/session, installed native TUI and backend executables, full

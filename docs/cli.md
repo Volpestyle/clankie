@@ -2481,11 +2481,11 @@ An uncertain start or brief delivery retains its pane for inspection and reports
 uncertainty. The turn may already have started; reconcile its native session before
 retrying. `message_seat` distinguishes confirmed delivery, unconfirmed delivery,
 and unavailable control. External Codex messages first try the selected machine's
-existing app-server connection. On Windows, new native Herdr launches use a
+existing app-server connection. On Windows, control supports an existing
 dedicated loopback backend and a TUI attached with `--remote`, preserving their
-private environment, cwd, configuration and MCP bridge. This replaces the
-elevated-shell `--no-daemon` flag for those launches without joining the shared
-daemon. Existing embedded `--no-daemon` sessions and explicit named profiles
+private environment, cwd, configuration and MCP bridge. This adapter does not
+establish automatic supervision of new Windows launches; that launcher path
+still needs native verification. Existing embedded `--no-daemon` sessions and explicit named profiles
 retain that launch mode. Pane-targeted delivery refuses when no private endpoint
 can be proven; it never queues through the SSH account's default home.
 Clankie checks the current pane/session, native process lifetimes and ancestry,
