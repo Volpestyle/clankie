@@ -2,15 +2,23 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  defaultOperatorAgentAppearance,
   HERDR_BINDING_PATH,
   HERDR_SOCKET_HEADER,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
+  type ObservableCaptainLane,
+  type OperatorAgentPersona,
+  type OperatorFleetSeat,
+  type OperatorFleetSnapshot,
 } from "@clankie/protocol";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
+import { captainInstructions } from "../src/captain/captain.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
+import { composeVoiceLaneInstructions } from "../src/captain/voice-lane.ts";
 import { createFileMemory } from "../src/memory.ts";
+import { VOICE_AWARENESS_MAX_CHARACTERS } from "../src/voice-awareness.ts";
 
 /**
  * One boot-to-first-answer pass over the merged service: health, a Discord
@@ -164,43 +172,153 @@ describe("clankie app smoke", () => {
       clankie.close();
     }
   });
-  it("gives realtime voice agency to initiate its own episodic memories", async () => {
-    const clankie = await createClankieApp({
-      captain: createStubCaptain(),
-      settings: { load: async () => ClankieSettingsSchema.parse({ schemaVersion: 1 }) },
-      authenticateCaptain: (request) =>
-        Promise.resolve(
-          request.headers.get("authorization") === "Bearer captain"
-            ? { captainId: "captain-clankie", steerSourceLane: "discord_voice" as const }
-            : undefined,
-        ),
+  it("composes realtime voice as Clankie: identity, one register, and what he is up to", async () => {
+    const at = "2026-10-05T03:00:00.000Z";
+    const now = new Date("2026-10-05T03:13:00.000Z");
+    const persona = (personaId: string, name: string): OperatorAgentPersona => ({
+      schemaVersion: 1,
+      personaId,
+      name,
+      appearance: defaultOperatorAgentAppearance("codex", personaId),
+      harness: "codex",
+      createdAt: at,
+      updatedAt: at,
     });
-    const response = await clankie.app.request("/v1/discord/voice-briefing", {
-      method: "POST",
-      headers: { authorization: "Bearer captain", "content-type": "application/json" },
-      body: JSON.stringify({
-        schemaVersion: 1,
-        guildId: "12345",
-        channelId: "67890",
-        consentedUserIds: ["54321"],
-      }),
+    const seat = (index: number, status: string, objective?: string): OperatorFleetSeat => ({
+      seatId: `seat-${String(index)}`,
+      occupantId: `occupant-${String(index)}`,
+      personaId: `persona-${String(index)}`,
+      harness: "codex",
+      status,
+      title: `pane ${String(index)}`,
+      ...(objective === undefined ? {} : { assignment: { objective, updatedAt: at } }),
+    });
+    const fleet: OperatorFleetSnapshot = {
+      schemaVersion: 1,
+      cursor: "c1",
+      goals: [
+        {
+          conversationId: "global-default",
+          goal: { objective: "Land batch 12", status: "active", tokensUsed: 0, createdAt: at, updatedAt: at },
+        },
+      ],
+      seats: [
+        seat(1, "idle"),
+        seat(2, "working", "Fix the voice register"),
+        ...[3, 4, 5, 6, 7, 8].map((index) => seat(index, "idle")),
+      ],
+      personas: [persona("persona-1", "Bram"), persona("persona-2", "Kit")],
+      channels: [],
+    };
+    const lanes: ObservableCaptainLane[] = [
+      {
+        lane: "discord_presence",
+        targetId: "12345:111",
+        entries: [
+          { at, kind: "heard", text: "whitelist thinkcreate2" },
+          { at, kind: "said", text: "we cookin, server's back up" },
+        ],
+      },
+      {
+        lane: "discord_presence",
+        targetId: "99999:222",
+        entries: [{ at, kind: "heard", text: "OTHER_GUILD" }],
+      },
+      {
+        lane: "operator",
+        targetId: "global-default",
+        entries: [{ at, kind: "heard", text: "CONSOLE_PRIVATE" }],
+      },
+    ];
+    const compose = async (captain: Parameters<typeof createStubCaptain>[0]) => {
+      const clankie = await createClankieApp({
+        captain: createStubCaptain({
+          voiceLaneInstructions: () => composeVoiceLaneInstructions(captainInstructions()),
+          ...captain,
+        }),
+        clock: () => now,
+        settings: { load: async () => ClankieSettingsSchema.parse({ schemaVersion: 1 }) },
+        authenticateCaptain: (request) =>
+          Promise.resolve(
+            request.headers.get("authorization") === "Bearer captain"
+              ? { captainId: "captain-clankie", steerSourceLane: "discord_voice" as const }
+              : undefined,
+          ),
+      });
+      try {
+        const response = await clankie.app.request("/v1/discord/voice-briefing", {
+          method: "POST",
+          headers: { authorization: "Bearer captain", "content-type": "application/json" },
+          body: JSON.stringify({
+            schemaVersion: 1,
+            guildId: "12345",
+            channelId: "67890",
+            consentedUserIds: ["54321"],
+          }),
+        });
+        expect(response.status).toBe(200);
+        return ((await response.json()) as { instructions: string }).instructions;
+      } finally {
+        clankie.close();
+      }
+    };
+    const count = (text: string, needle: string) => text.split(needle).length - 1;
+
+    const instructions = await compose({
+      serveOperatorConversation: async (request) =>
+        request.op === "fleet" && request.includeWork === true
+          ? { op: "fleet", schemaVersion: 1, snapshot: fleet }
+          : Promise.reject(new Error(`unexpected ${request.op}`)),
+      observeLanes: async () => lanes,
     });
 
-    expect(response.status).toBe(200);
-    const briefing = (await response.json()) as { instructions: string };
-    expect(briefing.instructions).toContain("do not wait for someone to tell you to remember it");
-    expect(briefing.instructions).toContain("part of your own experience or developing personality");
-    expect(briefing.instructions).toContain("your own captain mind");
-    expect(briefing.instructions).toContain("web browsing and research");
-    expect(briefing.instructions).toContain("friend hanging out in a call");
-    expect(briefing.instructions).toContain("Match the length to the moment; most turns are short");
-    expect(briefing.instructions).toContain("A story, a strong opinion, a bit you are invested in");
-    expect(briefing.instructions).toContain("a real question that needs a real answer can earn more room");
-    expect(briefing.instructions).toContain("Keep your personality without constantly performing");
-    expect(briefing.instructions).not.toContain("rarely more than two sentences");
-    expect(briefing.instructions).toContain("Text can be thorough");
-    expect(briefing.instructions).toContain("Handoff results follow the same proportion");
-    clankie.close();
+    // The same Identity every lane gets, and only that section of instructions.md.
+    expect(instructions).toContain("You are Clankie: a persistent agent with a life of your own.");
+    expect(instructions).toContain("You are one Clankie across");
+    expect(instructions).not.toContain("# Trust");
+    // One voice is him: no front-end/back-end split.
+    expect(instructions).toContain("This voice is you, Clankie");
+    expect(instructions).toContain(
+      "`ask_clankie` is how you think something through or act with your full tools",
+    );
+    expect(instructions).not.toContain("captain mind");
+    expect(instructions).not.toContain("ask the captain");
+    // Trust and routing rules survive.
+    expect(instructions).toContain(
+      "never tell someone you cannot do or see something before asking through it",
+    );
+    expect(instructions).toContain("treat that id as ground truth");
+    expect(instructions).toContain("do not wait for someone to tell you to remember it");
+    expect(instructions).toContain("part of your own experience or developing personality");
+    // One length and register rule, stated once.
+    expect(count(instructions, "Usually one short sentence, sometimes just a few words.")).toBe(1);
+    expect(count(instructions, "menus of options")).toBe(1);
+    expect(instructions).toContain("Don't end on a question unless you actually need the answer.");
+    expect(instructions).toContain("give the gist in a sentence and offer the rest in text");
+    expect(instructions).not.toContain("earn more room");
+    expect(instructions).not.toContain("Match the length to the moment");
+    // What he is up to: fleet, goal, and this guild's text room — never the console or another guild.
+    const awareness = instructions.slice(instructions.indexOf("# What you're up to"));
+    expect(instructions.indexOf("# What you're up to")).toBeGreaterThan(
+      instructions.indexOf("# This surface"),
+    );
+    expect(awareness.length).toBeLessThanOrEqual(VOICE_AWARENESS_MAX_CHARACTERS);
+    expect(awareness).toContain("- A goal you are working toward: Land batch 12");
+    expect(awareness).toContain("- Agents in your fleet right now (8):");
+    expect(awareness.indexOf("Kit, working: Fix the voice register")).toBeLessThan(
+      awareness.indexOf("Bram, idle"),
+    );
+    expect(awareness).toContain("  - and 2 more");
+    expect(awareness).toContain("- Last text chat in this server, 13 min ago");
+    expect(awareness).toContain('You said: "we cookin, server\'s back up"');
+    expect(awareness).not.toContain("OTHER_GUILD");
+    expect(awareness).not.toContain("CONSOLE_PRIVATE");
+    expect(instructions.length).toBeLessThanOrEqual(12_000);
+
+    // A fleet that cannot be read, or a room read that hangs, leaves the call able to open.
+    const degraded = await compose({ observeLanes: () => new Promise(() => undefined) });
+    expect(degraded).toContain("- Your fleet could not be read just now; ask_clankie can check it.");
+    expect(degraded).not.toContain("Last text chat");
   });
 
   it("boots with a stub captain and answers health, a channel turn, and episode recall", async () => {

@@ -24,6 +24,7 @@ import {
   discordVoiceTranscriptLogPath,
   createVoiceBriefingProvider,
   createVoiceLookAtScreenProvider,
+  createVoiceSelfToolProvider,
   createVoiceRealtimePorts,
   DiscordBridgeReceiptStore,
   DiscordPresenceSession,
@@ -351,6 +352,7 @@ const voiceSession =
         briefing: createVoiceBriefingProvider(voiceApi),
         channelOccupants: (guildId, channelId) => gateway.voiceOccupants(guildId, channelId),
         lookAtScreen: createVoiceLookAtScreenProvider(voiceApi),
+        selfTool: createVoiceSelfToolProvider(voiceApi),
         floor: {
           names: characterNames(storedSettings.persona),
           replyPolicy: storedSettings.persona.replyPolicy,

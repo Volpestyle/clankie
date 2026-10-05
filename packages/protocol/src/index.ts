@@ -6676,6 +6676,9 @@ export const DiscordVoiceRealtimeToolNameSchema = z.enum([
   "music_resume",
   "music_stop",
   "music_now",
+  "recall_episodes",
+  "get_self_state",
+  "remember_episode",
 ]);
 export type DiscordVoiceRealtimeToolName = z.infer<typeof DiscordVoiceRealtimeToolNameSchema>;
 export const DiscordVoiceRealtimeToolPhaseSchema = z.enum(["called", "completed", "failed", "dropped"]);

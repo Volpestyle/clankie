@@ -83,6 +83,9 @@ still describes v3. A real provider canary is required to verify model access.
 The reference defines `close_context` as flushing remaining generation. Thus
 local interruption is guaranteed by dropping late output, not by a claim that
 the provider cancels billing immediately.
+A reply superseded before it became audible is treated the same way
+(2026-10-04): its context closes, its held done is released at once, and the
+realtime response is cancelled, so the next reply never waits on dead speech.
 
 ### Teardown and cutoff attribution (2026-09-28)
 

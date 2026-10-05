@@ -191,11 +191,21 @@ describe("realtime conversation session", () => {
       "music_resume",
       "music_stop",
       "music_now",
+      "recall_episodes",
+      "get_self_state",
+      "remember_episode",
     ]);
     expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain(
       "you choose to remember",
     );
-    expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain("your own route");
+    expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain(
+      "Think something through or act with your full tools",
+    );
+    expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).not.toContain("captain mind");
+    // The voice never chooses console-private visibility; the lane default applies.
+    expect(JSON.stringify(tools?.find((tool) => tool.name === "remember_episode"))).not.toContain(
+      "visibility",
+    );
     expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain(
       "web browsing and research",
     );
@@ -745,10 +755,10 @@ it.each(["openai", "xai"] as const)(
 );
 
 it.each([
-  ["audio", 4_096],
-  ["text", 1_024],
+  ["audio", 800],
+  ["text", 200],
 ] as const)(
-  "gives %s responses generous runaway bounds that every response inherits",
+  "gives %s responses a runaway bound that every response inherits",
   async (outputModality, limit) => {
     const { session, socket } = await openConversation({ outputModality, onTextDelta: () => undefined });
     expect(framesOfType(socket, "session.update")[0]).toMatchObject({

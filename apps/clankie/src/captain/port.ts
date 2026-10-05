@@ -108,6 +108,17 @@ type SeatMessageResult = { readonly deliveryStage?: DeliveryStage } & (
   | { readonly outcome: "unknown_seat"; readonly seat: string }
 );
 
+export const VOICE_SELF_TOOL_NAMES = ["recall_episodes", "get_self_state", "remember_episode"] as const;
+type VoiceSelfToolName = (typeof VOICE_SELF_TOOL_NAMES)[number];
+interface VoiceSelfToolInput {
+  readonly guildId: string;
+  readonly channelId: string;
+  /** Authenticated Discord speaker whose request led to the call, when there was one. */
+  readonly speakerId?: string;
+  readonly name: VoiceSelfToolName;
+  readonly arguments: Record<string, unknown>;
+}
+
 export interface LaneToolResult {
   readonly content: readonly (
     | { type: "text"; text: string }
@@ -191,6 +202,12 @@ export interface CaptainPort {
   readIssueMetrics(query: IssueMetricsQuery): Promise<IssueMetricsReport>;
   /** Prompt fragment describing the voice lane, for the realtime voice briefing. */
   voiceLaneInstructions(): string;
+  /**
+   * One of the captain's own self tools (`recall_episodes`, `get_self_state`,
+   * `remember_episode`) run in the `discord_voice` lane for this voice room,
+   * from that lane's tool bank, so visibility and defaults are the lane's own.
+   */
+  voiceSelfTool(input: VoiceSelfToolInput): Promise<LaneToolResult>;
   /**
    * The system prompt a lane's pi session starts from, readable outside a pi
    * session so a seat launcher or a per-turn hook can carry it into another
@@ -366,6 +383,9 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       throw new Error("Issue metrics unavailable");
     },
     voiceLaneInstructions: () => "You are in a voice room.",
+    voiceSelfTool: async () => {
+      throw new Error("stub captain: voiceSelfTool not overridden");
+    },
     syncSeatTranscript: () => true,
     seatContext: (conversationId) => ({ conversationId: conversationId ?? "global-default", cwd: "/tmp" }),
     lanePrompt: async ({ lane }) => `stub prompt for ${lane}`,

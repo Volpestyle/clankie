@@ -55,6 +55,7 @@ import {
   MUSIC_SKIP_TOOL_NAME,
   MUSIC_STOP_TOOL_NAME,
   YOUTUBE_SEARCH_TOOL_NAME,
+  SELF_TOOL_NAMES,
   MAX_REALTIME_AUDIO_APPEND_BYTES,
   MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
   MAX_REALTIME_TEXT_ITEM_CHARACTERS,
@@ -100,6 +101,16 @@ const CAPTURE_END_SILENCE_MS = 500;
 /** Runaway backstop with headroom for an earned 20–30 second riff, not a target. */
 const MAX_SPOKEN_RESPONSE_MS = 45_000;
 const HANDOFF_ACKNOWLEDGMENT_MS = 1_200;
+/**
+ * How much of a captain answer enters the voice conversation. A spoken turn
+ * needs the gist; a report read aloud is a monologue and its full text is
+ * context the room keeps paying for. The rest stays with the captain.
+ */
+const VOICE_HANDOFF_RESULT_CHARACTERS = 1_500;
+/** A handoff answer this late, after the room kept talking, is offered rather than delivered. */
+const STALE_HANDOFF_MS = 30_000;
+/** A spoken search lists only its top hits; the model names one or two. */
+const SPOKEN_SEARCH_RESULTS = 3;
 /** Near silence only; deliberately far below the 1,200 RMS interruption gate. */
 const CAPTURE_NOISE_RMS = 80;
 /** Preserve quiet word onsets before the first above-floor frame (200ms). */
@@ -125,6 +136,21 @@ const BARGE_IN_PCM_BYTES = Math.round(
  * a soft talker cannot interrupt him.
  */
 const BARGE_IN_SPEECH_RMS = 1_200;
+/**
+ * Sustained talk-over that yields the floor without waiting for a transcript:
+ * 700 ms of speech-level audio (the {@link BARGE_IN_SPEECH_RMS} gate) from a
+ * recently engaged speaker whose capture began after his reply became audible.
+ *
+ * The transcript-confirmed path costs the rest of their sentence, 500 ms of
+ * packet silence and finalization — 1.5–3 s of him talking over someone. This
+ * rule acts on the audio alone, so it is deliberately narrower than that path:
+ * a 350 ms loudness rule once cut him off on a short fragment (VUH-1440), and
+ * backchannels ("yeah", "mm-hm") and false starts run well under 700 ms of
+ * speech-level audio. A capture already open when he started is an open mic or
+ * someone he started over; it still waits for its transcript. Calibration
+ * knob, untested live.
+ */
+const ONSET_YIELD_PCM_BYTES = Math.round(REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES * 0.7);
 const VOICE_READY_TIMEOUT_MS = 20_000;
 const DAVE_READY_TIMEOUT_MS = 10_000;
 const PLAYBACK_TIMEOUT_MS = 2 * 60_000;
@@ -179,6 +205,22 @@ export const TRANSCRIPT_RING_MAX_BYTES = 4_000;
  * speech is never held — a re-address must cut him off now.
  */
 export const UTTERANCE_REORDER_GRACE_MS = 400;
+/**
+ * Turn gating for crosstalk. An unaddressed response opportunity waits while
+ * another participant is still talking or their final transcript is due, so a
+ * busy room asks him once per lull instead of once per utterance — a newer
+ * line replaces the waiting one, and he still decides whether to speak.
+ * Addressed and name-mention turns never wait.
+ *
+ * Bounds keep the wait from becoming silence: a capture older than
+ * {@link TURN_GATE_CAPTURE_MAX_MS} (an open mic, a monologue) stops counting,
+ * a final more than {@link TURN_GATE_FINAL_WAIT_MS} overdue stops counting,
+ * and continuous crosstalk still yields one opportunity per
+ * {@link TURN_GATE_MAX_WAIT_MS}.
+ */
+export const TURN_GATE_CAPTURE_MAX_MS = 8_000;
+export const TURN_GATE_FINAL_WAIT_MS = 2_500;
+export const TURN_GATE_MAX_WAIT_MS = 8_000;
 /** The service schema bounds person-memory projection to this many room members. */
 const MAX_BRIEFING_SPEAKERS = 25;
 /** A broken transcriber cannot retain content-free capture ids without bound. */
@@ -314,6 +356,8 @@ export interface VoiceConversationPort {
   createTextItem(text: string): void;
   createImageItem(pngBase64: string, mimeType?: "image/png"): void;
   createResponse(context?: string, shouldStart?: () => boolean): void;
+  /** Stops the provider generating (and an external mouth voicing) a reply nobody will hear. */
+  cancelResponse(requestEventId: string): void;
   truncate(itemId: string, audioEndMs: number): void;
   submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void;
   close(): void;
@@ -365,6 +409,15 @@ export interface DiscordVoiceBriefing {
   readonly briefing: string;
 }
 
+/** One self-tool call for the service's discord_voice lane (recall_episodes, get_self_state, remember_episode). */
+export interface VoiceSelfToolCall {
+  readonly guildId: string;
+  readonly channelId: string;
+  readonly speakerId?: string;
+  readonly name: (typeof SELF_TOOL_NAMES)[number];
+  readonly arguments: Record<string, unknown>;
+}
+
 export type LookAtScreenResult =
   | { readonly outcome: "not_playing" }
   | { readonly outcome: "pending" }
@@ -387,6 +440,8 @@ export interface DiscordVoiceSessionOptions {
    * not-playing result is spoken as "I cannot see the screen."
    */
   readonly lookAtScreen?: () => Promise<LookAtScreenResult>;
+  /** His own memory/self tools, answered by the service; absent says they are unavailable. */
+  readonly selfTool?: (call: VoiceSelfToolCall) => Promise<string>;
   readonly realtime: DiscordVoiceRealtimePorts;
   /** Fetched at engage time so the wake carries current state, not join-time state. */
   readonly briefing: (request: DiscordVoiceBriefingRequest) => Promise<DiscordVoiceBriefing>;
@@ -593,6 +648,19 @@ export class DiscordVoiceSession {
   private readonly transcriptTurns = new Map<string, PendingTranscriptTurn[]>();
   private readonly finalizedUtterances: FinalizedUtterance[] = [];
   private reorderHandle: unknown;
+  /** The latest unaddressed opportunity, waiting for the room to pause (turn gating). */
+  private deferredOffer:
+    | {
+        readonly turn: RoomTurn;
+        readonly guildId: string;
+        readonly channelId: string;
+        readonly offer: "engaged" | "addressed";
+        readonly roomEpoch: number;
+        readonly generation: number;
+        readonly firstDeferredAtMs: number;
+      }
+    | undefined;
+  private deferredOfferHandle: unknown;
   private readonly speakerIdleHandles = new Map<string, unknown>();
   private readonly speakerLastActiveAtMs = new Map<string, number>();
   private conversation: VoiceConversationPort | undefined;
@@ -1046,6 +1114,7 @@ export class DiscordVoiceSession {
     this.speakerIdleHandles.clear();
     this.speakerLastActiveAtMs.clear();
     this.cancelReorderWait();
+    this.dropDeferredOffer();
     for (const line of transcriptRing) line.fill(0);
     for (const job of playbackJobs) {
       if (job === undefined) continue;
@@ -1329,7 +1398,10 @@ export class DiscordVoiceSession {
     if (this.outputControlUncertain) throw new Error("voice_output_uncertain");
     this.outputMuted = muted;
     if (!muted) return;
-    for (const pending of this.pendingResponses) pending.superseded = true;
+    for (const pending of this.pendingResponses) {
+      pending.superseded = true;
+      this.cancelInFlight(pending);
+    }
     for (const job of new Set([this.openPlayback, this.playingJob])) {
       if (job === undefined) continue;
       job.encodedChunks.length = 0;
@@ -1573,6 +1645,15 @@ export class DiscordVoiceSession {
         capture.turn.overlapPlaybackId = playback.playbackId;
       }
       capture.turn.overlapSpeechBytes = (capture.turn.overlapSpeechBytes ?? 0) + pcm.byteLength;
+      if (
+        capture.turn.overlapSpeechBytes >= ONSET_YIELD_PCM_BYTES &&
+        playback.startedAtMs !== undefined &&
+        capture.turn.startedAtMs >= playback.startedAtMs &&
+        this.floor.isEngagedSpeaker(frame.userId, this.clock())
+      ) {
+        // Yield now: someone he is talking with has been talking over him.
+        this.truncatePlayback(frame.userId);
+      }
     }
     if (!capture.forwarding && rms < CAPTURE_NOISE_RMS) {
       const buffered = Buffer.concat([capture.preroll, pcm]);
@@ -1757,10 +1838,15 @@ export class DiscordVoiceSession {
       /^(?:(?:hey|please|can you|could you|would you)\s+)*(?:clankie[, ]+)?stop(?:\s+(?:talking|speaking))?[.!?]*$/iu.test(
         text.trim(),
       );
-    if (explicitStop) {
+    // A bare "stop" said to a friend must not silence everyone's pending
+    // answers; only someone talking with him, or to him, quiets the room.
+    if (explicitStop && (addressed || this.floor.isEngagedSpeaker(userId, this.clock()))) {
       this.roomResponseEpoch += 1;
       this.quietEpoch += 1;
-      for (const pending of this.pendingResponses) pending.superseded = true;
+      for (const pending of this.pendingResponses) {
+        pending.superseded = true;
+        this.cancelInFlight(pending);
+      }
       for (const handoff of this.handoffs.values()) this.timers.clearTimeout(handoff.timer);
     }
     if ((this.isPlaying() || explicitStop) && (addressed || confirmedOverlap || explicitStop)) {
@@ -1793,6 +1879,9 @@ export class DiscordVoiceSession {
       this.finalizedUtterances.shift();
       this.applyFinalizedUtterance(next);
     }
+    // A capture that ended without a line, or a final that just landed, may be
+    // the pause a waiting opportunity was gated on.
+    this.releaseDeferredOffer();
   }
 
   private hasEarlierInflight(candidate: FinalizedUtterance): boolean {
@@ -1837,6 +1926,7 @@ export class DiscordVoiceSession {
       if (pending.firstAudioAtMs === undefined && !pending.superseded) {
         pending.superseded = true;
         unheardReply = true;
+        this.cancelInFlight(pending);
       }
     }
     if (unheardReply) {
@@ -1871,7 +1961,89 @@ export class DiscordVoiceSession {
       ...("reason" in decision ? { reason: decision.reason } : {}),
       state: this.floor.state,
     });
+    const previous = this.deferredOffer;
+    this.dropDeferredOffer();
+    if (
+      source === "speech" &&
+      decision.action === "offer" &&
+      decision.reason !== "mentioned" &&
+      this.turnGateWaitMs(turn.userId) !== undefined
+    ) {
+      this.deferredOffer = {
+        turn: { ...turn, sourceText: text },
+        guildId,
+        channelId,
+        offer: "engaged",
+        roomEpoch: this.roomResponseEpoch,
+        generation: this.sessionGeneration,
+        firstDeferredAtMs: previous?.firstDeferredAtMs ?? this.clock(),
+      };
+      this.releaseDeferredOffer();
+      return;
+    }
     this.applyFloorDecision(decision, { ...turn, sourceText: text }, guildId, channelId);
+  }
+
+  /**
+   * How long another participant's speech may still hold an unaddressed
+   * opportunity back, or undefined when the room has paused. Their capture is
+   * live speech (past the noise floor), or their final transcript is due.
+   */
+  private turnGateWaitMs(speakerId: string): number | undefined {
+    const now = this.clock();
+    let wait: number | undefined;
+    const hold = (remainingMs: number): void => {
+      if (remainingMs > 0) wait = Math.min(wait ?? remainingMs, remainingMs);
+    };
+    for (const capture of this.captures.values()) {
+      if (capture.userId === speakerId || !capture.forwarding) continue;
+      hold(capture.turn.startedAtMs + TURN_GATE_CAPTURE_MAX_MS - now);
+    }
+    for (const [userId, turns] of this.transcriptTurns) {
+      if (userId === speakerId) continue;
+      for (const turn of turns) {
+        const endedAtMs = turn.inputTiming?.captureEndedAtMs;
+        if (endedAtMs !== undefined) hold(endedAtMs + TURN_GATE_FINAL_WAIT_MS - now);
+      }
+    }
+    return wait;
+  }
+
+  /** Requests the waiting opportunity once the room pauses or its bound expires. */
+  private releaseDeferredOffer(): void {
+    const deferred = this.deferredOffer;
+    if (deferred === undefined) return;
+    this.cancelDeferredOfferTimer();
+    if (deferred.generation !== this.sessionGeneration || deferred.roomEpoch !== this.roomResponseEpoch) {
+      this.deferredOffer = undefined;
+      return;
+    }
+    const capWaitMs = deferred.firstDeferredAtMs + TURN_GATE_MAX_WAIT_MS - this.clock();
+    const busyWaitMs = this.turnGateWaitMs(deferred.turn.userId);
+    if (busyWaitMs !== undefined && capWaitMs > 0) {
+      const generation = this.sessionGeneration;
+      this.deferredOfferHandle = this.timers.setTimeout(
+        () => {
+          this.deferredOfferHandle = undefined;
+          if (generation === this.sessionGeneration) this.releaseDeferredOffer();
+        },
+        Math.ceil(Math.min(busyWaitMs, capWaitMs)),
+      );
+      return;
+    }
+    this.deferredOffer = undefined;
+    this.queueEngagedResponse(deferred.turn, deferred.guildId, deferred.channelId, deferred.offer);
+  }
+
+  private dropDeferredOffer(): void {
+    this.deferredOffer = undefined;
+    this.cancelDeferredOfferTimer();
+  }
+
+  private cancelDeferredOfferTimer(): void {
+    if (this.deferredOfferHandle === undefined) return;
+    this.timers.clearTimeout(this.deferredOfferHandle);
+    this.deferredOfferHandle = undefined;
   }
 
   private rememberRoomLine(turn: RoomTurn, text: string, source: RoomInputSource): void {
@@ -2533,6 +2705,13 @@ export class DiscordVoiceSession {
         .catch(() => this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "handler_failed"));
       return;
     }
+    if (this.isSelfTool(call.name)) {
+      const generation = this.sessionGeneration;
+      this.turnQueue = this.turnQueue
+        .then(() => this.handleSelfTool(call, exchange, generation, guildId, channelId))
+        .catch(() => this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "handler_failed"));
+      return;
+    }
     if (call.name === LOOK_AT_SCREEN_TOOL_NAME) {
       const generation = this.sessionGeneration;
       this.turnQueue = this.turnQueue
@@ -2554,7 +2733,71 @@ export class DiscordVoiceSession {
       name === ASK_CLANKIE_TOOL_NAME ||
       name === VOICE_LEAVE_TOOL_NAME ||
       name === LOOK_AT_SCREEN_TOOL_NAME ||
-      this.isMusicTool(name)
+      this.isMusicTool(name) ||
+      this.isSelfTool(name)
+    );
+  }
+
+  private isSelfTool(name: string): name is VoiceSelfToolCall["name"] {
+    return (SELF_TOOL_NAMES as readonly string[]).includes(name);
+  }
+
+  /** Same tools as the captain, run by the service in this room's discord_voice lane. */
+  private async handleSelfTool(
+    call: RealtimeFunctionCall,
+    exchange: PendingVoiceResponse | undefined,
+    generation: number,
+    guildId: string,
+    channelId: string,
+  ): Promise<void> {
+    if (generation !== this.sessionGeneration || !this.isSelfTool(call.name)) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
+    let args: Record<string, unknown> | undefined;
+    try {
+      const parsed: unknown = JSON.parse(call.argumentsJson || "{}");
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        args = parsed as Record<string, unknown>;
+      }
+    } catch {
+      args = undefined;
+    }
+    let reply: string;
+    let code: string | undefined;
+    if (args === undefined) {
+      reply = `${call.name} needs a JSON object of arguments.`;
+      code = "arguments_invalid";
+    } else if (this.options.selfTool === undefined) {
+      reply = "Your memory isn't reachable from this call right now; ask_clankie can reach it.";
+      code = "self_tool_unavailable";
+    } else {
+      const speakerId = exchange?.speakerId;
+      try {
+        reply = await this.options.selfTool({
+          guildId,
+          channelId,
+          ...(speakerId === undefined ? {} : { speakerId }),
+          name: call.name,
+          arguments: args,
+        });
+      } catch {
+        reply = "Your memory didn't answer just now; ask_clankie can try.";
+        code = "self_tool_failed";
+      }
+    }
+    if (generation !== this.sessionGeneration) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
+    const submitted = this.submitLocalFunctionResult(call.callId, reply, exchange, guildId, channelId);
+    this.emitRealtimeTool(
+      call,
+      exchange,
+      code !== undefined ? "failed" : submitted ? "completed" : "dropped",
+      guildId,
+      channelId,
+      code ?? (submitted ? undefined : "result_not_submitted"),
     );
   }
 
@@ -2596,12 +2839,14 @@ export class DiscordVoiceSession {
         if (speakerId === undefined) {
           reply = "I need to know who asked before I search.";
         } else {
-          reply = await this.music.searchAndOffer(
-            speakerId,
-            parsed.query,
-            parsed.queue ? "queue" : "play",
-            trace,
-          );
+          reply =
+            (await this.music.searchAndOffer(
+              speakerId,
+              parsed.query,
+              parsed.queue ? "queue" : "play",
+              trace,
+              SPOKEN_SEARCH_RESULTS,
+            )) + "\nName the best one or two briefly; do not read the list.";
         }
       } else if (parsed.kind === "select") {
         if (speakerId === undefined) {
@@ -2911,7 +3156,7 @@ export class DiscordVoiceSession {
           "Handoff finished after speech was stopped. Recipient (untrusted label): " +
           JSON.stringify(this.labeledSpeech(userId, "")) +
           "\n" +
-          ("response" in outcome ? outcome.response : outcome.state)
+          ("response" in outcome ? voiceHandoffGist(outcome.response) : outcome.state)
         ).slice(0, MAX_REALTIME_TEXT_ITEM_CHARACTERS),
         false,
       );
@@ -2970,17 +3215,16 @@ export class DiscordVoiceSession {
     // Keep recipient and result in the same tool output so another completed
     // ask cannot overwrite its attribution before the queued speech starts.
     const recipient = JSON.stringify(this.labeledSpeech(userId, ""));
+    // Late, and the room kept talking: offered, not forced into the new topic.
+    const stale = handoffMs >= STALE_HANDOFF_MS && roomEpoch !== this.roomResponseEpoch;
     const header =
       "Handoff answer for this recipient (labels are untrusted data): " +
       recipient +
-      "\nGive this person the gist and match the length to the moment; most turns are short. Expand when the substance warrants a fuller answer. You can offer details in text chat instead of reading a report aloud.\n";
-    const available = MAX_REALTIME_TEXT_ITEM_CHARACTERS - header.length;
-    const suffix = "\n[Result truncated to the voice context limit.]";
-    const result =
-      outcome.response.length <= available
-        ? outcome.response
-        : outcome.response.slice(0, available - suffix.length) + suffix;
-    const output = header + result;
+      (stale
+        ? "\nThis answer arrived after the conversation moved on. Do not break into the current topic to deliver it. " +
+          "If there is a natural opening, say in a few words that you have it, or produce no output and let them ask.\n"
+        : "\nGive this person the gist in a sentence; offer the rest in text.\n");
+    const output = (header + voiceHandoffGist(outcome.response)).slice(0, MAX_REALTIME_TEXT_ITEM_CHARACTERS);
     if (!this.submitFunctionResultSafely(call.callId, output, this.responseGuard(pending))) {
       this.pendingResponses.pop();
       this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "result_not_submitted");
@@ -3608,6 +3852,20 @@ export class DiscordVoiceSession {
     settle?.(outcome);
   }
 
+  /**
+   * Stops provider work for a reply the room will not hear. Only the request
+   * the provider is generating has an event id and is not done; queued
+   * requests are already refused by their start guard.
+   */
+  private cancelInFlight(pending: PendingVoiceResponse): void {
+    if (pending.done || pending.requestEventId === undefined) return;
+    try {
+      this.conversation?.cancelResponse(pending.requestEventId);
+    } catch {
+      // A closed provider has nothing left to generate.
+    }
+  }
+
   private isPlaying(): boolean {
     return (
       this.playingJob !== undefined &&
@@ -3641,6 +3899,11 @@ export class DiscordVoiceSession {
     // Truncation may synchronously release a held response.done and start the next request.
     job.stopping = true;
     this.settlePlayback(job, "stopped");
+    // The interrupted reply may still be generating; the rest of it is unwanted.
+    // Cancelled before the truncate below, the order the provider documents.
+    for (const pending of this.pendingResponses) {
+      if (pending === job.pending || pending.superseded) this.cancelInFlight(pending);
+    }
     if (supersededBacklog) {
       try {
         this.conversation?.createTextItem(
@@ -4149,6 +4412,24 @@ function waitForVoxEvent<T extends VoxControlEvent>(
     signal?.addEventListener("abort", onAbort, { once: true });
     if (signal?.aborted === true) onAbort();
   });
+}
+
+/**
+ * Bounds a captain answer to what a spoken turn can use. The cut lands at a
+ * sentence or word break, and the model is told the rest exists rather than
+ * left to improvise it.
+ */
+function voiceHandoffGist(response: string): string {
+  if (response.length <= VOICE_HANDOFF_RESULT_CHARACTERS) return response;
+  const head = response.slice(0, VOICE_HANDOFF_RESULT_CHARACTERS);
+  const sentence = Math.max(head.lastIndexOf(". "), head.lastIndexOf("\n"));
+  const word = head.lastIndexOf(" ");
+  const cut = sentence >= VOICE_HANDOFF_RESULT_CHARACTERS / 2 ? sentence + 1 : word > 0 ? word : head.length;
+  return (
+    head.slice(0, cut).trimEnd() +
+    "\n[Only the start of this answer is shown. Your captain mind has the rest; do not read on or fill it in. " +
+    "If they want the details, offer to post them in text chat through ask_clankie.]"
+  );
 }
 
 /** Short controls are intentional; fragments and acknowledgements are not. */

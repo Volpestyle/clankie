@@ -124,6 +124,9 @@ const MAX_SESSION_LIFETIME_MS = 4 * 60 * 60_000;
 export const DEFAULT_REALTIME_TRUNCATION_RETENTION_RATIO = 0.7;
 export const DEFAULT_REALTIME_POST_INSTRUCTIONS_TOKEN_LIMIT = 12_000;
 
+/** Client event ids for `response.cancel`, so their benign races are recognizable. */
+const RESPONSE_CANCEL_EVENT_PREFIX = "response-cancel-";
+
 export const ASK_CLANKIE_TOOL_NAME = "ask_clankie";
 export const VOICE_LEAVE_TOOL_NAME = "voice_leave";
 /** Read-only glance at his own live play screen. Not a controller (ADR 0099). */
@@ -147,9 +150,9 @@ const ASK_CLANKIE_TOOL = {
   type: "function",
   name: ASK_CLANKIE_TOOL_NAME,
   description:
-    "Use your captain mind to act or to look something up. This is your own route to Clankie's " +
-    "complete tools and memory, not another assistant; capabilities reached through it are your " +
-    "capabilities. Use this for anything beyond conversation — web browsing and research, actions, " +
+    "Think something through or act with your full tools. This is still you — your complete " +
+    "tools and memory, not another mind or assistant; what you reach through it is yours. " +
+    "Use this for anything beyond conversation — web browsing and research, actions, " +
     "files, the shell and the herdr agent fleet on the operator's machine, text channels you cannot see from here, " +
     "the story of this playthrough, facts the briefing does not cover, or something from the " +
     "conversation you choose to remember as part of your own experience. Do not wait for someone to ask you to remember it. " +
@@ -199,8 +202,9 @@ const YOUTUBE_SEARCH_TOOL = {
   type: "function",
   name: YOUTUBE_SEARCH_TOOL_NAME,
   description:
-    "Search YouTube for a song or video to play in this call. Returns numbered results. " +
-    "Read them to the room. A reply like '1 please' or 'the second one' is music_play or music_queue " +
+    "Search YouTube for a song or video to play in this call. Returns the top numbered results. " +
+    "Name only the best one or two, briefly; never read the list aloud. " +
+    "A reply like '1 please' or 'the second one' is music_play or music_queue " +
     "with that index — do not ask_clankie and do not treat a song as a game.",
   parameters: {
     type: "object",
@@ -261,6 +265,57 @@ const MUSIC_TOOLS = [
   MUSIC_STOP_TOOL,
   MUSIC_NOW_TOOL,
 ] as const;
+
+// --- Self tools: the captain's own recall_episodes / get_self_state /
+// remember_episode, same names, run by the service in the discord_voice lane.
+const RECALL_EPISODES_TOOL_NAME = "recall_episodes";
+const GET_SELF_STATE_TOOL_NAME = "get_self_state";
+const REMEMBER_EPISODE_TOOL_NAME = "remember_episode";
+export const SELF_TOOL_NAMES = [
+  RECALL_EPISODES_TOOL_NAME,
+  GET_SELF_STATE_TOOL_NAME,
+  REMEMBER_EPISODE_TOOL_NAME,
+] as const;
+const SELF_TOOLS = [
+  {
+    type: "function",
+    name: RECALL_EPISODES_TOOL_NAME,
+    description:
+      "Search your own memory — everything you kept, not just the briefing. Use it when someone asks about " +
+      "your past or something feels like it came up before, instead of guessing. Returns your newest matching notes.",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string", description: "What to look for in your notes." } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: GET_SELF_STATE_TOOL_NAME,
+    description:
+      "Check on yourself right now: live play, Discord presence, recent voice stays. Read it before answering " +
+      "a question about what you are doing, instead of guessing.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    type: "function",
+    name: REMEMBER_EPISODE_TOOL_NAME,
+    description:
+      "Write one short episode into your own memory: something from this call you choose to carry forward. " +
+      "Your concise memory, not a transcript or a profile of someone. Set retain for ones you want in a year.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: { type: "string", description: "Your memory of it, in a sentence or two." },
+        retain: { type: "boolean" },
+      },
+      required: ["summary"],
+      additionalProperties: false,
+    },
+  },
+] as const;
+// --- end self tools.
 
 /** Minimal transport seam. Production wraps a WebSocket; tests inject a fake. */
 export interface RealtimeSocket {
@@ -768,8 +823,9 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   private currentResponseId = "";
   private currentResponseAudioBytes = 0;
   private currentResponseTextCharacters = 0;
-  private activeResponse: { eventId: string; responseId?: string } | undefined;
+  private activeResponse: { eventId: string; responseId?: string; cancelRequested?: boolean } | undefined;
   private nextResponseEventId = 0;
+  private nextCancelEventId = 0;
   private hasAbandonedResponse = false;
   private drainingResponses = false;
   private responseCallbackDepth = 0;
@@ -822,15 +878,17 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               // becoming a second, conflicting floor owner.
               turn_detection: null,
               audio: { output: { format: REALTIME_PCM_FORMAT } },
-              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS, ...SELF_TOOLS],
             }
           : {
               type: "realtime",
               model,
               output_modalities: [outputModality],
-              // Runaway backstops with room for a deliberate 20–30 second riff.
-              // Audio tokens also consume this budget; text feeds an external mouth.
-              max_output_tokens: outputModality === "audio" ? 4_096 : 1_024,
+              // Runaway backstops, not the length control: the voice register
+              // asks for about a sentence. Text feeds an external mouth, and
+              // ~200 tokens (~150 words) already outlasts the 45 s speech
+              // ceiling. Audio tokens also count against the audio budget.
+              max_output_tokens: outputModality === "audio" ? 800 : 200,
               instructions,
               audio: {
                 input: {
@@ -855,7 +913,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
                     }
                   : {}),
               },
-              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS, ...SELF_TOOLS],
               tool_choice: "auto",
               truncation: {
                 type: "retention_ratio",
@@ -884,6 +942,34 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
       if (this.activeResponse?.eventId !== eventId || !this.isOpen) return;
       this.sendFrame({ type: "response.create", event_id: eventId });
     }, shouldStart);
+  }
+
+  /**
+   * Stops the in-flight response the caller no longer wants (`response.cancel`):
+   * a reply superseded before the room heard it, or one cut off by barge-in.
+   * Queued requests are refused by their own start guard, so only the response
+   * the provider is generating needs this. The provider still ends it with
+   * `response.done` (status `cancelled`), which settles it and releases the
+   * queue exactly as a completed response does.
+   *
+   * OpenAI only: xAI's support for the event is unverified, and an unknown
+   * client event must not risk the live socket.
+   */
+  public cancelResponse(requestEventId: string): void {
+    const active = this.activeResponse;
+    if (
+      this.provider !== "openai" ||
+      !this.isOpen ||
+      active?.eventId !== requestEventId ||
+      active.cancelRequested === true
+    )
+      return;
+    active.cancelRequested = true;
+    this.sendFrame({
+      type: "response.cancel",
+      event_id: `${RESPONSE_CANCEL_EVENT_PREFIX}${String(++this.nextCancelEventId)}`,
+      ...(active.responseId === undefined ? {} : { response_id: active.responseId }),
+    });
   }
 
   private queueResponse(start: (eventId: string) => void, shouldStart?: () => boolean): void {
@@ -918,6 +1004,9 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   protected override handleServerError(event: Record<string, unknown>): void {
     const error = asRecord(event.error);
     const clientEventId = asString(error?.event_id);
+    // A cancel can race its response's own completion, and the provider then
+    // reports that nothing was active. That outcome is the one we asked for.
+    if (clientEventId?.startsWith(RESPONSE_CANCEL_EVENT_PREFIX) === true) return;
     const active = this.activeResponse;
     const abandoned =
       active !== undefined &&

@@ -37,6 +37,9 @@ import {
   SPEAKER_TRANSCRIPTION_IDLE_MS,
   FLOOR_WORK_HEARTBEAT_MS,
   FLOOR_WORK_MAX_MS,
+  TURN_GATE_CAPTURE_MAX_MS,
+  TURN_GATE_FINAL_WAIT_MS,
+  UTTERANCE_REORDER_GRACE_MS,
   ADDRESSED_OFFER_TURN_ITEM,
   ENGAGED_OFFER_TURN_ITEM,
   UNPROMPTED_TURN_ITEM,
@@ -336,6 +339,12 @@ class FakeConversation implements VoiceConversationPort {
     this.responseContexts.push(context);
   }
 
+  public readonly cancellations: string[] = [];
+  public cancelResponse(requestEventId: string): void {
+    this.assertOpen();
+    this.cancellations.push(requestEventId);
+  }
+
   public truncate(itemId: string, audioEndMs: number): void {
     this.assertOpen();
     this.truncations.push({ itemId, audioEndMs });
@@ -417,6 +426,7 @@ interface HarnessOptions {
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
   readonly roomNames?: (guildId: string, channelId: string) => { guildName?: string; channelName?: string };
   readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
+  readonly selfTool?: (call: import("../src/voice-session.ts").VoiceSelfToolCall) => Promise<string>;
   readonly speakerTranscriptionGate?: Promise<void>;
   readonly conversationGate?: Promise<void>;
   readonly occupants?: readonly {
@@ -482,6 +492,7 @@ function buildHarness(options: HarnessOptions = {}) {
       });
     },
     ...(options.lookAtScreen === undefined ? {} : { lookAtScreen: options.lookAtScreen }),
+    ...(options.selfTool === undefined ? {} : { selfTool: options.selfTool }),
     floor: {
       names: ["clankie"],
       replyPolicy: "addressed",
@@ -1526,6 +1537,85 @@ describe("floor decisions", () => {
     ).toBe(true);
   });
 
+  it("asks once per lull while another participant is still talking, and never delays his name", async () => {
+    const harness = await engagedHarness();
+    await harness.consent(BOB);
+    const conversation = harness.conversation();
+    const before = conversation.responseCreates;
+    harness.clock.now = 1_000;
+    const alice = harness.startCapture(ALICE);
+    alice.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.clock.now = 1_100;
+    const bob = harness.startCapture(BOB);
+    bob.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    alice.stream.end();
+    await flush();
+    harness.transcribe(ALICE, "so anyway I went to the store");
+    await flush();
+    harness.clock.now = 1_500;
+    await harness.say(ALICE, "and they were out of everything");
+    // Bob started first, so the existing reorder grace holds this final briefly.
+    harness.clock.now = 1_900;
+    harness.timers.fireLast(UTTERANCE_REORDER_GRACE_MS);
+    await flush();
+    // Both lines are heard, but nobody asked him and Bob is mid-sentence.
+    expect(conversation.textItems.filter((item) => item.includes("out of everything"))).toHaveLength(1);
+    expect(conversation.responseCreates).toBe(before);
+    bob.stream.end();
+    await flush();
+    expect(conversation.responseCreates).toBe(before);
+    harness.transcribe(BOB, "no way that is wild");
+    await flush();
+    // One opportunity for the lull, carrying the latest line.
+    expect(conversation.responseCreates).toBe(before + 1);
+    expect(at(conversation.responseContexts, -1)).toContain("no way that is wild");
+
+    harness.clock.now = 3_000;
+    const again = harness.startCapture(BOB);
+    again.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    await harness.say(ALICE, "clankie what do you think");
+    expect(conversation.responseCreates).toBe(before + 2);
+  });
+
+  it("bounds the wait for an open mic and for a final that never arrives", async () => {
+    const harness = await engagedHarness();
+    await harness.consent(BOB);
+    const conversation = harness.conversation();
+    const before = conversation.responseCreates;
+    harness.clock.now = 1_000;
+    const openMic = harness.startCapture(BOB);
+    openMic.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.clock.now = 1_200;
+    await harness.say(ALICE, "anyone up for a match later");
+    harness.clock.now = 1_600;
+    harness.timers.fireLast(UTTERANCE_REORDER_GRACE_MS);
+    await flush();
+    expect(conversation.responseCreates).toBe(before);
+    harness.clock.now = 1_000 + TURN_GATE_CAPTURE_MAX_MS;
+    harness.timers.fireLast(TURN_GATE_CAPTURE_MAX_MS - 600);
+    await flush();
+    expect(conversation.responseCreates).toBe(before + 1);
+    expect(at(conversation.responseContexts, -1)).toContain("anyone up for a match later");
+
+    openMic.stream.end();
+    await flush();
+    harness.clock.now = 10_000;
+    await harness.say(ALICE, "or maybe tomorrow instead");
+    harness.clock.now = 10_400;
+    harness.timers.fireLast(UTTERANCE_REORDER_GRACE_MS);
+    await flush();
+    expect(conversation.responseCreates).toBe(before + 1);
+    // Bob's capture ended at 9_000 and its final never came.
+    harness.clock.now = 9_000 + TURN_GATE_FINAL_WAIT_MS;
+    harness.timers.fireLast(TURN_GATE_FINAL_WAIT_MS - 1_400);
+    await flush();
+    expect(conversation.responseCreates).toBe(before + 2);
+  });
+
   it("applies overlapping finals in start-of-speech order", async () => {
     const harness = await joinedHarness();
     await harness.consent(ALICE);
@@ -2515,6 +2605,56 @@ describe("ability path", () => {
     });
   });
 
+  it("runs recall_episodes, get_self_state and remember_episode through the service, not the captain", async () => {
+    const calls: import("../src/voice-session.ts").VoiceSelfToolCall[] = [];
+    const harness = await engagedHarness({
+      selfTool: (call) => {
+        calls.push(call);
+        return Promise.resolve(`${call.name} answered`);
+      },
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall({
+      callId: "recall_1",
+      name: "recall_episodes",
+      argumentsJson: '{"query":"minecraft"}',
+    });
+    conversation.input.onFunctionCall({ callId: "self_1", name: "get_self_state", argumentsJson: "{}" });
+    conversation.input.onFunctionCall({
+      callId: "keep_1",
+      name: "remember_episode",
+      argumentsJson: '{"summary":"James and I got the server back up."}',
+    });
+    conversation.input.onFunctionCall({ callId: "bad_1", name: "recall_episodes", argumentsJson: "[1]" });
+    await flush();
+    expect(harness.submitCalls).toHaveLength(0);
+    expect(calls.map((call) => [call.name, call.arguments])).toEqual([
+      ["recall_episodes", { query: "minecraft" }],
+      ["get_self_state", {}],
+      ["remember_episode", { summary: "James and I got the server back up." }],
+    ]);
+    expect(calls.every((call) => call.guildId.length > 0 && call.channelId.length > 0)).toBe(true);
+    expect(conversation.functionResults.map((result) => [result.callId, result.output])).toEqual([
+      ["recall_1", "recall_episodes answered"],
+      ["self_1", "get_self_state answered"],
+      ["keep_1", "remember_episode answered"],
+      ["bad_1", "recall_episodes needs a JSON object of arguments."],
+    ]);
+  });
+
+  it("says a self tool is unreachable rather than guessing when the service is absent or fails", async () => {
+    const absent = await engagedHarness();
+    absent.conversation().input.onFunctionCall({ callId: "s1", name: "get_self_state", argumentsJson: "{}" });
+    await flush();
+    expect(at(absent.conversation().functionResults, 0).output).toContain("ask_clankie can reach it");
+    const failing = await engagedHarness({ selfTool: () => Promise.reject(new Error("down")) });
+    failing
+      .conversation()
+      .input.onFunctionCall({ callId: "s2", name: "get_self_state", argumentsJson: "{}" });
+    await flush();
+    expect(at(failing.conversation().functionResults, 0).output).toContain("didn't answer");
+  });
+
   it("look_at_screen says so when he is not playing", async () => {
     const harness = await engagedHarness({
       lookAtScreen: () => Promise.resolve({ outcome: "not_playing" }),
@@ -2875,7 +3015,8 @@ describe("barge-in", () => {
     async (text) => {
       const { harness, conversation } = await playingHarness();
       const capture = harness.startCapture(ALICE);
-      capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 4));
+      // Fragment-length speech; sustained talk-over is the onset rule below.
+      capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
       await flush();
       expect(conversation.truncations).toHaveLength(0);
       harness.transcribe(ALICE, text);
@@ -2897,6 +3038,56 @@ describe("barge-in", () => {
       expect(conversation.truncations).toHaveLength(1);
     },
   );
+
+  it("yields to an engaged speaker's sustained talk-over before any transcript", async () => {
+    const { harness, conversation } = await playingHarness();
+    const playbackId = harness.vox.activePlaybackId;
+    harness.clock.now = 5_700;
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 700 }]);
+    expect(harness.vox.stops).toContain(playbackId);
+    expect(harness.ofType("interrupted")).toMatchObject([{ userId: ALICE, playbackId }]);
+    // The transcript that follows is an ordinary turn, not a second interruption.
+    harness.transcribe(ALICE, "wait no I meant the other thing");
+    await flush();
+    expect(conversation.truncations).toHaveLength(1);
+  });
+
+  it("does not yield on onset to crosstalk, room tone, or a capture already open when he started", async () => {
+    const { harness, conversation } = await playingHarness();
+    await harness.consent(BOB);
+    const bob = harness.startCapture(BOB);
+    bob.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 4));
+    await flush();
+    const tone = harness.startCapture(ALICE);
+    tone.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 4, ROOM_TONE_FILL));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+    expect(harness.vox.activePlaybackId).toEqual(expect.any(String));
+  });
+
+  it("leaves speech already underway to the transcript-confirmed path", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    harness.clock.now = 1_000;
+    const openMic = harness.startCapture(ALICE);
+    openMic.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES, ROOM_TONE_FILL));
+    await flush();
+    harness.clock.now = 2_000;
+    conversation.input.onAudioDelta(pcmDelta(480), "item_play");
+    await flush();
+    openMic.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 4));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+    harness.transcribe(ALICE, "hold on");
+    await flush();
+    expect(conversation.truncations).toHaveLength(1);
+  });
 
   it("does not apply a delayed transcript to a different playback", async () => {
     const { harness, conversation } = await playingHarness();
@@ -3805,7 +3996,7 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
   expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, ALICE, BOB]);
   expect(conversation.functionResults[0]?.output).toContain('"displayName":"Alice"');
   expect(conversation.functionResults[0]?.output).toContain(
-    "Give this person the gist and match the length to the moment",
+    "Give this person the gist in a sentence; offer the rest in text.",
   );
   conversation.input.onAudioDelta(pcmDelta(480), "alice-answer");
   done();
@@ -3952,11 +4143,74 @@ describe("snappy conversation absorption", () => {
     expect(harness.timers.pending().some((timer) => timer.delayMs === 1_200)).toBe(false);
     resolveCaptain(settledResult("linear", "Long detailed result"));
     await flush();
-    expect(conversation.functionResults[0]?.output).toContain("match the length to the moment");
+    expect(conversation.functionResults[0]?.output).toContain("gist in a sentence; offer the rest in text");
     conversation.input.onAudioDelta(pcmDelta(480), "result");
     done(conversation);
     await flush();
     expect(harness.ofType("response")).toHaveLength(2);
+  });
+
+  it("speaks a gist of a long handoff answer and leaves the rest with the captain", async () => {
+    const report = "The build is green. " + "Detail line about one subsystem. ".repeat(300);
+    const harness = await engagedHarness({
+      captain: () => Promise.resolve(settledResult("report", report)),
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall(askClankie("report", '{"request":"how is the build"}'));
+    done(conversation);
+    await flush();
+    const output = at(conversation.functionResults, 0).output;
+    expect(output).toContain("The build is green.");
+    expect(output).toContain("offer to post them in text chat");
+    expect(output.length).toBeLessThan(2_200);
+    expect(conversation.functionResponseGuards.at(-1)).toEqual(expect.any(Function));
+  });
+
+  it("offers a late handoff answer after the room moved on instead of forcing it in", async () => {
+    let resolveCaptain!: (result: CaptainChannelTurnResult) => void;
+    const harness = await engagedHarness({
+      captain: () =>
+        new Promise((resolve) => {
+          resolveCaptain = resolve;
+        }),
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall(askClankie("slow", '{"request":"check Linear"}'));
+    done(conversation);
+    await flush();
+    harness.clock.now = 40_000;
+    await harness.say(ALICE, "anyway did you see the game last night");
+    done(conversation);
+    resolveCaptain(settledResult("linear", "Found it."));
+    await flush();
+    const output = at(conversation.functionResults, 0).output;
+    expect(output).toContain("arrived after the conversation moved on");
+    expect(output).toContain("produce no output");
+    expect(output).toContain("Found it.");
+  });
+
+  it("does not let a bare stop from someone else in the room silence a pending answer", async () => {
+    let resolveCaptain!: (result: CaptainChannelTurnResult) => void;
+    const harness = await engagedHarness({
+      captain: () =>
+        new Promise((resolve) => {
+          resolveCaptain = resolve;
+        }),
+    });
+    await harness.consent(BOB);
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall(askClankie("slow", '{"request":"check Linear"}'));
+    done(conversation);
+    await flush();
+    await harness.say(BOB, "stop");
+    done(conversation);
+    resolveCaptain(settledResult("linear", "Found it."));
+    await flush();
+    expect(conversation.functionResults).toEqual([
+      { callId: "slow", output: expect.stringContaining("Found it.") },
+    ]);
+    // Delivered as a response opportunity, not retained silently.
+    expect(conversation.functionResponseGuards).toEqual([expect.any(Function)]);
   });
 
   it("drops a queued checking beat when its result arrives before the beat starts", async () => {
@@ -4660,6 +4914,110 @@ it.each([
     await h.session.leave("fixture_done");
   },
 );
+
+it.each(["generating", "draining"] as const)(
+  "cancels a reply superseded while %s, so the next reply is not queued behind dead speech",
+  async (phase) => {
+    const h = await joinedHarness();
+    await h.consent(ALICE);
+    await h.consent(BOB);
+    const sockets: { tts: boolean; socket: VoiceRecoverySocket }[] = [];
+    const production = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      elevenLabsApiKey: "fixture-tts",
+      config: parseVoiceRealtimeEnv({
+        CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+        CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "fixture",
+      }),
+      timers: h.timers,
+      socketFactory: async (url) => {
+        const socket = new VoiceRecoverySocket();
+        sockets.push({ tts: url.includes("elevenlabs"), socket });
+        return socket;
+      },
+    });
+    h.ports.openConversation = production.openConversation;
+    await h.say(ALICE, "hey clankie tell me a long story");
+    const realtime = sockets.find((entry) => !entry.tts)!.socket;
+    const tts = sockets.find((entry) => entry.tts)!.socket;
+    expect(realtime.creates()).toHaveLength(1);
+    realtime.emit({ type: "response.created", response: { id: "response-A" } });
+    realtime.emit({
+      type: "response.output_text.delta",
+      response_id: "response-A",
+      item_id: "item-A",
+      delta: "Once upon a time there was a very long story. ",
+    });
+    await flush();
+    if (phase === "draining") {
+      // The model finished; only synthesis of the dead reply is outstanding.
+      realtime.emit({ type: "response.done", response: { id: "response-A", status: "completed" } });
+      await flush();
+    }
+    await h.say(BOB, "anyway what are we doing tonight");
+    const cancels = realtime.sent.filter((frame) => frame.type === "response.cancel");
+    expect(tts.sent.some((frame) => frame.context_id === "item-A" && frame.close_context === true)).toBe(
+      true,
+    );
+    if (phase === "generating") {
+      expect(cancels).toMatchObject([{ response_id: "response-A" }]);
+      expect(realtime.creates()).toHaveLength(1);
+      realtime.emit({ type: "response.done", response: { id: "response-A", status: "cancelled" } });
+      // A cancel that raced completion is benign, not a reported failure.
+      realtime.emit({
+        type: "error",
+        error: { type: "invalid_request_error", event_id: cancels[0]!.event_id },
+      });
+      await flush();
+    } else {
+      expect(cancels).toEqual([]);
+    }
+    // Bob's reply starts now, without waiting for the dead context to drain.
+    expect(realtime.creates()).toHaveLength(2);
+    tts.emit({ contextId: "item-A", audio: pcmDelta(2_400).toString("base64") });
+    await flush();
+    expect(h.vox.audio).toHaveLength(0);
+    expect(h.ofType("failed")).toEqual([]);
+    await h.session.leave("fixture_done");
+  },
+);
+
+it("cancels the rest of an interrupted reply before truncating what the room heard", async () => {
+  const h = await joinedHarness();
+  await h.consent(ALICE);
+  const sockets: VoiceRecoverySocket[] = [];
+  const production = createVoiceRealtimePorts({
+    apiKey: "fixture-realtime",
+    config: parseVoiceRealtimeEnv({}),
+    timers: h.timers,
+    socketFactory: async () => {
+      const socket = new VoiceRecoverySocket();
+      sockets.push(socket);
+      return socket;
+    },
+  });
+  h.ports.openConversation = production.openConversation;
+  await h.say(ALICE, "hey clankie tell me a long story");
+  const realtime = sockets[0]!;
+  realtime.emit({ type: "response.created", response: { id: "response-A" } });
+  realtime.emit({
+    type: "response.output_audio.delta",
+    response_id: "response-A",
+    item_id: "item-A",
+    delta: pcmDelta(2_400).toString("base64"),
+  });
+  await flush();
+  expect(h.vox.activePlaybackId).toEqual(expect.any(String));
+  await h.say(ALICE, "stop");
+  const repairs = realtime.sent
+    .filter((frame) => frame.type === "response.cancel" || frame.type === "conversation.item.truncate")
+    .map((frame) => [frame.type, frame.response_id ?? frame.item_id]);
+  expect(repairs).toEqual([
+    ["response.cancel", "response-A"],
+    ["conversation.item.truncate", "item-A"],
+  ]);
+  await h.session.leave("fixture_done");
+});
 
 it.each(["membership", "narration"] as const)(
   "binds %s abandonment through its own dispatch guard",

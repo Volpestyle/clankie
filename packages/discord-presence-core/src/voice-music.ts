@@ -157,6 +157,8 @@ export class VoiceMusicQueue {
     query: string,
     action: "play" | "queue",
     trace?: VoiceMusicTraceContext,
+    /** Spoken surfaces list fewer; every hit stays pickable by number. */
+    maxListed?: number,
   ): Promise<string> {
     const hits = await this.searchImpl(query);
     if (hits.length === 0) {
@@ -165,7 +167,7 @@ export class VoiceMusicQueue {
     }
     this.pendingPicks.set(authorId, { hits, action, at: this.now() });
     this.emit("search", "queue", "offered", trace, { resultCount: hits.length });
-    const lines = hits.map((hit, index) => {
+    const lines = hits.slice(0, maxListed ?? hits.length).map((hit, index) => {
       const who = hit.channel === undefined ? "" : ` — ${hit.channel}`;
       const length = hit.duration === undefined ? "" : ` (${hit.duration})`;
       return `${String(index + 1)}. ${hit.title}${who}${length}`;
