@@ -14,6 +14,39 @@ const pane = "w8:pB";
 const qualified = `${fleet.id}/${pane}`;
 const sessionId = "01a10928-d878-7db2-82d0-643dce239a3f";
 const cleanups: Array<() => Promise<void>> = [];
+const finalAuthorityFailures = [
+  "revoked authority",
+  "late approval",
+  "late rejection",
+  "delayed approval",
+] as const;
+function finalAuthorityGuard(kind: (typeof finalAuthorityFailures)[number]) {
+  let authorized = true;
+  let calls = 0;
+  let settle!: () => void;
+  const delayed = new Promise<boolean>((resolve, reject) => {
+    settle = () =>
+      kind === "late rejection" ? reject(new Error("Late authority lookup failed")) : resolve(true);
+  });
+  return {
+    beforeDispatch: vi.fn(async () => {
+      if (++calls === 1 || kind === "revoked authority") return authorized;
+      if (kind === "delayed approval") {
+        // Timer callbacks cannot run while an authority implementation blocks.
+        const deadline = performance.now() + 300;
+        while (performance.now() < deadline) {}
+        return true;
+      }
+      return delayed;
+    }),
+    revoke: () => {
+      authorized = false;
+    },
+    release: () => {
+      if (kind === "late approval" || kind === "late rejection") settle();
+    },
+  };
+}
 function scriptFromCommand(command: string) {
   const script = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
   const compressed = /\$bytes=\[Convert\]::FromBase64String\('([A-Za-z0-9+/=]+)'\)/u.exec(script)?.[1];
@@ -140,115 +173,124 @@ it("refuses queue when a proven private steer becomes idle and its native proof 
   expect(cliCalls).toBe(0);
 });
 
-it.each(["queue", "steer"] as const)(
-  "refuses private %s when peer authority is revoked during the final SSH observation",
-  async (mode) => {
-    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-    await once(server, "listening");
-    const address = server.address();
-    if (typeof address === "string" || address === null) throw new Error("Test socket unavailable");
-    cleanups.push(async () => {
-      for (const socket of server.clients) socket.terminate();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    });
-    type Snapshot = {
-      owners: number[];
-      nativeProcesses: Array<{ pid: number; role: string; endpoint: string; listeners?: { port: number }[] }>;
-    };
-    const snapshots = JSON.parse(raw) as { first: Snapshot; last: Snapshot };
-    for (const snapshot of [snapshots.first, snapshots.last]) {
-      const backend = snapshot.nativeProcesses.find((native) => native.role === "server")!;
-      backend.listeners![0]!.port = address.port;
-      snapshot.nativeProcesses.find((native) => native.role === "tui")!.endpoint =
-        `ws://127.0.0.1:${address.port}`;
-      snapshot.owners = [backend.pid];
-    }
-    const requests: string[] = [];
-    let clientPort: number | undefined;
-    let effects = 0;
-    server.on("connection", (socket, request) => {
-      clientPort = request.socket.remotePort;
-      socket.on("message", (bytes) => {
-        const request = JSON.parse(bytes.toString()) as {
-          id?: number;
-          method: string;
-          params?: { clientUserMessageId?: string };
-        };
-        requests.push(request.method);
-        if (request.method === "initialized") return;
-        let result: unknown = {};
-        if (request.method === "thread/read")
-          result = { thread: { id: sessionId, status: { type: "active" } } };
-        if (request.method === "thread/turns/list")
-          result = { data: [{ id: "held-turn", status: "inProgress" }] };
-        if (request.method === "thread/queue/add") {
-          effects++;
-          result = {
-            queuedSubmission: { id: "queued-once", clientUserMessageId: request.params?.clientUserMessageId },
-          };
-        }
-        if (request.method === "turn/steer") {
-          effects++;
-          result = { turnId: "held-turn" };
-        }
-        socket.send(JSON.stringify({ id: request.id, result }));
-      });
-    });
-    const connect = async () => {
-      const socket = new WebSocket(`ws://127.0.0.1:${address.port}`);
-      await once(socket, "open");
-      if (clientPort === undefined) throw new Error("Test TCP client unavailable");
-      return {
-        socket,
-        connection: { clientPort, serverPort: address.port },
-        alive: () => socket.readyState === WebSocket.OPEN,
-        close: () => socket.terminate(),
+it.each(
+  (["queue", "steer"] as const).flatMap((mode) => finalAuthorityFailures.map((kind) => ({ mode, kind }))),
+)("refuses private $mode after the final SSH observation with $kind", async ({ mode, kind }) => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const address = server.address();
+  if (typeof address === "string" || address === null) throw new Error("Test socket unavailable");
+  cleanups.push(async () => {
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  type Snapshot = {
+    owners: number[];
+    nativeProcesses: Array<{ pid: number; role: string; endpoint: string; listeners?: { port: number }[] }>;
+  };
+  const snapshots = JSON.parse(raw) as { first: Snapshot; last: Snapshot };
+  for (const snapshot of [snapshots.first, snapshots.last]) {
+    const backend = snapshot.nativeProcesses.find((native) => native.role === "server")!;
+    backend.listeners![0]!.port = address.port;
+    snapshot.nativeProcesses.find((native) => native.role === "tui")!.endpoint =
+      `ws://127.0.0.1:${address.port}`;
+    snapshot.owners = [backend.pid];
+  }
+  const requests: string[] = [];
+  let clientPort: number | undefined;
+  let effects = 0;
+  server.on("connection", (socket, request) => {
+    clientPort = request.socket.remotePort;
+    socket.on("message", (bytes) => {
+      const request = JSON.parse(bytes.toString()) as {
+        id?: number;
+        method: string;
+        params?: { clientUserMessageId?: string };
       };
-    };
-    let announceProbe!: () => void;
-    const probeStarted = new Promise<void>((resolve) => {
-      announceProbe = resolve;
-    });
-    let releaseProbe!: () => void;
-    const probeReleased = new Promise<void>((resolve) => {
-      releaseProbe = resolve;
-    });
-    let authorized = true;
-    let probes = 0;
-    const shell = async (command: string) => {
-      expect(scriptFromCommand(command)).toContain("Observe-ClankieProcess");
-      if (++probes === 2) {
-        announceProbe();
-        await probeReleased;
+      requests.push(request.method);
+      if (request.method === "initialized") return;
+      let result: unknown = {};
+      if (request.method === "thread/read")
+        result = { thread: { id: sessionId, status: { type: "active" } } };
+      if (request.method === "thread/turns/list")
+        result = { data: [{ id: "held-turn", status: "inProgress" }] };
+      if (request.method === "thread/queue/add") {
+        effects++;
+        result = {
+          queuedSubmission: { id: "queued-once", clientUserMessageId: request.params?.clientUserMessageId },
+        };
       }
-      return JSON.stringify(snapshots);
+      if (request.method === "turn/steer") {
+        effects++;
+        result = { turnId: "held-turn" };
+      }
+      socket.send(JSON.stringify({ id: request.id, result }));
+    });
+  });
+  const connect = async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}`);
+    await once(socket, "open");
+    if (clientPort === undefined) throw new Error("Test TCP client unavailable");
+    return {
+      socket,
+      connection: { clientPort, serverPort: address.port },
+      alive: () => socket.readyState === WebSocket.OPEN,
+      close: () => socket.terminate(),
     };
-    const beforeDispatch = vi.fn(async () => authorized);
-    const pending = remoteCodexControl(fleet, shell, async () => "", qualified, { connect, mode })(
-      sessionId,
-      "revoked private dispatch",
-      undefined,
-      undefined,
-      beforeDispatch,
-    );
-    try {
-      await probeStarted;
-      expect(beforeDispatch).toHaveBeenCalledOnce();
-      authorized = false;
-    } finally {
-      releaseProbe();
+  };
+  let announceProbe!: () => void;
+  const probeStarted = new Promise<void>((resolve) => {
+    announceProbe = resolve;
+  });
+  let releaseProbe!: () => void;
+  const probeReleased = new Promise<void>((resolve) => {
+    releaseProbe = resolve;
+  });
+  let probes = 0;
+  const shell = async (command: string) => {
+    expect(scriptFromCommand(command)).toContain("Observe-ClankieProcess");
+    if (++probes === 2) {
+      announceProbe();
+      await probeReleased;
     }
-    expect(await pending).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
-    expect(beforeDispatch).toHaveBeenCalledTimes(2);
-    expect(effects).toBe(0);
-    expect(requests).toEqual([
-      "initialize",
-      "initialized",
-      "thread/read",
-      ...(mode === "steer" ? ["thread/turns/list"] : []),
-    ]);
-  },
-);
+    return JSON.stringify(snapshots);
+  };
+  const authority = finalAuthorityGuard(kind);
+  const beforeDispatch = authority.beforeDispatch;
+  const pending = remoteCodexControl(fleet, shell, async () => "", qualified, { connect, mode })(
+    sessionId,
+    "revoked private dispatch",
+    undefined,
+    undefined,
+    beforeDispatch,
+  );
+  try {
+    await probeStarted;
+    expect(beforeDispatch).toHaveBeenCalledOnce();
+    if (kind === "revoked authority") authority.revoke();
+    const started = performance.now();
+    releaseProbe();
+    const result = await pending;
+    expect(result).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+    if (kind !== "revoked authority") {
+      expect(result).toMatchObject({ detail: expect.stringContaining("timed out") });
+      expect(performance.now() - started).toBeLessThan(1_500);
+    }
+  } finally {
+    releaseProbe();
+    authority.release();
+  }
+  // Late guard settlement must never resume native dispatch.
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  expect(beforeDispatch).toHaveBeenCalledTimes(2);
+  expect(effects).toBe(0);
+  expect(requests).toEqual([
+    "initialize",
+    "initialized",
+    "thread/read",
+    ...(mode === "steer" ? ["thread/turns/list"] : []),
+  ]);
+});
 
 it.each(["missing control", "unavailable proof"])(
   "refuses %s for a targeted Windows queue before account CLI discovery",
@@ -293,60 +335,72 @@ it("queues a hired --no-daemon pane through SSH CLI only after fresh default-hom
   expect(privateQueue).not.toHaveBeenCalled();
 });
 
-it("refuses CLI queue when peer authority is revoked during the final default-home SSH observation", async () => {
-  const observation = defaultHomePane();
-  let announceProbe!: () => void;
-  const probeStarted = new Promise<void>((resolve) => {
-    announceProbe = resolve;
-  });
-  let releaseProbe!: () => void;
-  const probeReleased = new Promise<void>((resolve) => {
-    releaseProbe = resolve;
-  });
-  let authorized = true;
-  let probes = 0;
-  let effects = 0;
-  const calls: string[] = [];
-  const shell = async (command: string) => {
-    const script = scriptFromCommand(command);
-    calls.push(script);
-    if (script.includes("Observe-ClankieProcess")) {
-      if (++probes === 2) {
-        announceProbe();
-        await probeReleased;
+it.each(finalAuthorityFailures)(
+  "refuses CLI queue after the final default-home SSH observation with %s",
+  async (kind) => {
+    const observation = defaultHomePane();
+    let announceProbe!: () => void;
+    const probeStarted = new Promise<void>((resolve) => {
+      announceProbe = resolve;
+    });
+    let releaseProbe!: () => void;
+    const probeReleased = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    let probes = 0;
+    let effects = 0;
+    const calls: string[] = [];
+    const shell = async (command: string) => {
+      const script = scriptFromCommand(command);
+      calls.push(script);
+      if (script.includes("Observe-ClankieProcess")) {
+        if (++probes === 2) {
+          announceProbe();
+          await probeReleased;
+        }
+        return JSON.stringify({ first: observation, last: observation });
       }
-      return JSON.stringify({ first: observation, last: observation });
+      if (script.includes("npm root -g")) return "C:\\npm\\codex.js";
+      effects++;
+      return "queued";
+    };
+    const privateQueue = vi.fn();
+    const authority = finalAuthorityGuard(kind);
+    const beforeDispatch = authority.beforeDispatch;
+    const pending = remoteCodexQueue(fleet, shell, privateQueue)(
+      sessionId,
+      "revoked queue",
+      beforeDispatch,
+      qualified,
+    );
+    try {
+      await probeStarted;
+      expect(beforeDispatch).toHaveBeenCalledOnce();
+      if (kind === "revoked authority") authority.revoke();
+      const started = performance.now();
+      releaseProbe();
+      const result = await pending;
+      expect(result).toMatchObject({
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: expect.stringContaining("authority"),
+      });
+      if (kind !== "revoked authority") {
+        expect(result).toMatchObject({ detail: expect.stringContaining("timed out") });
+        expect(performance.now() - started).toBeLessThan(1_500);
+      }
+    } finally {
+      releaseProbe();
+      authority.release();
     }
-    if (script.includes("npm root -g")) return "C:\\npm\\codex.js";
-    effects++;
-    return "queued";
-  };
-  const privateQueue = vi.fn();
-  const beforeDispatch = vi.fn(async () => authorized);
-  const pending = remoteCodexQueue(fleet, shell, privateQueue)(
-    sessionId,
-    "revoked queue",
-    beforeDispatch,
-    qualified,
-  );
-  try {
-    await probeStarted;
-    expect(beforeDispatch).toHaveBeenCalledOnce();
-    authorized = false;
-  } finally {
-    releaseProbe();
-  }
-  expect(await pending).toMatchObject({
-    outcome: "undelivered",
-    deliveryStage: "unavailable",
-    detail: expect.stringContaining("authority changed"),
-  });
-  expect(beforeDispatch).toHaveBeenCalledTimes(2);
-  expect(effects).toBe(0);
-  expect(calls).toHaveLength(3);
-  expect(calls.at(-1)).toContain("Observe-ClankieProcess");
-  expect(privateQueue).not.toHaveBeenCalled();
-});
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    expect(beforeDispatch).toHaveBeenCalledTimes(2);
+    expect(effects).toBe(0);
+    expect(calls).toHaveLength(3);
+    expect(calls.at(-1)).toContain("Observe-ClankieProcess");
+    expect(privateQueue).not.toHaveBeenCalled();
+  },
+);
 
 it.each([
   "private home",

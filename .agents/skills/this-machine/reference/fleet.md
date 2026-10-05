@@ -138,7 +138,8 @@ SSH CLI only after fresh kernel observations prove the pane and CLI share the
 SSH account's canonical default `~/.codex` and positively identify a standalone
 TUI. A missing or rejected remote endpoint alone cannot prove that mode.
 The same pane/session and home proof are repeated after preparation, then caller
-authority is rechecked immediately before sending. Private or unproved
+authority is rechecked with a 250 ms deadline immediately before sending. Timeout
+means undelivered; late approval cannot send. Private or unproved
 homes refuse the CLI fallback, and private native receipts never authorize a
 second send. An unavailable endpoint grants no tools or authority to another
 session. Other routes need a supported native channel or session API. Automated

@@ -51,6 +51,7 @@ import { codexTrackerOverridesFromList } from "./tracker-isolation.ts";
 const REMOTE_PORTS = { min: 41_000, max: 60_999 } as const;
 const START_TIMEOUT_MS = 30_000;
 const TAIL_INTERVAL_MS = 5_000;
+const FINAL_CODEX_AUTHORITY_TIMEOUT_MS = 250;
 /** A remote server starts over ssh and, on Windows, through PowerShell. */
 const REMOTE_CODEX_LISTEN_TIMEOUT_MS = 45_000;
 
@@ -384,6 +385,26 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
   };
 }
 
+/** A final authority read must finish promptly; late approval cannot authorize a write. */
+async function finalCodexAuthority(beforeDispatch: () => Promise<boolean>): Promise<boolean> {
+  const deadline = performance.now() + FINAL_CODEX_AUTHORITY_TIMEOUT_MS;
+  const timeout = () => new Error("Final Codex authority check timed out; nothing was sent.");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const allowed = await Promise.race([
+      Promise.resolve().then(beforeDispatch),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(timeout()), FINAL_CODEX_AUTHORITY_TIMEOUT_MS);
+      }),
+    ]);
+    // A synchronous guard can delay timer delivery past the authority deadline.
+    if (performance.now() >= deadline) throw timeout();
+    return allowed;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
  * `codex queue` on a remote fleet's machine (VUH-1527): a Codex session
  * Clankie did not start there receives his message as its next prompt. On
@@ -468,7 +489,8 @@ export function remoteCodexQueue(
     // The final SSH observation yields; peer authority may change while it runs.
     if (original && beforeDispatch) {
       try {
-        if (!(await beforeDispatch())) throw new Error("Peer authority changed; nothing was sent.");
+        if (!(await finalCodexAuthority(beforeDispatch)))
+          throw new Error("Peer authority changed; nothing was sent.");
       } catch (error) {
         return {
           outcome: "undelivered",
@@ -533,7 +555,7 @@ export function remoteCodexControl(
           if (beforeDispatch !== undefined && !(await beforeDispatch())) return false;
           const current = await observe(fleet.id, qualified.id, sessionId, connection.connection);
           if (!connection.alive() || !isDeepStrictEqual(original, current)) return false;
-          if (beforeDispatch !== undefined && !(await beforeDispatch())) return false;
+          if (beforeDispatch !== undefined && !(await finalCodexAuthority(beforeDispatch))) return false;
           return connection.alive();
         });
         // A proven private home must never fall through to the account-default queue.

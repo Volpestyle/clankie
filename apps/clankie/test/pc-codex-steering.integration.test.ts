@@ -17,6 +17,8 @@ import type { ExternalCodexControl } from "../src/captain/external-codex-control
 const execFileAsync = promisify(execFile);
 
 // Explicit installed-binary integration lane, never a model eval or a cloud call:
+// VUH-1563 native Windows acceptance is James's PC-only run, not a worker gate.
+// This installed Codex lane alone does not exercise the C# kernel argv producer.
 // CODEX_APP_SERVER_INTEGRATION=1 pnpm exec vitest run --config vitest.config.ts \
 //   apps/clankie/test/pc-codex-steering.integration.test.ts
 const cleanups: Array<() => Promise<void>> = [];

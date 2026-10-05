@@ -2492,7 +2492,8 @@ observations prove that its home is the SSH account's canonical default `~/.code
 and the CLI inherits that same home. The native projection must positively prove
 a standalone TUI; an absent or rejected remote endpoint is insufficient.
 The pane/session and home proof are repeated after preparation. Caller authority
-is checked again after the final observation, immediately before sending. Private, changed
+is checked again after the final observation, with a 250 ms deadline immediately
+before sending. A timeout reports undelivered and never sends on late approval. Private, changed
 or unproved homes refuse the fallback; a private native receipt cannot authorize
 a second send through CLI.
 Clankie checks the current pane/session, native process lifetimes and ancestry,

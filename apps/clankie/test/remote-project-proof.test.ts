@@ -12,6 +12,7 @@ import {
   createRemoteCodexQueueObserver,
 } from "../src/remote-project-proof.ts";
 import { windowsProcessCommand } from "../src/windows-process-probe.ts";
+import { classifyWindowsCodexArgv } from "../src/windows-codex-argv.ts";
 
 const fleet = { id: "pc", session: "kh2-desktop", ssh: { host: "pc", shell: "powershell" as const } };
 function scriptFromCommand(command: string): string {
@@ -86,7 +87,10 @@ describe("remote project process proof", () => {
       const executable = "C:\\installed\\codex.exe";
       observation.installed = [executable];
       observation.processes[2]!.executable = executable;
-      const native = { ...observation.nativeProcesses[0]!, executable, role };
+      const argv = role === "unavailable" ? [] : [executable, role === "other" ? "--yolo" : "--no-daemon"];
+      const projection = classifyWindowsCodexArgv(argv);
+      expect(projection.role).toBe(role);
+      const native = { ...observation.nativeProcesses[0]!, executable, ...projection };
       observation.nativeProcesses = [native];
       // Failed argv reads and unknown flags (for example --yolo) are not
       // prerequisites for the installed native process/cwd/socket ancestry proof.
@@ -96,11 +100,25 @@ describe("remote project process proof", () => {
       });
     },
   );
-  it("excludes a recognized app-server even when its endpoint projection is uncertain", async () => {
+  it("keeps app-server excluded after an unknown trailing flag", async () => {
     const observation = fixture();
-    const native = { ...observation.nativeProcesses[0]!, role: "server", endpoint: null, standalone: false };
+    observation.agent.agent = "codex";
+    observation.agent.agent_session.agent = "codex";
+    observation.agent.agent_session.source = "herdr:codex";
+    const executable = "C:\\installed\\codex.exe";
+    observation.installed = [executable];
+    observation.processes[2]!.executable = executable;
+    const projection = classifyWindowsCodexArgv([
+      executable,
+      "app-server",
+      "--listen",
+      "ws://127.0.0.1:45000",
+      "--future-native-flag",
+    ]);
+    const native = { ...observation.nativeProcesses[0]!, executable, ...projection };
     observation.nativeProcesses = [native];
     expect(await setup(observation).observe("pc", "w3:p8", stream)).toBeUndefined();
+    expect(projection).toEqual({ role: "server", endpoint: null, standalone: false });
   });
   it.each([
     [
@@ -311,9 +329,7 @@ describe("standalone remote Codex queue proof", () => {
         {
           ...observation.nativeProcesses[0]!,
           executable,
-          role: "tui",
-          endpoint: null,
-          standalone: true,
+          ...classifyWindowsCodexArgv([executable, "--no-daemon"]),
           markers,
         },
       ],
@@ -335,17 +351,31 @@ describe("standalone remote Codex queue proof", () => {
     });
   });
 
-  it.each(["explicit remote configuration", "legacy unknown projection"])(
-    "denies a null endpoint with %s without withdrawing independent project proof",
-    async (kind) => {
+  it.each([
+    ["non-loopback remote", ["--remote", "wss://other.example:45000"]],
+    ["remote endpoint with a trailing newline", ["--remote", "ws://127.0.0.1:45000\n"]],
+  ] as const)(
+    "denies standalone queue authority for %s while retaining independent project proof",
+    async (_kind, args) => {
       const observation = standaloneFixture();
-      if (kind === "explicit remote configuration") observation.nativeProcesses[0]!.standalone = false;
-      else delete (observation.nativeProcesses[0] as { standalone?: boolean }).standalone;
+      const native = observation.nativeProcesses[0]!;
+      const projection = classifyWindowsCodexArgv([native.executable, ...args]);
+      expect(projection.endpoint).toBeNull();
+      expect(projection.standalone).toBe(false);
+      Object.assign(native, projection);
       const observed = observers(observation);
       expect(await observed.queue("pc", "w3:p8", "standalone-thread")).toBeUndefined();
       expect(await observed.project("pc", "w3:p8", stream)).toMatchObject({ processes: [{ pid: 30 }] });
     },
   );
+
+  it("denies a legacy unknown standalone projection without withdrawing independent project proof", async () => {
+    const observation = standaloneFixture();
+    delete (observation.nativeProcesses[0] as { standalone?: boolean }).standalone;
+    const observed = observers(observation);
+    expect(await observed.queue("pc", "w3:p8", "standalone-thread")).toBeUndefined();
+    expect(await observed.project("pc", "w3:p8", stream)).toMatchObject({ processes: [{ pid: 30 }] });
+  });
 
   it("refuses a standalone projection that disappears before the final native observation", async () => {
     const first = standaloneFixture();

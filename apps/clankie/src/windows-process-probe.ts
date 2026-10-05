@@ -1,5 +1,6 @@
 import { powershellLiteral, powershellScriptCommand } from "./herdr-fleet.ts";
 import { gzipSync } from "node:zlib";
+import { WINDOWS_CODEX_ARGV, windowsCodexArgvSet } from "./windows-codex-argv.ts";
 
 /** Windows caps a process command line at 32,767 characters; expand larger probes only in memory. */
 function probeCommand(script: string): string {
@@ -131,7 +132,7 @@ public static class ClankieProcess {
     return BitConverter.ToInt64(Read(handle,BitConverter.ToInt64(basic,8)+0x20,8),0);
   }
   static string Loopback(string value,bool allowZero) {
-    if(value==null || !System.Text.RegularExpressions.Regex.IsMatch(value,@"\Aws://127\.0\.0\.1:(0|[1-9][0-9]{0,4})/?\z")) return null;
+    if(value==null || !System.Text.RegularExpressions.Regex.IsMatch(value,@"\A${WINDOWS_CODEX_ARGV.loopback}\z")) return null;
     int port;
     if(!Int32.TryParse(value.Substring(15).TrimEnd('/'),out port) || port>65535 || (!allowZero && port==0)) return null;
     return "ws://127.0.0.1:"+port;
@@ -164,19 +165,21 @@ public static class ClankieProcess {
   public static CodexRole Codex(int pid) { return ProjectCodex(Arguments(pid)); }
   // Endpoint uncertainty cannot turn a positively recognized backend into a pane TUI.
   static CodexRole UncertainCodexRole(string command) {
-    return new CodexRole {role=command=="app-server"?"server":"other"};
+    return new CodexRole {role=command=="app-server"?${JSON.stringify(WINDOWS_CODEX_ARGV.roles.uncertainServer)}:${JSON.stringify(WINDOWS_CODEX_ARGV.roles.uncertainTui)}};
   }
   // Codex 0.160: [OPTIONS] [PROMPT] or [OPTIONS] <COMMAND> [ARGS].
   // Unknown positional text is the initial TUI prompt, never a subcommand.
   static CodexRole ProjectCodex(string[] args) {
     string command=null,remote=null,listen=null;
     int remotes=0,listens=0,positionals=0; bool noDaemon=false;
-    var maintenance=new System.Collections.Generic.HashSet<string>(new string[]{"agents","tcp-tunnel","exec","e","review","login","logout","mcp","mcp-server","plugin","remote-control","app","completion","update","doctor","sandbox","debug","execpolicy","apply","a","queue","archive","delete","migrate-rollouts","unarchive","cloud","cloud-tasks","responses-api-proxy","stdio-to-uds","exec-server","features","help","daemon","proxy"});
-    var values=new System.Collections.Generic.HashSet<string>(new string[]{"-c","--config","-m","--model","-p","--profile","-s","--sandbox","-a","--ask-for-approval","-C","--cd","-i","--image","--add-dir","--enable","--disable","--local-provider","--code-mode-host","--remote","--listen","--ws-auth","--ws-token-file","--ws-token-sha256","--ws-shared-secret-file","--ws-issuer","--ws-audience","--ws-max-clock-skew-seconds"});
-    var flags=new System.Collections.Generic.HashSet<string>(new string[]{"--no-daemon","--no-alt-screen","--search","--full-auto","--dangerously-bypass-approvals-and-sandbox","--oss","--strict-config","--analytics-default-enabled","--stdio","--last","--all"});
+    var commands=${windowsCodexArgvSet(WINDOWS_CODEX_ARGV.commands)};
+    var maintenance=${windowsCodexArgvSet(WINDOWS_CODEX_ARGV.maintenance)};
+    var values=${windowsCodexArgvSet(WINDOWS_CODEX_ARGV.values)};
+    var flags=${windowsCodexArgvSet(WINDOWS_CODEX_ARGV.flags)};
+    var stops=${windowsCodexArgvSet(WINDOWS_CODEX_ARGV.stops)};
     for(int n=1;n<args.Length;n++) {
       string arg=args[n];
-      if(arg=="--help" || arg=="-h" || arg=="--version" || arg=="-V") return UncertainCodexRole(command);
+      if(stops.Contains(arg)) return UncertainCodexRole(command);
       if(arg=="--") {
         // An option-looking prompt after the separator is text, not authority.
         int remaining=args.Length-n-1;
@@ -195,13 +198,13 @@ public static class ClankieProcess {
         } else if(equals<0 && flags.Contains(name)) {if(name=="--no-daemon") noDaemon=true;}
         else return UncertainCodexRole(command);
       } else if(command==null && positionals==0) {
-        if(arg=="app-server" || arg=="resume" || arg=="fork") command=arg;
+        if(commands.Contains(arg)) command=arg;
         else if(maintenance.Contains(arg)) return UncertainCodexRole(command);
         else positionals=1;
       } else if(command=="app-server" || (command==null && ++positionals>1)) return UncertainCodexRole(command);
     }
-    if(command=="app-server") return new CodexRole {role="server",endpoint=remotes==0 && listens==1 && !noDaemon?Loopback(listen,true):null};
-    return new CodexRole {role="tui",endpoint=remotes==1 && listens==0 && !noDaemon?Loopback(remote,false):null,standalone=remotes==0 && listens==0};
+    if(command=="app-server") return new CodexRole {role=${JSON.stringify(WINDOWS_CODEX_ARGV.roles.server)},endpoint=remotes==0 && listens==1 && !noDaemon?Loopback(listen,true):null};
+    return new CodexRole {role=${JSON.stringify(WINDOWS_CODEX_ARGV.roles.tui)},endpoint=remotes==1 && listens==0 && !noDaemon?Loopback(remote,false):null,standalone=remotes==0 && listens==0};
   }
   /** Read only fixed consistency markers; unrelated entries are neither retained nor exported. */
   public static SeatMarkers Markers(int pid) {
