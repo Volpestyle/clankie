@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-10-05T05:06:50.411Z",
+  "concurrentProcesses": 4,
+  "concurrentIssues": 40,
+  "uniqueUUIDs": 40,
+  "uniqueLocalIdentifiers": 40,
+  "team": {
+    "id": "481a6af6-3acb-4c94-bf0e-cd8a7e38bde3",
+    "key": "VUH"
+  },
+  "sortedPriorities": [
+    1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0,
+    0, 0, 0, 0, 0
+  ],
+  "writeHooks": ["fence", "before", "dispatch", "confirmed"],
+  "allSixPatchOperations": "head replace after end",
+  "reopenedIdentifier": "LOCAL-VUH-37",
+  "failedFenceLeftStoreUnchanged": true,
+  "networkWrites": 0
+}

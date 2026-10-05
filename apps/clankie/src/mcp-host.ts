@@ -53,6 +53,8 @@ import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
 import { compactLinearWrite } from "./linear-write-receipt.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
+import type { TrackerToolBackend } from "@clankie/work-items";
+import { callPrioritySortedLinearIssues } from "./tracker-tool-router.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -73,6 +75,13 @@ class DispatchRefused extends Error {}
  * who fixes the typo would have to restart the service to be believed.
  */
 const FAILURE_COOLDOWN_MS = 60_000;
+const LOCAL_TRACKER_COMMAND = "clankie:local-tracker";
+
+export interface TrackerBackendStatus {
+  readonly backend: "linear" | "local";
+  readonly reason: "owner_connected" | "linear_disconnected" | "linear_disabled";
+  readonly binding: string;
+}
 
 interface McpHostLogger {
   info(context: Record<string, unknown>, message: string): void;
@@ -113,6 +122,16 @@ type McpCallResult =
 
 export interface McpHost {
   account(server: string, lane: CaptainSessionLaneV2): Promise<{ account: ProviderAccount; binding: string }>;
+  /** A local tracker has a resource binding, never a fabricated provider account. */
+  binding?(
+    server: string,
+    lane: CaptainSessionLaneV2,
+  ): Promise<{
+    account?: ProviderAccount;
+    binding: string;
+    backend?: "local";
+  }>;
+  trackerStatus?(): Promise<TrackerBackendStatus>;
   /**
    * Connects every active server up front, so no conversational turn pays for
    * it. Failures are logged, never thrown: a server that is down costs him that
@@ -181,6 +200,23 @@ const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
 ];
 
 export interface McpHostOptions {
+  /** The durable fallback. Connected transport failures never select this backend. */
+  readonly localTracker?: TrackerToolBackend;
+  readonly trackerIdentity?: string;
+  /** Read-only lookup in already registered stores; never enrolls a repository. */
+  readonly trackerRepoForCall?: (name: string, args: Record<string, unknown>) => Promise<string | undefined>;
+  /** Repository conventions are backends of the same public tracker vocabulary. */
+  readonly trackerForRepo?: (input: {
+    name: string;
+    args: Record<string, unknown>;
+    repo: string;
+    lane: CaptainSessionLaneV2;
+    /** Only the native owner operator, never a delegated worker, may enroll paths. */
+    local: boolean;
+    beforeWrite(): Promise<void>;
+    onDispatch(): void;
+    effectConfirmed(): void;
+  }) => Promise<unknown>;
   /** Shipped lazy motor, reserved for the service's MinecraftPort rather than raw catalogs. */
   readonly minecraftMotor?: {
     readonly command: string;
@@ -234,6 +270,7 @@ interface ServerState {
   connection?: McpConnection;
   connecting?: Promise<McpConnection>;
   tools?: readonly McpToolDescriptor[];
+  nativeToolNames?: ReadonlySet<string>;
   failure?: { reason: string; at: number };
 }
 
@@ -253,6 +290,31 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   const missingCredentials = new Set<string>();
   const opening = new Set<Promise<McpConnection>>();
   let closed = false;
+  const isLocalTracker = (server: McpServerSettings) =>
+    server.id === "linear" && server.command === LOCAL_TRACKER_COMMAND;
+  const trackerCatalog = options.localTracker?.catalog() ?? [];
+  const trackerNames = new Set(trackerCatalog.map((tool) => tool.name));
+  const localBinding = createHash("sha256")
+    .update(JSON.stringify(["local-tracker", options.trackerIdentity ?? "service-tracker"]))
+    .digest("hex");
+  const canonicalTrackerCatalog = (): McpToolDescriptor[] =>
+    trackerCatalog.map((tool) => ({
+      ...tool,
+      server: "linear",
+      qualifiedName: `linear_${tool.name}`,
+      initial: CURATED_MCP_SERVERS[0]!.initialTools.includes(tool.name),
+      inputSchema: {
+        ...tool.inputSchema,
+        properties: {
+          ...(tool.inputSchema as { properties?: Record<string, unknown> }).properties,
+          repo: {
+            type: "string",
+            description:
+              "Optional registered repository or absolute path (operator tools only); follows its saved tracker convention.",
+          },
+        },
+      },
+    }));
 
   /**
    * The servers in play right now: curated ones whose credential exists, plus
@@ -269,7 +331,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     // An explicitly disabled owner entry suppresses the curated default too.
     const authoredIds = new Set(settings.mcp.servers.map((server) => server.id));
     const minecraft = options.minecraftMotor;
-    const servers = [
+    let servers = [
       ...curated.filter((server) => !authoredIds.has(server.id)),
       ...settings.mcp.servers.filter((server) => minecraft === undefined || server.id !== "minecraft"),
       ...(minecraft === undefined
@@ -287,6 +349,26 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             },
           ]),
     ].filter((server) => server.enabled);
+    if (options.localTracker) {
+      const linear = servers.find((server) => server.id === "linear");
+      const connected =
+        linear !== undefined &&
+        (linear.credential === undefined || (await options.credentials.get(linear.credential)) !== undefined);
+      if (!connected) {
+        servers = [
+          ...servers.filter((server) => server.id !== "linear"),
+          {
+            id: "linear",
+            transport: "stdio",
+            command: LOCAL_TRACKER_COMMAND,
+            args: [],
+            lane: "everywhere",
+            initialTools: CURATED_MCP_SERVERS[0]!.initialTools,
+            enabled: true,
+          },
+        ];
+      }
+    }
     await Promise.all(
       [...states].map(async ([id, state]) => {
         const server = servers.find((entry) => entry.id === id);
@@ -376,7 +458,28 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     if (state.failure !== undefined && now - state.failure.at < FAILURE_COOLDOWN_MS) {
       throw new Error(state.failure.reason);
     }
-    const attempt = connectImpl(server, options.credentials, state.credential)
+    const localConnection: McpConnection = {
+      listTools: async () => trackerCatalog,
+      callTool: async (name, args) => {
+        try {
+          return { content: JSON.stringify(await options.localTracker!.call(name, args)), isError: false };
+        } catch (error) {
+          return {
+            content: JSON.stringify({
+              error: "tracker_request_failed",
+              detail: error instanceof Error ? error.message : String(error),
+            }),
+            isError: true,
+          };
+        }
+      },
+      close: async () => undefined,
+    };
+    const attempt = (
+      isLocalTracker(server)
+        ? Promise.resolve(localConnection)
+        : connectImpl(server, options.credentials, state.credential)
+    )
       .then(async (client) => {
         if (closed || states.get(server.id) !== state) {
           await client.close().catch(() => undefined);
@@ -415,7 +518,14 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     const initial = new Set(server.initialTools);
     const listed = await client.listTools();
     await assertCurrent(server, state);
-    const projected = listed
+    state.nativeToolNames = new Set(listed.map((tool) => tool.name));
+    // The canonical subset retains identical schemas even when the owner connects
+    // Linear mid-session. The rest of Linear's native catalog remains discoverable.
+    const exposed =
+      server.id === "linear" && options.localTracker
+        ? [...listed.filter((tool) => !trackerNames.has(tool.name)), ...trackerCatalog]
+        : listed;
+    const projected = exposed
       .filter((tool) => typeof tool.name === "string" && tool.name.length > 0)
       .map((tool) => ({
         server: server.id,
@@ -427,7 +537,19 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             : tool.name,
         inputSchema:
           tool.inputSchema !== null && typeof tool.inputSchema === "object"
-            ? (tool.inputSchema as Record<string, unknown>)
+            ? server.id === "linear" && trackerNames.has(tool.name)
+              ? {
+                  ...(tool.inputSchema as Record<string, unknown>),
+                  properties: {
+                    ...(tool.inputSchema as { properties?: Record<string, unknown> }).properties,
+                    repo: {
+                      type: "string",
+                      description:
+                        "Optional registered repository or absolute path (operator tools only); follows its saved tracker convention.",
+                    },
+                  },
+                }
+              : (tool.inputSchema as Record<string, unknown>)
             : { type: "object" },
         // No `initialTools` means all of them: right for a small server, and
         // the reason a large one should name the handful worth carrying.
@@ -465,6 +587,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   }
 
   async function account(server: McpServerSettings, expectedCredential?: string) {
+    if (isLocalTracker(server)) return { binding: localBinding, backend: "local" as const };
     const stored =
       server.credential === undefined ? undefined : await options.credentials.get(server.credential);
     if (stored === undefined || !("account" in stored) || stored.account === undefined)
@@ -492,7 +615,37 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       const server = (await activeServers()).find((entry) => entry.id === id);
       if (server === undefined || !laneAllows(server, lane))
         throw new Error("Connected account unavailable in this lane");
+      const selected = await account(server);
+      if (selected.account === undefined)
+        throw new Error(`${id} is using the local tracker, not a connected account`);
+      return { account: selected.account, binding: selected.binding };
+    },
+    async binding(id, lane) {
+      const server = (await activeServers()).find((entry) => entry.id === id);
+      if (server === undefined || !laneAllows(server, lane))
+        throw new Error("Tool resource unavailable in this lane");
       return account(server);
+    },
+    async trackerStatus() {
+      const server = (await activeServers()).find((entry) => entry.id === "linear");
+      if (!server) throw new Error("Tracker is unavailable");
+      if (!isLocalTracker(server))
+        return {
+          backend: "linear",
+          reason: "owner_connected",
+          // Backend discovery does not acquire a verified account grant.
+          binding:
+            (await account(server).catch(() => undefined))?.binding ??
+            createHash("sha256")
+              .update(JSON.stringify([server, await credentialFingerprint(server)]))
+              .digest("hex"),
+        };
+      const authored = (await options.settings.load()).mcp.servers.find((entry) => entry.id === "linear");
+      return {
+        backend: "local",
+        reason: authored?.enabled === false ? "linear_disabled" : "linear_disconnected",
+        binding: localBinding,
+      };
     },
     async warm() {
       const now = Date.now();
@@ -518,6 +671,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         } catch {
           // One unreachable server must not cost him the others. The failure is
           // already logged; the tools simply are not offered this session.
+          if (server.id === "linear" && options.localTracker) collected.push(...canonicalTrackerCatalog());
         }
       }
       return collected;
@@ -571,11 +725,45 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           detail: `${server.id} stays at the console. Ask from the operator TUI, not from this room.`,
         };
       }
+      let trackerRepo = input.arguments.repo;
+      let inferredRepo = false;
+      if (
+        isLocalTracker(server) &&
+        trackerNames.has(input.tool) &&
+        trackerRepo === undefined &&
+        input.lane === "operator" &&
+        options.trackerRepoForCall
+      ) {
+        try {
+          trackerRepo = await options.trackerRepoForCall(input.tool, input.arguments);
+          inferredRepo = trackerRepo !== undefined;
+        } catch (error) {
+          return {
+            outcome: "refused",
+            reason: "server_unavailable",
+            possiblyDispatched: false,
+            detail: error instanceof Error ? error.message.slice(0, 500) : "Tracker scope lookup failed",
+          };
+        }
+      }
+      const repositoryCall =
+        server.id === "linear" && trackerNames.has(input.tool) && trackerRepo !== undefined;
+      if (
+        repositoryCall &&
+        (input.lane !== "operator" || typeof trackerRepo !== "string" || !options.trackerForRepo)
+      ) {
+        return {
+          outcome: "refused",
+          reason: "lane_denied",
+          detail: "Repository tracker access requires operator tools and a registered repository.",
+        };
+      }
       let state: ServerState | undefined;
       let dispatched = false;
+      const deferredDispatch = repositoryCall || isLocalTracker(server);
       try {
         state = await stateFor(server);
-        const client = await connection(server, state, now);
+        const client = repositoryCall ? undefined : await connection(server, state, now);
         const connectedAccount =
           input.delegation !== undefined || options.observeCall !== undefined
             ? await account(server, state.credential).catch((error: unknown) => {
@@ -621,37 +809,114 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         // check revocation without yielding again before provider dispatch.
         const current = input.fence ? await input.fence() : undefined;
         await assertCurrent(server, state);
+        let commitCurrent = current;
+        let confirmed = false;
         const assertDispatch = () => {
           try {
             if (closed || states.get(server.id) !== state) throw new Error(`${server.id} connection changed`);
             current?.();
-            input.onDispatch?.();
+            if (!deferredDispatch) input.onDispatch?.();
           } catch (error) {
             throw new DispatchRefused(error instanceof Error ? error.message : "MCP dispatch refused");
           }
         };
         assertDispatch();
-        dispatched = true;
-        const result = workerPost
-          ? await publishLinearWorker({
-              tool: input.tool,
-              args: input.arguments,
-              credential,
-              author: options.linearAuthor ?? (async () => undefined),
-              beforeWrite: async () => {
-                await refreshAttribution();
-                const current = await input.fence?.();
-                await assertCurrent(server, state!);
-                current?.();
-              },
-              ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
-            })
-          : await dispatchFence.run(assertDispatch, () =>
-              input.timeoutMs === undefined
-                ? client.callTool(input.tool, input.arguments)
-                : client.callTool(input.tool, input.arguments, input.timeoutMs),
-            );
-        if (!result.isError) input.onSettled?.();
+        dispatched = !deferredDispatch;
+        const publication = {
+          beforeWrite: async () => {
+            try {
+              await refreshAttribution();
+              commitCurrent = await input.fence?.();
+              await assertCurrent(server, state!);
+              commitCurrent?.();
+            } catch (error) {
+              throw new DispatchRefused(
+                error instanceof Error ? error.message : "Tracker publication refused",
+              );
+            }
+          },
+          onDispatch: () => {
+            try {
+              if (closed || states.get(server.id) !== state) throw new Error(`${server.id} backend changed`);
+              commitCurrent?.();
+              input.onDispatch?.();
+              dispatched = true;
+            } catch (error) {
+              throw new DispatchRefused(
+                error instanceof Error ? error.message : "Tracker publication refused",
+              );
+            }
+          },
+          effectConfirmed: () => {
+            confirmed = true;
+            input.onSettled?.();
+          },
+        };
+        const aliases: Record<string, string> = {
+          search_issues: "list_issues",
+          create_comment: "save_comment",
+          create_issue_label: "save_issue_label",
+        };
+        const upstreamTool =
+          !isLocalTracker(server) &&
+          server.id === "linear" &&
+          (input.tool === "search_issues" || state.nativeToolNames?.has(input.tool) === false)
+            ? (aliases[input.tool] ?? input.tool)
+            : input.tool;
+        const result = repositoryCall
+          ? {
+              content: JSON.stringify(
+                await options.trackerForRepo!({
+                  name: input.tool,
+                  repo: trackerRepo as string,
+                  args: Object.fromEntries(Object.entries(input.arguments).filter(([key]) => key !== "repo")),
+                  lane: input.lane,
+                  local: input.lane === "operator" && input.delegation === undefined && !inferredRepo,
+                  ...publication,
+                }),
+              ),
+              isError: false,
+            }
+          : isLocalTracker(server)
+            ? {
+                content: JSON.stringify(
+                  await options.localTracker!.call(input.tool, input.arguments, publication),
+                ),
+                isError: false,
+              }
+            : workerPost
+              ? await publishLinearWorker({
+                  tool: input.tool,
+                  args: input.arguments,
+                  credential,
+                  author: options.linearAuthor ?? (async () => undefined),
+                  beforeWrite: async () => {
+                    await refreshAttribution();
+                    const current = await input.fence?.();
+                    await assertCurrent(server, state!);
+                    current?.();
+                  },
+                  ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
+                })
+              : await dispatchFence.run(assertDispatch, () =>
+                  !isLocalTracker(server) &&
+                  options.localTracker &&
+                  server.id === "linear" &&
+                  upstreamTool === "list_issues"
+                    ? callPrioritySortedLinearIssues(
+                        input.arguments,
+                        async (args) => {
+                          await assertCurrent(server, state!);
+                          current?.();
+                          return client!.callTool(upstreamTool, args, input.timeoutMs);
+                        },
+                        connectedAccount?.binding ?? state!.credential,
+                      )
+                    : input.timeoutMs === undefined
+                      ? client!.callTool(upstreamTool, input.arguments)
+                      : client!.callTool(upstreamTool, input.arguments, input.timeoutMs),
+                );
+        if (!result.isError && !confirmed) input.onSettled?.();
         options.logger.info(
           {
             event: "mcp.host.call",
@@ -678,7 +943,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             ...(authority ? { owner: authority.owner } : {}),
             ...(recipient ? { recipient } : {}),
             isError: result.isError,
-            ...(connectedAccount === undefined ? {} : { account: connectedAccount.account }),
+            ...(connectedAccount === undefined || !("account" in connectedAccount)
+              ? {}
+              : { account: connectedAccount.account }),
             ...(input.delegation === undefined
               ? {}
               : {
@@ -730,7 +997,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         return {
           outcome: "refused",
           reason: "server_unavailable",
-          possiblyDispatched: dispatched && !(error instanceof DispatchRefused),
+          possiblyDispatched: dispatched && (deferredDispatch || !(error instanceof DispatchRefused)),
           detail: error instanceof Error ? error.message.slice(0, 500) : "mcp_call_failed",
         };
       }

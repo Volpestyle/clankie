@@ -10,6 +10,7 @@ import {
   WorkConventionSchema,
   WorkEvidenceSchema,
   WorkItemStatusSchema,
+  WorkItemPrioritySchema,
   WorkLinearLabelSchema,
   type WorkConvention,
   type WorkItem,
@@ -22,6 +23,7 @@ import {
   readConvention,
   resolveTracker,
   backendFor,
+  trackerToolsFor,
   type WorkItemPatch,
   writeConvention,
   type CommandRunner,
@@ -29,6 +31,7 @@ import {
   type GhRunner,
   type LinearToolCall,
   type TrackerDeps,
+  type TrackerToolCallOptions,
 } from "@clankie/work-items";
 import type { McpHost } from "./mcp-host.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
@@ -97,6 +100,7 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       criteria: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
       dependsOn: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
       status: WorkItemStatusSchema.optional(),
+      priority: WorkItemPrioritySchema.optional(),
     })
     .strict(),
   z
@@ -105,6 +109,7 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       repo: z.string().min(1).max(4096),
       id: z.string().min(1).max(64),
       status: WorkItemStatusSchema.optional(),
+      priority: WorkItemPrioritySchema.optional(),
       owner: z.string().trim().min(1).max(128).nullable().optional(),
       title: z.string().trim().min(1).max(200).optional(),
       dependsOn: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
@@ -140,9 +145,11 @@ export interface WorkItemsServiceOptions {
   readonly localMachineId?: string;
   /** Where the registry of readable repos lives. */
   readonly stateDirectory: string;
+  /** The shared local tracker, when it lives outside the service's normal state root. */
+  readonly globalTrackerDirectory?: string;
   /** The captain's working directory, always readable as `workspace`. */
   readonly workspace?: () => string | undefined;
-  readonly mcpHost?: Pick<McpHost, "call"> & Partial<Pick<McpHost, "account">>;
+  readonly mcpHost?: Pick<McpHost, "call"> & Partial<Pick<McpHost, "account" | "binding" | "trackerStatus">>;
   /**
    * The body's GitHub account connection token (ADR 0196). When present it is
    * used instead of `gh`; a hosted body has no `gh` login to fall back on.
@@ -307,6 +314,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
 
   const deps = async (path: string): Promise<TrackerDeps> => {
     const token = await options.githubToken?.();
+    const localTracker = (await options.mcpHost?.trackerStatus?.())?.backend === "local";
     return {
       run,
       ...(options.hosted === true ? {} : { gh: options.gh ?? defaultGh(path) }),
@@ -319,8 +327,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
               ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
             }),
           }),
-      ...(linear === undefined ? {} : { linear }),
+      ...(linear === undefined || localTracker ? {} : { linear }),
       clock,
+      trackerDirectory: join(options.stateDirectory, "repo-trackers", repoId(path)),
     };
   };
 
@@ -381,6 +390,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   ): WorkItemWriteReceipt => ({ requestId, outcome, message });
   const accountBinding = async (kind: WorkConvention["backend"]) => {
     if (kind === "linear") {
+      if (options.mcpHost?.binding) return (await options.mcpHost.binding("linear", "operator")).binding;
       if (!options.mcpHost?.account) throw new Error("Connected Linear account cannot be checked.");
       return (await options.mcpHost.account("linear", "operator")).binding;
     }
@@ -444,15 +454,17 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           scopedWrites: true,
           beforeWrite,
           effectConfirmed,
-          ...(target.convention.backend === "default" || target.convention.backend === "markdown"
+          ...(target.convention.backend === "default" ||
+          target.convention.backend === "markdown" ||
+          (target.convention.backend === "linear" && dependencies.linear === undefined)
             ? { onDispatch }
             : {}),
         };
-        if (target.convention.backend === "linear") {
+        if (target.convention.backend === "linear" && dependencies.linear !== undefined) {
           writeDeps.linear = async (tool, args) => {
             const writing = tool === "save_issue";
             if (!options.mcpHost) throw new Error("Linear is unavailable.");
-            if ((await options.mcpHost.account!("linear", "operator")).binding !== account)
+            if ((await accountBinding("linear")) !== account)
               throw new Error("Connected Linear account changed.");
             const result = await options.mcpHost.call({
               lane: "operator",
@@ -469,6 +481,14 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             }
             if (result.isError) throw new Error("Connected provider refused the write.");
             return result.content.trim() ? (JSON.parse(result.content) as unknown) : undefined;
+          };
+        }
+        if (target.convention.backend === "linear" && dependencies.linear === undefined) {
+          writeDeps.beforeWrite = async () => {
+            await authorizeWrite(authority);
+            if ((await accountBinding("linear")) !== account)
+              throw new Error("Connected Linear account or local tracker changed.");
+            beforeWrite();
           };
         }
         if (target.convention.backend === "github") {
@@ -561,6 +581,201 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   };
   return {
     handleOwnerWrite,
+    /** Resolve existing local identities without enrolling a repo or opening a tracker backend. */
+    async resolveTrackerRepo(_name: string, args: Record<string, unknown>): Promise<string | undefined> {
+      const isReference = (value: unknown): value is string =>
+        typeof value === "string" &&
+        (/^(?:P-)?LOCAL(?:-[A-Z0-9]+)*-\d+$/iu.test(value) ||
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value));
+      const references = new Set<string>();
+      for (const key of [
+        "id",
+        "issueId",
+        "parentId",
+        "projectId",
+        "statusUpdateId",
+        "query",
+        "project",
+        "team",
+        "teamId",
+        "state",
+        "assignee",
+        "lead",
+        "leadTeam",
+        "duplicateOf",
+      ])
+        if (isReference(args[key])) references.add(args[key].toLowerCase());
+      for (const key of [
+        "blocks",
+        "blockedBy",
+        "relatedTo",
+        "removeBlocks",
+        "removeBlockedBy",
+        "removeRelatedTo",
+        "setTeams",
+        "addTeams",
+        "removeTeams",
+        "labels",
+        "addLabels",
+        "removeLabels",
+      ])
+        if (Array.isArray(args[key]))
+          for (const value of args[key]) if (isReference(value)) references.add(value.toLowerCase());
+      const registered = await known();
+      if (references.size === 0) {
+        const workspace = options.workspace?.();
+        const entry =
+          workspace === undefined
+            ? undefined
+            : registered.find((candidate) => candidate.path === resolve(workspace));
+        if (entry && (await readConvention(entry.path))?.backend === "linear") return entry.id;
+        return undefined;
+      }
+      const candidates = new Map<string, string | undefined>([
+        [
+          join(options.globalTrackerDirectory ?? join(options.stateDirectory, "tracker"), "tracker.json"),
+          undefined,
+        ],
+      ]);
+      const projectRepos = (await projectReader?.repos()) ?? [];
+      const existing = [
+        ...registered,
+        ...projectRepos
+          .filter((entry) => entry.root !== undefined && entry.unavailable === undefined)
+          .map((entry) => ({ id: entry.id, path: entry.root!, name: entry.name })),
+      ];
+      for (const entry of existing) {
+        const convention = await readConvention(entry.path);
+        if (!convention) continue;
+        const directory = join(options.stateDirectory, "repo-trackers", repoId(entry.path));
+        for (const file of [join(directory, "tracker.json"), join(directory, "ancillary", "tracker.json")])
+          if (!candidates.has(file)) candidates.set(file, entry.id);
+      }
+      const matches = new Set<string | undefined>();
+      for (const [path, repo] of candidates) {
+        let store: Record<string, unknown>;
+        try {
+          store = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+          throw new WorkRequestError(
+            "backend_unavailable",
+            "An existing local tracker cannot be read. Choose its repo explicitly.",
+          );
+        }
+        if (store === null || typeof store !== "object" || store.version !== 1)
+          throw new WorkRequestError(
+            "backend_unavailable",
+            "An existing local tracker cannot be read. Choose its repo explicitly.",
+          );
+        const records: unknown[] = [store.team, store.user];
+        for (const collection of [
+          "issues",
+          "projects",
+          "comments",
+          "statusUpdates",
+          "labels",
+          "issueStatuses",
+          "projectStatuses",
+        ])
+          if (Array.isArray(store[collection])) records.push(...store[collection]);
+        if (
+          records.some((record) => {
+            if (record === null || typeof record !== "object") return false;
+            const resource = record as { id?: unknown; identifier?: unknown };
+            return [resource.id, resource.identifier].some(
+              (value) => typeof value === "string" && references.has(value.toLowerCase()),
+            );
+          })
+        )
+          matches.add(repo);
+      }
+      if (matches.size > 1)
+        throw new WorkRequestError(
+          "invalid",
+          "The local tracker reference is ambiguous. Pass the saved repo ID explicitly.",
+        );
+      return matches.size === 1 ? [...matches][0] : undefined;
+    },
+    /** Canonical tool requests select the repo's backend without introducing another vocabulary. */
+    async callTracker(
+      name: string,
+      args: Record<string, unknown>,
+      callOptions: { readonly repo: string; readonly local: boolean } & TrackerToolCallOptions,
+    ): Promise<unknown> {
+      const { repo, local, ...callbacks } = callOptions;
+      const { repo: _repo, ...toolArgs } = args;
+      let path: string;
+      let convention: WorkConvention;
+      let validate: (() => Promise<void>) | undefined;
+      if (/^project-[a-f0-9]{48}$/u.test(repo)) {
+        if (!projectReader) throw new WorkRequestError("unknown_repo", "No registered project work");
+        const read = await projectReader.prepare(repo);
+        path = read.path;
+        convention = read.convention;
+        validate = read.validate;
+      } else {
+        const entry = await locate(repo, local);
+        path = entry.path;
+        const resolved = await tracker(path, local && /^(?:save_|create_)/u.test(name), !local);
+        convention = resolved.convention;
+        const savedConvention = JSON.stringify(await readConvention(path));
+        const savedRegistry = JSON.stringify(await readRegistry());
+        const savedWorkspace = options.workspace?.();
+        validate = async () => {
+          if (
+            JSON.stringify(await readConvention(path)) !== savedConvention ||
+            JSON.stringify(await readRegistry()) !== savedRegistry ||
+            options.workspace?.() !== savedWorkspace
+          )
+            throw new Error("Saved work repository or tracker changed. Read the work again.");
+        };
+      }
+      const dependencies = await deps(path);
+      const beforeWrite = async () => {
+        await validate?.();
+        await callbacks.beforeWrite?.();
+      };
+      const scopedDependencies: TrackerDeps = {
+        ...dependencies,
+        ...callbacks,
+        beforeWrite,
+        scopedWrites: !local,
+        ...(convention.backend !== "linear" ||
+        options.mcpHost === undefined ||
+        dependencies.linear === undefined
+          ? {}
+          : {
+              linear: async (tool: string, arguments_: Record<string, unknown>) => {
+                const result = await options.mcpHost!.call({
+                  lane: "operator",
+                  server: "linear",
+                  tool,
+                  arguments: arguments_,
+                  resultMode: "data",
+                  fence: async () => {
+                    await beforeWrite();
+                    return () => {};
+                  },
+                  ...(callbacks.onDispatch === undefined ? {} : { onDispatch: callbacks.onDispatch }),
+                  ...(callbacks.effectConfirmed === undefined
+                    ? {}
+                    : { onSettled: callbacks.effectConfirmed }),
+                });
+                if (result.outcome !== "ok") throw new Error(`Tracker ${tool}: ${result.detail}`);
+                if (result.isError) throw new Error(`Tracker ${tool}: ${result.content.slice(0, 500)}`);
+                return result.content.trim() ? (JSON.parse(result.content) as unknown) : undefined;
+              },
+            }),
+      };
+      await validate?.();
+      const result = await trackerToolsFor(path, convention, scopedDependencies).call(name, toolArgs, {
+        ...callbacks,
+        beforeWrite,
+      });
+      await validate?.();
+      return result;
+    },
     async readOwnerReceipt(
       request: WorkItemWriteReceiptRequest,
       authority: WorkWriteAuthority,
@@ -708,6 +923,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             ...(request.criteria === undefined ? {} : { criteria: request.criteria }),
             ...(request.dependsOn === undefined ? {} : { dependsOn: request.dependsOn }),
             ...(request.status === undefined ? {} : { status: request.status }),
+            ...(request.priority === undefined ? {} : { priority: request.priority }),
           });
           return { repo: await describe(entry), item };
         }
@@ -716,6 +932,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           const { backend } = await tracker(entry.path, true);
           const patch = {
             ...(request.status === undefined ? {} : { status: request.status }),
+            ...(request.priority === undefined ? {} : { priority: request.priority }),
             ...(request.owner === undefined ? {} : { owner: request.owner }),
             ...(request.title === undefined ? {} : { title: request.title }),
             ...(request.dependsOn === undefined ? {} : { dependsOn: request.dependsOn }),

@@ -97,6 +97,9 @@ for the practical setup and [clankie.bot](https://clankie.bot) for hosted availa
 ## A team around him
 
 **Work stays where you track it:** Linear, GitHub, or task files in the repo.
+Clankie and his workers use one Linear-shaped tool surface; without a Linear
+connection it uses durable local storage. `clankie doctor` reports the active
+backend, and the existing `clankie work` commands keep working.
 **Herdr contains the agents:** their native interactive terminals remain yours
 to watch and use. Clankie sends assignments through each supported harness's
 message connection, without typing into your draft. If delivery is unavailable

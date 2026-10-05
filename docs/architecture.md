@@ -520,7 +520,12 @@ Clankie uses pi's `ModelRuntime` and `createAgentSession` for Clankie's
 models, sessions, tools, skills, and compaction. The agent runtime, HTTP surface, and
 play host share one service
 ([ADR 0101](adr/0101-pi-owns-the-captain-model-runtime.md)).
-The repo's tracker or task files hold work and results. Herdr contains the native
+The repo's tracker or task files hold work and results. The service exposes one
+Linear-shaped tracker tool surface to Clankie and workers, using the connected
+owner account or durable local storage when disconnected; repository conventions
+adapt GitHub and Markdown to that same surface. `clankie doctor` reports backend
+selection and reason ([ADR 0226](adr/0226-one-tracker-tool-surface.md)).
+Herdr contains the native
 interactive workers; Clankie uses their supported channels or session APIs for
 delivery. Linked independent agents can write first with `message_clankie`. Untrusted input stays fenced, secrets stay in the credential
 broker, and every report describes observed outcomes rather than intentions.

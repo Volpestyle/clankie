@@ -20,8 +20,24 @@ Work items in the repo's own tracking convention ([ADR 0191](../../docs/adr/0191
   their other sections and order.
 
 The service (`apps/clankie/src/work-items.ts`) owns which repos a paired device
-may read or write; `clankie work` and the captain's `work_items` tools are its callers.
+may read or write; `clankie work` and the device API remain compatibility callers.
 The wire shapes live in `@clankie/protocol/work-items`.
+
+The canonical tracker surface is the Linear-shaped subset in `tracker-tools.ts`
+([ADR 0226](../../docs/adr/0226-one-tracker-tool-surface.md)). `createLocalTracker`
+provides that catalog and `call(name, args)` over a durable `tracker.json`, with
+atomic locked writes, stable UUIDs and human identifiers. The service exposes
+these as `linear_*` through the same MCP host and fleet directory used by
+connected Linear. No connection selects local storage; connected provider
+failures retain their errors and never replay locally. `clankie doctor` reports
+selection and reason. Repository adapters keep GitHub/Markdown issue storage
+and carry ancillary records in durable local metadata within that scope.
+
+Priority is native Linear `0..4`, Markdown `priority:` front matter and reserved
+GitHub priority labels. Open-work listing sorts Urgent→High→Medium→Low→none
+before limits and pagination. CLI create/update accept `--priority 0..4`.
+Export/import execution is deferred; the ADR specifies the identity mapping and
+uncertain-write reconciliation needed to avoid duplicate imports.
 
 `update` accepts `addLabels`, `removeLabels` and `addDependsOn` deltas. Each
 backend reads the item afresh and merges against its complete native metadata;

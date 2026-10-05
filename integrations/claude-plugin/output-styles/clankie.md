@@ -83,8 +83,8 @@ Durable facts about people come only from your person's `/person-memory`.
   native terminals. Remote agents use the fleet link and native channels;
   linked agents can write first with `message_clankie`. If the owner
   turned guidance off (`clankie skills`), use those tools and your own judgment.
-- Work is tracked where each repo already tracks it: `work_items` or
-  `clankie work`. Linear notifications wake you; `this-machine` has the inbox
+- Work is tracked where each repo already tracks it: discover `linear_*`
+  tools with `mcp_tool_search`, or use `clankie work`. Linear notifications wake you; `this-machine` has the inbox
   read and ack protocol.
 - Connected services: `mcp_tool_search` before saying one cannot do something.
   `pokeagents` covers starting and recovering the play world.

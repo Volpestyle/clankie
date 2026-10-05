@@ -1,13 +1,19 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { lstatSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { WorkItemSchema, type WorkItem, type WorkItemStatus } from "@clankie/protocol/work-items";
+import {
+  WorkItemPrioritySchema,
+  WorkItemSchema,
+  type WorkItem,
+  type WorkItemStatus,
+} from "@clankie/protocol/work-items";
 import {
   matchesFilter,
   patchCriteria,
   patchDependsOn,
   patchLabels,
   touchesCriteria,
+  sortWorkItems,
   WorkItemNotFoundError,
   WorkItemScopeError,
   workItemLabels,
@@ -85,13 +91,13 @@ function quote(value: string): string {
 }
 
 function serializeFile(fields: ReadonlyMap<string, string>, body: string): string {
-  const order = ["id", "title", "status", "owner", "depends_on", "created", "updated"];
+  const order = ["id", "title", "status", "owner", "priority", "depends_on", "created", "updated"];
   const keys = [
     ...order.filter((key) => fields.has(key)),
     ...[...fields.keys()].filter((key) => !order.includes(key)),
   ];
   const front = keys.map((key) => `${key}: ${quote(fields.get(key)!)}`).join("\n");
-  return `---\n${front}\n---\n\n${body.trim()}\n`;
+  return `---\n${front}\n---\n${body}`;
 }
 
 function statusOf(raw: string | undefined): WorkItemStatus {
@@ -157,6 +163,7 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       ...(parent === undefined || parent.trim() === "" ? {} : { parent }),
       title: title.slice(0, 200),
       status: statusOf(file.fields.get("status")),
+      priority: WorkItemPrioritySchema.parse(Number(file.fields.get("priority") ?? "0")),
       ...(owner === undefined || owner === "" ? {} : { owner }),
       dependsOn:
         depends === undefined
@@ -208,7 +215,7 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
     const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
     try {
       await writeFile(temporary, text, "utf8");
-      options.beforeWrite?.();
+      await options.beforeWrite?.();
       assertScopedPath(path);
       options.onDispatch?.();
       await rename(temporary, path);
@@ -220,9 +227,35 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
 
   return {
     kind: options.kind,
+    async readIssue(id) {
+      try {
+        const file = await find(id);
+        const item = toItem(file);
+        return {
+          ...item,
+          identifier: item.id,
+          description: file.body,
+          labels: listField(file.fields.get("labels")),
+          url: item.location,
+        };
+      } catch (error) {
+        if (error instanceof WorkItemNotFoundError) return undefined;
+        throw error;
+      }
+    },
     async list(filter?: WorkListFilter) {
-      const items = (await readAll()).map(toItem).filter((item) => matchesFilter(item, filter));
-      return items.slice(0, filter?.limit ?? items.length);
+      const { label, ...itemFilter } = filter ?? {};
+      const items = (await readAll())
+        .filter(
+          (file) =>
+            label === undefined ||
+            listField(file.fields.get("labels")).some(
+              (name) => name.trim().toLowerCase() === label.trim().toLowerCase(),
+            ),
+        )
+        .map(toItem)
+        .filter((item) => matchesFilter(item, itemFilter));
+      return sortWorkItems(items).slice(0, filter?.limit ?? items.length);
     },
     async get(id) {
       try {
@@ -240,6 +273,11 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
         ["id", id],
         ["title", draft.title],
         ["status", draft.status ?? "todo"],
+        ["priority", String(draft.priority ?? 0)],
+        ...(draft.parent === undefined ? [] : [["parent", draft.parent] as [string, string]]),
+        ...((draft.labels?.length ?? 0) === 0
+          ? []
+          : [["labels", JSON.stringify(draft.labels)] as [string, string]]),
         ...(draft.owner === undefined ? [] : [["owner", draft.owner] as [string, string]]),
         ...((draft.dependsOn?.length ?? 0) === 0
           ? []
@@ -247,15 +285,17 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
         ["created", now],
         ["updated", now],
       ]);
-      const body = patchBody(draft.summary ?? "", {
-        criteria: (draft.criteria ?? []).map((text) => ({ text, done: false })),
-        evidence: [],
-      });
+      const body =
+        draft.description ??
+        patchBody(draft.summary ?? "", {
+          criteria: (draft.criteria ?? []).map((text) => ({ text, done: false })),
+          evidence: [],
+        });
       const path = join(directory, `${id}-${slugify(draft.title)}.md`);
-      options.beforeWrite?.();
+      await options.beforeWrite?.();
       assertScopedPath(path, true);
       options.onDispatch?.();
-      await writeFile(path, serializeFile(fields, body), { encoding: "utf8", flag: "wx" });
+      await writeFile(path, serializeFile(fields, `\n${body}`), { encoding: "utf8", flag: "wx" });
       options.effectConfirmed?.();
       return toItem({ path, fields, body });
     },
@@ -264,6 +304,9 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       const current = toItem(file);
       const fields = new Map(file.fields);
       if (patch.status !== undefined) fields.set("status", patch.status);
+      if (patch.priority !== undefined) fields.set("priority", String(patch.priority));
+      if (patch.parent === null) fields.delete("parent");
+      else if (patch.parent !== undefined) fields.set("parent", patch.parent);
       if (patch.title !== undefined) fields.set("title", patch.title);
       if (patch.owner === null) fields.delete("owner");
       else if (patch.owner !== undefined) fields.set("owner", patch.owner);
@@ -272,7 +315,7 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
         if (depends.length === 0) fields.delete("depends_on");
         else fields.set("depends_on", depends.join(", "));
       }
-      if (patch.addLabels !== undefined || patch.removeLabels !== undefined) {
+      if (patch.labels !== undefined || patch.addLabels !== undefined || patch.removeLabels !== undefined) {
         const labels = patchLabels(listField(file.fields.get("labels")), patch);
         if (labels.length === 0) fields.delete("labels");
         else fields.set("labels", JSON.stringify(labels));
@@ -281,13 +324,20 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       if (!fields.has("title")) fields.set("title", current.title);
       fields.set("updated", clock().toISOString());
       const body =
-        touchesCriteria(patch) || patch.owner !== undefined
-          ? patchBody(file.body, {
+        patch.summary !== undefined ||
+        patch.evidence !== undefined ||
+        touchesCriteria(patch) ||
+        patch.owner !== undefined
+          ? patchBody(patch.description ?? patch.summary ?? file.body, {
+              ...(patch.summary === undefined
+                ? {}
+                : { criteria: current.criteria, evidence: current.evidence }),
               ...(touchesCriteria(patch) ? { criteria: patchCriteria(current.criteria, patch) } : {}),
+              ...(patch.evidence === undefined ? {} : { evidence: patch.evidence }),
               // Front matter owns the new value; clear any older inline fallback.
               ...(patch.owner === undefined ? {} : { owner: null }),
             })
-          : file.body;
+          : (patch.description ?? file.body);
       await write(file.path, serializeFile(fields, body));
       return toItem({ path: file.path, fields, body });
     },

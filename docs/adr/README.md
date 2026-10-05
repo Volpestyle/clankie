@@ -73,3 +73,4 @@ remains a separate reviewed effort.
 
 - [0222 — Discord setup has one shared definition](0222-discord-setup-has-one-shared-definition.md)
 - [0225 — Minecraft keeps playing with one driver](0225-minecraft-keeps-playing-with-one-driver.md)
+- [0226 — One tracker tool surface](0226-one-tracker-tool-surface.md)

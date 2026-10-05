@@ -102,6 +102,11 @@ export interface InstallDoctorReport {
   };
   readonly emailConfigured: boolean;
   readonly linear?: ReturnType<typeof linearFollowStatus>;
+  readonly tracker?: {
+    readonly backend: "linear" | "local";
+    readonly reason: "owner_connected" | "linear_disconnected" | "linear_disabled";
+    readonly directory?: string;
+  };
   readonly mcpServers: readonly string[];
   readonly credentials: readonly InstallDoctorCredential[];
   readonly commands: { readonly [name: string]: CommandPresence };
@@ -182,10 +187,28 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   const settings = await (options.settings ?? new SettingsStore(defaultSettingsPath(env))).load();
   const config = await (options.loadConfigImpl ?? loadConfig)({ cwd: options.repoRoot, env });
   const credentialStore = options.credentialStore ?? createDefaultCredentialStore({ env });
+  const linearServer = settings.mcp.servers.find((server) => server.id === "linear");
+  const trackerCredential = linearServer?.credential ?? "linear";
   const [credentials, linearSecret] = await Promise.all([
     listCredentialIds(credentialStore),
     credentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID).catch(() => undefined),
   ]);
+  // Use the same configuration/credential decision as the service host. A
+  // connected server's transport failure stays Linear; it cannot fork local work.
+  const trackerConnected =
+    linearServer?.enabled !== false &&
+    ((linearServer !== undefined && linearServer.credential === undefined) ||
+      (await credentialStore.get(trackerCredential)) !== undefined);
+  const tracker: NonNullable<InstallDoctorReport["tracker"]> = trackerConnected
+    ? { backend: "linear", reason: "owner_connected" }
+    : {
+        backend: "local",
+        reason: linearServer?.enabled === false ? "linear_disabled" : "linear_disconnected",
+        directory: join(
+          env.CLANKIE_STATE?.trim() || join(env.HOME?.trim() || homedir(), ".clankie"),
+          "tracker",
+        ),
+      };
   const linear = linearFollowStatus(
     settings.linearWebhook,
     linearSecret?.type === "api" && linearSecret.key.trim().length > 0,
@@ -280,6 +303,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
       settings.email.fromAddress !== undefined ||
       settings.email.imapHost !== undefined,
     linear,
+    tracker,
     mcpServers: settings.mcp.servers.filter((server) => server.enabled).map((server) => server.id),
     credentials,
     commands,

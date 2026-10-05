@@ -67,7 +67,8 @@ const RecordSchema = z.object({
   server: z.string(),
   lane: z.literal("operator"),
   tools: z.array(ToolRuleSchema),
-  account: ProviderAccountSchema,
+  account: ProviderAccountSchema.optional(),
+  backend: z.literal("local").optional(),
   revokedAt: z.string().datetime().optional(),
   fleet: FleetIdSchema.optional(),
   project: ProjectIdSchema.optional(),
@@ -102,13 +103,13 @@ const FLEET_TOOLS = [
   {
     name: "clankie_tools",
     description:
-      "Search connected tools with query (up to 20 names and one-line descriptions), or request full input schemas with names (up to 10). Discover a tool's schema before calling it.",
+      "Search available tools with query (up to 20 names and one-line descriptions), or request full input schemas with names (up to 10). The linear_* tracker tools use the owner's connected Linear account or durable local fallback. Discover a tool's schema before calling it.",
     inputSchema: z.toJSONSchema(FleetSearchSchema) as { type: "object" },
   },
   {
     name: "clankie_call",
     description:
-      "Call a connected tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Calls use Clankie's verified connected account.",
+      "Call an available tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Tracker calls use the active backend; other provider calls use Clankie's verified connected account.",
     inputSchema: z.toJSONSchema(FleetCallSchema) as { type: "object" },
   },
 ];
@@ -218,7 +219,7 @@ export class WorkerMcp {
       if (request.principalId !== `project:${project.id}` || request.workId !== `project:${project.id}`)
         throw new Error("Project grants must name their project as the principal and work.");
     }
-    const { account, binding } = await this.options.host.account(request.server, "operator");
+    const { account, binding, backend } = await this.binding(request.server, "operator");
     const catalog = await this.options.host.catalog("operator");
     if (request.tools.length === 0)
       // A project's standing access: the server's tools, minus worker publishing,
@@ -247,7 +248,8 @@ export class WorkerMcp {
       server: request.server,
       lane: "operator",
       tools: request.tools,
-      account,
+      ...(account === undefined ? {} : { account }),
+      ...(backend === undefined ? {} : { backend }),
       ...(request.project === undefined ? {} : { project: request.project }),
       grant: {
         version: 1,
@@ -326,8 +328,17 @@ export class WorkerMcp {
 
   private async checkBinding(record: GrantRecord) {
     if (record.revokedAt !== undefined) throw new Error("Worker grant revoked");
-    const current = await this.options.host.account(record.server, record.lane);
+    const current = await this.binding(record.server, record.lane);
     if (current.binding !== record.grant.profileHash) throw new Error("Delegated account changed");
+  }
+
+  private binding(server: string, lane: "operator") {
+    if (this.options.host.binding) return this.options.host.binding(server, lane);
+    return this.options.host.account(server, lane) as Promise<{
+      account?: z.infer<typeof ProviderAccountSchema>;
+      binding: string;
+      backend?: "local";
+    }>;
   }
 
   async handle(request: Request): Promise<Response> {
@@ -413,7 +424,7 @@ export class WorkerMcp {
       );
       for (const server of new Set(catalog.map((tool) => tool.server))) {
         try {
-          const { account, binding } = await this.options.host.account(server, "operator");
+          const { account, binding, backend } = await this.binding(server, "operator");
           const tools = catalog
             .filter(
               (tool) => tool.server === server && !(server === "linear" && isLinearWorkerTool(tool.name)),
@@ -424,7 +435,8 @@ export class WorkerMcp {
             server,
             lane: "operator",
             tools,
-            account,
+            ...(account === undefined ? {} : { account }),
+            ...(backend === undefined ? {} : { backend }),
             grant: {
               version: 1,
               grantId: randomUUID(),

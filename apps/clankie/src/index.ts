@@ -153,6 +153,7 @@ import { startHostedModelForwarder } from "./hosted-model-forwarder.ts";
 import { hostedPiSeatModel } from "./hosted-seat-model.ts";
 import { createHostedCustomerModels, customerSeatModel } from "./hosted-customer-model.ts";
 import { createWorkItemsService } from "./work-items.ts";
+import { createLocalTracker } from "@clankie/work-items";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
 
 const logger = createLogger({ service: "clankie", version: "0.2.0" });
@@ -558,6 +559,11 @@ const boundApp = (): ClankieApp => {
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
 const mcpHost = createMcpHost({
+  localTracker: createLocalTracker({ directory: join(stateRoot, "tracker") }),
+  trackerIdentity: join(stateRoot, "tracker"),
+  trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
+  trackerForRepo: ({ name, args, repo, local, beforeWrite, onDispatch, effectConfirmed }) =>
+    workItems.callTracker(name, args, { repo, local, beforeWrite, onDispatch, effectConfirmed }),
   minecraftMotor: {
     command: process.execPath,
     args: [

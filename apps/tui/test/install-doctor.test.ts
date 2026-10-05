@@ -5,6 +5,7 @@ import { FileCredentialStore, LINEAR_WEBHOOK_PROVIDER_ID } from "@clankie/creden
 import { SETTINGS_SCHEMA_VERSION, SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectInstall, inspectInstallKind, type ExecFileImpl } from "../src/install-doctor.ts";
+import { formatDoctorReport } from "../src/doctor-report.ts";
 
 const tempDirs: string[] = [];
 
@@ -26,6 +27,66 @@ const missing: ExecFileImpl = async () => {
 const offline: typeof fetch = () => Promise.reject(new Error("no probe in tests"));
 
 describe("install doctor", () => {
+  it("reports the tracker backend and selection reason without probing or writing Linear", async () => {
+    const root = await installRoot();
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const credentials = new FileCredentialStore(join(root, "credentials.json"));
+    const inspect = () =>
+      inspectInstall({
+        repoRoot: root,
+        env: {
+          HOME: join(root, "home"),
+          XDG_CONFIG_HOME: join(root, "config"),
+          CLANKIE_STATE: join(root, "state"),
+        },
+        settings,
+        credentialStore: credentials,
+        execFileImpl: missing,
+        fetchImpl: offline,
+      });
+    const local = await inspect();
+    expect(local.tracker).toEqual({
+      backend: "local",
+      reason: "linear_disconnected",
+      directory: join(root, "state", "tracker"),
+    });
+    expect(formatDoctorReport(local)).toContain(
+      "Tracker · local · Linear disconnected; using durable local store",
+    );
+    await credentials.set("linear", { type: "api", key: "isolated-doctor-fixture" });
+    const connected = await inspect();
+    expect(connected.tracker).toEqual({ backend: "linear", reason: "owner_connected" });
+    expect(formatDoctorReport(connected)).toContain("Tracker · linear · owner-connected Linear account");
+    await settings.update((current) => ({
+      ...current,
+      mcp: {
+        ...current.mcp,
+        servers: [
+          {
+            id: "linear",
+            transport: "http",
+            url: "http://127.0.0.1:1/mcp",
+            credential: "linear",
+            args: [],
+            lane: "everywhere",
+            initialTools: [],
+            enabled: false,
+          },
+        ],
+      },
+    }));
+    const disabled = await inspect();
+    expect(disabled.tracker).toEqual({
+      backend: "local",
+      reason: "linear_disabled",
+      directory: join(root, "state", "tracker"),
+    });
+    expect(formatDoctorReport(disabled)).toContain(
+      "Tracker · local · Linear disabled; using durable local store",
+    );
+    expect(JSON.stringify(disabled)).not.toContain("isolated-doctor-fixture");
+  });
+
   it("keeps missing webhook credentials separate from an empty owner rule", async () => {
     const root = await installRoot();
     const settings = new SettingsStore(join(root, "settings.json"));
