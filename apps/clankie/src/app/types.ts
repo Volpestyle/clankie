@@ -145,6 +145,8 @@ export interface ClankieAppDependencies {
   supportGrantSync?: Pick<HostedBodyClient, "syncSupportGrants">;
   /** Mandatory support audit bypasses ordinary diagnostic consent. */
   supportTelemetry?: BodyTelemetry;
+  /** Tenant telemetry key or a dedicated random key persisted on this body volume. */
+  supportDeviceRefKey?: Uint8Array;
   /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */
   hostedCredits?: Pick<HostedBodyClient, "readCredits">;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;

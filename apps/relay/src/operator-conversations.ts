@@ -495,8 +495,7 @@ async function authorizeGrant(
   if (authorization.device.supportGrantId !== undefined) {
     if (
       op === undefined ||
-      !authorization.device.grants.terminalObserve ||
-      authorization.device.supportScope === undefined ||
+      authorization.device.supportScope !== "read-state" ||
       !supportReadOperationAllowed(op, authorization.device.supportScope)
     ) {
       writeGrantDenial(response, grant);
@@ -844,8 +843,7 @@ function tailAuthorizationDenial(
   if (!authorization.authorized) return authorization.denial;
   if (authorization.device.supportGrantId !== undefined) {
     const scope = authorization.device.supportScope;
-    return authorization.device.grants.terminalObserve &&
-      scope !== undefined &&
+    return scope === "read-state" &&
       supportReadOperationAllowed(grant === "chat" ? "tail" : "terminal_tail", scope)
       ? undefined
       : "support_scope_required";

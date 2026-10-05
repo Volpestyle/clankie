@@ -7,9 +7,14 @@ also serves `clankie support` and `/support`.
 
 Read-state offers bind a read-only support device to the live grant. They
 permit conversation history and Clankie state, but no mutations or terminal
-content. Tokens expire no later than their grant and every request rechecks
+content. A Shell grant refuses pairing with HTTP 409
+`support_pairing_requires_read_state`; its shell access uses only the hosted
+Systems Manager `StartSession` path. Tokens expire no later than their grant and every request rechecks
 the live grant. Parked polls and established streams recheck before disclosing
 an event/frame, including after backpressure. Revocation and expiry close them.
+Support audit device references use the tenant-keyed `dv1_` HMAC scheme, with
+a durable local key for self-hosted bodies. The body derives the audit route
+class from the route it admitted; caller-supplied route headers cannot relabel it.
 
 Hosted account commands use single-use, short-lived tickets bound to the exact
 command, account, tenant, body, browser key and nonce. Replies are authenticated
@@ -73,6 +78,15 @@ execution is a fixture; no model calls or live service were involved.
 Relevant package typechecks passed for protocol, API client, observability,
 service and TUI. Scoped lint/format and whitespace checks passed. Local docs
 links and retired-claims checks passed. No full `pnpm check` or evals ran.
+
+Security-review follow-up: `support-access.test.ts` and the ordinary relay
+`operator-conversations.test.ts` passed **78/78** across two files. The support
+file covers shell pairing refusal, restored shell-bound devices, terminal and
+file refusals, forged route-class headers, stable keyed references across
+refresh/restart, different keys/devices, and fail-closed unavailable keys.
+After normalizing restored support-device refresh grants, the pairing/audit
+regressions passed again (**2/2**).
+Protocol, service and relay typechecks and scoped lint passed.
 
 ## Limits and integration
 

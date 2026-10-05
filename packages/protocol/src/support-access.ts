@@ -77,14 +77,14 @@ export type SupportRouteClass = z.infer<typeof SupportRouteClassSchema>;
 export const SUPPORT_DEVICE_GRANTS = {
   chat: false,
   steer: false,
-  terminalObserve: true,
+  terminalObserve: false,
   terminalControl: false,
 } as const;
 
-/** Read-state includes conversation state/history; terminal bytes additionally require shell scope. */
+/** Pairing reads conversation state/history. Shell grants authorize the fleet's separate shell path. */
 export function supportReadOperationAllowed(op: string, scope: "read-state" | "shell"): boolean {
   return (
-    ["list", "get", "replay", "tail", "presence", "roster", "fleet", "composer_catalog"].includes(op) ||
-    (scope === "shell" && ["terminal_catalog", "terminal_tail"].includes(op))
+    scope === "read-state" &&
+    ["list", "get", "replay", "tail", "presence", "roster", "fleet", "composer_catalog"].includes(op)
   );
 }

@@ -1,6 +1,7 @@
 import {
   createECDH,
   createHash,
+  createHmac,
   createDecipheriv,
   generateKeyPairSync,
   hkdfSync,
@@ -8,7 +9,15 @@ import {
   randomUUID,
   verify,
 } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, renameSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -32,6 +41,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { HostedPairing } from "../src/hosted-pairing.ts";
 import { HostedBodyClient } from "../src/hosted-body.ts";
+import { loadOrCreateDeviceSessionKey } from "../src/device-session.ts";
 import { hostedFixture } from "./fixtures/hosted-body.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createCaptainConversationDispatch } from "../../relay/src/conversation-upstream.ts";
@@ -70,7 +80,8 @@ async function fixture(
   let now = f.now;
   const key = randomBytes(32),
     log = join(root, "events.jsonl"),
-    spool = join(root, "telemetry");
+    spool = join(root, "telemetry"),
+    deviceRefKeyPath = join(root, "telemetry-device.key");
   const telemetry = createBodyTelemetry({ dir: spool, writer: "service", clock: () => now });
   const historicalIds: string[] = [];
   if (history !== undefined) {
@@ -150,8 +161,9 @@ async function fixture(
     { clock: () => now, replayPath: join(root, "tickets.json") },
   );
   let body: ClankieApp;
-  const makeBody = async () =>
-    createClankieApp({
+  const makeBody = async () => {
+    const supportDeviceRefKey = await loadOrCreateDeviceSessionKey(deviceRefKeyPath);
+    return createClankieApp({
       captain: createStubCaptain({
         serveOperatorConversation: (request, authority) => {
           if (request.op === "tail") {
@@ -164,6 +176,7 @@ async function fixture(
       deviceSessionKey: key,
       eventLogPath: log,
       supportTelemetry: telemetry,
+      ...(supportDeviceRefKey === undefined ? {} : { supportDeviceRefKey }),
       clock: () => new Date(now),
       authenticateOperator: async (r) =>
         r.headers.get("authorization") === "Bearer fixture-owner" ? { operatorId: "owner" } : undefined,
@@ -186,6 +199,7 @@ async function fixture(
           }
         : {}),
     });
+  };
   body = await makeBody();
   cleanups.push(async () => body.close());
   const server = serve({
@@ -270,6 +284,7 @@ async function fixture(
     f,
     gatewayHost,
     bodySigning,
+    deviceRefKeyPath,
     tail: () => tailStarted.promise,
     nextTail: () => nextTail.promise,
     resetTail: () => {
@@ -359,6 +374,178 @@ it("enforces owner grant lifecycle, readonly pairing, durable restart and conten
   expect(JSON.stringify(events)).not.toContain("CUSTOMER PRIVATE REFERENCE");
   expect(JSON.stringify(events)).not.toContain("/operator/v1");
   expect(JSON.stringify(events)).not.toContain(device.deviceToken);
+});
+
+it("refuses shell pairing and closes terminal and file reads for support, including restored shell devices", async () => {
+  const f = await fixture();
+  const shell = await f.owner.createSupportGrant({
+    scope: "shell",
+    durationSeconds: 120,
+    supportRef: "shell-ref",
+  });
+  const refused = await f.post(`/v1/support/grants/${shell.grantId}/pairing-offer`, {}, "fixture-owner");
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toEqual({ error: "support_pairing_requires_read_state" });
+
+  const grant = await f.owner.createSupportGrant({
+    scope: "read-state",
+    durationSeconds: 120,
+    supportRef: "state-ref",
+  });
+  const device = await f.pair(grant.grantId);
+  const self = await fetch(`${f.url}/v1/devices/self`, {
+    headers: { authorization: `Bearer ${device.deviceToken}` },
+  });
+  expect((await self.json()).grants).toEqual({
+    chat: false,
+    steer: false,
+    terminalObserve: false,
+    terminalControl: false,
+  });
+  expect(
+    (
+      await f.post(
+        "/operator/v1/dispatch",
+        { schemaVersion: 1, op: "terminal_catalog" },
+        device.deviceToken,
+        f.relay,
+      )
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await f.post(
+        "/operator/v1/terminal-tail",
+        {
+          schemaVersion: 1,
+          op: "terminal_tail",
+          observation: {
+            schemaVersion: 1,
+            terminalId: "term-worker",
+            surfaceClientId: "support",
+            columns: 120,
+            rows: 40,
+            limit: 1,
+          },
+        },
+        device.deviceToken,
+        f.relay,
+      )
+    ).status,
+  ).toBe(403);
+  expect(
+    (await fetch(`${f.relay}/v1/body-leases`, { headers: { authorization: `Bearer ${device.deviceToken}` } }))
+      .status,
+  ).toBe(403);
+  expect((await f.post("/operator/v1/artifacts/download", {}, device.deviceToken, f.relay)).status).toBe(403);
+
+  // Reproduce an older disk that admitted shell-bound support pairing. Its signed device
+  // identity survives restart, but shell authority must not enter the paired read transport.
+  const log = join(f.root, "events.jsonl");
+  const records = readFileSync(log, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  for (const record of records)
+    if (record.type === "device.activated" && record.data.deviceId === device.deviceId)
+      record.data.grants.terminalObserve = true;
+  writeFileSync(log, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+  await f.restart();
+  const refreshed = await f.post("/v1/devices/self/session/refresh", {}, device.deviceToken);
+  expect(refreshed.status).toBe(200);
+  expect((await refreshed.json()).grants).toEqual(SUPPORT_DEVICE_GRANTS);
+
+  for (const record of records)
+    if (record.type === "support.grant.granted" && record.data.grant.grantId === grant.grantId)
+      record.data.grant.scope = "shell";
+  writeFileSync(log, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+  await f.restart();
+  expect(
+    (await fetch(`${f.url}/v1/devices/self`, { headers: { authorization: `Bearer ${device.deviceToken}` } }))
+      .status,
+  ).toBe(401);
+  expect(
+    (
+      await f.post(
+        "/operator/v1/dispatch",
+        { schemaVersion: 1, op: "terminal_catalog" },
+        device.deviceToken,
+        f.relay,
+      )
+    ).status,
+  ).toBe(401);
+});
+
+it("derives audit route classes on the server and uses durable keyed device references", async () => {
+  const f = await fixture();
+  const grant = await f.owner.createSupportGrant({
+    scope: "read-state",
+    durationSeconds: 120,
+    supportRef: "private-ref",
+  });
+  const device = await f.pair(grant.grantId);
+  const headers = { authorization: `Bearer ${device.deviceToken}`, "x-clankie-support-route-class": "other" };
+  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(200);
+  const expected = `dv1_${createHmac("sha256", Buffer.from(readFileSync(f.deviceRefKeyPath, "utf8"), "hex"))
+    .update(`clankie-device-v1\0${device.deviceId}`)
+    .digest("base64url")
+    .slice(0, 22)}`;
+  expect(f.audit().at(-1)).toMatchObject({
+    action: "accessed",
+    routeClass: "device-state",
+    deviceRef: expected,
+  });
+  expect(expected).toMatch(/^dv1_[A-Za-z0-9_-]{22}$/u);
+  expect(expected).not.toBe(
+    `dv1_${createHash("sha256").update(device.deviceId).digest("base64url").slice(0, 22)}`,
+  );
+  await f.restart();
+  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(200);
+  expect(f.audit().at(-1).deviceRef).toBe(expected);
+  const refresh = await fetch(`${f.url}/v1/devices/self/session/refresh`, {
+    method: "POST",
+    headers: { ...headers, "x-clankie-support-route-class": "body-state" },
+  });
+  expect(refresh.status).toBe(200);
+  expect(f.audit().at(-1)).toMatchObject({
+    action: "accessed",
+    routeClass: "device-session",
+    deviceRef: expected,
+  });
+  expect(JSON.stringify(f.audit())).not.toContain(device.deviceId);
+
+  const secondDevice = await f.pair(grant.grantId);
+  expect(
+    (
+      await fetch(`${f.url}/v1/devices/self`, {
+        headers: { authorization: `Bearer ${secondDevice.deviceToken}` },
+      })
+    ).status,
+  ).toBe(200);
+  expect(f.audit().at(-1).deviceRef).not.toBe(expected);
+
+  writeFileSync(f.deviceRefKeyPath, randomBytes(32).toString("hex"));
+  await f.restart();
+  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(200);
+  expect(f.audit().at(-1).deviceRef).not.toBe(expected);
+});
+
+it("fails support reads closed when the durable device reference key is unavailable", async () => {
+  const f = await fixture();
+  const grant = await f.owner.createSupportGrant({
+    scope: "read-state",
+    durationSeconds: 120,
+    supportRef: "private-ref",
+  });
+  const device = await f.pair(grant.grantId);
+  const headers = { authorization: `Bearer ${device.deviceToken}` };
+  chmodSync(f.deviceRefKeyPath, 0o644);
+  await f.restart();
+  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(503);
+  expect(f.audit().filter((event) => event.action === "accessed")).toEqual([]);
+  chmodSync(f.deviceRefKeyPath, 0o600);
+  await f.restart();
+  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(200);
 });
 
 it("bounds open windows while keeping more than 1024 ended durable grants and rejecting restored expired authority", async () => {

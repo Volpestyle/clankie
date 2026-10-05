@@ -1,4 +1,4 @@
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, createHmac } from "node:crypto";
 import {
   SupportGrantCreateRequestSchema,
   SupportGrantSchema,
@@ -32,6 +32,8 @@ export class SupportGrantStore {
     idFactory?: () => string;
     recordEvent: (type: string, streamId: string, at: string, data: Record<string, unknown>) => DomainEvent;
     telemetry?: BodyTelemetry;
+    /** This tenant's telemetry key, or the body's dedicated persistent local telemetry key. */
+    deviceRefKey?: Uint8Array;
     requireAudit?: boolean;
     changed?: () => void;
   };
@@ -138,12 +140,19 @@ export class SupportGrantStore {
   accessed(id: string, deviceId: string, routeClass: SupportRouteClass): boolean {
     const grant = this.active(id);
     if (grant === undefined) return false;
+    if (this.options.telemetry === undefined && !this.options.requireAudit) return true;
+    const key = this.options.deviceRefKey;
+    if (key === undefined || key.byteLength !== 32)
+      throw new Error("Support device reference key unavailable");
     this.audit({
       event: "body.support",
       action: "accessed",
       grantId: id,
       scope: grant.scope,
-      deviceRef: createHash("sha256").update(deviceId).digest("base64url"),
+      deviceRef: `dv1_${createHmac("sha256", key)
+        .update(`clankie-device-v1\0${deviceId}`)
+        .digest("base64url")
+        .slice(0, 22)}`,
       routeClass,
     });
     return true;

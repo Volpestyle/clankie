@@ -1,5 +1,5 @@
 import { SupportGrantStore } from "../support-access.ts";
-import { SUPPORT_DEVICE_GRANTS, SupportRouteClassSchema } from "@clankie/protocol/support-access";
+import { SUPPORT_DEVICE_GRANTS } from "@clankie/protocol/support-access";
 import { createIntegrationRoutes } from "../integrate-routes.ts";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
 import {
@@ -192,6 +192,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     clock,
     requireAudit: dependencies.hostedBody !== undefined || dependencies.hostedPairing !== undefined,
     ...(dependencies.supportTelemetry === undefined ? {} : { telemetry: dependencies.supportTelemetry }),
+    ...(dependencies.supportDeviceRefKey === undefined
+      ? {}
+      : { deviceRefKey: dependencies.supportDeviceRefKey }),
     changed: () => {
       void syncSupportGrants();
     },
@@ -427,8 +430,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (record.supportGrantId !== undefined) {
       const grant = supportGrants.active(record.supportGrantId);
       if (grant === undefined) return { denied: "revoked" };
+      if (grant.scope !== "read-state") return { denied: "invalid" };
       const path = new URL(request.url).pathname;
-      // A support session is a read capability, even for an explicit shell grant.
+      // Support pairing carries read-state only; shell access is the fleet's separate path.
       if (
         !(
           (request.method === "GET" && path === "/v1/devices/self") ||
@@ -441,8 +445,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           supportGrants.accessed(
             record.supportGrantId,
             record.deviceId,
-            SupportRouteClassSchema.safeParse(request.headers.get("x-clankie-support-route-class")).data ??
-              (path.endsWith("/refresh") ? "device-session" : "device-state"),
+            path === "/v1/devices/self/session/refresh" ? "device-session" : "device-state",
           );
         } catch {
           return "unavailable";
@@ -459,10 +462,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     return {
       deviceId: record.deviceId,
-      grants:
-        record.supportGrantId === undefined
-          ? record.grants
-          : { ...SUPPORT_DEVICE_GRANTS, terminalObserve: record.grants.terminalObserve },
+      grants: record.supportGrantId === undefined ? record.grants : SUPPORT_DEVICE_GRANTS,
       sessionExpiresAt: new Date(claims.expiresAt * 1000).toISOString(),
     };
   };
@@ -2077,8 +2077,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   registerLinearRoutes({ app, dependencies, settingsSource, clock });
   const { wakeRevocationTimer } = registerPairingRoutes({
-    get supportGrants() { return supportGrants; },
-    get questionOwnerAuthority() { return questionOwnerAuthority; },
+    get supportGrants() {
+      return supportGrants;
+    },
+    get questionOwnerAuthority() {
+      return questionOwnerAuthority;
+    },
     get dependencies() {
       return dependencies;
     },

@@ -455,6 +455,10 @@ const deviceSessionKeyPath = process.env.CLANKIE_DEVICE_SESSION_KEY_PATH
   ? resolve(process.env.CLANKIE_DEVICE_SESSION_KEY_PATH)
   : join(stateRoot, "device-session.key");
 const deviceSessionKey = await loadOrCreateDeviceSessionKey(deviceSessionKeyPath);
+const supportDeviceRefKey =
+  hostedBody?.bootstrap.tenantTelemetryKey === undefined
+    ? await loadOrCreateDeviceSessionKey(join(stateRoot, "telemetry-device.key"))
+    : Uint8Array.from(Buffer.from(hostedBody.bootstrap.tenantTelemetryKey, "base64url"));
 if (deviceSessionKey === undefined) {
   logger.warn(
     { deviceSessionKeyPath },
@@ -1216,6 +1220,7 @@ const clankie = await createClankieApp({
     ? {}
     : { hostedPairing, onHostedPairing: () => hostedHeartbeat?.interactive() }),
   ...(rawBodyTelemetry === undefined ? {} : { supportTelemetry: rawBodyTelemetry }),
+  ...(supportDeviceRefKey === undefined ? {} : { supportDeviceRefKey }),
   ...(hostedBody === undefined
     ? {}
     : {

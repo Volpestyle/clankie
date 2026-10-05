@@ -1,6 +1,12 @@
 import { SupportGrantStore, SupportGrantCapacityError } from "../support-access.ts";
 import type { QuestionAuthority } from "../captain/conversation-questions.ts";
-import { SUPPORT_GRANTS_PATH, HOSTED_SUPPORT_PATH, SUPPORT_DEVICE_GRANTS, SupportGrantCreateRequestSchema, type SupportAccessCommand } from "@clankie/protocol/support-access";
+import {
+  SUPPORT_GRANTS_PATH,
+  HOSTED_SUPPORT_PATH,
+  SUPPORT_DEVICE_GRANTS,
+  SupportGrantCreateRequestSchema,
+  type SupportAccessCommand,
+} from "@clankie/protocol/support-access";
 import {
   DEVICE_PUSH_PATH,
   DeviceDirectRouteSchema,
@@ -230,6 +236,8 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     const supportGrant = supportGrantId === undefined ? undefined : ctx.supportGrants.active(supportGrantId);
     if (supportGrantId !== undefined && supportGrant === undefined)
       return context.json({ error: "expired" }, 410);
+    if (supportGrant !== undefined && supportGrant.scope !== "read-state")
+      return context.json({ error: "support_pairing_requires_read_state" }, 409);
     const offeredGrants = supportGrantId === undefined ? TAKE_CONTROL_GRANTS : SUPPORT_DEVICE_GRANTS;
     const deviceId = `device-${ctx.idFactory().slice(0, 12)}`;
     const pendingExpiresAt = new Date(now.getTime() + COMPLETION_TOKEN_TTL_MS).toISOString();
@@ -298,6 +306,8 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
           : Math.floor(Date.parse(supportGrant.expiresAt) / 1000) - Math.floor(now.getTime() / 1000);
       if (record.supportGrantId !== undefined && (supportGrant === undefined || (ttlSeconds ?? 0) <= 0))
         return context.json({ error: "expired" }, 410);
+      if (supportGrant !== undefined && supportGrant.scope !== "read-state")
+        return context.json({ error: "support_pairing_requires_read_state" }, 409);
       const current = ctx.completionTokens.get(tokenHash);
       if (current === undefined || current.consumed) return context.json({ error: "consumed" }, 409);
       current.consumed = true;
@@ -355,13 +365,15 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
           : {
               ttlSeconds:
                 Math.floor(
-                  Date.parse(ctx.supportGrants.active(record.supportGrantId)?.expiresAt ?? now.toISOString()) /
-                    1000,
+                  Date.parse(
+                    ctx.supportGrants.active(record.supportGrantId)?.expiresAt ?? now.toISOString(),
+                  ) / 1000,
                 ) - Math.floor(now.getTime() / 1000),
             }),
       });
       const deviceToken = signer.issue(claims);
       const sessionExpiresAt = new Date(claims.expiresAt * 1000).toISOString();
+      const grants = record.supportGrantId === undefined ? record.grants : SUPPORT_DEVICE_GRANTS;
       const refreshed = ctx.recordEvent(
         "device.session.refreshed",
         `device:${identity.deviceId}`,
@@ -369,14 +381,14 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         {
           schemaVersion: 1,
           deviceId: identity.deviceId,
-          grants: record.grants,
+          grants,
           sessionExpiresAt,
         },
       );
       applyDeviceEvent(ctx.devices, refreshed);
       return context.json({
         deviceToken,
-        grants: record.grants,
+        grants,
         sessionExpiresAt,
         ...advertisedRelayUrl(),
       } satisfies DeviceSessionRefreshResponse);
@@ -614,6 +626,8 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     }
     const grant = ctx.supportGrants.active(command.grantId);
     if (grant === undefined) return Response.json({ error: "support_grant_inactive" }, { status: 410 });
+    if (grant.scope !== "read-state")
+      return Response.json({ error: "support_pairing_requires_read_state" }, { status: 409 });
     const direct = advertisedDirectRoute().directRoute?.controlPlaneUrl;
     const publisher = ctx.dependencies.pairingOfferPublisher;
     const doorway = ctx.dependencies.publicGatewayDoorway?.();
@@ -630,7 +644,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       mintedBy: `support:${grant.grantId}`,
       supportGrantId: grant.grantId,
       ttlMs: Math.min(5 * 60_000, Date.parse(grant.expiresAt) - now.getTime()),
-      ctx.idFactory,
+      idFactory: ctx.idFactory,
     });
     if (publisher !== undefined) {
       try {

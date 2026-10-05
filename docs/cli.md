@@ -2330,8 +2330,11 @@ permits a support device to inspect conversation history and Clankie state;
 it cannot change settings, send commands or read terminal output. Shell permits
 commands and the content those commands can read during the grant window.
 
-`offer ID` returns a short-lived, read-only pairing offer attached to the grant;
-the resulting device loses access on grant expiry or revocation. `revoke ID`
+`offer ID` requires a Read state grant and returns a short-lived, read-only
+pairing offer attached to it. The resulting device loses access on grant expiry
+or revocation. Shell grants refuse pairing with
+`support_pairing_requires_read_state` and authorize only the hosted Systems
+Manager `StartSession` path. `revoke ID`
 closes the grant. Responses are JSON. This command requires the operator
 credential; a captain bearer cannot issue support access. `/support` exposes
 the same command in the console. The hosted app and web account page provide

@@ -3,7 +3,6 @@ import {
   parseProtocolResponse,
   type DeviceSelfResponse,
 } from "../../../packages/protocol/src/index.ts";
-import type { SupportRouteClass } from "../../../packages/protocol/src/support-access.ts";
 
 export type RelayDeviceAuthDenial = "invalid" | "expired" | "revoked" | "unavailable";
 
@@ -16,7 +15,7 @@ export type RelayDeviceAuthorization =
  * state on every call; a signed token alone is identity, never live authority.
  */
 export interface RelayDeviceAuthorizer {
-  authorize(bearerToken: string, routeClass?: SupportRouteClass): Promise<RelayDeviceAuthorization>;
+  authorize(bearerToken: string): Promise<RelayDeviceAuthorization>;
 }
 
 export interface ControlPlaneDeviceAuthorizerOptions {
@@ -38,14 +37,11 @@ export class ControlPlaneDeviceAuthorizer implements RelayDeviceAuthorizer {
     this.fetcher = options.fetch ?? globalThis.fetch;
   }
 
-  public async authorize(
-    bearerToken: string,
-    routeClass: SupportRouteClass = "body-state",
-  ): Promise<RelayDeviceAuthorization> {
+  public async authorize(bearerToken: string): Promise<RelayDeviceAuthorization> {
     let response: Response;
     try {
       response = await this.fetcher(this.endpoint, {
-        headers: { authorization: `Bearer ${bearerToken}`, "x-clankie-support-route-class": routeClass },
+        headers: { authorization: `Bearer ${bearerToken}` },
         signal: AbortSignal.timeout(5_000),
       });
     } catch {
