@@ -330,3 +330,52 @@ export class LiveAgentPicker implements Component {
     );
   }
 }
+
+/** The tint that marks an agent's conversation: its harness color, or the accent when it is not seated. */
+export function agentTint(agent: LiveAgent | undefined, { ansi }: AgentTheme): (text: string) => string {
+  if (agent === undefined) return ansi.accent;
+  return clean(agent.seat.harness) === "claude" ? ansi.yellow : ansi.blue;
+}
+
+/**
+ * The fixed bar above the transcript naming the conversation on screen. In an
+ * agent's conversation it takes that agent's tint and says how to get home.
+ */
+export class ConversationHeader implements Component {
+  private readonly theme: AgentTheme;
+  private readonly view: () => {
+    readonly title?: string;
+    readonly agent?: { readonly name: string; readonly live?: LiveAgent };
+  };
+
+  constructor(
+    theme: AgentTheme,
+    view: () => {
+      readonly title?: string;
+      readonly agent?: { readonly name: string; readonly live?: LiveAgent };
+    },
+  ) {
+    this.theme = theme;
+    this.view = view;
+  }
+
+  invalidate(): void {}
+
+  render(width: number): string[] {
+    const { ansi } = this.theme;
+    const { title, agent } = this.view();
+    const fit = (line: string) => truncateToWidth(line, Math.max(1, width), "…");
+    if (agent === undefined) {
+      const heading = `${ansi.bold("Clankie")}${title && title !== "Clankie" ? ansi.dim(` · ${clean(title)}`) : ""}`;
+      return [fit(heading), ansi.dim("─".repeat(Math.max(1, width)))];
+    }
+    const tint = agentTint(agent.live, this.theme);
+    const details = agent.live === undefined ? "" : ` · ${agentMetadata(agent.live, this.theme)}`;
+    return [
+      fit(
+        `${tint("◀ esc")} ${ansi.dim("Clankie ›")} ${ansi.bold(tint(clean(agent.name)))}${details}${ansi.dim(" · ctrl+y pane")}`,
+      ),
+      tint("━".repeat(Math.max(1, width))),
+    ];
+  }
+}

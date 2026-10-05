@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { stripTerminalSequences, visibleWidth, type Component } from "@earendil-works/pi-tui";
-import { LiveAgentPicker, LiveAgentStrip } from "../src/shell/live-agents.ts";
+import { ConversationHeader, LiveAgentPicker, LiveAgentStrip } from "../src/shell/live-agents.ts";
 import { ClankieFaceShell } from "../src/shell/shell.ts";
 import type { LiveAgent } from "../src/observation/herdr-roster.ts";
 import { createClankieFaceAnsiTheme } from "../src/face/clankie-face-theme.ts";
@@ -186,7 +186,10 @@ it.each([32, 120])("places the dock below the prompt at width %i", (width) => {
 });
 
 it("enters the inline agent list only from an empty prompt and opens the chosen seat", async () => {
-  const open = vi.fn(async (_agent: LiveAgent) => {});
+  let expanded: LiveAgent | undefined;
+  const open = vi.fn(async (value: LiveAgent) => {
+    expanded = value;
+  });
   const shell = new ClankieFaceShell({
     commands: [],
     cwd: process.cwd(),
@@ -194,6 +197,8 @@ it("enters the inline agent list only from an empty prompt and opens the chosen 
     bannerFields: { title: "Clankie" },
     liveAgents: () => [agent("first"), agent("second")],
     onOpenLiveAgent: open,
+    expandedAgent: () => expanded?.name,
+    expandedAgentSeatId: () => expanded?.seat.seatId,
   });
   vi.spyOn(shell.tui, "start").mockImplementation(() => {});
   shell.start();
@@ -207,7 +212,16 @@ it("enters the inline agent list only from an empty prompt and opens the chosen 
   ui.routeInput("\r");
   await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
   expect(open.mock.calls[0]?.[0].seat.seatId).toBe("second");
-  expect(plain(shell.tui.render(120))).not.toContain("esc back");
+  const rows = shell.tui.render(120);
+  expect(plain(rows)).not.toContain("esc back");
+  // The fixed header names the agent on screen and the way home, in its harness tint.
+  expect(stripTerminalSequences(rows[0]!)).toContain("◀ esc Clankie › Worker second");
+  expect(stripTerminalSequences(rows[1]!)).toMatch(/^━+$/u);
+  const header = new ConversationHeader(theme, () => ({ agent: { name: "Worker", live: agent("w") } }));
+  expect(header.render(40)[1]).toBe(ansi.blue("━".repeat(40)));
+  expect(plain(new ConversationHeader(theme, () => ({ title: "Main" })).render(40))).toContain(
+    "Clankie · Main",
+  );
 });
 
 it("opens a real overlay, restores editor focus and navigates without interrupting the agent", async () => {
