@@ -17,9 +17,11 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import { createCaptainConversationDispatch } from "../src/conversation-upstream.ts";
 import { ControlPlaneDeviceAuthorizer, type RelayDeviceAuthorizer } from "../src/device-auth.ts";
+import { publicGatewayTargetFor } from "../../../packages/protocol/src/public-gateway.ts";
 import {
   createOperatorConversationRelayHandler,
   OPERATOR_CONVERSATION_TAIL_PATH,
+  OPERATOR_RELAY_DEVICE_ROUTES,
   type OperatorConversationRelayOptions,
   type RelayConversationLogger,
 } from "../src/operator-conversations.ts";
@@ -1477,4 +1479,18 @@ it("withholds room output after await if the original observe grant is revoked",
     headers: { authorization: `Bearer ${TOKEN}` },
   });
   expect(response.status).toBe(403);
+});
+
+describe("public gateway reach", () => {
+  // A route missing from the gateway works on the same Mac and fails on every
+  // remote device with only a generic "couldn't load".
+  it.each(OPERATOR_RELAY_DEVICE_ROUTES)("forwards $method $path to the relay", ({ method, path }) => {
+    expect(publicGatewayTargetFor(method, path)).toBe("relay");
+  });
+
+  it.each(OPERATOR_RELAY_DEVICE_ROUTES)("owns $method $path and refuses it without a device token", async ({ method, path }) => {
+    const { url } = await startRelay({ dispatch: async () => { throw new Error("not reached"); } });
+    const response = await fetch(new URL(path, url), { method, ...(method === "POST" ? { body: "{}", headers: { "content-type": "application/json" } } : {}) });
+    expect(response.status).toBe(401);
+  });
 });

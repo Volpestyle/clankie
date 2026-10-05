@@ -78,6 +78,26 @@ export interface OperatorConversationRelayOptions {
 }
 
 /**
+ * Every route this boundary owns for a paired device. A device reaching its
+ * host through the public gateway can only use routes the gateway forwards,
+ * so the relay tests hold this list against `PUBLIC_GATEWAY_ROUTES`.
+ */
+export const OPERATOR_RELAY_DEVICE_ROUTES = [
+  { method: "POST", path: OPERATOR_CONVERSATION_DISPATCH_PATH },
+  { method: "POST", path: OPERATOR_CONVERSATION_TAIL_PATH },
+  { method: "POST", path: OPERATOR_TERMINAL_TAIL_PATH },
+  { method: "POST", path: OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH },
+  { method: "GET", path: BODY_LEASE_STATUS_PATH },
+  { method: "GET", path: DISCORD_ROOMS_PATH },
+  { method: "GET", path: DISCORD_SETTINGS_PATH },
+  { method: "GET", path: DISCORD_DIRECTORY_PATH },
+  { method: "GET", path: DISCORD_ROOM_VOICE_PATH },
+  { method: "GET", path: DISCORD_VOICE_TRANSCRIPTS_PATH },
+  { method: "POST", path: DISCORD_ROOM_GUIDANCE_PATH },
+  { method: "POST", path: DISCORD_SETUP_TEST_POST_PATH },
+] as const;
+
+/**
  * Authenticated HTTP/NDJSON projection of the callable operator contract.
  * Returns true only for routes this boundary owns.
  */
