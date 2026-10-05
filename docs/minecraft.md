@@ -143,14 +143,15 @@ manual equivalent provisions the pinned playit agent and begins a claim:
 ```sh
 clankie minecraft host tunnel claim
 clankie minecraft host tunnel status  # Repeat while preparing; pending includes the URL.
-# Approve that URL in your browser, then:
-clankie minecraft host tunnel complete
+# Approve that URL in your browser; the integration completes it automatically.
+clankie minecraft host tunnel status
 ```
 
 Claim returns quickly with `preparing`; its background build survives the request.
-Status reports its phase and the approval URL when ready; complete polls
-once and stores the permanent agent key in the broker after browser approval.
-Pending needs another completion poll; expired/rejected claims need resolving. On macOS, playit has no official binary
+Status reports its phase and the approval URL when ready. The integration calls
+playit every three seconds, exchanges browser approval, and stores the permanent
+agent key in the broker even after the CLI exits. `complete` also reads status.
+Expired/rejected claims need a new claim. On macOS, playit has no official binary
 asset for the selected version: setup compiles pinned **0.17.1** source with its
 locked Cargo dependencies, so Cargo is required. Future starts use the verified
 cached executable. No router forwarding is needed. Public address and genuine

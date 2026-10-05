@@ -1009,8 +1009,9 @@ instance is stopped. `host admin JSON` accepts typed administration; `host appro
 USERNAME` approves an existing verified Discord request. No op, raw RCON or
 account-secret arguments are accepted. `host tunnel claim` starts a background
 agent build/claim job and returns quickly with its phase. `host tunnel status` reads its
-phase and the approval URL when ready; after browser approval, `host tunnel complete` polls once and sends the
-permanent key straight to the broker. This Mac builds pinned playit source during setup and requires Cargo.
+phase and the approval URL when ready. The integration polls playit every three seconds
+and sends browser approval straight to the broker even after the CLI exits;
+`host tunnel complete` also reads status. This Mac builds pinned playit source during setup and requires Cargo.
 
 `minecraft configure PROFILE HOST --version VERSION [--port PORT] [--username NAME]`
 adds an offline Java server profile. `configure` shows settings; `configure remove PROFILE`

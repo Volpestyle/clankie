@@ -116,6 +116,7 @@ vi.mock("../src/tunnel.ts", () => ({
       return { phase: "stopped" };
     }
     async stop() {}
+    async close() {}
     async start() {
       mocks.tunnelStarts++;
     }

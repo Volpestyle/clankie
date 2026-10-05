@@ -132,6 +132,7 @@ test("claim preparation survives returned requests and reuses one real delayed C
     expect(await tunnel.prepareClaim()).toEqual(ready);
     expect(installs).toBe(1);
     expect(setups).toBe(1);
+    await expect.poll(() => tunnel.claimStatus().phase, { timeout: 5000 }).toBe("claimed");
     expect(await tunnel.completeClaim()).toEqual({ phase: "claimed", claimed: true });
     expect(await readFile(join(dataDir, "broker-secret"), "utf8")).toBe(secret);
     expect(await tunnel.prepareClaim()).toEqual({ phase: "claimed", claimed: true });

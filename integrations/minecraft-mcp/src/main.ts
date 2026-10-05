@@ -65,6 +65,11 @@ const createTunnel = () =>
     dataDir: host.dataDir,
     originPort: host.status().gamePort,
     authReady: () => host.status().authReady,
+    onClaimed: async () =>
+      withHost(async () => {
+        const status = host.status();
+        if (status.phase === "running" && status.authReady) await tunnel?.start();
+      }),
     credentials: {
       get: async () => {
         const credential = await credentials.get("clankie_minecraft_playit");
@@ -79,7 +84,7 @@ const currentTunnel = async () => {
   if (backend.kind !== "local") throw new Error("Minecraft AWS host does not use playit");
   await host.configuration();
   if (!tunnel || tunnelPort !== host.status().gamePort) {
-    await tunnel?.stop();
+    await tunnel?.close();
     tunnel = createTunnel();
     tunnelPort = host.status().gamePort;
   }
@@ -108,8 +113,8 @@ const withHost = <T>(operation: () => Promise<T>): Promise<T> => {
   return pending;
 };
 const configureHost = async (raw: unknown) => {
-  if (tunnel?.claimStatus().phase === "preparing")
-    throw new Error("Wait for Minecraft tunnel claim preparation before changing host settings");
+  if (["preparing", "pending"].includes(tunnel?.claimStatus().phase ?? "idle"))
+    throw new Error("Wait for Minecraft tunnel claim completion before changing host settings");
   const { backend: requested, ...patch } = HostConfigurationPatchSchema.parse(raw);
   const next = requested ?? backend;
   const changing = JSON.stringify(next) !== JSON.stringify(backend);
@@ -120,7 +125,7 @@ const configureHost = async (raw: unknown) => {
     // configure performs a read-only stopped-state check. refresh would attach a
     // watchdog to a running candidate even though this selection is rejected.
     await candidate.configure(patch);
-    await tunnel?.stop();
+    await tunnel?.close();
     await mkdir(dataDir, { recursive: true, mode: 0o700 });
     const temporary = `${backendPath}.${randomUUID()}.tmp`;
     await writeFile(temporary, JSON.stringify(next) + "\n", { mode: 0o600 });
@@ -364,15 +369,11 @@ server.registerTool(
 );
 server.registerTool(
   "host_claim_complete",
-  { description: "Complete an approved playit claim into broker storage.", inputSchema: z.strictObject({}) },
-  async () =>
-    withHost(async () => {
-      const activeTunnel = await currentTunnel();
-      const claim = await activeTunnel.completeClaim();
-      const status = host.status();
-      if (claim.claimed && status.phase === "running" && status.authReady) await activeTunnel.start();
-      return result(claim);
-    }),
+  {
+    description: "Read the integration-owned playit claim job; approval is exchanged automatically.",
+    inputSchema: z.strictObject({}),
+  },
+  async () => withHost(async () => result(await (await currentTunnel()).completeClaim())),
 );
 await server.connect(new StdioServerTransport());
 let closing = false;
@@ -384,7 +385,7 @@ const shutdown = () => {
       await motor.close();
     } finally {
       try {
-        await tunnel?.stop();
+        await tunnel?.close();
       } finally {
         await host.stop();
       }
