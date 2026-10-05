@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BodyConversationIdentity } from "../src/body-lease-router.ts";
 import { createMinecraftHostAuthority } from "../src/minecraft-host-authority.ts";
 import { MinecraftHostService } from "../src/minecraft-host.ts";
+import { minecraftHostTools } from "../src/captain/minecraft-host-tools.ts";
 import type { McpHost } from "../src/mcp-host.ts";
 import type { MinecraftService } from "../src/minecraft.ts";
 
@@ -203,21 +204,37 @@ describe("Minecraft host core receipts and authority", () => {
     }
   });
 
-  it("strips provider secrets from status and completed admin results", async () => {
+  it("preserves safe tunnel errors through the captain tool and strips provider secrets", async () => {
     const f = fixture();
     try {
-      f.reply.mockResolvedValueOnce({
+      const failedStatus = {
         ...status,
+        tunnel: { phase: "failed", error: "playit-email-verification-required" },
+      };
+      f.reply.mockResolvedValueOnce({
+        ...failedStatus,
         password: "DO_NOT_RETURN",
-        tunnel: { ...status.tunnel, secret: "DO_NOT_RETURN" },
+        tunnel: { ...failedStatus.tunnel, secret: "DO_NOT_RETURN" },
       });
+      const tool = minecraftHostTools(f.service, { bodyIdentity: f.friend }).find(
+        (item) => item.name === "minecraft_host_status",
+      )!;
+      const result = await tool.execute("test", {}, undefined, undefined, {} as never);
       const visible = [
-        await f.service.status(f.friend),
+        result.details,
         await f.service.admin({ operation: "say", text: "hello" }, f.owner),
       ];
       expect(JSON.stringify(visible)).not.toContain("DO_NOT_RETURN");
-      expect(visible[0]).toEqual(status);
+      expect(visible[0]).toEqual(failedStatus);
+      expect(result.content).toEqual([{ type: "text", text: JSON.stringify(failedStatus) }]);
       expect(visible[1]).toMatchObject({ outcome: "completed" });
+      f.reply.mockResolvedValueOnce({
+        ...status,
+        tunnel: { phase: "failed", error: "DO_NOT_RETURN" },
+      });
+      expect(await f.service.status(f.friend)).toMatchObject({
+        tunnel: { phase: "failed", error: "playit-start-failed" },
+      });
       f.reply.mockResolvedValueOnce({ phase: "preparing", claimed: false });
       expect(await f.service.claim(f.owner)).toEqual({ phase: "preparing", claimed: false });
       f.reply.mockResolvedValueOnce({ phase: "preparing", claimed: false });

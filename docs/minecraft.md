@@ -156,6 +156,15 @@ locked Cargo dependencies, so Cargo is required. Future starts use the verified
 cached executable. No router forwarding is needed. Public address and genuine
 remote connectivity remain unverified until an account claim and remote join.
 
+Claim completion authenticates the agent; it does not confirm tunnel allocation.
+`clankie minecraft host status` reports a safe `tunnel.error` code when startup
+fails. `playit-email-verification-required` means the owner must verify their
+playit account email, then retry `clankie minecraft host start`. Failed allocation
+is reconciled on the next start against the agent's tunnel list. A confirmed
+rejection permits another create attempt; an uncertain result can adopt a
+matching tunnel but remains `playit-tunnel-allocation-pending` while none is
+visible. Do not delete its allocation marker to force a retry.
+
 Ask Clankie for an invite in the Discord room where you want it. He posts the
 public Minecraft address/version there, with the two login paths below. The
 public tunnel carries only the game port, uses mandatory PROXY V2 forwarding,

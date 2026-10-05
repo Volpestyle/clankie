@@ -1,0 +1,14 @@
+{
+  "status": "success",
+  "data": {
+    "agent_id": "00000000-0000-4000-8000-000000000001",
+    "tunnels": [],
+    "pending": [],
+    "notices": [],
+    "permissions": {
+      "is_self_managed": true,
+      "has_premium": false,
+      "account_status": "verified"
+    }
+  }
+}

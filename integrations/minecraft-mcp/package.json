@@ -23,6 +23,7 @@
     "mineflayer-pathfinder": "2.4.5",
     "playwright-core": "1.63.0",
     "prismarine-viewer": "1.33.0",
+    "proper-lockfile": "4.1.2",
     "socket.io": "4.8.1",
     "vec3": "0.1.10",
     "zod": "4.4.3"
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@types/express": "4.17.25",
     "@types/node": "24.12.4",
+    "@types/proper-lockfile": "4.1.4",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
   }

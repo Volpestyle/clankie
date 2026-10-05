@@ -23,10 +23,13 @@ async function fixture(
   if (created) await writeFile(join(dataDir, "playit-tunnel-id"), tunnelId);
   const tunnelData = {
     id: tunnelId,
+    internal_id: 1,
+    name: "Clankie Minecraft",
     display_address: "example.gl.joinmc.link:12345",
     port_type: "tcp",
     port_count: 1,
     tunnel_type: "minecraft-java",
+    tunnel_type_display: "Minecraft Java",
     disabled_reason: null,
     agent_config: {
       fields: [
@@ -36,8 +39,15 @@ async function fixture(
       ],
     },
   };
+  const rundata = (tunnels: (typeof tunnelData)[]) => ({
+    agent_id: agentId,
+    tunnels,
+    pending: [],
+    notices: [],
+    permissions: { is_self_managed: true, has_premium: false, account_status: "verified" },
+  });
   const api = vi.fn(async (path: string) => {
-    if (path === "/v1/agents/rundata") return { agent_id: agentId, tunnels: created ? [tunnelData] : [] };
+    if (path === "/v1/agents/rundata") return rundata(created ? [tunnelData] : []);
     if (path === "/v1/tunnels/create") {
       created = true;
       return { id: tunnelId };
@@ -74,7 +84,7 @@ async function fixture(
     launch,
     install,
   });
-  return { host, api, credentials, launch, install, authReady, children, dataDir, tunnelData };
+  return { host, api, credentials, launch, install, authReady, children, dataDir, tunnelData, rundata };
 }
 
 describe("Minecraft playit tunnel", () => {
@@ -182,8 +192,7 @@ describe("Minecraft playit tunnel", () => {
     let lists = 0;
     f.api.mockImplementation(async (path) => {
       if (path === "/v1/tunnels/create") return { id: tunnelId };
-      if (path === "/v1/agents/rundata")
-        return { agent_id: agentId, tunnels: ++lists >= 3 ? [f.tunnelData] : [] };
+      if (path === "/v1/agents/rundata") return f.rundata(++lists >= 3 ? [f.tunnelData] : []);
       throw new Error("unexpected API path");
     });
     expect((await f.host.start()).phase).toBe("running");
@@ -229,10 +238,7 @@ describe("Minecraft playit tunnel", () => {
   });
   test("never runs an agent with unrelated active tunnel assignments", async () => {
     const f = await fixture();
-    f.api.mockImplementation(async () => ({
-      agent_id: agentId,
-      tunnels: [{ ...f.tunnelData, id: agentId }],
-    }));
+    f.api.mockImplementation(async () => f.rundata([{ ...f.tunnelData, id: agentId }]));
     expect((await f.host.start()).error).toBe("playit-tunnel-unsafe");
     expect(f.launch).not.toHaveBeenCalled();
     expect(f.api.mock.calls.map(([path]) => path)).toEqual(["/v1/agents/rundata"]);
@@ -259,16 +265,20 @@ describe("Minecraft playit tunnel", () => {
     vi.useRealTimers();
     await vi.waitFor(() => expect(f.host.status().phase).toBe("stopped"));
   });
-  test("an uncertain allocation never dispatches another external create", async () => {
+  test("a lost allocation response is reconciled before another external create", async () => {
     const f = await fixture();
+    let created = false;
     f.api.mockImplementation(async (path) => {
-      if (path === "/v1/agents/rundata") return { agent_id: agentId, tunnels: [] };
+      if (path === "/v1/agents/rundata") return f.rundata(created ? [f.tunnelData] : []);
+      created = true;
       throw new Error("allocation response lost");
     });
     expect((await f.host.start()).phase).toBe("failed");
-    expect((await f.host.start()).error).toBe("playit-tunnel-unsafe");
-    expect(f.api.mock.calls.filter(([path]) => path === "/v1/tunnels/create")).toHaveLength(1);
     expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe("allocation-pending\n");
+    expect((await f.host.start()).phase).toBe("running");
+    expect(f.api.mock.calls.filter(([path]) => path === "/v1/tunnels/create")).toHaveLength(1);
+    expect(await readFile(join(f.dataDir, "playit-tunnel-id"), "utf8")).toBe(`${tunnelId}\n`);
+    await f.host.stop();
   });
   test("remote failure containing secrets is sanitized", async () => {
     const f = await fixture();
