@@ -39,7 +39,16 @@ export async function verifyNativeMcp(input: {
     "Do not write files, start agents, ask questions, or call any other tools.";
   const claudeId = randomUUID();
   const claudeConfig = join(root, "claude-mcp.json");
-  await writeFile(claudeConfig, JSON.stringify({ mcpServers: { clankie: common } }), { mode: 0o600 });
+  // This first-turn check disables built-ins, including ToolSearch. Load the
+  // test server eagerly rather than racing Claude's background/deferred catalog.
+  // https://code.claude.com/docs/en/mcp#exempt-a-server-from-deferral
+  await writeFile(
+    claudeConfig,
+    JSON.stringify({ mcpServers: { clankie: { ...common, alwaysLoad: true } } }),
+    {
+      mode: 0o600,
+    },
+  );
   // Equivalent to claude2: same existing alternate profile, no sign-in or account changes.
   const claudeProfile = join(ownerHome, ".claude-james");
   const claudeTranscript = () => {
@@ -68,7 +77,13 @@ export async function verifyNativeMcp(input: {
       "low",
       prompt,
     ],
-    env: { ...env, HOME: ownerHome, CLAUDE_CONFIG_DIR: claudeProfile } as Record<string, string>,
+    env: {
+      ...env,
+      HOME: ownerHome,
+      CLAUDE_CONFIG_DIR: claudeProfile,
+      MCP_CONNECTION_NONBLOCKING: "0",
+      MCP_TIMEOUT: "30000",
+    } as Record<string, string>,
   });
   result.claude = { pane: claudePane, sessionId: claudeId, accountProfile: "claude2" };
   const codexHome = join(root, "codex");
