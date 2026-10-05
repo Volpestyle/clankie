@@ -422,6 +422,62 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/body-leases",
+      {
+        access: "Device bearer with terminal-observe access",
+        purpose: "Read the active body leases and their ownership on the paired host.",
+      },
+    ],
+    [
+      "GET /v1/discord/rooms",
+      {
+        access: "Device bearer with terminal-observe access",
+        purpose: "Read the Discord rooms and their routing state on the paired host.",
+      },
+    ],
+    [
+      "GET /v1/discord/settings",
+      {
+        access: "Device bearer with terminal-observe access",
+        purpose: "Read the host's Discord settings without credentials.",
+      },
+    ],
+    [
+      "GET /v1/discord/directory",
+      {
+        access: "Device bearer with terminal-observe access",
+        purpose: "Read the Discord guild and channel directory available to the host.",
+      },
+    ],
+    [
+      "GET /v1/discord/room-voice",
+      {
+        access: "Device bearer with terminal-observe access",
+        purpose: "Read the selected Discord room's current voice state.",
+      },
+    ],
+    [
+      "GET /v1/discord/voice-transcripts",
+      {
+        access: "Device bearer with terminal-observe access",
+        purpose: "Read bounded voice transcripts for the selected Discord room.",
+      },
+    ],
+    [
+      "POST /v1/discord/room-guidance",
+      {
+        access: "Device bearer with steer access",
+        purpose: "Update owner guidance for a Discord room through its paired host.",
+      },
+    ],
+    [
+      "POST /v1/discord/setup/test-post",
+      {
+        access: "Device bearer with terminal-control access",
+        purpose: "Send the bounded setup test message through the paired host's Discord body.",
+      },
+    ],
+    [
       "POST /operator/v1/dispatch",
       {
         access: "Device bearer plus the operation’s grant",

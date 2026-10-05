@@ -1442,9 +1442,19 @@ describe("public gateway reach", () => {
     expect(publicGatewayTargetFor(method, path)).toBe("relay");
   });
 
-  it.each(OPERATOR_RELAY_DEVICE_ROUTES)("owns $method $path and refuses it without a device token", async ({ method, path }) => {
-    const { url } = await startRelay({ dispatch: async () => { throw new Error("not reached"); } });
-    const response = await fetch(new URL(path, url), { method, ...(method === "POST" ? { body: "{}", headers: { "content-type": "application/json" } } : {}) });
-    expect(response.status).toBe(401);
-  });
+  it.each(OPERATOR_RELAY_DEVICE_ROUTES)(
+    "owns $method $path and refuses it without a device token",
+    async ({ method, path }) => {
+      const { url } = await startRelay({
+        dispatch: async () => {
+          throw new Error("not reached");
+        },
+      });
+      const response = await fetch(new URL(path, url), {
+        method,
+        ...(method === "POST" ? { body: "{}", headers: { "content-type": "application/json" } } : {}),
+      });
+      expect(response.status).toBe(401);
+    },
+  );
 });
