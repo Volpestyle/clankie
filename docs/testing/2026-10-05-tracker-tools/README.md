@@ -54,3 +54,28 @@ write to the real Linear workspace. No full `pnpm check`, evals or sign-ins ran.
 Pell owns the batch gate and landing; production rollout is not claimed here.
 Export/import execution is deferred by acceptance; its account mapping,
 identity mapping and receipt reconciliation are designed in ADR 0226.
+
+Review follow-up coverage uses the real local tracker in the operator lane-MCP
+fixture. Delegated repository tools refuse ambient `gh`, require a connected
+GitHub account, and fence account replacement before publication. Native owner
+CLI calls retain their existing ambient account path. A malformed authored
+Markdown priority reads as `0`; create/update validation stays strict.
+
+[Repo metadata integration](../../../packages/work-items/test/tracker-repo-lock.integration.test.ts)
+uses independent Node processes invoking the actual repo tools. It verifies the
+shared cross-process lock, separate ancillary lock, preservation of both writers,
+and temporary-file/lock cleanup after publication refusal.
+
+Review gate passed **7 files / 45 tests**, both affected package typechecks
+(`@clankie/clankie`, `@clankie/work-items`), changed-file lint/format and docs checks:
+
+```sh
+pnpm exec vitest run \
+  apps/clankie/test/lane-mcp.test.ts \
+  apps/clankie/test/tracker-tool-surface.integration.test.ts \
+  apps/clankie/test/tracker-connected-priority.integration.test.ts \
+  packages/work-items/test/backends.test.ts \
+  packages/work-items/test/parent.integration.test.ts \
+  packages/work-items/test/write-deltas.integration.test.ts \
+  packages/work-items/test/tracker-repo-lock.integration.test.ts
+```

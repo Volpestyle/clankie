@@ -7,10 +7,12 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SettingsStore } from "@clankie/settings";
+import { FileCredentialStore } from "@clankie/credential-broker";
+import { createLocalTracker } from "@clankie/work-items";
 import { createCaptain } from "../src/captain/captain.ts";
 import { describe, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
-import { createWorkItemsService } from "../src/work-items.ts";
+import { createMcpHost } from "../src/mcp-host.ts";
 import { buildLaneToolBank } from "../src/captain/lane-tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { AutonomyStore } from "../src/captain/autonomy.ts";
@@ -426,17 +428,18 @@ it("binds native tools, project doctrine and channel delivery to selected servic
 it("initializes an operator MCP session with native and connected tools", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-seat-offline-"));
   const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const workItems = createWorkItemsService({
-    stateDirectory: root,
-    workspace: () => root,
-    run: async () => {
-      throw new Error("fixture has no git repository");
-    },
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const mcp = createMcpHost({
+    settings,
+    credentials: new FileCredentialStore(join(root, "credentials.json")),
+    localTracker: createLocalTracker({ directory: join(root, "tracker") }),
+    curated: [],
+    logger: { info() {}, warn() {} },
   });
   const captain = createCaptain(
     {
       ...bankDeps(),
-      workItems,
+      mcp,
       agentSessions: {
         list: async () => ({ sessions: [], errors: [] }),
         read: async () => {
@@ -448,7 +451,7 @@ it("initializes an operator MCP session with native and connected tools", async 
       repoRoot: root,
       stateDir: root,
       workingDirectory: root,
-      settings: new SettingsStore(join(root, "settings.json")),
+      settings,
     },
   );
   const app = await createClankieApp({
@@ -459,10 +462,17 @@ it("initializes an operator MCP session with native and connected tools", async 
     const sessionId = await connect(app, "operator");
     const names = await toolNames(app, "operator", sessionId);
     expect(names.some((name) => name.startsWith("swarm_"))).toBe(false);
-    for (const name of ["hire_agent", "message_seat", "agent_sessions", "agent_session_read", "work_items"])
+    expect(names).not.toContain("work_items");
+    for (const name of [
+      "hire_agent",
+      "message_seat",
+      "agent_sessions",
+      "agent_session_read",
+      "linear_list_issues",
+    ])
       expect(names).toContain(name);
     for (const [index, name, args] of [
-      [3, "work_items", { action: "repos" }],
+      [3, "linear_list_issues", {}],
       [4, "agent_sessions", {}],
     ] as const) {
       const response = await call(
@@ -484,6 +494,7 @@ it("initializes an operator MCP session with native and connected tools", async 
   } finally {
     app.close();
     await captain.close();
+    await mcp.close();
     warning.mockRestore();
     // The session store can still be flushing after close; retry ENOTEMPTY.
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });

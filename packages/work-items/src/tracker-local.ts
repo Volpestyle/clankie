@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { open, readFile, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import lockfile from "proper-lockfile";
+import { withTrackerStoreLock } from "./tracker-store-lock.ts";
 import {
   applyTrackerDescriptionPatch,
   TRACKER_TOOLS,
@@ -125,7 +125,6 @@ export interface LocalTrackerOptions {
   readonly assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void;
 }
 
-const queues = new Map<string, Promise<void>>();
 const norm = (value: string) => value.trim().toLowerCase();
 const text = (args: Record<string, unknown>, key: string) => args[key] as string | undefined;
 const values = (args: Record<string, unknown>, key: string) => (args[key] ?? []) as string[];
@@ -281,47 +280,6 @@ async function persist(
     options?.effectConfirmed?.();
   } finally {
     await rm(temp, { force: true });
-  }
-}
-
-/** CLI, service and multiple backend instances serialize through the same filesystem lock. */
-async function locked<T>(directory: string, operation: (assertHeld: () => void) => Promise<T>): Promise<T> {
-  const previous = queues.get(directory) ?? Promise.resolve();
-  let releaseQueue!: () => void;
-  const pending = new Promise<void>((resolveQueue) => {
-    releaseQueue = resolveQueue;
-  });
-  const queued = previous.then(() => pending);
-  queues.set(directory, queued);
-  await previous;
-  let release: (() => Promise<void>) | undefined;
-  try {
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    // Same cross-process locking policy as the credential broker, including a
-    // heartbeat and a final held-lock check before the atomic publish.
-    let compromised: Error | undefined;
-    release = await lockfile.lock(join(directory, "tracker.json"), {
-      realpath: false,
-      stale: 60_000,
-      update: 10_000,
-      retries: { retries: 12, minTimeout: 25, maxTimeout: 5_000 },
-      onCompromised: (error) => {
-        compromised = error;
-      },
-    });
-    const assertHeld = () => {
-      if (compromised !== undefined) throw compromised;
-    };
-    const result = await operation(assertHeld);
-    assertHeld();
-    return result;
-  } finally {
-    try {
-      await release?.();
-    } finally {
-      releaseQueue();
-      if (queues.get(directory) === queued) queues.delete(directory);
-    }
   }
 }
 
@@ -1069,7 +1027,7 @@ export function createLocalTracker(options: LocalTrackerOptions): TrackerToolBac
     catalog: () => TRACKER_TOOLS,
     async call(name, args, callOptions) {
       validateTrackerToolArgs(name, args);
-      return locked(directory, async (assertHeld) => {
+      return withTrackerStoreLock(path, async (assertHeld) => {
         const now = (options.clock ?? (() => new Date()))().toISOString();
         let store: Store;
         let initialized = false;

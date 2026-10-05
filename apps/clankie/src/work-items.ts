@@ -312,12 +312,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
-  const deps = async (path: string): Promise<TrackerDeps> => {
+  const deps = async (path: string, local = true): Promise<TrackerDeps> => {
     const token = await options.githubToken?.();
     const localTracker = (await options.mcpHost?.trackerStatus?.())?.backend === "local";
     return {
       run,
-      ...(options.hosted === true ? {} : { gh: options.gh ?? defaultGh(path) }),
+      ...(options.hosted === true || !local ? {} : { gh: options.gh ?? defaultGh(path) }),
       ...(token === undefined
         ? {}
         : {
@@ -333,9 +333,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
-  const tracker = async (path: string, record: boolean, requireRecorded = false) => {
+  const tracker = async (path: string, record: boolean, requireRecorded = false, local = true) => {
     try {
-      return await resolveTracker(path, await deps(path), { record, requireRecorded });
+      return await resolveTracker(path, await deps(path, local), { record, requireRecorded });
     } catch (error) {
       if (error instanceof ConventionNeededError)
         throw new WorkRequestError("needs_decision", error.message, {
@@ -717,7 +717,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       } else {
         const entry = await locate(repo, local);
         path = entry.path;
-        const resolved = await tracker(path, local && /^(?:save_|create_)/u.test(name), !local);
+        const resolved = await tracker(path, local && /^(?:save_|create_)/u.test(name), !local, local);
         convention = resolved.convention;
         const savedConvention = JSON.stringify(await readConvention(path));
         const savedRegistry = JSON.stringify(await readRegistry());
@@ -731,10 +731,18 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             throw new Error("Saved work repository or tracker changed. Read the work again.");
         };
       }
-      const dependencies = await deps(path);
+      // Delegated tools use a connected account; the owner's ambient gh login
+      // is available only to native local calls.
+      const account = !local && convention.backend === "github" ? await accountBinding("github") : undefined;
+      const assertAccountCurrent = async () => {
+        if (account !== undefined && (await accountBinding("github")) !== account)
+          throw new Error("Connected GitHub account changed.");
+      };
+      const dependencies = await deps(path, local);
       const beforeWrite = async () => {
         await validate?.();
         await callbacks.beforeWrite?.();
+        await assertAccountCurrent();
       };
       const scopedDependencies: TrackerDeps = {
         ...dependencies,
@@ -769,11 +777,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             }),
       };
       await validate?.();
+      await assertAccountCurrent();
       const result = await trackerToolsFor(path, convention, scopedDependencies).call(name, toolArgs, {
         ...callbacks,
         beforeWrite,
       });
       await validate?.();
+      await assertAccountCurrent();
       return result;
     },
     async readOwnerReceipt(

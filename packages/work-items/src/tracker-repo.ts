@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { WorkItemPrioritySchema, type WorkItem, type WorkItemStatus } from "@clankie/protocol/work-items";
 import {
@@ -10,6 +11,7 @@ import {
 } from "./backend.ts";
 import { parseBody, patchBody } from "./format.ts";
 import { createLocalTracker } from "./tracker-local.ts";
+import { withTrackerStoreLock } from "./tracker-store-lock.ts";
 import {
   applyTrackerDescriptionPatch,
   TRACKER_TOOLS,
@@ -45,8 +47,6 @@ interface IssueMetadata {
   links?: { url: string; title: string }[];
 }
 
-const locks = new Map<string, Promise<unknown>>();
-
 /**
  * Native repository issues and local ancillary records share the Linear-shaped
  * vocabulary. Comments, projects and status updates live beside the backend's
@@ -73,14 +73,25 @@ export function createRepoTracker(
       throw error;
     }
   };
-  const writeMetadata = async (metadata: Record<string, IssueMetadata>) => {
+  const writeMetadata = async (metadata: Record<string, IssueMetadata>, assertHeld: () => void) => {
     await mkdir(options.directory, { recursive: true });
-    const temporary = `${metadataPath}.${process.pid}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
-    await options.beforeWrite?.();
-    options.onDispatch?.();
-    await rename(temporary, metadataPath);
-    options.effectConfirmed?.();
+    const temporary = `${metadataPath}.${randomUUID()}.tmp`;
+    try {
+      const handle = await open(temporary, "wx", 0o600);
+      try {
+        await handle.writeFile(`${JSON.stringify(metadata, null, 2)}\n`);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await options.beforeWrite?.();
+      assertHeld();
+      options.onDispatch?.();
+      await rename(temporary, metadataPath);
+      options.effectConfirmed?.();
+    } finally {
+      await rm(temporary, { force: true });
+    }
   };
   const issue = async (reference: string): Promise<WorkItem> => {
     const item = await native.get(reference);
@@ -151,7 +162,11 @@ export function createRepoTracker(
   const delta = (existing: readonly string[], additions: readonly string[], removals: readonly string[]) =>
     [...new Set([...existing, ...additions])].filter((id) => !removals.includes(id));
 
-  const call = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+  const call = async (
+    name: string,
+    args: Record<string, unknown>,
+    assertHeld?: () => void,
+  ): Promise<unknown> => {
     validateTrackerToolArgs(name, args);
     switch (name) {
       case "list_issue_statuses":
@@ -362,7 +377,9 @@ export function createRepoTracker(
           relation.removeRelatedTo.length > 0
         ) {
           metadata[saved.id] = own;
-          await writeMetadata(metadata);
+          if (assertHeld === undefined)
+            throw new Error("Repository tracker metadata write requires its store lock");
+          await writeMetadata(metadata, assertHeld);
         }
         return toIssue(await issue(saved.id), metadata);
       }
@@ -391,16 +408,7 @@ export function createRepoTracker(
     catalog: () => TRACKER_TOOLS,
     async call(name, args) {
       if (name !== "save_issue") return call(name, args);
-      const pending = (locks.get(metadataPath) ?? Promise.resolve()).then(
-        () => call(name, args),
-        () => call(name, args),
-      );
-      locks.set(metadataPath, pending);
-      try {
-        return await pending;
-      } finally {
-        if (locks.get(metadataPath) === pending) locks.delete(metadataPath);
-      }
+      return withTrackerStoreLock(metadataPath, (assertHeld) => call(name, args, assertHeld));
     },
   };
 }

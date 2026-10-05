@@ -163,7 +163,8 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       ...(parent === undefined || parent.trim() === "" ? {} : { parent }),
       title: title.slice(0, 200),
       status: statusOf(file.fields.get("status")),
-      priority: WorkItemPrioritySchema.parse(Number(file.fields.get("priority") ?? "0")),
+      // Authored Markdown can contain a typo; one malformed priority must not hide the repo's work.
+      priority: WorkItemPrioritySchema.safeParse(Number(file.fields.get("priority") ?? "0")).data ?? 0,
       ...(owner === undefined || owner === "" ? {} : { owner }),
       dependsOn:
         depends === undefined
@@ -266,6 +267,7 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       }
     },
     async create(draft: WorkItemDraft) {
+      const priority = WorkItemPrioritySchema.parse(draft.priority ?? 0);
       await mkdir(directory, { recursive: true });
       const id = (options.newId ?? newWorkItemId)();
       const now = clock().toISOString();
@@ -273,7 +275,7 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
         ["id", id],
         ["title", draft.title],
         ["status", draft.status ?? "todo"],
-        ["priority", String(draft.priority ?? 0)],
+        ["priority", String(priority)],
         ...(draft.parent === undefined ? [] : [["parent", draft.parent] as [string, string]]),
         ...((draft.labels?.length ?? 0) === 0
           ? []
@@ -304,7 +306,8 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       const current = toItem(file);
       const fields = new Map(file.fields);
       if (patch.status !== undefined) fields.set("status", patch.status);
-      if (patch.priority !== undefined) fields.set("priority", String(patch.priority));
+      if (patch.priority !== undefined)
+        fields.set("priority", String(WorkItemPrioritySchema.parse(patch.priority)));
       if (patch.parent === null) fields.delete("parent");
       else if (patch.parent !== undefined) fields.set("parent", patch.parent);
       if (patch.title !== undefined) fields.set("title", patch.title);

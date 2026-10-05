@@ -1,7 +1,10 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
@@ -10,11 +13,12 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
-import { createWorkItemsService } from "../src/work-items.ts";
+import { createWorkItemsService, type WorkItemsServiceOptions } from "../src/work-items.ts";
+import { githubConnectionToken } from "../src/accounts.ts";
 import { workRequest } from "../../tui/src/command/work.ts";
 
 /** Real fleet HTTP tools, host, settings, credentials and durable local storage. */
-async function surface(root: string) {
+async function surface(root: string, github: Pick<WorkItemsServiceOptions, "gh" | "githubApiBase"> = {}) {
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const repo = join(root, "repo");
@@ -48,6 +52,8 @@ async function surface(root: string) {
     globalTrackerDirectory: join(root, "tracker"),
     workspace: () => repo,
     mcpHost: host,
+    githubToken: () => githubConnectionToken(credentials),
+    ...github,
   });
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
@@ -513,6 +519,112 @@ it("keeps clankie work and Markdown issues on the canonical tools with priority,
     expect(refused.isError).toBe(true);
   } finally {
     await f.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("requires a bound GitHub account for delegated tools while keeping the owner CLI's ambient gh access", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-tracker-github-"));
+  const ambientLog = join(root, "ambient-gh.jsonl");
+  const ambientCommand = join(root, "ambient-gh.mjs");
+  await writeFile(ambientLog, "");
+  // A real subprocess records any attempted ambient command without using a
+  // developer's installed gh or authenticated GitHub workspace.
+  await writeFile(
+    ambientCommand,
+    "import {appendFileSync} from 'node:fs'; appendFileSync(process.argv[2], JSON.stringify(process.argv.slice(3))+'\\n'); process.stdout.write('[[]]');\n",
+  );
+  const exec = promisify(execFile);
+  const issue = {
+    number: 42,
+    title: "Existing issue",
+    body: "Owner prose",
+    state: "open",
+    html_url: "https://github.com/fixture/tracker/issues/42",
+    labels: [] as string[],
+  };
+  const seen: { method: string; authorization: string | undefined }[] = [];
+  const mutations: Record<string, unknown>[] = [];
+  let replaceAccount: (() => Promise<void>) | undefined;
+  const server = createServer(async (request, response) => {
+    const path = new URL(request.url ?? "/", "http://fixture").pathname;
+    seen.push({ method: request.method ?? "", authorization: request.headers.authorization });
+    response.setHeader("content-type", "application/json");
+    if (path.endsWith("/parent")) {
+      response.writeHead(404).end("{}");
+      return;
+    }
+    if (request.method === "GET" && path === "/repos/fixture/tracker/issues") {
+      response.end("[]");
+      return;
+    }
+    if (request.method === "GET" && replaceAccount) {
+      const replace = replaceAccount;
+      replaceAccount = undefined;
+      await replace();
+    }
+    if (request.method === "PATCH") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const patch = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>;
+      mutations.push(patch);
+      Object.assign(issue, patch);
+    }
+    response.end(JSON.stringify(issue));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("No fixture port");
+  const f = await surface(root, {
+    gh: async (args) => (await exec(process.execPath, [ambientCommand, ambientLog, ...args])).stdout,
+    githubApiBase: `http://127.0.0.1:${String(address.port)}`,
+  });
+  try {
+    await f.work(["init", "--backend", "github", "--github-repo", "fixture/tracker"]);
+    for (const [name, args] of [
+      ["linear_list_issues", {}],
+      ["linear_save_issue", { team: "LOCAL", title: "Delegated issue" }],
+    ] as const) {
+      const refused = await f.tool("clankie_call", { name, arguments: { repo: "workspace", ...args } });
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0]?.text).toMatch(/connect GitHub/iu);
+    }
+    expect(await readFile(ambientLog, "utf8")).toBe("");
+    expect(seen).toEqual([]);
+    expect((await f.work(["list"])).items).toEqual([]);
+    const ownerCommand = await readFile(ambientLog, "utf8");
+    expect(JSON.parse(ownerCommand)).toEqual([
+      "api",
+      "--paginate",
+      "--slurp",
+      "repos/fixture/tracker/issues?state=all&per_page=100",
+    ]);
+
+    await f.credentials.set("github", { type: "api", key: "isolated-github-account" });
+    expect((await f.call("linear_list_issues", { repo: "workspace" })).issues).toEqual([]);
+    await f.call("linear_save_issue", { repo: "workspace", id: "#42", title: "Connected delegated edit" });
+    expect(issue.title).toBe("Connected delegated edit");
+    expect(mutations).toHaveLength(1);
+    expect(seen.every((request) => request.authorization === "Bearer isolated-github-account")).toBe(true);
+    expect(await readFile(ambientLog, "utf8")).toBe(ownerCommand);
+
+    // Replace the connected account during an actual provider read, before the
+    // backend can publish the edit. Neither account may receive a mutation.
+    replaceAccount = () => f.credentials.set("github", { type: "api", key: "replacement-github-account" });
+    const changed = await f.tool("clankie_call", {
+      name: "linear_save_issue",
+      arguments: { repo: "workspace", id: "#42", title: "Must remain unpublished" },
+    });
+    expect(changed.isError).toBe(true);
+    expect(changed.content[0]?.text).toContain("Connected GitHub account changed");
+    expect(mutations).toHaveLength(1);
+    expect(issue.title).toBe("Connected delegated edit");
+    expect(await readFile(ambientLog, "utf8")).toBe(ownerCommand);
+  } finally {
+    await f.close();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
     await rm(root, { recursive: true, force: true });
   }
 });
