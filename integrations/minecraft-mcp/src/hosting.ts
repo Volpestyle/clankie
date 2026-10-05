@@ -361,9 +361,11 @@ export class MinecraftHost implements MinecraftHostingPort {
       "plugins/FastLogin/config.yml",
       "autoRegister: true\nsecondAttemptCracked: false\nswitchMode: false\npremiumUuid: false\nnameChangeCheck: false\nforwardSkin: true\nautoLogin: true\nuseProxyAgnosticResolver: true\nverifyClientKeys: false\nauto-register-unknown: false\nautoLoginFloodgate: false\nallowFloodgateNameConflict: false\nautoRegisterFloodgate: false\nmojang-request-limit: 600\nantibot:\n  enabled: true\n  connections: 100\n  expire: 10\n  action: block\nanti-bot:\n  enabled: true\n  connections: 100\n  expire: 10\n  action: block\ndriver: sqlite\ndatabase: '{pluginDir}/FastLogin.db'\n",
     );
+    // FastLogin calls AuthMe from an async task. AuthMe 5.6 must also mark
+    // its login event async (BukkitService / AsynchronousLogin in tag 5.6.0).
     await this.privateWrite(
       "plugins/AuthMe/config.yml",
-      `settings:\n  useAsyncTasks: false\n  sessions:\n    enabled: false\n  restrictions:\n    allowChat: false\n    allowMovement: false\n    ProtectInventoryBeforeLogIn: true\n    AllowRestrictedUser: true\n    AllowedRestrictedUser:\n    - '${BOT};127.0.0.1'\n    kickNonRegistered: false\n    timeout: 30\n    maxRegPerIp: 0\n    allowCommands:\n    - /login\n    - /l\n  registration:\n    enabled: false\n    force: true\n  security:\n    minPasswordLength: 12\n    passwordMaxLength: 30\n  unrestrictions:\n    UnrestrictedName: []\nProtection:\n  enableAntiBot: true\n`,
+      `settings:\n  useAsyncTasks: true\n  sessions:\n    enabled: false\n  restrictions:\n    allowChat: false\n    allowMovement: false\n    ProtectInventoryBeforeLogIn: true\n    AllowRestrictedUser: true\n    AllowedRestrictedUser:\n    - '${BOT};127.0.0.1'\n    kickNonRegistered: false\n    timeout: 30\n    maxRegPerIp: 0\n    allowCommands:\n    - /login\n    - /l\n  registration:\n    enabled: false\n    force: true\n  security:\n    passwordHash: SHA256\n    minPasswordLength: 12\n    passwordMaxLength: 30\n  unrestrictions:\n    UnrestrictedName: []\nProtection:\n  enableAntiBot: true\n`,
     );
     await this.privateWrite("ops.json", "[]\n");
   }
@@ -487,10 +489,10 @@ export class MinecraftHost implements MinecraftHostingPort {
       for (const name of ["AuthMe", "ProtocolLib", "FastLogin", "ViaVersion"])
         if (!plugins.includes(`§a${name}`)) throw new Error("Minecraft auth plugin readiness failed");
       await this.command(`authme register ${BOT} ${this.botPassword}`);
-      const botRegistered = await this.command(`authme changepassword ${BOT} ${this.botPassword}`);
-      if (!/changed|success/iu.test(botRegistered))
-        throw new Error("Minecraft bot credential registration unverified");
+      await this.verifyAuthMeStored(BOT);
+      await this.changeAuthMePassword(BOT, this.botPassword);
       await this.command(`whitelist add ${BOT}`);
+      await this.reconcilePremiumAuth();
       for (const entry of this.codes.values()) clearTimeout(entry.timer);
       this.codes.clear();
       const pendingProviders = await this.credentials.list();
@@ -501,8 +503,7 @@ export class MinecraftHost implements MinecraftHostingPort {
         username.parse(name);
         const replacement = randomBytes(12).toString("hex");
         this.sensitive.add(replacement);
-        const revoked = await this.command(`authme changepassword ${name} ${replacement}`);
-        if (!/changed|success/iu.test(revoked)) throw new Error("Minecraft stale code revocation failed");
+        await this.changeAuthMePassword(name, replacement);
         await this.credentials.delete(provider);
       }
       this.state.phase = "running";
@@ -672,6 +673,73 @@ export class MinecraftHost implements MinecraftHostingPort {
     }
     throw new Error("Minecraft forced-premium persistence unverified");
   }
+  private async verifyAuthMeStored(name: string, password?: string): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      let db: DatabaseSync | undefined;
+      try {
+        db = new DatabaseSync(join(this.dataDir, "plugins", "AuthMe", "authme.db"), { readOnly: true });
+        const row = db
+          .prepare("SELECT password FROM authme WHERE LOWER(username) = ?")
+          .get(name.toLowerCase());
+        const hash = row?.password;
+        if (typeof hash === "string" && hash.length > 0) {
+          if (password === undefined) return;
+          // Pinned AuthMe 5.6 Sha256.computeHash: $SHA$salt$SHA256(SHA256(password)+salt).
+          const parts = /^\$SHA\$([^$]+)\$([a-f0-9]{64})$/u.exec(hash);
+          if (parts) {
+            const inner = createHash("sha256").update(password).digest("hex");
+            const expected = createHash("sha256")
+              .update(inner + parts[1])
+              .digest("hex");
+            if (parts[2] === expected) return;
+          }
+        }
+      } catch {
+      } finally {
+        db?.close();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("Minecraft premium auth registration unverified");
+  }
+  private async changeAuthMePassword(name: string, password: string): Promise<void> {
+    await this.command(`authme changepassword ${name} ${password}`);
+    await this.verifyAuthMeStored(name, password);
+  }
+  private async provisionPremiumAuth(name: string): Promise<void> {
+    // AuthMe 5.6 blocks API auto-registration when player registration is
+    // closed. Its admin register command preserves an existing account.
+    const internalPassword = randomBytes(12).toString("hex");
+    this.sensitive.add(internalPassword);
+    await this.command(`authme register ${name} ${internalPassword}`);
+    await this.verifyAuthMeStored(name);
+  }
+  private async reconcilePremiumAuth(): Promise<void> {
+    let approved: { name: string }[];
+    try {
+      approved = z
+        .array(z.object({ uuid: z.uuid(), name: username }))
+        .max(1024)
+        .parse(JSON.parse(await readFile(join(this.dataDir, "whitelist.json"), "utf8")));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw new Error("Minecraft premium whitelist state invalid");
+    }
+    const db = new DatabaseSync(join(this.dataDir, "plugins", "FastLogin", "FastLogin.db"), {
+      readOnly: true,
+    });
+    try {
+      const premium = db.prepare("SELECT Premium FROM premium WHERE LOWER(Name) = ?");
+      for (const entry of approved) {
+        if (entry.name.toLowerCase() === BOT.toLowerCase()) continue;
+        if (Number(premium.get(entry.name.toLowerCase())?.Premium) === 1) {
+          await this.provisionPremiumAuth(entry.name);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  }
   enroll(
     name: string,
   ): Promise<{ username: string; classification: "premium" | "nonpremium"; providerId?: string }> {
@@ -685,6 +753,7 @@ export class MinecraftHost implements MinecraftHostingPort {
         if (!/premium|paid|already/iu.test(result))
           throw new Error("Minecraft forced-premium enrollment unverified");
         await this.verifyPremiumStored(name);
+        await this.provisionPremiumAuth(name);
         this.enrolled.add(name.toLowerCase());
         return { username: name, classification };
       }
@@ -692,8 +761,8 @@ export class MinecraftHost implements MinecraftHostingPort {
       await this.credentials.set(provider, { type: "api", key: randomBytes(12).toString("hex") });
       const code = await this.secret(provider);
       await this.command(`authme register ${name} ${code}`);
-      const changed = await this.command(`authme changepassword ${name} ${code}`);
-      if (!/changed|success/iu.test(changed)) throw new Error("Minecraft offline enrollment unverified");
+      await this.verifyAuthMeStored(name);
+      await this.changeAuthMePassword(name, code);
       this.enrolled.add(name.toLowerCase());
       const key = name.toLowerCase();
       const old = this.codes.get(key);
@@ -752,8 +821,7 @@ export class MinecraftHost implements MinecraftHostingPort {
       try {
         const replacement = randomBytes(12).toString("hex");
         this.sensitive.add(replacement);
-        const response = await this.command(`authme changepassword ${name} ${replacement}`);
-        if (!/changed|success/iu.test(response)) throw new Error("Minecraft code revocation unverified");
+        await this.changeAuthMePassword(name, replacement);
         await this.credentials.delete(entry.provider);
         this.codes.delete(key);
         return { revoked: true };

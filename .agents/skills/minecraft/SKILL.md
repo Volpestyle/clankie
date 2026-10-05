@@ -152,6 +152,18 @@ through game chat or repeat them in a room. Refused or uncertain delivery must b
 resolved, not retried with a new code. All server commands are typed and audited;
 there is no op or arbitrary console tool.
 
+Premium enrollment must prepare both the FastLogin premium marker and the AuthMe
+account before whitelist admission. Premium friends use their normal launcher
+without a code or `/register`; an AuthMe registration prompt is a provisioning
+failure to resolve through owner-approved enrollment. Startup repairs missing
+AuthMe accounts only for existing whitelisted names already persisted as premium;
+it does not enroll or whitelist new names. Keep player self-registration
+disabled. `premiumUuid: false` preserves the world's player identity while
+FastLogin still verifies the premium Mojang session.
+Keep AuthMe's `settings.useAsyncTasks: true` for FastLogin automatic login;
+disabling it breaks the asynchronous hook. Player self-registration remains
+disabled independently.
+
 Join claims the shared play body. Pokémon and Minecraft cannot run together.
 Follow, goto, dig, place, craft and build return action handles immediately;
 inspect status to decide the next action. Follow is continuous until stopped.
