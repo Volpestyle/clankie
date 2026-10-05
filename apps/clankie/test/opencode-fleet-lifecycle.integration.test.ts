@@ -143,7 +143,10 @@ async function fixture() {
       const key = JSON.stringify(args);
       let sample = socketSamples.get(key);
       if (!sample) {
-        sample = execute(file, [...args]).then((result) => result.stdout);
+        // This fixture owns both TCP ends in this PID. Keep the real positive
+        // socket ownership proof; skip unrelated filesystem stat/readlink probes
+        // with -b because cwd and process birth are already golden inputs above.
+        sample = execute(file, ["-b", "-p", String(process.pid), ...args]).then((result) => result.stdout);
         socketSamples.set(key, sample);
       }
       return sample;

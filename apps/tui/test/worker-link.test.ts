@@ -353,8 +353,8 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
     child.stderr.on("data", (chunk: Buffer) => (stderr += String(chunk)));
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    await vi.waitFor(() => expect(stderr).toContain("not polling"), { timeout: 10_000 });
     await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(stderr).toContain("not polling");
     expect(service.seen.some((request) => request.path.endsWith("/events"))).toBe(false);
   });
 

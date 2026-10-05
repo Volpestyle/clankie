@@ -99,6 +99,12 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
         }
         return json(200, issues);
       }
+      const issuePath = /^\/repos\/owner\/repo\/issues\/(\d+)$/u.exec(url.pathname);
+      if (request.method === "GET" && issuePath) {
+        if (request.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { message: TOKEN });
+        const issue = issues.find((entry) => entry.number === Number(issuePath[1]));
+        return issue ? json(200, issue) : json(404, { message: "Not Found" });
+      }
       // Linear's MCP authorization server, reached through the rewriting fetch below.
       if (route === "POST /linear/register") return json(201, { client_id: "dcr-client" });
       if (route === "POST /linear/token")
