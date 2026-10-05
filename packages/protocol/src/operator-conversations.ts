@@ -1,3 +1,4 @@
+import { OperatorSeatEfficiencySchema } from "./seat-efficiency.ts";
 import { WorkerReportSummarySchema } from "./worker-reports.ts";
 import { FleetSeatToolCatalogHealthSchema } from "./tool-catalog.ts";
 import { z } from "zod";
@@ -801,6 +802,8 @@ export const OperatorFleetSeatSchema = z
     parentSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
     workerReportRouting: WorkerReportRoutingSchema.optional(),
     workerReports: z.array(WorkerReportSummarySchema).max(100).optional(),
+    /** Evidence for the leading conversation's periodic and watch-time review. */
+    efficiency: OperatorSeatEfficiencySchema.optional(),
     /**
      * Native subagents the occupying harness started inside its own TUI
      * (Claude Code's Agent/Task tool), newest first (ADR 0208). Present only

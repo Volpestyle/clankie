@@ -15,12 +15,15 @@ import {
   resolveCaptainRouteToken,
 } from "../session/operator-conversations.ts";
 import { commandHost } from "./io.ts";
+import { text } from "node:stream/consumers";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
   "       clankie agents readopt SEAT --conversation ID\n" +
   "       clankie agents reports --conversation ID [--limit N]\n" +
   "       clankie agents reports ack DELIVERY_ID... --conversation ID\n" +
+  "       clankie agents efficiency [review SEAT --json-stdin] --conversation ID\n" +
+  "       clankie agents tidy-worktrees --repo PATH [--merged-into REF]\n" +
   `       clankie agents role NAME|PERSONA_ID ROLE|none [--project PROJECT]   (${OPERATOR_AGENT_ROLES.join(", ")}, or "a custom role")\n` +
   "       clankie agents role ROLE --project PROJECT [--harness KIND] [--model NAME] [--effort LEVEL] [--subagent-model NAME] [--subagent-effort LEVEL] [--delegation native-first|panes] [--account LABEL] [--placement new-tab|split]\n" +
   "       clankie agents roles\n" +
@@ -77,8 +80,59 @@ export async function runAgentsCommand(
     host?: string;
     fetchImpl?: typeof fetch;
     operatorCredentialStore?: CredentialStore;
+    stdin?: Parameters<typeof text>[0];
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "efficiency" || args[0] === "tidy-worktrees") {
+    const jsonInput = args.includes("--json-stdin");
+    if (args.filter((arg) => arg === "--json-stdin").length > 1) throw new Error(AGENTS_USAGE);
+    const cleanArgs = args.filter((arg) => arg !== "--json-stdin");
+    const reviewing = args[0] === "efficiency" && args[1] === "review";
+    const first = reviewing ? 3 : 1;
+    const values = flags(
+      cleanArgs.slice(first),
+      args[0] === "efficiency" ? ["--conversation"] : ["--repo", "--merged-into"],
+    );
+    if (reviewing !== jsonInput) throw new Error(AGENTS_USAGE);
+    const conversationId = values.get("--conversation");
+    const repository = values.get("--repo");
+    if (args[0] === "efficiency" ? !conversationId : !repository) throw new Error(AGENTS_USAGE);
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+    });
+    if (!credential) throw new Error("Fleet review needs the operator credential. Run clankie doctor.");
+    let finding: Record<string, unknown> = {};
+    if (reviewing) {
+      const input: unknown = JSON.parse(await text(options.stdin ?? process.stdin));
+      if (typeof input !== "object" || input === null || Array.isArray(input)) throw new Error(AGENTS_USAGE);
+      finding = input as Record<string, unknown>;
+      if (
+        Object.keys(finding).some(
+          (key) => !["offScope", "assignmentStatus", "deliverable", "progressAt", "evidence"].includes(key),
+        )
+      )
+        throw new Error(AGENTS_USAGE);
+    }
+    const path = args[0] === "efficiency" ? "/v1/fleet/efficiency" : "/v1/fleet/tidy-worktrees";
+    const body =
+      args[0] === "efficiency"
+        ? {
+            ...finding,
+            action: reviewing ? "review" : "show",
+            conversationId,
+            ...(reviewing ? { seatId: cleanArgs[2] } : {}),
+          }
+        : { repository, ...(values.has("--merged-into") ? { mergedInto: values.get("--merged-into") } : {}) };
+    const response = await (options.fetchImpl ?? fetch)(`${commandHost(options)}${path}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error(`Fleet request failed: ${response.status}`);
+    return response.json();
+  }
   if (args[0] === "readopt" || args[0] === "reports") {
     const first = args.findIndex((arg) => arg.startsWith("--"));
     if (first < 0) throw new Error(AGENTS_USAGE);

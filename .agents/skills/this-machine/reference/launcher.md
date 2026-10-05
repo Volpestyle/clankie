@@ -2,6 +2,32 @@
 
 Everything past the command table in the core skill: Linear activity, devices, memory, sleep and doorways, steering a turn, model refresh, setup and conflicts.
 
+For every watch wake and periodic lead round (30 minutes by default), load
+`lead` and inspect every seat owned by this conversation. Use
+`clankie agents efficiency --conversation ID` or `fleet_efficiency` with
+`action: "show"`; the roster and agent dock carry plain efficiency flags.
+Periodic rounds coalesce while a review turn is outstanding. Wake prompts carry
+bounded summaries; use the tool or CLI for the full owned roster. Context
+percentage is the latest native Codex model-input snapshot and may age between
+responses. Claude context/effort and OpenCode or remote telemetry remain unknown.
+Original report acceptance or attempt remains progress after acknowledgment;
+acknowledgment creates no new progress. Record inspected
+scope, tracker status or substantive progress with
+`clankie agents efficiency review SEAT --conversation ID --json-stdin`;
+the JSON requires `evidence` and optionally accepts `offScope`,
+`assignmentStatus`, `deliverable` and `progressAt`. The tool's `review` action
+records the same evidence for an exact owned native session. It changes no
+tracker state, ownership, harness settings or report receipts. Follow the
+`lead` skill for action and worker-report reconciliation.
+
+When tidying, load `tidy` and list remaining merged, clean worktrees with
+`clankie agents tidy-worktrees --repo /canonical/repository/path
+[--merged-into REF]` or `list_tidy_worktrees`. Listing does not remove anything
+or fetch refs; the default ref is `origin/main`. Main, dirty, unmerged, locked,
+prunable and live-pane worktrees are excluded. An incomplete pane census returns
+no candidates. Verify ownership and fresh landing evidence before removing an
+owned worktree, after keeping its results. Full contracts: `{repoRoot}/docs/cli.md`.
+
 Clankie's Spider-Man bridge stays disabled under [VUH-1325](https://linear.app/vuhlp/issue/VUH-1325).
 Its sources passed independent review, but the practice-range freeze lift does
 not authorize this bridge. Deployment, reconnecting and sittings await the lead's

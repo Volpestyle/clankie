@@ -43,9 +43,9 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
   };
 
   ctx.conversations.onInboundReportChange = ctx.onChange;
-  function reportSummaries(conversationId?: string, native?: HerdrAgentSnapshot) {
+  function reportSummaries(conversationId?: string, native?: HerdrAgentSnapshot, includeRead = false) {
     return ctx.conversations
-      .inboundReports(conversationId)
+      .inboundReports(conversationId, { includeRead })
       .filter(
         (report) =>
           native === undefined ||

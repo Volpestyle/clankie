@@ -1,7 +1,12 @@
+import { SeatEfficiencyStore } from "./seat-efficiency.ts";
+import { readSeatTelemetry } from "./seat-telemetry.ts";
+import { fleetReviewContext, startFleetRounds } from "./fleet-review.ts";
+import { FleetEfficiencyReviewSchema, type FleetEfficiencyReview } from "./fleet-efficiency-tools.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
+  OPERATOR_CONVERSATION_TEXT_MAX,
   type CaptainChannelTurnResult,
   type CaptainSessionLaneV2,
   type DiscordPresenceChannelTurnRequest,
@@ -81,6 +86,7 @@ import {
   captureNativeSeatAuthority,
   ConversationOwnerSchema,
   type ConversationOwner,
+  type ConversationAuthority,
   type NativeSeatRecipient,
   type WorkerWriteAuthority,
 } from "./conversation-owner.ts";
@@ -664,6 +670,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const seatSubjects = new Map<string, string>();
   const stances = createStanceStore();
   const agentWork = createAgentWorkStore(options.stateDir);
+  const seatEfficiency = new SeatEfficiencyStore(join(options.stateDir, "seat-efficiency.json"));
+  const seatLeadOwners = new WeakMap<OperatorFleetSeat, { owner: ConversationOwner; admitted: boolean }>();
+  let efficiencyFingerprint = "";
   /**
    * What each fleet seat's pane status was last seen as. The watcher publishes
    * only changes, so this is the other half of a transition — and holding it
@@ -1386,6 +1395,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
           projectId,
         );
+        seatEfficiency.assign(seat.occupantId, {
+          owner: authority.owner,
+          ...(request.deliverable === undefined ? {} : { deliverable: request.deliverable }),
+          ...(request.model === undefined ? {} : { model: request.model }),
+          ...(request.effort === undefined ? {} : { effort: request.effort }),
+        });
         conversations.bindPersona(seat.personaId, seat.seatId, seat.title);
         liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
         seatByPersona.set(seat.personaId, seat.seatId);
@@ -1867,7 +1882,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       herdrWatches.trackSeat(seat.seatId);
     }
     liveSeats = seats;
-    return Promise.all(
+    const projected = await Promise.all(
       seats.map(async (seat) => {
         // A lapsed stance simply is not here, so no surface has to reason about
         // how old the thing it is drawing is (ADR 0148).
@@ -1878,9 +1893,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const parentSeatId = parents.get(seat.seatId);
         const observed = fleet.seats.find((entry) => entry.seatId === seat.seatId);
         let workerReportRouting: WorkerReportRouting | undefined;
+        let leadOwner: ConversationOwner | undefined;
+        let admitted = true;
         if (observed) {
           try {
-            workerReportRouting = (await workerReportRoute(observedAgent(observed), fleet)).diagnostic;
+            const route = await workerReportRoute(observedAgent(observed), fleet);
+            workerReportRouting = route.diagnostic;
+            leadOwner = herdrWatches.nativeOwner(observedAgent(observed));
+            // A native-only report route uses global-default as a transport
+            // fallback. It never makes that child an owned captain seat.
+            if (leadOwner === undefined && route.diagnostic.source === "parent" && route.native === undefined)
+              leadOwner = route.owner;
           } catch {
             workerReportRouting = {
               source: "refused",
@@ -1889,7 +1912,47 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             };
           }
         }
-        return {
+        if (observed && leadOwner === undefined) {
+          // Same-thread historical hire proof can bring a reporting fault to
+          // its lead for inspection. It grants no control or review writes.
+          try {
+            const original = observedAgent(observed);
+            const retained = herdrWatches.retainedReportOwner(original);
+            if (retained && (await validateConversationOwner(retained))) {
+              const current = await herdrRunner.get(original.paneId).catch(() => undefined);
+              if (
+                current &&
+                inboundBinding(current) === inboundBinding(original) &&
+                JSON.stringify(herdrWatches.retainedReportOwner(current)) === JSON.stringify(retained)
+              ) {
+                leadOwner = retained;
+                admitted = false;
+                workerReportRouting = {
+                  source: "refused",
+                  reason: "authority_unavailable",
+                  conversationId: retained.conversationId,
+                };
+              }
+            }
+          } catch {
+            /* Conflicting historical claims confer no inspection attribution. */
+          }
+        }
+        const efficiency =
+          observed && leadOwner
+            ? seatEfficiency.observe({
+                occupantId: seat.occupantId,
+                seatId: seat.seatId,
+                owner: leadOwner,
+                status: seat.status,
+                assignment: seat.assignment,
+                goal: seat.goal,
+                reportRoute: workerReportRouting,
+                reports: reportSummaries(undefined, observedAgent(observed), true),
+                telemetry: await readSeatTelemetry(observed),
+              })
+            : undefined;
+        const result = {
           ...seat,
           conversationId: conversations.conversationIdForPersona(seat.personaId),
           ...(stance === undefined ? {} : { stance }),
@@ -1900,12 +1963,41 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const identity = observed && catalogIdentity(observed, "worker");
             return identity ? { toolCatalog: await currentCatalogHealth(identity) } : {};
           })()),
+          ...(efficiency === undefined ? {} : { efficiency }),
           ...(observed === undefined
             ? {}
             : { workerReports: reportSummaries(undefined, observedAgent(observed)).slice(-100) }),
         };
+        if (leadOwner) seatLeadOwners.set(result, { owner: leadOwner, admitted });
+        return result;
       }),
     );
+    for (const seat of projected) {
+      const efficiency = seat.efficiency;
+      if (!efficiency?.assignedDeliverable) continue;
+      if (
+        projected.some(
+          (other) =>
+            other.occupantId !== seat.occupantId &&
+            JSON.stringify(seatLeadOwners.get(other)?.owner) ===
+              JSON.stringify(seatLeadOwners.get(seat)?.owner) &&
+            other.efficiency?.assignedDeliverable === efficiency.assignedDeliverable,
+        )
+      )
+        efficiency.flags.push("overlap");
+    }
+    const fingerprint = JSON.stringify(
+      projected.map((seat) => {
+        const { checkedAt: _checked, ...evidence } = seat.efficiency ?? {};
+        return [seat.occupantId, evidence];
+      }),
+    );
+    if (fingerprint !== efficiencyFingerprint) {
+      efficiencyFingerprint = fingerprint;
+      fleetChanges.touch();
+    }
+    liveSeats = projected;
+    return projected;
   }
 
   /** Read every fleet-owned record against one stable Herdr change cursor. */
@@ -1982,13 +2074,94 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
 
   evaluator.start();
+  async function ledSeats(owner: ConversationOwner) {
+    const seats = await refreshFleet();
+    return seats.filter((seat) => JSON.stringify(seatLeadOwners.get(seat)?.owner) === JSON.stringify(owner));
+  }
+  const efficiencyActions = {
+    async run(authority: ConversationAuthority, input?: FleetEfficiencyReview) {
+      await assertConversationAuthority(authority);
+      const seats = await ledSeats(authority.owner);
+      if (input) {
+        const review = FleetEfficiencyReviewSchema.parse(input);
+        const seat = seats.find((candidate) => candidate.seatId === review.seatId);
+        if (!seat) throw new Error("This conversation does not lead that native seat");
+        if (!seatLeadOwners.get(seat)?.admitted)
+          throw new Error("The native occupant must be re-adopted before recording a review");
+        // Renew admission before the final native census. No await separates
+        // its ownership check from writing this display-only review.
+        await assertConversationAuthority(authority);
+        const current = (await ledSeats(authority.owner)).find(
+          (candidate) => candidate.seatId === seat.seatId && candidate.occupantId === seat.occupantId,
+        );
+        if (!current || !seatLeadOwners.get(current)?.admitted || !authority.current())
+          throw new Error("Native seat ownership changed during review");
+        const { seatId: _seat, ...finding } = review;
+        seatEfficiency.review({ occupantId: seat.occupantId, owner: authority.owner, ...finding });
+        fleetChanges.touch();
+      }
+      const current = await ledSeats(authority.owner);
+      await assertConversationAuthority(authority);
+      return { conversationId: authority.owner.conversationId, seats: current };
+    },
+  };
+  herdrWatches.efficiency = efficiencyActions;
+  const pendingFleetRounds = new Set<string>();
+  const stopFleetRounds = startFleetRounds(async () => {
+    if (shutdown.signal.aborted) return;
+    const seats = await refreshFleet();
+    const owners = new Map<string, ConversationOwner>();
+    for (const seat of seats) {
+      const owner = seatLeadOwners.get(seat)?.owner;
+      if (owner) owners.set(JSON.stringify(owner), owner);
+    }
+    for (const [ownerKey, owner] of owners) {
+      if (pendingFleetRounds.has(ownerKey)) continue;
+      try {
+        if (!(await validateConversationOwner(owner))) continue;
+        const current = await ledSeats(owner);
+        if (!current.length || shutdown.signal.aborted) continue;
+        pendingFleetRounds.add(ownerKey);
+        void wakeConversation(
+          owner,
+          fleetReviewContext(current),
+          async () => {
+            if (shutdown.signal.aborted || !(await ledSeats(owner)).length)
+              throw new Error("Fleet review stopped or has no owned seats");
+            if (shutdown.signal.aborted) throw new Error("Fleet review stopped");
+          },
+          "machine",
+          false,
+          true,
+        )
+          .catch((error: unknown) => {
+            if (!shutdown.signal.aborted)
+              console.warn("Fleet lead round unavailable", owner.conversationId, String(error));
+          })
+          .finally(() => pendingFleetRounds.delete(ownerKey));
+      } catch (error) {
+        if (!shutdown.signal.aborted)
+          console.warn("Fleet lead round unavailable", owner.conversationId, String(error));
+      }
+    }
+  }, options.fleetRoundIntervalMs);
   herdrWatches.start(
     async (conversationId, prompt, discord, guard) => {
-      await wakeConversation(
-        { conversationId, ...(discord === undefined ? {} : { discord }) },
-        prompt,
-        guard,
-      );
+      const owner = { conversationId, ...(discord === undefined ? {} : { discord }) };
+      let review = "";
+      try {
+        const seats = await ledSeats(owner);
+        if (seats.length) {
+          const context = fleetReviewContext(seats, OPERATOR_CONVERSATION_TEXT_MAX - prompt.length - 2);
+          if (context) review = `\n\n${context}`;
+        }
+      } catch (error) {
+        console.warn("Watch fleet review unavailable", conversationId, String(error));
+        const hint =
+          "\n\nFleet review observations are unavailable. Use the lead skill and inspect the roster.";
+        if (prompt.length + hint.length <= OPERATOR_CONVERSATION_TEXT_MAX) review = hint;
+      }
+      await wakeConversation(owner, `${prompt}${review}`, guard);
     },
     (seatId, projection) => {
       if (seatId === headSeat?.seatId && projection.kind === "transcript") {
@@ -2656,6 +2829,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     validateConversationOwner,
     wakeConversation,
 
+    async fleetEfficiency(conversationId, review) {
+      const owner = { conversationId };
+      return efficiencyActions.run(
+        {
+          owner,
+          current: () => conversations.runsCaptainTurns(conversationId),
+          authorize: () => validateConversationOwner(owner),
+        },
+        review,
+      );
+    },
+    tidyWorktrees: (repository, mergedInto) => paneTidy.worktrees(repository, mergedInto),
+
     async laneMemoryCard(lane) {
       return renderMemoryCard(await deps.memory.recallMemoryCard(lane));
     },
@@ -3104,6 +3290,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     async close(): Promise<void> {
       shutdown.abort(new SeatLinkInterruptedError());
+      stopFleetRounds();
       unsubscribeFleets?.();
       evaluator.close();
       for (const mailbox of fleetMailboxes.values()) mailbox.close();

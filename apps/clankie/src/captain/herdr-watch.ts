@@ -228,6 +228,7 @@ export type HerdrWatchArmResult =
 
 export interface HerdrWatchPort {
   tidy?: import("./pane-tidy.ts").PaneTidy;
+  efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
   readoptSeat?(seatId: string, authority: ConversationAuthority): Promise<void>;
   watch(
     conversationId: string,
@@ -713,6 +714,7 @@ export interface ProjectHirePolicy {
 }
 
 export class HerdrWatchStore implements HerdrWatchPort {
+  public efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
   private readonly projectHires: ProjectHires;
   private readonly projectPolicy: ProjectHirePolicy | undefined;
   private readonly hireDefaultPolicies = new WeakMap<SpawnOperatorSeat, string>();
