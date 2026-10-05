@@ -1,4 +1,62 @@
+import { createHash } from "node:crypto";
 import type { OperatorFleetSeat } from "@clankie/protocol";
+
+/** Stable evidence for periodic rounds; observation clocks and report reads are not fresh work. */
+export function fleetRoundEvidence(seats: readonly OperatorFleetSeat[]): {
+  fingerprint: string;
+  flagged: boolean;
+} {
+  const rows = seats.map((seat) => {
+    const efficiency = seat.efficiency;
+    return {
+      seatId: seat.seatId,
+      occupantId: seat.occupantId,
+      harness: seat.harness,
+      fleet: seat.fleet,
+      status: seat.status,
+      assignment: seat.assignment && {
+        objective: seat.assignment.objective,
+        issue: seat.assignment.issue && {
+          repoId: seat.assignment.issue.repoId,
+          itemId: seat.assignment.issue.itemId,
+        },
+      },
+      goal: seat.goal && {
+        objective: seat.goal.objective,
+        status: seat.goal.status,
+        tokenBudget: seat.goal.tokenBudget,
+      },
+      efficiency: efficiency && {
+        ownerConversationId: efficiency.ownerConversationId,
+        flags: [...efficiency.flags].sort(),
+        assignedDeliverable: efficiency.assignedDeliverable,
+        objective: efficiency.objective,
+        currentIssue: efficiency.currentIssue,
+        model: efficiency.model,
+        effort: efficiency.effort,
+        contextPercent: efficiency.contextPercent,
+        lastProgressAt: efficiency.lastProgressAt,
+        lastReportAt: efficiency.lastReportAt,
+        reportFailures: efficiency.reportFailures,
+      },
+      reporting: seat.workerReportRouting && {
+        source: seat.workerReportRouting.source,
+        reason: seat.workerReportRouting.reason,
+        conversationId: seat.workerReportRouting.conversationId,
+        leadSeatId: seat.workerReportRouting.leadSeatId,
+        leadPaneId: seat.workerReportRouting.leadPaneId,
+      },
+    };
+  });
+  rows.sort(
+    (left, right) =>
+      left.seatId.localeCompare(right.seatId) || left.occupantId.localeCompare(right.occupantId),
+  );
+  return {
+    fingerprint: createHash("sha256").update(JSON.stringify(rows)).digest("hex"),
+    flagged: seats.some((seat) => (seat.efficiency?.flags.length ?? 0) > 0),
+  };
+}
 
 /** These are bounded observations, not new authority or a scripted intervention. */
 export function fleetReviewContext(seats: readonly OperatorFleetSeat[], budget = 10_000): string {

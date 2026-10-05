@@ -1848,10 +1848,18 @@ between responses. Claude context/effort and OpenCode or remote telemetry remain
 unknown. Original report acceptance or a reporting attempt remains progress after
 a later acknowledgment; acknowledgment creates no new progress. The TUI shows
 these flags in the agent dock. Every watch wake calls for reviewing all owned
-seats, and periodic lead rounds default to every 30 minutes, coalescing while a
-review turn is outstanding. Wake prompts carry bounded summaries; use
+seats. Periodic checks default to every 30 minutes; unchanged, unflagged evidence
+skips a model turn, and pending reviews coalesce. Wake prompts carry bounded summaries; use
 `fleet_efficiency` or the CLI to inspect the full owned roster. Clankie chooses
 interventions using the `lead` skill and his existing native worker tools.
+Automatic commit evidence requires an advanced descendant HEAD on the seat's
+captured branch in an exclusive linked worktree. Primary checkouts, shared
+worktrees and commits predating admission do not establish that seat's progress.
+Native transcript snapshots are cached by file identity, size and modification
+time; unchanged branch HEADs reuse Git evidence. Discovery runs once in the
+background instead of walking transcript directories during roster refreshes.
+To change an external worker's effort, ask that worker or re-hire with a retained
+handoff; captain model settings do not change the worker.
 
 After inspecting a worker's actual assignment, tracker status or progress evidence,
 record the finding with:

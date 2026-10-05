@@ -189,7 +189,13 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       )
         throw new Error("Designated head authority changed");
     };
-    return wakeExactConversation({ conversationId: head }, notification, finalGuard, "machine", waitForCompletion);
+    return wakeExactConversation(
+      { conversationId: head },
+      notification,
+      finalGuard,
+      "machine",
+      waitForCompletion,
+    );
   }
 
   async function wakeExactConversation(
@@ -207,7 +213,13 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     }
     await guard?.();
     if (!ctx.conversations.runsCaptainTurns(owner.conversationId)) return false;
-    const result = ctx.conversations.submitInternal(owner.conversationId, notification, "watch", undefined, waitForCompletion ? "queue" : undefined);
+    const result = ctx.conversations.submitInternal(
+      owner.conversationId,
+      notification,
+      "watch",
+      undefined,
+      waitForCompletion ? "queue" : undefined,
+    );
     if (result.status !== "accepted") return false;
     // Never redirect an accepted delivery, including one whose turn fails.
     if (waitForCompletion && !(await ctx.conversations.awaitRunResult(result.runId)))

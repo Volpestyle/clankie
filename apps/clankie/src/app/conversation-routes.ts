@@ -28,6 +28,7 @@ import { HerdrUnavailableError } from "../herdr-session.ts";
 import { WorkRequestError } from "../work-items.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
+import { z } from "zod";
 import { authenticateCaptain, authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { type ClankieAppDependencies, type DeviceAuthDenial, type TrustedDeviceIdentity } from "./types.ts";
@@ -93,7 +94,6 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       await ctx.dependencies.captain.tidyWorktrees(parsed.data.repository, parsed.data.mergedInto),
     );
   });
-
 
   // The operator conversation contract (TUI direct, relay in front for
   // devices) and the lanes view — the captain's HTTP face. Both clients send

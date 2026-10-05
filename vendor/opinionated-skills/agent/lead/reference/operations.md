@@ -164,8 +164,9 @@ At 80% reported context occupancy, retain a compact handoff before using the
 harness's supported fresh-session path. Two hours without a commit, substantive
 finding or reporting attempt calls for a result/blocker and an intervention,
 not another watch on the same seat. Changing `clankie model` or `clankie effort` does not tune
-an external worker; use supported per-seat controls or a correctly configured
-replacement after keeping its handoff. Preserve the existing model floors.
+an external worker. Ask the worker through its native channel or re-hire with the
+needed model and effort after keeping its handoff; no lead tool lowers a running
+worker's effort. Preserve the existing model floors.
 
 When available, `close_worker_pane({ pane: PANE_ID, reason: "…", reportPath: "…" })`
 keeps last output and a saved report. `reportPath` is an optional absolute path to

@@ -1,5 +1,16 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+  appendFile,
+  rename,
+  utimes,
+  realpath,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -10,7 +21,12 @@ import {
   type WorkerReportSummary,
 } from "@clankie/protocol";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
-import { readSeatTelemetry } from "../src/captain/seat-telemetry.ts";
+import {
+  readSeatTelemetry,
+  prepareSeatTelemetry,
+  readSeatCommitBaseline,
+  readSeatCommitClaim,
+} from "../src/captain/seat-telemetry.ts";
 import type { ObservedFleetSeat } from "../src/captain/herdr-census.ts";
 
 const exec = promisify(execFile);
@@ -214,10 +230,45 @@ it("resolves an exact Codex session in its admitted custom account home", async 
     account: { label: "custom", home },
     session: { source: "herdr:codex", kind: "id" as const, value: sessionId },
   };
+  expect(await readSeatTelemetry(seat)).toBeUndefined();
+  await prepareSeatTelemetry(seat);
   expect(await readSeatTelemetry(seat)).toMatchObject({ contextPercent: 82 });
   expect(
     await readSeatTelemetry({ ...seat, account: { label: "other", home: join(dir, "other-profile") } }),
   ).toBeUndefined();
+});
+
+it("prepares an ID-only primary Codex session without requiring account census metadata", async () => {
+  const dir = await directory();
+  const home = join(dir, "primary-codex");
+  const date = new Date(Number.parseInt(sessionId.replaceAll("-", "").slice(0, 12), 16));
+  const nativeDir = join(
+    home,
+    "sessions",
+    String(date.getUTCFullYear()),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  );
+  await mkdir(nativeDir, { recursive: true });
+  const path = join(nativeDir, `rollout-fixture-${sessionId}.jsonl`);
+  await writeFile(path, nativeCodex());
+  const seat = {
+    ...observed(path),
+    session: { source: "herdr:codex", kind: "id" as const, value: sessionId },
+  };
+  const previousHome = process.env.CODEX_HOME;
+  try {
+    process.env.CODEX_HOME = home;
+    expect(await readSeatTelemetry(seat)).toBeUndefined();
+    await prepareSeatTelemetry(seat);
+    expect(await readSeatTelemetry(seat)).toMatchObject({ contextPercent: 82, effort: "high" });
+    const customSeat = { ...seat, account: { label: "other", home: join(dir, "missing-custom-profile") } };
+    await prepareSeatTelemetry(customSeat);
+    expect(await readSeatTelemetry(customSeat)).toBeUndefined();
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+  }
 });
 
 it("records preaccept native MCP report failures once and keeps acknowledged report progress", async () => {
@@ -387,44 +438,203 @@ it("honors old admitted assignment, distinguishes native paused work, and omits 
   expect(store.observe({ ...input, owner: { conversationId: "new-owner" } }).flags).toEqual([]);
 });
 
-it("uses a bounded real git HEAD timestamp as commit evidence without creating or changing worker work", async () => {
-  const dir = await directory();
-  await exec("git", ["init", "--quiet", dir]);
-  await writeFile(join(dir, "result.txt"), "A focused patch\n");
-  await exec("git", ["-C", dir, "add", "result.txt"]);
+async function commit(cwd: string, message: string, at: string) {
   await exec(
     "git",
     [
       "-C",
-      dir,
+      cwd,
       "-c",
       "user.name=Fixture",
       "-c",
       "user.email=fixture@example.invalid",
       "commit",
+      "--allow-empty",
       "--quiet",
       "-m",
-      "Focused fixture patch",
+      message,
     ],
     {
-      env: {
-        ...process.env,
-        GIT_COMMITTER_DATE: "2026-10-05T12:30:00Z",
-        GIT_AUTHOR_DATE: "2026-10-05T12:30:00Z",
-      },
+      env: { ...process.env, GIT_COMMITTER_DATE: at, GIT_AUTHOR_DATE: at },
     },
   );
+}
+
+it("attributes only advanced descendant commits on the admitted linked worktree and branch, caching unchanged HEAD", async () => {
+  const dir = await directory();
+  const repository = join(dir, "repository");
+  const worktree = join(dir, "worker-worktree");
+  await exec("git", ["init", "--quiet", repository]);
+  await commit(repository, "Initial baseline", "2026-10-05T12:00:00Z");
+  await exec("git", ["-C", repository, "worktree", "add", "--quiet", "-b", "owned-worker", worktree]);
+  await mkdir(join(worktree, "src"));
+  expect(await readSeatCommitBaseline(repository)).toBeUndefined();
+  const baseline = await readSeatCommitBaseline(join(worktree, "src"));
+  expect(baseline).toMatchObject({
+    worktreeRoot: await realpath(worktree),
+    branchRef: "refs/heads/owned-worker",
+  });
+  expect(await readSeatCommitClaim(join(worktree, "src"), baseline!)).toMatchObject({
+    branchRef: "refs/heads/owned-worker",
+  });
+  const path = join(worktree, "native.jsonl");
+  await writeFile(path, nativeCodex());
+  const seat = { ...observed(path), workingDirectory: join(worktree, "src") };
+  expect(await readSeatTelemetry(seat)).not.toHaveProperty("lastCommitAt");
+  expect(await readSeatTelemetry(seat, { commitBaseline: baseline })).not.toHaveProperty("lastCommitAt");
+  await commit(repository, "Another worker's primary-checkout commit", "2026-10-05T12:30:00Z");
+  expect(await readSeatTelemetry(seat, { commitBaseline: baseline })).not.toHaveProperty("lastCommitAt");
+  await commit(worktree, "Owned branch result", "2026-10-05T12:40:00Z");
+  expect(await readSeatTelemetry(seat, { commitBaseline: baseline })).toMatchObject({
+    lastCommitAt: "2026-10-05T12:40:00.000Z",
+  });
+  const previousPath = process.env.PATH;
+  try {
+    // A real unavailable executable proves unchanged HEAD needs no new Git query.
+    process.env.PATH = join(dir, "no-executables");
+    expect(await readSeatTelemetry(seat, { commitBaseline: baseline })).toHaveProperty(
+      "lastCommitAt",
+      "2026-10-05T12:40:00.000Z",
+    );
+    expect(await readSeatCommitClaim(join(worktree, "src"), baseline!)).toHaveProperty(
+      "branchRef",
+      "refs/heads/owned-worker",
+    );
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+  expect(
+    await readSeatTelemetry(
+      { ...observed(join(dir, "missing-native.jsonl")), workingDirectory: worktree },
+      { commitBaseline: baseline },
+    ),
+  ).toEqual({
+    lastCommitAt: "2026-10-05T12:40:00.000Z",
+  });
+  await exec("git", ["-C", worktree, "switch", "--quiet", "-c", "different-deliverable"]);
+  expect(await readSeatCommitClaim(join(worktree, "src"), baseline!)).toHaveProperty(
+    "branchRef",
+    "refs/heads/different-deliverable",
+  );
+  expect(await readSeatTelemetry(seat, { commitBaseline: baseline })).not.toHaveProperty("lastCommitAt");
+  await exec("git", ["-C", worktree, "switch", "--quiet", "owned-worker"]);
+  await exec("git", ["-C", worktree, "reset", "--quiet", "--hard", baseline!.head]);
+  expect(await readSeatTelemetry(seat, { commitBaseline: baseline })).not.toHaveProperty("lastCommitAt");
+  const storePath = join(dir, "efficiency.json");
+  const store = new SeatEfficiencyStore(storePath);
+  store.assign("session-worker-1", { owner, commitBaseline: baseline });
+  expect(new SeatEfficiencyStore(storePath).readCommitBaseline("session-worker-1", owner)).toEqual(baseline);
+  expect(store.readCommitBaseline("session-worker-1", { conversationId: "another-owner" })).toBeUndefined();
+});
+
+it("reuses unchanged native snapshots and invalidates on append, mtime and replacement inode", async () => {
+  const dir = await directory();
   const path = join(dir, "native.jsonl");
   await writeFile(path, nativeCodex());
-  const before = await readFile(join(dir, ".git", "HEAD"));
-  expect(await readSeatTelemetry({ ...observed(path), workingDirectory: dir })).toMatchObject({
-    lastCommitAt: "2026-10-05T12:30:00.000Z",
+  const seat = observed(path);
+  const initial = await readSeatTelemetry(seat);
+  expect(await readSeatTelemetry(seat)).toBe(initial);
+  await appendFile(
+    path,
+    JSON.stringify({
+      timestamp: startedAt,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: { model_context_window: 100_000, last_token_usage: { input_tokens: 91_000 } },
+      },
+    }) + "\n",
+  );
+  expect(await readSeatTelemetry(seat)).toHaveProperty("contextPercent", 91);
+  await writeFile(path, nativeCodex().replaceAll("gpt-6-sol", "gpt-6-xyz"));
+  await utimes(path, new Date("2026-10-05T12:01:00Z"), new Date("2026-10-05T12:01:00Z"));
+  const changed = await readSeatTelemetry(seat);
+  expect(changed).toHaveProperty("model", "gpt-6-xyz");
+  const replacement = join(dir, "replacement.jsonl");
+  await writeFile(replacement, nativeCodex().replaceAll("gpt-6-sol", "gpt-6-new"));
+  await utimes(replacement, new Date("2026-10-05T12:01:00Z"), new Date("2026-10-05T12:01:00Z"));
+  await rename(replacement, path);
+  expect(await readSeatTelemetry(seat)).toHaveProperty("model", "gpt-6-new");
+  expect(await readSeatTelemetry(seat)).not.toBe(changed);
+});
+
+it("keeps prepared missing IDs unknown without rediscovering directories during refresh", async () => {
+  const dir = await directory();
+  const home = join(dir, "codex");
+  const seat = {
+    ...observed(join(dir, "native.jsonl")),
+    account: { label: "fixture", home },
+    session: { source: "herdr:codex", kind: "id" as const, value: sessionId },
+  };
+  await prepareSeatTelemetry(seat);
+  const date = new Date(Number.parseInt(sessionId.replaceAll("-", "").slice(0, 12), 16));
+  const nativeDir = join(
+    home,
+    "sessions",
+    String(date.getUTCFullYear()),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  );
+  await mkdir(nativeDir, { recursive: true });
+  const path = join(nativeDir, `rollout-fixture-${sessionId}.jsonl`);
+  await writeFile(path, nativeCodex());
+  expect(await readSeatTelemetry(seat)).toBeUndefined();
+  await prepareSeatTelemetry(seat);
+  expect(await readSeatTelemetry(seat)).toBeUndefined();
+  await prepareSeatTelemetry(seat, { transcriptPath: path });
+  expect(await readSeatTelemetry(seat)).toHaveProperty("contextPercent", 82);
+});
+
+it("migrates unproven generic commit progress without losing explicit report and reviewed timestamps", async () => {
+  const dir = await directory();
+  const path = join(dir, "efficiency.json");
+  now = Date.parse("2026-10-05T14:01:00.000Z");
+  await writeFile(
+    path,
+    JSON.stringify({
+      "session-old-commit": {
+        owner,
+        firstObservedAt: startedAt,
+        assignedAt: "2026-10-05T09:00:00.000Z",
+        lastProgressAt: "2026-10-05T13:59:00.000Z",
+        observed: {
+          checkedAt: startedAt,
+          ownerConversationId: owner.conversationId,
+          flags: [],
+          lastProgressAt: "2026-10-05T13:59:00.000Z",
+          lastCommitAt: "2026-10-05T13:59:00.000Z",
+        },
+      },
+      "session-report": {
+        owner,
+        firstObservedAt: startedAt,
+        assignedAt: "2026-10-05T09:00:00.000Z",
+        lastProgressAt: "2026-10-05T13:59:00.000Z",
+        lastReportAt: "2026-10-05T13:30:00.000Z",
+        progressAt: "2026-10-05T13:20:00.000Z",
+      },
+    }),
+  );
+  const store = new SeatEfficiencyStore(path, { now: () => now });
+  const old = store.observe({ occupantId: "session-old-commit", seatId: "seat-old", owner });
+  expect(old.flags).toContain("no progress in 2h");
+  expect(old).not.toHaveProperty("lastProgressAt");
+  expect(store.observe({ occupantId: "session-report", seatId: "seat-report", owner })).toHaveProperty(
+    "lastProgressAt",
+    "2026-10-05T13:30:00.000Z",
+  );
+  store.review({
+    occupantId: "session-old-commit",
+    owner,
+    progressAt: "2026-10-05T13:40:00.000Z",
+    evidence: "Reviewed a real focused patch",
   });
   expect(
-    await readSeatTelemetry({ ...observed(join(dir, "missing-native.jsonl")), workingDirectory: dir }),
-  ).toEqual({ lastCommitAt: "2026-10-05T12:30:00.000Z" });
-  expect(await readSeatTelemetry({ ...observed(path, "opencode"), workingDirectory: dir })).toEqual({
-    lastCommitAt: "2026-10-05T12:30:00.000Z",
-  });
-  expect(await readFile(join(dir, ".git", "HEAD"))).toEqual(before);
+    new SeatEfficiencyStore(path, { now: () => now }).observe({
+      occupantId: "session-old-commit",
+      seatId: "seat-old",
+      owner,
+    }),
+  ).toHaveProperty("lastProgressAt", "2026-10-05T13:40:00.000Z");
 });

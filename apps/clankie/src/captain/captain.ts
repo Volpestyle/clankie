@@ -1,6 +1,12 @@
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
-import { readSeatTelemetry } from "./seat-telemetry.ts";
-import { fleetReviewContext, startFleetRounds } from "./fleet-review.ts";
+import {
+  prepareSeatTelemetry,
+  readSeatCommitClaim,
+  readSeatCommitBaseline,
+  readSeatTelemetry,
+  type SeatCommitBaseline,
+} from "./seat-telemetry.ts";
+import { fleetReviewContext, fleetRoundEvidence, startFleetRounds } from "./fleet-review.ts";
 import { FleetEfficiencyReviewSchema, type FleetEfficiencyReview } from "./fleet-efficiency-tools.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
@@ -38,8 +44,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
@@ -122,6 +129,7 @@ import {
   readFleet,
   type HerdrCensusFleet,
   type ObservedHeadSeat,
+  type ObservedFleetSeat,
 } from "./herdr-census.ts";
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
@@ -671,7 +679,40 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const stances = createStanceStore();
   const agentWork = createAgentWorkStore(options.stateDir);
   const seatEfficiency = new SeatEfficiencyStore(join(options.stateDir, "seat-efficiency.json"));
-  const seatLeadOwners = new WeakMap<OperatorFleetSeat, { owner: ConversationOwner; admitted: boolean }>();
+  const seatLeadOwners = new WeakMap<
+    OperatorFleetSeat,
+    { owner: ConversationOwner; admitted: boolean; observed: ObservedFleetSeat }
+  >();
+  const observedCommitBaselines = new Map<string, Promise<SeatCommitBaseline | undefined>>();
+  const preparedTelemetry = new Set<string>();
+  const observationIdentity = (observed: ObservedFleetSeat) =>
+    JSON.stringify([
+      observed.fleet,
+      observed.harness,
+      observed.account?.home,
+      observed.session,
+      observed.workingDirectory,
+    ]);
+  function initialCommitBaseline(observed: ObservedFleetSeat): Promise<SeatCommitBaseline | undefined> {
+    const identity = observationIdentity(observed);
+    if (!preparedTelemetry.has(identity)) {
+      preparedTelemetry.add(identity);
+      // Address discovery is a one-time background admission task. Roster reads
+      // never scan transcript directories or wait for that discovery.
+      setImmediate(() => {
+        if (!shutdown.signal.aborted) void prepareSeatTelemetry(observed).catch(() => undefined);
+      });
+    }
+    let pending = observedCommitBaselines.get(identity);
+    if (!pending) {
+      pending =
+        observed.fleet === undefined && observed.workingDirectory
+          ? readSeatCommitBaseline(observed.workingDirectory)
+          : Promise.resolve(undefined);
+      observedCommitBaselines.set(identity, pending);
+    }
+    return pending;
+  }
   let efficiencyFingerprint = "";
   /**
    * What each fleet seat's pane status was last seen as. The watcher publishes
@@ -1375,6 +1416,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     await personas.prepareRoleAdoption(request.role);
     let adopted: ReturnType<typeof personas.adoptSpawn> | undefined;
     let adoptedRoleWrite: PersonaRoleWrite | undefined;
+    // Capture before the native harness can change its branch. A resumed or
+    // legacy seat without this proof starts at first observation, never at an
+    // arbitrary recent commit from its cwd.
+    const commitBaseline =
+      request.fleet === undefined ? await readSeatCommitBaseline(request.workingDirectory) : undefined;
     const result = await herdrWatches.spawnSeat(
       request,
       undefined,
@@ -1397,6 +1443,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         );
         seatEfficiency.assign(seat.occupantId, {
           owner: authority.owner,
+          ...(commitBaseline === undefined ? {} : { commitBaseline }),
           ...(request.deliverable === undefined ? {} : { deliverable: request.deliverable }),
           ...(request.model === undefined ? {} : { model: request.model }),
           ...(request.effort === undefined ? {} : { effort: request.effort }),
@@ -1938,21 +1985,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             /* Conflicting historical claims confer no inspection attribution. */
           }
         }
-        const efficiency =
-          observed && leadOwner
-            ? seatEfficiency.observe({
-                occupantId: seat.occupantId,
-                seatId: seat.seatId,
-                owner: leadOwner,
-                status: seat.status,
-                assignment: seat.assignment,
-                goal: seat.goal,
-                reportRoute: workerReportRouting,
-                reports: reportSummaries(undefined, observedAgent(observed), true),
-                telemetry: await readSeatTelemetry(observed),
-              })
-            : undefined;
-        const result = {
+        const result: OperatorFleetSeat = {
           ...seat,
           conversationId: conversations.conversationIdForPersona(seat.personaId),
           ...(stance === undefined ? {} : { stance }),
@@ -1963,13 +1996,80 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const identity = observed && catalogIdentity(observed, "worker");
             return identity ? { toolCatalog: await currentCatalogHealth(identity) } : {};
           })()),
-          ...(efficiency === undefined ? {} : { efficiency }),
           ...(observed === undefined
             ? {}
             : { workerReports: reportSummaries(undefined, observedAgent(observed)).slice(-100) }),
         };
-        if (leadOwner) seatLeadOwners.set(result, { owner: leadOwner, admitted });
+        if (leadOwner && observed) seatLeadOwners.set(result, { owner: leadOwner, admitted, observed });
         return result;
+      }),
+    );
+    // Establish all native worktree claims once per occupant, including seats
+    // led elsewhere. A shared worktree cannot attribute HEAD progress to one seat.
+    const claims = await Promise.all(
+      fleet.seats.map(async (observed) => {
+        const baseline = await initialCommitBaseline(observed);
+        return {
+          observed,
+          baseline,
+          cwd:
+            observed.fleet === undefined && observed.workingDirectory
+              ? await realpath(observed.workingDirectory).catch(() => undefined)
+              : undefined,
+          current:
+            baseline && observed.workingDirectory
+              ? await readSeatCommitClaim(observed.workingDirectory, baseline)
+              : undefined,
+        };
+      }),
+    );
+    const currentObservations = new Set(fleet.seats.map(observationIdentity));
+    for (const identity of observedCommitBaselines.keys()) {
+      if (!currentObservations.has(identity)) observedCommitBaselines.delete(identity);
+    }
+    for (const identity of preparedTelemetry) {
+      if (!currentObservations.has(identity)) preparedTelemetry.delete(identity);
+    }
+    await Promise.all(
+      projected.map(async (seat) => {
+        const lead = seatLeadOwners.get(seat);
+        if (!lead) return;
+        let baseline = seatEfficiency.readCommitBaseline(seat.occupantId, lead.owner);
+        if (!baseline) {
+          baseline = claims.find((claim) => claim.observed.seatId === seat.seatId)?.baseline;
+          if (baseline) seatEfficiency.setCommitBaseline(seat.occupantId, lead.owner, baseline);
+        }
+        const exclusive =
+          baseline &&
+          !claims.some(
+            (claim) =>
+              claim.observed.seatId !== seat.seatId &&
+              (claim.baseline
+                ? claim.baseline.worktreeRoot === baseline.worktreeRoot ||
+                  (claim.baseline.commonDir === baseline.commonDir &&
+                    (!claim.current || claim.current.branchRef === baseline.branchRef))
+                : claim.cwd !== undefined &&
+                  basename(baseline.commonDir) === ".git" &&
+                  (() => {
+                    // A local primary-checkout claim cannot earn commit credit,
+                    // and cannot establish another branch's exclusivity either.
+                    const within = relative(dirname(baseline.commonDir), claim.cwd);
+                    return within !== ".." && !within.startsWith("../") && !isAbsolute(within);
+                  })()),
+          );
+        seat.efficiency = seatEfficiency.observe({
+          occupantId: seat.occupantId,
+          seatId: seat.seatId,
+          owner: lead.owner,
+          status: seat.status,
+          assignment: seat.assignment,
+          goal: seat.goal,
+          reportRoute: seat.workerReportRouting,
+          reports: reportSummaries(undefined, observedAgent(lead.observed), true),
+          telemetry: await readSeatTelemetry(lead.observed, {
+            commitBaseline: exclusive ? baseline : undefined,
+          }),
+        });
       }),
     );
     for (const seat of projected) {
@@ -1986,12 +2086,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       )
         efficiency.flags.push("overlap");
     }
-    const fingerprint = JSON.stringify(
-      projected.map((seat) => {
-        const { checkedAt: _checked, ...evidence } = seat.efficiency ?? {};
-        return [seat.occupantId, evidence];
-      }),
-    );
+    const fingerprint = fleetRoundEvidence(projected).fingerprint;
     if (fingerprint !== efficiencyFingerprint) {
       efficiencyFingerprint = fingerprint;
       fleetChanges.touch();
@@ -2107,6 +2202,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   herdrWatches.efficiency = efficiencyActions;
   const pendingFleetRounds = new Set<string>();
+  const completedFleetRounds = new Map<string, string>();
   const stopFleetRounds = startFleetRounds(async () => {
     if (shutdown.signal.aborted) return;
     const seats = await refreshFleet();
@@ -2115,12 +2211,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const owner = seatLeadOwners.get(seat)?.owner;
       if (owner) owners.set(JSON.stringify(owner), owner);
     }
+    for (const ownerKey of completedFleetRounds.keys()) {
+      if (!owners.has(ownerKey)) completedFleetRounds.delete(ownerKey);
+    }
     for (const [ownerKey, owner] of owners) {
       if (pendingFleetRounds.has(ownerKey)) continue;
       try {
         if (!(await validateConversationOwner(owner))) continue;
         const current = await ledSeats(owner);
         if (!current.length || shutdown.signal.aborted) continue;
+        const evidence = fleetRoundEvidence(current);
+        if (!evidence.flagged && completedFleetRounds.get(ownerKey) === evidence.fingerprint) continue;
         pendingFleetRounds.add(ownerKey);
         void wakeConversation(
           owner,
@@ -2134,6 +2235,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           false,
           true,
         )
+          .then((accepted) => {
+            if (accepted) completedFleetRounds.set(ownerKey, evidence.fingerprint);
+          })
           .catch((error: unknown) => {
             if (!shutdown.signal.aborted)
               console.warn("Fleet lead round unavailable", owner.conversationId, String(error));

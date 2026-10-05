@@ -10,7 +10,7 @@ import {
 } from "@clankie/protocol";
 import { z } from "zod";
 import { ConversationOwnerSchema, type ConversationOwner } from "./conversation-owner.ts";
-import type { SeatTelemetry } from "./seat-telemetry.ts";
+import { SeatCommitBaselineSchema, type SeatCommitBaseline, type SeatTelemetry } from "./seat-telemetry.ts";
 
 const Timestamp = z.string().datetime();
 const RecordSchema = z
@@ -22,10 +22,14 @@ const RecordSchema = z
     objective: z.string().min(1).max(16_384).optional(),
     model: z.string().min(1).max(256).optional(),
     effort: z.string().min(1).max(64).optional(),
+    commitBaseline: SeatCommitBaselineSchema.optional(),
     offScope: z.boolean().optional(),
     assignmentStatus: z.enum(["active", "paused", "canceled", "done"]).optional(),
     evidence: z.string().min(1).max(4000).optional(),
     lastProgressAt: Timestamp.optional(),
+    progressEvidenceVersion: z.literal(1).optional(),
+    reviewedProgressAt: Timestamp.optional(),
+    attributedCommitAt: Timestamp.optional(),
     lastReportAt: Timestamp.optional(),
     reportFailedAt: Timestamp.optional(),
     reportFailures: z.number().int().nonnegative().optional(),
@@ -35,6 +39,14 @@ const RecordSchema = z
   .strict();
 type Record = z.infer<typeof RecordSchema>;
 const RecordsSchema = z.record(z.string().min(1).max(512), RecordSchema);
+const LegacyRecordsSchema = z.record(
+  z.string().min(1).max(512),
+  RecordSchema.extend({
+    progressAt: Timestamp.optional(),
+    lastCommitAt: Timestamp.optional(),
+    observed: OperatorSeatEfficiencySchema.extend({ lastCommitAt: Timestamp.optional() }).optional(),
+  }),
+);
 const sameOwner = (left: ConversationOwner, right: ConversationOwner) =>
   JSON.stringify(ConversationOwnerSchema.parse(left)) ===
   JSON.stringify(ConversationOwnerSchema.parse(right));
@@ -76,7 +88,31 @@ export class SeatEfficiencyStore {
     this.now = options.now ?? Date.now;
     if (existsSync(path)) {
       try {
-        this.records = RecordsSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+        const legacy = LegacyRecordsSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+        for (const [id, entry] of Object.entries(legacy)) {
+          const { progressAt, lastCommitAt: _unprovenCommit, observed, ...persisted } = entry;
+          const record: Record = persisted;
+          if (record.progressEvidenceVersion !== 1) {
+            // Older aggregates mixed cwd HEAD with real progress. Preserve only
+            // separately timestamped reports/reviews; never infer their source.
+            record.reviewedProgressAt = latest(record.reviewedProgressAt, progressAt);
+            delete record.attributedCommitAt;
+            record.lastProgressAt = latest(
+              record.reviewedProgressAt,
+              record.lastReportAt,
+              record.reportFailedAt,
+            );
+            record.progressEvidenceVersion = 1;
+          }
+          if (observed) {
+            const { lastCommitAt: _legacyCommit, lastProgressAt: _aggregate, ...evidence } = observed;
+            record.observed = {
+              ...evidence,
+              ...(record.lastProgressAt === undefined ? {} : { lastProgressAt: record.lastProgressAt }),
+            };
+          }
+          this.records[id] = RecordSchema.parse(record);
+        }
       } catch {
         /* Unavailable display evidence cannot prevent service startup. */
       }
@@ -93,6 +129,7 @@ export class SeatEfficiencyStore {
       model?: string | undefined;
       effort?: string | undefined;
       assignedAt?: string | undefined;
+      commitBaseline?: SeatCommitBaseline | undefined;
     },
   ): void {
     z.string()
@@ -103,7 +140,7 @@ export class SeatEfficiencyStore {
     const record =
       previous !== undefined && sameOwner(previous.owner, owner)
         ? previous
-        : { owner, firstObservedAt: this.timestamp() };
+        : { owner, firstObservedAt: this.timestamp(), progressEvidenceVersion: 1 as const };
     this.records[occupantId] = RecordSchema.parse({
       ...record,
       owner,
@@ -112,7 +149,24 @@ export class SeatEfficiencyStore {
       ...(assignment.objective === undefined ? {} : { objective: assignment.objective }),
       ...(assignment.model === undefined ? {} : { model: assignment.model }),
       ...(assignment.effort === undefined ? {} : { effort: assignment.effort }),
+      ...(assignment.commitBaseline === undefined ? {} : { commitBaseline: assignment.commitBaseline }),
     });
+    this.save();
+  }
+
+  /** Internal host evidence only; owner changes never inherit another baseline. */
+  public readCommitBaseline(occupantId: string, owner: ConversationOwner): SeatCommitBaseline | undefined {
+    const record = Object.hasOwn(this.records, occupantId) ? this.records[occupantId] : undefined;
+    return record && sameOwner(record.owner, owner) && record.commitBaseline
+      ? SeatCommitBaselineSchema.parse(record.commitBaseline)
+      : undefined;
+  }
+
+  /** Establish a legacy occupant's first-observed baseline without retro-credit. */
+  public setCommitBaseline(occupantId: string, owner: ConversationOwner, baseline: SeatCommitBaseline): void {
+    const record = this.ownedRecord(occupantId, owner, true);
+    if (record.commitBaseline !== undefined) return;
+    record.commitBaseline = SeatCommitBaselineSchema.parse(baseline);
     this.save();
   }
 
@@ -128,15 +182,17 @@ export class SeatEfficiencyStore {
       input.telemetry?.reportFailedAt,
       ...reports.map((report) => report.acceptedAt),
     );
-    const progress = latest(
-      record.lastProgressAt,
-      input.lastCommitAt,
-      input.telemetry?.lastCommitAt,
-      input.telemetry?.lastProgressAt,
-      lastReportAt,
-    );
+    const progress = latest(record.reviewedProgressAt, record.attributedCommitAt, lastReportAt);
+    const commitAt = latest(input.lastCommitAt, input.telemetry?.lastCommitAt);
+    if (record.commitBaseline !== undefined && commitAt !== undefined)
+      record.attributedCommitAt = latest(record.attributedCommitAt, commitAt);
+    const explicitProgress = input.telemetry?.lastProgressAt;
+    if (explicitProgress !== undefined)
+      record.reviewedProgressAt = latest(record.reviewedProgressAt, explicitProgress);
+    const provenProgress = latest(progress, record.attributedCommitAt, record.reviewedProgressAt);
     if (lastReportAt !== undefined) record.lastReportAt = lastReportAt;
-    if (progress !== undefined) record.lastProgressAt = progress;
+    if (provenProgress !== undefined) record.lastProgressAt = provenProgress;
+    else delete record.lastProgressAt;
     const failureAt = input.telemetry?.reportFailedAt;
     if (
       failureAt !== undefined &&
@@ -245,7 +301,10 @@ export class SeatEfficiencyStore {
       ...(input.deliverable === undefined ? {} : { assignedDeliverable: input.deliverable }),
       ...(input.progressAt === undefined
         ? {}
-        : { lastProgressAt: latest(record.lastProgressAt, Timestamp.parse(input.progressAt)) }),
+        : {
+            reviewedProgressAt: latest(record.reviewedProgressAt, Timestamp.parse(input.progressAt)),
+            lastProgressAt: latest(record.lastProgressAt, input.progressAt),
+          }),
     });
     this.records[input.occupantId] = updated;
     this.save();
@@ -292,7 +351,7 @@ export class SeatEfficiencyStore {
       // and assignment/progress evidence must not cross the ownership boundary.
     }
     if (!create) throw new Error("Seat efficiency observation is unavailable for this occupant");
-    const record: Record = { owner: proof, firstObservedAt: this.timestamp() };
+    const record: Record = { owner: proof, firstObservedAt: this.timestamp(), progressEvidenceVersion: 1 };
     this.records[occupantId] = record;
     return record;
   }

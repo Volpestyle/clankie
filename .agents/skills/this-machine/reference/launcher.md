@@ -6,12 +6,16 @@ For every watch wake and periodic lead round (30 minutes by default), load
 `lead` and inspect every seat owned by this conversation. Use
 `clankie agents efficiency --conversation ID` or `fleet_efficiency` with
 `action: "show"`; the roster and agent dock carry plain efficiency flags.
-Periodic rounds coalesce while a review turn is outstanding. Wake prompts carry
+Periodic checks skip a model turn for unchanged, unflagged evidence and coalesce
+while a review turn is outstanding. Wake prompts carry
 bounded summaries; use the tool or CLI for the full owned roster. Context
 percentage is the latest native Codex model-input snapshot and may age between
 responses. Claude context/effort and OpenCode or remote telemetry remain unknown.
 Original report acceptance or attempt remains progress after acknowledgment;
-acknowledgment creates no new progress. Record inspected
+acknowledgment creates no new progress. Automatic commit evidence requires the
+seat's captured branch and exclusive linked worktree, with HEAD advanced since
+admission; primary or shared checkouts do not count. Ask the worker or re-hire to
+change its effort. Record inspected
 scope, tracker status or substantive progress with
 `clankie agents efficiency review SEAT --conversation ID --json-stdin`;
 the JSON requires `evidence` and optionally accepts `offScope`,

@@ -59,6 +59,14 @@ Hire a pane when the work needs its own lifetime beyond this turn, its own
 worktree, a different harness, model or account, or long parallel work the owner
 should be able to watch. Workers follow the same rule inside their own panes.
 
+## Report through the tracker
+
+Progress for the owner lives in the work tracker: ticket status plus an evidence
+comment as each piece lands, and project status updates for check-ins and
+summaries. Scratch output and logs stay in the worker's worktree `.local/`.
+Don't create side folders of handoff files for the owner to read; a restarted
+lead recovers from the tracker, the roster and the branches.
+
 ## Use the best harness for the task
 
 You are the lead and the character, not the best tool for every job. Route each
@@ -132,6 +140,33 @@ use what the user said. With neither, assume `max` and `optimal`.
 Size toward the target, and go past it when the work clearly warrants; say so.
 The budget never adds a worker without a separable result, never removes a
 required review, and never lowers a consequential boundary's model floor.
+
+## Read fleet responsibility settings
+
+For Clankie's fleet, read the current effective `fleet.closure` and
+`fleet.machineSetup` in his "Your fleet" prompt section. `clankie fleet status`
+shows the global defaults; `clankie project settings PROJECT` shows independent
+project overrides and effective values. Read them before closing tracked work
+or preparing a machine; a missing project override inherits the global setting.
+Both default to `lead` on installs that support these settings. Older installs
+without them retain the user's existing workflow and authority.
+
+With `closure=lead`, the lead closes the issue to Done once the result has landed,
+relevant checks pass, and evidence is attached. Workers report their result to
+the lead; they do not park it for "owner acceptance". The owner can reopen it.
+With `closure=owner`, park the delivered result In Review for the owner to close.
+An owner-only step such as App Store submission, payment, an eval, or a sign-up
+on the owner's account gets its own linked follow-up without holding an otherwise
+delivered issue open. This does not turn missing implementation or verification
+into a pass, or grant permission to run those owner-only steps.
+
+With `machineSetup=lead`, leads and workers may install, refresh and prepare
+Clankie's own harness plugins, bridges and worker setup on already-linked
+machines through their existing authorized access. With `machineSetup=owner`,
+ask the owner before those setup changes. This never grants new machine or CLI
+credentials and never restarts or steers existing lanes. Sign-ins, codes,
+CAPTCHAs, payments, account changes, credentials and destructive actions outside
+fleet workspaces always retain their existing owner boundary.
 
 ## Inherit the project's hire profile
 
@@ -289,7 +324,9 @@ work from this thread while existing productive jobs remain safe.
 On every watch wake and each periodic lead round, check **all seats you own**
 in the selected runtime. For Clankie, that is every seat in your hiring/adopting
 conversation across local and linked fleets; supporting installs run the periodic
-round every 30 minutes by default, coalescing while a review turn is outstanding.
+check every 30 minutes by default. Skip a periodic review when the owned-set
+evidence is unchanged and has no flags; coalesce while a review turn is
+outstanding.
 Wake prompts carry bounded summaries; use `fleet_efficiency` for the full owned
 roster and inspect every owned seat. Include working seats, not only the seat that
 woke you or those marked idle. Use the current roster, efficiency flags
@@ -315,8 +352,11 @@ on the wrong thing.
   OpenCode or remote telemetry stay unknown. Token spend or transcript length is
   not context occupancy.
 - **Progress:** two hours without a commit, substantive finding or reporting
-  attempt needs intervention. Use the source timestamp; a failed report still
-  counts as an attempt, while its route needs repair. An unread or unacknowledged
+  attempt needs intervention. Verify commit evidence against this worker's
+  assigned branch, worktree and deliverable; another worker's commit or a
+  repository-wide HEAD change is not its progress. Use the source timestamp. A
+  failed report still counts as an attempt, while its route needs repair. An
+  unread or unacknowledged
   report does not prove missing progress. Original report acceptance or attempt
   remains progress after a later acknowledgment; acknowledgment adds no new
   progress. Obtain a concrete result or actionable
@@ -335,8 +375,9 @@ inspected scope/status or progress evidence for an exact native occupant. Use
 `review` when that evidence changes; it does not update the tracker, change
 ownership or configure a harness. Keep unavailable observations unknown.
 
-Act in the same round: redirect, tune supported per-seat settings, hand off,
-unblock, re-task or tidy. Let productive workers continue. Tell the owner only
+Act in the same round: redirect, ask the worker or re-hire with the needed
+model/effort, hand off, unblock, re-task or tidy. No lead tool lowers a running
+worker's effort. Let productive workers continue. Tell the owner only
 what needs their decision, naming the exact blocker and next action. Start from
 roster signals and worker reports; read a bounded part of native history or a
 pane only when a signal is missing, contradictory or stale. Periodic rounds do
