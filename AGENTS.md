@@ -31,7 +31,9 @@ This repository is public. Both neighbors are private and consume
 - `apps/discord-activity` — the watch-me-play surface.
 - `apps/relay` — remote access for the phone/desktop app.
 - `apps/docs` — public field guide and generated technical references. The
-  [library index](docs/README.md) maps current guides, proposals, and history.
+  [library index](docs/README.md) maps current guides, proposals, and history. The
+  [current architecture](docs/architecture.md) describes system boundaries,
+  request flows, and source modules by domain.
 - `apps/vox` — AGPL native Discord voice, screen-watch, and Go Live media.
 - `integrations/herdr-plugin` — Clankie's herdr plugin (board/console panes,
   actions); all other herdr integration is vanilla CLI/socket (ADR 0139).
