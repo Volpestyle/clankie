@@ -654,6 +654,12 @@ Linear-shaped tracker tool surface to Clankie and workers, using the connected
 owner account or durable local storage when disconnected; repository conventions
 adapt GitHub and Markdown to that same surface. `clankie doctor` reports backend
 selection and reason ([ADR 0226](adr/0226-one-tracker-tool-surface.md)).
+Account Connections in the app and account page use body-owned GitHub device
+authorization and registered Linear S256 PKCE. Provider tokens stay in the
+body's broker; the portals exchange only sealed lifecycle requests and public
+connection metadata. Registered Linear API OAuth uses a separate `linear-api`
+credential and in-process tracker, preserving the existing MCP audience and
+grant fences ([ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md)).
 Herdr contains the native
 interactive workers; Clankie uses their supported channels or session APIs for
 delivery. Linked independent agents can write first with `message_clankie`. Untrusted input stays fenced, secrets stay in the credential

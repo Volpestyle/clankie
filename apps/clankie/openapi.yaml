@@ -765,7 +765,7 @@ paths:
       operationId: listAccounts
       summary: List GitHub and Linear account connections
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
@@ -784,7 +784,7 @@ paths:
       operationId: startGithubAccount
       summary: Start a GitHub device flow; return the user code and verification URL
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
         The device code stays on the body. Unconfigured without a GitHub OAuth client ID.
@@ -814,7 +814,7 @@ paths:
       operationId: pollGithubAccount
       summary: Poll a GitHub device flow; returns pending, connected or a closed error
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
         Polls faster than GitHub's interval are answered by the body without calling GitHub.
@@ -848,12 +848,12 @@ paths:
     post:
       tags: [Operator]
       operationId: startLinearAccount
-      summary: Start Linear OAuth with PKCE; return the authorize URL
+      summary: Start registered Linear app OAuth with S256 PKCE; return the authorize URL
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
-        The PKCE verifier stays on the body. Unconfigured without a redirect URI.
+        The PKCE verifier stays on the body. Tokens use the separate linear-api broker entry and GraphQL tracker, never MCP. Unconfigured without a redirect URI.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
@@ -880,7 +880,7 @@ paths:
       operationId: completeLinearAccount
       summary: Hand back Linear's redirect code; the body exchanges it with its verifier
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
         state is single use.
@@ -951,13 +951,15 @@ paths:
     post:
       tags: [Operator]
       operationId: disconnectAccount
-      summary: Revoke a connection at the provider and delete its token
+      summary: Disconnect locally and report actual provider revocation
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
         revoked is false when the provider could not revoke; the token is deleted either way
         and manageUrl names where to revoke it by hand.
+        Hosted GitHub disconnect never uses a developer app secret and reports revoked false.
+        Owner-run self-hosted GitHub revocation deletes only the stored token, never an app grant.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true

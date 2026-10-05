@@ -3,7 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
-import { FileCredentialStore, type ProviderAccount } from "@clankie/credential-broker";
+import {
+  FileCredentialStore,
+  LINEAR_API_PROVIDER_ID,
+  type ProviderAccount,
+} from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker } from "@clankie/work-items";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -18,6 +22,9 @@ import { afterEach, expect, it } from "vitest";
 import type { LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
+import { createAccounts } from "../src/accounts.ts";
+import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
+import { createLinearApiProvider, ISSUE_ID } from "./fixtures/linear-api-provider.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -49,7 +56,7 @@ async function listen(fetch: (request: Request) => Promise<Response>) {
 }
 
 /** Real worker/host/SDK HTTP path; the isolated tracker owns one controlled issue. */
-async function fixture(options: { local?: boolean } = {}) {
+async function fixture(options: { local?: boolean; api?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-call-receipts-"));
   const admitted = gate();
   const release = gate();
@@ -148,8 +155,25 @@ async function fixture(options: { local?: boolean } = {}) {
     verifiedAt: new Date().toISOString(),
   };
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
-  if (!options.local)
+  const apiProvider = options.api ? await createLinearApiProvider() : undefined;
+  if (apiProvider) {
+    const accounts = createAccounts({
+      store: credentials,
+      apps: async () => ({
+        github: {},
+        linear: {
+          clientId: "registered-client",
+          redirectUri: "https://gateway.test/account/connections/callback",
+        },
+      }),
+      fetch: apiProvider.fetch,
+    });
+    const start = await accounts.startLinear();
+    if (!start.ok) throw new Error("Missing API receipt OAuth flow");
+    expect((await accounts.completeLinear(start.flowId, "good-code")).ok).toBe(true);
+  } else if (!options.local) {
     await credentials.set("linear", { type: "api", key: "fixture-provider-secret", account });
+  }
   const localTracker = options.local
     ? createLocalTracker({ directory: join(root, "local-tracker") })
     : undefined;
@@ -158,6 +182,12 @@ async function fixture(options: { local?: boolean } = {}) {
     settings,
     curated: [],
     ...(localTracker ? { localTracker, trackerIdentity: join(root, "local-tracker") } : {}),
+    ...(apiProvider
+      ? {
+          linearApiTracker: createLinearApiTracker({ credentials, fetch: apiProvider.fetch }),
+          linearFetch: apiProvider.fetch,
+        }
+      : {}),
     logger: { info() {}, warn() {} },
     observeCall: () => observed.release(),
   });
@@ -257,6 +287,7 @@ async function fixture(options: { local?: boolean } = {}) {
     await service.close();
     for (const session of providerSessions.values()) await session.server.close();
     await provider.close();
+    await apiProvider?.close();
     await rm(root, { recursive: true, force: true });
   });
   return {
@@ -272,6 +303,7 @@ async function fixture(options: { local?: boolean } = {}) {
     account,
     settings,
     localTracker,
+    apiProvider,
     holdFence() {
       const held = { entered: gate(), release: gate() };
       heldFence = held;
@@ -291,6 +323,153 @@ async function fixture(options: { local?: boolean } = {}) {
 }
 
 const invocation = { name: "linear_save_issue", arguments: { id: "VUH-FIXTURE", state: "Done" } };
+
+it("API-owned reads and writes retain scoped worker receipts without repeating provider calls", async () => {
+  const f = await fixture({ api: true });
+  const session = await f.initialize();
+  const readId = randomUUID();
+  const readArgs = { name: "linear_get_issue", arguments: { id: ISSUE_ID } };
+  const read = await f.call(readArgs, session, undefined, readId);
+  expect(read).toMatchObject({ outcome: "ok", receiptId: readId, isError: false, toolError: false });
+  const reads = f.apiProvider!.seen.length;
+  expect(await f.call({ receiptId: readId }, session)).toEqual(read);
+  expect(await f.call(readArgs, session, undefined, readId)).toEqual(read);
+  expect(f.apiProvider!.seen).toHaveLength(reads);
+  const writeId = randomUUID();
+  const writeArgs = {
+    name: "linear_save_comment",
+    arguments: { issueId: ISSUE_ID, body: "One API receipt" },
+  };
+  const write = await f.call(writeArgs, session, undefined, writeId);
+  expect(write).toMatchObject({ outcome: "ok", receiptId: writeId, isError: false, toolError: false });
+  expect(await f.call(writeArgs, session, undefined, writeId)).toEqual(write);
+  expect(await f.call({ receiptId: writeId }, session)).toEqual(write);
+  const writes = () =>
+    f.apiProvider!.seen.filter((entry) => entry.query?.startsWith("mutation TrackerWrite"));
+  expect(writes()).toHaveLength(1);
+  expect(f.apiProvider!.rows.comments!.filter((row) => row.body === "One API receipt")).toHaveLength(1);
+  await f.settings.update((current) => ({ ...current, fleet: { ...current.fleet, tools: "off" } }));
+  expect(await f.call({ receiptId: readId }, session)).toMatchObject({ outcome: "refused", toolError: true });
+  expect(await f.call(writeArgs, session, undefined, randomUUID())).toMatchObject({
+    outcome: "refused",
+    toolError: true,
+  });
+  await f.settings.update((current) => ({ ...current, fleet: { ...current.fleet, tools: "connected" } }));
+  await f.credentials.update(LINEAR_API_PROVIDER_ID, async (current) => {
+    if (current.type !== "oauth" || !current.account) throw new Error("Expected connected API account");
+    return { ...current, account: { ...current.account, connectionId: randomUUID() } };
+  });
+  expect(await f.call({ receiptId: readId }, session)).toMatchObject({ outcome: "refused", toolError: true });
+  expect(await f.call({ receiptId: writeId }, session)).toMatchObject({
+    outcome: "refused",
+    toolError: true,
+  });
+  expect(writes()).toHaveLength(1);
+  expect(f.apiProvider!.validationErrors).toEqual([]);
+});
+
+it("a late API-owned read settles the same receipt with the model cap and no mutation admission", async () => {
+  const f = await fixture({ api: true });
+  const session = await f.initialize();
+  f.apiProvider!.issue.description = "x".repeat(60_000);
+  const held = f.apiProvider!.blockNextGraphql();
+  const receiptId = randomUUID();
+  try {
+    const pending = f.call(
+      { name: "linear_get_issue", arguments: { id: ISSUE_ID } },
+      session,
+      undefined,
+      receiptId,
+    );
+    await held.started;
+    expect(await pending).toMatchObject({
+      outcome: "refused",
+      reason: "server_unavailable",
+      toolError: true,
+    });
+    held.release();
+    await f.observed.promise;
+    const count = f.apiProvider!.seen.length;
+    const settled = await f.call({ receiptId }, session);
+    expect(settled).toMatchObject({ outcome: "ok", receiptId, isError: false, toolError: false });
+    expect(settled.content).toHaveLength(50_000);
+    expect(await f.call({ receiptId }, session)).toEqual(settled);
+    expect(f.apiProvider!.seen).toHaveLength(count);
+    expect(f.apiProvider!.seen.some((entry) => entry.query?.startsWith("mutation"))).toBe(false);
+  } finally {
+    held.release();
+  }
+});
+
+it("an admitted API mutation keeps an uncertain receipt until its original response settles", async () => {
+  const f = await fixture({ api: true });
+  const session = await f.initialize();
+  const held = f.apiProvider!.blockNextMutationResponse();
+  const receiptId = randomUUID();
+  const args = {
+    name: "linear_save_comment",
+    arguments: { issueId: ISSUE_ID, body: "One delayed API effect" },
+  };
+  try {
+    const pending = f.call(args, session, undefined, receiptId);
+    await held.started;
+    expect(f.apiProvider!.rows.comments!.filter((row) => row.body === args.arguments.body)).toHaveLength(1);
+    expect(await pending).toMatchObject({ outcome: "uncertain", receiptId, toolError: false });
+    expect(await f.call({ receiptId }, session)).toMatchObject({
+      outcome: "uncertain",
+      receiptId,
+      toolError: false,
+    });
+    expect(await f.call(args, session, undefined, receiptId)).toMatchObject({
+      outcome: "uncertain",
+      receiptId,
+      toolError: false,
+    });
+    held.release();
+    await f.observed.promise;
+    const settled = await f.call({ receiptId }, session);
+    expect(settled).toMatchObject({ outcome: "ok", receiptId, isError: false, toolError: false });
+    await f.restartWorker();
+    expect(await f.call({ receiptId }, await f.initialize())).toEqual(settled);
+    expect(
+      f.apiProvider!.seen.filter((entry) => entry.query?.startsWith("mutation TrackerWrite")),
+    ).toHaveLength(1);
+    expect(f.apiProvider!.rows.comments!.filter((row) => row.body === args.arguments.body)).toHaveLength(1);
+    expect(f.apiProvider!.validationErrors).toEqual([]);
+  } finally {
+    held.release();
+  }
+});
+
+it.each(["off", "account"] as const)(
+  "refuses an API write when %s changes during its target lookup",
+  async (change) => {
+    const f = await fixture({ api: true });
+    const session = await f.initialize();
+    const held = f.apiProvider!.blockNextGraphql();
+    try {
+      const pending = f.call(
+        { name: "linear_save_comment", arguments: { issueId: ISSUE_ID, body: "Refused API effect" } },
+        session,
+      );
+      await held.started;
+      if (change === "off") {
+        await f.settings.update((current) => ({ ...current, fleet: { ...current.fleet, tools: "off" } }));
+      } else {
+        await f.credentials.update(LINEAR_API_PROVIDER_ID, async (current) => {
+          if (current.type !== "oauth" || !current.account) throw new Error("Expected connected API account");
+          return { ...current, account: { ...current.account, connectionId: randomUUID() } };
+        });
+      }
+      held.release();
+      expect(await pending).toMatchObject({ outcome: "refused", toolError: true });
+      expect(f.apiProvider!.seen.some((entry) => entry.query?.startsWith("mutation"))).toBe(false);
+      expect(f.apiProvider!.rows.comments!.some((row) => row.body === "Refused API effect")).toBe(false);
+    } finally {
+      held.release();
+    }
+  },
+);
 
 it("local tracker reads and writes retain scoped receipts while the fleet kill switch blocks new effects", async () => {
   const f = await fixture({ local: true });

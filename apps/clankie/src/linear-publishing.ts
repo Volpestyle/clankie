@@ -68,7 +68,11 @@ export async function publishLinearWorker(input: {
 }): Promise<{ content: string; isError: boolean }> {
   const signal = input.signal ?? AbortSignal.timeout(30_000);
   const credential = input.credential;
-  if (credential?.type !== "oauth" || credential.linearAuth !== "app" || credential.account?.actor !== "app")
+  if (
+    credential?.type !== "oauth" ||
+    (credential.linearAuth !== "app" && credential.linearAuth !== "api") ||
+    credential.account?.actor !== "app"
+  )
     throw new Error("Worker attribution requires a verified Linear app connection");
   const kind =
     input.tool === "create_worker_comment"
@@ -97,23 +101,34 @@ export async function publishLinearWorker(input: {
   // The caller can return earlier while this original write is observed for a
   // receipt. Keep its existing network cap, including response-body consumption.
   const completion = AbortSignal.timeout(30_000);
-  const response = await beforeDeadline(
-    (input.fetch ?? fetch)("https://api.linear.app/graphql", {
-      method: "POST",
-      headers: { authorization: `Bearer ${credential.access}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        query: `mutation WorkerPost($input: ${variableType}!) { ${kind}Create(input: $input) { success ${kind} { ${selection} } } }`,
-        variables: { input: { ...fields, createAsUser: author.name, displayIconUrl: author.avatarUrl } },
+  let response: Response;
+  try {
+    response = await beforeDeadline(
+      (input.fetch ?? fetch)("https://api.linear.app/graphql", {
+        method: "POST",
+        redirect: "error",
+        headers: { authorization: `Bearer ${credential.access}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          query: `mutation WorkerPost($input: ${variableType}!) { ${kind}Create(input: $input) { success ${kind} { ${selection} } } }`,
+          variables: { input: { ...fields, createAsUser: author.name, displayIconUrl: author.avatarUrl } },
+        }),
+        signal: completion,
       }),
-      signal: completion,
-    }),
-    completion,
-  );
+      completion,
+    );
+  } catch {
+    throw new Error("Linear worker post unavailable; inspect the issue before retrying");
+  }
   if (!response.ok)
     throw new Error(`Linear worker post failed: HTTP ${response.status}; inspect the issue before retrying`);
   const result = z
     .object({ data: z.record(z.string(), z.unknown()).nullish(), errors: z.array(z.unknown()).optional() })
-    .safeParse(await beforeDeadline(response.json(), completion));
+    .safeParse(
+      await beforeDeadline(
+        response.json().catch(() => undefined),
+        completion,
+      ),
+    );
   if (!result.success || result.data.errors?.length)
     throw new Error("Linear worker post was not confirmed; inspect the issue before retrying");
   const payload = z
@@ -126,7 +141,13 @@ export async function publishLinearWorker(input: {
     .safeParse(payload.data[kind]);
   if (!receipt.success)
     throw new Error("Linear worker post returned no receipt; inspect the issue before retrying");
-  return { content: JSON.stringify({ ...receipt.data, personaId }), isError: false };
+  const content = [credential.access, credential.refresh]
+    .filter(Boolean)
+    .reduce(
+      (text, secret) => text.replaceAll(secret, "[redacted]"),
+      JSON.stringify({ ...receipt.data, personaId }),
+    );
+  return { content, isError: false };
 }
 
 function beforeDeadline<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {

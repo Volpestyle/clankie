@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { hostedFixture } from "./fixtures/hosted-body.ts";
 import { describe, expect, it, vi } from "vitest";
 import { loadConfig, updateModelRouting } from "@clankie/model-provider";
+import { SettingsStore } from "@clankie/settings";
 import {
   applyHostedModelRouting,
+  applyHostedAccountApps,
   applyHostedModelPolicy,
   configureHostedModels,
   HOSTED_DEFAULT_MODEL,
@@ -17,6 +19,49 @@ import {
 } from "../src/hosted-body.ts";
 
 describe("managed hosted credential", () => {
+  it("accepts only public app configuration and applies it to the body's persisted OAuth settings", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hosted-accounts-"));
+    try {
+      const { bootstrap } = hostedFixture();
+      const path = join(dir, "bootstrap.json");
+      const accounts = {
+        github: { clientId: "fixture-github" },
+        linear: {
+          clientId: "fixture-linear",
+          redirectUri: `${bootstrap.gatewayOrigin}/account/connections/callback`,
+        },
+      };
+      writeFileSync(path, JSON.stringify({ ...bootstrap, accounts }));
+      const parsed = readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path });
+      const settings = new SettingsStore(join(dir, "settings.json"));
+      await applyHostedAccountApps(parsed!, settings);
+      expect((await settings.load()).oauthApps).toEqual(accounts);
+      await applyHostedAccountApps({}, settings);
+      expect((await settings.load()).oauthApps).toEqual(accounts);
+      for (const invalid of [
+        { ...accounts, github: { ...accounts.github, clientSecret: "secret-marker" } },
+        { ...accounts, linear: { ...accounts.linear, accessToken: "secret-marker" } },
+        {
+          ...accounts,
+          linear: { ...accounts.linear, redirectUri: "https://other.example/account/connections/callback" },
+        },
+        {
+          ...accounts,
+          linear: {
+            ...accounts.linear,
+            redirectUri: `${bootstrap.gatewayOrigin}/account/connections/callback?code=secret-marker`,
+          },
+        },
+      ]) {
+        writeFileSync(path, JSON.stringify({ ...bootstrap, accounts: invalid }));
+        expect(() => readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toThrow(
+          "Invalid hosted body bootstrap file",
+        );
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("is opt-in and rejects malformed or insecure bootstrap configuration", () => {
     expect(readHostedBodyBootstrap({})).toBeUndefined();
     const dir = mkdtempSync(join(tmpdir(), "hosted-bootstrap-"));

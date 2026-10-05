@@ -7,7 +7,8 @@
     "./gateway-encryption": "./src/gateway-encryption.ts",
     "./discord-api": "./src/discord-api.ts",
     "./discord-setup": "./src/discord-setup.ts",
-    "./composer-transcription": "./src/composer-transcription.ts"
+    "./composer-transcription": "./src/composer-transcription.ts",
+    "./accounts": "./src/accounts.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
