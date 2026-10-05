@@ -53,8 +53,10 @@ for await (const line of createInterface({ input: control })) {
       continue;
     }
     const result = await new Promise((resolve, reject) => {
+      const url = new URL(endpoint);
+      url.pathname = `/v1/fleet/seats/${encodeURIComponent(command.pane ?? defaultPane)}/messages`;
       const req = request(
-        endpoint,
+        url,
         {
           agent,
           headers: { "x-clankie-pane": command.pane ?? defaultPane },
@@ -74,6 +76,6 @@ for await (const line of createInterface({ input: control })) {
     });
     control.write(JSON.stringify({ id: command.id, ...result }) + "\n");
   } catch (error) {
-    control.write(JSON.stringify({ id: command.id, error: String(error) }) + "\n");
+    control.write(JSON.stringify({ id: command.id, transportError: String(error) }) + "\n");
   }
 }

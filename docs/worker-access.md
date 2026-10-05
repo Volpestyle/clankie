@@ -77,13 +77,26 @@ The existing transport admission is the proof:
 
 On macOS, local admission uses a bounded native `libproc` census, rather than
 `lsof` socket scans. It observes the unique client endpoint owner, its process
-birth and socket identity, and its ancestor lifetimes. Two fresh observations
+birth and socket identity. Non-owner ancestor lifetimes come from kernel
+`sysctl` process records across users, so Terminal's root `login` ancestor does
+not block a legitimate pane. The owner still requires full same-user process
+observation. Two fresh observations
 bracket the live pane and linked-session checks. An admitted connection pins
 that identity only to refuse a changed lifetime; every request still checks
 ownership and membership afresh. Shared ownership, missing observations, exit,
 PID reuse and revoked bindings fail closed. Service-owned private app-server
 registrations retain their separate live checks. See the
 [native helper](../integrations/fleet-proof/README.md) for build and verification.
+
+Local admission can refuse when process or descriptor ownership changes during
+the census. The native helper retries a complete census for confirmed descriptor
+churn; it never skips an uncertain record. An exact HTTP 403 with
+`local_process_membership_required` is returned before forwarding that request,
+so a later fresh request can retry safely. Read-only discovery and mailbox polls
+can also retry. The worker bridge currently surfaces that 403 rather than
+automatically replaying it. A timeout, lost reply or uncertain receipt remains
+uncertain: reconcile the original receipt, even if a later request receives 403.
+A later refusal does not prove that an earlier call had no effect.
 
 No additional native session, harness executable, canonical cwd or project grant
 is needed for connected tools after fleet admission. Anything running in an admitted pane,

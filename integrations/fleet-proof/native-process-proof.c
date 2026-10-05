@@ -17,10 +17,12 @@
 #include <sys/proc.h>
 #include <sys/proc_info.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
 #include <time.h>
 #include <unistd.h>
 
-enum { MAX_PIDS = 16384, MAX_FDS = 16384, MAX_CHAIN = 64, MAX_SCAN_MS = 200, MAX_ATTEMPTS = 3 };
+enum { MAX_PIDS = 16384, MAX_FDS = 16384, MAX_CHAIN = 64, MAX_SCAN_MS = 200,
+       MAX_ATTEMPTS = 3, MAX_TOTAL_MS = MAX_SCAN_MS * MAX_ATTEMPTS };
 _Static_assert(sizeof(pid_t) == 4 && sizeof(uid_t) == 4, "Unsupported process ABI");
 _Static_assert(sizeof(struct proc_bsdinfo) == 136, "Unsupported proc_bsdinfo ABI");
 _Static_assert(offsetof(struct proc_bsdinfo, pbi_start_tvsec) == 120, "Unsupported birth ABI");
@@ -42,18 +44,66 @@ struct owner {
   uint64_t generation;
 };
 static struct timespec began;
+static struct timespec overall_began;
+static int diagnostics;
+static int current_attempt;
+static int budget_reported;
+static int budget_expired;
+
+/* Fixed vocabulary only: this observation is never an admission input. */
+static void diagnostic(const char *stage, const char *reason, int error, int retry) {
+  if (!diagnostics) return;
+  int saved_error = errno;
+  fprintf(stderr, "Native process proof diagnostic: {\"schemaVersion\":1,"
+          "\"stage\":\"%s\",\"reason\":\"%s\",\"errno\":%d,"
+          "\"attempt\":%d,\"retry\":%s}\n", stage, reason, error < 0 ? 0 : error,
+          current_attempt, retry ? "true" : "false");
+  errno = saved_error;
+}
 
 static int refuse(void) {
+  return budget_expired ? 2 : 1;
+}
+
+static int final_refusal(void) {
   fputs("Native process proof unavailable\n", stderr);
   return 1;
 }
 
+static int refuse_at(const char *stage, const char *reason, int error) {
+  diagnostic(stage, reason, error, budget_expired);
+  return refuse();
+}
+
 static int within_budget(void) {
   struct timespec now;
-  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+    diagnostic("startup", "clock_unavailable", errno, 0);
+    return 0;
+  }
   int64_t ns = (int64_t)(now.tv_sec - began.tv_sec) * INT64_C(1000000000) +
                now.tv_nsec - began.tv_nsec;
-  return ns >= 0 && ns < (int64_t)MAX_SCAN_MS * 1000000;
+  int64_t total_ns = (int64_t)(now.tv_sec - overall_began.tv_sec) * INT64_C(1000000000) +
+                     now.tv_nsec - overall_began.tv_nsec;
+  int valid = ns >= 0 && total_ns >= 0 && ns < (int64_t)MAX_SCAN_MS * 1000000 &&
+              total_ns < (int64_t)MAX_TOTAL_MS * 1000000;
+  if (ns >= 0 && total_ns >= 0 && !valid) budget_expired = 1;
+  if (!valid && !budget_reported) {
+    budget_reported = 1;
+    diagnostic("completion", "budget_exhausted", 0, budget_expired);
+  }
+  return valid;
+}
+
+static int within_overall_budget(void) {
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+    diagnostic("startup", "clock_unavailable", errno, 0);
+    return 0;
+  }
+  int64_t ns = (int64_t)(now.tv_sec - overall_began.tv_sec) * INT64_C(1000000000) +
+               now.tv_nsec - overall_began.tv_nsec;
+  return ns >= 0 && ns < (int64_t)MAX_TOTAL_MS * 1000000;
 }
 
 static int decimal(const char *text, uint64_t max, uint64_t *out) {
@@ -111,6 +161,27 @@ static int same_process(const struct identity *a, const struct identity *b) {
          a->ruid == b->ruid && a->sec == b->sec && a->usec == b->usec;
 }
 
+/* Parentage and birth are exported across users by the same kernel interface
+ * used by ps. This never supplies the socket owner's admission identity. */
+static int observe_ancestor(pid_t pid, struct identity *out) {
+  if (pid <= 1 || !within_budget()) { errno = EINVAL; return -1; }
+  int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+  struct kinfo_proc k;
+  size_t bytes = sizeof(k);
+  errno = 0;
+  if (sysctl(mib, 4, &k, &bytes, NULL, 0) != 0 || bytes != sizeof(k)) return -1;
+  if (k.kp_proc.p_pid != pid || k.kp_eproc.e_ppid < 0 ||
+      k.kp_proc.p_starttime.tv_sec <= 0 || k.kp_proc.p_starttime.tv_usec < 0 ||
+      k.kp_proc.p_starttime.tv_usec >= 1000000) { errno = EPROTO; return -1; }
+  if (k.kp_proc.p_stat == SZOMB || (k.kp_proc.p_flag & P_WEXIT)) return 0;
+  *out = (struct identity){pid, k.kp_eproc.e_ppid, k.kp_eproc.e_ucred.cr_uid,
+                           k.kp_eproc.e_pcred.p_ruid,
+                           (uint64_t)k.kp_proc.p_starttime.tv_sec,
+                           (uint64_t)k.kp_proc.p_starttime.tv_usec};
+  return 1;
+}
+
+
 static int compare_pid(const void *a, const void *b) {
   pid_t aa = *(const pid_t *)a, bb = *(const pid_t *)b;
   return (aa > bb) - (aa < bb);
@@ -160,30 +231,40 @@ static void print_identity(const struct identity *p, int include_uid) {
   printf(",\"birth\":[\"%" PRIu64 "\",\"%" PRIu64 "\"]", p->sec, p->usec);
 }
 
-/* Return 2 only for census churn. Retrying starts the entire census again;
+/* Return 2 only for census churn or an expired attempt. Retrying starts the entire census again;
  * uncertain records are never omitted from an otherwise successful proof. */
 static int prove(int argc, char **argv) {
-  if (argc != 3 && argc != 6 && argc != 7) return refuse();
+  if (argc != 3 && argc != 6 && argc != 7)
+    return refuse_at("arguments", "invalid_arguments", 0);
   uint64_t client, server, expected_pid = 0, expected_sec = 0, expected_usec = 0;
   if (!decimal(argv[1], 65535, &client) || !decimal(argv[2], 65535, &server) ||
-      client == 0 || server == 0 || client == server) return refuse();
+      client == 0 || server == 0 || client == server)
+    return refuse_at("arguments", "invalid_arguments", 0);
   if (argc >= 6 && (!decimal(argv[3], INT_MAX, &expected_pid) || expected_pid <= 1 ||
                     !decimal(argv[4], UINT64_MAX, &expected_sec) || expected_sec == 0 ||
-                    !decimal(argv[5], 999999, &expected_usec))) return refuse();
+                    !decimal(argv[5], 999999, &expected_usec)))
+    return refuse_at("arguments", "invalid_arguments", 0);
 
   pid_t all[MAX_PIDS], uid_pids[MAX_PIDS], ruid_pids[MAX_PIDS];
   int count, uid_count, ruid_count;
   if (!list_pids(PROC_ALL_PIDS, all, &count) ||
       !list_pids(PROC_UID_ONLY, uid_pids, &uid_count) ||
-      !list_pids(PROC_RUID_ONLY, ruid_pids, &ruid_count)) return refuse();
+      !list_pids(PROC_RUID_ONLY, ruid_pids, &ruid_count))
+    return refuse_at("census", "process_census_unavailable", errno);
   /* A same-user process born between these snapshots must not hide an owner. */
   for (int i = 0; i < uid_count; ++i)
-    if (uid_pids[i] > 1 && !contains(all, count, uid_pids[i]) && !exited(uid_pids[i])) return 2;
+    if (uid_pids[i] > 1 && !contains(all, count, uid_pids[i]) && !exited(uid_pids[i])) {
+      diagnostic("census", "process_census_changed", 0, 1);
+      return 2;
+    }
   for (int i = 0; i < ruid_count; ++i)
-    if (ruid_pids[i] > 1 && !contains(all, count, ruid_pids[i]) && !exited(ruid_pids[i])) return 2;
+    if (ruid_pids[i] > 1 && !contains(all, count, ruid_pids[i]) && !exited(ruid_pids[i])) {
+      diagnostic("census", "process_census_changed", 0, 1);
+      return 2;
+    }
 
   struct proc_fdinfo *fds = calloc(MAX_FDS, sizeof(*fds));
-  if (fds == NULL) return refuse();
+  if (fds == NULL) return refuse_at("fd_list", "allocation_failed", errno);
   struct owner owner = {0};
   int valid = 1;
   for (int i = 0; valid == 1 && i < count; ++i) {
@@ -194,10 +275,12 @@ static int prove(int argc, char **argv) {
     int observed = observe(pid, &before);
     if (observed == 0) continue;
     if (observed < 0) {
+      int observation_error = errno;
       /* libproc cannot inspect another user's protected processes. A same-user
        * denial is never treated as proof that the process owns no socket. */
       if ((errno == EPERM || errno == EACCES) && protected_other_user(pid)) continue;
       valid = errno == ESRCH ? -1 : 0;
+      diagnostic("process", "process_unavailable", observation_error, valid == -1);
       break;
     }
     same_uid = same_uid || before.uid == getuid() || before.ruid == getuid();
@@ -208,12 +291,21 @@ static int prove(int argc, char **argv) {
       if (exited(pid)) continue;
       if (!same_uid && (error == EPERM || error == EACCES)) continue;
       valid = error == ESRCH ? -1 : 0;
+      diagnostic("fd_list", "fd_list_unavailable", error, valid == -1);
       break;
     }
-    if (bytes >= MAX_FDS * (int)sizeof(*fds) || bytes % sizeof(*fds)) { valid = 0; break; }
+    if (bytes >= MAX_FDS * (int)sizeof(*fds) || bytes % sizeof(*fds)) {
+      diagnostic("fd_list", "fd_list_bounds", 0, 0);
+      valid = 0;
+      break;
+    }
     int found = 0;
     for (int j = 0; valid == 1 && j < bytes / (int)sizeof(*fds); ++j) {
-      if (fds[j].proc_fd < 0) { valid = 0; break; }
+      if (fds[j].proc_fd < 0) {
+        diagnostic("fd_list", "fd_record_invalid", 0, 0);
+        valid = 0;
+        break;
+      }
       if (fds[j].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
       struct socket_fdinfo socket;
       if (!socket_info(pid, fds[j].proc_fd, &socket)) {
@@ -222,13 +314,24 @@ static int prove(int argc, char **argv) {
         if (!same_uid && (error == EPERM || error == EACCES)) continue;
         /* The kernel may have closed/replaced this descriptor since LISTFDS.
          * Start over on a stale-descriptor error; other failures stay closed. */
-        valid = error == ESRCH || error == EBADF || error == ENOENT ? -1 : 0;
+        valid = error == ESRCH || error == EBADF || error == ENOENT || error == ENOTSOCK ? -1 : 0;
+        diagnostic("fd_socket", "socket_unavailable", error, valid == -1);
         break;
       }
       if (!matches(&socket, (uint16_t)client, (uint16_t)server)) continue;
+      if (before.uid != getuid()) {
+        diagnostic("socket_owner", "owner_mismatch", 0, 0);
+        valid = 0;
+        break;
+      }
       if (socket.psi.soi_so == 0 || socket.psi.soi_pcb == 0 ||
-          socket.psi.soi_proto.pri_tcp.tcpsi_ini.insi_gencnt == 0) { valid = 0; break; }
+          socket.psi.soi_proto.pri_tcp.tcpsi_ini.insi_gencnt == 0) {
+        diagnostic("socket_owner", "socket_identity_invalid", 0, 0);
+        valid = 0;
+        break;
+      }
       if (owner.process.pid != 0 && (owner.process.pid != pid || !same_socket(&owner, &socket))) {
+        diagnostic("socket_owner", "multiple_owners", 0, 0);
         valid = 0;
         break;
       }
@@ -238,40 +341,54 @@ static int prove(int argc, char **argv) {
     }
     observed = observe(pid, &after);
     if (observed == 0 && !found) continue;
-    if (observed != 1 || !same_process(&before, &after)) valid = -1;
+    if (observed != 1 || !same_process(&before, &after)) {
+      diagnostic("process", "process_changed", observed == 1 ? 0 : errno, 1);
+      valid = -1;
+    }
   }
   free(fds);
   if (valid == -1 && within_budget()) return 2;
-  if (!valid || owner.process.pid <= 1 || !within_budget()) return refuse();
+  if (!valid) return refuse();
+  if (owner.process.pid <= 1) return refuse_at("socket_owner", "owner_not_found", 0);
+  if (!within_budget()) return refuse_at("completion", "budget_exhausted", 0);
 
   if (argc >= 6 && ((uint64_t)owner.process.pid != expected_pid || owner.process.sec != expected_sec ||
-                    owner.process.usec != expected_usec)) return refuse();
+                    owner.process.usec != expected_usec))
+    return refuse_at("owner_pin", "owner_mismatch", 0);
   char socket_id[80];
   int length = snprintf(socket_id, sizeof(socket_id), "%" PRIu64 ":%" PRIu64 ":%" PRIu64,
                         owner.socket, owner.pcb, owner.generation);
   if (length < 0 || (size_t)length >= sizeof(socket_id) ||
-      (argc == 7 && strcmp(socket_id, argv[6]) != 0)) return refuse();
+      (argc == 7 && strcmp(socket_id, argv[6]) != 0))
+    return refuse_at("owner_pin", "socket_mismatch", 0);
 
   struct identity chain[MAX_CHAIN];
   int chain_count = 0;
   pid_t current = owner.process.pid;
   while (current > 1) {
-    if (chain_count >= MAX_CHAIN) return refuse();
-    for (int i = 0; i < chain_count; ++i) if (chain[i].pid == current) return refuse();
-    if (observe(current, &chain[chain_count]) != 1) return refuse();
-    if (chain_count == 0 && !same_process(&owner.process, &chain[0])) return refuse();
+    if (chain_count >= MAX_CHAIN) return refuse_at("ancestry", "ancestry_bounds", 0);
+    for (int i = 0; i < chain_count; ++i)
+      if (chain[i].pid == current) return refuse_at("ancestry", "ancestry_cycle", 0);
+    if ((chain_count == 0 ? observe(current, &chain[chain_count]) :
+                           observe_ancestor(current, &chain[chain_count])) != 1)
+      return refuse_at("ancestry", "ancestry_unavailable", errno);
+    if (chain_count == 0 && !same_process(&owner.process, &chain[0]))
+      return refuse_at("ancestry", "ancestry_changed", 0);
     current = chain[chain_count++].ppid;
   }
   for (int i = 0; i < chain_count; ++i) {
     struct identity after;
-    if (observe(chain[i].pid, &after) != 1 || !same_process(&chain[i], &after)) return refuse();
+    if ((i == 0 ? observe(chain[i].pid, &after) : observe_ancestor(chain[i].pid, &after)) != 1 ||
+        !same_process(&chain[i], &after))
+      return refuse_at("ancestry", "ancestry_changed", errno);
   }
   struct socket_fdinfo final_socket;
   struct identity final_owner;
   if (!socket_info(owner.process.pid, owner.fd, &final_socket) ||
       !matches(&final_socket, (uint16_t)client, (uint16_t)server) ||
       !same_socket(&owner, &final_socket) || observe(owner.process.pid, &final_owner) != 1 ||
-      !same_process(&owner.process, &final_owner) || !within_budget()) return refuse();
+      !same_process(&owner.process, &final_owner) || !within_budget())
+    return refuse_at("final_socket", "socket_mismatch", errno);
 
   printf("{\"schemaVersion\":1,\"owner\":");
   print_identity(&owner.process, 1);
@@ -286,10 +403,26 @@ static int prove(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-  if (clock_gettime(CLOCK_MONOTONIC, &began) != 0) return refuse();
-  for (int attempt = 0; attempt < MAX_ATTEMPTS && within_budget(); ++attempt) {
-    int result = prove(argc, argv);
-    if (result != 2) return result;
+  if (argc > 1 && strcmp(argv[argc - 1], "--diagnostics") == 0) {
+    diagnostics = 1;
+    --argc;
   }
-  return refuse();
+  if (clock_gettime(CLOCK_MONOTONIC, &overall_began) != 0) {
+    diagnostic("startup", "clock_unavailable", errno, 0);
+    return final_refusal();
+  }
+  for (int attempt = 0; attempt < MAX_ATTEMPTS && within_overall_budget(); ++attempt) {
+    current_attempt = attempt + 1;
+    budget_reported = 0;
+    budget_expired = 0;
+    if (clock_gettime(CLOCK_MONOTONIC, &began) != 0) {
+      diagnostic("startup", "clock_unavailable", errno, 0);
+      return final_refusal();
+    }
+    int result = prove(argc, argv);
+    if (result == 0) return 0;
+    if (result != 2) return final_refusal();
+  }
+  diagnostic("completion", within_overall_budget() ? "attempts_exhausted" : "budget_exhausted", 0, 0);
+  return final_refusal();
 }

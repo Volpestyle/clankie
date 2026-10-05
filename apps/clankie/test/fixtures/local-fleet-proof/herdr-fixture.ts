@@ -17,6 +17,8 @@ export interface Reply {
   elapsedMs: number;
   port: number;
   coOwnerPid?: number;
+  effects: number;
+  error?: string;
 }
 interface Pending {
   resolve(value: Reply): void;
@@ -68,7 +70,7 @@ export async function isolatedHerdr(logDirectory: string) {
         if (!call) return;
         clearTimeout(call.timer);
         pending.delete(message.id);
-        if (message.error) call.reject(new Error(message.error));
+        if (message.transportError) call.reject(new Error(message.transportError));
         else call.resolve(message);
       }
     });
@@ -172,6 +174,90 @@ export async function isolatedHerdr(logDirectory: string) {
           pending.set(requestId, { resolve, reject, timer });
           client.socket.write(JSON.stringify({ id: requestId, pane: selectedPane, action }) + "\n");
         });
+      },
+      async startFdChurn() {
+        const binary = join(root, "fd-churn");
+        const source = fileURLToPath(new URL("./fd-churn.c", import.meta.url));
+        await exec("cc", ["-O2", "-Wall", "-Wextra", "-Werror", "-pthread", source, "-o", binary], {
+          timeout: 10_000,
+        });
+        const child = spawn(binary, [], { env, stdio: ["pipe", "pipe", "pipe"] });
+        children.push(child);
+        const exited = once(child, "exit");
+        let stderr = "";
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk;
+        });
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("FD churn did not become ready")), 2_000);
+          child.stdout.once("data", (chunk) => {
+            clearTimeout(timer);
+            if (String(chunk).trim() === "ready") resolve();
+            else reject(new Error("Unexpected FD churn readiness"));
+          });
+          child.once("exit", (code) => {
+            clearTimeout(timer);
+            reject(new Error(`FD churn exited before ready: ${code} ${stderr}`));
+          });
+          child.once("error", reject);
+        });
+        return {
+          pid: child.pid!,
+          stop: async () => {
+            child.stdin.end();
+            const [code] = await exited;
+            if (code !== 0) throw new Error(`FD churn failed: ${code} ${stderr}`);
+          },
+        };
+      },
+      async startCpuLoad() {
+        const startedAt = new Date().toISOString();
+        const loads = [0, 1].map(() => {
+          const child = spawn(process.execPath, [fileURLToPath(new URL("./cpu-load.mjs", import.meta.url))], {
+            env,
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          children.push(child);
+          const events: unknown[] = [];
+          let ready!: () => void;
+          const readiness = new Promise<void>((resolve) => {
+            ready = resolve;
+          });
+          createInterface({ input: child.stdout }).on("line", (line) => {
+            const event = JSON.parse(line);
+            events.push(event);
+            if (event.stage === "ready") ready();
+          });
+          const completion = once(child, "exit").then(([code]) => {
+            if (code !== 0) throw new Error(`CPU load process failed: ${code}`);
+            return { pid: child.pid, events };
+          });
+          return { readiness, completion };
+        });
+        await Promise.all(loads.map(({ readiness, completion }) => Promise.race([readiness, completion])));
+        return {
+          done: async () => {
+            const processes = await Promise.all(loads.map(({ completion }) => completion));
+            await writeFile(
+              join(logDirectory, "cpu-load.json"),
+              JSON.stringify({ startedAt, processes }, null, 2) + "\n",
+            );
+          },
+        };
+      },
+      async waitForExit(pid: number) {
+        const until = Date.now() + 2_000;
+        for (;;) {
+          try {
+            process.kill(pid, 0);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ESRCH")
+              return { pid, errno: "ESRCH" as const, checkedAt: new Date().toISOString() };
+            throw error;
+          }
+          if (Date.now() >= until) throw new Error(`Owned process ${pid} did not exit`);
+          await delay(10);
+        }
       },
       async quitClient(name: string) {
         const client = clients.get(name);

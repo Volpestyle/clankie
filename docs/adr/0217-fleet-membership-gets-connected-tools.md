@@ -29,6 +29,12 @@ sharing, exit, reused PIDs, unknown ownership and changed bindings refuse access
 This replaces slow `lsof` socket scans without changing the accepted fleet
 boundary. The release includes the helper; source startup builds it before
 serving requests. Project and private-seat checks retain their separate authority.
+The owner requires full same-user kernel observation; non-owner ancestors use
+cross-user `sysctl` PID, parent and birth records, including a terminal's root
+`login` process. Descriptor churn restarts a complete census. Bounded retries
+may still refuse under sustained churn; an explicit current-request admission
+403 precedes dispatch, while earlier uncertain receipts remain subject to
+reconciliation.
 
 Fleet discovery lists exactly `clankie_tools` and `clankie_call`.
 `clankie_tools` searches up to 20 qualified names/descriptions or retrieves up to

@@ -293,6 +293,8 @@ async function installNativeBinaries(targetRoot) {
   const fleetProof = join(targetRoot, "libexec/local-fleet-proof");
   await buildFleetProof(fleetProof);
   run("codesign", ["--force", "--sign", "-", fleetProof]);
+  // Build-cache metadata describes pre-signing bytes and is not a runtime asset.
+  await rm(`${fleetProof}.json`, { force: true });
   requireArm64(fleetProof);
   const herdr = join(targetRoot, "libexec/herdr");
   await buildHerdr(herdr);

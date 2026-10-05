@@ -16,6 +16,18 @@ only when the kernel establishes that identity; unavailable same-user process
 observations fail closed. Process, descriptor, ancestry and elapsed-time bounds
 also refuse access rather than returning a partial proof.
 
+The socket owner requires full `PROC_PIDTBSDINFO` observation and the body's
+user identity. Other ancestors use `sysctl(KERN_PROC_PID)` for exact PID, parent
+PID, seconds and microseconds of birth across users. This preserves lifetime
+checks through Terminal's setuid-root `/usr/bin/login` ancestor without granting
+that ancestor ownership or using a weaker owner observation. Unknown, malformed,
+changed or exited ancestors still refuse admission.
+
+There are at most three complete attempts, each with a 200 ms monotonic budget
+and a 600 ms total cap, inside the body's 1 s helper timeout. An expired attempt
+can only start a fresh complete census; incomplete observations never grant
+membership.
+
 The body takes two fresh snapshots around live Herdr and private-seat checks and
 requires agreement. Its per-connection identity pin adds a refusal fence against
 PID or socket replacement. It never caches authority, skips the census, or
@@ -53,5 +65,27 @@ real Herdr commands run. No provider credentials or live fleet are needed.
 
 The stale-birth case uses a birth read from a different real process with the
 same expected PID as the live client. It proves refusal of a stale lifetime pin
-without claiming that macOS was forced to recycle a PID. Kernel PID recycling
-cannot be forced within a bounded isolated test on this host.
+at the real `LocalFleetLink` HTTP boundary, with no forwarded effect. The test
+then confirms the original PID has exited and admits a new process with a new
+birth and socket. This tests the reuse guard without forcing numeric PID recycling.
+
+## Refusal diagnostics and retry
+
+Server-owned opt-in diagnostics report fixed proof stages and native reason
+codes, errno, attempt and retry status. The helper's `--diagnostics` writes these
+to stderr; its successful stdout schema and generic failure stderr remain the
+default contract. No PID, endpoint, command, path, environment or credentials
+enter diagnostic events. Diagnostic callbacks cannot change admission.
+
+A process can replace a listed socket FD with a non-socket before the kernel
+socket query. macOS returns `ENOTSOCK`; like `EBADF`, this requires a complete
+fresh census, rather than skipping the descriptor or treating it as permanent
+owner rejection. Sustained churn can exhaust the bounded attempts and refuse
+access. The integration exercises actual unrelated descriptor churn, refusal
+without forwarding, and recovery with the same socket after churn stops.
+
+An exact `local_process_membership_required` HTTP403 occurs before dispatch for
+that request and can safely be followed by a fresh request. The existing worker
+bridge does not automatically replay403. Read-only polling may retry; uncertain
+writes or lost replies must reconcile their original receipt. A later403 does
+not establish that an earlier uncertain operation never ran.

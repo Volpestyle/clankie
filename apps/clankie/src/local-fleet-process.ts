@@ -26,6 +26,69 @@ const SnapshotSchema = z
   })
   .strict();
 
+const DiagnosticSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    stage: z.enum([
+      "startup",
+      "arguments",
+      "census",
+      "process",
+      "fd_list",
+      "fd_socket",
+      "socket_owner",
+      "owner_pin",
+      "ancestry",
+      "final_socket",
+      "completion",
+    ]),
+    reason: z.enum([
+      "clock_unavailable",
+      "invalid_arguments",
+      "process_census_unavailable",
+      "process_census_changed",
+      "allocation_failed",
+      "process_unavailable",
+      "process_changed",
+      "fd_list_unavailable",
+      "fd_list_bounds",
+      "fd_record_invalid",
+      "socket_unavailable",
+      "socket_identity_invalid",
+      "multiple_owners",
+      "owner_not_found",
+      "budget_exhausted",
+      "owner_mismatch",
+      "socket_mismatch",
+      "ancestry_bounds",
+      "ancestry_cycle",
+      "ancestry_unavailable",
+      "ancestry_changed",
+      "attempts_exhausted",
+    ]),
+    errno: z.number().int().min(0),
+    attempt: z.number().int().min(0).max(3),
+    retry: z.boolean(),
+  })
+  .strict();
+
+export type NativeProcessDiagnostic = z.infer<typeof DiagnosticSchema>;
+
+/** Opt-in fixed kernel stages only; observation cannot change admission. */
+function nativeDiagnostics(stderr: string, report?: (event: NativeProcessDiagnostic) => void) {
+  if (report === undefined) return;
+  const prefix = "Native process proof diagnostic: ";
+  for (const line of stderr.split("\n")) {
+    if (!line.startsWith(prefix)) continue;
+    try {
+      const parsed = DiagnosticSchema.safeParse(JSON.parse(line.slice(prefix.length)));
+      if (parsed.success) void Promise.resolve(report(parsed.data)).catch(() => {});
+    } catch {
+      // Neither a malformed diagnostic nor its observer changes the proof.
+    }
+  }
+}
+
 export interface NativeSocketOwner {
   readonly pid: number;
   readonly uid: number;
@@ -57,6 +120,7 @@ export async function observeSocketProcess(
   socket: Socket,
   processHelper: string,
   expected?: NativeSocketOwner,
+  report?: (event: NativeProcessDiagnostic) => void,
 ): Promise<NativeSocketProcess | undefined> {
   if (
     process.platform !== "darwin" ||
@@ -71,15 +135,17 @@ export async function observeSocketProcess(
   )
     return undefined;
   try {
-    const { stdout } = await exec(
+    const { stdout, stderr } = await exec(
       processHelper,
       [
         String(socket.remotePort),
         String(socket.localPort),
         ...(expected === undefined ? [] : [String(expected.pid), ...expected.birth, expected.socket]),
+        ...(report === undefined ? [] : ["--diagnostics"]),
       ],
       { timeout: 1_000, maxBuffer: 65_536, encoding: "utf8" },
     );
+    nativeDiagnostics(stderr, report);
     const result = SnapshotSchema.safeParse(JSON.parse(stdout));
     if (!result.success) return undefined;
     const snapshot = result.data;
@@ -103,7 +169,9 @@ export async function observeSocketProcess(
     )
       return undefined;
     return snapshot;
-  } catch {
+  } catch (error) {
+    if (error !== null && typeof error === "object" && "stderr" in error && typeof error.stderr === "string")
+      nativeDiagnostics(error.stderr, report);
     // Missing helper, unsupported ABI, ambiguous owner, exit, reuse or timeout:
     // none establishes process membership; no legacy scan silently substitutes.
     return undefined;
