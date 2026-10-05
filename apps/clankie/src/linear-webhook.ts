@@ -530,7 +530,7 @@ const HEADLINE_MAX = 160;
  * One line naming the event, for a transcript that shows the rest folded.
  * Provider strings are untrusted; they are shortened, never interpreted.
  */
-function linearActivityHeadline(activity: LinearActivityEvent): string {
+export function linearActivityHeadline(activity: LinearActivityEvent): string {
   const line = [
     `Linear ${activity.type} ${activity.action}`,
     linearSubject(activity.type, activity.data),
