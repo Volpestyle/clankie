@@ -14,6 +14,8 @@ identity. An authenticated operator or a currently active Take Control device on
 this service can answer, including a device different from the initiating TUI.
 A captain credential alone, a room message, pane metadata, or a read-only device
 cannot answer. Native-seat, room, global and side conversations are excluded.
+Persisted native ownership excludes a question even while its receiver is offline.
+A native takeover cancels a pending question before answer continuation.
 
 The operator TUI uses `/question` to fetch and display the current question.
 `/question answer 1` selects the first displayed option; `/question text ...`

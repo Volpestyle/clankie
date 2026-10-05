@@ -1418,7 +1418,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
   conversations.projectOnboarding = projectOnboarding(settingsStore);
   conversations.questionEligible = (id) =>
-    !conversations.nativeSource(id) && !seatOutboxes.get(id)?.bound() && !seatOutboxes.get(id)?.uncertain();
+    !conversations.hasNativeSeat(id) &&
+    !conversations.nativeSource(id) &&
+    !seatOutboxes.get(id)?.bound() &&
+    !seatOutboxes.get(id)?.uncertain();
 
   /**
    * Owner uploads and their way into a seat (ADR 0209). A seat receives files

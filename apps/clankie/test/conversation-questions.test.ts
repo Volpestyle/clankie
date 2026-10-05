@@ -7,7 +7,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { ConversationStore, type ConversationTurnContext } from "../src/captain/conversations.ts";
+import {
+  ConversationStore,
+  type ConversationRunner,
+  type ConversationTurnContext,
+} from "../src/captain/conversations.ts";
 import {
   QuestionDraftSchema,
   questionWorkspaceContext,
@@ -15,6 +19,9 @@ import {
 } from "../src/captain/conversation-questions.ts";
 import type { ConversationQuestionResult, ConversationQuestionTarget } from "@clankie/protocol";
 import { questionTools } from "../src/captain/question-tools.ts";
+import { SettingsStore } from "@clankie/settings";
+import { createCaptain } from "../src/captain/captain.ts";
+import type { CaptainDeps } from "../src/captain/deps.ts";
 
 vi.mock("node:fs", async (original) => ({ ...(await original<typeof import("node:fs")>()) }));
 const roots: string[] = [];
@@ -488,3 +495,119 @@ it("projects the canonical pending owner question and drops it after resolution"
   );
   expect(store.pendingPresenceOwnerItem()).toBeUndefined();
 });
+
+it.each(["before question", "while pending"])(
+  "refuses a service question continuation when offline native ownership persists %s",
+  async (when) => {
+    const root = fs.mkdtempSync(join(tmpdir(), "clankie-native-question-"));
+    roots.push(root);
+    const workspace = join(root, "workspace");
+    fs.mkdirSync(workspace);
+    const stores: ConversationStore[] = [];
+    const serve = ConversationStore.prototype.serve;
+    vi.spyOn(ConversationStore.prototype, "serve").mockImplementation(function (
+      this: ConversationStore,
+      ...args
+    ) {
+      stores.push(this);
+      return serve.apply(this, args);
+    });
+    const captain = createCaptain({ herdrAvailable: () => false } as CaptainDeps, {
+      repoRoot: root,
+      stateDir: root,
+      workingDirectory: root,
+      settings: new SettingsStore(join(root, "settings.json")),
+    });
+    const asked = deferred(),
+      finish = deferred();
+    let continuationStarts = 0;
+    try {
+      const created = await captain.serveOperatorConversation({
+        op: "create",
+        schemaVersion: 1,
+        scope: { kind: "workspace", workspaceId: workspace },
+        title: "Native question",
+      });
+      if (created.op !== "create") throw new Error("create failed");
+      const id = created.conversation.conversationId;
+      const store = stores.at(-1)!;
+      // Keep the actual captain's eligibility and continuation runner. Only the
+      // original question tool invocation replaces a provider turn in this fixture.
+      const actualRunner = (store as unknown as { runner: ConversationRunner }).runner;
+      Object.defineProperty(store, "runner", {
+        value: async (...args: Parameters<ConversationRunner>) => {
+          const [conversationId, message, , context] = args;
+          if (message !== "ask") {
+            continuationStarts++;
+            return actualRunner(...args);
+          }
+          const tool = questionTools({
+            requestQuestion: (d) => store.requestQuestion(conversationId, d, context),
+          })[0]!;
+          await tool.execute("question", draft, undefined, undefined, {} as never);
+          asked.resolve();
+          await finish.promise;
+        },
+      });
+      const native = () => {
+        expect(captain.syncSeatTranscript(id, { sessionId: "offline-native", entries: [] })).toBe(true);
+        expect(store.hasNativeSeat(id)).toBe(true);
+        expect(store.nativeSource(id)).toBeUndefined();
+        expect(store.questionEligible(id)).toBe(false);
+      };
+      if (when === "before question") native();
+      const sent = await store.serve(
+        {
+          op: "send",
+          schemaVersion: 1,
+          turn: {
+            schemaVersion: 1,
+            kind: "message",
+            conversationId: id,
+            surfaceClientId: "fixture",
+            expectedRevision: store.conversation(id)!.revision,
+            message: "ask",
+          },
+        },
+        owner,
+      );
+      if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("send failed");
+      if (when === "while pending") {
+        await asked.promise;
+        const read = await store.serve({ op: "input_get", schemaVersion: 1, conversationId: id }, owner);
+        if (read.op !== "input_get" || !read.result.question) throw new Error("question missing");
+        expect(read.result.question.status).toBe("pending");
+        const q = read.result.question;
+        native();
+        const answer = await store.serve(
+          {
+            op: "input_answer",
+            schemaVersion: 1,
+            conversationId: id,
+            requestId: q.requestId,
+            incarnationId: q.incarnationId,
+            expectedRevision: read.result.revision!,
+            answer: { kind: "choice", optionId: q.options[0]!.optionId },
+          },
+          owner,
+        );
+        expect(answer).toMatchObject({
+          result: { question: { status: "cancelled", reason: "owner_context_lost" } },
+        });
+        expect(answer).not.toHaveProperty("result.question.continuation");
+      } else {
+        expect(await store.awaitRunResult(sent.result.runId)).toBe(false);
+        const read = await store.serve({ op: "input_get", schemaVersion: 1, conversationId: id }, owner);
+        expect(read).not.toHaveProperty("result.question");
+        expect(fs.readFileSync(join(root, "conversations", id, "events.jsonl"), "utf8")).not.toContain(
+          '"type":"input_requested"',
+        );
+      }
+      expect(store.questionEligible(id)).toBe(false);
+      expect(continuationStarts).toBe(0);
+    } finally {
+      finish.resolve();
+      await captain.close();
+    }
+  },
+);
