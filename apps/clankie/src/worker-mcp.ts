@@ -502,7 +502,18 @@ export class WorkerMcp {
     server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
       const current = await authenticate(extra.authInfo?.token ?? "");
       if (current.key !== authority.key) throw new Error("Worker session changed");
-      if (current.fleet !== undefined) return { tools: (await this.fleetToolsEnabled()) ? FLEET_TOOLS : [] };
+      if (current.fleet !== undefined) {
+        if (!(await this.fleetToolsEnabled())) return { tools: [] };
+        // Name what is connected, so a worker reading the catalog knows Linear and the rest are here.
+        const servers = [...new Set(current.records.map((record) => record.server))];
+        return {
+          tools: FLEET_TOOLS.map((tool) =>
+            tool.name === "clankie_tools" && servers.length
+              ? { ...tool, description: `${tool.description} Connected now: ${servers.join(", ")}.` }
+              : tool,
+          ),
+        };
+      }
       const catalog = current.records.length ? await this.options.host.catalog("operator") : [];
       return {
         tools: catalog

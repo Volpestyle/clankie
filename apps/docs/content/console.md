@@ -56,7 +56,7 @@ the service's fleet feed and works with his own workspace or your Herdr session.
 
 ## Slash commands
 
-Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token boundary for the skill picker. `/skill-name task` invokes a loaded skill directly. This table is generated from the console's own command registry.
+Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token boundary for the skill picker. `/skill-name task` invokes a loaded skill directly. A command typed bare opens its menu: `/project` edits names, caps, trackers, roles and workspaces in place; `/access`, `/accounts`, `/machines`, `/minecraft` and `/update` work the same way, and `/update` shows what is running before it stages anything. Arguments run the same command the CLI does, and `/doctor json` keeps the full report. This table is generated from the console's own command registry.
 
 {{SLASH_COMMANDS}}
 

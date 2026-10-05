@@ -34,7 +34,7 @@ export async function runProjectSettingsCommand(
     !(
       args.length === 6 &&
       (create || args[0] === "update") &&
-      (create ? args[2] === "--settings" : ["--changes", "--changes-json"].includes(args[2]!)) &&
+      (create ? ["--settings", "--settings-json"] : ["--changes", "--changes-json"]).includes(args[2]!) &&
       args[4] === "--revision"
     )
   )
@@ -43,9 +43,9 @@ export async function runProjectSettingsCommand(
     );
   let command: unknown;
   if (!list && !membership) {
-    if (args[2] !== "--changes-json" && (await stat(args[3]!)).size > 16 * 1024)
-      throw new Error("Project changes are too large");
-    const text = args[2] === "--changes-json" ? args[3]! : await readFile(args[3]!, "utf8");
+    const inline = args[2] === "--changes-json" || args[2] === "--settings-json";
+    if (!inline && (await stat(args[3]!)).size > 16 * 1024) throw new Error("Project changes are too large");
+    const text = inline ? args[3]! : await readFile(args[3]!, "utf8");
     if (Buffer.byteLength(text) > 16 * 1024) throw new Error("Project changes are too large");
     if (create) {
       const proposed: unknown = JSON.parse(text);
