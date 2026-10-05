@@ -35,6 +35,7 @@ import { openHerdr, type HerdrConnectionOptions } from "./session/herdr-connecti
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import type { BrowserSettings, GameplaySettings, SettingsStore } from "@clankie/settings";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
+import { runShareCommand } from "./command/share.ts";
 import {
   formatLaneListing,
   laneKey,
@@ -1247,6 +1248,36 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         } catch (error) {
           shell.insertCommandResult(
             "/desktop",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+      },
+    },
+    {
+      name: "share",
+      aliases: [],
+      description: "Control local Activity artifact shares",
+      argumentHint: "[list | request JSON]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (settings === undefined || (await settings.load()).client?.mode === "hosted") {
+          shell.insertCommandResult("/share", "Activity sharing is managed by the hosted service.", "error");
+          return;
+        }
+        try {
+          const input = argument.trim();
+          const result = await runShareCommand(
+            input.startsWith("request ") ? ["request", input.slice(8)] : input.length === 0 ? [] : [input],
+          );
+          shell.insertCommandResult(
+            "/share",
+            JSON.stringify(result.body, null, 2),
+            result.ok ? "success" : "error",
+          );
+        } catch (error) {
+          shell.insertCommandResult(
+            "/share",
             error instanceof Error ? error.message : String(error),
             "error",
           );

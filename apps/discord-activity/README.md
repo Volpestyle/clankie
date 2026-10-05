@@ -34,6 +34,62 @@ The older
 is a historical snapshot. Current game-body ownership is diagrammed in
 [ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md).
 
+## Scoped general media core
+
+[ADR 0233](../../docs/adr/0233-activity-shares-own-their-media-scope.md) adds a
+separate v2 stream for game, image, animation and demo sources. Each finite share
+has its own scope, generation, hub and producer capability. Scoped media never
+appears on public legacy `/frames`. Self-host launcher/tunnel transport stays.
+
+The owner's `clankie share` / `/share` controls project an existing delivered PNG
+by exact conversation/artifact ID. See the [CLI](../../docs/cli.md#activity-shares).
+This creates no Discord invite or Activity launch. Hosted routing, Discord
+instance/user admission, automatic infrastructure and a continuing-share compute
+lease await the official app decision and private ops integration. Hosted
+customers will not configure accounts, bot tokens, app registrations or tunnels.
+
+Private control on port 4322 requires the broker-owned producer bearer:
+
+| Method and path          | Contract                                               |
+| ------------------------ | ------------------------------------------------------ |
+| `GET /shares`            | `{sessions}`: active metadata, no credentials/media    |
+| `POST /shares`           | `{scope,source,ttlMs?}` → `{session,producerToken}`    |
+| `POST /shares/ID/switch` | `{generation,source}` → next session and rotated token |
+| `POST /shares/ID/grant`  | `{generation,ttlMs?}` → `{grant,expiresAt}`            |
+| `POST /shares/ID/stop`   | `{generation}` → `{stopped:true}`                      |
+
+Scope is `{tenantId,installationId,guildId,channelId}` from the trusted controller;
+source is `{kind,id,title}`. `@clankie/rendered-surface-client` supplies
+`createActivityShareClient` and a v2 publisher. `/shares/ID/producer` requires the
+returned generation capability. Lost/invalid management responses are typed
+`uncertain`, carrying share/generation when known; no effect is retried. Read
+`GET /shares` to reconcile before deciding what to do next.
+
+Public `/shares/ID/frames` and `/.proxy/shares/ID/frames` require first message
+`{kind:"admit",grant}` within five seconds. The viewer URL uses
+`/#share=ID&grant=GRANT`: the fragment stays out of HTTP requests and referrers.
+Never put control/producer bearers there. Grants prove delegated read access;
+Discord participant/room verification belongs to the pending admission adapter.
+Missing, wrong, foreign, expired or revoked grants receive no media. Scoped
+launches never fall back to the public stream.
+
+Switch clears media/text/audio, advances generation and resets sequences for
+existing viewers. It revokes old grants for later joins. Grant TTL bounds
+admission; an admitted connection lasts until the share ends. Stop, expiry and
+producer loss end the share permanently. Installation replacement ends all old
+shares in the guild; guild binding stays reserved to its tenant until registry
+restart. Reconnect cannot open a different share or restore terminal media.
+
+Hard ceilings: eight active shares; 64 viewers and 64 grants per share; 64 pending
+admissions; 256 guild bindings; two-hour shares (default 30 minutes); five-minute
+grants. Public/private sockets cap total connections at 640/16, including sockets
+closing or awaiting rejection. Scoped PNG caps 256 KiB and checks canonical
+base64, byte count, digest and IHDR dimensions. PCM caps 64 KiB and 200 ms. Both
+socket sides cap writes at 512 KiB including text/status. Slow updates drop;
+slow lifecycle delivery closes the connection. The process reports drop counters
+without retaining raw media or secrets. The viewer caps sound scheduling at
+350 ms and invalidates pending decode/playback on switch, stop or socket loss.
+
 ## Running it
 
 ```bash
@@ -199,7 +255,8 @@ port for an internet-facing surface to connect into.
 - Producer messages are validated once at producer ingress before they reach
   the private hub or a viewer: frame and PCM sizes must agree with their
   payloads before they are forwarded.
-- Lifecycle messages (`stopped`) are never dropped.
+- Lifecycle messages that cannot fit the socket bound close the viewer rather
+  than queuing behind stale media.
 - Producer disconnect invalidates the latest frame, overlay, and work status,
   so an ended or crashed session cannot remain labelled live for late viewers.
 - Concurrent viewers are bounded; an over-cap viewer is closed, not queued.
@@ -217,5 +274,6 @@ port for an internet-facing surface to connect into.
 
 An **unverified** activity is launchable only by the app team's developers and
 testers, and only in servers with fewer than 25 members — which is the personal
-lab exactly. Verification is the documented path if the surface is ever made
-public and is out of scope here.
+lab exactly. General customer availability requires the operator's registration
+and verification. Those decisions and live Discord proof remain pending; the
+scoped core does not establish eligibility of the official app.

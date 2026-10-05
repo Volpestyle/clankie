@@ -87,6 +87,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0228 — Quick actions are skills, and tidy keeps results](0228-quick-actions-are-skills-and-tidy-keeps-results.md)
 
 - [0230 — Fleet responsibility is owner settings](0230-fleet-responsibility-is-owner-settings.md)
+- [0233 — Activity shares own their media scope](0233-activity-shares-own-their-media-scope.md)
 
 ## Archived decisions
 

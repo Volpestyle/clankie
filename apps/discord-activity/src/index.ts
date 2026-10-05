@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { RenderedSurfaceHub } from "./frame-hub.ts";
 import { createFrameProducerServer } from "./producer.ts";
 import { createDiscordActivityServer } from "./server.ts";
+import { ActivityShareRegistry } from "./share-registry.ts";
 
 /**
  * Standalone entrypoint. The surface is a rendering client only: it holds no
@@ -18,9 +19,11 @@ if (
 ) {
   const port = positiveInt(process.env.CLANKIE_ACTIVITY_PORT ?? "4320", "CLANKIE_ACTIVITY_PORT");
   const hub = new RenderedSurfaceHub();
+  const shares = new ActivityShareRegistry();
   const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
   const activity = createDiscordActivityServer({
     hub,
+    shares,
     avatarDirectory: join(stateRoot, "captain", "persona-avatars"),
   });
   const bound = await activity.listen(port);
@@ -36,7 +39,7 @@ if (
     process.env.CLANKIE_ACTIVITY_PRODUCER_PORT ?? "4322",
     "CLANKIE_ACTIVITY_PRODUCER_PORT",
   );
-  const producer = createFrameProducerServer({ hub, token });
+  const producer = createFrameProducerServer({ hub, token, shares });
   const producerBound = await producer.listen(producerPort);
   process.stdout.write(`clankie activity producer listening on 127.0.0.1:${String(producerBound)}\n`);
 
@@ -45,7 +48,23 @@ if (
   // when someone was asking why the picture stuttered. Reported on change only:
   // a healthy stream stays silent, and a bad one names itself.
   let reportedDrops = 0;
+  const reportedShareDrops = new Map<string, number>();
   const dropWatch = setInterval(() => {
+    const shareStats = shares.stats();
+    const active = new Set(shareStats.map((share) => share.shareId));
+    for (const shareId of reportedShareDrops.keys()) {
+      if (!active.has(shareId)) reportedShareDrops.delete(shareId);
+    }
+    for (const share of shareStats) {
+      const drops = share.droppedFrameCount + share.droppedAudioPacketCount + share.droppedUpdateCount;
+      const reported = reportedShareDrops.get(share.shareId) ?? 0;
+      if (drops === reported) continue;
+      process.stdout.write(
+        `activity share ${share.shareId}: dropped ${String(drops - reported)} updates for backpressure ` +
+          `(${String(drops)} total, ${String(share.viewerCount)} viewers)\n`,
+      );
+      reportedShareDrops.set(share.shareId, drops);
+    }
     const dropped = hub.droppedFrameCount;
     if (dropped === reportedDrops) return;
     process.stdout.write(

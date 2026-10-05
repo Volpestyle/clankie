@@ -1,4 +1,5 @@
 import { runComputerCommand } from "../src/command/computer.ts";
+import { runShareCommand } from "../src/command/share.ts";
 import { runDesktopCommand } from "../src/command/desktop.ts";
 import { runHarnessCommand } from "../src/command/harness.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
@@ -223,6 +224,11 @@ export async function runHeadlessCaptainCommand(
       });
       outputJson(stdout, result);
       return 0;
+    }
+    if (command === "share") {
+      const result = await runShareCommand(rest, options);
+      outputJson(stdout, result.body);
+      return result.ok ? 0 : 1;
     }
     if (command === "play") return await runPlayCommand(rest, options);
     if (command === "computer") {

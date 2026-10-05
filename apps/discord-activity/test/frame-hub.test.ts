@@ -112,8 +112,8 @@ describe("RenderedSurfaceHub", () => {
     expect(JSON.parse(late.sent[2] ?? "{}").status.phase).toBe("thinking");
   });
 
-  it("drops frames for a backed-up viewer but never drops lifecycle messages", () => {
-    const hub = new RenderedSurfaceHub({ maxBufferedBytes: 100 });
+  it("bounds every viewer update and closes a backed-up viewer on stop", () => {
+    const hub = new RenderedSurfaceHub({ maxBufferedBytes: 1_000 });
     const slow = viewer(5_000);
     const fast = viewer(0);
     hub.addViewer(slow);
@@ -127,9 +127,16 @@ describe("RenderedSurfaceHub", () => {
     expect(hub.droppedFrameCount).toBe(1);
     expect(hub.droppedAudioPacketCount).toBe(1);
 
+    hub.publishOverlay(overlay());
+    hub.publishStatus(status());
+    expect(slow.sent).toHaveLength(0);
+
     hub.stop("operator_stop");
-    // The slow viewer still learns the surface ended.
-    expect(JSON.parse(slow.sent.at(-1) ?? "{}")).toMatchObject({
+    // A lifecycle event cannot queue behind stale media. Socket closure is the
+    // terminal signal for the slow viewer, while a fast viewer gets the event.
+    expect(slow.sent).toHaveLength(0);
+    expect(slow.close).toHaveBeenCalled();
+    expect(JSON.parse(fast.sent.at(-1) ?? "{}")).toMatchObject({
       kind: "stopped",
       reason: "operator_stop",
     });

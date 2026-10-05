@@ -35,6 +35,7 @@ import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
 import { type CaptainPort } from "../captain/port.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
+import type { ActivitySharing } from "../activity-sharing.ts";
 import { type DiscordIngress } from "../discord-ingress.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { DiscordRoomObservations } from "../discord-room-observations.ts";
@@ -185,6 +186,8 @@ export interface ClankieAppDependencies {
   ) => Promise<import("@clankie/protocol/projects").FleetMembershipReport>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
   deliveredFiles?: Pick<DeliveredFileStore, "read">;
+  /** Local owner-authorized projection of delivered artifacts; hosted launch/admission is separate. */
+  activitySharing?: ActivitySharing;
   memory?: MemoryStores;
   personaImages?: PersonaImageSource;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */

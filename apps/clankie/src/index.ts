@@ -1,4 +1,6 @@
 import { ComputerBody } from "./computer-body.ts";
+import { ActivitySharing } from "./activity-sharing.ts";
+import { resolveActivityProducerCredential } from "@clankie/credential-broker";
 import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
 import { detectWindowsComputerUseHarnesses } from "./computer-windows-discovery.ts";
 import { detectComputerUseHarnesses } from "./computer-use-harnesses.ts";
@@ -1288,6 +1290,15 @@ const clankie = await createClankieApp({
   },
   deliveredFiles,
   herdrRuntime: herdr.status,
+  // This local artifact projection requires the owner bearer. Hosted routing,
+  // app registration and audience admission are supplied by the private edge.
+  activitySharing: new ActivitySharing({
+    files: deliveredFiles,
+    token: () => resolveActivityProducerCredential(),
+    url: (process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer")
+      .replace(/^ws/u, "http")
+      .replace(/\/producer$/u, ""),
+  }),
   herdrBinding: herdr.binding,
   runtimes,
   memory,

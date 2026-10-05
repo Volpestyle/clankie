@@ -240,6 +240,19 @@ owner/device transport; the ambient captain bearer receives `goal_owner_required
 authority, not local OS identities: a same-UID shell can still read the operator
 credential or device signing key. See ADR 0130 for that remaining boundary.
 
+## Activity artifact shares
+
+Local owners use `clankie share list` or `clankie share request JSON`; `/share`
+in the local console uses the same API. Follow [the request contract](../../../docs/cli.md#activity-shares).
+The first non-game source is a hash-bound delivered PNG with exact conversation
+and artifact IDs, not an arbitrary path/URL or screen-capture grant. Share IDs
+and generations fence switch/stop. Viewer grants are read-only and separate
+from the operator/producer bearer; keep them in the viewer URL fragment.
+Stop, expiry or producer loss is terminal. Never replay an uncertain control:
+read active session metadata to reconcile. This core creates no Discord launch;
+hosted routing and Discord participant admission await the operator's official
+app decision. Hosted users never configure tunnels or applications.
+
 ## Presence and desktop body
 
 `get_self_state` reports current activity; `clankie status` reports process

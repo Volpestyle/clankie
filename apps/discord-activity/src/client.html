@@ -337,16 +337,10 @@
   <body>
     <main id="app">
       <section id="stage" aria-label="What Clankie sees">
-        <canvas
-          id="screen"
-          width="240"
-          height="160"
-          role="img"
-          aria-label="Clankie's live game view"
-        ></canvas>
+        <canvas id="screen" width="240" height="160" role="img" aria-label="Clankie's live view"></canvas>
         <div id="empty">
           <strong id="empty-title">Waiting for Clankie</strong>
-          <span id="empty-copy">Gameplay appears here when a session starts.</span>
+          <span id="empty-copy">A shared view appears here when a session starts.</span>
         </div>
         <div id="sound-controls">
           <input id="volume" type="range" min="0" max="1" step="0.01" value="0.2" aria-label="Volume" />
@@ -402,6 +396,16 @@
       let lastOverlaySequence = -1;
       let lastAudioSequence = -1;
       let sessionEnded = false;
+      let renderEpoch = 0;
+      let currentSocket = null;
+      let currentSession = null;
+      let legacyGeneration = 0;
+      const launch = new URLSearchParams(location.hash.slice(1));
+      const shareId = launch.get("share");
+      const viewerGrant = launch.get("grant");
+      // Grants stay out of HTTP URLs, logs and referrers. A scoped request never
+      // falls back to the deliberately public legacy game stream.
+      const scoped = launch.has("share") || launch.has("grant");
       let hasWorkStatus = false;
       const audio = { context: null, gain: null, enabled: false, nextAt: 0, sources: new Set() };
 
@@ -426,9 +430,10 @@
           canvas.height = frame.height;
           context.imageSmoothingEnabled = false;
         }
+        const epoch = renderEpoch;
         const image = new Image();
         image.addEventListener("load", () => {
-          if (frame.sequence !== lastFrameSequence) {
+          if (epoch !== renderEpoch || sessionEnded || frame.sequence !== lastFrameSequence) {
             stats.decodeSkipped += 1;
             return;
           }
@@ -438,7 +443,9 @@
           showLiveFallback();
           setStatus(liveLabel(), "live");
         });
-        image.addEventListener("error", () => setStatus("Frame unavailable", "idle"));
+        image.addEventListener("error", () => {
+          if (epoch === renderEpoch && !sessionEnded) setStatus("Frame unavailable", "idle");
+        });
         image.src = `data:image/png;base64,${frame.data}`;
       }
 
@@ -455,11 +462,28 @@
       const playbackGain = () => Number(volume.value) ** 2;
 
       function renderAudio(packet) {
+        if (
+          !Number.isInteger(packet.frames) ||
+          packet.frames <= 0 ||
+          !Number.isFinite(packet.sampleRate) ||
+          packet.sampleRate < 8000 ||
+          packet.sampleRate > 192000 ||
+          packet.frames / packet.sampleRate > 0.2 ||
+          packet.byteLength > 65536 ||
+          typeof packet.data !== "string" ||
+          packet.data.length > 87384
+        )
+          return;
         if (packet.sequence <= lastAudioSequence) return;
         if (lastAudioSequence >= 0 && packet.sequence !== lastAudioSequence + 1) stopAudio();
         lastAudioSequence = packet.sequence;
         if (!audio.enabled || !audio.context) return;
-        const binary = atob(packet.data);
+        let binary;
+        try {
+          binary = atob(packet.data);
+        } catch {
+          return;
+        }
         if (
           binary.length !== packet.byteLength ||
           packet.encoding !== "pcm_s16le" ||
@@ -480,7 +504,8 @@
           }
         }
         const now = audio.context.currentTime;
-        if (audio.nextAt < now - 0.05 || audio.nextAt > now + 0.35) stopAudio();
+        if (audio.nextAt < now - 0.05) stopAudio();
+        if (audio.nextAt + buffer.duration > now + 0.35 || audio.sources.size >= 32) return;
         const startsAt = Math.max(audio.nextAt, now + 0.06);
         const source = audio.context.createBufferSource();
         source.buffer = buffer;
@@ -552,7 +577,7 @@
       function renderWorkStatus(next) {
         hasWorkStatus = true;
         if (next.phase === "thinking") setWorkStatus("Thinking", "thinking");
-        else if (next.phase === "acting") setWorkStatus("Playing", "acting");
+        else if (next.phase === "acting") setWorkStatus("Active", "acting");
       }
 
       function showLiveFallback() {
@@ -589,49 +614,115 @@
         setField(effect, null, "Waiting for a result");
       }
 
-      function connect() {
-        sessionEnded = false;
+      function resetView() {
+        renderEpoch += 1;
         hasWorkStatus = false;
         lastFrameSequence = -1;
         lastOverlaySequence = -1;
         lastAudioSequence = -1;
         stopAudio();
+        clearOverlay();
+        showEmpty("Waiting for Clankie", "The shared view will appear here.");
         if (audio.enabled) soundToggle.textContent = "Sound ready";
+      }
+
+      function endSession() {
+        sessionEnded = true;
+        resetView();
+        showEmpty("Session ended", "This shared view has ended.");
+        setStatus("Session ended", "idle");
+        setWorkStatus("Session ended", "ended");
+      }
+
+      function connect() {
+        if (scoped && (!shareId || !viewerGrant || sessionEnded)) {
+          endSession();
+          return;
+        }
+        sessionEnded = false;
+        resetView();
         setStatus("Connecting", "idle");
         setWorkStatus("Connecting", "waiting");
-        // All activity traffic is proxied through discordsays.com; the /.proxy
-        // prefix is required or the request is refused as blocked:csp.
         const scheme = location.protocol === "https:" ? "wss" : "ws";
-        const socket = new WebSocket(`${scheme}://${location.host}/.proxy/frames`);
-
+        const path = scoped ? `/shares/${encodeURIComponent(shareId)}/frames` : "/frames";
+        const socket = new WebSocket(`${scheme}://${location.host}/.proxy${path}`);
+        currentSocket = socket;
         socket.addEventListener("open", () => {
+          if (socket !== currentSocket || sessionEnded) return;
+          if (scoped) socket.send(JSON.stringify({ kind: "admit", grant: viewerGrant }));
           setStatus("Waiting for session", "idle");
           setWorkStatus("Waiting for session", "waiting");
         });
         socket.addEventListener("message", (event) => {
+          if (socket !== currentSocket || sessionEnded) return;
           let message;
           try {
             message = JSON.parse(event.data);
           } catch {
             return;
           }
-          if (message.kind === "frame") render(message.frame);
-          else if (message.kind === "audio") renderAudio(message.audio);
-          else if (message.kind === "overlay") renderOverlay(message.overlay);
-          else if (message.kind === "status") renderWorkStatus(message.status);
-          else if (message.kind === "stopped") {
-            sessionEnded = true;
-            clearOverlay();
-            showEmpty("Session ended", "Waiting for Clankie to play again.");
-            setStatus("Session ended", "idle");
-            setWorkStatus("Session ended", "ended");
-            stopAudio();
+          if (!message || typeof message !== "object") return;
+          if (scoped) {
+            if (message.kind === "session") {
+              const next = message.session;
+              if (
+                !next ||
+                next.shareId !== shareId ||
+                !Number.isSafeInteger(next.generation) ||
+                next.generation < 1
+              )
+                return;
+              if (currentSession && next.generation < currentSession.generation) return;
+              if (!currentSession || next.generation !== currentSession.generation) resetView();
+              currentSession = next;
+              return;
+            }
+            if (
+              !currentSession ||
+              message.shareId !== shareId ||
+              message.generation !== currentSession.generation
+            )
+              return;
+          } else if (message.kind === "reset") {
+            if (!Number.isSafeInteger(message.generation) || message.generation <= legacyGeneration) return;
+            legacyGeneration = message.generation;
+            resetView();
+            return;
           }
+          if (message.kind === "frame") {
+            const frame = message.frame;
+            if (
+              !frame ||
+              !Number.isSafeInteger(frame.sequence) ||
+              frame.sequence < 0 ||
+              !Number.isInteger(frame.width) ||
+              frame.width < 1 ||
+              frame.width > 4096 ||
+              !Number.isInteger(frame.height) ||
+              frame.height < 1 ||
+              frame.height > 4096 ||
+              frame.encoding !== "png" ||
+              typeof frame.data !== "string" ||
+              frame.data.length > 349528
+            )
+              return;
+            render(frame);
+          } else if (message.kind === "audio" && message.audio) renderAudio(message.audio);
+          else if (message.kind === "overlay" && message.overlay) renderOverlay(message.overlay);
+          else if (message.kind === "status" && message.status) renderWorkStatus(message.status);
+          else if (message.kind === "stopped") endSession();
         });
-        socket.addEventListener("close", () => {
+        socket.addEventListener("close", (event) => {
+          if (socket !== currentSocket) return;
+          currentSocket = null;
+          resetView();
+          // Revoked or expired admission is terminal. Retrying a scoped grant
+          // never opens another share or the public compatibility endpoint.
+          if (scoped && (sessionEnded || [4403, 4408, 4409].includes(event.code))) {
+            endSession();
+            return;
+          }
           if (!sessionEnded) {
-            stopAudio();
-            clearOverlay();
             showEmpty("Reconnecting", "The live view will resume automatically.");
             setStatus("Reconnecting", "idle");
             setWorkStatus("Reconnecting", "waiting");
