@@ -23,10 +23,14 @@ checks through Terminal's setuid-root `/usr/bin/login` ancestor without granting
 that ancestor ownership or using a weaker owner observation. Unknown, malformed,
 changed or exited ancestors still refuse admission.
 
-There are at most three complete attempts, each with a 200 ms monotonic budget
-and a 600 ms total cap, inside the body's 1 s helper timeout. An expired attempt
-can only start a fresh complete census; incomplete observations never grant
-membership.
+There are at most 32 complete attempts, each with a 200 ms monotonic budget
+and an independent 600 ms total cap, inside the body's 1 s active-helper timeout.
+Only existing transient census/descriptor races or an expired attempt can start
+a fresh complete proof. Retries wait a randomized 1–8 ms, clipped to the remaining
+total budget even when a signal interrupts the wait. This avoids consuming all
+retries in a few milliseconds during unrelated process churn. Neither a pause
+nor an extra attempt carries forward a partial census. Hard identity, ancestry
+and shared-owner refusals retain their existing behavior.
 
 The body takes two fresh snapshots around live Herdr and private-seat checks and
 requires agreement. Its per-connection identity pin adds a refusal fence against
@@ -185,10 +189,17 @@ budgets and diagnostic flags. Socket mode still performs its complete process/FD
 census, requires one distinct socket owner and revalidates exact lifetime and
 socket identities; a newly shared descriptor refuses even after an earlier job
 succeeded. Process mode repeats the same full BSD/path/argument observations.
-All proof modes keep their existing three-attempt, per-job 600 ms total bound.
+All proof modes share the independent 32-attempt, per-job 600 ms total bound.
 Request and captured output buffers are erased and freed after each job. The
-body owns queue bounds, cancellation, per-job timeout and child shutdown; these
-transport controls do not substitute for fresh kernel or current Herdr checks.
+body bounds the waiting queue to 128 jobs and starts each job's 1 s timeout at
+active dispatch. Waiting time is not a 1 s enqueue deadline; an uncanceled
+queued request can wait behind other bounded jobs. Canceling an active caller
+drains its exact native frame and discards its result before releasing that
+caller's permit, then serves independently queued jobs through the same child.
+Canceling a queued job removes only that job. An actual malformed protocol,
+stalled active job or failed child still closes the helper and refuses all
+pending jobs. These transport controls do not substitute for fresh kernel or
+current Herdr checks.
 The classic one-shot CLI stdout/stderr contract remains unchanged.
 
 ## Build
@@ -237,7 +248,13 @@ socket query. macOS returns `ENOTSOCK`; like `EBADF`, this requires a complete
 fresh census, rather than skipping the descriptor or treating it as permanent
 owner rejection. Sustained churn can exhaust the bounded attempts and refuse
 access. The integration exercises actual unrelated descriptor churn, refusal
-without forwarding, and recovery with the same socket after churn stops.
+without forwarding, and recovery with the same socket after churn stops. The
+opt-in `apps/clankie/test/native-proof-churn.integration.test.ts` also observes
+real unrelated process births/exits, distinct PIDs sharing a connected FD during
+descriptor churn, stale owner/socket pins, and a live owner's changed ancestry
+after its original parent exits. It retains every native observation under
+`.local/project-proof/churn/native/integration/`; fresh ancestry facts do not
+independently authorize membership in that former parent's pane.
 
 An exact `local_process_membership_required` HTTP403 occurs before dispatch for
 that request and can safely be followed by a fresh request. The existing worker

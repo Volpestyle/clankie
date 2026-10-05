@@ -3,7 +3,10 @@
 `fixture.mjs` is an actual executable child speaking the production helper's
 private JSONL protocol. The transport integration checks malformed replies,
 close fencing, cancellation, timeout and explicit restart without mocking spawn
-or pipes. `close-driver.mjs` runs separately so test-runner timers cannot conceal
+or pipes. Three real 650 ms jobs prove that queue wait does not consume the
+active job's 1 s deadline. Cancelling an active caller drains and discards its
+reply while independent queued work survives on the same helper; stalled or
+malformed helpers still fail closed. `close-driver.mjs` runs separately so test-runner timers cannot conceal
 an unsettled top-level await when closing an idle helper.
 
 `codex-recovery-fixture.mjs` is an ordinary Node Unix WebSocket server and

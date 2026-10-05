@@ -53,3 +53,56 @@ wrapper changes the proof path.
 Evidence under `.local/project-proof/frequency/` includes all requests and reasons,
 proof/registry counts, initial and final liveness, CPU endpoints and all spawn
 records. This owned workload cannot establish the live body's post-deployment CPU.
+
+## Matched process-churn comparison
+
+The opt-in `PROJECT_PROOF_CHURN=1` mode starts an unrelated ordinary Node driver
+after all ten shipped bridges have initialized. It dispatches `/usr/bin/true`
+every 50 ms with at most four children in flight, records actual child PIDs,
+spawn/close times and exit status, and stops after the measurement or a bounded
+independent deadline. Its launches occur outside the measured body process;
+the separate driver CPU and reaped-child CPU are sampled but excluded from body,
+native-proof-helper and Herdr totals. No agent, provider or real fleet is started.
+
+Use the same duration and fixture for both variants, pausing other deliberate
+native probes. Existing live host activity remains ambient load and must be
+disclosed. The original sixty-second benchmark remains the default; select
+60–300 seconds with `PROJECT_PROOF_FREQUENCY_SECONDS`.
+
+```sh
+PROJECT_PROOF_FREQUENCY_TEST=1 PROJECT_PROOF_FREQUENCY_VARIANT=a1ceae9d \
+  PROJECT_PROOF_CHURN=1 PROJECT_PROOF_FREQUENCY_SECONDS=300 \
+  pnpm exec vitest run --config vitest.config.ts \
+  apps/clankie/test/project-proof-frequency.integration.test.ts
+```
+
+Repeat with `PROJECT_PROOF_FREQUENCY_VARIANT=current` only after the new native
+helper is built. Evidence goes under `.local/project-proof/churn/benchmark/`.
+`MEASURING.json` marks the actual start immediately; Vitest can buffer console
+output. `churn.json` records every external dispatch, distinct from body spawns.
+
+For this baseline, preserve **all** `apps/clankie/src`, the complete
+`integrations/claude-plugin/worker` tree and
+`integrations/fleet-proof/native-process-proof.c` from exact commit
+`a1ceae9dcb601cfd9042ce40fdc13160cdc97812`, retaining the original tree layout below
+`.local/project-proof/churn/benchmark/baseline-a1ceae9d/`. `git archive <ref> <paths>`
+provides those tracked inputs without copying runtime state. Record the full
+commit and SHA256 of the archive and each source in `manifest.json`.
+
+The loader intercepts source imports across that preserved graph, including the
+native transport, direct Herdr RPC, registry and recovery dependencies. It makes
+one explicit packaging adaptation while bundling: the `fleetProcessHelper`
+default checkout root points at the preserved directory. Its separately compiled
+binary lives at `.local/fleet-proof/native-process-proof` there. Thus the registry's
+default `--birth` request and explicit socket/process helper option share the
+baseline binary; no current helper or transport is silently substituted. The
+preserved source files stay byte-for-byte unchanged. Existing package dependencies
+resolve from the checkout. Baseline transport cleanup is exported and awaited.
+
+Report membership refusals divided by **all completed legitimate-pane HTTP
+requests**, including deliberate policy refusals that passed membership. Keep
+grant failures, unfinished/cancelled/no-status requests and startup outcomes
+separate. Use completion times inside the measured interval so cleanup cannot
+turn an unfinished request into a measured refusal. Keep every failed run and
+all normal shipped bridge retries; never retry HTTP proof in the test to conceal
+an admission failure. Report sample counts and uncertainty, not just percentages.

@@ -9,6 +9,7 @@ import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import type { Socket } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
@@ -44,28 +45,51 @@ interface BridgeReply {
   tools?: string[];
 }
 const nativeIt = it.skipIf(process.platform !== "darwin" || process.env.PROJECT_PROOF_FREQUENCY_TEST !== "1");
+const durationSeconds = Number(process.env.PROJECT_PROOF_FREQUENCY_SECONDS ?? 60);
+const churnEnabled = process.env.PROJECT_PROOF_CHURN === "1";
 
 nativeIt(
-  "measures sixty seconds of ten real worker bridges through restored native private-seat proof",
+  "measures ten real worker bridges through restored native private-seat proof",
   async () => {
     const variant = process.env.PROJECT_PROOF_FREQUENCY_VARIANT ?? "current";
-    if (!["current", "ae91cca8", "b5b24bdb"].includes(variant)) throw new Error("Unknown benchmark variant");
-    const logDirectory = join(checkout, ".local/project-proof/frequency", `${variant}-${Date.now()}`);
+    if (!["current", "ae91cca8", "b5b24bdb", "a1ceae9d"].includes(variant))
+      throw new Error("Unknown benchmark variant");
+    if (!Number.isInteger(durationSeconds) || durationSeconds < 60 || durationSeconds > 300)
+      throw new Error("Benchmark duration must be 60–300 seconds");
+    const evidenceRoot =
+      churnEnabled || variant === "a1ceae9d"
+        ? ".local/project-proof/churn/benchmark"
+        : ".local/project-proof/frequency";
+    const logDirectory = join(checkout, evidenceRoot, `${variant}-${Date.now()}`);
     await mkdir(logDirectory, { recursive: true });
-    const preserved = join(checkout, ".local/project-proof/frequency", `baseline-${variant}`);
+    const preserved = join(
+      checkout,
+      variant === "a1ceae9d" ? ".local/project-proof/churn/benchmark" : ".local/project-proof/frequency",
+      `baseline-${variant}`,
+    );
     const api =
       variant === "current"
         ? { ...proofCurrent, ...observerCurrent, ...registryCurrent }
-        : await frequencyBaseline(checkout, variant as "ae91cca8" | "b5b24bdb");
+        : await frequencyBaseline(checkout, variant as "ae91cca8" | "b5b24bdb" | "a1ceae9d");
     const helper =
-      variant === "current" ? fleetProcessHelper(checkout) : join(preserved, "native-process-proof");
+      variant === "current"
+        ? fleetProcessHelper(checkout)
+        : variant === "a1ceae9d"
+          ? join(preserved, ".local/fleet-proof/native-process-proof")
+          : join(preserved, "native-process-proof");
+    if (variant === "a1ceae9d") await mkdir(join(preserved, ".local/fleet-proof"), { recursive: true });
     if (variant !== "current")
       await exec("cc", [
         "-O2",
         "-Wall",
         "-Wextra",
         "-Werror",
-        join(preserved, "native-process-proof.c"),
+        join(
+          preserved,
+          variant === "a1ceae9d"
+            ? "integrations/fleet-proof/native-process-proof.c"
+            : "native-process-proof.c",
+        ),
         "-o",
         helper,
       ]);
@@ -81,7 +105,12 @@ nativeIt(
     const bridgeScript =
       variant === "current"
         ? join(checkout, "integrations/claude-plugin/worker/bin/fleet-mcp.mjs")
-        : join(preserved, "worker/bin/fleet-mcp.mjs");
+        : join(
+            preserved,
+            variant === "a1ceae9d"
+              ? "integrations/claude-plugin/worker/bin/fleet-mcp.mjs"
+              : "worker/bin/fleet-mcp.mjs",
+          );
     const herdr = await isolatedHerdr(logDirectory);
     const tracker = frequencySpawns();
     const children: ChildProcess[] = [];
@@ -114,6 +143,9 @@ nativeIt(
     const eventStops = new Set<() => void>();
     const binding = { runtime: "external" as const, socketPath: herdr.socketPath, session: "default" };
     let summary: unknown;
+    let churn: ChildProcess | undefined;
+    let churnClosed: Promise<unknown> | undefined;
+    const churnEvents: unknown[] = [];
     try {
       const observe = api.createProjectProcessObserver({
         binding: async () => (linked ? binding : undefined),
@@ -304,6 +336,28 @@ nativeIt(
       }
       trace.push({ phase, startup });
       expect(startup.every((status) => !!status.bridgePid)).toBe(true);
+      expect(startup.every((status) => status.catalogReady)).toBe(true);
+      if (churnEnabled) {
+        churn = spawn(node, [join(fixtures, "process-churn.mjs"), join(logDirectory, "churn.json")], {
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        churnClosed = once(churn, "close");
+        const lines = createInterface({ input: churn.stdout! });
+        const next = () =>
+          new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("Churn fixture readiness timeout")), 3_000);
+            lines.once("line", (line) => {
+              clearTimeout(timer);
+              churnEvents.push(JSON.parse(line));
+              resolve();
+            });
+            churn!.once("error", reject);
+          });
+        await next();
+        const started = next();
+        churn.stdin!.write(JSON.stringify({ durationMs: (durationSeconds + 15) * 1_000 }) + "\n");
+        await started;
+      }
       const shellSample = (await sample([herdr.shellPid]))[0]!;
       const daemonPid = shellSample.ppid;
       const samplePids = [
@@ -311,17 +365,30 @@ nativeIt(
         daemonPid,
         ...roster.map((entry) => entry.bridgePid!),
         ...[...tracker.persistent].map((child) => child.pid!).filter(Boolean),
+        ...(churn?.pid ? [churn.pid] : []),
       ];
       const cpuBefore = await sample(samplePids);
       const beforeCounts = { ...counts };
       const bodyBefore = process.cpuUsage();
       const started = performance.now();
+      const startedEpochMs = Date.now();
       phase = "measuring";
-      await delay(60_000);
+      await writeFile(
+        join(logDirectory, "MEASURING.json"),
+        JSON.stringify({ variant, startedEpochMs, durationSeconds, churnPid: churn?.pid }) + "\n",
+      );
+      console.log(`MEASUREMENT START ${variant} ${startedEpochMs} ${logDirectory}`);
+      await delay(durationSeconds * 1_000);
       const ended = performance.now();
+      const endedEpochMs = Date.now();
       const bodyCpu = process.cpuUsage(bodyBefore);
       phase = "endpoint";
       const cpuAfter = await sample(samplePids);
+      if (churn) {
+        churn.stdin!.end(JSON.stringify({ stop: true }) + "\n");
+        await churnClosed;
+      }
+      console.log(`MEASUREMENT END ${variant} ${endedEpochMs} ${logDirectory}`);
       const afterCounts = { ...counts };
       const live = await ready();
       const spawns = tracker.records.filter((record) => record.at >= started && record.at < ended);
@@ -330,6 +397,11 @@ nativeIt(
       );
       summary = {
         variant,
+        churnEnabled,
+        churnPid: churn?.pid,
+        churnEvents,
+        startedEpochMs,
+        endedEpochMs,
         started,
         ended,
         seconds: (ended - started) / 1000,
@@ -351,6 +423,7 @@ nativeIt(
           "10 ordinary foreground fixtures +10 restored private parents spawning actual shipped fleet-mcp bridges; no installed TUI or provider; real empty McpHost; in-memory empty event mailbox",
       };
       expect(live.every((status) => !!status.bridgePid)).toBe(true);
+      expect(live.every((status) => status.catalogReady)).toBe(true);
       expect(afterCounts.privateRegistry - beforeCounts.privateRegistry).toBeGreaterThan(0);
       expect(afterCounts.restoredOccupant - beforeCounts.restoredOccupant).toBeGreaterThan(0);
       expect(intervalRequests.length).toBeGreaterThan(0);
@@ -364,6 +437,10 @@ nativeIt(
       }
     } finally {
       phase = "cleanup";
+      if (churn && churn.exitCode === null && churn.signalCode === null) {
+        churn.stdin?.end(JSON.stringify({ stop: true }) + "\n");
+        await churnClosed;
+      }
       linked = false;
       await local?.close();
       for (const stop of eventStops) stop();
@@ -376,6 +453,7 @@ nativeIt(
       }
       await herdr.close();
       await closeNativeProcessObservers();
+      if ("closeNativeProcessObservers" in api) await api.closeNativeProcessObservers?.();
       tracker.close();
       await writeFile(
         join(logDirectory, "evidence.json"),
@@ -384,5 +462,5 @@ nativeIt(
       console.log(`Frequency benchmark evidence: ${logDirectory}`);
     }
   },
-  180_000,
+  durationSeconds * 1_000 + 120_000,
 );
