@@ -1449,6 +1449,15 @@ export const OperatorConversationSchema = z
     /** Present only for an ephemeral side conversation forked from this parent. */
     parentConversationId: OperatorConversationIdSchema.optional(),
     designatedHeadConversationId: OperatorConversationIdSchema.optional(),
+    /**
+     * A harness sits in this conversation's seat and takes its turns instead
+     * of pi (ADR 0152). `harness` is present when the service can name it,
+     * which today is the head pane herdr lists under his name.
+     */
+    driver: z
+      .object({ harness: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX).optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 export type OperatorConversation = z.infer<typeof OperatorConversationSchema>;

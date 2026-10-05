@@ -181,6 +181,9 @@ export function createOperatorConversationShellSink(
       // He is visibly answering; the spinner has nothing left to say.
       shell.setTurnLoaderMessage?.("Responding...");
     },
+    olderHistory(): void {
+      shell.insertMarkdown("_Earlier turns are not shown. `clankie conversations show ID` reads them._");
+    },
     recovery(recovery): void {
       shell.insertMarkdown(renderOperatorConversationRecovery(recovery));
       shell.refreshStatus(

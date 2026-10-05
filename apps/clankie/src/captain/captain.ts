@@ -84,6 +84,7 @@ import {
   type CaptainSessionLaneV2,
   type DiscordPresenceChannelTurnRequest,
   type ObservableCaptainLane,
+  type OperatorConversation,
   type OperatorConversationActivityPhase,
   type OperatorFleetSeat,
   type OperatorSeatEventKind,
@@ -2656,6 +2657,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return autonomy.getGoal(conversationId);
   }
 
+  /** Who takes this conversation's turns when it is not pi: a polling seat, or the head pane. */
+  function conversationDriver(conversationId: string): OperatorConversation["driver"] {
+    const head = conversationId === conversations.defaultGlobalConversationId() ? headSeat : undefined;
+    if (head === undefined && seatOutboxes.get(conversationId)?.bound() !== true) return undefined;
+    return head === undefined ? {} : { harness: head.harness };
+  }
+
+  function withDriver(conversation: OperatorConversation): OperatorConversation {
+    const driver = conversationDriver(conversation.conversationId);
+    return driver === undefined ? conversation : { ...conversation, driver };
+  }
+
   function conversationAssignment(conversationId: string) {
     return conversationId === conversations.defaultGlobalConversationId() && headSeat !== undefined
       ? agentWork.read(headSeat.occupantId)
@@ -4447,28 +4460,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       } else if (request.op === "create" && request.scope.kind === "persona") {
         fleetChanges.touch();
       }
-      if (result.op === "list" && request.op === "list" && request.includeWork === true)
+      if (result.op === "list" && request.op === "list")
         return {
           ...result,
-          conversations: result.conversations.map((conversation) => ({
-            ...conversation,
-            goal: conversationGoal(conversation.conversationId),
-            assignment: conversationAssignment(conversation.conversationId),
-          })),
+          conversations: result.conversations.map((conversation) =>
+            request.includeWork === true
+              ? {
+                  ...withDriver(conversation),
+                  goal: conversationGoal(conversation.conversationId),
+                  assignment: conversationAssignment(conversation.conversationId),
+                }
+              : withDriver(conversation),
+          ),
         };
-      if (
-        result.op === "get" &&
-        request.op === "get" &&
-        request.includeWork === true &&
-        result.conversation !== undefined
-      )
+      if (result.op === "get" && request.op === "get" && result.conversation !== undefined)
         return {
           ...result,
-          conversation: {
-            ...result.conversation,
-            goal: conversationGoal(result.conversation.conversationId),
-            assignment: conversationAssignment(result.conversation.conversationId),
-          },
+          conversation:
+            request.includeWork === true
+              ? {
+                  ...withDriver(result.conversation),
+                  goal: conversationGoal(result.conversation.conversationId),
+                  assignment: conversationAssignment(result.conversation.conversationId),
+                }
+              : withDriver(result.conversation),
         };
       return result;
     },
