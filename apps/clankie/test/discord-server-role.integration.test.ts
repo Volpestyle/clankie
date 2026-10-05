@@ -10,6 +10,7 @@ import { FileCredentialStore } from "@clankie/credential-broker";
 import { createDiscordPresenceRuntime } from "../../discord-bridge/src/presence-runtime-module.ts";
 import { createChannelProjection } from "../src/captain/channel-projection.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
+import { replayConversation, sendMessage } from "./conversation-requests.ts";
 
 const SERVER = "10001",
   CHANNEL = "20001",
@@ -252,6 +253,175 @@ it("fleet disable retains credentials and Participant posts need no webhook prov
       body: { content: "**Crew**\nWorking", allowed_mentions: { parse: [] } },
     },
   ]);
+});
+
+it("Participant per-channel off keeps operator messages, member replies and notices local across restart", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    discord: { ...current.discord, role: "participant", fleetEnabled: true, fleetChannelId: CHANNEL },
+  }));
+  const projection = createChannelProjection({
+    fleetSettings: async () => resolveDiscordSettings((await f.settings.load()).discord, {}).settings,
+    participantPost: async (channelId, content) => {
+      const result = await f.execute({
+        method: "POST",
+        path: `/channels/${channelId}/messages`,
+        body: { content },
+      });
+      if (!result.ok) throw new Error(result.message);
+    },
+  });
+  const conversationsRoot = join(f.root, "conversations");
+  let seated = true;
+  let reply = "";
+  let presentationPause: { skip: number; observed: () => void; released: Promise<void> } | undefined;
+  let store: ConversationStore;
+  const openStore = () =>
+    new ConversationStore(
+      conversationsRoot,
+      async () => {},
+      undefined,
+      async (seatId) => {
+        if (!seated) return false;
+        const text = reply;
+        // Deliver a native reply through the public event surface after the
+        // channel round has registered its waiter; no model or pane is used.
+        setImmediate(() =>
+          store.publishSeatEvent(seatId, { type: "message", role: "agent", text, streaming: false }),
+        );
+        return true;
+      },
+      undefined,
+      undefined,
+      projection,
+      undefined,
+      async (personaId) => {
+        const pause = presentationPause;
+        if (pause && pause.skip-- === 0) {
+          presentationPause = undefined;
+          pause.observed();
+          await pause.released;
+        }
+        return { username: personaId };
+      },
+    );
+  store = openStore();
+  cleanups.push(() => store.close());
+  const group = async (title: string) => {
+    const created = await store.serve({
+      schemaVersion: 1,
+      op: "channel",
+      channel: { schemaVersion: 1, title, members: ["crew"] },
+    });
+    if (created.op !== "channel") throw new Error("Channel result required");
+    return created;
+  };
+  const say = async (conversationId: string, message: string) => {
+    const current = await store.serve({ schemaVersion: 1, op: "get", conversationId });
+    if (current.op !== "get" || !current.conversation) throw new Error("Conversation required");
+    const sent = await sendMessage(store, {
+      conversationId,
+      surfaceClientId: "fixture-tui",
+      expectedRevision: current.conversation.revision,
+      message,
+    });
+    if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("Accepted message required");
+    await store.awaitRun(sent.result.runId);
+  };
+  const posts = () => f.calls.filter((call) => call.method === "POST");
+  const hidden = await group("Hidden crew");
+  const visible = await group("Visible crew");
+  let observed!: () => void;
+  let release!: () => void;
+  const presentationObserved = new Promise<void>((resolve) => {
+    observed = resolve;
+  });
+  const presentationReleased = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  cleanups.push(async () => release());
+  // The round first resolves roster names; pause the later member projection.
+  presentationPause = { skip: 1, observed, released: presentationReleased };
+  reply = "Hidden member reply racing off";
+  const racingRound = say(hidden.conversation.conversationId, "Operator before per-channel off");
+  await presentationObserved;
+  const beforeOff = posts().length;
+  expect(beforeOff).toBe(1);
+  await store.serve({
+    schemaVersion: 1,
+    op: "channel",
+    channel: {
+      schemaVersion: 1,
+      channelId: hidden.channel.channelId,
+      title: hidden.channel.title,
+      members: ["crew"],
+      discord: { kind: "off" },
+    },
+  });
+  release();
+  await racingRound;
+  expect(posts()).toHaveLength(beforeOff);
+  reply = "Hidden member reply before restart";
+  await say(hidden.conversation.conversationId, "Hidden operator before restart");
+  expect(posts()).toHaveLength(beforeOff);
+
+  reply = "Visible member reply";
+  await say(visible.conversation.conversationId, "Visible operator");
+  expect(
+    posts()
+      .slice(beforeOff)
+      .map((call) => call.body),
+  ).toEqual([
+    { content: "**operator**\n**Visible crew**\nVisible operator", allowed_mentions: { parse: [] } },
+    { content: "**crew**\n**Visible crew**\nVisible member reply", allowed_mentions: { parse: [] } },
+  ]);
+  const beforeNotice = posts().length;
+  seated = false;
+  await say(hidden.conversation.conversationId, "Hidden offline notice");
+  expect(posts()).toHaveLength(beforeNotice);
+  await say(visible.conversation.conversationId, "Visible offline notice");
+  expect(posts().at(-1)?.body).toMatchObject({
+    content: expect.stringContaining("No one here has a live seat"),
+  });
+
+  await store.close();
+  store = openStore();
+  const beforeRestart = posts().length;
+  seated = true;
+  reply = "Hidden member reply after restart";
+  await say(hidden.conversation.conversationId, "Hidden operator after restart");
+  seated = false;
+  await say(hidden.conversation.conversationId, "Hidden offline notice after restart");
+  expect(posts()).toHaveLength(beforeRestart);
+  seated = true;
+  reply = "Visible member reply after restart";
+  await say(visible.conversation.conversationId, "Visible operator after restart");
+  expect(posts()).toHaveLength(beforeRestart + 2);
+  const replay = await replayConversation(store, {
+    conversationId: hidden.conversation.conversationId,
+    surfaceClientId: "fixture-tui",
+  });
+  if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("Replay page required");
+  expect(replay.result.events.flatMap((event) => (event.type === "message" ? [event.text] : []))).toEqual([
+    "Operator before per-channel off",
+    "Hidden member reply racing off",
+    "Hidden operator before restart",
+    "Hidden member reply before restart",
+    "Hidden offline notice",
+    "Hidden operator after restart",
+    "Hidden member reply after restart",
+    "Hidden offline notice after restart",
+  ]);
+  expect(
+    JSON.parse(
+      await readFile(join(conversationsRoot, hidden.conversation.conversationId, "meta.json"), "utf8"),
+    ),
+  ).toMatchObject({ channelDiscordAutoProvision: "disabled" });
+  expect(
+    f.calls.every((call) => [`/channels/${CHANNEL}`, `/channels/${CHANNEL}/messages`].includes(call.path)),
+  ).toBe(true);
+  expect(f.calls.every((call) => call.method === "GET" || call.method === "POST")).toBe(true);
 });
 
 it("existing Admin fleet groups provision once, retain their mirror across toggles/restart, and never replay an uncertain create", async () => {
