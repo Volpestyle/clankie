@@ -232,8 +232,9 @@ pixels or publish Go Live.
 
 ## Then the plumbing
 
-Minecraft's first local slice uses approved offline Java server profiles and
-shares Clankie's play body with Pokémon. Configure it through `clankie minecraft`
+Minecraft uses approved offline Java server profiles and shares Clankie's play
+body with Pokémon. Its continuous mind plays by default; explicit driver handoff
+lets a chosen native worker or the owner drive the same stay. Configure it through `clankie minecraft`
 or `/minecraft`; see the [Minecraft reference](../../../docs/minecraft.md) for
 destination policy, action evidence, Chrome rendering and current limitations.
 

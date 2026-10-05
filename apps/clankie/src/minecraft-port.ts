@@ -11,7 +11,8 @@ import type {
 } from "@clankie/protocol";
 import { z } from "zod";
 
-export type MinecraftGuard = () => Promise<void>;
+/** Retain a no-await fence through transport setup until the exact send. */
+export type MinecraftGuard = () => Promise<void | (() => void)>;
 export const MinecraftEventsSchema = z
   .strictObject({
     session: z.strictObject({

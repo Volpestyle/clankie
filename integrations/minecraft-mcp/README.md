@@ -89,6 +89,13 @@ server rejection can be refuted or unknown. Navigation and outgoing chat
 currently report local-only evidence; their completion is not verified success.
 Craft currently supports inventory recipes, not remote crafting-table discovery.
 
+Observations include nearby player positions and bounded local terrain alongside
+inventory/health. Active-body reflexes interrupt slow motor work to surface with
+low oxygen, brace a fall, or defend against a nearby hostile after damage. They
+stop outside the active phase and do not grant another driver or verify effects.
+The service's continuous mind and explicit worker handoff are described in
+[Minecraft](../../docs/minecraft.md).
+
 ## Viewer feed
 
 Installed Chrome on macOS or Chromium on Linux supplies the browser. Set

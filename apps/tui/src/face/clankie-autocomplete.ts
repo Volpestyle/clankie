@@ -298,6 +298,28 @@ function staticArgumentSpec(commandName: string, context: ArgumentContext): Stat
       return values(["focus", "close"], ["/board", "/board focus", "/board close"]);
     case "discord":
       return values(["status", "invite"], ["/discord status", "/discord invite"]);
+    case "minecraft":
+      return values(
+        [
+          "configure",
+          "configure play",
+          "driver",
+          "driver mind",
+          "driver owner",
+          "driver worker",
+          "status",
+          "profiles",
+          "pause",
+          "resume",
+          "leave",
+        ],
+        [
+          "/minecraft configure play",
+          "/minecraft configure play --model xai/grok-build-0.1 --max-cost-usd 1",
+          "/minecraft configure play --enabled off",
+          "/minecraft driver",
+        ],
+      );
     case "model":
       return modelArguments("model");
     case "provider":

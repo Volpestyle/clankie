@@ -48,6 +48,10 @@ type Connection = {
   status: MinecraftSessionStatus;
   evidence: PacketEvidence;
   viewer: BrowserViewer | null;
+  lastDamageAt?: number;
+  lastReflexAt?: number;
+  surfacing?: boolean;
+  bracing?: boolean;
 };
 const same = (a: MinecraftSessionRef, b: MinecraftSessionRef) =>
   a.sessionId === b.sessionId && a.connectionGeneration === b.connectionGeneration;
@@ -245,8 +249,73 @@ export class MinecraftMotor {
     let health = 20;
     bot.on("health", () => {
       if (!current()) return;
-      if (bot.health < health) this.emit("damage", { health: bot.health, food: bot.food });
+      if (bot.health < health) {
+        connection.lastDamageAt = Date.now();
+        this.emit("damage", { health: bot.health, food: bot.food });
+      }
       health = bot.health;
+    });
+    bot.on("physicsTick", () => {
+      if (!current() || connection.status.phase !== "active" || !bot.entity) return;
+      const now = Date.now();
+      const inWater = (bot.entity as Bot["entity"] & { isInWater?: boolean }).isInWater === true;
+      if (connection.surfacing && (!inWater || bot.oxygenLevel >= 15)) {
+        bot.setControlState("jump", false);
+        connection.surfacing = false;
+      }
+      if (connection.bracing && bot.entity.onGround) {
+        bot.setControlState("sneak", false);
+        connection.bracing = false;
+      }
+      if (now - (connection.lastReflexAt ?? 0) < 750) return;
+      if (inWater && Number.isFinite(bot.oxygenLevel) && bot.oxygenLevel < 10) {
+        this.stopActive("interrupted");
+        bot.setControlState("jump", true);
+        connection.surfacing = true;
+        connection.lastReflexAt = now;
+        this.emit("damage", { reflex: "surface", oxygen: bot.oxygenLevel });
+      } else if (bot.entity.velocity?.y < -0.8 && !connection.bracing) {
+        this.stopActive("interrupted");
+        bot.setControlState("sneak", true);
+        connection.bracing = true;
+        connection.lastReflexAt = now;
+        this.emit("damage", { reflex: "falling" });
+      } else if (now - (connection.lastDamageAt ?? 0) < 3_000) {
+        const hostile = new Set([
+          "zombie",
+          "husk",
+          "drowned",
+          "skeleton",
+          "stray",
+          "wither_skeleton",
+          "spider",
+          "cave_spider",
+          "creeper",
+          "endermite",
+          "silverfish",
+          "piglin_brute",
+          "vindicator",
+          "pillager",
+          "ravager",
+          "phantom",
+        ]);
+        const attacker = Object.values(bot.entities)
+          .filter(
+            (entity) =>
+              entity !== bot.entity &&
+              hostile.has(entity.name ?? "") &&
+              entity.position.distanceTo(bot.entity.position) <= 3,
+          )
+          .sort(
+            (a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position),
+          )[0];
+        if (attacker) {
+          this.stopActive("interrupted");
+          bot.attack(attacker);
+          connection.lastReflexAt = now;
+          this.emit("damage", { reflex: "defend", entity: attacker.name ?? "hostile" });
+        }
+      }
     });
     bot._client.on("block_change", (packet) => {
       if (current()) connection.evidence.block(packet.location, packet.type);
@@ -300,6 +369,43 @@ export class MinecraftMotor {
           position: { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z },
         },
       });
+    if (bot.entity) {
+      for (const nearby of Object.values(bot.players ?? {})
+        .filter(
+          (player) =>
+            player.username !== bot.username &&
+            player.entity &&
+            player.entity.position.distanceTo(bot.entity.position) <= 64,
+        )
+        .slice(0, 32)) {
+        const position = nearby.entity!.position;
+        facts.push({
+          source: "bot_cache",
+          observedAt,
+          fact: {
+            type: "position",
+            player: nearby.username,
+            position: { x: position.x, y: position.y, z: position.z },
+          },
+        });
+      }
+      const origin = bot.entity.position.floored();
+      for (let y = -1; y <= 1; y++)
+        for (let x = -2; x <= 2; x++)
+          for (let z = -2; z <= 2; z++) {
+            const block = bot.blockAt(origin.offset(x, y, z));
+            if (block)
+              facts.push({
+                source: "bot_cache",
+                observedAt,
+                fact: {
+                  type: "block",
+                  position: { x: block.position.x, y: block.position.y, z: block.position.z },
+                  block: `minecraft:${block.name}`,
+                },
+              });
+          }
+    }
     for (const item of bot.inventory?.items() ?? [])
       facts.push({
         source: "bot_cache",

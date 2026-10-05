@@ -2,7 +2,7 @@ import { DesktopSettingsSchema } from "./desktop.ts";
 import { HireProfileSchema } from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
-import { MinecraftServerProfileIdSchema } from "@clankie/protocol";
+import { MinecraftPlaySettingsSchema, MinecraftServerProfileIdSchema } from "@clankie/protocol";
 import { isIP } from "node:net";
 
 /**
@@ -395,6 +395,7 @@ export const MinecraftPublicEndpointSchema = z.strictObject({
 
 export const MinecraftSettingsSchema = z
   .strictObject({
+    play: MinecraftPlaySettingsSchema.default(() => MinecraftPlaySettingsSchema.parse({})),
     profiles: z.array(MinecraftConfiguredProfileSchema).max(32).default([]),
     /** Public destinations require approval of the actual resolved/SRV target and port. */
     publicAllowlist: z.array(MinecraftPublicEndpointSchema).max(64).default([]),

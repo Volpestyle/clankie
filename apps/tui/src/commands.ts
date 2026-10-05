@@ -64,6 +64,7 @@ import { runSkillsCommand } from "./command/skills.ts";
 import { gamesSet, gamesStatus } from "./command/games.ts";
 import { runRivalsCommand } from "./command/rivals.ts";
 import { runMinecraftCommand } from "./command/minecraft.ts";
+import { runMinecraftDriverMenu } from "./minecraft-driver-menu.ts";
 import { runHerdrCommand, type HerdrCommandResult } from "./command/herdr.ts";
 import type { StatusCommandResult } from "./command/status.ts";
 import type { InstallDoctorReport } from "./command/doctor.ts";
@@ -1242,16 +1243,22 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       name: "minecraft",
       aliases: [],
       description: "Host, invite, administer, configure, and play in Minecraft",
-      argumentHint: "[configure|status|join PROFILE|leave|cancel|pause|resume|chat|follow]",
+      argumentHint:
+        "[configure play --model PROVIDER/MODEL --max-cost-usd N|driver|configure|status|join PROFILE|leave|cancel|pause|resume|chat|follow]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         try {
-          const result = await runMinecraftCommand(argument.trim().split(/\s+/u).filter(Boolean), {
+          const options = {
             ...(settings === undefined ? {} : { settings }),
             ...(conversations?.conversationId === undefined
               ? {}
               : { conversationId: conversations.conversationId }),
-          });
+          };
+          if (argument.trim() === "driver") {
+            await runMinecraftDriverMenu(shell, options);
+            return;
+          }
+          const result = await runMinecraftCommand(argument.trim().split(/\s+/u).filter(Boolean), options);
           shell.insertCommandResult("/minecraft", JSON.stringify(result, null, 2), "success");
         } catch (error) {
           shell.insertCommandResult(

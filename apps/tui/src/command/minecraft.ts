@@ -3,6 +3,7 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import { MinecraftCommandSchema } from "@clankie/protocol";
 import {
   MinecraftConfiguredProfileSchema,
+  MinecraftPlaySettingsSchema,
   MinecraftPublicEndpointSchema,
   SettingsStore,
   defaultSettingsPath,
@@ -11,10 +12,39 @@ import { commandHost } from "./io.ts";
 import { runMinecraftHostCommand } from "./minecraft-host.ts";
 
 const USAGE =
-  "Usage: clankie minecraft host status|configure [JSON]|start|stop|restart|backup|admin JSON|approve USERNAME|tunnel claim|status|complete | configure [PROFILE HOST --version VERSION [--port PORT] [--username NAME] [--name LABEL] [--allow-public] | remove PROFILE | allow-public HOST [PORT] | revoke-public HOST [PORT]] | status | profiles | join PROFILE | leave | cancel [ACTION] | pause | resume | observe | action JSON | action-status ACTION | chat TEXT | follow PLAYER [DISTANCE] | goto X Y Z [TOLERANCE] | dig X Y Z | place X Y Z ITEM | craft ITEM COUNT";
+  "Usage: clankie minecraft host status|configure [JSON]|start|stop|restart|backup|admin JSON|approve USERNAME|tunnel claim|status|complete | configure [play [--enabled on|off] [--model PROVIDER/MODEL] [--max-tokens N] [--max-cost-usd N] [--turn-interval-ms N] [--idle-backoff-ms N] [--idle-stop-ms N] | PROFILE HOST --version VERSION [--port PORT] [--username NAME] [--name LABEL] [--allow-public] | remove PROFILE | allow-public HOST [PORT] | revoke-public HOST [PORT]] | driver [mind|owner|worker PRINCIPAL] | status | profiles | join PROFILE | leave | cancel [ACTION] | pause | resume | observe | action JSON | action-status ACTION | chat TEXT | follow PLAYER [DISTANCE] | goto X Y Z [TOLERANCE] | dig X Y Z | place X Y Z ITEM | craft ITEM COUNT";
 
 async function configure(args: readonly string[], store: SettingsStore): Promise<Record<string, unknown>> {
   if (args.length === 0) return { minecraft: (await store.load()).minecraft };
+  if (args[0] === "play") {
+    if (args.length === 1) return { play: (await store.load()).minecraft.play };
+    const fields: Record<string, unknown> = {};
+    for (let index = 1; index < args.length; index += 2) {
+      const field = (
+        {
+          "--enabled": "enabled",
+          "--model": "model",
+          "--max-tokens": "maxTokens",
+          "--max-cost-usd": "maxCostUsd",
+          "--turn-interval-ms": "turnIntervalMs",
+          "--idle-backoff-ms": "idleBackoffMs",
+          "--idle-stop-ms": "idleStopMs",
+        } as Record<string, string>
+      )[args[index]!];
+      const value = args[index + 1];
+      if (!field || !value || value.startsWith("--") || field in fields) throw new Error(USAGE);
+      if (field === "enabled") {
+        if (value !== "on" && value !== "off") throw new Error(USAGE);
+        fields[field] = value === "on";
+      } else fields[field] = field === "model" ? value : Number(value);
+    }
+    const updated = await store.update((current) => {
+      const play = MinecraftPlaySettingsSchema.safeParse({ ...current.minecraft.play, ...fields });
+      if (!play.success) throw new Error(USAGE);
+      return { ...current, minecraft: { ...current.minecraft, play: play.data } };
+    });
+    return { outcome: "ok", play: updated.minecraft.play };
+  }
   if (args[0] === "remove" && args.length === 2) {
     const updated = await store.update((current) => ({
       ...current,
@@ -90,6 +120,7 @@ async function configure(args: readonly string[], store: SettingsStore): Promise
     return {
       ...current,
       minecraft: {
+        ...current.minecraft,
         profiles: [...current.minecraft.profiles.filter((entry) => entry.id !== id), profile],
         publicAllowlist,
       },
@@ -134,7 +165,21 @@ export async function runMinecraftCommand(
   if (action === "configure")
     return configure(rest, options.settings ?? new SettingsStore(defaultSettingsPath(env)));
   let raw: unknown;
-  if (["status", "profiles", "leave", "pause", "resume", "observe"].includes(action) && rest.length === 0)
+  if (action === "driver") {
+    if (rest.length === 0) raw = { action };
+    else if ((rest[0] === "mind" || rest[0] === "owner") && rest.length === 1)
+      raw = { action, driver: { kind: rest[0] } };
+    else if (
+      rest[0] === "worker" &&
+      rest.length === 2 &&
+      /^fleet:[a-z][a-z0-9-]*:pane:(?!unverified$)\S{1,128}$/u.test(rest[1]!)
+    )
+      raw = { action, driver: { kind: "worker", principalId: rest[1] } };
+    else throw new Error(USAGE);
+  } else if (
+    ["status", "profiles", "leave", "pause", "resume", "observe"].includes(action) &&
+    rest.length === 0
+  )
     raw = { action };
   else if (action === "join" && rest.length === 1) raw = { action, profileId: rest[0] };
   else if (action === "cancel" && rest.length <= 1)

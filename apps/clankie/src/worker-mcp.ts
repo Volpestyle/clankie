@@ -22,6 +22,24 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { verifyLinearMcpAccount, type McpHost } from "./mcp-host.ts";
 import { isLinearWorkerTool } from "./linear-publishing.ts";
+import { MinecraftActionSchema } from "@clankie/protocol";
+import type { MinecraftService } from "./minecraft.ts";
+
+const minecraftWorkerSchemas = {
+  clankie_minecraft_observe: z.strictObject({}),
+  clankie_minecraft_status: z.strictObject({ actionId: z.string().min(1).max(128).optional() }),
+  clankie_minecraft_cancel: z.strictObject({ actionId: z.string().min(1).max(128).optional() }),
+  clankie_minecraft_act: z.strictObject({
+    request: MinecraftActionSchema,
+    actionId: z.string().min(1).max(128).optional(),
+  }),
+};
+const minecraftWorkerCatalog = Object.entries(minecraftWorkerSchemas).map(([qualifiedName, schema]) => ({
+  qualifiedName,
+  description:
+    "Drive Clankie's current Minecraft stay only when he explicitly selected your exact fleet principal through minecraft_driver. One driver; the owning conversation keeps its play lease and authority. Read motor settlement and verified evidence separately. No join, configuration, administration or raw motor access.",
+  inputSchema: z.toJSONSchema(schema),
+}));
 
 const ToolRuleSchema = z
   .object({
@@ -108,6 +126,7 @@ export class WorkerMcp {
     fleetTools?(): Promise<FleetSettings["tools"]>;
     /** Canonical settings generation, checked without yielding at provider dispatch. */
     fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
+    minecraft?: Pick<MinecraftService, "workerCommand">;
   };
   private readonly sessions = new Map<
     string,
@@ -510,12 +529,16 @@ export class WorkerMcp {
           if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
           if (name === "clankie_tools") {
             const search = FleetSearchSchema.parse(args);
-            const catalog = (await this.options.host.catalog("operator")).filter((tool) =>
+            const connected = (await this.options.host.catalog("operator")).filter((tool) =>
               authorityNow.records.some(
                 (record) =>
                   record.server === tool.server && record.tools.some((rule) => rule.name === tool.name),
               ),
             );
+            const catalog = [
+              ...connected,
+              ...(this.options.minecraft === undefined ? [] : minecraftWorkerCatalog),
+            ];
             const terms = (search.query ?? "").toLowerCase().split(/\s+/u).filter(Boolean);
             const text = search.names
               ? JSON.stringify(
@@ -553,6 +576,30 @@ export class WorkerMcp {
           const invocation = FleetCallSchema.parse(args);
           name = invocation.name;
           args = invocation.arguments;
+        }
+        if (Object.hasOwn(minecraftWorkerSchemas, name)) {
+          if (authorityNow.fleet === undefined || this.options.minecraft === undefined)
+            throw new Error("Minecraft driver requires an admitted fleet channel");
+          const input = minecraftWorkerSchemas[name as keyof typeof minecraftWorkerSchemas].parse(args);
+          const action = name.slice("clankie_minecraft_".length) as "act" | "observe" | "status" | "cancel";
+          const result = await this.options.minecraft.workerCommand(
+            { action, ...input },
+            {
+              principalId: authorityNow.principalId,
+              guard: async () => {
+                if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
+                const snapshot = await this.options.fleetToolsSnapshot?.();
+                if (snapshot?.tools !== "connected") throw new Error("Fleet tools are off or unavailable");
+                snapshot.assertCurrent();
+                if (authorityNow.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
+                return () => {
+                  snapshot.assertCurrent();
+                  if (authorityNow.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
+                };
+              },
+            },
+          );
+          return { content: [{ type: "text", text: JSON.stringify(result) }], isError: false };
         }
         const current = authorityNow.records.find((record) =>
           record.tools.some(
