@@ -4,6 +4,9 @@ import { ConversationOwnerSchema, NativeSeatRecipientSchema } from "../conversat
 
 export const CURSOR_WIDTH = 12;
 
+export const PRESENCE_NEW_MESSAGE_MS = 10_000;
+export const PRESENCE_ERROR_MS = 30_000;
+
 export const ZERO_CURSOR = "0".repeat(CURSOR_WIDTH);
 
 /** A maximum-length report can expand to six JSON bytes per UTF-16 unit. */

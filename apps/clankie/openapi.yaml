@@ -2317,6 +2317,16 @@ paths:
         immediately. A current cursor parks until the projected sources change,
         sampled within 500 ms, or the wait expires. Unreachable is a client
         transport state, never a mood. Paired hosted devices may read it.
+        includeFace true opts in to an optional face (legacy reads omit it).
+        It drives the desktop screen separately from mood/body:
+        needs_you, error, new_message, working or voice, in that precedence.
+        Working follows thinking/leading or observed native captain/child work;
+        voice follows in_voice. Otherwise idle/play omit the override.
+        Live committed captain replies in owner conversations
+        show new_message for 10s; failed owner turns show error for 30s or until
+        the same conversation completes successfully. History, room, worker
+        and fork activity do not raise these transient faces. Face expiry
+        changes the cursor; clients honor Reduce Motion with a static face.
         Optional expression is a transient desktop action with UUID id and ISO
         expiresAt: kind emote adds animation (a hero sprite tag), kind say adds
         text (1–200 characters), and kind move adds x/y (normalized 0–1 on the

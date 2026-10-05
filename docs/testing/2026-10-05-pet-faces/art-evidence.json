@@ -1,0 +1,58 @@
+{
+  "kind": "offline generated sprite review; not a live app capture",
+  "baseline": "05ccea2e",
+  "preservedFrames": 85,
+  "preservedSourceFiles": 25,
+  "preservedRgbaSha256": "7509647e60519828ae31d0f50a4aa27f6f137e1a523d5650226320213663ccd6",
+  "miniOutputsByteIdentical": true,
+  "screen": {
+    "x": 10,
+    "y": 23,
+    "w": 12,
+    "h": 5
+  },
+  "opaquePixelsPerOverlay": 60,
+  "appendedTags": [
+    {
+      "name": "face_working",
+      "from": 85,
+      "to": 87,
+      "direction": "forward",
+      "color": "#000000ff"
+    },
+    {
+      "name": "face_new_message",
+      "from": 88,
+      "to": 90,
+      "direction": "forward",
+      "color": "#000000ff"
+    },
+    {
+      "name": "face_needs_you",
+      "from": 91,
+      "to": 93,
+      "direction": "forward",
+      "color": "#000000ff"
+    },
+    {
+      "name": "face_error",
+      "from": 94,
+      "to": 96,
+      "direction": "forward",
+      "color": "#000000ff"
+    },
+    {
+      "name": "face_voice",
+      "from": 97,
+      "to": 99,
+      "direction": "forward",
+      "color": "#000000ff"
+    }
+  ],
+  "validatedCompositions": 600,
+  "gifSequencesVerified": 5,
+  "builderRejected": {
+    "outside screen": true,
+    "uncovered background": true
+  }
+}

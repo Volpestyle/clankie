@@ -6,6 +6,8 @@ import type { OperatorPresenceSnapshot } from "@clankie/protocol/presence";
 export interface PresenceSources {
   expression?: OperatorPresenceSnapshot["expression"];
   thinking: boolean;
+  /** A live native captain/child can work outside Pi's loaded lanes. */
+  working?: boolean;
   voiceSince?: string;
   inVoice: boolean;
   playingSince?: string;
@@ -13,10 +15,12 @@ export interface PresenceSources {
   activeSeats: number;
   nativeSubagents?: number;
   pendingOwnerItem?: OperatorPresenceSnapshot["pendingOwnerItem"];
+  newMessage?: boolean;
+  error?: boolean;
 }
 
 /** Pure projection: no persisted presence state or invented transition time. */
-export function projectPresence(sources: PresenceSources): OperatorPresenceSnapshot {
+export function projectPresence(sources: PresenceSources, includeFace = true): OperatorPresenceSnapshot {
   const { activeSeats, pendingOwnerItem } = sources;
   const [mood, detail, since] = pendingOwnerItem
     ? (["needs_you", pendingOwnerItem.title, pendingOwnerItem.since] as const)
@@ -33,9 +37,23 @@ export function projectPresence(sources: PresenceSources): OperatorPresenceSnaps
                 null,
               ] as const)
             : (["idle", "Taking a break", null] as const);
+  const face: OperatorPresenceSnapshot["face"] = pendingOwnerItem
+    ? "needs_you"
+    : sources.error
+      ? "error"
+      : sources.newMessage
+        ? "new_message"
+        : sources.working || mood === "thinking"
+          ? "working"
+          : mood === "in_voice"
+            ? "voice"
+            : mood === "leading"
+              ? "working"
+              : undefined;
   const projection = {
     schemaVersion: 1 as const,
     mood,
+    ...(!includeFace || face === undefined ? {} : { face }),
     detail,
     since,
     activeSeats,
