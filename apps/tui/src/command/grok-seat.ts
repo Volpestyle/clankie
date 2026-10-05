@@ -103,7 +103,7 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
       ok: true,
       ...plan,
       delivery:
-        "Private native leader IPC + ACP attached to the visible TUI's exact session. No terminal input or headless worker.",
+        "Private native leader IPC + ACP attached to the visible TUI's exact session. No terminal input, and never a worker without its visible TUI.",
       ownerSteps: ["Native permissions and sign-in remain owner decisions."],
     });
     return 0;
