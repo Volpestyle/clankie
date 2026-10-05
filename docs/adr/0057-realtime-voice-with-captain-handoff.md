@@ -211,6 +211,15 @@ TTS duck or pause command, so a softer duck-then-confirm needs a Vox change.
 Echo of his own voice from a participant on speakers without echo cancellation
 could trigger this; the threshold is untested live.
 
+Crosstalk is offered once per lull rather than once per line. An unaddressed
+spoken opportunity waits while another participant's capture is live speech or
+their final transcript is due; a newer line replaces the waiting one, and the
+room's pause requests it. Every line is still heard immediately, he still
+decides whether to speak, and addressed or name-mention turns never wait. An
+8-second-old capture (an open mic or a monologue) and a final more than 2.5 s
+overdue stop holding the room, and continuous crosstalk still yields one
+opportunity every 8 seconds.
+
 ### Room membership is context, departure is his decision (2026-09-28)
 
 The gateway supplies participant joins and leaves, display names, and the

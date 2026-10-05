@@ -194,6 +194,22 @@ export const TRANSCRIPT_RING_MAX_BYTES = 4_000;
  * speech is never held — a re-address must cut him off now.
  */
 export const UTTERANCE_REORDER_GRACE_MS = 400;
+/**
+ * Turn gating for crosstalk. An unaddressed response opportunity waits while
+ * another participant is still talking or their final transcript is due, so a
+ * busy room asks him once per lull instead of once per utterance — a newer
+ * line replaces the waiting one, and he still decides whether to speak.
+ * Addressed and name-mention turns never wait.
+ *
+ * Bounds keep the wait from becoming silence: a capture older than
+ * {@link TURN_GATE_CAPTURE_MAX_MS} (an open mic, a monologue) stops counting,
+ * a final more than {@link TURN_GATE_FINAL_WAIT_MS} overdue stops counting,
+ * and continuous crosstalk still yields one opportunity per
+ * {@link TURN_GATE_MAX_WAIT_MS}.
+ */
+export const TURN_GATE_CAPTURE_MAX_MS = 8_000;
+export const TURN_GATE_FINAL_WAIT_MS = 2_500;
+export const TURN_GATE_MAX_WAIT_MS = 8_000;
 /** The service schema bounds person-memory projection to this many room members. */
 const MAX_BRIEFING_SPEAKERS = 25;
 /** A broken transcriber cannot retain content-free capture ids without bound. */
@@ -610,6 +626,19 @@ export class DiscordVoiceSession {
   private readonly transcriptTurns = new Map<string, PendingTranscriptTurn[]>();
   private readonly finalizedUtterances: FinalizedUtterance[] = [];
   private reorderHandle: unknown;
+  /** The latest unaddressed opportunity, waiting for the room to pause (turn gating). */
+  private deferredOffer:
+    | {
+        readonly turn: RoomTurn;
+        readonly guildId: string;
+        readonly channelId: string;
+        readonly offer: "engaged" | "addressed";
+        readonly roomEpoch: number;
+        readonly generation: number;
+        readonly firstDeferredAtMs: number;
+      }
+    | undefined;
+  private deferredOfferHandle: unknown;
   private readonly speakerIdleHandles = new Map<string, unknown>();
   private readonly speakerLastActiveAtMs = new Map<string, number>();
   private conversation: VoiceConversationPort | undefined;
@@ -1063,6 +1092,7 @@ export class DiscordVoiceSession {
     this.speakerIdleHandles.clear();
     this.speakerLastActiveAtMs.clear();
     this.cancelReorderWait();
+    this.dropDeferredOffer();
     for (const line of transcriptRing) line.fill(0);
     for (const job of playbackJobs) {
       if (job === undefined) continue;
@@ -1825,6 +1855,9 @@ export class DiscordVoiceSession {
       this.finalizedUtterances.shift();
       this.applyFinalizedUtterance(next);
     }
+    // A capture that ended without a line, or a final that just landed, may be
+    // the pause a waiting opportunity was gated on.
+    this.releaseDeferredOffer();
   }
 
   private hasEarlierInflight(candidate: FinalizedUtterance): boolean {
@@ -1904,7 +1937,89 @@ export class DiscordVoiceSession {
       ...("reason" in decision ? { reason: decision.reason } : {}),
       state: this.floor.state,
     });
+    const previous = this.deferredOffer;
+    this.dropDeferredOffer();
+    if (
+      source === "speech" &&
+      decision.action === "offer" &&
+      decision.reason !== "mentioned" &&
+      this.turnGateWaitMs(turn.userId) !== undefined
+    ) {
+      this.deferredOffer = {
+        turn: { ...turn, sourceText: text },
+        guildId,
+        channelId,
+        offer: "engaged",
+        roomEpoch: this.roomResponseEpoch,
+        generation: this.sessionGeneration,
+        firstDeferredAtMs: previous?.firstDeferredAtMs ?? this.clock(),
+      };
+      this.releaseDeferredOffer();
+      return;
+    }
     this.applyFloorDecision(decision, { ...turn, sourceText: text }, guildId, channelId);
+  }
+
+  /**
+   * How long another participant's speech may still hold an unaddressed
+   * opportunity back, or undefined when the room has paused. Their capture is
+   * live speech (past the noise floor), or their final transcript is due.
+   */
+  private turnGateWaitMs(speakerId: string): number | undefined {
+    const now = this.clock();
+    let wait: number | undefined;
+    const hold = (remainingMs: number): void => {
+      if (remainingMs > 0) wait = Math.min(wait ?? remainingMs, remainingMs);
+    };
+    for (const capture of this.captures.values()) {
+      if (capture.userId === speakerId || !capture.forwarding) continue;
+      hold(capture.turn.startedAtMs + TURN_GATE_CAPTURE_MAX_MS - now);
+    }
+    for (const [userId, turns] of this.transcriptTurns) {
+      if (userId === speakerId) continue;
+      for (const turn of turns) {
+        const endedAtMs = turn.inputTiming?.captureEndedAtMs;
+        if (endedAtMs !== undefined) hold(endedAtMs + TURN_GATE_FINAL_WAIT_MS - now);
+      }
+    }
+    return wait;
+  }
+
+  /** Requests the waiting opportunity once the room pauses or its bound expires. */
+  private releaseDeferredOffer(): void {
+    const deferred = this.deferredOffer;
+    if (deferred === undefined) return;
+    this.cancelDeferredOfferTimer();
+    if (deferred.generation !== this.sessionGeneration || deferred.roomEpoch !== this.roomResponseEpoch) {
+      this.deferredOffer = undefined;
+      return;
+    }
+    const capWaitMs = deferred.firstDeferredAtMs + TURN_GATE_MAX_WAIT_MS - this.clock();
+    const busyWaitMs = this.turnGateWaitMs(deferred.turn.userId);
+    if (busyWaitMs !== undefined && capWaitMs > 0) {
+      const generation = this.sessionGeneration;
+      this.deferredOfferHandle = this.timers.setTimeout(
+        () => {
+          this.deferredOfferHandle = undefined;
+          if (generation === this.sessionGeneration) this.releaseDeferredOffer();
+        },
+        Math.ceil(Math.min(busyWaitMs, capWaitMs)),
+      );
+      return;
+    }
+    this.deferredOffer = undefined;
+    this.queueEngagedResponse(deferred.turn, deferred.guildId, deferred.channelId, deferred.offer);
+  }
+
+  private dropDeferredOffer(): void {
+    this.deferredOffer = undefined;
+    this.cancelDeferredOfferTimer();
+  }
+
+  private cancelDeferredOfferTimer(): void {
+    if (this.deferredOfferHandle === undefined) return;
+    this.timers.clearTimeout(this.deferredOfferHandle);
+    this.deferredOfferHandle = undefined;
   }
 
   private rememberRoomLine(turn: RoomTurn, text: string, source: RoomInputSource): void {

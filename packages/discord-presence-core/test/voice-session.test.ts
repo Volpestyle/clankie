@@ -37,6 +37,9 @@ import {
   SPEAKER_TRANSCRIPTION_IDLE_MS,
   FLOOR_WORK_HEARTBEAT_MS,
   FLOOR_WORK_MAX_MS,
+  TURN_GATE_CAPTURE_MAX_MS,
+  TURN_GATE_FINAL_WAIT_MS,
+  UTTERANCE_REORDER_GRACE_MS,
   ADDRESSED_OFFER_TURN_ITEM,
   ENGAGED_OFFER_TURN_ITEM,
   UNPROMPTED_TURN_ITEM,
@@ -1530,6 +1533,85 @@ describe("floor decisions", () => {
           item.includes(JSON.stringify({ userId: ALICE, displayName: "Alice", isBot: false })),
         ),
     ).toBe(true);
+  });
+
+  it("asks once per lull while another participant is still talking, and never delays his name", async () => {
+    const harness = await engagedHarness();
+    await harness.consent(BOB);
+    const conversation = harness.conversation();
+    const before = conversation.responseCreates;
+    harness.clock.now = 1_000;
+    const alice = harness.startCapture(ALICE);
+    alice.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.clock.now = 1_100;
+    const bob = harness.startCapture(BOB);
+    bob.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    alice.stream.end();
+    await flush();
+    harness.transcribe(ALICE, "so anyway I went to the store");
+    await flush();
+    harness.clock.now = 1_500;
+    await harness.say(ALICE, "and they were out of everything");
+    // Bob started first, so the existing reorder grace holds this final briefly.
+    harness.clock.now = 1_900;
+    harness.timers.fireLast(UTTERANCE_REORDER_GRACE_MS);
+    await flush();
+    // Both lines are heard, but nobody asked him and Bob is mid-sentence.
+    expect(conversation.textItems.filter((item) => item.includes("out of everything"))).toHaveLength(1);
+    expect(conversation.responseCreates).toBe(before);
+    bob.stream.end();
+    await flush();
+    expect(conversation.responseCreates).toBe(before);
+    harness.transcribe(BOB, "no way that is wild");
+    await flush();
+    // One opportunity for the lull, carrying the latest line.
+    expect(conversation.responseCreates).toBe(before + 1);
+    expect(at(conversation.responseContexts, -1)).toContain("no way that is wild");
+
+    harness.clock.now = 3_000;
+    const again = harness.startCapture(BOB);
+    again.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    await harness.say(ALICE, "clankie what do you think");
+    expect(conversation.responseCreates).toBe(before + 2);
+  });
+
+  it("bounds the wait for an open mic and for a final that never arrives", async () => {
+    const harness = await engagedHarness();
+    await harness.consent(BOB);
+    const conversation = harness.conversation();
+    const before = conversation.responseCreates;
+    harness.clock.now = 1_000;
+    const openMic = harness.startCapture(BOB);
+    openMic.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    harness.clock.now = 1_200;
+    await harness.say(ALICE, "anyone up for a match later");
+    harness.clock.now = 1_600;
+    harness.timers.fireLast(UTTERANCE_REORDER_GRACE_MS);
+    await flush();
+    expect(conversation.responseCreates).toBe(before);
+    harness.clock.now = 1_000 + TURN_GATE_CAPTURE_MAX_MS;
+    harness.timers.fireLast(TURN_GATE_CAPTURE_MAX_MS - 600);
+    await flush();
+    expect(conversation.responseCreates).toBe(before + 1);
+    expect(at(conversation.responseContexts, -1)).toContain("anyone up for a match later");
+
+    openMic.stream.end();
+    await flush();
+    harness.clock.now = 10_000;
+    await harness.say(ALICE, "or maybe tomorrow instead");
+    harness.clock.now = 10_400;
+    harness.timers.fireLast(UTTERANCE_REORDER_GRACE_MS);
+    await flush();
+    expect(conversation.responseCreates).toBe(before + 1);
+    // Bob's capture ended at 9_000 and its final never came.
+    harness.clock.now = 9_000 + TURN_GATE_FINAL_WAIT_MS;
+    harness.timers.fireLast(TURN_GATE_FINAL_WAIT_MS - 1_400);
+    await flush();
+    expect(conversation.responseCreates).toBe(before + 2);
   });
 
   it("applies overlapping finals in start-of-speech order", async () => {

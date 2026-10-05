@@ -149,7 +149,10 @@ talking” cuts playback on the final transcript even below the ordinary barge-i
 loudness gate, drops queued speech, and keeps late handoff results silent. A
 recently engaged speaker who talks over him for 700 ms of speech-level audio,
 in a capture begun after his reply became audible, stops him without waiting
-for the transcript (ADR 0057, 2026-10-04).
+for the transcript (ADR 0057, 2026-10-04). Unaddressed speech waits for a
+pause before it becomes a response opportunity: while another participant is
+still talking or their final is due, the latest such line waits (bounded at
+8 seconds) and is offered once when the room pauses.
 
 Repeated identical asks from the same person join pending work. For paraphrases,
 `ask_clankie.join_call_id` joins only that authenticated speaker's handoff;
