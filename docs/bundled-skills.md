@@ -50,6 +50,13 @@ native hires and harness delivery. Its operations reference
 uses `hire_agent`, `message_seat` and `message_clankie`; Herdr holds visible terminals. The vendored dashboard plugin and board-specific references
 were removed per cut audit C23. Other opinionated-skill evaluations remain on hold.
 
+The `lead` and `linear-issues` skills read the current effective
+`fleet.closure` and `fleet.machineSetup`, including project overrides. The
+owner-global `linear-grind` source follows the same closure policy; it remains
+unbundled. Defaults delegate closure and already-linked machine setup to the
+lead, while genuine owner-only actions retain their boundary. See
+[fleet responsibility](adr/0227-fleet-responsibility-is-owner-settings.md).
+
 Turning guidance off does not disable leading. `herdr` remains
 available as tool references. Disabled names and the merged `swarm-lead` and
 `herdr-lead` names are filtered from Clankie's Pi roots and Codex worker overlays,

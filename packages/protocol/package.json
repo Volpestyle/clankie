@@ -25,7 +25,9 @@
     "./presence": "./src/presence.ts",
     "./tool-catalog": "./src/tool-catalog.ts",
     "./integrate": "./src/integrate.ts",
-    "./tool-output": "./src/tool-output.ts"
+    "./tool-output": "./src/tool-output.ts",
+    "./autonomy": "./src/autonomy.ts",
+    "./fleet-settings": "./src/fleet-settings.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

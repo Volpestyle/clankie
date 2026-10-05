@@ -2,6 +2,9 @@ import { type CaptainSessionLaneV2 } from "@clankie/protocol";
 import {
   FLEET_MODEL_GUIDANCE,
   FLEET_SIZE_GUIDANCE,
+  FLEET_CLOSURE_GUIDANCE,
+  FLEET_MACHINE_SETUP_GUIDANCE,
+  effectiveFleetAutonomy,
   personaInstructions,
   type ClankieSettings,
   type PersonaRegister,
@@ -90,6 +93,26 @@ export const SESSION_PROMPT_SECTIONS: readonly CaptainPromptSection[] = [
   "address",
 ];
 
+export function fleetInstructions(systemTools: boolean, currentSettings: ClankieSettings): string {
+  if (!systemTools) return "";
+  const { notes, size, models } = currentSettings.fleet;
+  const policy = effectiveFleetAutonomy(currentSettings.autonomy);
+  return [
+    "# Your fleet",
+    "",
+    `Fleet size: ${size}. ${FLEET_SIZE_GUIDANCE[size]}`,
+    `Models: ${models}. ${FLEET_MODEL_GUIDANCE[models]}`,
+    "Size and models are budget targets, not caps: go past them when the work warrants and say so.",
+    `Work closure: ${policy.closure}. ${FLEET_CLOSURE_GUIDANCE[policy.closure]}`,
+    `Machine setup: ${policy.machineSetup}. ${FLEET_MACHINE_SETUP_GUIDANCE[policy.machineSetup]}`,
+    "Under lead closure, workers report to the lead without parking for owner acceptance. Genuine owner-only steps (App Store, payments, evals or owner-account sign-ups) become linked follow-ups without holding delivered work open; missing implementation or verification is never a pass.",
+    "These settings delegate fleet work within existing authority. Sign-ins, codes, CAPTCHAs, payments, account changes, credentials and destructive actions outside fleet workspaces remain owner-only.",
+    ...(notes.trim()
+      ? ["", "Routing notes are preferences; you still choose a harness for each job.", notes.trim()]
+      : []),
+  ].join("\n");
+}
+
 /**
  * The prompt a lane starts from, one section per concern. The pi session and a
  * seat outside pi (`lanePrompt`) both call this, so the two can never drift:
@@ -130,29 +153,7 @@ export function assembleLanePrompt(
   // How a Discord reply carries media is true only in a Discord room, so the
   // console and the seats never pay for it (VUH-1456).
   const reach = DISCORD_LANES.has(lane) ? `${machine}\n\n${DISCORD_ROOM}` : machine;
-  // Owner-authored routing preference, and only where a fleet can be reached: a
-  // room with no shell cannot dispatch, so the section would be dead weight
-  // there. Unset renders nothing rather than an empty heading. Stated as
-  // preference on purpose — he is handed the context and decides, the way he
-  // does with every other thing his person tells him. The budget lines ride
-  // along whenever the section renders, and alone force it only when they
-  // differ from the no-limit default, so an owner who set nothing sees no change.
-  const { notes, size, models } = currentSettings.fleet;
-  const fleetNotes = notes.trim();
-  const budgetSet = size !== "max" || models !== "optimal";
-  const fleet =
-    systemTools && (fleetNotes.length > 0 || budgetSet)
-      ? [
-          "# Your fleet",
-          "",
-          "How your person wants work spread across the agents you lead. Their preference, not a rule you execute — you still read the work and decide, and you say so when you go another way.",
-          "",
-          `Swarm size: ${size}. ${FLEET_SIZE_GUIDANCE[size]}`,
-          `Models: ${models}. ${FLEET_MODEL_GUIDANCE[models]}`,
-          "This is their budget as a target, not a cap: size the fleet toward it and pick each seat's model and effort by it (the lead skills say how). Go past it when the work clearly warrants, and say so.",
-          ...(fleetNotes.length > 0 ? ["", fleetNotes] : []),
-        ].join("\n")
-      : "";
+  const fleet = fleetInstructions(systemTools, currentSettings);
   // His own address is a fact he should be able to say without calling a tool
   // for it, and it belongs to whichever mailbox is actually connected — so it
   // is derived from settings rather than written into the persona a second

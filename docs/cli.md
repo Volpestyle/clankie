@@ -1437,12 +1437,12 @@ in the TUI call the same code. A listed harness is hired with `hire_agent`;
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--tools connected|off] [--peer-messages on|off]` / `fleet clear`
+### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
 which (up to 4,000 characters of free text) — and the budget he sizes the fleet
-to, plus the fleet connected-tool and peer-message switches. `set` takes any combination of the flags;
+to, plus responsibility for work closure and machine setup, and the fleet connected-tool and peer-message switches. `set` takes any combination of the flags;
 what is left out keeps its value. `clear` restores every default, including tools
 `connected`. `--tools off` stops new standing tool admissions; manual grants keep
 working. A call already past its last asynchronous check can still dispatch after
@@ -1459,6 +1459,32 @@ cannot be recalled. `--peer-messages on` restores the capability, which defaults
 to on. Workers still need proven native pane/process and matching session identity;
 a fleet bearer alone cannot send. See [worker peer messages](worker-access.md#messages-between-workers)
 and [ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608).
+
+`--closure` and `--machine-setup` both default to `lead`:
+
+| Setting        | `lead` (default)                                                                                                                         | `owner`                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `closure`      | The lead closes tracked work to Done after it has landed, relevant checks pass, and evidence is attached.                                | Park completed work In Review for the owner to close. |
+| `machineSetup` | The lead and workers may install, refresh or prepare Clankie's own harness plugins, bridges and worker setup on already-linked machines. | Ask the owner before those setup actions.             |
+
+Under lead closure, workers report to the lead without parking for owner
+acceptance. Genuine owner-only gates (App Store submission, payments, evals or
+sign-ups on owner accounts) get linked follow-ups without holding otherwise
+delivered work open; missing implementation or verification is never a pass.
+
+The owner may reopen work under either closure mode. Worker reports and native
+delivery receipts alone do not establish acceptance or landing. Each project may
+override either leaf independently with `project settings`, below. The CLI presents
+the logical fields as `fleet.closure` and `fleet.machineSetup`; owner settings store
+them under `autonomy.fleet`. These policies apply without a service restart.
+Setup still requires an existing authorized route, preserves source-owned
+configuration, and never restarts or steers existing lanes. Sign-ins, codes,
+CAPTCHAs, payments, account or credential changes, and destructive actions outside
+fleet workspaces remain owner decisions.
+
+`--hire-profile FILE.json` retains the global launch defaults for harness, model,
+effort, native subagents, delegation, account and placement. Project role defaults
+and explicit per-hire choices keep their existing precedence.
 
 **The budget is two targets, never caps.** Nothing counts seats against them; the
 leadership skill (`lead`) and his prompt use them to aim.
@@ -1488,17 +1514,18 @@ The notes reach him as the `fleet` prompt section, and only on lanes that hold a
 shell — a room that cannot dispatch would carry the section for nothing. They are
 preference, not authority: the section says plainly that he still reads the work
 and decides, and a note here can no more widen his reach than a warmer persona
-can. The section carries the fleet size and model mode whenever it renders. With
-no notes and the default budget (`max`, `optimal`) there is no section at all.
+can. The section carries the effective fleet size, model mode and autonomy policy
+on machine-authorized lanes, including the default `lead` responsibilities.
 
-JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "tools": "connected", "peerMessages": "on" }, "settingsFile": "…", "restart": "clankie restart" }`.
-The TUI `/fleet` command opens the same editor (size, models, connected tools, peer messages, then notes)
+JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "closure": "lead", "machineSetup": "lead", "tools": "connected", "peerMessages": "on" }, "settingsFile": "…", "restart": "clankie restart" }`.
+The TUI `/fleet` command opens the same editor (size, models, connected tools, peer messages, closure, machine setup, then notes)
 and `/fleet status` prints the same values.
 
 ```bash
 clankie fleet set --notes "codex is the workhorse. claude when it needs skills or long context. grok for a hostile read on work that already passed review. never codex on Swift."
 clankie fleet set --size small --models efficient
 clankie fleet set --peer-messages off
+clankie fleet set --closure owner --machine-setup owner
 ```
 
 <a id="runtime-setup"></a>
@@ -2180,7 +2207,7 @@ Sections default to the five a session is built with, joined by one blank line:
 | `identity` | `instructions.md` — who he is, his trust boundaries and where things live                                                                                                                                  |
 | `persona`  | The owner-authored character configuration                                                                                                                                                                 |
 | `reach`    | The machine-access or this-room paragraph for that lane; with machine access, the ready computer-use harnesses (`browser harnesses`) unless delegation is off; in Discord lanes, how a reply carries media |
-| `fleet`    | Owner-authored routing preference; shell-holding lanes only, when set                                                                                                                                      |
+| `fleet`    | Current fleet budget, effective project closure and machine setup responsibility, and optional routing notes; machine-holding lanes                                                                        |
 | `address`  | His own mailbox, when one is connected                                                                                                                                                                     |
 | `model`    | The card naming the model the service lanes run on (ask for it by name)                                                                                                                                    |
 
@@ -2775,14 +2802,14 @@ fleet tools are denied; `nativeTools: not-verified` still requires an actual nat
 catalog/call check. MCP sessions bind to fleet/pane (fleet only for bearer links)
 and expire after 15 minutes idle. See [worker access](worker-access.md).
 
-### `project list` and `project update`
+### `project list`, `project settings` and `project update`
 
 `clankie project list` reads the current project settings and their revision.
 `clankie project update PROJECT --changes FILE.json --revision REVISION` submits
 reviewed changes for an existing project through the authenticated service API.
 The console exposes the same verbs through `/project`.
 
-The changes file may contain `name`, `roles`, `workerCap` and `trackerRef`.
+The changes file may contain `name`, `roles`, `workerCap`, `trackerRef` and `autonomy`.
 Omitted fields remain unchanged; `null` removes a worker cap or tracker binding.
 An empty roles list inherits the six built-in roles; an explicit list defines
 the available roles and may set their whole hire profile (harness, model, effort,
@@ -2794,6 +2821,28 @@ The service validates the whole resulting project settings document, preserving
 workspaces, roots, assignments, grants, label mappings and unrelated projects.
 Stale revisions or removal of an in-use role fail without overwriting the saved
 settings. Read the settings again and review the changes before retrying.
+
+`clankie project settings PROJECT` prints stored closure/machine-setup overrides
+and their current effective values. Add `--closure lead|owner|inherit` or
+`--machine-setup lead|owner|inherit` to change only that leaf through the current
+revision-bearing owner API. Missing leaves inherit the global setting independently;
+`inherit` removes the selected override without changing its sibling. The console
+accepts the same syntax as `/project settings PROJECT ...`.
+
+```sh
+clankie project settings garden --closure owner
+clankie project settings garden --machine-setup lead
+clankie project settings garden --closure inherit
+```
+
+For a reviewed JSON update, `autonomy: { "fleet": { "closure": "owner" } }`
+sets one override; `autonomy: { "fleet": { "closure": null } }` clears it. No
+defaults are copied into project overrides. API readers request
+`?includeAutonomy=true` to receive project autonomy and `autonomyDefaults`;
+the default response preserves the older project snapshot shape. These settings
+grant no workspace, machine or tool authority. Machine setup derives its project
+from the actual canonical caller workspace; an explicit `--project` must match
+that context and cannot select a more permissive override.
 
 `trackerRef` selects an existing project workspace and the fixed path
 `.clankie/tracking.json`. It does not initialize a tracker, select an account or
@@ -3425,18 +3474,27 @@ The owner API exposes `GET /v1/operator/projects` and revision-guarded
 
 ### Linking native fleet harnesses
 
-`clankie harness install` reviews each installed Claude/Codex harness in an
-interactive terminal. Each Claude profile (default, `CLAUDE_CONFIG_DIR`, and
-named `~/.claude-*` directories) has its own consent and native install/enable.
-Declining the interactive step changes no registration. Both checkout and
-release installers refresh existing links even without a terminal, then offer
-new linking interactively. `clankie harness install --refresh-linked` repeats
-that maintenance step and returns JSON receipts with a failing exit code for
+`clankie harness install [--refresh-linked | --codex-source-setup /absolute/script] [--project PROJECT] [--approve]`
+reads the current effective `machineSetup` policy and existing local link through
+the authenticated service. Under `lead`, it runs without a terminal or another
+approval on an already-linked machine. New setup is limited to the caller's
+existing `CLAUDE_CONFIG_DIR` (otherwise `~/.claude`) and `CODEX_HOME` (otherwise
+`~/.codex`); sibling Claude account profiles are skipped. Under `owner`, use an
+interactive terminal for per-profile consent or supply the owner's explicit
+`--approve` for the selected profiles. Declining consent changes no registration.
+
+`clankie harness install --refresh-linked [--project PROJECT] [--approve]`
+maintains existing links and returns JSON receipts with a failing exit code for
 incomplete installations. It includes remembered custom profiles and registered
 Codex account homes; enabled fleet aliases sharing one SSH destination refresh
-once. Unlinked profiles and existing Claude channel policy stay unchanged.
+once. The CLI rechecks current project policy and target linkage before each
+profile or remote destination. Under `owner`, refresh requires the owner's
+explicit `--approve`; under `lead`, automatic refresh requires an already-linked
+target. Unlinked profiles and existing Claude channel policy stay unchanged.
 An explicitly disabled Codex plugin reports `declined`: its native installer
 would enable it, so refreshing that profile requires a reviewed install.
+Checkout and release installers maintain existing links as part of the
+owner-authorized update, then offer new linking interactively.
 
 Native clients reporting an older worker version receive a durable, display-only
 `clankie-plugin` pane flag with a save/restart/resume prompt, once per native
@@ -3444,22 +3502,32 @@ occupant/process and expected version. No harness or pane is restarted. The flag
 clears when a current native client connects. A release installer announces its
 worker version to an already-running service; unavailable notification is
 reported as `notices.state: deferred` until the updated service connects.
-The operator API exposes `POST /v1/harness-refresh` for the same maintenance and
+The operator API exposes `POST /v1/harness-refresh` for the same maintenance,
+with a required `workingDirectory`, optional matching `projectId`, and
+`ownerApproved: true` for explicit owner approval. It checks current policy,
+workspace membership, target linkage and operator authority before setup.
+It exposes
 `POST /v1/harness-plugin-version` with `{ "version": "0.6.2" }` for that announcement.
 
 Codex uses the native `clankie-worker@clankie-fleet` plugin for project-scoped
 bridge tools and packaged skills. It does not load the operator-seat plugin.
 Symlinked or marked generated Codex configuration is not rewritten. Use the
 owning source/setup; `--codex-source-setup /absolute/script` runs an explicitly
-selected source setup after consent and checks that the link is preserved.
+selected source setup under the effective policy and checks that the link is preserved.
 Setup completion still needs doctor verification; no hook trust record is written.
 Successful owner-approved source setup is remembered for that exact config
 source and profile, so subsequent updates reuse it. A changed config source or a
 legacy bridge without a recorded source setup reports `source-manager-required`;
 select the source-owned script through the supported install/prepare command first.
 
-`clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` is the
-explicit owner-approved remote installation.
+`clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT] [--project PROJECT] [--approve]`
+(also `clankie runtime prepare`) prepares the configured remote machine. Under
+`lead`, it needs an existing healthy link and no fresh approval; under `owner`,
+the owner must review the setup and authorize `--approve`. The CLI reads current
+policy before dispatch, and the service independently checks policy, canonical
+source workspace, project context and operator authentication again. An existing
+canonical workspace with no project uses global policy. Missing, ambiguous,
+mismatched or unverified worktree context refuses.
 It enables Claude in each discovered profile. An already enabled, installed Claude
 profile whose settings symlink points to another discovered unmanaged profile
 can update its own plugin cache without installing, enabling, or changing the
@@ -3479,8 +3547,11 @@ through the config symlink:
 clankie herdr prepare pc --codex-source-setup 'C:\Users\volpe\dotfiles\scripts\codex-worker-setup.py'
 ```
 
-The owner API accepts the same remote path as `codexSourceSetup` in the optional
-JSON body of `POST /v1/runtime-connections/NAME/prepare`. Node (`.js`/`.mjs`),
+For owner mode, add `--approve` to that command after approval. The owner API
+requires `workingDirectory` in the JSON body of
+`POST /v1/runtime-connections/NAME/prepare`, accepts a matching `projectId`, and
+uses `ownerApproved: true` for explicit approval. It accepts the same remote
+script path as `codexSourceSetup`. Node (`.js`/`.mjs`),
 Python (`.py`, Python 3.11+ for the dotfiles setup), Windows PowerShell (`.ps1`),
 and directly executable source scripts run as argument vectors. The source hook
 receives `CODEX_HOME`, `CLANKIE_CODEX_WORKER_MARKETPLACE`, and
@@ -3516,9 +3587,16 @@ visible; no generated config rewrite is required merely to inspect them.
 Reports separate executable presence, version, activation, bridge, hooks, and the
 `clankie` skill. Static files never prove a live receiver or project membership.
 OpenCode and Pi automatic plugin installation remains unsupported and appears
-explicitly in doctor; use their native setup. Restart native harnesses after
-installation. No launcher flags, project approvals, grants or owner credentials
+explicitly in doctor; use their native setup. Existing native sessions may retain
+their loaded plugins; verify the actual catalog after setup. These setup commands
+never restart the service or existing lanes. No launcher flags, project approvals, grants or owner credentials
 are changed by linking a plugin.
+
+Fleet plugin membership grants connected MCP tools, not operator CLI authority.
+A native PC worker's fleet proof alone cannot call the operator setup/context
+routes or supply a service-host canonical workspace. An authorized operator on
+the service host can prepare its linked PC through the existing remote route;
+no owner credentials are copied to make a worker's local CLI an operator.
 
 ### Repository-bound linked worktree roots
 

@@ -10,6 +10,34 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { runRuntimeCommand } from "../../tui/src/command/runtime.ts";
 import { readHerdrBinding, herdrConnection } from "../../tui/src/session/herdr-connection.ts";
 
+async function prepareFixture() {
+  const root = await mkdtemp("/tmp/clankie-runtime-prepare-");
+  const settings = new SettingsStore(join(root, "settings.json"));
+  await settings.update((current) => ({
+    ...current,
+    machines: [{ id: "pc", ssh: "fixture.invalid", shell: "posix", aliases: [] }],
+    execution: {
+      connections: [
+        {
+          id: "pc",
+          machine: "pc",
+          kind: "herdr",
+          session: "default",
+          ssh: { host: "fixture.invalid", shell: "posix" },
+          enabled: true,
+          capabilities: ["code"],
+        },
+      ],
+    },
+  }));
+  const runtimes = new ExecutionConnections({
+    settings,
+    primary: { binding: () => undefined, status: () => "disabled" },
+    fleetRun: () => async () => JSON.stringify({ result: { snapshot: { workspaces: [] } } }),
+  });
+  return { root, settings, runtimes };
+}
+
 it("connects two pinned runtimes through API/CLI, survives restart, and never adopts the calling terminal", async () => {
   const root = await mkdtemp("/tmp/clankie-runtime-connections-");
   const settings = new SettingsStore(join(root, "settings.json"));
@@ -291,8 +319,11 @@ it("reports remote harness diagnostics only to the owner through the registered 
 });
 
 it("prepares registered fleets only for the owner and passes remote source setup through the CLI/API", async () => {
+  const f = await prepareFixture();
   const seen: Array<{ id: string; options: { codexSourceSetup?: string } }> = [];
   const app = await createClankieApp({
+    settings: f.settings,
+    runtimes: f.runtimes,
     captain: createStubCaptain(),
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
@@ -304,6 +335,7 @@ it("prepares registered fleets only for the owner and passes remote source setup
     },
   });
   const cli = {
+    cwd: f.root,
     host: "http://localhost",
     env: { CLANKIE_OPERATOR_TOKEN: "owner" },
     fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
@@ -339,6 +371,7 @@ it("prepares registered fleets only for the owner and passes remote source setup
     ]);
   } finally {
     await app.close();
+    await rm(f.root, { recursive: true, force: true });
   }
 });
 
@@ -386,9 +419,12 @@ it("refuses malformed prepare bodies and unknown fields before fleet preparation
 });
 
 it("returns incomplete native Codex preparation as a conflict and preserves the repair detail for the CLI", async () => {
+  const f = await prepareFixture();
   const detail =
     "Codex preparation incomplete on pc: missing native plugin, Clankie bridge, forwarding. Inspect clankie doctor; managed configuration requires --codex-source-setup.";
   const app = await createClankieApp({
+    settings: f.settings,
+    runtimes: f.runtimes,
     captain: createStubCaptain(),
     authenticateOperator: async () => ({ operatorId: "owner" }),
     prepareFleet: async () => {
@@ -396,11 +432,16 @@ it("returns incomplete native Codex preparation as a conflict and preserves the 
     },
   });
   try {
-    const result = await app.app.request("/v1/runtime-connections/pc/prepare", { method: "POST" });
+    const result = await app.app.request("/v1/runtime-connections/pc/prepare", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workingDirectory: f.root }),
+    });
     expect(result.status).toBe(409);
     expect(await result.json()).toEqual({ error: "fleet_prepare_failed", detail });
     await expect(
       runRuntimeCommand(["prepare", "pc"], {
+        cwd: f.root,
         host: "http://localhost",
         env: { CLANKIE_OPERATOR_TOKEN: "owner" },
         fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
@@ -408,5 +449,6 @@ it("returns incomplete native Codex preparation as a conflict and preserves the 
     ).rejects.toThrow(detail);
   } finally {
     await app.close();
+    await rm(f.root, { recursive: true, force: true });
   }
 });

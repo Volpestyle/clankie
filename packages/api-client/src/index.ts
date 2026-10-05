@@ -110,6 +110,35 @@ import {
   type ActivityObservationRead,
   type PlayStillRead,
 } from "@clankie/interactive-environment";
+import {
+  FLEET_SETTINGS_PATH,
+  FLEET_SETTINGS_CONTEXT_PATH,
+  FleetSettingsSnapshotSchema,
+  FleetSettingsContextSchema,
+  FleetSettingsContextRequestSchema,
+  UpdateFleetSettingsSchema,
+  type FleetSettingsSnapshot,
+  type FleetSettingsContext,
+  type FleetSettingsContextRequest,
+  type UpdateFleetSettings,
+} from "@clankie/protocol/fleet-settings";
+import {
+  PROJECTS_PATH,
+  PROJECT_UPDATE_SETTINGS_PATH,
+  PROJECT_CREATE_SETTINGS_PATH,
+  PROJECT_REMOVE_WORKSPACE_PATH,
+  PROJECT_ADD_WORKTREE_ROOT_PATH,
+  PROJECT_REMOVE_WORKTREE_ROOT_PATH,
+  ProjectsSnapshotSchema,
+  UpdateProjectSettingsSchema,
+  CreateProjectSettingsSchema,
+  RemoveProjectWorkspaceSchema,
+  AddProjectWorktreeRootSchema,
+  RemoveProjectWorktreeRootSchema,
+  type ProjectsSnapshot,
+  type UpdateProjectSettings,
+  type CreateProjectSettings,
+} from "@clankie/protocol/projects";
 
 export type {
   ActivityObservationRead,
@@ -218,6 +247,92 @@ export class ClankieApiClient {
     }
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
+  }
+
+  public async fleetSettings(): Promise<FleetSettingsSnapshot> {
+    return parseProtocolResponse(
+      FleetSettingsSnapshotSchema,
+      await this.request(FLEET_SETTINGS_PATH, { headers: this.operatorHeaders(), redirect: "error" }),
+    );
+  }
+
+  public async updateFleetSettings(input: UpdateFleetSettings): Promise<FleetSettingsSnapshot> {
+    return parseProtocolResponse(
+      FleetSettingsSnapshotSchema,
+      await this.request(FLEET_SETTINGS_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        redirect: "error",
+        body: JSON.stringify(UpdateFleetSettingsSchema.parse(input)),
+      }),
+    );
+  }
+
+  public async fleetSettingsContext(input: FleetSettingsContextRequest): Promise<FleetSettingsContext> {
+    const parsed = FleetSettingsContextRequestSchema.parse(input);
+    const query = new URLSearchParams({
+      workingDirectory: parsed.workingDirectory,
+      machine: parsed.machine,
+      ...(parsed.projectId === undefined ? {} : { projectId: parsed.projectId }),
+    });
+    return parseProtocolResponse(
+      FleetSettingsContextSchema,
+      await this.request(`${FLEET_SETTINGS_CONTEXT_PATH}?${query}`, {
+        headers: this.operatorHeaders(),
+        redirect: "error",
+      }),
+    );
+  }
+
+  public async projects(): Promise<ProjectsSnapshot> {
+    return parseProtocolResponse(
+      ProjectsSnapshotSchema,
+      await this.request(`${PROJECTS_PATH}?includeAutonomy=true`, {
+        headers: this.operatorHeaders(),
+        redirect: "error",
+      }),
+    );
+  }
+
+  private async projectMutation(path: string, input: unknown): Promise<ProjectsSnapshot> {
+    return parseProtocolResponse(
+      ProjectsSnapshotSchema,
+      await this.request(`${path}?includeAutonomy=true`, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        redirect: "error",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  public updateProjectSettings(input: UpdateProjectSettings): Promise<ProjectsSnapshot> {
+    return this.projectMutation(PROJECT_UPDATE_SETTINGS_PATH, UpdateProjectSettingsSchema.parse(input));
+  }
+
+  public createProjectSettings(input: CreateProjectSettings): Promise<ProjectsSnapshot> {
+    return this.projectMutation(PROJECT_CREATE_SETTINGS_PATH, CreateProjectSettingsSchema.parse(input));
+  }
+
+  public removeProjectWorkspace(
+    input: ReturnType<typeof RemoveProjectWorkspaceSchema.parse>,
+  ): Promise<ProjectsSnapshot> {
+    return this.projectMutation(PROJECT_REMOVE_WORKSPACE_PATH, RemoveProjectWorkspaceSchema.parse(input));
+  }
+
+  public addProjectWorktreeRoot(
+    input: ReturnType<typeof AddProjectWorktreeRootSchema.parse>,
+  ): Promise<ProjectsSnapshot> {
+    return this.projectMutation(PROJECT_ADD_WORKTREE_ROOT_PATH, AddProjectWorktreeRootSchema.parse(input));
+  }
+
+  public removeProjectWorktreeRoot(
+    input: ReturnType<typeof RemoveProjectWorktreeRootSchema.parse>,
+  ): Promise<ProjectsSnapshot> {
+    return this.projectMutation(
+      PROJECT_REMOVE_WORKTREE_ROOT_PATH,
+      RemoveProjectWorktreeRootSchema.parse(input),
+    );
   }
 
   public async getHerdrBinding(connection?: string): Promise<HerdrBinding> {

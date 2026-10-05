@@ -71,7 +71,7 @@ describe("clankie fleet", () => {
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
     const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
-    const picks = ["small", "efficient", "off", "off"];
+    const picks = ["small", "efficient", "off", "off", "owner", "owner"];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
@@ -93,6 +93,8 @@ describe("clankie fleet", () => {
       { currentValue: "optimal" },
       { currentValue: "connected" },
       { currentValue: "on" },
+      { currentValue: "lead" },
+      { currentValue: "lead" },
     ]);
     expect(prompts).toMatchObject([{ defaultValue: "codex is the workhorse.", multiline: true }]);
     expect(read().fleet).toEqual({
@@ -102,6 +104,7 @@ describe("clankie fleet", () => {
       tools: "off",
       peerMessages: "off",
     });
+    expect(read().autonomy.fleet).toEqual({ closure: "owner", machineSetup: "owner" });
   });
 });
 
@@ -121,6 +124,8 @@ describe("clankie fleet budget", () => {
       models: "optimal",
       tools: "off",
       peerMessages: "on",
+      closure: "lead",
+      machineSetup: "lead",
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain("fleet tool access disabled");
     await expect(runFleetCommand(["set", "--tools", "all"], { settings })).rejects.toThrow(
@@ -142,7 +147,7 @@ describe("clankie fleet budget", () => {
       peerMessages: "on",
     });
     const lines = formatFleetLines(status.fleet).join("\n");
-    expect(lines).toContain("swarm size: max");
+    expect(lines).toContain("fleet size: max");
     expect(lines).toContain("No ceiling");
     expect(lines).toContain("models: optimal");
   });
@@ -157,6 +162,8 @@ describe("clankie fleet budget", () => {
       models: "efficient",
       tools: "connected",
       peerMessages: "on",
+      closure: "lead",
+      machineSetup: "lead",
     });
     await runFleetCommand(["set", "--models", "optimal"], { settings });
     expect(read().fleet).toEqual({
@@ -172,6 +179,8 @@ describe("clankie fleet budget", () => {
       models: "optimal",
       tools: "connected",
       peerMessages: "on",
+      closure: "lead",
+      machineSetup: "lead",
     });
   });
 
@@ -209,6 +218,8 @@ describe("clankie fleet peer messages", () => {
       models: "optimal",
       tools: "off",
       peerMessages: "off",
+      closure: "lead",
+      machineSetup: "lead",
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain(
       "peer messages: off — new messages between fleet workers disabled",

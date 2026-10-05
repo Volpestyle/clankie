@@ -68,12 +68,20 @@ describe("clankie herdr prepare", () => {
       const runtimeArgs = herdrFleetRuntimeArgs(args)!;
       expect(runtimeArgs).toEqual(args);
       const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        if (new URL(String(url)).pathname === "/v1/operator/fleet-settings/context")
+          return Response.json({
+            schemaVersion: 1,
+            effective: { closure: "lead", machineSetup: "lead" },
+            machine: { id: "pc", linked: true },
+          });
         expect(String(url)).toBe("http://fixture/v1/runtime-connections/pc%20fleet/prepare");
         expect(init?.method).toBe("POST");
         expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture");
-        expect(init?.body ? JSON.parse(init.body as string) : undefined).toEqual(
-          codexSourceSetup === undefined ? undefined : { codexSourceSetup },
-        );
+        expect(JSON.parse(init!.body as string)).toEqual({
+          workingDirectory: process.cwd(),
+          ownerApproved: false,
+          ...(codexSourceSetup === undefined ? {} : { codexSourceSetup }),
+        });
         return Response.json({ ok: true });
       });
       expect(
@@ -83,7 +91,7 @@ describe("clankie herdr prepare", () => {
           fetchImpl: fetchImpl as typeof fetch,
         }),
       ).toEqual({ ok: true });
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
     },
   );
 

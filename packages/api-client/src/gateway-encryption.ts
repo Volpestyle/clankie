@@ -11,6 +11,7 @@ import {
   type GatewayEncryptionCredential,
   type GatewayPlainRequest,
 } from "@clankie/protocol/gateway-encryption";
+import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "@clankie/protocol/projects";
 
 /** Implemented with node:crypto, Expo Crypto, or CryptoKit, never JavaScript ciphers. */
 export interface GatewayCrypto {
@@ -85,7 +86,17 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
     const credential = GatewayEncryptionCredentialSchema.parse(options.credential());
     const pushBody = isPush ? ((await request.json()) as Record<string, unknown>) : undefined;
     const hostId = hostPath?.[1] ?? pushBody?.hostId;
-    if (hostId !== credential.hostId || url.search || url.hash || url.username || url.password)
+    const projectQuery =
+      url.search === "?includeAutonomy=true" &&
+      ((request.method === "GET" && hostPath?.[2] === PROJECTS_PATH) ||
+        (request.method === "POST" && hostPath?.[2] === PROJECT_UPDATE_SETTINGS_PATH));
+    if (
+      hostId !== credential.hostId ||
+      (url.search && !projectQuery) ||
+      url.hash ||
+      url.username ||
+      url.password
+    )
       throw new Error("Gateway host identity mismatch");
     if (
       url.protocol !== "https:" &&
@@ -111,7 +122,7 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
     if (request.method !== "GET" && request.method !== "POST") throw new Error("Unsupported gateway method");
     const plaintext: GatewayPlainRequest = {
       method: isPush ? "GET" : request.method,
-      path: isPush ? "/v1/devices/self" : hostPath![2]!,
+      path: isPush ? "/v1/devices/self" : `${hostPath![2]!}${url.search}`,
       headers: Array.from(request.headers, ([name, value]) => ({ name, value })).filter((h) =>
         ["authorization", "content-type", "accept"].includes(h.name),
       ),

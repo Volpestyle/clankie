@@ -17,6 +17,17 @@ import {
 import { BODY_LEASE_STATUS_PATH, BodyLeaseStatusSchema } from "../../../packages/protocol/src/body-leases.ts";
 import { hostedOperatorAllows } from "../../../packages/protocol/src/hosted-operator.ts";
 import {
+  FLEET_SETTINGS_PATH,
+  FleetSettingsSnapshotSchema,
+  UpdateFleetSettingsSchema,
+} from "../../../packages/protocol/src/fleet-settings.ts";
+import {
+  PROJECTS_PATH,
+  PROJECT_UPDATE_SETTINGS_PATH,
+  ProjectsSnapshotSchema,
+  UpdateProjectSettingsSchema,
+} from "../../../packages/protocol/src/projects.ts";
+import {
   DISCORD_DIRECTORY_PATH,
   DiscordDirectorySnapshotSchema,
   DISCORD_SETUP_TEST_POST_PATH,
@@ -61,7 +72,7 @@ export interface OperatorConversationRelayOptions {
   readonly dispatch: OperatorConversationServiceDispatch;
   /** Original signed device; only owner-capable send and preference input operations. */
   readonly deviceDispatch?: DeviceConversationDispatch;
-  /** Forwards the original paired-device token; never substitutes captain authority. */
+  /** Room and owner settings routes forward the original device; never captain authority. */
   readonly roomRequest?: (
     path: string,
     method: "GET" | "POST",
@@ -95,6 +106,10 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "GET", path: DISCORD_VOICE_TRANSCRIPTS_PATH },
   { method: "POST", path: DISCORD_ROOM_GUIDANCE_PATH },
   { method: "POST", path: DISCORD_SETUP_TEST_POST_PATH },
+  { method: "GET", path: FLEET_SETTINGS_PATH },
+  { method: "POST", path: FLEET_SETTINGS_PATH },
+  { method: "GET", path: PROJECTS_PATH },
+  { method: "POST", path: PROJECT_UPDATE_SETTINGS_PATH },
 ] as const;
 
 /**
@@ -106,6 +121,85 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
   const idempotency = new TurnIdempotencyStore(options.clock ?? Date.now);
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const path = requestUrl(request).pathname;
+    if (path === FLEET_SETTINGS_PATH || path === PROJECTS_PATH || path === PROJECT_UPDATE_SETTINGS_PATH) {
+      response.setHeader("cache-control", "no-store");
+      const method = request.method;
+      if (
+        (method !== "GET" && method !== "POST") ||
+        (path === PROJECTS_PATH && method !== "GET") ||
+        (path === PROJECT_UPDATE_SETTINGS_PATH && method !== "POST")
+      ) {
+        writeJson(response, 405, { error: "method_not_allowed" });
+        return true;
+      }
+      const route = `${path}${requestUrl(request).search}`;
+      if (!hostedOperatorAllows(method, route)) {
+        writeJson(response, 400, { error: "invalid_settings_route" });
+        return true;
+      }
+      const token = bearerToken(request);
+      if (token === undefined) {
+        writeAuthDenial(response, "invalid");
+        return true;
+      }
+      const initial = await authorizeGrant(options, token, response, "terminalControl");
+      if (!initial) return true;
+      if (!options.roomRequest) {
+        writeJson(response, 503, { error: "settings_upstream_unavailable" });
+        return true;
+      }
+      let body: string | undefined;
+      if (method === "POST") {
+        const input = await readJson(request).catch(() => undefined);
+        const parsed =
+          path === FLEET_SETTINGS_PATH
+            ? UpdateFleetSettingsSchema.safeParse(input)
+            : UpdateProjectSettingsSchema.safeParse(input);
+        if (!parsed.success) {
+          writeJson(response, 400, { error: "invalid_settings_update" });
+          return true;
+        }
+        body = JSON.stringify(parsed.data);
+      }
+      const before = await authorizeGrant(options, token, response, "terminalControl");
+      if (!before) return true;
+      if (
+        before.device.deviceId !== initial.device.deviceId ||
+        before.device.controlScope !== initial.device.controlScope
+      ) {
+        writeAuthDenial(response, "invalid");
+        return true;
+      }
+      try {
+        const upstream = await options.roomRequest(route, method, token, body);
+        const data: unknown = await upstream.json();
+        const after = await authorizeGrant(options, token, response, "terminalControl");
+        if (!after) return true;
+        if (
+          after.device.deviceId !== before.device.deviceId ||
+          after.device.controlScope !== before.device.controlScope
+        ) {
+          writeAuthDenial(response, "invalid");
+          return true;
+        }
+        if (!upstream.ok) {
+          writeJson(response, upstream.status, { error: "settings_upstream_refused" });
+          return true;
+        }
+        const parsed =
+          path === FLEET_SETTINGS_PATH
+            ? FleetSettingsSnapshotSchema.safeParse(data)
+            : ProjectsSnapshotSchema.safeParse(data);
+        writeJson(
+          response,
+          parsed.success ? 200 : 502,
+          parsed.success ? parsed.data : { error: "invalid_settings_response" },
+        );
+      } catch {
+        writeJson(response, 502, { error: "settings_upstream_unavailable" });
+      }
+      return true;
+    }
     const roomRoute =
       path === DISCORD_ROOMS_PATH ||
       path === DISCORD_ROOM_GUIDANCE_PATH ||

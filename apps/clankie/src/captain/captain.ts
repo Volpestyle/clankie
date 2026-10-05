@@ -37,6 +37,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
+import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
 import { trackHostedConversationRunner } from "../hosted-work.ts";
@@ -54,6 +55,7 @@ import {
   assembleLanePrompt,
   captainInstructions,
   captainMemoryExtension,
+  fleetInstructions,
   instructionsForHarness,
   laneHoldsSystemTools,
   renderMemoryCard,
@@ -68,6 +70,7 @@ import {
 import { type CaptainOptions, type LaneSession } from "./captain-types.ts";
 import { createWorkerReports } from "./captain-worker-reports.ts";
 import { createChannelProjection } from "./channel-projection.ts";
+import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import {
   claudeWorkerChannelConsent,
   createClaudeWorkerSeatAdapter,
@@ -728,6 +731,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let headSeat: ObservedHeadSeat | undefined;
 
   const settings = (): Promise<ClankieSettings> => settingsStore.load();
+  async function settingsForFleetContext(current: ClankieSettings, cwd: string): Promise<ClankieSettings> {
+    if (current.projects.projects.length === 0) return current;
+    const context = await resolveFleetSettingsContext(
+      current,
+      { workingDirectory: cwd, machine: "local" },
+      {},
+    );
+    const project = current.projects.projects.find((candidate) => candidate.id === context.projectId);
+    return {
+      ...current,
+      fleet: {
+        ...current.fleet,
+        size: project?.fleet?.size ?? current.fleet.size,
+        models: project?.fleet?.models ?? current.fleet.models,
+      },
+      autonomy: {
+        ...current.autonomy,
+        fleet: context.effective,
+      },
+    };
+  }
   const cacheSalt = promptCacheSalt(join(options.stateDir, "prompt-cache-salt"));
   const runtime = async (run?: ConversationServiceRun): Promise<CaptainModelRuntime> => {
     run?.signal.throwIfAborted();
@@ -836,7 +860,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       };
     }
     const { runtime: models, resolveRoute } = await runtime(run);
-    const currentSettings = await prepare("session settings", settings);
+    const currentSettings = await prepare("session settings", async () =>
+      systemTools ? settingsForFleetContext(await settings(), cwd) : settings(),
+    );
     const computerUse = systemTools ? await prepare("computer-use discovery", harnessesForPrompt) : [];
     const purpose = sessionPurpose(lane, systemTools);
     const route = { current: await prepare("session model route", () => resolveRoute(purpose)) };
@@ -855,6 +881,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
         noExtensions: true,
         extensionFactories: [
+          ...(systemTools
+            ? [
+                captainFleetSettingsExtension({
+                  initialPrompt: fleetInstructions(systemTools, currentSettings),
+                  loadPrompt: async () =>
+                    fleetInstructions(true, await settingsForFleetContext(await settings(), cwd)),
+                }),
+              ]
+            : []),
           ...(hasPersonaImages
             ? [
                 personaImagesExtension(personaImages, async (prompt) => {
@@ -2609,7 +2644,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async lanePrompt({ lane, sections = SESSION_PROMPT_SECTIONS, conversationId, harness }) {
-      const currentSettings = await settings();
+      const binding =
+        lane === "operator" && conversationId !== undefined ? seatContext(conversationId) : undefined;
+      if (conversationId !== undefined && binding === undefined)
+        throw new Error("Unknown captain conversation");
+      const stored = await settings();
+      const currentSettings =
+        laneHoldsSystemTools(lane) && sections.includes("fleet")
+          ? await settingsForFleetContext(stored, binding?.cwd ?? workingDirectory)
+          : stored;
       // The model card is per run in pi, so it is only assembled when asked for;
       // a selection that cannot be resolved leaves the section out, as the
       // extension does, rather than guessing.
@@ -2626,7 +2669,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       if (sections.includes("persona")) prompt += "\n\n" + personaImageBriefing(await personaImages());
       if (conversationId === undefined) return prompt;
-      const binding = lane === "operator" ? seatContext(conversationId) : undefined;
       if (binding === undefined) throw new Error("Unknown captain conversation");
       const files = instructionsForHarness(await projectInstructions(binding.cwd), harness);
       return [

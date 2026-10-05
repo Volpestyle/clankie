@@ -47,6 +47,7 @@ import type { MediaGeneratorPort } from "../media-generation.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { MinecraftService } from "../minecraft.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
+import type { HarnessRefreshAuthority } from "../runtime-update-routes.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
 import type { PersonaImageSource } from "../persona-images.ts";
 import { type PushWakeSender } from "../push.ts";
@@ -127,7 +128,7 @@ export interface ClankieAppDependencies {
   integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
-  refreshHarnesses?: () => Promise<unknown>;
+  refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
   discordIngress?: DiscordIngress;
   /** Durable exact Discord turn receipts; production supplies its state directory. */

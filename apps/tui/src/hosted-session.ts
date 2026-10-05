@@ -347,7 +347,13 @@ export function createHostedTransport(
     }
     const request = new Request(input, init),
       url = new URL(request.url);
-    if (url.origin !== "http://hosted.clankie.invalid" || url.search || url.hash)
+    if (
+      url.origin !== "http://hosted.clankie.invalid" ||
+      url.hash ||
+      (url.search &&
+        (url.search !== "?includeAutonomy=true" ||
+          !["/v1/operator/projects", "/v1/operator/projects/update"].includes(url.pathname)))
+    )
       throw new Error("Invalid hosted operator target");
     const response = await exchange(`${base}${HOSTED_OPERATOR_PATH}`, {
       method: "POST",
@@ -355,7 +361,7 @@ export function createHostedTransport(
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(220_000)]),
       body: JSON.stringify({
         method: request.method,
-        path: url.pathname,
+        path: `${url.pathname}${url.search}`,
         ...(request.method === "GET" ? {} : { body: await request.text() }),
       }),
     });

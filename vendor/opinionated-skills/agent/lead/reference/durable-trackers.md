@@ -49,6 +49,15 @@ owned, linked follow-up. Close an accepted slice only under that decision; never
 mark missing verification as passed. Blockers name the missing prerequisite and
 next action, not merely "waiting."
 
+For Clankie's fleet, read effective `fleet.closure` before the transition:
+`lead` closes landed work with passing checks and attached evidence to Done;
+`owner` parks it In Review. The owner can reopen either. A genuine owner-only
+gate (App Store submission, payments, evals or owner-account sign-ups) becomes a
+linked follow-up and does not hold the delivered issue open. Keep the gate's
+unperformed action explicit; missing product behavior still needs the scope
+owner's disposition above. Workers report to the transition owner rather than
+waiting for a separate owner acceptance under `lead`.
+
 ## Local records
 
 Use the repository's existing layout. Keep the shared plan lead-owned and link

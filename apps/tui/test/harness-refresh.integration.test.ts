@@ -84,6 +84,7 @@ it.skipIf(process.env.NATIVE_HARNESS_FIXTURES !== "1")(
       // API uses the same production coordinator and real native installers.
       let announcedVersion: string | undefined;
       const app = createRuntimeUpdateRoutes({
+        settings,
         authorize: async (request) =>
           request.headers.get("authorization") === `Bearer ${token}`
             ? { current: () => true, guard: async () => {} }
@@ -91,10 +92,11 @@ it.skipIf(process.env.NATIVE_HARNESS_FIXTURES !== "1")(
         pluginVersionInstalled: (version) => {
           announcedVersion = version;
         },
-        refreshHarnesses: () =>
+        refreshHarnesses: (authority) =>
           refreshLinkedHarnesses({
             env,
             settings,
+            authorizeSetup: authority.authorizeSetup,
             repoRoot: join(root, "new"),
             fleets: [],
             host: "http://fixture",
@@ -105,6 +107,7 @@ it.skipIf(process.env.NATIVE_HARNESS_FIXTURES !== "1")(
       const response = await app.request("/v1/harness-refresh", {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
+        body: JSON.stringify({ workingDirectory: join(root, "new"), ownerApproved: true }),
       });
       const result = await response.json();
       expect(response.status).toBe(200);
