@@ -332,6 +332,14 @@ either policy; automatic setup uses the native plugin manager or an exact,
 already-remembered source setup. The server records consent as a caller claim,
 not verified human presence. Setup preserves source/account fences and never restarts or
 steers an existing lane.
+
+Before committing, pushing or releasing, read this workspace's resolved working
+preferences with `clankie fleet status` or `clankie doctor --json`. The same
+`autonomy.fleet` block holds commit/push, official-release policy, verification
+level and reporting style, with independent project overrides. Preferences do
+not grant tool/account authority. Respect explicit task/integrator gates; report
+unavailable project context instead of assuming release consent. See
+[`reference/fleet.md`](reference/fleet.md) for the shared read/edit surface.
 Updates and checkout/release installs automatically refresh existing links on
 this machine and enabled SSH fleets with `clankie harness install --refresh-linked`.
 Direct refresh rechecks current policy and linkage for each target; supply the

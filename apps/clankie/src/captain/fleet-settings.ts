@@ -3,7 +3,7 @@ import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 const UNAVAILABLE = [
   "# Your fleet",
   "",
-  "Current fleet responsibility could not be verified. Do not close tracked work or change machine setup until current settings and project membership can be verified. Previous responsibility values are unavailable for this turn.",
+  "Current fleet responsibility could not be verified. Do not close tracked work or change machine setup, commit, push, or publish a release based on previous preferences until current settings and project membership can be verified. Previous responsibility and working preference values are unavailable for this turn.",
 ].join("\n");
 
 /** Pi reports extension errors and continues, so a failed policy read must replace stale delegation. */

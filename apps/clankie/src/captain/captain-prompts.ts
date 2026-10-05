@@ -1,9 +1,7 @@
-import { type CaptainSessionLaneV2 } from "@clankie/protocol";
+import { formatFleetAutonomyGuidance, type CaptainSessionLaneV2 } from "@clankie/protocol";
 import {
   FLEET_MODEL_GUIDANCE,
   FLEET_SIZE_GUIDANCE,
-  FLEET_CLOSURE_GUIDANCE,
-  FLEET_MACHINE_SETUP_GUIDANCE,
   effectiveFleetAutonomy,
   personaInstructions,
   type ClankieSettings,
@@ -103,10 +101,9 @@ export function fleetInstructions(systemTools: boolean, currentSettings: Clankie
     `Fleet size: ${size}. ${FLEET_SIZE_GUIDANCE[size]}`,
     `Models: ${models}. ${FLEET_MODEL_GUIDANCE[models]}`,
     "Size and models are budget targets, not caps: go past them when the work warrants and say so.",
-    `Work closure: ${policy.closure}. ${FLEET_CLOSURE_GUIDANCE[policy.closure]}`,
-    `Machine setup: ${policy.machineSetup}. ${FLEET_MACHINE_SETUP_GUIDANCE[policy.machineSetup]}`,
-    "Under lead closure, workers report to the lead without parking for owner acceptance. Genuine owner-only steps (App Store, payments, evals or owner-account sign-ups) become linked follow-ups without holding delivered work open; missing implementation or verification is never a pass.",
-    "These settings delegate fleet work within existing authority. Sign-ins, codes, CAPTCHAs, payments, account changes, credentials and destructive actions outside fleet workspaces remain owner-only.",
+    ...formatFleetAutonomyGuidance(policy),
+    "Under lead closure, workers report to the lead without parking for owner acceptance. Release publication, including App Store or TestFlight, follows the resolved release preference. Owner-only payments, evals and account sign-ups become linked follow-ups without holding delivered work open; missing implementation or verification is never a pass.",
+    "These preferences are standing work guidance within existing authority. They grant no tools, accounts, credentials or machine authority. Sign-ins, codes, CAPTCHAs, payments, account changes, credentials and destructive actions outside fleet workspaces remain owner-only. Evals require explicit owner authorization; a release preference never authorizes them.",
     ...(notes.trim()
       ? ["", "Routing notes are preferences; you still choose a harness for each job.", notes.trim()]
       : []),

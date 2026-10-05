@@ -84,7 +84,7 @@ it("native continuation goes through one hire/adoption path and preserves the ex
     expect(spawn).toHaveBeenCalledWith(
       seat,
       undefined,
-      expect.stringContaining("continue\n\nEnd each finished turn with a short report"),
+      expect.stringContaining("continue\n\nWorking preferences for this assignment:"),
       session,
       expect.objectContaining({ owner: { conversationId: "global-default" } }),
       expect.any(Function),

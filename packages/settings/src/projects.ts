@@ -10,7 +10,12 @@ import {
   UpdateProjectSettingsSchema,
   type UpdateProjectSettings,
 } from "@clankie/protocol/projects";
-import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "@clankie/protocol";
+import {
+  OPERATOR_AGENT_ROLES,
+  OperatorAgentRoleSchema,
+  operatorAgentRoleKey,
+  applyFleetAutonomyPatch,
+} from "@clankie/protocol";
 
 export function projectsRevision(settings: ProjectsSettings): string {
   return createHash("sha256")
@@ -35,12 +40,7 @@ export function updateProjectSettings(
   if (input.changes.trackerRef === null) delete project.trackerRef;
   else if (input.changes.trackerRef !== undefined) project.trackerRef = input.changes.trackerRef;
   if (input.changes.autonomy !== undefined) {
-    const fleet = { ...project.autonomy?.fleet };
-    for (const field of ["closure", "machineSetup"] as const) {
-      const value = input.changes.autonomy.fleet[field];
-      if (value === null) delete fleet[field];
-      else if (value !== undefined) fleet[field] = value;
-    }
+    const fleet = applyFleetAutonomyPatch(project.autonomy?.fleet, input.changes.autonomy.fleet);
     const autonomy = { ...project.autonomy };
     if (Object.keys(fleet).length > 0) autonomy.fleet = fleet;
     else delete autonomy.fleet;

@@ -51,6 +51,16 @@ Clankie can do work himself or assemble a team. Tell him the outcome, your
 constraints, and any decisions you want to make yourself. You can ask who is
 doing what, open a helper's conversation, and steer the work as it develops.
 
+Tell him how you want agents to work: “Commit and push without asking, ask me
+before official releases, and keep reports short and plain.” Owner defaults
+apply across projects; a project can override each choice or inherit it.
+Verification can request independent review and sealing, or making the change,
+running relevant checks and reading the results. View or change these choices by
+talking to Clankie or using the app's project settings. Every helper receives the
+resolved preferences for its project. On a DIY installation, `clankie fleet
+status` and `clankie doctor --json` expose the same workspace preferences for
+agents you launch yourself. Preferences keep the existing access boundaries.
+
 For DIY users, helper agents use the installed and authenticated tools you
 choose. [Customize Clankie](/diy/#bring-your-own-team) explains the setup. Hosted
 worker availability depends on the service and plan; the [current plans](https://clankie.bot/#plans)

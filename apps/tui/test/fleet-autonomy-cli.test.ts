@@ -17,6 +17,8 @@ import { runProjectSettingsCommand } from "../src/command/project-settings.ts";
 import { herdrFleetRuntimeArgs } from "../src/command/herdr.ts";
 import { runRuntimeCommand } from "../src/command/runtime.ts";
 import { machineSetupContext } from "../src/command/machine-setup.ts";
+import { FleetAutonomySchema } from "@clankie/protocol";
+import { formatWorkingPreferences } from "../src/command/working-preferences.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -88,7 +90,9 @@ it("persists logical fleet autonomy leaves independently and clear restores lead
   await runFleetCommand(["set", "--closure", "owner", "--size", "small"], { settings: f.settings });
   const saved = await runFleetCommand(["set", "--machine-setup", "owner"], { settings: f.settings });
   expect(saved.fleet).toMatchObject({ closure: "owner", machineSetup: "owner", size: "small" });
-  expect((await f.settings.load()).autonomy.fleet).toEqual({ closure: "owner", machineSetup: "owner" });
+  expect((await f.settings.load()).autonomy.fleet).toEqual(
+    FleetAutonomySchema.parse({ closure: "owner", machineSetup: "owner" }),
+  );
   expect((await f.settings.load()).fleet).not.toHaveProperty("closure");
   await expect(runFleetCommand(["set", "--closure", "ask"], { settings: f.settings })).rejects.toThrow(
     "lead or owner",
@@ -96,6 +100,119 @@ it("persists logical fleet autonomy leaves independently and clear restores lead
   const clear = await runFleetCommand(["clear"], { settings: f.settings });
   expect(clear.fleet).toMatchObject({ closure: "lead", machineSetup: "lead", size: "max" });
   expect((await f.settings.load()).projects.projects[0]!.workerCap).toBe(2);
+});
+
+it("stores working preferences atomically and resolves an unstarted workspace through the real context API", async () => {
+  const f = await fixture();
+  const options = { settings: f.settings, ...f.client };
+  await runFleetCommand(
+    [
+      "set",
+      "--commit",
+      "owner",
+      "--push",
+      "owner",
+      "--release",
+      "time_rule",
+      "--release-rule",
+      "After a week with user-visible changes.",
+      "--verification",
+      "review_and_seal",
+      "--report-style",
+      "Evidence first.",
+    ],
+    options,
+  );
+  const projected = await runProjectSettingsCommand(
+    ["settings", "garden", "--push", "lead", "--release", "lead", "--report-style", "Short with links."],
+    f.client,
+  );
+  expect(projected).toMatchObject({
+    workingPreferences: true,
+    fleet: {
+      commit: "inherit",
+      push: "lead",
+      release: { mode: "lead" },
+      effective: {
+        commit: "owner",
+        push: "lead",
+        release: { mode: "lead" },
+        verification: "review_and_seal",
+        reportingStyle: "Short with links.",
+      },
+    },
+  });
+  const before = await readFile(f.settings.path, "utf8");
+  const resolved = await runFleetCommand(["status", "--working-directory", f.root], options);
+  expect(resolved.workingPreferences).toMatchObject({
+    status: "available",
+    projectId: "garden",
+    effective: {
+      commit: "owner",
+      push: "lead",
+      release: { mode: "lead" },
+      verification: "review_and_seal",
+      reportingStyle: "Short with links.",
+    },
+  });
+  expect(formatWorkingPreferences(resolved.workingPreferences).join("\n")).toContain(
+    "project garden overrides global defaults",
+  );
+  expect(await readFile(f.settings.path, "utf8")).toBe(before);
+  await runProjectSettingsCommand(
+    ["settings", "garden", "--push", "inherit", "--release", "inherit", "--report-style", "inherit"],
+    f.client,
+  );
+  const inherited = await runFleetCommand(["status"], options);
+  expect(inherited.workingPreferences).toMatchObject({
+    effective: {
+      push: "owner",
+      release: { mode: "time_rule", rule: "After a week with user-visible changes." },
+      reportingStyle: "Evidence first.",
+    },
+  });
+  await expect(runFleetCommand(["set", "--release-rule", "Only a rule"], options)).rejects.toThrow();
+  await expect(
+    runProjectSettingsCommand(
+      ["settings", "garden", "--release", "owner", "--release-rule", "stale rule"],
+      f.client,
+    ),
+  ).rejects.toThrow();
+  const release = await runFleetCommand(["set", "--release", "owner"], options);
+  expect(release.fleet.release).toEqual({ mode: "owner" });
+});
+
+it("does not manufacture working preferences or send new project leaves to an old service", async () => {
+  const f = await fixture();
+  let mutations = 0;
+  const legacy = {
+    ...f.client,
+    fetchImpl: (async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") mutations++;
+      const response = await f.client.fetchImpl(url, init);
+      const value = await response.json();
+      delete value.workingPreferences;
+      if (value.effective)
+        for (const field of ["commit", "push", "release", "verification", "reportingStyle"])
+          delete value.effective[field];
+      if (value.autonomyDefaults)
+        for (const field of ["commit", "push", "release", "verification", "reportingStyle"])
+          delete value.autonomyDefaults.fleet[field];
+      return Response.json(value, { status: response.status });
+    }) as typeof fetch,
+  };
+  const result = await runFleetCommand(["status"], { settings: f.settings, ...legacy });
+  expect(result.workingPreferences).toMatchObject({
+    status: "unavailable",
+    detail: expect.stringContaining("update"),
+  });
+  await expect(
+    runProjectSettingsCommand(["settings", "garden", "--commit", "owner"], legacy),
+  ).rejects.toThrow("does not support working preferences");
+  expect(mutations).toBe(0);
+  const existing = await runProjectSettingsCommand(["settings", "garden"], legacy);
+  expect(existing).toMatchObject({ fleet: { effective: { closure: "lead", machineSetup: "lead" } } });
+  expect(existing).not.toHaveProperty("fleet.effective.commit");
 });
 
 it("edits and clears project leaves through the real revision API while reporting stored and effective values", async () => {

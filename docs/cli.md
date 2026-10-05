@@ -138,6 +138,11 @@ card too. Both formats always exit 0 when the card is produced. JSON `ok` means
 the card was produced, not that every integration works. `/doctor` in the
 console continues to show the full card.
 
+The local card includes `workingPreferences`: resolved global/project values
+for the actual current workspace, or an explicit unavailable detail. The TUI
+`/doctor` displays these values; the headless command keeps its one-line summary,
+so use `--json` to read them. This observation never adds project or tool access.
+
 Local fleet discovery uses `<CLANKIE_STATE>/links`, defaulting to
 `~/.clankie/links`. Local hires carry the service's absolute state path, including
 into the Codex MCP bridge. Doctor and native workers select that same directory;
@@ -1437,12 +1442,12 @@ in the TUI call the same code. A listed harness is hired with `hire_agent`;
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status]` / `fleet set [--notes TEXT] [--size SIZE] [--models MODE] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
 which (up to 4,000 characters of free text) — and the budget he sizes the fleet
-to, plus responsibility for work closure and machine setup, and the fleet connected-tool and peer-message switches. `set` takes any combination of the flags;
+to, plus work closure, machine setup, working preferences and the fleet connected-tool and peer-message switches. `set` takes any combination of the flags;
 what is left out keeps its value. `clear` restores every default, including tools
 `connected`. `--tools off` stops new standing tool admissions; manual grants keep
 working. A call already past its last asynchronous check can still dispatch after
@@ -1468,19 +1473,48 @@ and [ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608).
 | `machineSetup` | The lead and workers may install, refresh or prepare Clankie's own harness plugins, bridges and worker setup on already-linked machines. | Ask the owner before those setup actions.             |
 
 Under lead closure, workers report to the lead without parking for owner
-acceptance. Genuine owner-only gates (App Store submission, payments, evals or
+acceptance. Genuine owner-only gates (payments, evals or
 sign-ups on owner accounts) get linked follow-ups without holding otherwise
 delivered work open; missing implementation or verification is never a pass.
 
 The owner may reopen work under either closure mode. Worker reports and native
 delivery receipts alone do not establish acceptance or landing. Each project may
-override either leaf independently with `project settings`, below. The CLI presents
+override each leaf independently with `project settings`, below. The CLI presents
 the logical fields as `fleet.closure` and `fleet.machineSetup`; owner settings store
 them under `autonomy.fleet`. These policies apply without a service restart.
 Setup still requires an existing authorized route, preserves source-owned
 configuration, and never restarts or steers existing lanes. Sign-ins, codes,
 CAPTCHAs, payments, account or credential changes, and destructive actions outside
 fleet workspaces remain owner decisions.
+
+The same `autonomy.fleet` block holds working preferences. `--commit` and
+`--push` use `lead` for without asking (default) or `owner` for ask first.
+`--release owner` asks before official tags, packages or store submissions
+(default); `lead` permits them after relevant checks, and `time_rule` requires
+`--release-rule TEXT`. A rule is owner-authored guidance to verify against current
+evidence, not a scheduler. `--verification review_and_seal` asks for independent
+review, addressed findings and sealing the reviewed revision with evidence;
+`change_run_read` (default) asks for focused checks and reading their results.
+`--report-style TEXT` sets reporting guidance (default "Short and plain.").
+Explicit task and integrator gates take precedence, and these preferences
+grant no additional account, tool or workspace authority.
+
+`fleet status`, `doctor --json` and the TUI `/doctor` expose the resolved preferences for the actual
+current workspace through the verified service context, including the project
+ID or global inheritance. Agents launched independently can read this same
+context. Unavailable, ambiguous or unverified context is reported explicitly.
+Global fields remain visible separately, so project overrides are apparent.
+Every hire receives resolved preferences in its native brief, even when no task
+brief is supplied; machine-bearing "Your fleet" prompts refresh them each turn.
+Ask Clankie to view or change a preference and he uses these same CLI/API tools.
+
+Legacy settings migration seeds the weekly release rule only on an existing
+owner project with ID `clankie` that has no release override: the last `v*` tag
+must be more than one week old and `main` must have user-visible changes worth
+shipping. It creates no project, workspace or grant. Persisted global working
+preferences mark the migration complete; clearing that project override then
+stays cleared after restart. An unregistered project inherits global ask-first
+releases. See [ADR 0230](adr/0230-fleet-responsibility-is-owner-settings.md).
 
 `--hire-profile FILE.json` retains the global launch defaults for harness, model,
 effort, native subagents, delegation, account and placement. Project role defaults
@@ -1517,8 +1551,10 @@ and decides, and a note here can no more widen his reach than a warmer persona
 can. The section carries the effective fleet size, model mode and autonomy policy
 on machine-authorized lanes, including the default `lead` responsibilities.
 
-JSON contains `{ "ok": true, "fleet": { "notes": "…", "size": "max", "models": "optimal", "closure": "lead", "machineSetup": "lead", "tools": "connected", "peerMessages": "on" }, "settingsFile": "…", "restart": "clankie restart" }`.
-The TUI `/fleet` command opens the same editor (size, models, connected tools, peer messages, closure, machine setup, then notes)
+JSON includes the global `fleet` projection and a separate workspace
+`workingPreferences` report, with either available resolved values or an
+unavailable detail. The TUI `/fleet` command opens the same editor (size, models,
+connected tools, peer messages, closure, machine setup, working preferences, then notes)
 and `/fleet status` prints the same values.
 
 ```bash
@@ -1526,6 +1562,8 @@ clankie fleet set --notes "codex is the workhorse. claude when it needs skills o
 clankie fleet set --size small --models efficient
 clankie fleet set --peer-messages off
 clankie fleet set --closure owner --machine-setup owner
+clankie fleet set --commit lead --push lead --release owner
+clankie fleet set --verification review_and_seal --report-style "Short and plain."
 ```
 
 <a id="runtime-setup"></a>
@@ -2822,9 +2860,13 @@ workspaces, roots, assignments, grants, label mappings and unrelated projects.
 Stale revisions or removal of an in-use role fail without overwriting the saved
 settings. Read the settings again and review the changes before retrying.
 
-`clankie project settings PROJECT` prints stored closure/machine-setup overrides
+`clankie project settings PROJECT` prints stored autonomy overrides
 and their current effective values. Add `--closure lead|owner|inherit` or
-`--machine-setup lead|owner|inherit` to change only that leaf through the current
+`--machine-setup lead|owner|inherit`, `--commit lead|owner|inherit`,
+`--push lead|owner|inherit`, `--release lead|owner|time_rule|inherit`
+(with `--release-rule TEXT` for `time_rule`),
+`--verification review_and_seal|change_run_read|inherit`, or
+`--report-style TEXT|inherit` to change only that leaf through the current
 revision-bearing owner API. Missing leaves inherit the global setting independently;
 `inherit` removes the selected override without changing its sibling. The console
 accepts the same syntax as `/project settings PROJECT ...`.
@@ -2833,13 +2875,20 @@ accepts the same syntax as `/project settings PROJECT ...`.
 clankie project settings garden --closure owner
 clankie project settings garden --machine-setup lead
 clankie project settings garden --closure inherit
+clankie project settings clankie --release time_rule --release-rule "Release without asking when the last v* tag is more than one week old and main has user-visible changes worth shipping."
+clankie project settings garden --commit owner --push inherit
+clankie project settings garden --report-style "Short and plain."
 ```
 
 For a reviewed JSON update, `autonomy: { "fleet": { "closure": "owner" } }`
 sets one override; `autonomy: { "fleet": { "closure": null } }` clears it. No
 defaults are copied into project overrides. API readers request
 `?includeAutonomy=true` to receive project autonomy and `autonomyDefaults`;
-the default response preserves the older project snapshot shape. These settings
+the default response preserves the older project snapshot shape. New fleet/context
+and autonomy-aware project responses advertise `workingPreferences:true`; an
+older response keeps new leaves absent. The app hides unadvertised working
+preference controls while retaining existing closure/machine-setup controls.
+Release mode and rule are replaced or inherited together. These settings
 grant no workspace, machine or tool authority. Machine setup derives its project
 from the actual canonical caller workspace; an explicit `--project` must match
 that context and cannot select a more permissive override.

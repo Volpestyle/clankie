@@ -68,9 +68,13 @@ This repository is public. Both neighbors are private and consume
   full E2E with real dependencies and nothing mocked, then integration across
   data/API/schema boundaries, then goldens grounded in real examples. Do not add
   unit tests by default; existing unit tests stay until separately reviewed pruning.
-- Release without asking when the last release is over a week old and `main`
-  has user-visible changes worth shipping (`release-clankie`). The private
-  `~/dev/clankie-app` follows the same rule for TestFlight (`release-app`).
+- Read resolved owner working preferences through `clankie fleet status` or
+  `clankie doctor --json` for this workspace before committing, pushing or releasing.
+  Global defaults permit commit/push without asking and require asking before
+  official releases. The registered `clankie` project's migrated release override
+  permits release when the last `v*` tag is more than one week old and `main` has
+  user-visible changes worth shipping (`release-clankie`). Explicit task and
+  integrator gates take precedence; the private app reads its own project policy.
 - Build every feature API- and CLI-first, expose any settings it needs in the
   TUI, and update the relevant agent-facing skill and human-facing docs.
 - Reusable lessons about how Clankie works belong in the relevant shipped skill

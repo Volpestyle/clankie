@@ -548,7 +548,12 @@ export function createOperatorService(
         current: () => ctx.conversations.runsCaptainTurns(conversationId),
         authorize: async () => ctx.conversations.runsCaptainTurns(conversationId),
       });
-      const result = { ...hired, deliveryStage: hireDeliveryStage(hired, request.brief !== undefined) };
+      const result = {
+        ...hired,
+        deliveryStage:
+          hired.deliveryStage ??
+          hireDeliveryStage(hired, hired.outcome === "spawned" || request.brief !== undefined),
+      };
       return { op: "spawn_seat", schemaVersion: 1, result };
     }
     if (request.op === "move_seat") {
