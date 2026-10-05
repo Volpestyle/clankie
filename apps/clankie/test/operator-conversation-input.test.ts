@@ -32,8 +32,12 @@ it.each([false, true])("steers past queued work while a human/internal (%s) turn
     },
   };
   const lane: Parameters<typeof runDurableTurn>[0] = { session, capture: {} };
-  const store = new ConversationStore(root, async (_id, message, publish) => {
-    if ((await runDurableTurn(lane, message, [])) === "ran") {
+  const store = new ConversationStore(root, async (_id, message, publish, context) => {
+    if (
+      (await runDurableTurn(lane, message, [], {
+        onAdmitted: (state) => context.deliveryOutcome?.({ state }),
+      })) === "ran"
+    ) {
       publish({ type: "message", role: "captain", text: `reply to ${message}`, streaming: false });
     }
   });

@@ -38,7 +38,7 @@ export function fleetDeliveryStage(result: {
   readonly deliveryStage?: DeliveryStage;
 }): DeliveryStage {
   if (result.outcome === "unconfirmed") return "uncertain";
-  if (result.outcome !== "delivered") return "unavailable";
+  if (result.outcome !== "delivered") return result.deliveryStage === "rejected" ? "rejected" : "unavailable";
   if (result.deliveryStage === "stored") return "stored";
   return result.deliveryStage === "responded"
     ? "responded"

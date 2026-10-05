@@ -736,7 +736,8 @@ function piRunFailure(state: PiRunState): PiRunError | undefined {
  */
 export async function runDurableTurn(
   lane: {
-    readonly session: Pick<AgentSession, "isStreaming" | "prompt"> & { readonly state: PiRunState };
+    readonly session: Pick<AgentSession, "isStreaming" | "prompt"> &
+      Partial<Pick<AgentSession, "subscribe">> & { readonly state: PiRunState };
     readonly capture: TurnContext;
     running?: Promise<boolean> | undefined;
     runningDeliveryId?: string | undefined;
@@ -748,6 +749,7 @@ export async function runDurableTurn(
     expandPromptTemplates?: boolean;
     deliveryId?: string;
     onAbsorbed?: (deliveryId: string | undefined) => void;
+    onAdmitted?: (state: "started" | "steered") => void;
     /** Reserved actual run owner only; returned prompt is committed synchronously with prompt(). */
     preparePrompt?: () => Promise<() => string>;
     signal?: AbortSignal;
@@ -790,10 +792,17 @@ export async function runDurableTurn(
       // awaiting — so the state observed here is the state it acts on.
       lane.capture.media = undefined;
       lane.runningDeliveryId = options?.deliveryId;
+      // Only the invocation owning prompt() may claim its asynchronous start.
+      // Other invocations can be waiting here to steer or start a later turn.
+      const stopAdmission = lane.session.subscribe?.((event) => {
+        if (event.type === "agent_start") options?.onAdmitted?.("started");
+      });
       let run: Promise<void>;
       try {
         run = lane.session.prompt(prepared?.() ?? prompt, { expandPromptTemplates, images });
+        if (lane.session.isStreaming) options?.onAdmitted?.("started");
       } catch (error) {
+        stopAdmission?.();
         if (release !== undefined) {
           lane.starting = undefined;
           release();
@@ -817,10 +826,14 @@ export async function runDurableTurn(
         lane.starting = undefined;
         release();
       }
-      await run;
-      const failure = await settlement;
-      if (failure !== undefined) throw failure;
-      return "ran";
+      try {
+        await run;
+        const failure = await settlement;
+        if (failure !== undefined) throw failure;
+        return "ran";
+      } finally {
+        stopAdmission?.();
+      }
     }
     if (lane.session.isStreaming) {
       options?.onAbsorbed?.(lane.runningDeliveryId);
@@ -829,6 +842,7 @@ export async function runDurableTurn(
         streamingBehavior: "steer",
         images,
       });
+      options?.onAdmitted?.("steered");
       if (running === undefined || !(await running)) {
         throw new Error("The run this turn was steered into failed");
       }
@@ -1839,7 +1853,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 preparation.close();
               }
               signal.throwIfAborted();
+              let queuedAtSeat = false;
               const delivery = await selectedOutbox.deliver({
+                ...(context.delivery === undefined ? {} : { delivery: context.delivery }),
+                onAdmitted: (state) => {
+                  if (state === "queued") queuedAtSeat = true;
+                  context.deliveryOutcome?.({ state });
+                  if (state !== "queued") publish({ type: "activity", phase: "responding" });
+                },
                 kind,
                 conversationId,
                 source: context.surfaceClientId ?? "service",
@@ -1851,13 +1872,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               // Shutdown loses the reply target; cancellation must not turn an
               // unanswered accepted native dispatch into a completed turn.
               shutdown.signal.throwIfAborted();
+              if (delivery.outcome === "unconfirmed")
+                context.deliveryOutcome?.({ state: "uncertain", detail: delivery.detail });
+              if (delivery.outcome === "aborted")
+                context.deliveryOutcome?.({
+                  state: "rejected",
+                  detail: "The send was cancelled before the seat took it.",
+                });
               if (delivery.deliveryStage !== undefined && delivery.outcome !== "unbound")
                 context.deliveryReceipt?.(delivery.deliveryStage);
               if (delivery.outcome === "replied") {
                 publish({ type: "message", role: "captain", text: delivery.text, streaming: false });
               }
-              // Taken by the seat, or the operator cancelled: either way this run is
-              // over. Only a seat that vanished before taking it hands the turn to pi.
+              if (delivery.outcome === "unbound" && queuedAtSeat) {
+                context.deliveryOutcome?.({
+                  state: "rejected",
+                  detail: "The channel disconnected before taking this message. Nothing was sent.",
+                });
+                context.deliveryReceipt?.("unavailable");
+                return { handled: true as const, result: undefined };
+              }
+              // A held Queue already belongs to the native turn. Only a definite
+              // refusal before admission may choose the service driver instead.
               return delivery.outcome === "unbound"
                 ? { handled: false as const }
                 : { handled: true as const, result: undefined };
@@ -2146,6 +2182,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 attached?.images ?? [],
                 {
                   expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,
+                  onAdmitted: (state) => context.deliveryOutcome?.({ state }),
                   ...(context.inputAnswer
                     ? {
                         // Existing admission reservation rechecks immediately before prompt().
@@ -2294,6 +2331,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     workingDirectory,
     ownerAttachmentHost(),
   );
+  conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
   conversations.projectOnboarding = projectOnboarding(settingsStore);
   conversations.linearNativeRunner = deliverLinearNativeRecipient;
   conversations.questionEligible = (id) =>
@@ -2497,13 +2535,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             deliveryStage: "rejected",
             detail: "Peer authority changed before mailbox delivery; nothing was sent.",
           };
+        if (context.delivery && current?.session?.kind === "id" && current.status === "working")
+          live.observeTurn(current.session.value, "responding", true);
         return deliverFleetSeatMessage(fleetMailboxes, seatId, message, {
           ...context,
-          ...(deliveryOptions?.recipientBinding === undefined
-            ? {}
-            : { recipientBinding: deliveryOptions.recipientBinding }),
+          ...(deliveryOptions?.recipientBinding !== undefined
+            ? { recipientBinding: deliveryOptions.recipientBinding }
+            : context.delivery && inboundBinding(current)
+              ? { recipientBinding: inboundBinding(current)! }
+              : {}),
         });
       }
+      if (context.delivery === "steer")
+        return {
+          outcome: "undelivered",
+          deliveryStage: "rejected",
+          detail: "This agent's channel is unavailable. Nothing was sent.",
+        };
       const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
       await deliveryOptions?.guard?.();
       if (deliveryOptions?.fence && !(await deliveryOptions.fence(agent)))
@@ -2515,8 +2563,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
     };
     const deliver = () =>
-      deliveryOptions
-        ? herdrWatches.deliverToSeat(seatId, message, fallback, deliveryOptions)
+      deliveryOptions || context.delivery
+        ? herdrWatches.deliverToSeat(seatId, message, fallback, {
+            ...deliveryOptions,
+            ...(context.delivery === undefined ? {} : { delivery: context.delivery }),
+          })
         : herdrWatches.deliverToSeat(seatId, message, fallback);
     let delivery: FleetSeatDelivery | undefined;
     if (context.source === "room") {
@@ -4424,6 +4475,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     invalidateQuestionPrincipal: (deviceId) => conversations.invalidateQuestionPrincipal(deviceId),
 
+    operatorSeatReady: () => seatOutboxes.get(conversations.defaultGlobalConversationId())?.bound() === true,
+
     async observeLanes(): Promise<readonly ObservableCaptainLane[]> {
       return laneLog.list();
     },
@@ -4451,13 +4504,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     seatContext,
-    syncSeatTranscript: (id, transcript) =>
-      conversations.syncNativeSeatTranscript(
-        id,
-        transcript.sessionId,
-        transcript.entries,
-        transcript.activity,
-      ),
+    syncSeatTranscript: (id, transcript) => {
+      if (!conversations.syncNativeSeatTranscript(id, transcript.sessionId, transcript.entries)) return false;
+      if (
+        transcript.activity !== undefined &&
+        seatOutbox(id).observeTurn(transcript.sessionId, transcript.activity)
+      )
+        conversations.syncNativeSeatTranscript(id, transcript.sessionId, [], transcript.activity);
+      return true;
+    },
 
     async lanePrompt({ lane, sections = SESSION_PROMPT_SECTIONS, conversationId, harness }) {
       const currentSettings = await settings();
@@ -4587,6 +4642,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             : basename(session.value, ".jsonl");
       if (agent?.agent !== "claude" || sessionId !== hook.sessionId) return false;
       seatHooks.record(paneId, hook);
+      if (hook.event !== "SessionStart")
+        fleetMailboxes
+          .get(agent.terminalId)
+          ?.observeTurn(hook.sessionId, hook.event === "UserPromptSubmit" ? "responding" : "waiting");
       const binding = inboundBinding(agent);
       const qualified = splitFleetQualified(paneId);
       const receiver =

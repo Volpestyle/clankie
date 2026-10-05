@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { createCaptain } from "../src/captain/captain.ts";
+import { createClankieApp } from "../src/app.ts";
+import {
+  createCaptainOperatorConversationClient,
+  createCaptainRouteClient,
+} from "../../tui/src/session/operator-conversations.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
@@ -35,23 +40,25 @@ vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
     fake.emit = (event) => {
       for (const listener of listeners) listener(event);
     };
-    return {
-      session: {
-        isStreaming: false,
-        state: { messages: [] },
-        model: { id: "fake", provider: "fake", contextWindow: 1000 },
-        thinkingLevel: "off",
-        bindExtensions: async () => {},
-        subscribe: (listener: (event: unknown) => void) => {
-          listeners.add(listener);
-          return () => listeners.delete(listener);
-        },
-        getContextUsage: () => undefined,
-        resourceLoader: { getSkills: () => ({ skills: [] }) },
-        abort: async () => {},
-        dispose: fake.dispose,
-        prompt: async (text: string) => {
-          fake.prompts.push(text);
+    const session = {
+      isStreaming: false,
+      state: { messages: [] },
+      model: { id: "fake", provider: "fake", contextWindow: 1000 },
+      thinkingLevel: "off",
+      bindExtensions: async () => {},
+      subscribe: (listener: (event: unknown) => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      getContextUsage: () => undefined,
+      resourceLoader: { getSkills: () => ({ skills: [] }) },
+      abort: async () => {},
+      dispose: fake.dispose,
+      prompt: async (text: string) => {
+        fake.prompts.push(text);
+        session.isStreaming = true;
+        for (const listener of listeners) listener({ type: "agent_start" });
+        try {
           await fake.beforePrompt(text);
           for (const listener of listeners)
             listener({
@@ -62,9 +69,12 @@ vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
                 usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
               },
             });
-        },
+        } finally {
+          session.isStreaming = false;
+        }
       },
     };
+    return { session };
   },
   DefaultResourceLoader: class {
     async reload() {}
@@ -78,9 +88,10 @@ vi.mock("../src/captain/lane-tools.ts", () => ({
   buildLaneToolBank: () => ({ lane: "operator", tools: [] }),
 }));
 
-const fixtures: { captain: ReturnType<typeof createCaptain>; root: string }[] = [];
+const fixtures: { captain: ReturnType<typeof createCaptain>; root: string; closeService: () => void }[] = [];
 afterEach(async () => {
-  for (const { captain, root } of fixtures.splice(0)) {
+  for (const { captain, root, closeService } of fixtures.splice(0)) {
+    closeService();
     await captain.close();
     rmSync(root, { recursive: true, force: true });
   }
@@ -118,7 +129,20 @@ async function fixture() {
     personaImages: async () => ({ images: [], hash: "fake", files: [] }),
     nativeCensusRunner: async () => ({ stdout: "", stderr: "" }),
   });
-  fixtures.push({ captain, root });
+  const service = await createClankieApp({
+    captain,
+    settings: new SettingsStore(join(root, "settings.json")),
+    eventLogPath: join(root, "events.jsonl"),
+    authenticateCaptain: async (request) =>
+      request.headers.get("authorization") === "Bearer fixture-captain"
+        ? { captainId: "fixture", steerSourceLane: "api" }
+        : undefined,
+  });
+  fixtures.push({ captain, root, closeService: service.close });
+  const fetchImpl: typeof fetch = async (input, init) => service.app.fetch(new Request(input, init));
+  const client = createCaptainOperatorConversationClient(
+    createCaptainRouteClient({ host: "http://fixture", captainToken: "fixture-captain", fetchImpl }),
+  );
   const created = await captain.serveOperatorConversation({
     op: "create",
     schemaVersion: 1,
@@ -132,10 +156,12 @@ async function fixture() {
   const send = async (message: string) => {
     const got = await captain.serveOperatorConversation({ op: "get", schemaVersion: 1, conversationId: id });
     if (got.op !== "get" || got.conversation === undefined) throw new Error("conversation missing");
-    return captain.serveOperatorConversation({
-      op: "send",
-      schemaVersion: 1,
-      turn: {
+    // Production serialization, authenticated HTTP dispatch, host admission
+    // and public response parsing all participate in the watchdog fixture.
+    return {
+      op: "send" as const,
+      schemaVersion: 1 as const,
+      result: await client.send({
         schemaVersion: 1,
         kind: "message",
         conversationId: id,
@@ -143,14 +169,22 @@ async function fixture() {
         expectedRevision: got.conversation.revision,
         message,
         delivery: "queue",
-      },
-    });
+      }),
+    };
   };
-  return { captain, id, journal, send, agent, autonomous, root };
+  const settleSeat = () =>
+    expect(
+      captain.syncSeatTranscript(id, {
+        sessionId: "fixture-operator-session",
+        entries: [],
+        activity: "waiting",
+      }),
+    ).toBe(true);
+  return { captain, id, journal, send, agent, autonomous, root, settleSeat };
 }
 
 it("a stuck session startup fails loudly and releases an attached seat to handle later turns", async () => {
-  const { captain, id, journal, send, agent } = await fixture();
+  const { captain, id, journal, send, agent, settleSeat } = await fixture();
   let entered!: () => void;
   const starting = new Promise<void>((resolve) => {
     entered = resolve;
@@ -194,6 +228,7 @@ it("a stuck session startup fails loudly and releases an attached seat to handle
       poll = captain.pollSeatEvents(10_000, undefined, id);
       void poll.catch(() => {});
       await captain.replySeatEvent(event!.id, "Native answer", id);
+      settleSeat();
     }
     // Reconciliation preserves the original acceptance; it never replays the report.
     expect(
@@ -237,10 +272,13 @@ it.each(["startup", "execution"])(
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.useFakeTimers();
     try {
-      await send(`Hung ${boundary}`);
+      // The HTTP receipt waits for real start/admission; cold startup is the
+      // dependency this test deliberately leaves unresolved.
+      const receipt = send(`Hung ${boundary}`);
       await starting;
       await send("Later service turn");
       await vi.advanceTimersByTimeAsync(5 * 60_000 + 1);
+      await receipt;
       await vi.waitFor(() =>
         expect(
           journal.read(id).filter((event) => event.type === "turn" && event.phase === "completed"),
@@ -355,7 +393,7 @@ it("a silent in-flight tool keeps an operator turn alive beyond the inactivity d
 });
 
 it("the attached project receives worker reports, watches, self wakes and escalations without Pi or global leakage", async () => {
-  const { captain, id, journal, send, agent, autonomous } = await fixture();
+  const { captain, id, journal, send, agent, autonomous, settleSeat } = await fixture();
   const globalAbort = new AbortController();
   const global = captain.pollSeatEvents(10_000, globalAbort.signal);
   let poll = captain.pollSeatEvents(10_000, undefined, id);
@@ -387,13 +425,16 @@ it("the attached project receives worker reports, watches, self wakes and escala
   expect(wake).toMatchObject({ kind: "wake", conversationId: id, content: "Due self wake" });
   await captain.acknowledgeSeatEvent(wake!.id, id);
   await wakeRun;
+  settleSeat();
   poll = captain.pollSeatEvents(10_000, undefined, id);
-  expect(await send("Owner asks the attached seat")).toMatchObject({
-    op: "send",
-    result: { status: "accepted" },
-  });
+  const receipt = send("Owner asks the attached seat");
   const [escalation] = await poll;
   expect(escalation).toMatchObject({ kind: "escalation", conversationId: id });
+  expect(await captain.acknowledgeSeatEvent(escalation!.id, id)).toBe(true);
+  expect(await receipt).toMatchObject({
+    op: "send",
+    result: { status: "accepted", seatDelivery: { state: "started" } },
+  });
   expect(await captain.replySeatEvent(escalation!.id, "Native project answer", id)).toBe(true);
   await vi.waitFor(() =>
     expect(journal.read(id)).toContainEqual(expect.objectContaining({ text: "Native project answer" })),
@@ -442,7 +483,10 @@ it("a definite native refusal resumes the project service runner once", async ()
   const { captain, id, journal, send } = await fixture();
   // Establish then leave a poll within its grace without taking the send.
   expect(await captain.pollSeatEvents(1, undefined, id)).toEqual([]);
-  await send("Resume after the seat left");
+  expect(await send("Resume after the seat left")).toMatchObject({
+    op: "send",
+    result: { status: "accepted", deliveryStage: "delivered", seatDelivery: { state: "started" } },
+  });
   await vi.waitFor(
     () =>
       expect(

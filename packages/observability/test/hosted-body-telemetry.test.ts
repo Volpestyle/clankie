@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseBodyTelemetryLine } from "../src/body-telemetry.ts";
+import { parseBodyTelemetryLine, writeBodyDiagnosticsConsent } from "../src/body-telemetry.ts";
 
 const SCRIPT = resolve(import.meta.dirname, "../../../scripts/release/hosted-body.sh");
 
@@ -39,12 +39,15 @@ async function runBody(telemetryDir: string | undefined, cwd = tmpdir()): Promis
 describe("the whole-body loop's telemetry", () => {
   it("writes only schema-valid lines for boot, restart and shutdown", async () => {
     const dir = mkdtempSync(join(tmpdir(), "hosted-body-spool-"));
+    writeBodyDiagnosticsConsent(dir, true);
     await runBody(dir);
-    const lines = readdirSync(dir).flatMap((name) =>
-      readFileSync(join(dir, name), "utf8")
-        .split("\n")
-        .filter((line) => line.length > 0),
-    );
+    const lines = readdirSync(dir)
+      .filter((name) => name.endsWith(".jsonl"))
+      .flatMap((name) =>
+        readFileSync(join(dir, name), "utf8")
+          .split("\n")
+          .filter((line) => line.length > 0),
+      );
     const events = lines.map((line) => parseBodyTelemetryLine(line));
     expect(events.every((event) => event !== undefined)).toBe(true);
     expect(
@@ -56,7 +59,7 @@ describe("the whole-body loop's telemetry", () => {
             : event?.event,
       ),
     ).toEqual(["container-start", "clankie-healthy", "restarting", "healthy", "body.shutdown"]);
-    expect(readdirSync(dir)[0]).toMatch(/^\d{10}-body\.jsonl$/u);
+    expect(readdirSync(dir).find((name) => name.endsWith(".jsonl"))).toMatch(/^\d{10}-body\.jsonl$/u);
   }, 15_000);
 
   it("writes nothing when the host names no spool", async () => {

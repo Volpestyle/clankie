@@ -52,6 +52,8 @@ Existing settings files that store the value keep it.
   flows return the provider they connected, which is how `/setup` chains them.
 - `doctor` now probes `codex` and `claude` on PATH, so the checklist can say
   whether he has workers to hire.
-- Portals do not yet read readiness from the service. The app's first message
-  on an unready Mac still fails with the service's own error until a service
-  route exposes `captainReadiness`.
+- VUH-1363 exposes the secret-free setup result at `GET /v1/captain/readiness`
+  to active paired devices and owner operators. The private app explains a
+  definite missing model or sign-in and checks again without re-pairing. A live
+  native operator bridge reports ready without requiring the fallback model;
+  its outbox already owns that chat delivery.

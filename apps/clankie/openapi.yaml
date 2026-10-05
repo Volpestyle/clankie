@@ -3240,18 +3240,58 @@ paths:
         "200":
           description: Device token issued; relayUrl is the host-scoped gateway base when configured; optional directRoute carries explicitly configured controlPlaneUrl and relayUrl origins
 
+  /v1/captain/readiness:
+    get:
+      tags: [Captain, Devices]
+      operationId: getCaptainReadiness
+      summary: Read secret-free chat setup readiness
+      description: |
+        Any active paired device or owner operator may read this. A live native
+        operator bridge reports ready independently of the fallback model.
+        Otherwise the shared captainReadiness rule reports no_model or
+        no_credential, with model and provider ids when known. No credential
+        material or authentication method leaves the body. Responses are no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Ready boolean, optional model/providerId, and reason when unready
+        "401":
+          description: Authentication required
+        "503":
+          description: Readiness unavailable
+
+  /v1/devices/self/diagnostics-default:
+    get:
+      tags: [Devices]
+      operationId: getAccountDiagnosticsDefault
+      summary: Read the account diagnostics default
+      description: |
+        Returns only diagnosticsDefault. A hosted body reads it through its
+        signed fleet settings request; unavailable account authority returns
+        503. Self-hosted bodies use the existing true default. No-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Object with diagnosticsDefault boolean only
+        "401":
+          description: Authentication required
+        "503":
+          description: Account settings unavailable
+
   /v1/devices:
     get:
       tags: [Devices, Operator]
       operationId: listDevices
       summary: List paired devices
       description: |
-        Secret-free rows. `push` carries the device's last delivery state —
+        Owner operators and active paired devices may read these secret-free rows.
+        Optional lastSeenAt records successful authenticated device activity,
+        at most once per minute per device. `push` carries the device's last delivery state —
         `{ registrationId, sequence, enabled }` — so the listing is truthful
         about a device that turned notifications off or whose registration the
         gateway invalidated. The APNs token and delivery key are never here
         (ADR 0159).
-      security: [{ operatorBearer: [] }]
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":
           description: Secret-free device rows
@@ -3261,14 +3301,22 @@ paths:
       tags: [Devices, Operator]
       operationId: revokeDevice
       summary: Revoke a device
-      security: [{ operatorBearer: [] }]
+      description: |
+        Paired callers require Take Control. Local revocation is durable before
+        the hosted security and wake-key updates. A 503 does not confirm success;
+        retry the same device id. Fleet tombstones defeat restored old disks.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - $ref: "#/components/parameters/deviceId"
       responses:
         "200":
           description: Revoked row
+        "403":
+          description: Take Control required
         "404":
           description: Unknown
+        "503":
+          description: Hosted revocation could not be confirmed
 
   /v1/devices/self:
     get:

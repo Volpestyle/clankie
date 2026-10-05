@@ -204,6 +204,8 @@ export type SeatEvent =
 /** Control of one live seat. */
 export interface SeatControl {
   readonly ref: SeatRef;
+  /** Explicit modes this native controller can honor, rather than silently substituting. */
+  readonly deliveryModes?: readonly ("steer" | "queue")[];
   /** Original prepared controller/root observation; never a wire or saved-metadata proof. */
   verify?(): Promise<SeatProcessIdentity>;
   /** Adapters must run beforeDispatch after preparation, immediately before a native mutation. */
@@ -214,6 +216,7 @@ export interface SeatControl {
       readonly beforeDispatch?: () => Promise<boolean>;
       readonly source?: string;
       readonly recipientBinding?: string;
+      readonly delivery?: "steer" | "queue";
     },
   ): Promise<SeatDelivery>;
   status(): Promise<SeatStatus>;

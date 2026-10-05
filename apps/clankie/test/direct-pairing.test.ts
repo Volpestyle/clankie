@@ -189,7 +189,7 @@ describe("device doorway", () => {
       ["POST", "/v1/gateway/encrypted"],
       ["POST", "/v1/hosted/operator"],
       ["POST", "/v1/hooks/linear"],
-      ["GET", "/v1/devices"],
+      ["GET", "/v1/devices/x/unrelated"],
     ] as const) {
       const response = await doorway(new Request(`http://192.168.4.20:4311${path}`, { method }));
       expect({ method, path, status: response.status }).toEqual({ method, path, status: 404 });

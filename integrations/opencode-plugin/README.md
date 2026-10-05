@@ -15,8 +15,9 @@ checks the installed version and native session/server flags before launching.
 The exported `planOpenCodeSeat` and `runOpenCodeSeat` functions provide the local
 launch API. This change does not add a remote HTTP terminal-launch endpoint.
 Service integration uses the existing operator seat-context, prompt, memory,
-MCP, outbox and transcript HTTP APIs. Native OpenCode workers remain separate
-(VUH-1555); `runtime.mjs` is the reusable same-session delivery boundary.
+MCP, outbox and transcript HTTP APIs. Native OpenCode workers use a separate
+control binding (VUH-1555); shared transcript projection does not share operator
+authority.
 
 ## Install, settings and removal
 
@@ -108,3 +109,36 @@ unverified; unit tests do not substitute for that acceptance.
 Native references: [plugins](https://opencode.ai/docs/plugins/),
 [server](https://opencode.ai/docs/server/),
 [configuration](https://opencode.ai/docs/config/).
+
+## Hired native workers
+
+`worker-tui.mjs` is a separately loaded native TUI plugin. Local macOS workers
+require a direct OpenCode **1.18.18** executable and a controller-created initial
+argv pane in Herdr. The controller verifies the original process, socket, cwd
+and session; the plugin observes that TUI's displayed route and uses its SDKv2
+client. It leaves prompt drafts, permissions and questions with the owner.
+`worker-server.mjs` selects `clankie mcp --fleet`, without an operator token.
+Inherited personal Linear connectors are disabled for this worker launch;
+owner configuration and native permissions are preserved.
+
+Only the first awaited TUI initializer may create and navigate to a fresh native
+session, before the native prompt mounts. Delivery names the exact session and
+message. Native queue acceptance is a receipt, not model attention or completion;
+completion requires the matching finished native reply. Route changes, lost
+control and uncertain sends never trigger another launch or resend. Native
+interrupt targets only the bound session.
+
+Registered dedicated worker SQLite history is available through
+`clankie agents list` and `clankie agents read`. It is bounded stored v1 content,
+not proof of the currently displayed session or control.
+`clankie agents resume … --conversation ID` requires the original live controller
+and fresh identity/cwd checks, even without a brief. General profile discovery, remote control,
+restart reattachment and new-process resume remain unavailable.
+
+An owned live worker can exit through its original TUI's `app.exit` command;
+success requires its original terminal to disappear. Cold, replaced or switched
+sessions refuse this control. There is no unconditional physical pane-close
+fallback. See the
+[worker evidence and limits](../../docs/testing/2026-10-04-opencode-workers/README.md)
+for the original deterministic checkpoint, later native persona/exit evidence
+and the live checks still open; those stages are separate.
