@@ -102,6 +102,17 @@ successful completion just because the runtime is idle. Existing hire/controller
 origin handling owns harvesting and Discord reporting; no transcript mirror,
 parallel job store, or new room-delivery path is added.
 
+## Hosted model preparation
+
+The local preparation boundary resolves the existing hosted policy before calling
+native preparation. Included usage selects the forwarder provider/model, customer
+usage preserves the explicit selection or selected customer default, and project
+role checks use that same effective model. Lookup/declaration failure and unsupported
+Chrome refuse before allocation. Eight boundary scenarios and two prepared-hire
+regressions exercise this policy with synthetic adapters; no native executable,
+provider call or billing event was started. Native hosted compatibility and live
+billing remain unverified.
+
 ## Required owner acceptance
 
 - Start a real native Pi worker through `hire_agent` in an owner-visible Herdr

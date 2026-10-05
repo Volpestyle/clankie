@@ -158,7 +158,10 @@ Codex session reference alone cannot recover its in-memory control after a
 service restart. Never replay uncertainty through another delivery path.
 
 Briefed local Claude hires use the approved `clankie-worker` channel and report
-`control.mode: "channel"`; Codex and local OpenCode report `adapter`. Missing
+`control.mode: "channel"`; Codex, local OpenCode and prepared Pi report `adapter`. Prepared Pi requires
+the selected 0.87.1 native capability and original visible process/session. Its
+`{repoRoot}/docs/testing/2026-10-04-pi-workers/README.md`
+keeps native hosted/billing and fleet-tool projection acceptance open. Missing
 structured control reports `unavailable` with `control.reason` (and `control.fix` when owner action
 is needed). `terminal` is only an unbriefed native launch. Each hire logs its
 lane. Folder trust and channel consent remain owner decisions; a visible prompt

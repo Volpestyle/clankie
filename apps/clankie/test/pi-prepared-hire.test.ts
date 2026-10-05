@@ -15,16 +15,18 @@ import {
   HerdrWatchStore,
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
+  type PiSeatModel,
 } from "../src/captain/herdr-watch.ts";
 import { createPiSeatAdapter } from "../src/captain/pi-seat-adapter.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import { HireLayoutUnconfirmed } from "../src/captain/hire-layout.ts";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture() {
+async function fixture(piSeatModel?: () => Promise<PiSeatModel | undefined>) {
   const directory = await mkdtemp(join(tmpdir(), "pi-hire-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const sessionId = "10000000-0000-4000-8000-000000000001";
@@ -122,7 +124,12 @@ async function fixture() {
     proof: vi.fn(async () => undefined),
   };
   const path = join(directory, "watches.json");
-  store = new HerdrWatchStore(path, { runner, seatAdapters: [adapter], projectHirePolicy: policy });
+  store = new HerdrWatchStore(path, {
+    runner,
+    seatAdapters: [adapter],
+    projectHirePolicy: policy,
+    ...(piSeatModel === undefined ? {} : { piSeatModel }),
+  });
   cleanups.push(async () => store.close());
   const request = {
     schemaVersion: 1 as const,
@@ -215,7 +222,7 @@ test("native Pi file path reattaches exact UUID for messaging and harvests into 
 
 test("unconfirmed initial Pi allocation never falls back or creates a replacement worker", async () => {
   const f = await fixture();
-  f.runner.createTab.mockRejectedValue(new Error("allocation reply lost"));
+  f.runner.createTab.mockRejectedValue(new HireLayoutUnconfirmed("allocation reply lost"));
   expect(await f.hire()).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
   expect(f.runner.createTab).toHaveBeenCalledOnce();
   expect(f.prepared.dispose).toHaveBeenCalledOnce();
@@ -358,4 +365,29 @@ test("registered prepared Pi without a brief refuses failed native discovery bef
   expect(f.runner.runInPane).not.toHaveBeenCalled();
   expect(f.runner.installPiIntegration).not.toHaveBeenCalled();
   expect(f.runner.configurePiProvider).not.toHaveBeenCalled();
+});
+
+test("prepared Pi keeps the hosted model selection through role validation without a second lookup", async () => {
+  const lookup = vi.fn(async () => ({ model: "fixture/native" }));
+  const f = await fixture(lookup);
+  expect(await f.hire()).toMatchObject({ outcome: "spawned" });
+  expect(lookup).toHaveBeenCalledOnce();
+  expect(f.adapter.prepare).toHaveBeenCalledWith(expect.objectContaining({ model: "fixture/native" }));
+});
+
+test("prepared Pi refuses a hosted model that conflicts with the project's required model before allocation", async () => {
+  const f = await fixture(async () => ({
+    model: "clankie/default",
+    provider: { id: "clankie", config: { apiKey: "synthetic-placeholder" } },
+  }));
+  expect(await f.hire()).toMatchObject({
+    outcome: "failed",
+    reason: "harness_unavailable",
+    detail: "This role's required model is unavailable",
+  });
+  expect(f.adapter.prepare).not.toHaveBeenCalled();
+  expect(f.runner.createTab).not.toHaveBeenCalled();
+  expect(f.runner.startAgent).not.toHaveBeenCalled();
+  expect(f.runner.runInPane).not.toHaveBeenCalled();
+  expect(f.brief).not.toHaveBeenCalled();
 });

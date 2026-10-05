@@ -23,7 +23,8 @@ export const ReceiptSchema = z
         state: z.enum(["queued", "started", "steered"]).optional(),
         deliveryStage: DeliveryStageSchema.optional(),
       })
-      .strict().optional(),
+      .strict()
+      .optional(),
     /** Pi's supported semantic custom-message identity, distinct from this fence's ID. */
     nativeMessageId: z.string().uuid().optional(),
     nativeSessionPath: z

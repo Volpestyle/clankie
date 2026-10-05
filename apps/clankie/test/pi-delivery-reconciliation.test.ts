@@ -6,7 +6,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import { parseHerdrSeatTranscript } from "@clankie/agent-transcript";
 import { createFleetSeatControl } from "../src/captain/fleet-seat-control.ts";
-import { DeliveryFence } from "../src/captain/delivery-fence.ts";
+import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fence.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 
 const roots: string[] = [];
@@ -134,7 +134,12 @@ test.each(["owner-text", "custom-type", "session", "request", "path"])(
 test("old Pi receipts without semantic ID and original path remain uncertain", async () => {
   const f = await fixture();
   const fence = new DeliveryFence(f.receipts);
-  fence.begin("seat", { sessionId: f.sessionId, paneId: "w1:p1", fingerprint: "irrelevant", beforeIds: [] });
+  fence.begin("seat", {
+    sessionId: f.sessionId,
+    paneId: "w1:p1",
+    fingerprint: deliveryFingerprint("original"),
+    beforeIds: [],
+  });
   f.append();
   expect(await f.create().deliverToSeat("seat", "original")).toMatchObject({ outcome: "unconfirmed" });
   expect(f.send).not.toHaveBeenCalled();

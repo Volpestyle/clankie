@@ -81,7 +81,7 @@ flowchart TD
 | ----------- | ---------------------------------------------------- | --------------------------------------------------------- |
 | Claude Code | Native worker-plugin channel and turn hooks          | Implemented; requires the owner's channel consent         |
 | Codex       | App-server shared with the native TUI's bound thread | Implemented; starts or steers a turn                      |
-| Pi          | Process-bound native extension follow-up messages    | Implemented locally; original visible session required    |
+| Pi          | Process-bound native extension follow-up messages    | Local fixtures; Pi 0.87.1; live acceptance held           |
 | OpenCode    | Injected SDK in the process-bound native worker TUI  | Implemented locally; pinned to OpenCode 1.18.18           |
 | Grok Build  | Leader IPC/ACP on the exact interactive TUI session  | Implemented locally on macOS; pinned to Grok 1.0.46       |
 | Prime Agent | Daemon-backed messages to the active session         | Researched for PrimeIntellect's CLI; not implemented here |
@@ -91,6 +91,11 @@ do not imply a local hire adapter exists. Unsupported automated briefs fail
 without creating a worker or typing into a terminal. Upstream source links and
 the distinction between automated checks and live evidence are recorded in the
 [delivery verification notes](../../docs/testing/2026-10-01-native-agent-delivery/README.md).
+
+Pi uses the original process-bound extension and causal native custom-message
+receipts. Hosted model preparation has fixture coverage; native hosted/billing
+and the independently owned fleet-tool projection remain unverified. See the
+[Pi acceptance boundary](../../docs/testing/2026-10-04-pi-workers/README.md).
 
 Work records stay in the repo's [tracker or files](../work-items/README.md).
 Remote agents use the per-fleet link and native adapters.

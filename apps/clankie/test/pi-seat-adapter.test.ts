@@ -33,6 +33,8 @@ async function fixture() {
   const root = {
     paneId: "w1:p1",
     terminalId: "terminal",
+    process: proof.shell!,
+    verifyAllocation: vi.fn(async () => {}),
     check: vi.fn(async () => true),
     report: vi.fn(async () => {}),
     proof: vi.fn(async () => proof),
