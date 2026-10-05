@@ -112,7 +112,7 @@ describe("Discord voice ingress", () => {
   });
 });
 
-it("releases failed work, skips stale queued asks, and keeps other rooms independent", async () => {
+it("admits different speakers independently and rejects stale asks before dispatch", async () => {
   let fail!: (error: Error) => void;
   const submit = vi
     .fn()
@@ -130,15 +130,17 @@ it("releases failed work, skips stale queued asks, and keeps other rooms indepen
   const first = ingress.handle(turn);
   const failed = expect(first).rejects.toThrow("gone");
   await new Promise((resolve) => setImmediate(resolve));
-  let current = true;
-  const stale = ingress.handle({ ...turn, userId: "3333", isCurrent: () => current });
-  const next = ingress.handle({ ...turn, userId: "4444" });
-  await expect(ingress.handle({ ...turn, channelId: "9999" })).resolves.toMatchObject({ state: "settled" });
-  expect(submit).toHaveBeenCalledTimes(2);
-  current = false;
+  await expect(ingress.handle({ ...turn, deliveryId: "second", userId: "3333" })).resolves.toMatchObject({
+    state: "settled",
+  });
+  await expect(
+    ingress.handle({ ...turn, deliveryId: "other-room", channelId: "9999" }),
+  ).resolves.toMatchObject({ state: "settled" });
+  await expect(ingress.handle({ ...turn, userId: "4444", isCurrent: () => false })).resolves.toEqual({
+    state: "failed",
+    code: "voice_session_stale",
+  });
+  expect(submit).toHaveBeenCalledTimes(3);
   fail(new Error("gone"));
   await failed;
-  await expect(stale).resolves.toEqual({ state: "failed", code: "voice_session_stale" });
-  await expect(next).resolves.toMatchObject({ state: "settled" });
-  expect(submit).toHaveBeenCalledTimes(3);
 });

@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import {
   OperatorFleetSeatSchema,
   OperatorFleetSnapshotSchema,
+  OperatorConversationSchema,
   type OperatorFleetSnapshot,
 } from "@clankie/protocol";
 import { HerdrRoster } from "../src/observation/herdr-roster.ts";
@@ -71,6 +72,74 @@ function fleetSnapshot(cursor: string, status: "working" | "idle"): OperatorFlee
     channels: [],
   });
 }
+
+it("follows handoff status and results without manufacturing seats or panes", async () => {
+  const child = OperatorConversationSchema.parse({
+    schemaVersion: 1,
+    conversationId: "voice-job",
+    scope: { kind: "global" },
+    title: "Bakery hours",
+    isDefault: false,
+    sessionState: "waiting",
+    revision: 1,
+    createdAt: "2026-10-05T12:00:00.000Z",
+    updatedAt: "2026-10-05T12:00:00.000Z",
+    roomHandoff: {
+      roomConversationId: "voice-room",
+      deliveryId: "voice-delivery",
+      actorId: "James",
+      source: "voice",
+      request: "Check the bakery hours",
+      state: "running",
+      host: "pi",
+    },
+  });
+  const waits: ReturnType<typeof deferred<OperatorFleetSnapshot>>[] = [];
+  const roster = new HerdrRoster({
+    roster: async () => [],
+    fleet: async () => {
+      const wait = deferred<OperatorFleetSnapshot>();
+      waits.push(wait);
+      return wait.promise;
+    },
+  });
+  const change = vi.fn();
+  roster.start(change);
+  await vi.waitFor(() => expect(waits).toHaveLength(1));
+  waits[0]!.resolve(
+    OperatorFleetSnapshotSchema.parse({
+      schemaVersion: 1,
+      cursor: "running",
+      seats: [],
+      personas: [],
+      channels: [],
+      roomHandoffs: [child],
+    }),
+  );
+  await vi.waitFor(() => expect(waits).toHaveLength(2));
+  expect(roster.snapshot()).toMatchObject({ agents: [], liveAgents: [], roomHandoffs: [child] });
+  const finished = {
+    ...child,
+    roomHandoff: { ...child.roomHandoff!, state: "completed", result: "Open until six" },
+  };
+  waits[1]!.resolve(
+    OperatorFleetSnapshotSchema.parse({
+      schemaVersion: 1,
+      cursor: "completed",
+      seats: [],
+      personas: [],
+      channels: [],
+      roomHandoffs: [finished],
+    }),
+  );
+  await vi.waitFor(() => expect(waits).toHaveLength(3));
+  expect(change).toHaveBeenCalledTimes(2);
+  expect(roster.snapshot().roomHandoffs?.[0]?.roomHandoff).toMatchObject({
+    state: "completed",
+    result: "Open until six",
+  });
+  roster.stop();
+});
 
 it("repaints on the fleet cursor the moment Herdr changes, with no roster poll (ADR 0150)", async () => {
   const waits: { cursor: string | undefined; reply: ReturnType<typeof deferred<OperatorFleetSnapshot>> }[] =

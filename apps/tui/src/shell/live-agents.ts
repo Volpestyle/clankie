@@ -9,6 +9,7 @@ import {
   type Component,
 } from "@earendil-works/pi-tui";
 import type { LiveAgent } from "../observation/herdr-roster.ts";
+import type { OperatorConversation } from "@clankie/protocol";
 import { renderClankieOutline } from "../face/clankie-outline.ts";
 import type { FaceThemeBundle } from "./theme.ts";
 
@@ -30,15 +31,20 @@ function currentStep({ name, seat }: LiveAgent): string | undefined {
     .find((text) => text.length > 0 && !repeated.has(text.toLowerCase()));
 }
 
-function statusText(status: LiveAgent["seat"]["status"], text: string, { ansi }: AgentTheme): string {
+function statusText(status: string, text: string, { ansi }: AgentTheme): string {
   switch (status) {
     case "working":
+    case "running":
       return ansi.accent(text);
     case "idle":
+    case "pending":
       return ansi.yellow(text);
     case "done":
+    case "completed":
       return ansi.green(text);
     case "blocked":
+    case "waiting_user":
+    case "failed":
       return ansi.red(text);
     default:
       return ansi.dim(text);
@@ -141,6 +147,52 @@ function attentionOrder(agents: readonly LiveAgent[], theme: AgentTheme): LiveAg
     .map(({ agent }) => agent);
 }
 
+interface DockItem {
+  id: string;
+  name: string;
+  status: string;
+  metadata: string;
+  step?: string;
+  agent?: LiveAgent;
+  handoff?: OperatorConversation;
+}
+
+function dockItems(
+  agents: readonly LiveAgent[],
+  handoffs: readonly OperatorConversation[],
+  theme: AgentTheme,
+): DockItem[] {
+  const roomItems = handoffs.flatMap((conversation): DockItem[] => {
+    const handoff = conversation.roomHandoff;
+    if (!handoff) return [];
+    return [
+      {
+        id: `handoff:${conversation.conversationId}`,
+        name: `↳ Clankie · ${clean(handoff.request)}`,
+        status: handoff.state,
+        metadata: `${handoff.source} · Asked by ${clean(handoff.actorName ?? handoff.actorId)} · ${handoff.state} · ${handoff.host}`,
+        ...(handoff.result || handoff.doing ? { step: clean(handoff.result || handoff.doing!) } : {}),
+        handoff: conversation,
+      },
+    ];
+  });
+  const active = roomItems.filter((item) => item.status !== "completed" && item.status !== "failed");
+  const finished = roomItems.filter((item) => item.status === "completed" || item.status === "failed");
+  // Active room jobs precede seats; settled jobs remain in the full picker.
+  return [
+    ...active,
+    ...attentionOrder(agents, theme).map((agent) => ({
+      id: agent.seat.seatId,
+      name: clean(agent.name),
+      status: agent.seat.status,
+      metadata: agentMetadata(agent, theme),
+      ...(currentStep(agent) ? { step: currentStep(agent)! } : {}),
+      agent,
+    })),
+    ...finished,
+  ];
+}
+
 /** Collapsed, the dock shows at most this many seats that want attention. */
 const COLLAPSED_ROWS = 3;
 
@@ -158,6 +210,7 @@ export class LiveAgentStrip implements Component {
   private readonly theme: AgentTheme;
   private readonly maxRows: () => number;
   private readonly reports: () => readonly WorkerReportSummary[];
+  private readonly readHandoffs: () => readonly OperatorConversation[];
 
   constructor(
     agents: () => readonly LiveAgent[],
@@ -165,22 +218,41 @@ export class LiveAgentStrip implements Component {
     options: {
       readonly maxRows?: () => number;
       readonly reports?: () => readonly WorkerReportSummary[];
+      readonly roomHandoffs?: () => readonly OperatorConversation[];
     } = {},
   ) {
     this.agents = agents;
     this.theme = theme;
     this.maxRows = options.maxRows ?? (() => 12);
     this.reports = options.reports ?? (() => []);
+    this.readHandoffs = options.roomHandoffs ?? (() => []);
   }
 
-  private ordered(): LiveAgent[] {
-    return attentionOrder(this.agents(), this.theme);
+  handoffs(): readonly OperatorConversation[] {
+    return this.readHandoffs();
+  }
+
+  private ordered(includeFinished = true): DockItem[] {
+    return dockItems(this.agents(), this.handoffs(), this.theme).filter(
+      (item) =>
+        includeFinished ||
+        item.handoff === undefined ||
+        (item.status !== "completed" && item.status !== "failed"),
+    );
   }
 
   selected(): LiveAgent | undefined {
-    const agents = this.ordered();
-    const selected = agents.find((agent) => agent.seat.seatId === this.selectedId) ?? agents[0];
-    this.selectedId = selected?.seat.seatId;
+    return this.selectedItem()?.agent;
+  }
+
+  selectedHandoff(): OperatorConversation | undefined {
+    return this.selectedItem()?.handoff;
+  }
+
+  selectedItem(includeFinished = true): DockItem | undefined {
+    const agents = this.ordered(includeFinished);
+    const selected = agents.find((agent) => agent.id === this.selectedId) ?? agents[0];
+    this.selectedId = selected?.id;
     return selected;
   }
 
@@ -194,9 +266,9 @@ export class LiveAgentStrip implements Component {
 
   /** Expand onto the most urgent seat; false when there is nothing to browse. */
   focus(): boolean {
-    const first = this.ordered()[0];
+    const first = this.ordered(false)[0];
     if (first === undefined) return false;
-    this.selectedId = first.seat.seatId;
+    this.selectedId = first.id;
     this.expanded = true;
     return true;
   }
@@ -207,18 +279,18 @@ export class LiveAgentStrip implements Component {
 
   /** Keys while expanded. Anything that is not navigation collapses and goes back to the prompt. */
   handleInput(data: string): LiveAgentStripInput {
-    const agents = this.ordered();
-    const index = agents.findIndex((agent) => agent.seat.seatId === this.selected()?.seat.seatId);
+    const agents = this.ordered(false);
+    const index = agents.findIndex((agent) => agent.id === this.selectedItem(false)?.id);
     if (matchesKey(data, Key.up)) {
       if (index <= 0) {
         this.blur();
         return "leave";
       }
-      this.selectedId = agents[index - 1]!.seat.seatId;
+      this.selectedId = agents[index - 1]!.id;
       return "consumed";
     }
     if (matchesKey(data, Key.down)) {
-      if (index >= 0 && index < agents.length - 1) this.selectedId = agents[index + 1]!.seat.seatId;
+      if (index >= 0 && index < agents.length - 1) this.selectedId = agents[index + 1]!.id;
       return "consumed";
     }
     if (matchesKey(data, Key.enter) || data === "\r") {
@@ -231,13 +303,12 @@ export class LiveAgentStrip implements Component {
 
   invalidate(): void {}
 
-  private row(agent: LiveAgent, prefix: string): string {
-    const step = currentStep(agent);
-    return `${prefix}${statusText(agent.seat.status, "●", this.theme)} ${clean(agent.name)} · ${agentMetadata(agent, this.theme)}${step ? ` · ${step}` : ""}`;
+  private row(agent: DockItem, prefix: string): string {
+    return `${prefix}${statusText(agent.status, "●", this.theme)} ${agent.name} · ${agent.metadata}${agent.step ? ` · ${agent.step}` : ""}`;
   }
 
   render(width: number): string[] {
-    const agents = this.ordered();
+    const agents = this.ordered(false);
     const reports = this.reports();
     const reportRows = [...new Set(reports.map((report) => report.paneId))].slice(0, 3).map((pane) => {
       const pending = reports.some((report) => report.paneId === pane && report.state !== "delivered");
@@ -254,25 +325,27 @@ export class LiveAgentStrip implements Component {
       this.expanded = false;
       return reportNotice.map((line) => truncateToWidth(line, Math.max(1, width), "…"));
     }
-    const counts = new Map<LiveAgent["seat"]["status"], number>();
-    for (const { seat } of agents) counts.set(seat.status, (counts.get(seat.status) ?? 0) + 1);
+    const counts = new Map<string, number>();
+    for (const item of agents) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
     const summary = [...counts].map(([status, count]) =>
       statusText(status, `${count} ${status}`, this.theme),
     );
     const { ansi } = this.theme;
     const fit = (line: string) => truncateToWidth(line, Math.max(1, width), "…");
     if (!this.expanded) {
-      const attention = agents.filter((agent) => attentionRank(agent, this.theme) < 3);
+      const attention = agents.filter(
+        (item) => item.handoff !== undefined || (item.agent && attentionRank(item.agent, this.theme) < 3),
+      );
       return [
         `${ansi.bold(`Agents · ${agents.length}`)}${ansi.dim(" · ↓ list · ctrl+g")}${ansi.dim(" · ")}${summary.join(ansi.dim(" · "))}`,
         ...attention.slice(0, COLLAPSED_ROWS).map((agent) => this.row(agent, "")),
         ...reportNotice,
       ].map(fit);
     }
-    const selected = this.selected();
+    const selected = this.selectedItem(false);
     const index = Math.max(
       0,
-      agents.findIndex((agent) => agent.seat.seatId === selected?.seat.seatId),
+      agents.findIndex((agent) => agent.id === selected?.id),
     );
     const visible = Math.max(1, Math.min(agents.length, this.maxRows() - 1));
     const first = Math.min(Math.max(0, index - Math.floor(visible / 2)), agents.length - visible);
@@ -299,6 +372,7 @@ export class LiveAgentPicker implements Component {
   private readonly options: {
     readonly maxHeight: () => number;
     readonly onOpen: (agent: LiveAgent) => void;
+    readonly onOpenHandoff?: (conversation: OperatorConversation) => void;
     readonly onClose: () => void;
     readonly onRender: () => void;
   };
@@ -310,6 +384,7 @@ export class LiveAgentPicker implements Component {
     options: {
       readonly maxHeight: () => number;
       readonly onOpen: (agent: LiveAgent) => void;
+      readonly onOpenHandoff?: (conversation: OperatorConversation) => void;
       readonly onClose: () => void;
       readonly onRender: () => void;
     },
@@ -323,24 +398,25 @@ export class LiveAgentPicker implements Component {
   invalidate(): void {}
 
   private syncList(maxVisible = 8): SelectList {
-    const agents = attentionOrder(this.agents(), this.theme);
+    const agents = dockItems(this.agents(), this.selection.handoffs(), this.theme);
     const list = new SelectList(
       agents.map((agent) => ({
-        value: agent.seat.seatId,
-        label: clean(agent.name),
-        description: agentMetadata(agent, this.theme),
+        value: agent.id,
+        label: agent.name,
+        description: agent.metadata,
       })),
       maxVisible,
       { ...this.theme.selectListTheme, description: (text) => text },
       { minPrimaryColumnWidth: 16, maxPrimaryColumnWidth: 44 },
     );
-    const selectedId = this.selection.selected()?.seat.seatId;
-    list.setSelectedIndex(agents.findIndex((agent) => agent.seat.seatId === selectedId));
+    const selectedId = this.selection.selectedItem()?.id;
+    list.setSelectedIndex(agents.findIndex((agent) => agent.id === selectedId));
     list.onSelectionChange = ({ value }) => this.selection.select(value);
     list.onCancel = this.options.onClose;
     list.onSelect = ({ value }) => {
-      const agent = this.agents().find((item) => item.seat.seatId === value);
-      if (agent) this.options.onOpen(agent);
+      const item = agents.find((item) => item.id === value);
+      if (item?.agent) this.options.onOpen(item.agent);
+      if (item?.handoff) this.options.onOpenHandoff?.(item.handoff);
     };
     return list;
   }
@@ -352,8 +428,9 @@ export class LiveAgentPicker implements Component {
 
   render(width: number): string[] {
     const contentWidth = Math.max(1, width - 4);
-    const agents = this.agents();
+    const agents = dockItems(this.agents(), this.selection.handoffs(), this.theme);
     const selected = this.selection.selected();
+    const handoff = this.selection.selectedHandoff();
     const step = selected && currentStep(selected);
     const catalogDetail =
       selected?.seat.toolCatalog && selected.seat.toolCatalog.status !== "matched"
@@ -379,10 +456,26 @@ export class LiveAgentPicker implements Component {
             ? [`${this.theme.ansi.red("Fix:")} ${clean(bridgeRemediation(selected)!)}`]
             : []),
         ].flatMap((line) => wrapTextWithAnsi(line, contentWidth))
-      : [];
+      : handoff?.roomHandoff
+        ? [
+            this.theme.ansi.bold("Clankie handoff"),
+            `Asked by: ${clean(handoff.roomHandoff.actorName ?? handoff.roomHandoff.actorId)} · ${handoff.roomHandoff.source}`,
+            `Job: ${clean(handoff.roomHandoff.request)}`,
+            `Status: ${handoff.roomHandoff.state}`,
+            ...(handoff.roomHandoff.doing ? [`Doing: ${clean(handoff.roomHandoff.doing)}`] : []),
+            ...(handoff.roomHandoff.result ? [`Result: ${clean(handoff.roomHandoff.result)}`] : []),
+          ].flatMap((line) => wrapTextWithAnsi(line, contentWidth))
+        : [];
     // Reserve chrome and selected detail before allocating the scrolling list.
     const help = wrapTextWithAnsi(this.theme.ansi.dim("↑↓ select · enter open · esc close"), contentWidth);
-    const maxVisible = Math.max(1, Math.min(12, this.options.maxHeight() - details.length - help.length - 6));
+    const detailBudget = Math.max(1, this.options.maxHeight() - help.length - 9);
+    const shownDetails = details.slice(0, detailBudget);
+    if (shownDetails.length < details.length)
+      shownDetails[shownDetails.length - 1] = this.theme.ansi.dim("… open conversation for the full job");
+    const maxVisible = Math.max(
+      1,
+      Math.min(12, this.options.maxHeight() - shownDetails.length - help.length - 6),
+    );
     const rows =
       agents.length > 0
         ? this.syncList(maxVisible).render(contentWidth)
@@ -393,7 +486,7 @@ export class LiveAgentPicker implements Component {
         ...help,
         "",
         ...rows,
-        ...(details.length ? ["", ...details] : []),
+        ...(shownDetails.length ? ["", ...shownDetails] : []),
       ],
       width,
       this.theme.ansi.dim,

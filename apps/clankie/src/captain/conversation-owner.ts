@@ -9,6 +9,8 @@ export const DiscordWatchOriginSchema = z
     guildId: z.string().min(1).optional(),
     channelId: z.string().min(1),
     messageId: z.string().min(1),
+    /** Exact transport receipt identity, independent of the Discord reply message. */
+    deliveryId: z.string().min(1).optional(),
     transportKind: z.enum(["bot", "user_session"]),
   })
   .strict();

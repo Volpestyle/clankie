@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import { stripTerminalSequences, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { ConversationHeader, LiveAgentPicker, LiveAgentStrip } from "../src/shell/live-agents.ts";
 import { ClankieFaceShell } from "../src/shell/shell.ts";
+import { OperatorConversationSchema } from "@clankie/protocol";
 import type { LiveAgent } from "../src/observation/herdr-roster.ts";
 import { createClankieFaceAnsiTheme } from "../src/face/clankie-face-theme.ts";
 
@@ -29,6 +30,91 @@ const agent = (id: string, remote = false): LiveAgent => ({
     title: "Checking native delivery",
     ...(remote ? { fleet: "pc", machine: "Office PC" } : {}),
   },
+});
+
+const roomHandoff = (id: string, source: "voice" | "text", completed = false) =>
+  OperatorConversationSchema.parse({
+    schemaVersion: 1,
+    conversationId: id,
+    scope: { kind: "global" },
+    title: `Room job ${id}`,
+    isDefault: false,
+    createdAt: "2026-10-05T12:00:00.000Z",
+    updatedAt: "2026-10-05T12:01:00.000Z",
+    sessionState: "waiting",
+    revision: 1,
+    roomHandoff: {
+      roomConversationId: "room-voice",
+      deliveryId: `delivery-${id}`,
+      actorId: id,
+      actorName: source === "voice" ? "James" : "Mira",
+      source,
+      request: source === "voice" ? "Check the bakery hours" : "Find the train times",
+      doing: "Reading the source",
+      state: completed ? "completed" : "running",
+      host: source === "voice" ? "codex" : "pi",
+      ...(source === "voice" ? { nativeChildSessionId: `native-${id}` } : {}),
+      ...(completed ? { result: "The last train leaves at 10." } : {}),
+    },
+  });
+
+it("prioritizes active handoffs in the dock and keeps finished results selectable in the picker", async () => {
+  const handoffs = [roomHandoff("voice-child", "voice"), roomHandoff("text-child", "text", true)];
+  const open = vi.fn(async (_conversation: ReturnType<typeof roomHandoff>) => {});
+  const openSeat = vi.fn(async () => {});
+  const shell = new ClankieFaceShell({
+    commands: [],
+    cwd: process.cwd(),
+    env: {},
+    bannerFields: { title: "Clankie" },
+    liveAgents: () => [],
+    roomHandoffs: () => handoffs,
+    onOpenRoomHandoff: open,
+    onOpenLiveAgent: openSeat,
+  });
+  vi.spyOn(shell.tui, "start").mockImplementation(() => {});
+  shell.start();
+  const rows = plain(shell.tui.render(180));
+  expect(rows).toContain("↳ Clankie · Check the bakery hours");
+  expect(rows).toContain("Asked by James · running");
+  expect(rows).not.toContain("Asked by Mira · completed");
+  expect(rows).not.toContain("The last train leaves at 10.");
+  const ui = shell as unknown as { routeInput(data: string): unknown };
+  const showPicker = vi.spyOn(shell, "showModalOverlay");
+  ui.routeInput("\x07");
+  expect(showPicker).toHaveBeenCalledOnce();
+  const roomPicker = showPicker.mock.calls[0]![0];
+  expect(plain(roomPicker.render(180))).toContain("Asked by Mira · completed");
+  roomPicker.handleInput?.("\x1b[B");
+  roomPicker.handleInput?.("\r");
+  await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
+  expect(open.mock.calls[0]?.[0]).toBe(handoffs[1]);
+  expect(openSeat).not.toHaveBeenCalled();
+
+  const seats = [agent("working")];
+  const strip = new LiveAgentStrip(() => seats, theme, { roomHandoffs: () => handoffs });
+  expect(plain(strip.render(180))).toContain("Worker working");
+  expect(plain(strip.render(180))).not.toContain("completed");
+  strip.select("handoff:text-child");
+  const pickerOpen = vi.fn();
+  const picker = new LiveAgentPicker(() => seats, strip, theme, {
+    maxHeight: () => 35,
+    onOpen: () => {},
+    onOpenHandoff: pickerOpen,
+    onClose: () => {},
+    onRender: () => {},
+  });
+  const details = plain(picker.render(100));
+  expect(details).toContain("Asked by: Mira · text");
+  expect(details).toContain("Job: Find the train times");
+  expect(details).toContain("Doing: Reading the source");
+  expect(details).toContain("Result: The last train leaves at 10.");
+  picker.handleInput("\r");
+  expect(pickerOpen).toHaveBeenCalledExactlyOnceWith(handoffs[1]);
+  for (const width of [24, 40, 100]) {
+    expect(strip.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);
+    expect(picker.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);
+  }
 });
 
 it("lists up to three seats that want attention and expands to the whole fleet in place", () => {

@@ -691,3 +691,5 @@ export {
   SkillQuickActionSchema,
   type SkillQuickAction,
 } from "./operator-conversations.ts";
+
+export { RoomHandoffMetadataSchema, type RoomHandoffMetadata } from "./operator-conversations.ts";

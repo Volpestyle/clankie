@@ -3936,7 +3936,7 @@ describe("voice room membership and self-directed departure", () => {
   });
 });
 
-it("keeps a chaotic room talking while Alice refines and Bob waits for his own answer", async () => {
+it("keeps a chaotic room talking while Alice and Bob own parallel handoffs", async () => {
   const resolvers: ((result: CaptainChannelTurnResult) => void)[] = [];
   const harness = await joinedHarness({
     occupants: [
@@ -3965,13 +3965,16 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
   await harness.say(BOB, "hey clankie what is tomorrow's weather");
   ask("bob-weather", "look up tomorrow's weather");
   await flush();
-  expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE]);
+  expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, BOB]);
 
-  // A nameless refinement survives Bob engaging; it steers only Alice's run.
+  // A nameless refinement explicitly joins only Alice's pending run.
   await harness.say(ALICE, "only games for four players");
-  ask("alice-refines", "only games for four players");
+  conversation.input.onFunctionCall(
+    askClankie("alice-refines", '{"request":"only games for four players","join_call_id":"alice-game"}'),
+  );
+  done();
   await flush();
-  expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, ALICE]);
+  expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, BOB]);
 
   // Every spoken turn is considered; the model may stay silent for crosstalk.
   const beforeCrosstalk = conversation.responseCreates;
@@ -3988,22 +3991,21 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
   expect(harness.ofType("response")).toContainEqual(
     expect.objectContaining({ userId: MALLORY, fastPath: true }),
   );
-  expect(conversation.functionResults).toHaveLength(0);
+  expect(conversation.functionResults).toHaveLength(1);
 
   resolvers[0]!(settledResult("alice-turn", "Try this four-player game."));
-  resolvers[1]!({ state: "absorbed", captainSessionId: "room", turnId: "refinement" });
   await flush();
-  expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, ALICE, BOB]);
-  expect(conversation.functionResults[0]?.output).toContain('"displayName":"Alice"');
-  expect(conversation.functionResults[0]?.output).toContain(
+  expect(harness.submitCalls.map((call) => call.trigger.actorId)).toEqual([ALICE, BOB]);
+  expect(conversation.functionResults[1]?.output).toContain('"displayName":"Alice"');
+  expect(conversation.functionResults[1]?.output).toContain(
     "Give this person the gist in a sentence; offer the rest in text.",
   );
   conversation.input.onAudioDelta(pcmDelta(480), "alice-answer");
   done();
   await flush();
-  resolvers[2]!(settledResult("bob-turn", "Rain tomorrow."));
+  resolvers[1]!(settledResult("bob-turn", "Rain tomorrow."));
   await flush();
-  expect(conversation.functionResults.map((result) => result.output)).toEqual([
+  expect(conversation.functionResults.slice(1).map((result) => result.output)).toEqual([
     expect.stringContaining('"displayName":"Alice"'),
     expect.stringContaining('"displayName":"Bob"'),
   ]);
@@ -4019,7 +4021,11 @@ it("keeps a chaotic room talking while Alice refines and Bob waits for his own a
     [ALICE, "alice-turn"],
     [BOB, "bob-turn"],
   ]);
-  expect(conversation.functionResults.map((result) => result.callId)).toEqual(["alice-game", "bob-weather"]);
+  expect(conversation.functionResults.map((result) => result.callId)).toEqual([
+    "alice-refines",
+    "alice-game",
+    "bob-weather",
+  ]);
   expect(
     conversation.responseContexts.filter((context) => context?.includes("Response opportunity")),
   ).toEqual([
@@ -4064,39 +4070,39 @@ describe("snappy conversation absorption", () => {
     expect(conversation.responseContexts.at(-1)).toContain("Friday afternoon");
   });
 
-  it.each([
-    { request: "Check Linear!" },
-    { request: "What have I been doing on Linear?", join_call_id: "original" },
-  ])("joins a repeated in-flight ask without another captain run: %j", async (repeat) => {
-    let resolveCaptain!: (result: CaptainChannelTurnResult) => void;
-    const harness = await engagedHarness({
-      captain: () =>
-        new Promise((resolve) => {
-          resolveCaptain = resolve;
-        }),
-    });
-    const conversation = harness.conversation();
-    conversation.input.onFunctionCall(askClankie("original", '{"request":"check Linear"}'));
-    done(conversation);
-    await flush();
-    await harness.say(ALICE, "did you check my Linear activity");
-    conversation.input.onFunctionCall(askClankie("repeat", JSON.stringify(repeat)));
-    done(conversation);
-    await flush();
-    expect(harness.submitCalls).toHaveLength(1);
-    expect(conversation.functionResults).toMatchObject([
-      { callId: "repeat", output: expect.stringContaining("Joined pending handoff original") },
-    ]);
-    expect(conversation.functionResponseGuards).toEqual([false]);
-    resolveCaptain(settledResult("linear", "Three completed issues and a review."));
-    await flush();
-    expect(conversation.functionResults.at(-1)?.callId).toBe("original");
-    conversation.input.onAudioDelta(pcmDelta(480), "gist");
-    done(conversation);
-    await flush();
-    expect(harness.ofType("response")).toHaveLength(1);
-    expect(harness.ofType("response")[0]).toMatchObject({ userId: ALICE, turnId: "linear" });
-  });
+  it.each([{ request: "What have I been doing on Linear?", join_call_id: "original" }])(
+    "joins a repeated in-flight ask without another captain run: %j",
+    async (repeat) => {
+      let resolveCaptain!: (result: CaptainChannelTurnResult) => void;
+      const harness = await engagedHarness({
+        captain: () =>
+          new Promise((resolve) => {
+            resolveCaptain = resolve;
+          }),
+      });
+      const conversation = harness.conversation();
+      conversation.input.onFunctionCall(askClankie("original", '{"request":"check Linear"}'));
+      done(conversation);
+      await flush();
+      await harness.say(ALICE, "did you check my Linear activity");
+      conversation.input.onFunctionCall(askClankie("repeat", JSON.stringify(repeat)));
+      done(conversation);
+      await flush();
+      expect(harness.submitCalls).toHaveLength(1);
+      expect(conversation.functionResults).toMatchObject([
+        { callId: "repeat", output: expect.stringContaining("Joined pending handoff original") },
+      ]);
+      expect(conversation.functionResponseGuards).toEqual([false]);
+      resolveCaptain(settledResult("linear", "Three completed issues and a review."));
+      await flush();
+      expect(conversation.functionResults.at(-1)?.callId).toBe("original");
+      conversation.input.onAudioDelta(pcmDelta(480), "gist");
+      done(conversation);
+      await flush();
+      expect(harness.ofType("response")).toHaveLength(1);
+      expect(harness.ofType("response")[0]).toMatchObject({ userId: ALICE, turnId: "linear" });
+    },
+  );
 
   it("never joins another speaker's handoff even when given its id", async () => {
     const resolvers: ((result: CaptainChannelTurnResult) => void)[] = [];

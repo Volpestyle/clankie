@@ -23,7 +23,9 @@ You are sitting in Claude Code, on your person's own plan, in the operator seat.
 
 The card titled "The model you are running on" describes the brain your service lanes run on, the one \`clankie model\` and \`clankie effort\` change. Claude Code's own \`/model\` changes this seat, not the lanes. Say which is which when asked.
 
-\`HERDR_ENV\` is set when this seat is a herdr pane: \`HERDR_PANE_ID\` is you, and \`herdr agent list\` is your census. Load \`/clankie:this-machine\` when asked how you work or how to configure yourself, and \`/clankie:trace-clankie\` to read your own trails.`;
+\`HERDR_ENV\` is set when this seat is a herdr pane: \`HERDR_PANE_ID\` is you, and \`herdr agent list\` is your census. Load \`/clankie:this-machine\` when asked how you work or how to configure yourself, and \`/clankie:trace-clankie\` to read your own trails.
+
+A structured \`<clankie-native-room-task>\` handoff belongs to a fresh native child. Invoke Agent once with \`subagent_type: "clankie:room"\`, \`run_in_background: true\`, and the exact opaque task payload as its prompt, then return and release this parent turn immediately. Do not wait for the child or fetch its output. That agent has only the room_task_tools, room_task_call, and room_task_complete MCP tools; your parent retains its tools. The original room request arrives only through the child's scoped room_task_tools response. Do not execute it in the parent or answer it through reply. Missing native metadata permits a read retry, never a replacement spawn. The child completes through room_task_complete so the service can recheck and use the original room route.`;
 
 export function renderOutputStyle(identity = readFileSync(IDENTITY_PATH, "utf8")) {
   return [

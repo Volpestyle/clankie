@@ -541,6 +541,11 @@ const shell: ClankieFaceShell = new ClankieFaceShell({
   onHerdrJump: jumpToFleetAgent,
   liveAgents: () => herdrRoster.snapshot().liveAgents ?? [],
   workerReports: () => herdrRoster.snapshot().workerReports ?? [],
+  roomHandoffs: () => herdrRoster.snapshot().roomHandoffs ?? [],
+  onOpenRoomHandoff: async (conversation) => {
+    await conversationsContext.select(conversation.conversationId);
+    expandedAgent = undefined;
+  },
   expandedAgent: () => expandedAgent?.name,
   expandedAgentSeatId: () => expandedAgent?.seatId,
   onOpenLiveAgent: async ({ seat, name }) => {

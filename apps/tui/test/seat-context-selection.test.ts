@@ -16,6 +16,20 @@ const room = {
   sessionState: "waiting",
   revision: 0,
 };
+const child = {
+  ...room,
+  conversationId: "handoff-stable",
+  title: "James · Investigate this request",
+  roomHandoff: {
+    roomConversationId: room.conversationId,
+    deliveryId: "discord:handoff-stable",
+    actorId: "789",
+    source: "text",
+    request: "Investigate this request",
+    state: "running",
+    host: "pi",
+  },
+};
 const input = (conversationId: string) => ({
   conversationId,
   cwd: "/workspace",
@@ -23,37 +37,45 @@ const input = (conversationId: string) => ({
   dryRun: true,
 });
 
-it("an exact conversation ID resolves without a discovery request or captain credential", async () => {
-  const fetchImpl = vi.fn(async () => Response.json({ conversationId: "room-stable", cwd: "/service" }));
-  await expect(
-    resolveSeatContext(input("room-stable"), {
-      repoRoot: "/service",
-      env: { CLANKIE_OPERATOR_TOKEN: env.CLANKIE_OPERATOR_TOKEN },
-      fetchImpl,
-    }),
-  ).resolves.toEqual({ conversationId: "room-stable", cwd: "/service" });
-  expect(fetchImpl).toHaveBeenCalledTimes(1);
-});
+it.each([room.conversationId, child.conversationId])(
+  "exact conversation %s resolves without a discovery request or captain credential",
+  async (conversationId) => {
+    const fetchImpl = vi.fn(async () => Response.json({ conversationId, cwd: "/service" }));
+    await expect(
+      resolveSeatContext(input(conversationId), {
+        repoRoot: "/service",
+        env: { CLANKIE_OPERATOR_TOKEN: env.CLANKIE_OPERATOR_TOKEN },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ conversationId, cwd: "/service" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  },
+);
 
-it.each([room.title, "123:456", "456"])(
+it.each([
+  [room.title, room],
+  ["123:456", room],
+  ["456", room],
+  [child.title, child],
+] as const)(
   "--conversation resolves %s through discovery and pins the returned exact ID",
-  async (selector) => {
+  async (selector, selected) => {
     const fetchImpl: typeof fetch = vi.fn(async (raw, init) => {
       const url = new URL(String(raw));
       const bearer = new Headers(init?.headers).get("authorization");
       if (url.pathname === "/operator/v1/dispatch") {
         expect(bearer).toBe("Bearer captain-discovery");
         expect(JSON.parse(String(init?.body))).toMatchObject({ op: "list" });
-        return Response.json({ schemaVersion: 1, op: "list", conversations: [room] });
+        return Response.json({ schemaVersion: 1, op: "list", conversations: [room, child] });
       }
       expect(bearer).toBe(`Bearer ${env.CLANKIE_OPERATOR_TOKEN}`);
-      return url.searchParams.get("conversationId") === room.conversationId
-        ? Response.json({ conversationId: room.conversationId, cwd: "/service" })
+      return url.searchParams.get("conversationId") === selected.conversationId
+        ? Response.json({ conversationId: selected.conversationId, cwd: "/service" })
         : Response.json({ error: "unknown_captain_conversation" }, { status: 404 });
     });
     await expect(
       resolveSeatContext(input(selector), { repoRoot: "/service", env, fetchImpl }),
-    ).resolves.toEqual({ conversationId: room.conversationId, cwd: "/service" });
+    ).resolves.toEqual({ conversationId: selected.conversationId, cwd: "/service" });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   },
 );

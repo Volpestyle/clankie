@@ -3,6 +3,11 @@ import type { ConversationQuestionAnswer, ConversationQuestionResult } from "@cl
 import {
   fleetDeliveryStage,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
+  OPERATOR_CONVERSATION_LIST_MAX,
+  RoomHandoffMetadataSchema,
+  CaptainChannelTurnResultSchema,
+  type CaptainChannelTurnResult,
+  type RoomHandoffMetadata,
   OPERATOR_CONVERSATION_TEXT_MAX,
   operatorConversationWindow,
   type DeliveryStage,
@@ -202,6 +207,10 @@ import {
  * revision fencing and cursored pages) is the one the TUI and relay speak.
  * Cursors are zero-padded line counts.
  */
+export function roomHandoffConversationId(roomConversationId: string, deliveryId: string): string {
+  return `handoff-${createHash("sha256").update(`${roomConversationId}:${deliveryId}`).digest("hex").slice(0, 32)}`;
+}
+
 export class ConversationStore {
   /** Live outbox binding, never inferred from a remembered transcript. */
   public nativeTurnDelivery?: (conversationId: string) => boolean;
@@ -365,6 +374,27 @@ export class ConversationStore {
           }
         }
         this.metas.set(meta.conversationId, meta);
+        if (meta.roomHandoff !== undefined) {
+          meta.roomHandoff = RoomHandoffMetadataSchema.parse(meta.roomHandoff);
+          if (["pending", "running", "waiting_user"].includes(meta.roomHandoff.state)) {
+            meta.roomHandoff = {
+              ...meta.roomHandoff,
+              state: "failed",
+              doing: undefined,
+              result: "Service restarted; this handoff was not replayed.",
+            };
+            meta.sessionState = "failed";
+            meta.roomHandoffResult = {
+              state: "failed",
+              code: "room_handoff_interrupted",
+              turnId: meta.conversationId,
+            };
+            meta.updatedAt = new Date().toISOString();
+            meta.revision += 1;
+            this.append(meta, { type: "session", phase: "failed" });
+            this.saveMeta(meta);
+          }
+        }
         if (meta.questions !== undefined) {
           const checked = QuestionStateSchema.safeParse(meta.questions);
           if (!checked.success) this.corruptQuestions.add(meta.conversationId);
@@ -1061,6 +1091,136 @@ export class ConversationStore {
   /** Host-observed Discord names affect discovery only, never room authority. */
   public nameRoomConversation(conversationId: string, title: string): void {
     return nameRoomConversation(this, conversationId, title);
+  }
+
+  /** Metadata changes are part of the fleet cursor as well as the child event journal. */
+  public onRoomHandoffChange?: () => void;
+  private readonly liveRoomHandoffs = new Set<string>();
+
+  public findRoomHandoff(
+    roomConversationId: string,
+    deliveryId: string,
+    fingerprint: string,
+  ): { conversation: OperatorConversation; result?: CaptainChannelTurnResult } | undefined {
+    const meta = this.metas.get(roomHandoffConversationId(roomConversationId, deliveryId));
+    if (meta === undefined) return undefined;
+    if (meta.roomHandoffFingerprint !== fingerprint) throw new Error("room_handoff_delivery_conflict");
+    return {
+      conversation: publicConversation(meta),
+      ...(meta.roomHandoffResult === undefined
+        ? {}
+        : { result: CaptainChannelTurnResultSchema.parse(meta.roomHandoffResult) }),
+    };
+  }
+
+  public beginRoomHandoff(
+    metadata: RoomHandoffMetadata,
+    fingerprint: string,
+    admitted = false,
+  ): OperatorConversation {
+    const checked = RoomHandoffMetadataSchema.parse(metadata);
+    const room = this.metas.get(checked.roomConversationId);
+    if (room?.scope.kind !== "room" || room.roomHandoff !== undefined)
+      throw new Error("Expected canonical parent room");
+    const id = roomHandoffConversationId(room.conversationId, checked.deliveryId);
+    const existing = this.metas.get(id);
+    if (existing !== undefined) {
+      if (existing.roomHandoffFingerprint !== fingerprint) throw new Error("room_handoff_delivery_conflict");
+      if (admitted) this.liveRoomHandoffs.add(id);
+      return publicConversation(existing);
+    }
+    if (admitted) this.liveRoomHandoffs.add(id);
+    const meta = this.create(
+      room.scope,
+      `${checked.actorName ?? checked.actorId} · ${checked.request}`.slice(0, 200),
+      id,
+    );
+    meta.roomHandoff = checked;
+    meta.roomHandoffFingerprint = fingerprint;
+    meta.sessionState = "waiting";
+    meta.revision += 1;
+    this.append(meta, { type: "message", role: "external", text: checked.request, streaming: false });
+    this.saveMeta(meta);
+    this.onRoomHandoffChange?.();
+    return publicConversation(meta);
+  }
+
+  public updateRoomHandoff(
+    conversationId: string,
+    patch: Partial<Pick<RoomHandoffMetadata, "state" | "doing" | "host" | "nativeChildSessionId" | "result">>,
+    result?: CaptainChannelTurnResult,
+  ): void {
+    const meta = this.metas.get(conversationId);
+    if (meta?.roomHandoff === undefined) throw new Error("Unknown room handoff");
+    const next = RoomHandoffMetadataSchema.parse({ ...meta.roomHandoff, ...patch });
+    if (JSON.stringify(meta.roomHandoff) === JSON.stringify(next) && result === undefined) return;
+    meta.roomHandoff = next;
+    if (result !== undefined) {
+      meta.roomHandoffResult = CaptainChannelTurnResultSchema.parse(result);
+      this.liveRoomHandoffs.delete(conversationId);
+    }
+    meta.sessionState =
+      next.state === "running"
+        ? "active"
+        : next.state === "completed"
+          ? "completed"
+          : next.state === "failed"
+            ? "failed"
+            : "waiting";
+    meta.updatedAt = new Date().toISOString();
+    meta.revision += 1;
+    this.append(meta, {
+      type: "session",
+      phase:
+        next.state === "running"
+          ? "started"
+          : next.state === "completed"
+            ? "completed"
+            : next.state === "failed"
+              ? "failed"
+              : "waiting",
+    });
+    this.saveMeta(meta);
+    if (result !== undefined) this.prune(conversationId);
+    this.onRoomHandoffChange?.();
+  }
+
+  public roomHandoffs(): OperatorConversation[] {
+    return [...this.metas.values()]
+      .filter((meta) => meta.roomHandoff !== undefined)
+      .sort((a, b) => {
+        const live = (meta: ConversationMeta) =>
+          ["pending", "running", "waiting_user"].includes(meta.roomHandoff!.state);
+        return Number(live(b)) - Number(live(a)) || b.updatedAt.localeCompare(a.updatedAt);
+      })
+      .slice(0, OPERATOR_CONVERSATION_LIST_MAX)
+      .map(publicConversation);
+  }
+
+  /** Bounded room history is quoted context; no tool bank or grant crosses this boundary. */
+  public roomHandoffContext(roomConversationId: string, excludeDeliveryId: string): string {
+    const oldMessages = this.readEvents(roomConversationId)
+      .filter((event) => event.type === "message")
+      .slice(-12)
+      .map((event) =>
+        event.type === "message" ? `[${event.occurredAt}] ${event.role}: ${event.text.slice(0, 1_000)}` : "",
+      );
+    const handoffs = [...this.metas.values()]
+      .filter(
+        (meta) =>
+          meta.roomHandoff?.roomConversationId === roomConversationId &&
+          meta.roomHandoff.deliveryId !== excludeDeliveryId,
+      )
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(-12)
+      .map((meta) => {
+        const handoff = meta.roomHandoff!;
+        return (
+          `[${meta.createdAt}] <${handoff.actorId}> ${handoff.request.slice(0, 1_000)}\n` +
+          `Handoff ${handoff.state}${handoff.result === undefined ? "" : `: ${handoff.result.slice(0, 1_000)}`}`
+        );
+      });
+    return [...oldMessages, ...handoffs].join("\n\n").slice(-12_000);
   }
 
   public syncRoomTranscript(conversationId: string, transcript: HerdrSeatTranscript): void {
@@ -2502,9 +2662,10 @@ export class ConversationStore {
    */
   private prune(protectedConversationId?: string): void {
     const sideParents = new Set(
-      [...this.metas.values()].flatMap((meta) =>
-        meta.parentConversationId === undefined ? [] : [meta.parentConversationId],
-      ),
+      [...this.metas.values()].flatMap((meta) => [
+        ...(meta.parentConversationId === undefined ? [] : [meta.parentConversationId]),
+        ...(meta.roomHandoff === undefined ? [] : [meta.roomHandoff.roomConversationId]),
+      ]),
     );
     const removable = (): ConversationMeta[] =>
       [...this.metas.values()]
@@ -2513,6 +2674,7 @@ export class ConversationStore {
             !meta.isDefault &&
             !this.hasUnreadInboundReports(meta) &&
             meta.sessionState !== "active" &&
+            !this.liveRoomHandoffs.has(meta.conversationId) &&
             !this.seatSends.has(meta.conversationId) &&
             !sideParents.has(meta.conversationId) &&
             meta.conversationId !== protectedConversationId,

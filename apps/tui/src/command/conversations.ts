@@ -107,6 +107,7 @@ export async function runConversationsCommand(
           (item) =>
             item.title === selector ||
             (item.scope.kind === "room" &&
+              item.roomHandoff === undefined &&
               (item.scope.targetId === selector || item.scope.targetId.split(":").at(-1) === selector)),
         )
       : [exact];
