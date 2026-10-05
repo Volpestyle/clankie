@@ -1,4 +1,10 @@
 import { FleetSeatToolCatalogHealthSchema } from "./tool-catalog.ts";
+import {
+  WorkerReportSummarySchema,
+  WorkerReportPageSchema,
+  type WorkerReportPage,
+} from "./worker-reports.ts";
+export * from "./worker-reports.ts";
 import { HireProfileSchema } from "./hire-profile.ts";
 export {
   HireProfileSchema,
@@ -1056,6 +1062,7 @@ export const OperatorFleetSeatSchema = z
      */
     parentSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
     workerReportRouting: WorkerReportRoutingSchema.optional(),
+    workerReports: z.array(WorkerReportSummarySchema).max(100).optional(),
     /**
      * Native subagents the occupying harness started inside its own TUI
      * (Claude Code's Agent/Task tool), newest first (ADR 0208). Present only
@@ -1163,6 +1170,7 @@ export const OperatorFleetSnapshotSchema = z
       .optional(),
     closedPanes: z.array(ClosedWorkerPaneSchema).max(128).optional(),
     seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+    workerReports: z.array(WorkerReportSummarySchema).max(1000).optional(),
     personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_AGENT_PERSONA_LIST_MAX),
     channels: z.array(OperatorChannelSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
     /**
@@ -3000,6 +3008,30 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
+      op: z.literal("readopt_seat"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      seatId: OperatorConversationEventRefSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("worker_reports"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      limit: z.number().int().min(1).max(100).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("acknowledge_worker_reports"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      deliveryIds: z.array(z.string().uuid()).min(1).max(100),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("close_seat"),
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
@@ -3342,6 +3374,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       closedPanes: z.array(ClosedWorkerPaneSchema).max(128).optional(),
       seats: z.array(OperatorFleetSeatSchema).max(OPERATOR_FLEET_ROSTER_MAX),
+      workerReports: z.array(WorkerReportSummarySchema).max(1000).optional(),
     })
     .strict(),
   OperatorPresenceResultSchema,
@@ -3378,6 +3411,29 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("terminal_catalog"),
       schemaVersion: z.literal(1),
       sessions: z.array(OperatorTerminalSessionSchema).max(OPERATOR_TERMINAL_CATALOG_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("readopt_seat"),
+      schemaVersion: z.literal(1),
+      seatId: OperatorConversationEventRefSchema,
+      adopted: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("worker_reports"),
+      schemaVersion: z.literal(1),
+      page: WorkerReportPageSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("acknowledge_worker_reports"),
+      schemaVersion: z.literal(1),
+      conversationId: OperatorConversationIdSchema,
+      acknowledged: z.number().int().min(0),
     })
     .strict(),
   z
@@ -3503,6 +3559,9 @@ export interface OperatorConversationServiceClient {
   connections?(command?: OperatorConnectionCommand): Promise<z.infer<typeof OperatorConnectionResultSchema>>;
   list(scope?: OperatorConversationScope): Promise<readonly OperatorConversation[]>;
   roster(): Promise<readonly OperatorFleetSeat[]>;
+  readoptSeat?(seatId: string, conversationId: string): Promise<boolean>;
+  workerReports?(conversationId: string, limit?: number): Promise<WorkerReportPage>;
+  acknowledgeWorkerReports?(conversationId: string, deliveryIds: readonly string[]): Promise<number>;
   /** Park until the fleet cursor changes, then return one coherent snapshot. */
   fleet?(cursor?: string, signal?: AbortSignal): Promise<OperatorFleetSnapshot>;
   /** Park until present-tense activity changes. */
@@ -3707,6 +3766,33 @@ export function createOperatorConversationServiceClient(
       });
       if (result.op !== "list") throw new Error(`Unexpected ${result.op} result for list`);
       return result.conversations;
+    },
+    async readoptSeat(seatId, conversationId) {
+      const result = await dispatch({ op: "readopt_seat", schemaVersion: 1, seatId, conversationId });
+      if (result.op !== "readopt_seat") throw new Error(`Unexpected ${result.op} result for re-adoption`);
+      return result.adopted;
+    },
+    async workerReports(conversationId, limit) {
+      const result = await dispatch({
+        op: "worker_reports",
+        schemaVersion: 1,
+        conversationId,
+        ...(limit === undefined ? {} : { limit }),
+      });
+      if (result.op !== "worker_reports")
+        throw new Error(`Unexpected ${result.op} result for worker reports`);
+      return result.page;
+    },
+    async acknowledgeWorkerReports(conversationId, deliveryIds) {
+      const result = await dispatch({
+        op: "acknowledge_worker_reports",
+        schemaVersion: 1,
+        conversationId,
+        deliveryIds: [...deliveryIds],
+      });
+      if (result.op !== "acknowledge_worker_reports")
+        throw new Error(`Unexpected ${result.op} result for worker report acknowledgment`);
+      return result.acknowledged;
     },
     async roster() {
       const result = await dispatch({ op: "roster", schemaVersion: 1, ...workProjection });

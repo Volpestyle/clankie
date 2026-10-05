@@ -32,7 +32,13 @@ import {
   ConversationServiceRun,
   waitForConversationRun,
 } from "./conversation-run.ts";
-import { fleetDeliveryStage, WorkerReportRoutingSchema, type DeliveryStage } from "@clankie/protocol";
+import {
+  DeliveryStageSchema,
+  fleetDeliveryStage,
+  WorkerReportRoutingSchema,
+  type DeliveryStage,
+  type WorkerReportPage,
+} from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
@@ -123,6 +129,9 @@ type ConversationServiceRequest = Exclude<
   | { op: "autonomy" }
   | { op: "roster" }
   | { op: "fleet" }
+  | { op: "readopt_seat" }
+  | { op: "worker_reports" }
+  | { op: "acknowledge_worker_reports" }
   | { op: "presence" }
   | { op: "subagent_replay" }
   | { op: "composer_catalog" }
@@ -150,6 +159,9 @@ type ConversationServiceResult = Exclude<
   | { op: "autonomy" }
   | { op: "roster" }
   | { op: "fleet" }
+  | { op: "readopt_seat" }
+  | { op: "worker_reports" }
+  | { op: "acknowledge_worker_reports" }
   | { op: "presence" }
   | { op: "composer_catalog" }
   | { op: "state_stance" }
@@ -180,6 +192,8 @@ export const LINEAR_INBOX_CONVERSATION_ID = "linear-inbox";
 const LINEAR_PAGE_DEFAULT = 20;
 const LINEAR_PAGE_MAX = 100;
 const LINEAR_PAGE_BYTES = 30_000;
+/** A maximum-length report can expand to six JSON bytes per UTF-16 unit. */
+const WORKER_REPORT_PAGE_BYTES = 128 * 1024;
 const LINEAR_WAKE_HEADLINES_MAX = 40;
 
 export interface LinearInboxReadOptions {
@@ -230,6 +244,24 @@ interface SeatTranscriptCheckpoint {
   readonly messageIds?: readonly string[];
 }
 
+const InboundReportDeliverySchema = z
+  .object({
+    state: z.enum(["pending", "attempting", "delivered", "uncertain", "read"]),
+    stage: DeliveryStageSchema.optional(),
+    attemptedAt: z.string().datetime().optional(),
+    deliveredAt: z.string().datetime().optional(),
+    offeredAt: z.string().datetime().optional(),
+    readAt: z.string().datetime().optional(),
+  })
+  .strict();
+
+/** Captured by the host at admission; a worker cannot choose its recipient. */
+const InboundReportRecipientSchema = z.union([
+  NativeSeatRecipientSchema,
+  z.object({ kind: z.literal("conversation"), owner: ConversationOwnerSchema }).strict(),
+]);
+export type InboundReportRecipient = z.infer<typeof InboundReportRecipientSchema>;
+
 const InboundAcceptanceSchema = z
   .object({
     deliveryId: z.string().uuid(),
@@ -241,9 +273,21 @@ const InboundAcceptanceSchema = z
     runId: z.string(),
     acceptedCursor: z.string(),
     workerReportRouting: WorkerReportRoutingSchema.optional(),
+    recipient: InboundReportRecipientSchema.optional(),
+    acceptedAt: z.string().datetime().optional(),
+    reportDelivery: InboundReportDeliverySchema.optional(),
   })
   .strict();
 type InboundAcceptance = z.infer<typeof InboundAcceptanceSchema>;
+type InboundReceiptInput = Omit<
+  InboundAcceptance,
+  "message" | "runId" | "acceptedCursor" | "acceptedAt" | "reportDelivery"
+>;
+export interface InboundReport extends InboundAcceptance {
+  readonly conversationId: string;
+  readonly acceptedAt: string;
+  readonly reportDelivery: z.infer<typeof InboundReportDeliverySchema>;
+}
 
 interface ConversationMeta {
   questions?: QuestionState;
@@ -558,6 +602,8 @@ export class ConversationRefusedError extends Error {}
 export class ConversationStore {
   /** Live outbox binding, never inferred from a remembered transcript. */
   public nativeTurnDelivery?: (conversationId: string) => boolean;
+  /** Roster/inbox observers see progress independently of a worker's pane lifetime. */
+  public onInboundReportChange?: () => void;
   private readonly metas = new Map<string, ConversationMeta>();
   /**
    * Live durable-message observers, for delivery that happens outside the
@@ -707,6 +753,7 @@ export class ConversationStore {
         const meta = JSON.parse(
           readFileSync(join(root, entry.name, "meta.json"), "utf8"),
         ) as ConversationMeta;
+        this.restoreInboundReports(meta);
         // A crash mid-run leaves "active"; on boot nothing is running.
         if (meta.sessionState === "active" || meta.inboundAcceptances !== undefined) {
           if (meta.sessionState === "active") meta.sessionState = "waiting";
@@ -748,7 +795,7 @@ export class ConversationStore {
     }
     // Side forks have no resumable console owner after a service restart.
     for (const meta of this.metas.values()) {
-      if (meta.parentConversationId !== undefined) this.remove(meta);
+      if (meta.parentConversationId !== undefined && !this.hasUnreadInboundReports(meta)) this.remove(meta);
     }
     this.ensureDefaultGlobalConversation();
     try {
@@ -2416,6 +2463,199 @@ export class ConversationStore {
     return this.enqueue(meta, message, undefined, false, this.runner, { origin });
   }
 
+  private restoreInboundReports(meta: ConversationMeta): void {
+    if (meta.inboundAcceptances === undefined) return;
+    const entries = z.record(z.string(), InboundAcceptanceSchema).parse(meta.inboundAcceptances);
+    const events = this.readEvents(meta.conversationId);
+    for (const [id, receipt] of Object.entries(entries)) {
+      if (id !== receipt.deliveryId) throw new Error("Mismatched acceptance ID");
+      receipt.acceptedAt ??=
+        events.find(
+          (event) => event.type === "turn" && event.phase === "accepted" && event.runId === receipt.runId,
+        )?.occurredAt ?? meta.createdAt;
+      // Old runs and crash-interrupted attempts have no proof of whether a
+      // native handoff happened. Keep their payloads visible, never replay them.
+      receipt.reportDelivery ??= { state: "uncertain", stage: "uncertain" };
+      if (receipt.reportDelivery.state === "attempting")
+        receipt.reportDelivery = { ...receipt.reportDelivery, state: "uncertain", stage: "uncertain" };
+    }
+    meta.inboundAcceptances = entries;
+    this.saveMeta(meta);
+  }
+
+  private hasUnreadInboundReports(meta: ConversationMeta): boolean {
+    return Object.values(meta.inboundAcceptances ?? {}).some(
+      (receipt) => receipt.reportDelivery?.state !== "read",
+    );
+  }
+
+  private notifyInboundReportChange(): void {
+    try {
+      this.onInboundReportChange?.();
+    } catch {
+      // Observers never change durable admission or dispatch evidence.
+    }
+  }
+
+  /** Retained reports survive event trimming, restart and a vanished worker pane. */
+  public inboundReports(conversationId?: string, options: { includeRead?: boolean } = {}): InboundReport[] {
+    return [...this.metas.values()]
+      .filter((meta) => conversationId === undefined || meta.conversationId === conversationId)
+      .flatMap((meta) =>
+        Object.values(meta.inboundAcceptances ?? {}).map((value) => {
+          const receipt = InboundAcceptanceSchema.parse(value);
+          return {
+            ...receipt,
+            conversationId: meta.conversationId,
+            acceptedAt: receipt.acceptedAt ?? meta.createdAt,
+            reportDelivery: receipt.reportDelivery ?? {
+              state: "uncertain" as const,
+              stage: "uncertain" as const,
+            },
+          };
+        }),
+      )
+      .filter((receipt) => options.includeRead || receipt.reportDelivery.state !== "read")
+      .sort((a, b) => a.acceptedAt.localeCompare(b.acceptedAt) || a.deliveryId.localeCompare(b.deliveryId));
+  }
+
+  /** Offering full, bounded payloads does not mark them read. */
+  public readInboundReports(
+    conversationId: string,
+    options: { limit?: number | undefined } = {},
+  ): WorkerReportPage {
+    const meta = this.metas.get(conversationId);
+    if (!meta) throw new Error("Unknown worker-report conversation");
+    const unread = this.inboundReports(conversationId);
+    const items: WorkerReportPage["items"] = [];
+    for (const report of unread.slice(0, Math.min(100, Math.max(1, options.limit ?? 20)))) {
+      const item = {
+        deliveryId: report.deliveryId,
+        conversationId,
+        paneId: report.paneId,
+        acceptedAt: report.acceptedAt,
+        state: report.reportDelivery.state,
+        ...(report.reportDelivery.stage === undefined ? {} : { stage: report.reportDelivery.stage }),
+        text: report.text,
+      };
+      // Bound the whole page, including its envelope and acknowledgment IDs.
+      // The Linear budget cannot fit every valid 16,384-unit worker message.
+      const offered = [...items, item];
+      const size = Buffer.byteLength(
+        JSON.stringify({
+          conversationId,
+          items: offered,
+          unreadCount: unread.length,
+          ackDeliveryIds: offered.map((entry) => entry.deliveryId),
+        }),
+        "utf8",
+      );
+      if (size > WORKER_REPORT_PAGE_BYTES) break;
+      items.push(item);
+    }
+    if (items.length === 0 && unread.length > 0)
+      throw new Error("Worker report exceeds the inbox output budget; it remains unread.");
+    const now = new Date().toISOString();
+    const before = new Map(
+      items.map((report) => [report.deliveryId, meta.inboundAcceptances![report.deliveryId]!.reportDelivery]),
+    );
+    for (const report of items) {
+      const receipt = meta.inboundAcceptances![report.deliveryId]!;
+      receipt.reportDelivery = { ...receipt.reportDelivery!, offeredAt: now };
+    }
+    if (items.length > 0) {
+      try {
+        this.saveMeta(meta);
+      } catch (error) {
+        for (const [id, delivery] of before) meta.inboundAcceptances![id]!.reportDelivery = delivery;
+        throw error;
+      }
+    }
+    return {
+      conversationId,
+      items,
+      unreadCount: unread.length,
+      ackDeliveryIds: items.map((report) => report.deliveryId),
+    };
+  }
+
+  /** An authenticated recipient explicitly acknowledges only reports it was offered. */
+  public acknowledgeInboundReports(conversationId: string, deliveryIds: readonly string[]): boolean {
+    const meta = this.metas.get(conversationId);
+    if (!meta || deliveryIds.length === 0 || deliveryIds.length > 100) return false;
+    const receipts = deliveryIds.map((id) => meta.inboundAcceptances?.[id]);
+    if (receipts.some((receipt) => !receipt || !receipt.reportDelivery?.offeredAt)) return false;
+    const before = structuredClone(meta.inboundAcceptances);
+    for (const receipt of receipts) {
+      receipt!.reportDelivery = {
+        ...receipt!.reportDelivery!,
+        state: "read",
+        readAt: new Date().toISOString(),
+      };
+    }
+    try {
+      this.saveMeta(meta);
+    } catch (error) {
+      if (before === undefined) delete meta.inboundAcceptances;
+      else meta.inboundAcceptances = before;
+      throw error;
+    }
+    this.notifyInboundReportChange();
+    return true;
+  }
+
+  /** A native transport receipt is progress, never an acknowledgment that the lead read it. */
+  public recordInboundReportDelivery(deliveryId: string, stage: DeliveryStage): boolean {
+    const meta = [...this.metas.values()].find((entry) => entry.inboundAcceptances?.[deliveryId]);
+    const receipt = meta?.inboundAcceptances?.[deliveryId];
+    if (!meta || !receipt) return false;
+    if (receipt.reportDelivery?.state === "read") return true;
+    const before = receipt.reportDelivery;
+    const state =
+      stage === "unavailable" || stage === "rejected"
+        ? "pending"
+        : stage === "uncertain" || stage === "expired"
+          ? "uncertain"
+          : "delivered";
+    receipt.reportDelivery = {
+      ...before,
+      state,
+      stage,
+      ...(state === "delivered" ? { deliveredAt: new Date().toISOString() } : {}),
+    };
+    try {
+      this.saveMeta(meta);
+    } catch (error) {
+      receipt.reportDelivery = before;
+      throw error;
+    }
+    this.notifyInboundReportChange();
+    return true;
+  }
+
+  /** Retry only definite non-dispatch; the host must revalidate the saved recipient first. */
+  public retryInboundReport(
+    deliveryId: string,
+    admittedRunner: ConversationRunner,
+  ): SubmitOperatorConversationTurnResult | undefined {
+    const meta = [...this.metas.values()].find((entry) => entry.inboundAcceptances?.[deliveryId]);
+    const receipt = meta?.inboundAcceptances?.[deliveryId];
+    if (!meta || !receipt || receipt.reportDelivery?.state !== "pending" || this.runs.has(receipt.runId))
+      return undefined;
+    const {
+      message,
+      runId: _runId,
+      acceptedCursor: _acceptedCursor,
+      acceptedAt: _acceptedAt,
+      reportDelivery: _reportDelivery,
+      ...original
+    } = receipt;
+    return this.enqueue(meta, message, undefined, false, admittedRunner, {
+      origin: "message",
+      inboundReceipt: original,
+    });
+  }
+
   /** Read actual on-disk acceptance, never an in-memory success guess. */
   public inboundAcceptance(id: string): InboundAcceptance | undefined {
     let receipt: InboundAcceptance | undefined;
@@ -2434,7 +2674,7 @@ export class ConversationStore {
 
   public submitInbound(
     message: string,
-    receipt: Omit<InboundAcceptance, "message" | "runId" | "acceptedCursor">,
+    receipt: InboundReceiptInput,
     /** The service resolves this target; inbound worker content cannot select it. */
     conversationId = "global-default",
     /** Host-selected room/native runner; clients cannot select execution authority. */
@@ -2443,7 +2683,7 @@ export class ConversationStore {
     const meta = this.metas.get(conversationId);
     if (!meta) throw new Error(`Unknown conversation ${conversationId}`);
     const native = meta.scope.kind === "seat" || meta.scope.kind === "persona";
-    const runner = meta.scope.kind === "room" || native ? admittedRunner : this.runner;
+    const runner = admittedRunner ?? (meta.scope.kind === "room" || native ? undefined : this.runner);
     if (
       runner === undefined ||
       (!this.runsCaptainTurns(conversationId) && meta.scope.kind !== "room" && !native)
@@ -3346,7 +3586,7 @@ export class ConversationStore {
         readonly authority: QuestionAuthority;
       };
       delivery?: SubmitOperatorConversationTurn["delivery"];
-      inboundReceipt?: Omit<InboundAcceptance, "message" | "runId" | "acceptedCursor">;
+      inboundReceipt?: InboundReceiptInput;
     } = {},
   ): SubmitOperatorConversationTurnResult {
     if (provenance.questionAnswer?.record.projectCreation?.claim)
@@ -3381,6 +3621,13 @@ export class ConversationStore {
           message,
           runId,
           acceptedCursor: String(this.eventSequence(meta) + 1).padStart(CURSOR_WIDTH, "0"),
+          acceptedAt:
+            meta.inboundAcceptances?.[provenance.inboundReceipt.deliveryId]?.acceptedAt ?? meta.updatedAt,
+          reportDelivery: {
+            ...meta.inboundAcceptances?.[provenance.inboundReceipt.deliveryId]?.reportDelivery,
+            state: "pending",
+            stage: "stored",
+          },
         },
       };
     }
@@ -3395,6 +3642,7 @@ export class ConversationStore {
       else meta.inboundAcceptances = previousAcceptances;
       throw error;
     }
+    if (provenance.inboundReceipt) this.notifyInboundReportChange();
     if (provenance.questionAnswer) this.publishQuestionResolution(meta, provenance.questionAnswer.record);
     if (publishOperatorMessage) {
       this.append(meta, {
@@ -3464,6 +3712,26 @@ export class ConversationStore {
       if (provenance.origin === "hook") this.linearHookQueued.delete(conversationId);
       // Cancelled while still queued: settle without ever invoking the runner.
       if (controller.signal.aborted) return Promise.resolve();
+      if (provenance.inboundReceipt) {
+        const receipt = meta.inboundAcceptances![provenance.inboundReceipt.deliveryId]!;
+        if (receipt.reportDelivery?.state === "read") return Promise.resolve();
+        const previousDelivery = receipt.reportDelivery;
+        // This is the last durable boundary before calling the transport. A
+        // crash after it leaves uncertainty, which cannot authorize a replay.
+        receipt.reportDelivery = {
+          ...receipt.reportDelivery,
+          state: "attempting",
+          stage: "uncertain",
+          attemptedAt: new Date().toISOString(),
+        };
+        try {
+          this.saveMeta(meta);
+        } catch (error) {
+          receipt.reportDelivery = previousDelivery;
+          throw error;
+        }
+        this.notifyInboundReportChange();
+      }
       invoked = true;
       this.activeInvocations.set(conversationId, (this.activeInvocations.get(conversationId) ?? 0) + 1);
       if (!publishOperatorMessage) {
@@ -3489,6 +3757,8 @@ export class ConversationStore {
           deliveryOutcome: (outcome) => this.deliveryAdmissions.get(runId)?.resolve(outcome),
           deliveryReceipt: (stage) => {
             deliveryStage = stage;
+            if (provenance.inboundReceipt)
+              this.recordInboundReportDelivery(provenance.inboundReceipt.deliveryId, stage);
           },
           signal: controller.signal,
           draft: (text) => {
@@ -3510,6 +3780,8 @@ export class ConversationStore {
     const run = work
       .then(() => {
         const cancelled = this.cancelRequests.has(runId);
+        if (provenance.inboundReceipt && invoked && deliveryStage === undefined)
+          this.recordInboundReportDelivery(provenance.inboundReceipt.deliveryId, "uncertain");
         this.append(
           meta,
           cancelled
@@ -3544,6 +3816,8 @@ export class ConversationStore {
         return !cancelled;
       })
       .catch((error: unknown) => {
+        if (provenance.inboundReceipt && invoked && deliveryStage === undefined)
+          this.recordInboundReportDelivery(provenance.inboundReceipt.deliveryId, "uncertain");
         if (provenance.origin === "hook" && meta.linearWakePending) {
           meta.linearWokeCursor = meta.linearWakePending.previous;
           delete meta.linearWakePending;
@@ -4400,6 +4674,7 @@ export class ConversationStore {
           (meta) =>
             !meta.isDefault &&
             meta.conversationId !== LINEAR_INBOX_CONVERSATION_ID &&
+            !this.hasUnreadInboundReports(meta) &&
             meta.sessionState !== "active" &&
             !this.seatSends.has(meta.conversationId) &&
             !sideParents.has(meta.conversationId) &&
@@ -4494,6 +4769,7 @@ export class ConversationStore {
       ...(meta.linearReadCursor === undefined ? {} : { linearReadCursor: meta.linearReadCursor }),
       ...(meta.linearWokeCursor === undefined ? {} : { linearWokeCursor: meta.linearWokeCursor }),
       ...(meta.linearAckVersion === undefined ? {} : { linearAckVersion: meta.linearAckVersion }),
+      ...(meta.inboundAcceptances === undefined ? {} : { inboundAcceptances: meta.inboundAcceptances }),
       ...(meta.nativeSeatSessions === undefined
         ? {}
         : {
@@ -4527,6 +4803,7 @@ export class ConversationStore {
     if (
       meta === undefined ||
       meta.isDefault ||
+      this.hasUnreadInboundReports(meta) ||
       meta.scope.kind === "room" ||
       this.seatSends.has(conversationId) ||
       [...this.metas.values()].some((candidate) => candidate.parentConversationId === conversationId)

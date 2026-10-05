@@ -257,7 +257,7 @@ export function createCodexSeatAdapter(
               reportPending({
                 outcome: "failed",
                 reason: "not_ready",
-                detail: `Codex startup is pending in pane ${view.paneId}. The server and native TUI remain alive; review any hook or folder trust prompt there. The original brief will continue automatically after review; do not retry the hire.`,
+                detail: `Codex startup is pending in pane ${view.paneId}. The server and native TUI remain alive; ${launch.resumeSessionId ? "the saved thread may still be restoring. Inspect native progress and any owner trust prompt there" : "review any hook or folder trust prompt there"}. The original brief will continue automatically when ready; do not retry the hire.`,
               });
             },
             ...(trackerOverrides.length === 0 ? {} : { config: trackerOverrides }),
@@ -331,7 +331,11 @@ export function createCodexSeatAdapter(
           }
           if (launch.resumeSessionId !== undefined && seat.threadId !== launch.resumeSessionId)
             throw new Error("Codex resumed a different thread; no brief was sent");
-          await releaseProcess?.bindSession?.(seat.threadId);
+          const remoteIndex = seat.viewArgs.indexOf("--remote");
+          await releaseProcess?.bindSession?.(
+            seat.threadId,
+            remoteIndex < 0 ? undefined : seat.viewArgs[remoteIndex + 1],
+          );
           ref = { harness: "codex", sessionId: seat.threadId, paneId: view.paneId };
           for (const [id, question] of questions)
             if (question.threadId !== ref.sessionId) questions.delete(id);

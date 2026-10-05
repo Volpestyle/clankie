@@ -75,7 +75,9 @@ function row(pane: string, terminal: string, parent?: string): NativeRow {
 }
 
 /** Raw Herdr and kernel observations are the only substituted dependencies. */
-async function fixture(options: { remote?: boolean; parent?: boolean; parentAdapter?: boolean } = {}) {
+async function fixture(
+  options: { remote?: boolean; parent?: boolean; parentAdapter?: boolean; nonApiCaptain?: boolean } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "worker-parent-routing-"));
   roots.push(root);
   const local = [row(WORKER, "term_aaa", options.parent === false ? undefined : PARENT)];
@@ -223,6 +225,14 @@ async function fixture(options: { remote?: boolean; parent?: boolean; parentAdap
         request.headers.get("authorization") === "Bearer operator"
           ? { operatorId: "fixture-owner", steerSourceLane: "tui" }
           : undefined,
+      ...(options.nonApiCaptain
+        ? {
+            authenticateCaptain: async (request: Request) =>
+              request.headers.get("authorization") === "Bearer discord-text"
+                ? { captainId: "fixture-captain", steerSourceLane: "discord_text" as const }
+                : undefined,
+          }
+        : {}),
     });
     const socket = { destroyed: false } as Socket;
     const localFetch = link.fetch((request) => app.app.fetch(request));
@@ -529,7 +539,7 @@ it.each([false, true])(
       received: true,
     });
     const [event] = await attached.events();
-    expect(event).toMatchObject({ conversationId: target, source: "service", kind: "message" });
+    expect(event).toMatchObject({ conversationId: target, source: "worker-report", kind: "message" });
     expect(event!.content).toContain("Attached parent receives this");
     await diagnostic(f.service, f.root, receipt.id, {
       source: "parent",
@@ -538,6 +548,15 @@ it.each([false, true])(
       conversationId: target,
     });
     await settle(f.service, event!);
+    const next = await poll(f.service, target);
+    const repeated = await delivery(f.service);
+    expect(await report(f.service, "Attached parent receives this", repeated)).toMatchObject({
+      received: true,
+    });
+    const [second] = await next.events();
+    expect(second!.content).toContain(`Worker report ${repeated.id}`);
+    expect(second!.content).not.toContain(`Worker report ${receipt.id}`);
+    await settle(f.service, second!);
   },
 );
 
@@ -563,7 +582,7 @@ it("a managed clankie head excluded from fleet seats receives its native child's
     deliveryStage: "stored",
   });
   const [event] = await attached.events();
-  expect(event).toMatchObject({ conversationId: "global-default", source: "service", kind: "message" });
+  expect(event).toMatchObject({ conversationId: "global-default", source: "worker-report", kind: "message" });
   expect(event!.content).toContain("Report to the managed native head");
   await diagnostic(f.service, f.root, receipt.id, {
     source: "parent",
@@ -1027,4 +1046,102 @@ it("an original accepted parent route is not replayed into a later adoption afte
   attached.stop.abort();
   expect(await attached.events()).toEqual([]);
   expect((await hook(restarted, f.rows[1]!, "UserPromptSubmit")).additionalContext).toBeUndefined();
+});
+
+for (const remote of [false, true]) {
+  it(`retains the observed ${remote ? "remote" : "local"} native launcher edge across a service and Herdr reset`, async () => {
+    const f = await fixture({ remote });
+    await roster(f.service);
+    await f.service.close();
+    delete f.rows[0]!.parent_pane_id;
+    const restarted = await f.open();
+    await hook(restarted, f.rows[1]!);
+    const receipt = await delivery(restarted);
+    expect(await report(restarted, "Report after the launcher edge disappeared", receipt)).toMatchObject({
+      received: true,
+    });
+    await expect
+      .poll(async () => (await hook(restarted, f.rows[1]!, "UserPromptSubmit")).additionalContext)
+      .toContain("Report after the launcher edge disappeared");
+    const [original] = accepted(f.root, receipt.id);
+    expect(original.inboundAcceptances[receipt.id].workerReportRouting).toMatchObject({ source: "parent" });
+  });
+}
+
+it("does not resurrect a saved parent after a later actual ancestry points at an unavailable lead", async () => {
+  const f = await fixture();
+  await roster(f.service);
+  f.rows[0]!.parent_pane_id = "w3Z:missing";
+  await roster(f.service);
+  delete f.rows[0]!.parent_pane_id;
+  await f.service.close();
+  const restarted = await f.open();
+  const receipt = await delivery(restarted);
+  expect(await report(restarted, "Unknown ancestry must stay visible", receipt)).toMatchObject({
+    received: true,
+  });
+  const [original] = accepted(f.root, receipt.id);
+  expect(original.inboundAcceptances[receipt.id].workerReportRouting).toMatchObject({
+    source: "unadopted",
+    reason: "no_parent",
+  });
+});
+
+it("offers retained results through authenticated operator dispatch and only acknowledges offered IDs", async () => {
+  const f = await fixture({ parent: false });
+  const attached = await poll(f.service, "global-default");
+  const receipt = await delivery(f.service);
+  expect(await report(f.service, "Retained finished result for the lead", receipt)).toMatchObject({
+    received: true,
+  });
+  const nativeEvents = await attached.events();
+  expect(nativeEvents).toHaveLength(1);
+  expect(await f.service.captain.acknowledgeSeatEvent(nativeEvents[0]!.id, "global-default")).toBe(true);
+  const ack = {
+    schemaVersion: 1,
+    op: "acknowledge_worker_reports",
+    conversationId: "global-default",
+    deliveryIds: [receipt.id],
+  };
+  const beforeRead = await f.service.operatorRequest("/operator/v1/dispatch", ack);
+  expect(beforeRead.status).toBe(409);
+  const read = await f.service.operatorRequest("/operator/v1/dispatch", {
+    schemaVersion: 1,
+    op: "worker_reports",
+    conversationId: "global-default",
+  });
+  expect(read.status).toBe(200);
+  const result = OperatorConversationServiceResultSchema.parse(await read.json());
+  if (result.op !== "worker_reports") throw new Error("Wrong result");
+  expect(result.page.items).toContainEqual(
+    expect.objectContaining({ deliveryId: receipt.id, text: "Retained finished result for the lead" }),
+  );
+  expect(accepted(f.root, receipt.id)[0].inboundAcceptances[receipt.id].reportDelivery.state).not.toBe(
+    "read",
+  );
+  expect((await f.service.operatorRequest("/operator/v1/dispatch", ack)).status).toBe(200);
+  expect(accepted(f.root, receipt.id)[0].inboundAcceptances[receipt.id].reportDelivery.state).toBe("read");
+  const unauthenticated = await f.service.app.app.request("/operator/v1/dispatch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(ack),
+  });
+  expect(unauthenticated.status).toBe(503);
+  expect(await unauthenticated.json()).toMatchObject({ error: "captain_execution_unavailable" });
+  attached.stop.abort();
+});
+
+it.each([
+  { op: "readopt_seat", seatId: "term_aaa" },
+  { op: "worker_reports" },
+  { op: "acknowledge_worker_reports", deliveryIds: [randomUUID()] },
+])("refuses non-api captain authority for $op", async (request) => {
+  const f = await fixture({ parent: false, nonApiCaptain: true });
+  const response = await f.service.app.app.request("/operator/v1/dispatch", {
+    method: "POST",
+    headers: { authorization: "Bearer discord-text", "content-type": "application/json" },
+    body: JSON.stringify({ schemaVersion: 1, conversationId: "global-default", ...request }),
+  });
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "operator_authority_required" });
 });

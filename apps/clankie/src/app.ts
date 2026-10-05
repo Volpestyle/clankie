@@ -4927,6 +4927,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         captain === "unavailable" ? 503 : 401,
       );
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    const workerOwnerOp =
+      parsed.data.op === "readopt_seat" ||
+      parsed.data.op === "worker_reports" ||
+      parsed.data.op === "acknowledge_worker_reports";
+    if (
+      workerOwnerOp &&
+      !owner &&
+      (!captain || captain === "unavailable" || captain.steerSourceLane !== "api")
+    )
+      return context.json({ error: "operator_authority_required" }, 403);
     const questionOp =
       parsed.data.op === "project_proposal_get" ||
       parsed.data.op === "project_proposal_confirm" ||
@@ -4934,7 +4944,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       parsed.data.op === "input_answer" ||
       parsed.data.op === "input_cancel";
     if (questionOp && !owner) return context.json({ error: "question_owner_required" }, 403);
-    if (owner && (questionOp || parsed.data.op === "send" || parsed.data.op === "set_persona_role")) {
+    if (
+      owner &&
+      (questionOp || workerOwnerOp || parsed.data.op === "send" || parsed.data.op === "set_persona_role")
+    ) {
       const binding = dependencies.herdrBinding?.();
       const sameSession =
         binding !== undefined
@@ -5047,7 +5060,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     try {
       let roleAuthority: QuestionAuthority | undefined;
-      if (parsed.data.op === "set_persona_role") {
+      if (parsed.data.op === "set_persona_role" || workerOwnerOp) {
         let current = true;
         const original = structuredClone(captain);
         roleAuthority = {

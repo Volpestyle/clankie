@@ -18,6 +18,9 @@ import { commandHost } from "./io.ts";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
+  "       clankie agents readopt SEAT --conversation ID\n" +
+  "       clankie agents reports --conversation ID [--limit N]\n" +
+  "       clankie agents reports ack DELIVERY_ID... --conversation ID\n" +
   `       clankie agents role NAME|PERSONA_ID ROLE|none [--project PROJECT]   (${OPERATOR_AGENT_ROLES.join(", ")}, or "a custom role")\n` +
   "       clankie agents role ROLE --project PROJECT [--harness KIND] [--model NAME] [--effort LEVEL] [--subagent-model NAME] [--subagent-effort LEVEL] [--delegation native-first|panes] [--account LABEL] [--placement new-tab|split]\n" +
   "       clankie agents roles\n" +
@@ -76,6 +79,45 @@ export async function runAgentsCommand(
     operatorCredentialStore?: CredentialStore;
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "readopt" || args[0] === "reports") {
+    const first = args.findIndex((arg) => arg.startsWith("--"));
+    if (first < 0) throw new Error(AGENTS_USAGE);
+    const values = flags(
+      args.slice(first),
+      args[0] === "reports" ? ["--conversation", "--limit"] : ["--conversation"],
+    );
+    const conversationId = values.get("--conversation");
+    if (!conversationId) throw new Error("Worker ownership and reports require --conversation ID");
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
+    });
+    if (!credential)
+      throw new Error("Worker ownership and reports need the operator credential. Run clankie doctor.");
+    const client = createCaptainOperatorConversationClient(
+      createCaptainRouteClient({
+        host: commandHost(options),
+        captainToken: credential.token,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      }),
+    );
+    if (args[0] === "readopt") {
+      if (first !== 2) throw new Error(AGENTS_USAGE);
+      return { seatId: args[1], adopted: await client.readoptSeat!(args[1]!, conversationId) };
+    }
+    if (args[1] === "ack") {
+      if (first < 3 || values.has("--limit")) throw new Error(AGENTS_USAGE);
+      return {
+        conversationId,
+        acknowledged: await client.acknowledgeWorkerReports!(conversationId, args.slice(2, first)),
+      };
+    }
+    if (first !== 1) throw new Error(AGENTS_USAGE);
+    const limit = values.has("--limit") ? Number(values.get("--limit")) : undefined;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100))
+      throw new Error(AGENTS_USAGE);
+    return client.workerReports!(conversationId, limit);
+  }
   const firstFlag = args.findIndex((arg) => arg.startsWith("--"));
   const roleArguments = args.slice(1, firstFlag < 0 ? args.length : firstFlag);
   if (args[0] === "role" && roleArguments.length === 1 && args.includes("--project"))

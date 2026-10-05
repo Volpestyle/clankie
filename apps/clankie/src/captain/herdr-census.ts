@@ -1,7 +1,9 @@
 import { inspectLiveHarnessBridges } from "../../../../integrations/claude-plugin/worker/bin/harness-live.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { hostname } from "node:os";
+import { realpath } from "node:fs/promises";
+import { hostname, homedir } from "node:os";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import {
   OPERATOR_HEAD_AGENT_NAME,
@@ -10,6 +12,8 @@ import {
   type OperatorTerminalSession,
 } from "@clankie/protocol";
 import { readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
+import { readLocalCodexRecords, isLocalCodexEndpoint } from "../local-codex-records.ts";
+import { CodexAppServerClient, openCodexSocket } from "./codex-app-server.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -174,6 +178,207 @@ function defaultRunner(
   return execFileAsync(command, [...args], { env, timeout: CENSUS_TIMEOUT_MS, maxBuffer: 1024 * 1024 }).then(
     ({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }),
   );
+}
+
+export interface LocalCodexRecoveryOptions {
+  readonly runCommand?: HerdrCensusRunner;
+  readonly localCodexRecordsPath?: string;
+  readonly bridgeSocket?: string;
+  readonly herdrSession?: string;
+}
+
+/**
+ * A resumed private TUI need not emit Herdr's SessionStart hook. Recover only
+ * the exact controller-created server lifetime and thread named by native argv.
+ * No label, terminal title, or stale launch record is enough.
+ */
+export async function recoverLocalCodexSession(
+  entry: Pick<HerdrCensusAgent, "paneId" | "agent" | "session">,
+  options: LocalCodexRecoveryOptions = {},
+): Promise<HerdrCensusAgent["session"]> {
+  if (entry.agent !== "codex" || entry.session !== undefined) return entry.session;
+  const socket =
+    options.bridgeSocket ?? process.env.HERDR_SOCKET_PATH ?? join(homedir(), ".config/herdr/herdr.sock");
+  const session = options.herdrSession ?? "default";
+  const records = readLocalCodexRecords(options.localCodexRecordsPath).filter(
+    (record) =>
+      record.pane === entry.paneId &&
+      record.binding.socketPath === socket &&
+      record.binding.session === session,
+  );
+  if (records.length === 0) return undefined;
+  const run = options.runCommand ?? defaultRunner;
+  try {
+    const observePane = async () => {
+      const value = JSON.parse((await run("herdr", ["pane", "process-info", "--pane", entry.paneId])).stdout)
+        ?.result?.process_info;
+      if (value?.pane_id !== entry.paneId || value.foreground_process_group_id === value.shell_pid)
+        throw new Error("No native foreground occupant");
+      const processes: unknown[] = Array.isArray(value.foreground_processes)
+        ? value.foreground_processes
+        : [];
+      const native = processes.filter((item) => {
+        const process = item as { pid?: unknown; argv?: unknown };
+        return (
+          Number.isSafeInteger(process?.pid) &&
+          Number(process.pid) > 1 &&
+          Array.isArray(process.argv) &&
+          process.argv.every((arg) => typeof arg === "string") &&
+          basename(process.argv[0] ?? "") === "codex"
+        );
+      });
+      if (native.length !== 1) throw new Error("Ambiguous native occupant");
+      const process = native[0] as { pid: number; argv: string[] };
+      const remote = process.argv.indexOf("--remote");
+      const resume = process.argv.indexOf("resume");
+      const endpoint = remote < 0 ? undefined : process.argv[remote + 1];
+      const threadId = resume < 0 ? undefined : process.argv[resume + 1];
+      if (!endpoint || !isLocalCodexEndpoint(endpoint) || !threadId || threadId.startsWith("-"))
+        throw new Error("Exact remote resume address unavailable");
+      return {
+        pid: process.pid,
+        endpoint,
+        threadId,
+        shell: value.shell_pid,
+        foreground: value.foreground_process_group_id,
+      };
+    };
+    const native = await observePane();
+    const recovered = { source: "herdr:codex", kind: "id" as const, value: native.threadId };
+    const occupantId = occupantIdForHerdrSession(recovered);
+    const matching = records.filter(
+      (record) =>
+        record.nativeOccupantId === occupantId &&
+        (record.threadId === undefined || record.threadId === native.threadId) &&
+        (record.endpoint === undefined || record.endpoint === native.endpoint),
+    );
+    if (matching.length !== 1) return undefined;
+    const launch = matching[0]!;
+    const lifetime = async (pid: number) => {
+      const output = (await run("/bin/ps", ["-p", String(pid), "-o", "lstart=,comm="])).stdout;
+      const match =
+        /^\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/u.exec(
+          output,
+        );
+      if (!match || basename(match[2]!) !== "codex") throw new Error("Native process lifetime unavailable");
+      return match[1]!;
+    };
+    const serverProof = async () => {
+      if ((await lifetime(launch.pid)) !== launch.start) throw new Error("Private server lifetime changed");
+      const command = (await run("/bin/ps", ["-p", String(launch.pid), "-o", "command="])).stdout.trim();
+      if (!command.endsWith(` app-server --listen ${native.endpoint}`))
+        throw new Error("Private server address changed");
+      const sockets = (await run("/usr/sbin/lsof", ["-nP", "-a", "-p", String(launch.pid), "-U", "-Fn"]))
+        .stdout;
+      // Codex 0.160 aliases --listen paths to its private daemon socket directory.
+      const socketPath = await realpath(native.endpoint.slice("unix://".length));
+      if (!sockets.split("\n").some((line) => line === `n${socketPath}`))
+        throw new Error("Private server does not own its socket");
+    };
+    const started = await lifetime(native.pid);
+    await serverProof();
+    // argv identifies the requested resume. The live server must still have
+    // exactly that native thread loaded; a later /new or /resume cannot reuse
+    // the old process command as authority for its previous occupant.
+    const socket = await openCodexSocket(`ws+unix://${native.endpoint.slice("unix://".length)}:/`);
+    if (!socket) return undefined;
+    const client = new CodexAppServerClient(socket, () => {}, 2_000);
+    try {
+      await client.initialize();
+      const loaded = (await client.request("thread/loaded/list", {})) as {
+        data?: unknown;
+        nextCursor?: unknown;
+      };
+      if (
+        !Array.isArray(loaded.data) ||
+        loaded.data.length === 0 ||
+        loaded.data.length > MAX_AGENTS ||
+        !loaded.data.every((id) => typeof id === "string") ||
+        !loaded.data.includes(native.threadId) ||
+        loaded.nextCursor != null
+      )
+        return undefined;
+      // Native parallel workers may remain loaded. They must be descendants of
+      // this root; a second independent root makes the pane's selection ambiguous.
+      const parents = new Map<string, string>();
+      for (const id of loaded.data) {
+        if (id === native.threadId) continue;
+        const response = (await client.request("thread/read", { threadId: id, includeTurns: false })) as {
+          thread?: { id?: unknown; parentThreadId?: unknown };
+        };
+        if (response.thread?.id !== id || typeof response.thread.parentThreadId !== "string")
+          return undefined;
+        parents.set(id, response.thread.parentThreadId);
+      }
+      for (const id of parents.keys()) {
+        let current = id;
+        const seen = new Set<string>();
+        while (current !== native.threadId) {
+          if (seen.has(current) || !parents.has(current)) return undefined;
+          seen.add(current);
+          current = parents.get(current)!;
+        }
+      }
+    } finally {
+      client.close();
+    }
+    if (
+      JSON.stringify(await observePane()) !== JSON.stringify(native) ||
+      (await lifetime(native.pid)) !== started
+    )
+      return undefined;
+    await serverProof();
+    // Revocation/replacement during the observation cannot resurrect a record.
+    if (
+      !readLocalCodexRecords(options.localCodexRecordsPath).some(
+        (record) => JSON.stringify(record) === JSON.stringify(launch),
+      )
+    )
+      return undefined;
+    return recovered;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Restore only a recorded native launcher that still occupies the same seat. */
+export async function recoverLocalCodexParent(
+  entry: Pick<HerdrCensusAgent, "paneId" | "agent" | "session" | "parentPaneId">,
+  options: LocalCodexRecoveryOptions = {},
+): Promise<string | undefined> {
+  if (entry.parentPaneId !== undefined || entry.agent !== "codex" || entry.session === undefined)
+    return entry.parentPaneId;
+  const bindingSocket =
+    options.bridgeSocket ?? process.env.HERDR_SOCKET_PATH ?? join(homedir(), ".config/herdr/herdr.sock");
+  const records = readLocalCodexRecords(options.localCodexRecordsPath).filter(
+    (record) =>
+      record.pane === entry.paneId &&
+      record.binding.socketPath === bindingSocket &&
+      record.binding.session === (options.herdrSession ?? "default") &&
+      record.nativeOccupantId === occupantIdForHerdrSession(entry.session!) &&
+      record.parent !== undefined,
+  );
+  if (records.length !== 1) return undefined;
+  const launch = records[0]!;
+  const parent = launch.parent!;
+  const run = options.runCommand ?? defaultRunner;
+  const observe = async () => {
+    const result = JSON.parse((await run("herdr", ["agent", "get", parent.paneId])).stdout)?.result?.agent;
+    const native = parseHerdrAgentList(JSON.stringify({ result: { agents: [result] } }))[0];
+    if (native?.paneId !== parent.paneId) return undefined;
+    const session = native.session ?? (await recoverLocalCodexSession(native, options));
+    return session === undefined ? undefined : occupantIdForHerdrSession(session);
+  };
+  try {
+    if ((await observe()) !== parent.occupantId || (await observe()) !== parent.occupantId) return undefined;
+    return readLocalCodexRecords(options.localCodexRecordsPath).some(
+      (record) => JSON.stringify(record) === JSON.stringify(launch),
+    )
+      ? parent.paneId
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function titleOf(pane: Record<string, unknown>): string {
@@ -451,6 +656,7 @@ export async function readFleet(
     /** Override only for isolated host-observation tests; production uses this service process. */
     readonly runtimePid?: number;
     readonly localAvailable?: boolean;
+    readonly localCodexRecordsPath?: string;
   } = {},
 ): Promise<ObservedFleet> {
   const [local, remote, remotePlacements] = await Promise.all([
@@ -526,6 +732,7 @@ async function readLocalFleet(
     readonly bridgeSocket?: string;
     readonly runtimePid?: number;
     readonly summaries?: Readonly<Record<string, HerdrAgentSummary>>;
+    readonly localCodexRecordsPath?: string;
   } = {},
 ): Promise<ObservedFleet> {
   const run = options.runCommand ?? defaultRunner;
@@ -572,7 +779,15 @@ async function readLocalFleet(
       bridgeReport?.panes.map(({ paneId, harness: _harness, ...observation }) => [paneId, observation]),
     );
     const summaries = options.summaries ?? readHerdrSummariesFile().agents;
-    const occupied = parseHerdrAgentList(stdout).filter(
+    const observed = await Promise.all(
+      parseHerdrAgentList(stdout).map(async (entry) => {
+        const session = await recoverLocalCodexSession(entry, { ...options, runCommand: run });
+        const observed = session === undefined ? entry : { ...entry, session };
+        const parentPaneId = await recoverLocalCodexParent(observed, { ...options, runCommand: run });
+        return parentPaneId === undefined ? observed : { ...observed, parentPaneId };
+      }),
+    );
+    const occupied = observed.filter(
       (
         entry,
       ): entry is HerdrCensusAgent & {

@@ -1870,6 +1870,16 @@ and DELETE `/v1/agent-hosts/ID`. The resume route delegates to the existing
 operator conversation; inspection of a room is insufficient. Use
 `clankie agents resume HOST:SESSION --conversation ID [--fleet ID] [--brief TEXT]`.
 A missing `spawn_seat.conversationId` returns `not_ready` without launching.
+After an authorized same-thread native reattach, use
+`clankie agents readopt SEAT_ID --conversation ID` (or the lead's `readopt_seat`
+tool) to rebind the existing owner. The host proves the current native thread
+and original owning conversation again; a different thread or owner is refused.
+A same-thread `hire_agent` resume performs this rebinding under the admitted
+hiring authority. Remote-attached local Codex panes without a Herdr session hook
+are discovered from their exact foreground socket/thread and retained private
+server lifetime; labels alone never establish a binding. Doctor reports
+`linkedSession.nativeBindings` as observed, recovered, or missing.
+
 Hired workers retain their original host-persisted owner through restart and
 movement. Saved sessions without exact persisted ownership cannot be reclaimed
 by inferring a persona or default conversation. Completion and escalation wake
@@ -2705,6 +2715,27 @@ choose the destination. Worker reports fall back to `global-default` when that
 conversation has been removed; a retained room with revoked grants is refused.
 Local and fleet-qualified remote workers follow the same persisted ownership
 proof and delivery receipts.
+Worker output remains in the owning conversation independently of a worker pane.
+`clankie agents reports --conversation ID [--limit N]` (or `worker_reports`)
+returns the oldest unread reports with their original delivery IDs and exact text.
+Reading does not mark them read. After reviewing every offered report, run
+`clankie agents reports ack DELIVERY_ID... --conversation ID` (or
+`acknowledge_worker_reports`). Only fully offered IDs can be acknowledged.
+The roster exposes per-worker unread receipts and the fleet retains report rows
+for disappeared panes. A finished worker with pending or uncertain output shows
+“done, report not delivered”; confirmed transport alone still shows “report unread”.
+The console also lists retained reports under the agent dock.
+
+New definitely queued or refused-before-handoff reports keep their original target
+and may resume when its verified receiver returns. Crash-interrupted attempts and
+legacy receipts remain uncertain and readable; they are never blindly resent.
+A matching original thread may retain its output while requiring re-adoption;
+that retention grants no control or dispatch until the owner repairs the binding.
+The API uses authenticated operator dispatch operations `readopt_seat`,
+`worker_reports`, and `acknowledge_worker_reports`, each naming the exact owning
+`conversationId`. Credential and conversation authority are checked again at
+admission.
+
 Without persisted adoption, the host reads the actual census parent/launcher
 edge and routes to that exact native lead or its attached conversation. Explicit
 adoption wins; tabs, titles and report text establish no ownership. The parent
@@ -2714,13 +2745,18 @@ If no eligible parent exists, the report falls back to `global-default` with
 `workerReportRouting.source: "unadopted"` on its durable accepted turn and a
 reason (`no_parent`, `parent_unavailable`, `parent_unlinked`, or `owner_removed`).
 The fleet roster exposes the same diagnostic and parent pane/seat when known.
+Observed launcher edges are retained by native child and parent thread identity.
+After a Herdr reset, a missing edge is recovered only while one exact original
+child and parent are live on the same fleet. A new actual ancestry supersedes
+history; a changed, missing, or ambiguous parent cannot inherit it. Older launches
+with no retained edge keep the explicit `no_parent` diagnostic.
 An authority or occupant mismatch is `source: "refused"` with
 `reason: "authority_unavailable"`; it does not admit a default fallback.
 `clankie doctor` includes `linkedSession.parentLeads` and names lead panes whose
 bridges are missing or unobserved, including their child panes. These process
 observations do not prove native delivery or grant tools. Reconcile the original
 report ID after uncertainty; restarting or adopting a worker never resends an
-already accepted report to another conversation.
+already accepted report to another conversation. Only definite pre-handoff recovery reuses its original target.
 `clankie fleet set --tools off` stops new standing tool admissions. Each call
 rechecks live admission, account binding and settings, but a call already past its
 last asynchronous check can still reach a provider after tools-off or admission

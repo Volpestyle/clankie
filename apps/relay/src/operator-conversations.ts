@@ -315,6 +315,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           : serviceRequest.op === "connections" ||
               serviceRequest.op === "reset" ||
               serviceRequest.op === "close_seat" ||
+              serviceRequest.op === "readopt_seat" ||
+              serviceRequest.op === "worker_reports" ||
+              serviceRequest.op === "acknowledge_worker_reports" ||
               serviceRequest.op === "spawn_seat" ||
               serviceRequest.op === "move_seat" ||
               serviceRequest.op === "channel" ||
@@ -327,6 +330,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               // rather than falling through to chat. Listing the home guild's
               // rooms rides the grant of the projection it is picked for, so a
               // chat-only device never enumerates the owner's server.
+              // Native re-adoption and retained worker reports likewise belong
+              // to the lead: reading exposes machine work, and ACK clears its
+              // unread report marker.
               "steer"
             : "chat";
     // Reading a request may span sleep or a control-plane restart. Admission
