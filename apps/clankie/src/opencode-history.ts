@@ -49,7 +49,7 @@ function decode(value: string): unknown {
 /** A registered address only; no control, process liveness or resume authority. */
 export interface OpenCodeHistorySource {
   readonly kind: "opencode-sqlite";
-  readonly machineId: "local";
+  readonly machineId: string;
   readonly profileId: string;
   readonly database: string;
   readonly databaseIdentity: string;

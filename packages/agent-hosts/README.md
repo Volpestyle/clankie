@@ -77,14 +77,14 @@ flowchart TD
   Session -->|"receipts and turn events"| Tools
 ```
 
-| Harness     | Mechanism                                            | Local hire adapter                                        |
-| ----------- | ---------------------------------------------------- | --------------------------------------------------------- |
-| Claude Code | Native worker-plugin channel and turn hooks          | Implemented; requires the owner's channel consent         |
-| Codex       | App-server shared with the native TUI's bound thread | Implemented; starts or steers a turn                      |
-| Pi          | Process-bound native extension follow-up messages    | Opt-in only; Pi 0.87.1; live acceptance held              |
-| OpenCode    | Injected SDK in the process-bound native worker TUI  | Implemented locally; pinned to OpenCode 1.18.18           |
-| Grok Build  | Leader IPC/ACP on the exact interactive TUI session  | Implemented locally on macOS; pinned to Grok 1.0.46       |
-| Prime Agent | Daemon-backed messages to the active session         | Researched for PrimeIntellect's CLI; not implemented here |
+| Harness     | Mechanism                                            | Local hire adapter                                                    |
+| ----------- | ---------------------------------------------------- | --------------------------------------------------------------------- |
+| Claude Code | Native worker-plugin channel and turn hooks          | Implemented; requires the owner's channel consent                     |
+| Codex       | App-server shared with the native TUI's bound thread | Implemented; starts or steers a turn                                  |
+| Pi          | Process-bound native extension follow-up messages    | Opt-in only; Pi 0.87.1; live acceptance held                          |
+| OpenCode    | Injected SDK in the process-bound native worker TUI  | Implemented locally and on linked Mac POSIX fleets; pinned to 1.18.18 |
+| Grok Build  | Leader IPC/ACP on the exact interactive TUI session  | Implemented locally on macOS; pinned to Grok 1.0.46                   |
+| Prime Agent | Daemon-backed messages to the active session         | Researched for PrimeIntellect's CLI; not implemented here             |
 
 Transcript discovery and an available native CLI
 do not imply a local hire adapter exists. Unsupported automated briefs fail
@@ -161,6 +161,20 @@ capabilities and verification limits.
 
 ### Prepared OpenCode workers
 
+Remote workers use the existing configured fleet SSH target, with a private
+loopback forward to the original process-bound controller. A bounded SSH helper
+uses the same SQLite reader and native macOS process checks on that machine;
+it never runs an agent or a second OpenCode server. Remote UID, birth precision,
+executable/cwd, Herdr allocation/session and socket ownership are checked afresh.
+The native worker remains visible in its own Herdr tab. Endpoint loss, machine
+retarget and replaced native roots refuse; no local fallback or automatic adoption
+exists. Remote history is registered per service/fleet in dedicated profiles and
+is addressed as `<fleet>:ses_…`. Live-controller reuse requires that same source,
+process and owning conversation. Node 24+, Python 3, the existing Clankie fleet
+link and native OpenCode 1.18.18 must be available on the Mac. Windows control is
+not advertised. Remote acceptance currently has integration-fixture evidence;
+the full owner draft/approval/interrupt/recovery live matrix remains open.
+
 Local worker control requires macOS and a direct native OpenCode **1.18.18**
 executable. One new Herdr tab starts its initial argv process. The controller
 proves the original foreground process lifetime, held socket, canonical cwd and
@@ -182,7 +196,7 @@ normal WAL/SHM reader coordination in those profiles; it is not a zero-filesyste
 guarantee. No owner-wide database, migration or parallel transcript store is used.
 `clankie agents resume … --conversation ID` can reuse only the original live
 controller after fresh process, session and cwd checks. Saved metadata grants no
-control. General profile discovery, remote control, restart reattachment and
+control. General profile discovery, restart reattachment and
 new-process continuation remain unavailable. The
 [worker checkpoint](../../docs/testing/2026-10-04-opencode-workers/README.md)
 separates the original deterministic proof from later native persona/exit

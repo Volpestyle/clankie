@@ -292,12 +292,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           const revision = fleetRevisions.get(fleet.id) ?? 0;
           return [
             fleet.id,
-            createRemoteHerdrRunner(fleet, async (args, signal, timeout) => {
-              const active = (await refreshFleets()).find((entry) => entry.id === fleet.id);
-              if (!active || (fleetRevisions.get(fleet.id) ?? 0) !== revision)
-                throw new Error(`Machine connection ${fleet.id} changed or disconnected`);
-              return deps.fleets!.run(active)(args, signal, timeout);
-            }),
+            createRemoteHerdrRunner(
+              fleet,
+              async (args, signal, timeout) => {
+                const active = (await refreshFleets()).find((entry) => entry.id === fleet.id);
+                if (!active || (fleetRevisions.get(fleet.id) ?? 0) !== revision)
+                  throw new Error(`Machine connection ${fleet.id} changed or disconnected`);
+                return deps.fleets!.run(active)(args, signal, timeout);
+              },
+              options.remoteOpenCode === undefined
+                ? {}
+                : {
+                    createCommandTab: options.remoteOpenCode.forFleet(
+                      fleet,
+                      async () => {
+                        await refreshFleets();
+                        if (
+                          (fleetRevisions.get(fleet.id) ?? 0) !== revision ||
+                          !fleetIdentities.has(fleet.id)
+                        )
+                          throw new Error("Machine connection changed or disconnected");
+                      },
+                      revision,
+                    ).createCommandTab,
+                  },
+            ),
           ] as const;
         }),
         ...namedLocal.map((entry) => {
@@ -657,6 +676,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 observeCodexToolCatalog,
               ),
               createRemoteClaudeWorkerSeatAdapter(fleet, shell, claudeWorkerDeps),
+              ...(options.remoteOpenCode === undefined
+                ? []
+                : [options.remoteOpenCode.forFleet(fleet, guard, revision).adapter]),
             ].map((adapter) => fenceFleetSeatAdapter(adapter, current));
           },
         }),
@@ -3943,6 +3965,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     async close(): Promise<void> {
       shutdown.abort(new SeatLinkInterruptedError());
+      seatEfficiency.close();
       stopFleetRounds();
       unsubscribeFleets?.();
       evaluator.close();
@@ -3952,6 +3975,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       seatOutboxes.clear();
       terminals.close();
       herdrWatches.close();
+      await options.remoteOpenCode?.close();
       stopFleetChanges();
       autonomy.close();
       await roomHandoffs.close();

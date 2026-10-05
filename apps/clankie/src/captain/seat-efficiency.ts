@@ -83,6 +83,7 @@ export class SeatEfficiencyStore {
   private readonly now: () => number;
   private readonly path: string;
   private savedSignature = "";
+  private closed = false;
   public constructor(path: string, options: { now?: () => number } = {}) {
     this.path = path;
     this.now = options.now ?? Date.now;
@@ -118,6 +119,10 @@ export class SeatEfficiencyStore {
       }
     }
     this.savedSignature = this.signature();
+  }
+
+  public close(): void {
+    this.closed = true;
   }
 
   public assign(
@@ -356,6 +361,7 @@ export class SeatEfficiencyStore {
     return record;
   }
   private save(): void {
+    if (this.closed) return;
     const entries = Object.entries(this.records).sort((a, b) =>
       a[1].firstObservedAt.localeCompare(b[1].firstObservedAt),
     );

@@ -1,4 +1,5 @@
 import { redactSensitiveText } from "@clankie/observability";
+import type { RemoteOpenCodeWorkers } from "./captain/remote-opencode-workers.ts";
 import type { OpenCodeProfiles } from "./opencode-profiles.ts";
 import type { OpenCodeHistorySource, OpenCodeHistorySnapshot } from "./opencode-history.ts";
 import { resolveAgentHost } from "@clankie/agent-hosts";
@@ -36,8 +37,8 @@ export const savedSessionHarness = (session: SavedAgentSession) =>
   session.source ? ("opencode" as const) : session.file.harness;
 function nativeSummary(value: OpenCodeHistorySnapshot): AgentSessionSummary {
   return {
-    ref: `local:${value.source.sessionId}`,
-    host: "local",
+    ref: `${value.source.machineId}:${value.source.sessionId}`,
+    host: value.source.machineId,
     harness: "opencode",
     sessionId: value.source.sessionId,
     project: value.source.workingDirectory,
@@ -85,11 +86,21 @@ export function createAgentSessions(
     connections: readonly AgentHostConnection[],
   ) => AgentTranscriptHost = resolveAgentHost,
   native?: OpenCodeProfiles,
+  remoteNative?: Pick<RemoteOpenCodeWorkers, "hosts" | "list" | "read" | "resolve">,
 ): AgentSessions {
   // Resolving a session means listing its host; over SSH that is a recursive
   // directory walk, so a ref that already resolved skips it on later pages.
   const resolved = new Map<string, AgentSessionFile>();
   const connections = async () => (await settings.load()).agentHosts.connections;
+  const nativeHosts = async (configured: readonly AgentHostConnection[]) => {
+    const hosts = (await remoteNative?.hosts()) ?? [];
+    for (const entry of hosts) {
+      const other = configured.find((value) => value.id === entry.id);
+      if (other && (other.ssh !== entry.ssh || other.shell !== entry.shell))
+        throw new AgentSessionRequestError("Agent host and native fleet identities conflict", 409);
+    }
+    return hosts;
+  };
   const host = async (id: string): Promise<AgentTranscriptHost> => resolveKnown(id, await connections());
   const resolveKnown = (id: string, configured: readonly AgentHostConnection[]) => {
     if (id !== "local" && !configured.some((entry) => entry.id === id))
@@ -129,6 +140,12 @@ export function createAgentSessions(
     async resolve(ref) {
       const { host: hostId, session } = parseAgentSessionRef(ref);
       if (!session || session.includes("\0")) throw new AgentSessionRequestError("Invalid session ref");
+      if (hostId !== "local" && session.startsWith("ses_")) {
+        if (!remoteNative)
+          throw new AgentSessionRequestError("Remote native OpenCode history unavailable", 409);
+        await nativeHosts(await connections());
+        return remoteNative.resolve(hostId, session);
+      }
       if (hostId === "local" && session.startsWith("ses_")) {
         if (!native) throw new AgentSessionRequestError("Native OpenCode history unavailable", 409);
         const source = await native.resolve(session);
@@ -185,13 +202,23 @@ export function createAgentSessions(
         workingDirectory,
       };
     },
-    hosts: async () => [{ id: "local" as const }, ...(await connections())],
+    hosts: async () => {
+      const configured = await connections();
+      const remoteHosts = await nativeHosts(configured);
+      return [
+        { id: "local" as const },
+        ...configured,
+        ...remoteHosts.filter((entry) => !configured.some((value) => value.id === entry.id)),
+      ];
+    },
     async list(options = {}) {
       if (
         options.limit !== undefined &&
         (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 100)
       )
         throw new AgentSessionRequestError("limit must be an integer from 1 to 100");
+      const configured = await connections();
+      const remoteHosts = await nativeHosts(configured);
       const ids =
         options.host === undefined
           ? ["local", ...(await connections()).map((entry) => entry.id)]
@@ -200,7 +227,12 @@ export function createAgentSessions(
         ids.map(async (id) => {
           try {
             return {
-              sessions: await listAgentSessions(await host(id), options.limit),
+              sessions:
+                id !== "local" &&
+                !configured.some((value) => value.id === id) &&
+                remoteHosts.some((value) => value.id === id)
+                  ? []
+                  : await listAgentSessions(await host(id), options.limit),
             };
           } catch (error) {
             if (options.host !== undefined) throw error;
@@ -225,6 +257,21 @@ export function createAgentSessions(
           });
         }
       }
+      for (const nativeHost of remoteHosts) {
+        if (options.host !== undefined && options.host !== nativeHost.id) continue;
+        try {
+          results.push({
+            sessions: (await remoteNative!.list(nativeHost.id, options.limit)).map(nativeSummary),
+          });
+        } catch (error) {
+          results.push({
+            error: {
+              host: nativeHost.id + "/opencode",
+              error: redactSensitiveText(error instanceof Error ? error.message : String(error)),
+            },
+          });
+        }
+      }
       return {
         sessions: results
           .flatMap((result) => result.sessions ?? [])
@@ -234,6 +281,20 @@ export function createAgentSessions(
     },
     async read(ref, options = {}) {
       const { host: hostId, session } = parseAgentSessionRef(ref);
+      if (hostId !== "local" && session.startsWith("ses_")) {
+        if (!remoteNative)
+          throw new AgentSessionRequestError("Remote native OpenCode history unavailable", 409);
+        await nativeHosts(await connections());
+        const value = await remoteNative.read(hostId, session, options);
+        const { modifiedAt: _modified, ...summary } = nativeSummary(value);
+        return {
+          session: summary,
+          entries: value.entries,
+          cursor: value.cursor,
+          ...(value.reset ? { reset: true as const } : {}),
+          ...(value.truncated ? { truncated: true as const } : {}),
+        };
+      }
       if (hostId === "local" && session.startsWith("ses_")) {
         if (!native) throw new AgentSessionRequestError("Native OpenCode history unavailable", 409);
         const value = await native.read(session, options);

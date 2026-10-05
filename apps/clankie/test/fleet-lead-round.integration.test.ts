@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,7 +110,14 @@ async function fixture(
   if (rebound) rows[0]!.terminal_id = "term_rebound";
   await configure?.(root, rows);
   const waits = new Map<string, Set<() => void>>();
+  let censusGate: { entered(): void; wait: Promise<void> } | undefined;
   const execute = async (args: readonly string[], signal?: AbortSignal): Promise<string> => {
+    if (censusGate && args[0] === "agent" && args[1] === "list") {
+      const held = censusGate;
+      censusGate = undefined;
+      held.entered();
+      await held.wait;
+    }
     let result: unknown;
     if (args[0] === "agent" && args[1] === "wait") {
       const target = args[2]!;
@@ -180,6 +188,18 @@ async function fixture(
     captain,
     rows,
     other: second.conversation.conversationId,
+    holdNextCensus: () => {
+      let entered!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const wait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      censusGate = { entered, wait };
+      return { started, release };
+    },
     finish: async (
       eventId: string,
       conversationId = "global-default",
@@ -534,4 +554,24 @@ it("periodic inspection queues behind an active native turn and coalesces until 
   const [event] = await f.captain.pollSeatEvents(3000, undefined, "global-default");
   expect(event?.content).toContain("Fleet lead round.");
   await f.finish(event!.id, "global-default", sessionId);
+});
+
+it("a held fleet refresh cannot recreate efficiency persistence after Captain closes", async () => {
+  const f = await fixture();
+  await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+  expect(existsSync(join(f.root, "seat-efficiency.json"))).toBe(true);
+  const held = f.holdNextCensus();
+  const refresh = f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+  try {
+    await held.started;
+    f.rows[0]!.agent_status = "idle";
+    await f.captain.close();
+    await rm(f.root, { recursive: true, force: true });
+    held.release();
+    await refresh;
+    expect(existsSync(f.root)).toBe(false);
+  } finally {
+    held.release();
+    await refresh.catch(() => undefined);
+  }
 });
