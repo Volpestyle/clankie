@@ -59,6 +59,7 @@ export interface ExternalVoiceRealtimePort {
   createTextItem(text: string): void;
   createImageItem(pngBase64: string, mimeType?: "image/png"): void;
   createResponse(context?: string, shouldStart?: () => boolean): void;
+  cancelResponse(requestEventId: string): void;
   submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void;
   close(): void;
 }
@@ -160,7 +161,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   private readonly dialogue: boolean;
   private readonly onTranscript: ((event: RealtimeTranscriptEvent) => void) | undefined;
   private closed = false;
-  private activeResponse: { requestEventId?: string; itemIds: Set<string> } | undefined;
+  private activeResponse: { requestEventId?: string; itemIds: Set<string>; cancelled?: boolean } | undefined;
   private correlatedResponses = false;
   private drainingResponses = false;
   private responseCallbackDepth = 0;
@@ -315,6 +316,33 @@ class ExternalVoiceConversation implements VoiceConversationPort {
   }
 
   /**
+   * The media owner no longer wants this response: a newer utterance
+   * superseded it before the room heard it, or barge-in cut it off. Its
+   * synthesis stops now rather than when the whole dead reply has been voiced,
+   * and a done held for its drain is released, so the next reply is not queued
+   * behind speech nobody will hear. Generation upstream is cancelled too.
+   */
+  public cancelResponse(requestEventId: string): void {
+    const active = this.activeResponse;
+    if (this.closed || active?.requestEventId !== requestEventId || active.cancelled === true) return;
+    active.cancelled = true;
+    this.responseCallbackDepth++;
+    try {
+      for (const itemId of active.itemIds) {
+        if (this.lastTextItemId === itemId) this.lastTextItemId = "";
+        this.closeItemContext(itemId);
+        this.dropItem(itemId);
+      }
+    } finally {
+      this.responseCallbackDepth--;
+    }
+    // A done already held for the drain was just released; otherwise the
+    // provider's cancelled done settles this response when it arrives.
+    if (this.activeResponse === active) this.requireRealtime().cancelResponse(requestEventId);
+    this.startNextResponse();
+  }
+
+  /**
    * Barge-in. The audio offset is playback wall-clock, meaningful to a human
    * reading the marker but not to the text item — there is no server-side
    * audio to trim, so the repair is stopping synthesis and telling the model
@@ -345,6 +373,11 @@ class ExternalVoiceConversation implements VoiceConversationPort {
 
   private handleTextDelta(delta: string, itemId: string): void {
     if (this.closed || this.droppedItemIds.has(itemId)) return;
+    if (this.activeResponse?.cancelled === true) {
+      // Trailing output of a cancelled response never reaches the mouth.
+      this.droppedItemIds.add(itemId);
+      return;
+    }
     this.activeResponse?.itemIds.add(itemId);
     let item = this.items.get(itemId);
     if (item?.modelDone) return;
