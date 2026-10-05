@@ -13,7 +13,6 @@ import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
-import { HostedComposerRefusedError } from "./hosted-body.ts";
 import {
   COMPOSER_TRANSCRIPTION_ROOT,
   COMPOSER_TRANSCRIPTION_AUDIO_BYTES_MAX,
@@ -24,13 +23,9 @@ import {
   ComposerTranscriptionRequestSchema,
   ComposerTranscriptionReceiptSchema,
   ComposerTranscriptionStatusSchema,
-  ComposerTranscriptionDeviceSchema,
   parseComposerWav,
-  type ComposerTranscriptionDevice,
   type ComposerTranscriptionReceipt,
   type ComposerTranscriptionStatus,
-  type HostedComposerTranscription,
-  type HostedComposerReceipt,
 } from "@clankie/protocol/composer-transcription";
 
 export interface ComposerDeviceAuthority {
@@ -41,10 +36,38 @@ export interface ComposerDeviceAuthority {
   current(): boolean;
   authorize(): Promise<boolean>;
 }
+/** Device authority proved by this body, independent of its transcription connection. */
+export interface ComposerTranscriptionPrincipal {
+  deviceId: string;
+  sessionExpiresAtMs: number;
+  authKeyId: string;
+  chat: true;
+  support: false;
+}
+/** A confirmed admission refusal; transport or provider uncertainty is never a refusal. */
+export const ComposerTranscriptionAdmissionRefusalSchema = z
+  .object({
+    refused: z.enum([
+      "authentication_required",
+      "forbidden",
+      "ineligible",
+      "allowance_exhausted",
+      "invalid_request",
+      "invalid_audio",
+      "capacity",
+    ]),
+  })
+  .strict();
+type ComposerTranscriptionAdmissionRefusal = z.infer<typeof ComposerTranscriptionAdmissionRefusalSchema>;
 export interface ComposerTranscriptionCloud {
-  status(device: ComposerTranscriptionDevice): Promise<ComposerTranscriptionStatus>;
-  transcribe(input: HostedComposerTranscription, signal: AbortSignal): Promise<ComposerTranscriptionReceipt>;
-  receipt(input: HostedComposerReceipt): Promise<ComposerTranscriptionReceipt>;
+  status(device: ComposerTranscriptionPrincipal): Promise<ComposerTranscriptionStatus>;
+  transcribe(
+    input: ComposerTranscriptionPrincipal & { requestId: string; sha256: string; audioBase64: string },
+    signal: AbortSignal,
+  ): Promise<ComposerTranscriptionReceipt | ComposerTranscriptionAdmissionRefusal>;
+  receipt(
+    input: ComposerTranscriptionPrincipal & { requestId: string },
+  ): Promise<ComposerTranscriptionReceipt>;
 }
 class Refusal extends Error {
   readonly status: 400 | 401 | 403 | 404 | 409 | 429 | 503;
@@ -81,7 +104,6 @@ export class ComposerTranscriptions {
   private readonly starts = new Map<string, number[]>();
   private readonly options: {
     root: string;
-    installationId?: string;
     cloud?: ComposerTranscriptionCloud;
     clock?: () => number;
   };
@@ -147,16 +169,15 @@ export class ComposerTranscriptions {
     if (owner.support || !owner.current() || !(await owner.authorize()) || !owner.current())
       throw new Refusal(403, "forbidden");
   }
-  private device(owner: ComposerDeviceAuthority): ComposerTranscriptionDevice {
-    if (!this.options.installationId || !owner.authKeyId) throw new Refusal(503, "unavailable");
-    return ComposerTranscriptionDeviceSchema.parse({
-      installationId: this.options.installationId,
+  private device(owner: ComposerDeviceAuthority): ComposerTranscriptionPrincipal {
+    if (!owner.authKeyId) throw new Refusal(503, "unavailable");
+    return {
       deviceId: owner.deviceId,
       authKeyId: owner.authKeyId,
       sessionExpiresAtMs: owner.sessionExpiresAtMs,
       chat: true,
-      support: owner.support,
-    });
+      support: false,
+    };
   }
   async status(owner: ComposerDeviceAuthority): Promise<ComposerTranscriptionStatus> {
     await this.guard(owner);
@@ -274,16 +295,14 @@ export class ComposerTranscriptions {
     const timeout = setTimeout(() => live.controller.abort(), 90_000);
     timeout.unref();
     try {
-      const receipt = ComposerTranscriptionReceiptSchema.parse(
-        await this.options.cloud.transcribe(
-          {
-            ...this.device(owner),
-            requestId,
-            sha256: createHash("sha256").update(audio).digest("hex"),
-            audioBase64: audio.toString("base64"),
-          },
-          live.controller.signal,
-        ),
+      const answer = await this.options.cloud.transcribe(
+        {
+          ...this.device(owner),
+          requestId,
+          sha256: createHash("sha256").update(audio).digest("hex"),
+          audioBase64: audio.toString("base64"),
+        },
+        live.controller.signal,
       );
       await this.guard(owner);
       if (this.find(requestId, owner).state === "cancelled") return this.result(this.find(requestId, owner));
@@ -291,17 +310,21 @@ export class ComposerTranscriptions {
         this.state(requestId, "uncertain");
         return this.result(this.find(requestId, owner));
       }
-      if (receipt.requestId !== requestId || !["complete", "failed", "uncertain"].includes(receipt.state))
-        throw new Error("invalid_receipt");
-      if (receipt.state === "complete") live.text = receipt.text;
-      live.error = receipt.error;
-      this.state(requestId, receipt.state);
-    } catch (error) {
+      const refusal = ComposerTranscriptionAdmissionRefusalSchema.safeParse(answer);
+      if (refusal.success) {
+        live.error = refusal.data.refused;
+        this.state(requestId, "failed");
+      } else {
+        const receipt = ComposerTranscriptionReceiptSchema.parse(answer);
+        if (receipt.requestId !== requestId || !["complete", "failed", "uncertain"].includes(receipt.state))
+          throw new Error("invalid_receipt");
+        if (receipt.state === "complete") live.text = receipt.text;
+        live.error = receipt.error;
+        this.state(requestId, receipt.state);
+      }
+    } catch {
       if (!this.closed && this.find(requestId, owner).state !== "cancelled") {
-        if (error instanceof HostedComposerRefusedError) {
-          live.error = error.code;
-          this.state(requestId, "failed");
-        } else this.state(requestId, "uncertain");
+        this.state(requestId, "uncertain");
       }
     } finally {
       clearTimeout(timeout);

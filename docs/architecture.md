@@ -102,6 +102,14 @@ The service-side contracts are documented in [credentials](credentials.md) and
 managed provisioning implementation belong in the private operations repository
 ([ADR 0183](adr/0183-the-harness-is-public-the-hosted-service-is-private.md)).
 
+The public service also defines optional host-selected
+[`runtime-provider` hooks](../apps/clankie/src/runtime-provider.ts), empty by
+default. Private managed-body composition supplies quotas, credit routes,
+heartbeat accounting and model-plan policy through those hooks. Generic service
+lifecycle, transport, signed pairing and device-security recovery stay public.
+The [Linux guide](../infra/hosted/README.md#optional-runtime-provider) documents
+module selection across launcher restarts.
+
 ## How a message becomes a turn
 
 Each surface authenticates a request and selects a conversation. The service

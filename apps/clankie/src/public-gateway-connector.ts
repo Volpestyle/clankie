@@ -15,10 +15,12 @@ import {
   type PublicGatewayPairingRouteFrame,
   type PublicGatewayRequestFrame,
   type PublicGatewayTunnelFrame,
+  type PublicGatewayRoute,
 } from "@clankie/protocol/public-gateway";
 import type { PublicGatewayPushWakeFrame } from "@clankie/protocol";
 import { WebSocket, type RawData } from "ws";
 import { GatewayEncryptionHost } from "./gateway-encryption.ts";
+import { validateRuntimeGatewayRoutes } from "./runtime-provider.ts";
 import { pairingOfferWire, type StoredPairingOffer } from "./pairing.ts";
 import type { PairingOfferWire } from "@clankie/protocol";
 import { hashPairingCode, hashPairingSecret } from "./pairing.ts";
@@ -43,8 +45,9 @@ export interface PublicGatewayConnectorOptions {
   readonly hostId: string;
   readonly hostToken?: string;
   readonly encryptionKey?: Uint8Array;
-  /** Authenticated customer work observed after decrypting and dispatching. */
-  readonly onCustomerWork?: () => void;
+  /** Work classification only; decrypted request content stays inside the public body. */
+  readonly onAuthenticatedRequest?: (isWork: boolean) => void;
+  readonly gatewayRoutes?: readonly PublicGatewayRoute[];
   /** Managed bodies stop after a forbidden host upgrade as well as a failed renewal. */
   readonly onHostRejected?: () => void;
   readonly installationId?: string;
@@ -111,6 +114,7 @@ export class PublicGatewayConnector {
 
   private readonly connectUrl: string;
   private readonly encryption: GatewayEncryptionHost | undefined;
+  private readonly gatewayRoutes: readonly PublicGatewayRoute[];
   private readonly hostId: string;
   private readonly hostToken: string | undefined;
   private readonly resolveHostToken:
@@ -140,12 +144,18 @@ export class PublicGatewayConnector {
   private started = false;
 
   public constructor(options: PublicGatewayConnectorOptions) {
+    this.gatewayRoutes = validateRuntimeGatewayRoutes(options.gatewayRoutes);
     const gatewayOrigin = requireHttpOrigin(options.gatewayUrl, "Gateway URL");
     this.hostId = PublicGatewayHostIdSchema.parse(options.hostId);
     this.encryption =
       options.encryptionKey === undefined
         ? undefined
-        : new GatewayEncryptionHost(this.hostId, options.encryptionKey, options.onCustomerWork);
+        : new GatewayEncryptionHost(
+            this.hostId,
+            options.encryptionKey,
+            options.onAuthenticatedRequest,
+            this.gatewayRoutes,
+          );
     if ((options.hostToken === undefined) === (options.resolveHostToken === undefined)) {
       throw new Error("Configure one static or renewable gateway host token source");
     }
@@ -467,7 +477,7 @@ export class PublicGatewayConnector {
     if (
       this.inFlight.size >= PUBLIC_GATEWAY_IN_FLIGHT_MAX ||
       this.inFlight.has(frame.requestId) ||
-      publicGatewayTargetFor(frame.method, frame.path) !== frame.target
+      publicGatewayTargetFor(frame.method, frame.path, this.gatewayRoutes) !== frame.target
     ) {
       socket.close(1008, "gateway request is outside the public contract");
       return;

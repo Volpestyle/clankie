@@ -12,12 +12,18 @@ import { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
 import { type GatewayEncryptionCredential } from "@clankie/protocol/gateway-encryption";
 import {
   COMPOSER_TRANSCRIPTION_CHUNK_BYTES_MAX,
+  ComposerTranscriptionReceiptSchema,
+  ComposerTranscriptionStatusSchema,
   parseComposerWav,
-  type ComposerTranscriptionDevice,
 } from "@clankie/protocol/composer-transcription";
 import { createComposerTranscriptionApi } from "../../../../packages/api-client/src/composer-transcription.ts";
 import { createGatewayEncryptedFetch } from "../../../../packages/api-client/src/gateway-encryption.ts";
-import { ComposerTranscriptions } from "../../src/composer-transcription.ts";
+import {
+  ComposerTranscriptions,
+  ComposerTranscriptionAdmissionRefusalSchema,
+  type ComposerTranscriptionCloud,
+  type ComposerTranscriptionPrincipal,
+} from "../../src/composer-transcription.ts";
 import { createClankieApp, type ClankieApp } from "../../src/app.ts";
 import { createStubCaptain } from "../../src/captain/port.ts";
 import { GatewayEncryptionHost, sealGatewayValue, openGatewayValue } from "../../src/gateway-encryption.ts";
@@ -94,7 +100,7 @@ export async function composerHttpFixture(managed = true) {
     | undefined;
   let supportStateGate: { entered: ReturnType<typeof gate>; release: ReturnType<typeof gate> } | undefined;
   const reached = gate(),
-    attestations: ComposerTranscriptionDevice[] = [];
+    attestations: ComposerTranscriptionPrincipal[] = [];
   const cloudUrl = await listen(
     createServer(async (req, res) => {
       const chunks: Buffer[] = [];
@@ -193,18 +199,39 @@ export async function composerHttpFixture(managed = true) {
       fetch(`${cloudUrl}/${new URL(String(url)).pathname.split("/").at(-1)}`, options),
   });
   await hostedClient.registerPairingKey(generateKeyPairSync("ed25519").privateKey);
-  const cloud = {
-    status: async (device: ComposerTranscriptionDevice) => hostedClient.composerTranscriptionStatus(device),
-    transcribe: async (input: Parameters<HostedBodyClient["composerTranscribe"]>[0], signal: AbortSignal) => {
-      const response = await hostedClient.composerTranscribe(input, signal);
+  // A generic test connection: the device lifecycle has no hosted server wire dependency.
+  const cloudRequest = async (
+    action: "status" | "transcribe" | "receipt",
+    input: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<unknown> => {
+    const response = await hostedClient.signedPost(`/fixture/transcription/${action}`, input, signal);
+    const answer: unknown = await response.json();
+    if (!response.ok) {
+      if (action === "transcribe" && [400, 401, 403, 429].includes(response.status)) {
+        const refusal = ComposerTranscriptionAdmissionRefusalSchema.safeParse({
+          refused: (answer as { error?: unknown })?.error,
+        });
+        if (refusal.success) return refusal.data;
+      }
+      throw new Error("fixture_transcription_unavailable");
+    }
+    return answer;
+  };
+  const cloud: ComposerTranscriptionCloud = {
+    status: async (device) =>
+      ComposerTranscriptionStatusSchema.parse(await cloudRequest("status", { ...device })),
+    transcribe: async (input, signal) => {
+      const response = await cloudRequest("transcribe", { ...input }, signal);
       if (loseResponse) {
         loseResponse = false;
         throw new Error("lost_receipt");
       }
-      return response;
+      const refusal = ComposerTranscriptionAdmissionRefusalSchema.safeParse(response);
+      return refusal.success ? refusal.data : ComposerTranscriptionReceiptSchema.parse(response);
     },
-    receipt: async (input: Parameters<HostedBodyClient["composerTranscriptionReceipt"]>[0]) =>
-      hostedClient.composerTranscriptionReceipt(input),
+    receipt: async (input) =>
+      ComposerTranscriptionReceiptSchema.parse(await cloudRequest("receipt", { ...input })),
   };
   const key = randomBytes(32),
     installationId = "i".repeat(22),
@@ -246,7 +273,6 @@ export async function composerHttpFixture(managed = true) {
         ? {
             composerTranscriptions: new ComposerTranscriptions({
               root: join(root, "composer"),
-              installationId,
               cloud,
               clock: () => now,
             }),

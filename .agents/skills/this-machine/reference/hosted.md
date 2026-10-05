@@ -36,8 +36,14 @@ ask for a GitHub or Linear token in chat; send the owner to the app or
 
 ## Managed hosted bodies
 
-`CLANKIE_HOSTED_BOOTSTRAP_FILE` selects a managed tenant body. Its private
-bootstrap supplies the fleet identity; the service renews its host credential
+`CLANKIE_HOSTED_BOOTSTRAP_FILE` supplies the signed managed host identity.
+The managed image also installs a private runtime provider selected by
+`CLANKIE_RUNTIME_PROVIDER_MODULE`; the public index loads it on every service
+restart. That provider owns included-model policy, quotas, credits and
+heartbeat accounting. Bootstrap identity alone does not enable those policies
+in the public image. Check the selected image and installed module path when a
+provider fails startup.
+The service renews its host credential
 through the fleet and stores renewals in the broker. Do not repair this by
 running `/gateway` sign-in or editing the bootstrap. A fleet rejection needs the
 managed tenant's entitlement/provisioning fixed. Unset means a self-hosted body.

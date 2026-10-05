@@ -75,7 +75,6 @@ import { EmbodimentManager, embodimentEventScope, isEmbodimentEventType } from "
 import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../event-log.ts";
 import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-routes.ts";
 import { ExecutionConnectSchema } from "../herdr-session.ts";
-import { createHostedCreditsRoutes } from "../hosted-credits-routes.ts";
 import { createComposerTranscriptionRoutes } from "../composer-transcription.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
@@ -908,7 +907,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   );
   /**
    * Owner operator or any active paired device: account data that is not a
-   * secret and needs no terminal grant, such as the hosted credit balance.
+   * secret and needs no terminal grant.
    */
   const authorizeOwnerDevice = async (
     request: Request,
@@ -953,7 +952,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "unavailable" }, 503);
     }
   });
-  app.route("/", createHostedCreditsRoutes(dependencies.hostedCredits, authorizeOwnerDevice));
+  if (dependencies.runtimeProvider?.quota)
+    app.route("/", dependencies.runtimeProvider.quota.routes(authorizeOwnerDevice));
   app.route(
     "/",
     createComposerTranscriptionRoutes(dependencies.composerTranscriptions, async (request) => {

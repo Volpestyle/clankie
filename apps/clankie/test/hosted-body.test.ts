@@ -1,20 +1,14 @@
 import { createHash, generateKeyPairSync, verify, type KeyObject } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hostedFixture } from "./fixtures/hosted-body.ts";
 import { describe, expect, it, vi } from "vitest";
-import { loadConfig, updateModelRouting } from "@clankie/model-provider";
 import { SettingsStore } from "@clankie/settings";
 import {
-  applyHostedModelRouting,
   applyHostedAccountApps,
-  applyHostedModelPolicy,
-  configureHostedModels,
-  HOSTED_DEFAULT_MODEL,
   HostedBodyClient,
   HostedBodyDeniedError,
-  hostedWorkerLimit,
   readHostedBodyBootstrap,
 } from "../src/hosted-body.ts";
 
@@ -78,7 +72,7 @@ describe("managed hosted credential", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-  it("accepts the fleet's optional tenant telemetry key while keeping the bootstrap strict", () => {
+  it("validates the whole allowlisted bootstrap before projecting generic security fields", () => {
     const dir = mkdtempSync(join(tmpdir(), "hosted-bootstrap-"));
     try {
       const path = join(dir, "bootstrap.json");
@@ -86,67 +80,32 @@ describe("managed hosted credential", () => {
       const withTelemetry = { ...bootstrap, tenantTelemetryKey: Buffer.alloc(32, 7).toString("base64url") };
       writeFileSync(path, JSON.stringify(withTelemetry));
       expect(readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toEqual(withTelemetry);
+      writeFileSync(
+        path,
+        JSON.stringify({
+          ...withTelemetry,
+          maxHiredWorkers: 4,
+          modelRouting: {
+            routineModel: "clankie/routine",
+            escalate: true,
+            escalationModel: "clankie/escalation",
+          },
+        }),
+      );
+      expect(readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toEqual(withTelemetry);
       for (const invalid of [
         { ...withTelemetry, tenantTelemetryKey: "not-a-256-bit-key" },
-        { ...withTelemetry, unexpectedSecret: "should-not-be-accepted" },
+        { ...withTelemetry, extra: true },
+        { ...withTelemetry, providerKey: "secret-marker" },
+        { ...withTelemetry, maxHiredWorkers: 0 },
+        { ...withTelemetry, modelRouting: { private: true } },
+        { ...withTelemetry, modelRouting: { routineModel: "badref", escalate: true } },
       ]) {
         writeFileSync(path, JSON.stringify(invalid));
         expect(() => readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toThrow(
           "Invalid hosted body bootstrap file",
         );
       }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-  it("takes the plan's model routing from the bootstrap and writes it over the body's routing", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "hosted-bootstrap-"));
-    try {
-      const path = join(dir, "bootstrap.json");
-      const { bootstrap } = hostedFixture();
-      const routed = {
-        ...bootstrap,
-        modelRouting: {
-          routineModel: "clankie/routine",
-          escalate: true,
-          escalationModel: "clankie/escalation",
-        },
-      };
-      writeFileSync(path, JSON.stringify(routed));
-      const read = readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path });
-      expect(read).toEqual(routed);
-      for (const invalid of [
-        { ...routed, modelRouting: { routineModel: "no-slash", escalate: false } },
-        { ...routed, modelRouting: { ...routed.modelRouting, apiKey: "sk-should-not-be-accepted" } },
-      ]) {
-        writeFileSync(path, JSON.stringify(invalid));
-        expect(() => readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toThrow(
-          "Invalid hosted body bootstrap file",
-        );
-      }
-
-      const env = { XDG_CONFIG_HOME: dir };
-      await updateModelRouting({ purposes: { gameplay: "routine" }, escalationModel: "openai/old" }, { env });
-      await applyHostedModelRouting(read!, { env });
-      expect((await loadConfig({ env, cwd: dir })).config.routing).toEqual({
-        purposes: { gameplay: "routine" },
-        routine_model: "clankie/routine",
-        escalate: true,
-        escalation_model: "clankie/escalation",
-      });
-      // A Starter plan drops escalation and its model; the body's own purpose choices stay.
-      await applyHostedModelRouting(
-        { modelRouting: { routineModel: "clankie/routine", escalate: false } },
-        { env },
-      );
-      expect((await loadConfig({ env, cwd: dir })).config.routing).toEqual({
-        purposes: { gameplay: "routine" },
-        routine_model: "clankie/routine",
-        escalate: false,
-      });
-      // No routing in the bootstrap leaves the body's config alone.
-      await applyHostedModelRouting({}, { env });
-      expect((await loadConfig({ env, cwd: dir })).config.routing?.routine_model).toBe("clankie/routine");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -397,7 +356,7 @@ describe("signed body fleet calls", () => {
   });
 });
 
-describe("included model calls (VUH-1371)", () => {
+describe("signed byte transport", () => {
   const proxyError = (status: number, code: string, type = "invalid_request_error") =>
     Response.json({ error: { message: `refused: ${code}`, type, code } }, { status });
   async function registered(fetcher: typeof fetch) {
@@ -407,22 +366,22 @@ describe("included model calls (VUH-1371)", () => {
     await client.registerPairingKey(signing.privateKey);
     return { f, client, signing };
   }
-  const modelCalls = (fetcher: ReturnType<typeof vi.fn<typeof fetch>>) =>
-    fetcher.mock.calls.filter(([url]) => String(url).includes("/fleet/v1/model/"));
+  const transportCalls = (fetcher: ReturnType<typeof vi.fn<typeof fetch>>) =>
+    fetcher.mock.calls.filter(([url]) => String(url).includes("/extension/"));
 
-  it("signs the exact bytes to the model proxy, with the digest header, and relays the answer", async () => {
+  it("signs the exact bytes to the requested path, with the digest header, and relays the answer", async () => {
     const fetcher = vi.fn<typeof fetch>(async (url) =>
-      String(url).includes("/model/")
+      String(url).includes("/extension/")
         ? new Response("data: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } })
         : Response.json({}),
     );
     const { f, client, signing } = await registered(fetcher);
     const bytes = new Uint8Array(Buffer.from('{"model":"default","input":"☃","stream":true}'));
-    const answer = await client.forwardModel("responses", bytes);
+    const answer = await client.signedBytes("/extension/v1/requests", bytes);
     expect(answer.headers.get("content-type")).toBe("text/event-stream");
     expect(await answer.text()).toBe("data: {}\n\n");
-    const [[url, init]] = modelCalls(fetcher) as [[string, RequestInit]];
-    expect(new URL(url).href).toBe(`${f.bootstrap.gatewayOrigin}/fleet/v1/model/v1/responses`);
+    const [[url, init]] = transportCalls(fetcher) as [[string, RequestInit]];
+    expect(new URL(url).href).toBe(`${f.bootstrap.gatewayOrigin}/extension/v1/requests`);
     expect(init.body).toBe(bytes);
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe(`Bearer ${f.bootstrap.hostCredential}`);
@@ -431,7 +390,7 @@ describe("included model calls (VUH-1371)", () => {
     const transcript = [
       "clankie-body-request-v1",
       "POST",
-      "/fleet/v1/model/v1/responses",
+      "/extension/v1/requests",
       f.bootstrap.tenantId,
       f.bootstrap.installationId,
       headers.get("x-clankie-body-timestamp"),
@@ -450,13 +409,13 @@ describe("included model calls (VUH-1371)", () => {
 
   it("re-signs a rejected signature up to three times, each with a fresh nonce", async () => {
     const fetcher = vi.fn<typeof fetch>(async (url) =>
-      String(url).includes("/model/") ? proxyError(401, "body_signature_invalid") : Response.json({}),
+      String(url).includes("/extension/") ? proxyError(401, "body_signature_invalid") : Response.json({}),
     );
     const { client } = await registered(fetcher);
     client.onSignatureInvalid = vi.fn();
-    const answer = await client.forwardModel("chat/completions", new Uint8Array(Buffer.from("{}")));
+    const answer = await client.signedBytes("/extension/v1/alternate", new Uint8Array(Buffer.from("{}")));
     expect(answer.status).toBe(401);
-    const nonces = modelCalls(fetcher).map(([, init]) =>
+    const nonces = transportCalls(fetcher).map(([, init]) =>
       new Headers(init?.headers).get("x-clankie-body-nonce"),
     );
     expect(nonces).toHaveLength(3);
@@ -467,21 +426,21 @@ describe("included model calls (VUH-1371)", () => {
   it("re-registers a missing pairing key once, then sends the call again", async () => {
     let model = 0;
     const fetcher = vi.fn<typeof fetch>(async (url) =>
-      String(url).includes("/model/")
+      String(url).includes("/extension/")
         ? model++ === 0
           ? Response.json({ error: "pairing_key_required" }, { status: 403 })
           : Response.json({ id: "resp" })
         : Response.json({}),
     );
     const { client } = await registered(fetcher);
-    const answer = await client.forwardModel("responses", new Uint8Array(Buffer.from("{}")));
+    const answer = await client.signedBytes("/extension/v1/requests", new Uint8Array(Buffer.from("{}")));
     expect(answer.status).toBe(200);
     const paths = fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname);
     expect(paths).toEqual([
       "/fleet/v1/body/pairing-key",
-      "/fleet/v1/model/v1/responses",
+      "/extension/v1/requests",
       "/fleet/v1/body/pairing-key",
-      "/fleet/v1/model/v1/responses",
+      "/extension/v1/requests",
     ]);
   });
 
@@ -495,177 +454,33 @@ describe("included model calls (VUH-1371)", () => {
     [400, "unsupported_model", "invalid_request_error"],
   ] as const)("never retries %i %s, and never parks the body for it", async (status, code, type) => {
     const fetcher = vi.fn<typeof fetch>(async (url) =>
-      String(url).includes("/model/") ? proxyError(status, code, type) : Response.json({}),
+      String(url).includes("/extension/") ? proxyError(status, code, type) : Response.json({}),
     );
     const { client } = await registered(fetcher);
     client.onDenied = vi.fn();
-    const answer = await client.forwardModel("responses", new Uint8Array(Buffer.from("{}")));
+    const answer = await client.signedBytes("/extension/v1/requests", new Uint8Array(Buffer.from("{}")));
     expect(answer.status).toBe(status);
     expect(await answer.json()).toMatchObject({ error: { code } });
-    expect(modelCalls(fetcher)).toHaveLength(1);
+    expect(transportCalls(fetcher)).toHaveLength(1);
     expect(client.onDenied).not.toHaveBeenCalled();
     // The next call still goes out: a refusal is not a revoked body.
-    await client.forwardModel("responses", new Uint8Array(Buffer.from("{}")));
-    expect(modelCalls(fetcher)).toHaveLength(2);
+    await client.signedBytes("/extension/v1/requests", new Uint8Array(Buffer.from("{}")));
+    expect(transportCalls(fetcher)).toHaveLength(2);
   });
 
   it("retries one network failure before any answer with a new nonce, and no more", async () => {
     const fetcher = vi.fn<typeof fetch>(async (url) => {
-      if (String(url).includes("/model/")) throw new TypeError("fetch failed");
+      if (String(url).includes("/extension/")) throw new TypeError("fetch failed");
       return Response.json({});
     });
     const { client } = await registered(fetcher);
-    await expect(client.forwardModel("responses", new Uint8Array(Buffer.from("{}")))).rejects.toThrow();
-    const nonces = modelCalls(fetcher).map(([, init]) =>
+    await expect(
+      client.signedBytes("/extension/v1/requests", new Uint8Array(Buffer.from("{}"))),
+    ).rejects.toThrow();
+    const nonces = transportCalls(fetcher).map(([, init]) =>
       new Headers(init?.headers).get("x-clankie-body-nonce"),
     );
     expect(nonces).toHaveLength(2);
     expect(nonces[0]).not.toBe(nonces[1]);
-  });
-});
-
-describe("included model and customer model paths (VUH-1371)", () => {
-  const plan = {
-    modelRouting: { routineModel: "clankie/routine", escalate: true, escalationModel: "clankie/escalation" },
-  };
-  async function withConfig(
-    initial: Record<string, unknown> | undefined,
-    run: (env: NodeJS.ProcessEnv) => Promise<void>,
-  ) {
-    const dir = mkdtempSync(join(tmpdir(), "hosted-models-"));
-    try {
-      if (initial !== undefined) {
-        mkdirSync(join(dir, "clankie"), { recursive: true });
-        writeFileSync(join(dir, "clankie", "clankie.json"), JSON.stringify(initial));
-      }
-      await run({ XDG_CONFIG_HOME: dir });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }
-  const credentials =
-    (...providers: string[]) =>
-    async (providerId: string) =>
-      providers.includes(providerId);
-
-  it("starts a new body on the included model with the plan's routing", async () => {
-    await withConfig(undefined, async (env) => {
-      await configureHostedModels("http://127.0.0.1:4319/v1", { env });
-      await expect(applyHostedModelPolicy(plan, { env, hasCredential: credentials() })).resolves.toBe(
-        "included",
-      );
-      const { config } = await loadConfig({ env });
-      expect(config.model).toBe(HOSTED_DEFAULT_MODEL);
-      expect(config.provider?.clankie).toMatchObject({
-        npm: "@ai-sdk/openai",
-        options: { baseURL: "http://127.0.0.1:4319/v1" },
-      });
-      // The proxy bounds output per plan at 32,768 (VUH-1391); the body must not ask for less,
-      // or long code answers are cut off mid-file at the old 8,192.
-      for (const model of Object.values(config.provider?.clankie?.models ?? {})) {
-        expect(model).toMatchObject({ limit: { output: 32_768 } });
-      }
-      expect(Object.keys(config.provider?.clankie?.models ?? {}).sort()).toEqual([
-        "default",
-        "escalation",
-        "routine",
-      ]);
-      expect(config.routing).toMatchObject({
-        routine_model: "clankie/routine",
-        escalate: true,
-        escalation_model: "clankie/escalation",
-      });
-    });
-  });
-
-  const customerRouting = {
-    routine_model: "openai/gpt-5.4-nano",
-    escalate: true,
-    escalation_model: "openai/gpt-6-astra",
-    purposes: { gameplay: "routine" },
-  };
-  it.each([
-    ["an API key (BYOK)", "openai/gpt-6-luna", "openai"],
-    ["a subscription login (BYOS)", "openai-codex/gpt-6-astra", "openai-codex"],
-    ["a subscription login behind an openai/ selection (ADR 0052)", "openai/gpt-6-astra", "openai-codex"],
-  ])(
-    "gives a customer model backed by %s no plan routing, and keeps its own routing across restarts",
-    async (_kind, model, provider) => {
-      await withConfig({ model, routing: customerRouting }, async (env) => {
-        // Two boots: the plan's bootstrap routing is present both times and applied neither time.
-        for (let boot = 0; boot < 2; boot++) {
-          await configureHostedModels("http://127.0.0.1:4319/v1", { env });
-          await expect(
-            applyHostedModelPolicy(plan, { env, hasCredential: credentials(provider) }),
-          ).resolves.toBe("customer");
-        }
-        const { config } = await loadConfig({ env });
-        expect(config.model).toBe(model);
-        expect(config.routing).toEqual(customerRouting);
-      });
-    },
-  );
-
-  it("clears the routing an earlier plan wrote once the customer's own model takes over", async () => {
-    await withConfig(
-      {
-        model: "openai/gpt-6-luna",
-        routing: {
-          routine_model: "clankie/routine",
-          escalate: true,
-          escalation_model: "clankie/escalation",
-          purposes: { gameplay: "routine" },
-        },
-      },
-      async (env) => {
-        await expect(
-          applyHostedModelPolicy(plan, { env, hasCredential: credentials("openai") }),
-        ).resolves.toBe("customer");
-        // No turn can reach the included model; the customer's purpose choice stays.
-        expect((await loadConfig({ env })).config.routing).toEqual({ purposes: { gameplay: "routine" } });
-      },
-    );
-  });
-
-  it("returns a customer model whose credential is gone to the included model and the plan's routing", async () => {
-    await withConfig({ model: "openai/gpt-6-luna", routing: customerRouting }, async (env) => {
-      await expect(applyHostedModelPolicy(plan, { env, hasCredential: credentials() })).resolves.toBe(
-        "included",
-      );
-      const { config } = await loadConfig({ env });
-      expect(config.model).toBe(HOSTED_DEFAULT_MODEL);
-      expect(config.routing).toMatchObject({
-        routine_model: "clankie/routine",
-        escalate: true,
-        escalation_model: "clankie/escalation",
-      });
-    });
-  });
-});
-
-describe("a hosted body's hire limit (VUH-1388)", () => {
-  it("takes the plan's limit from the bootstrap, else two per vCPU", () => {
-    expect(hostedWorkerLimit({ maxHiredWorkers: 6 }, 2)).toBe(6);
-    expect(hostedWorkerLimit({}, 2)).toBe(4);
-    expect(hostedWorkerLimit({}, 4)).toBe(8);
-    expect(hostedWorkerLimit({}, 0)).toBe(1);
-  });
-
-  it("accepts the plan's limit in the bootstrap within bounds", () => {
-    const dir = mkdtempSync(join(tmpdir(), "hosted-bootstrap-"));
-    try {
-      const path = join(dir, "bootstrap.json");
-      const { bootstrap } = hostedFixture();
-      writeFileSync(path, JSON.stringify({ ...bootstrap, maxHiredWorkers: 8 }));
-      expect(readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })?.maxHiredWorkers).toBe(8);
-      for (const bad of [0, 65, 2.5]) {
-        writeFileSync(path, JSON.stringify({ ...bootstrap, maxHiredWorkers: bad }));
-        expect(() => readHostedBodyBootstrap({ CLANKIE_HOSTED_BOOTSTRAP_FILE: path })).toThrow(
-          "Invalid hosted body bootstrap file",
-        );
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });

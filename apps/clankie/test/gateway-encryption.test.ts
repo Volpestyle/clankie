@@ -45,8 +45,8 @@ async function account(
 ) {
   const hostId = derivePublicGatewayHostId(accountId, "i".repeat(22));
   const master = randomBytes(32);
-  const onCustomerWork = vi.fn();
-  let host = new GatewayEncryptionHost(hostId, master, onCustomerWork);
+  const onAuthenticatedRequest = vi.fn();
+  let host = new GatewayEncryptionHost(hostId, master, onAuthenticatedRequest);
   let credential: GatewayEncryptionCredential;
   const base = `http://127.0.0.1/h/${hostId}`;
   const app = await createClankieApp({
@@ -102,7 +102,7 @@ async function account(
   const headers = { authorization: `Bearer ${device.deviceToken}`, "content-type": "application/json" };
   return {
     app,
-    onCustomerWork,
+    onAuthenticatedRequest,
     base,
     headers,
     device,
@@ -308,11 +308,12 @@ it("returns a self-hosted 404 through the encrypted wake-key route", async () =>
   expect(response.status).toBe(404);
 });
 
-it("counts only authorized work after decrypting, excluding polling and revoked sends", async () => {
+it("passes only work classification across the runtime boundary and excludes revoked sends", async () => {
   const own = await account("work-account");
-  expect(own.onCustomerWork).toHaveBeenCalledTimes(2); // successful pairing
+  expect(own.onAuthenticatedRequest).toHaveBeenCalledTimes(2); // successful pairing
   await own.client(`${own.base}/v1/devices/self`, { headers: own.headers });
-  expect(own.onCustomerWork).toHaveBeenCalledTimes(2);
+  expect(own.onAuthenticatedRequest).toHaveBeenCalledTimes(3);
+  expect(own.onAuthenticatedRequest).toHaveBeenLastCalledWith(false);
   const body = JSON.stringify({
     op: "send",
     schemaVersion: 1,
@@ -326,7 +327,11 @@ it("counts only authorized work after decrypting, excluding polling and revoked 
     },
   });
   await own.client(`${own.base}/operator/v1/dispatch`, { method: "POST", headers: own.headers, body });
-  expect(own.onCustomerWork).toHaveBeenCalledTimes(3);
+  expect(own.onAuthenticatedRequest).toHaveBeenCalledTimes(4);
+  expect(own.onAuthenticatedRequest).toHaveBeenLastCalledWith(true);
+  expect(
+    own.onAuthenticatedRequest.mock.calls.every((args) => args.length === 1 && typeof args[0] === "boolean"),
+  ).toBe(true);
   await own.app.app.request(`/v1/devices/${own.device.deviceId}/revoke`, {
     method: "POST",
     headers: { authorization: "Bearer owner" },
@@ -337,7 +342,7 @@ it("counts only authorized work after decrypting, excluding polling and revoked 
     body,
   });
   expect(denied.status).toBe(401);
-  expect(own.onCustomerWork).toHaveBeenCalledTimes(3);
+  expect(own.onAuthenticatedRequest).toHaveBeenCalledTimes(4);
 });
 
 it("carries model keys only in the encrypted envelope and still checks machine authority", async () => {

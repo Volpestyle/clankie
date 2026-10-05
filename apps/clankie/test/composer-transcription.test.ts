@@ -25,8 +25,8 @@ it("transcribes bounded WAV chunks through genuine paired-device encryption, pre
     deviceId: f.device.deviceId,
     chat: true,
     support: false,
-    installationId: "i".repeat(22),
   });
+  expect(f.attestations.at(-1)).not.toHaveProperty("installationId");
   expect(f.attestations.at(-1)?.authKeyId).toMatch(/^[A-Za-z0-9_-]{22}$/u);
   expect(readdirSync(join(f.root, "composer/audio"))).toEqual([]);
   expect(f.outer.join(" ")).not.toContain("PRIVATE_AUDIO_MARKER");

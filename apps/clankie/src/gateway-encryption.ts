@@ -1,4 +1,3 @@
-import { isHostedCustomerWork } from "./hosted-heartbeat.ts";
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from "node:crypto";
 import { z } from "zod";
 import { PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID, type CredentialStore } from "@clankie/credential-broker";
@@ -15,8 +14,54 @@ import {
   type GatewayEncryptionCredential,
   type GatewayPlainResponse,
 } from "@clankie/protocol/gateway-encryption";
-import { publicGatewayTargetFor } from "@clankie/protocol/public-gateway";
+import { publicGatewayTargetFor, type PublicGatewayRoute } from "@clankie/protocol/public-gateway";
 import type { StoredPairingOffer } from "./pairing.ts";
+import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
+import { validateRuntimeGatewayRoutes } from "./runtime-provider.ts";
+
+const INTERACTIVE_OPERATIONS = new Set([
+  "create",
+  "fork",
+  "reset",
+  "close",
+  "send",
+  "cancel",
+  "channel",
+  "update_persona",
+  "set_persona_role",
+  "react",
+  "close_seat",
+  "spawn_seat",
+  "move_seat",
+  "terminal_control",
+  "terminal_input",
+  "publish_file",
+]);
+
+/** Classify after successful authenticated dispatch; decrypted content stays public. */
+function authenticatedWork(method: string, path: string, body: string): boolean {
+  if (method !== "POST") return false;
+  if (path === "/v1/hosted/operator") {
+    try {
+      const inner = z
+        .object({ method: z.enum(["GET", "POST"]), path: z.string(), body: z.string().optional() })
+        .parse(JSON.parse(body));
+      return inner.path !== path && authenticatedWork(inner.method, inner.path, inner.body ?? "");
+    } catch {
+      return false;
+    }
+  }
+  if (path === "/v1/pairing/redeem" || path === "/v1/pairing/complete") return true;
+  if (path !== "/operator/v1/dispatch") return false;
+  try {
+    const request = OperatorConversationServiceRequestSchema.parse(JSON.parse(body));
+    if (request.op === "autonomy") return request.command.action !== "status";
+    if (request.op === "connections") return request.command.action !== "list";
+    return INTERACTIVE_OPERATIONS.has(request.op);
+  } catch {
+    return false;
+  }
+}
 
 const TicketSchema = z
   .object({
@@ -64,11 +109,18 @@ export class GatewayEncryptionHost {
   private readonly challenges = new Map<string, number>();
   private readonly hostId: string;
   private readonly wrappingKey: Uint8Array;
-  private readonly onCustomerWork: (() => void) | undefined;
-  public constructor(hostId: string, wrappingKey: Uint8Array, onCustomerWork?: () => void) {
-    this.onCustomerWork = onCustomerWork;
+  private readonly onAuthenticatedRequest: ((isWork: boolean) => void) | undefined;
+  private readonly gatewayRoutes: readonly PublicGatewayRoute[];
+  public constructor(
+    hostId: string,
+    wrappingKey: Uint8Array,
+    onAuthenticatedRequest?: (isWork: boolean) => void,
+    gatewayRoutes: readonly PublicGatewayRoute[] = [],
+  ) {
+    this.onAuthenticatedRequest = onAuthenticatedRequest;
     this.hostId = hostId;
     this.wrappingKey = wrappingKey;
+    this.gatewayRoutes = validateRuntimeGatewayRoutes(gatewayRoutes);
   }
 
   public pairingCredential(offer: StoredPairingOffer): GatewayEncryptionCredential {
@@ -133,7 +185,7 @@ export class GatewayEncryptionHost {
         (ticket.stage !== "device" || request.path !== "/v1/devices/self" || request.method !== "GET")
       )
         throw new Error("Invalid push proof");
-      const target = publicGatewayTargetFor(request.method, request.path);
+      const target = publicGatewayTargetFor(request.method, request.path, this.gatewayRoutes);
       if (
         target === undefined ||
         request.path.startsWith("/v1/gateway/") ||
@@ -184,11 +236,10 @@ export class GatewayEncryptionHost {
           ...(requestBody === undefined ? {} : { body: requestBody }),
         }),
       );
-      if (
-        response.ok &&
-        isHostedCustomerWork(request.method, request.path, requestBody?.toString("utf8") ?? "")
-      )
-        this.onCustomerWork?.();
+      if (response.ok)
+        this.onAuthenticatedRequest?.(
+          authenticatedWork(request.method, request.path, requestBody?.toString("utf8") ?? ""),
+        );
       if (
         response.ok &&
         ["/v1/pairing/redeem", "/v1/pairing/complete", "/v1/devices/self/session/refresh"].includes(

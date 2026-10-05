@@ -27,7 +27,8 @@ need it to run one?
 - **Private (`clankie-ops`)**: the gateway source, Cognito accounts, gateway
   and account AWS templates and deploy workflow, production configuration, App
   Store and launch records, and any future managed-hosting control plane
-  (billing, tenant provisioning, lifecycle, quotas).
+  (billing, tenant provisioning, lifecycle, quotas). Managed-body composition
+  and its credit, heartbeat-accounting and model-plan policy live here too.
 - **Private (`clankie-app`)**: the iPhone, iPad and macOS companion app.
 
 ```mermaid
@@ -38,17 +39,55 @@ flowchart LR
   end
   subgraph Private["private repos"]
     Gateway["clankie-ops<br/>gateway, accounts, AWS, records"]
+    Managed["apps/body<br/>managed runtime provider"]
     App["clankie-app<br/>companion app"]
   end
   Protocol -->|sibling workspace| Gateway
   Protocol -->|sibling workspace| App
   Mac -->|outbound connector| Gateway
+  Managed -->|optional installed hooks| Mac
   App -->|HTTPS| Gateway
 ```
 
 The protocol is the contract and stays public, because the public Mac connector
 speaks it. Private repos consume it in place from a sibling checkout; changes
 flow from here outward, never back.
+
+## Amendment: optional managed runtime composition (2026-10-05, VUH-1664)
+
+The public service defines an optional
+[`RuntimeProvider`](../../apps/clankie/src/runtime-provider.ts). With no
+`CLANKIE_RUNTIME_PROVIDER_MODULE`, it loads an empty provider: no managed quota
+routes, credit accounting, plan model routing or hire limits. A host can select
+an installed module by its absolute path. The service loads its
+`createRuntimeProvider` factory on every index restart; a configured provider
+must initialize before Clankie starts. This is deployment configuration, never
+a tool argument or model-selected module.
+
+The hooks are generic: optional routes receive the existing owner/device
+authorizer and declare exact gateway routes; heartbeat hooks observe raw turn
+origins, authenticated activity and service lifetime; model hooks supply worker
+models and react to model changes. None grants a new device, tool, account or
+machine authority. The ordinary public service, transport and lifecycle remain
+the implementation used by both deployments.
+
+Private `clankie-ops/apps/body` supplies credit routes, quotas, control-plane
+heartbeat accounting, the included-usage forwarder and customer-model policy.
+Its image extends a selected public Linux image and keeps the provider module
+path in image configuration, so launcher restarts retain the composition.
+The credits schema and route declarations moved from `@clankie/protocol` into
+the private `@clankie/hosted-protocol` package. The companion app keeps the wire
+decoder it consumes locally in its private repo, so its CI does not require
+access to the operations checkout.
+
+Signed body requests, credential renewal, pairing and
+[`hosted-device-security`](../../apps/clankie/src/hosted-device-security.ts)
+remain public remote-access client code. They keep keys on the host, bind
+requests and replies to the correct identity, prevent pairing replay, and
+recover device revocations safely after a disk restore. Owners need these
+boundaries to inspect or run remote access; their presence does not select a
+managed plan or enable business policy. Managed infrastructure and the server
+half of those contracts remain private.
 
 ## Alternatives considered
 

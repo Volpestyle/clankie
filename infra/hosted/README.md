@@ -106,7 +106,32 @@ state. `workspace` holds project files. Both run as UID 1000; the file credentia
 broker writes mode 0600. Do not share these volumes between owners or mount a
 host home/Docker socket into a worker. The Docker host administrator can access
 container state. Managed multi-tenant provisioning, backups, quotas and stronger
-isolation remain deployment work.
+isolation belong to the private operations deployment.
+
+## Optional runtime provider
+
+The public image starts with an empty runtime provider. It adds no managed
+credit routes, heartbeat accounting, plan model routing or hire limits.
+[`RuntimeProvider`](../../apps/clankie/src/runtime-provider.ts) defines optional
+quota routes and capacity, heartbeat activity and lifetime, and model hooks. Routes use
+the service's existing owner/device authorizer; their exact gateway route
+declarations are supplied only when the provider is installed. These hooks do
+not change tool, account, device or machine authority.
+
+`CLANKIE_RUNTIME_PROVIDER_MODULE` selects an absolute installed JavaScript
+module exporting `createRuntimeProvider(context)`. The service loads it on every
+index restart, including restarts started by the launcher. An invalid or
+unavailable selected module fails startup. An ordinary self-hosted installation
+leaves the variable unset and uses its configured models and connections.
+
+Managed composition lives in private `clankie-ops/apps/body`: credits, quotas,
+control-plane heartbeat accounting, included-usage forwarding and customer-model
+policy. Its image extends this public runtime and persists the module path in
+image configuration. The generic transport, launcher lifecycle, signed body
+requests, pairing and device-security recovery remain public. See
+[ADR 0183](../../docs/adr/0183-the-harness-is-public-the-hosted-service-is-private.md)
+for the repository boundary. Managed deployment/build instructions and business
+wire schemas live in the private repository.
 
 ## Scope and verification
 
@@ -155,35 +180,13 @@ environment, command arguments or logs. Its exact fields are:
 }
 ```
 
-The optional `maxHiredWorkers` is the plan's limit on hired agents running at
-once (see "Included model usage"). Absent, the body allows two per vCPU.
-
 The optional `tenantTelemetryKey` is the fleet-derived 32-byte tenant telemetry
 key, encoded as 43 base64url characters. Treat it as a secret with the other
 bootstrap fields.
 
-The optional `modelRouting` is the plan's task-based model routing
-([ADR 0192](../../docs/adr/0192-model-routing-by-kind-of-task.md)):
-`{ "routineModel": "clankie/default", "escalate": false }`, with an optional
-`escalationModel`. The fleet writes it per plan (VUH-1391): Starter as shown, Pro
-with `"escalate": true, "escalationModel": "clankie/escalation"`. Routine
-purposes run on `clankie/default` because luna is already the cheapest good
-model measured; the proxy's `routine` alias is unused on purpose. A Pro turn
-reaches the escalation model only when Clankie calls `escalate`. It applies only while the body runs on included usage (see
-"Included model usage" below). Then, at every start and whenever the body
-returns to included usage, the body writes it over its own routing settings
-(routine model, escalation and escalation model; the owner's purpose
-overrides stay), so a plan change lands on the next boot. Absent, the body's
-routing is left alone. The model proxy, not this field, enforces what a plan
-may spend.
-
-Included-usage requests are shaped to fit the proxy
-([ADR 0195](../../docs/adr/0195-hosted-requests-fit-the-model-proxy.md)): sessions
-compact at 250k tokens unless `clankie model compaction` says otherwise, a
-request over about 1.8 MiB drops older images and trims older outsized tool
-output before it is sent, and each lane shares one prompt cache key per install.
-The loadout (`CLANKIE_SERVICES=clankie,relay`) runs no Discord body, so the
-voice, music and screen-share tools are not offered.
+The private provider reads any additional managed-plan fields. The public
+bootstrap reader validates the generic transport identity and does not apply
+plan policy.
 
 The body validates this configuration and the signed credential's identity before
 connecting. It derives its host id from the account and installation, uses the
@@ -237,25 +240,6 @@ live session chooses the device id; device revocation immediately denies local
 access and retries fleet key removal on failure and after restart. Self-hosted
 bodies answer 404, including through the encrypted gateway.
 
-The owner's app reads the account's AI credits with `GET /v1/hosted/credits`
-([VUH-1403](https://linear.app/vuhlp/issue/VUH-1403)), inside the encrypted
-device channel. Any live paired device or the operator may read it; it is
-account data, not a secret. The body asks the fleet with a signed
-`POST /fleet/v1/body/credits` carrying only `{ installationId }` and returns
-the answer unchanged once it matches `HostedCreditsSchema`
-(`@clankie/protocol/hosted-credits`), with `cache-control: no-store`. A fleet
-failure or an answer outside the contract is `503 unavailable`; self-hosted
-bodies answer `404 not_hosted`. Neither the request nor the answer is logged.
-
-Idle accounting reports actual work to `/fleet/v1/body/heartbeat`: human and
-owner-configured external-event captain turns, running owner-goal continuations,
-and working Herdr/headless seats. Self-wakes, presence and polling earn no busy
-credit. Successful pairing and operator writes update customer activity; tails,
-fleet reads and token refresh do not. Reports go out on changes, each minute
-while busy, and every five minutes while idle. The fleet remains responsible for
-sleep and budget enforcement; the service records its returned desired state and
-uses the ordinary graceful shutdown when the instance stops.
-
 ## Managed web pairing
 
 The body keeps an Ed25519 pairing signing key in the volume-backed credential
@@ -267,13 +251,12 @@ A provisioned boot delivers a fresh registration token; it is optional on a
 service restart that retains the same key. It never enters the gateway socket,
 logs, or an offer response.
 
-Registration completes before heartbeat, wake-key writes or credential renewal.
+Registration completes before other authenticated body calls.
 A lost registration response or `5xx` retries with the same token and public
 key (three attempts). Once registered, that same Ed25519 private key signs
-every POST to `/fleet/v1/body/heartbeat`, `/fleet/v1/body/wake-keys`,
-`/fleet/v1/body/wake-keys/revoke`, `/fleet/v1/body/credits` and
-`/fleet/v1/body/host-credential`.
-Renewal sends `{}`. Registration itself is unsigned.
+authenticated body requests, including wake-key registration/revocation and
+`/fleet/v1/body/host-credential`. Private providers use the same signed transport
+for their routes. Renewal sends `{}`. Registration itself is unsigned.
 
 Signed requests retain the bearer credential and add `x-clankie-body-timestamp`
 (epoch milliseconds), `x-clankie-body-nonce` (16 random bytes, base64url), and
@@ -286,75 +269,6 @@ the body; the fleet's model proxy requires it. Every retry gets a fresh nonce
 and timestamp. The fleet allows five minutes of clock skew and accepts each
 nonce once. A `401 body_signature_invalid` gets at most three attempts, then
 emits only that error code; check clock skew or a pairing-key mismatch.
-
-### Included model usage
-
-A managed body has no provider key of its own ([VUH-1371](https://linear.app/vuhlp/issue/VUH-1371)).
-At start it opens a loopback forwarder on an ephemeral `127.0.0.1` port and
-declares the provider `clankie` in its `clankie.json`, with the models
-`default`, `routine` and `escalation` (the fleet model proxy's aliases),
-OpenAI's Responses protocol, and the forwarder as `options.baseURL`. The
-forwarder accepts `POST /v1/responses`, `/v1/chat/completions` and
-`/v1/images/generations` and sends each body unchanged to
-`/fleet/v1/model/v1/<endpoint>` on the gateway origin, signed like the calls
-above, digest header included. Bodies over 2 MiB get `413` locally. It relays
-the proxy's status, content type and stream as they arrive.
-
-It retries only what the proxy allows:
-
-- `401 body_signature_invalid`: three attempts in all, each signed afresh.
-- `403 pairing_key_required`: one re-registration.
-- One network failure before any response, which is a new reservation.
-
-Everything else is relayed once with `x-should-retry: false`, including the
-caps (`429` `allowance_exhausted`, `daily_cap`, `capability_cap`),
-`rate_limited`, `409 replayed`, `403 not_entitled`, `no_allowance`,
-`escalation_not_in_plan` and `400 unsupported_model`. For the caps and plan
-refusals, the failed turn shows the customer the proxy's own `error.message`.
-Neither the SDK nor Pi's agent retry repeats a cap, because it carries type
-`insufficient_quota`. The forwarder logs statuses only.
-
-Which path a body is on is decided at every start and after every model
-selection or key removal (James, 2026-09-26):
-
-- **Customer model.** The selected model runs on the customer's own
-  credential. That is an API key (`/v1/model-keys/set`, then `/select`) or a
-  subscription login on the body, including the subscription an `openai/…`
-  selection runs on. Every turn goes to their provider:
-  - the plan's `modelRouting` is not applied;
-  - routing an earlier plan wrote (refs to `clankie/…`) is cleared;
-  - the customer's own routing settings are never overwritten, across restarts too.
-- **Included usage.** Anything else: a new body, or a selected model whose
-  credential is gone. The body runs on `clankie/default` with the plan's
-  routing. Removing the customer's key lands here and applies the plan's
-  routing again.
-
-Image generation does not use the forwarder yet.
-
-Hired pi workers follow the same path ([ADR 0197](../../docs/adr/0197-hosted-workers-reach-the-owners-model-through-the-body.md)):
-
-- **Included usage:** pi's `models.json` declares `clankie`, the forwarder with no
-  key, and the worker starts on `clankie/default`.
-- **The customer's own credential:** pi's `models.json` declares
-  `clankie-customer`, pointing at `/customer` on the same loopback, with a
-  placeholder key. For each call the loopback reads the credential from the
-  broker, puts it in the provider's auth header, and forwards to the selected
-  provider's base URL only.
-  - It refuses any other path, anything but POST, browser requests and calls
-    with no customer model selected.
-  - Pi never holds the credential, and OAuth refresh stays in the broker.
-
-A hosted body runs at most `maxHiredWorkers` hired agents at once, an optional
-bootstrap field of 1 to 64 that defaults to two per vCPU (Starter 4, Pro 8).
-A hire past it (`hire_agent` or the app's `spawn_seat`) fails as `at_capacity`
-before anything starts, and a move never counts as a new hire.
-
-The limit comes from measurement on the real image
-([VUH-1388](https://linear.app/vuhlp/issue/VUH-1388)). An idle hired pi worker
-costs about 95 MiB, so memory would hold about 60 on Starter and 140 on Pro.
-The real bound is the builds and tests working agents start, which take far
-more memory and CPU than pi itself, and the model proxy's four in-flight calls
-per tenant.
 
 `POST /v1/hosted/pair-offer` accepts only protocol v2:
 `{ version: 2, pairTicket, browserPublicKey, nonce }`. The body verifies the

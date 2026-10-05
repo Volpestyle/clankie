@@ -37,8 +37,6 @@ import { createHostedDiscordIngress } from "./discord-ingress.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { createHostedPairing } from "./hosted-pairing.ts";
 import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
-import { HostedHeartbeat } from "./hosted-heartbeat.ts";
-import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
 import { WorkerMcp } from "./worker-mcp.ts";
 import { OpenCodeProfiles } from "./opencode-profiles.ts";
 import { RemoteOpenCodeWorkers } from "./captain/remote-opencode-workers.ts";
@@ -157,17 +155,13 @@ import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import {
   applyHostedAccountApps,
-  applyHostedModelPolicy,
-  configureHostedModels,
-  hostedWorkerLimit,
   readHostedBodyBootstrap,
   createHostedBodyClient,
   HostedBodyDeniedError,
 } from "./hosted-body.ts";
 import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
-import { startHostedModelForwarder } from "./hosted-model-forwarder.ts";
-import { hostedPiSeatModel } from "./hosted-seat-model.ts";
-import { createHostedCustomerModels, customerSeatModel } from "./hosted-customer-model.ts";
+import { loadRuntimeProvider } from "./runtime-provider.ts";
+import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import { createLocalTracker } from "@clankie/work-items";
@@ -248,6 +242,8 @@ await ensureOperatorCredential({ env: process.env, store: operatorCredentialStor
 const discordBodyInLoadout =
   serviceInLoadout("discord-bridge", process.env) || serviceInLoadout("discord-user-session", process.env);
 const hostedBootstrap = readHostedBodyBootstrap(process.env);
+if (hostedBootstrap !== undefined && !process.env.CLANKIE_RUNTIME_PROVIDER_MODULE?.trim())
+  throw new Error("runtime_provider_required");
 if (hostedBootstrap !== undefined) await applyHostedAccountApps(hostedBootstrap, settingsStore);
 const hostedBody =
   hostedBootstrap === undefined
@@ -276,41 +272,31 @@ if (hostedBody !== undefined) {
   const timer = setInterval(() => void accountDiagnostics.refresh(), 60_000);
   timer.unref();
 }
-// The customer's own model for hired pi workers (VUH-1373): one resolver over
-// the operator broker, so the loopback and each hire read the same selection.
-const hostedCustomerModels =
-  hostedBody === undefined ? undefined : createHostedCustomerModels({ store: operatorCredentialStore });
-// Included model usage (VUH-1371): without a customer key, every model call
-// goes through this loopback forwarder to the fleet's model proxy.
-const hostedModelForwarder =
-  hostedBody === undefined
-    ? undefined
-    : await startHostedModelForwarder({
-        client: hostedBody,
-        ...(hostedCustomerModels === undefined ? {} : { customer: hostedCustomerModels }),
-        logger,
-      });
-// Which path model calls take (the customer's own credential, or included
-// usage with the plan's routing) is decided now and after every key or model
-// change; a self-hosted body keeps its own routing untouched.
-const hostedModelPolicy =
-  hostedBootstrap === undefined || hostedModelForwarder === undefined
-    ? undefined
-    : () =>
-        applyHostedModelPolicy(hostedBootstrap, {
-          hasCredential: async (providerId) => (await operatorCredentialStore.get(providerId)) !== undefined,
-        }).then(() => undefined);
-if (hostedModelForwarder !== undefined) await configureHostedModels(hostedModelForwarder.baseURL);
-await hostedModelPolicy?.();
-const hostedHeartbeat =
-  hostedBody === undefined
-    ? undefined
-    : new HostedHeartbeat(hostedBody, {
-        onReport: ({ busy, reasons, desired }) =>
-          bodyTelemetry?.emit({ event: "body.heartbeat", busy, reasons, desired }),
-        onError: () =>
-          logger.warn({ event: "hosted.heartbeat.unavailable" }, "hosted fleet heartbeat failed"),
-      });
+const runtimeProvider = await loadRuntimeProvider({
+  env: process.env,
+  store: operatorCredentialStore,
+  modelCredentials: new BrokerCredentialStore(operatorCredentialStore, {
+    env: process.env,
+    ...(hostedBody === undefined ? {} : { hosted: true }),
+  }),
+  ...(hostedBody === undefined ? {} : { body: hostedBody }),
+  stateRoot,
+  herdrAvailable: herdr.available,
+  logger,
+  ...(bodyTelemetry === undefined
+    ? {}
+    : { onHeartbeatReport: (report) => bodyTelemetry.emit({ event: "body.heartbeat", ...report }) }),
+});
+let runtimeProviderClosing: Promise<void> | undefined;
+function closeRuntimeProvider(): Promise<void> {
+  return (runtimeProviderClosing ??= (async () => {
+    try {
+      runtimeProvider.heartbeat?.close();
+    } finally {
+      await runtimeProvider.model?.close();
+    }
+  })());
+}
 let publicGatewayConnector: PublicGatewayConnector | undefined;
 /** Set when the account credential is rejected before a connector can even exist. */
 let publicGatewaySignInRequiredSince: string | undefined;
@@ -321,10 +307,13 @@ const hostPower = createHostPowerMonitor({
 });
 if (hostedBody !== undefined) {
   publicGatewayConnector = new PublicGatewayConnector({
+    ...(runtimeProvider.quota?.gatewayRoutes === undefined
+      ? {}
+      : { gatewayRoutes: runtimeProvider.quota.gatewayRoutes }),
     encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
     gatewayUrl: hostedBody.bootstrap.gatewayOrigin,
     hostId: hostedBody.hostId,
-    onCustomerWork: () => hostedHeartbeat?.interactive(),
+    onAuthenticatedRequest: (isWork) => runtimeProvider.heartbeat?.authenticatedWork(isWork),
     onHostRejected: () => hostedBody.reject(),
     installationId: hostedBody.bootstrap.installationId,
     resolveHostToken: () => hostedBody.resolveHostToken(),
@@ -336,7 +325,9 @@ if (hostedBody !== undefined) {
   });
   hostedBody.onDenied = () => {
     publicGatewayConnector?.close();
-    hostedHeartbeat?.close();
+    void closeRuntimeProvider().catch(() =>
+      logger.warn({ event: "runtime.provider.close_failed" }, "runtime provider cleanup failed"),
+    );
   };
   hostedBody.onSignatureInvalid = () =>
     logger.warn({ event: "body_signature_invalid" }, "hosted fleet signature rejected");
@@ -358,6 +349,9 @@ if (
       );
     } else {
       publicGatewayConnector = new PublicGatewayConnector({
+        ...(runtimeProvider.quota?.gatewayRoutes === undefined
+          ? {}
+          : { gatewayRoutes: runtimeProvider.quota.gatewayRoutes }),
         encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
         gatewayUrl: startupSettings.publicGateway.url,
         hostId: startupSettings.publicGateway.hostId,
@@ -397,6 +391,9 @@ if (
     }
     const hostId = derivePublicGatewayHostId(stored.accountId, startupSettings.publicGateway.installationId);
     publicGatewayConnector = new PublicGatewayConnector({
+      ...(runtimeProvider.quota?.gatewayRoutes === undefined
+        ? {}
+        : { gatewayRoutes: runtimeProvider.quota.gatewayRoutes }),
       encryptionKey: await loadGatewayEncryptionKey(operatorCredentialStore),
       gatewayUrl: startupSettings.publicGateway.url,
       hostId,
@@ -920,28 +917,12 @@ const captain = createCaptain(
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,
     ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses: computerUseHarnesses.current }),
-    // Hosted pi workers follow the captain's model path (VUH-1373).
-    ...(hostedModelForwarder === undefined
+    ...(runtimeProvider.model?.piSeatModel === undefined
       ? {}
-      : {
-          piSeatModel: () =>
-            hostedPiSeatModel({
-              customer: async (loopback) => {
-                const target = await hostedCustomerModels?.resolve();
-                return target === undefined ? undefined : customerSeatModel(target, loopback);
-              },
-            }),
-        }),
-    // A hosted body runs at most its plan's number of hired agents (VUH-1388).
-    ...(hostedBootstrap === undefined
+      : { piSeatModel: () => runtimeProvider.model!.piSeatModel!() }),
+    ...(runtimeProvider.quota?.hireCapacity === undefined
       ? {}
-      : {
-          hireCapacity: hostedHireCapacity({
-            limit: hostedWorkerLimit(hostedBootstrap),
-            available: herdr.available,
-          }),
-        }),
-    ...(hostedHeartbeat === undefined ? {} : { onWorkStarted: (reason) => hostedHeartbeat.begin(reason) }),
+      : { hireCapacity: () => runtimeProvider.quota!.hireCapacity!() }),
     ...(bodyTelemetry === undefined
       ? {}
       : { onTurnSettled: (metrics) => bodyTelemetry.emit(turnTelemetry(metrics)) }),
@@ -1075,6 +1056,7 @@ const captain = createCaptain(
         processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
       }),
     ),
+    runtimeProvider,
     repoRoot,
     ...(startupSettings.captain.workingDirectory === undefined
       ? {}
@@ -1099,7 +1081,7 @@ const hostedDiscord =
         store: operatorCredentialStore,
         statePath: join(stateRoot, "discord-ingress.json"),
         captain,
-        onWork: () => hostedHeartbeat?.interactive(),
+        onWork: () => runtimeProvider.heartbeat?.interactive(),
       });
 async function linearFollowing(): Promise<boolean> {
   const current = await settingsStore.load();
@@ -1256,6 +1238,15 @@ const clankie = await createClankieApp({
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   localFleet,
+  runtimeProvider,
+  ...(runtimeProvider.quota?.composer === undefined
+    ? {}
+    : {
+        composerTranscriptions: new ComposerTranscriptions({
+          root: join(stateRoot, "composer-transcription"),
+          cloud: runtimeProvider.quota.composer,
+        }),
+      }),
   ...(hostedDiscord === undefined
     ? {}
     : { discordIngress: hostedDiscord.ingress, hostedDiscordOperator: hostedDiscord.operator }),
@@ -1268,11 +1259,13 @@ const clankie = await createClankieApp({
     store: operatorCredentialStore,
     cwd: repoRoot,
     ...(bodyTelemetry === undefined ? {} : { telemetry: bodyTelemetry }),
-    ...(hostedModelPolicy === undefined ? {} : { onModelChanged: hostedModelPolicy }),
+    ...(runtimeProvider.model === undefined
+      ? {}
+      : { onModelChanged: () => runtimeProvider.model!.onChanged() }),
   }),
   ...(hostedPairing === undefined
     ? {}
-    : { hostedPairing, onHostedPairing: () => hostedHeartbeat?.interactive() }),
+    : { hostedPairing, onHostedPairing: () => runtimeProvider.heartbeat?.interactive() }),
   ...(rawBodyTelemetry === undefined ? {} : { supportTelemetry: rawBodyTelemetry }),
   ...(supportDeviceRefKey === undefined ? {} : { supportDeviceRefKey }),
   ...(hostedBody === undefined
@@ -1280,16 +1273,6 @@ const clankie = await createClankieApp({
     : {
         hostedBody,
         supportGrantSync: hostedBody,
-        hostedCredits: hostedBody,
-        composerTranscriptions: new ComposerTranscriptions({
-          root: join(stateRoot, "composer-transcription"),
-          installationId: hostedBody.bootstrap.installationId,
-          cloud: {
-            status: (device) => hostedBody.composerTranscriptionStatus(device),
-            transcribe: (input, signal) => hostedBody.composerTranscribe(input, signal),
-            receipt: (input) => hostedBody.composerTranscriptionReceipt(input),
-          },
-        }),
         accountSettings: hostedBody,
         hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),
       }),
@@ -1482,13 +1465,7 @@ const minecraftEventTimer = setInterval(() => {
     .catch(() => logger.warn({ event: "minecraft.events_unavailable" }, "Minecraft events unavailable"));
 }, 1_000);
 minecraftEventTimer.unref();
-const stopHostedWork =
-  hostedHeartbeat === undefined
-    ? undefined
-    : watchHostedHerdrWork((working) => hostedHeartbeat.setExternal("herdr-agent", working), {
-        available: herdr.available,
-      });
-hostedHeartbeat?.start();
+runtimeProvider.heartbeat?.start();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
 // "client" is the embodiment manager itself — the loopback died with the split.
@@ -1530,7 +1507,7 @@ const deviceDoorwayHost = process.env.CLANKIE_DEVICE_HOST?.trim();
 const deviceDoorwayPort = parsePositiveInt(process.env.CLANKIE_DEVICE_PORT, DEFAULT_DEVICE_DOORWAY_PORT);
 const deviceDoorway = deviceDoorwayHost
   ? serve({
-      fetch: deviceDoorwayFetch(clankie.app.fetch),
+      fetch: deviceDoorwayFetch(clankie.app.fetch, runtimeProvider.quota?.gatewayRoutes),
       port: deviceDoorwayPort,
       hostname: deviceDoorwayHost,
     })
@@ -1581,8 +1558,9 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   logger.info({ signal, exitCode, playShutdownDeadlineMs }, "clankie shutdown requested");
   playAbort.abort(signal);
   hostPower.stop();
-  hostedHeartbeat?.close();
-  stopHostedWork?.();
+  void closeRuntimeProvider().catch(() =>
+    logger.warn({ event: "runtime.provider.close_failed" }, "runtime provider cleanup failed"),
+  );
   publicGatewayConnector?.close();
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();

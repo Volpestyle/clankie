@@ -38,7 +38,6 @@ import {
   PublicGatewayPushWakeResultFrameSchema,
 } from "./device-push.ts";
 import { DEVICE_WAKE_KEY_PATH } from "./wake.ts";
-import { HOSTED_CREDITS_PATH } from "./hosted-credits.ts";
 import { FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
@@ -112,7 +111,6 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/v1/devices/self/session/refresh", target: "control" },
   { method: "POST", path: LINEAR_WEBHOOK_PATH, target: "control" },
   { method: "POST", path: DEVICE_WAKE_KEY_PATH, target: "control" },
-  { method: "GET", path: HOSTED_CREDITS_PATH, target: "control" },
   { method: "POST", path: HOSTED_PAIR_OFFER_PATH, target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
@@ -280,9 +278,17 @@ export type PublicGatewayCapabilityHash = z.infer<typeof PublicGatewayCapability
 export const PublicGatewayTargetSchema = z.enum(["control", "relay"]);
 export type PublicGatewayTarget = z.infer<typeof PublicGatewayTargetSchema>;
 
+/** Exact routes supplied by a host's optional runtime provider. */
+export interface PublicGatewayRoute {
+  readonly method: "GET" | "POST";
+  readonly path: string;
+  readonly target: PublicGatewayTarget;
+}
+
 export function publicGatewayTargetFor(
   method: "GET" | "POST",
   path: string,
+  additionalRoutes: readonly PublicGatewayRoute[] = [],
 ): PublicGatewayTarget | undefined {
   if (method === "POST" && /^\/v1\/devices\/[A-Za-z0-9_-]{1,128}\/revoke$/u.test(path)) return "control";
   // Only the explicit autonomy projection may ride a query-bearing route.
@@ -292,7 +298,10 @@ export function publicGatewayTargetFor(
     path = PROJECT_UPDATE_SETTINGS_PATH;
   if (method === "POST" && /^\/v1\/support\/grants\/[a-f0-9-]{36}\/(?:revoke|pairing-offer)$/u.test(path))
     return "control";
-  return PUBLIC_GATEWAY_ROUTES.find((route) => route.method === method && route.path === path)?.target;
+  return (
+    PUBLIC_GATEWAY_ROUTES.find((route) => route.method === method && route.path === path)?.target ??
+    additionalRoutes.find((route) => route.method === method && route.path === path)?.target
+  );
 }
 
 export const PublicGatewayHttpHeaderSchema = z

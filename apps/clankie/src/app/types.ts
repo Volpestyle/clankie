@@ -58,6 +58,7 @@ import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } fr
 import type { PersonaImageSource } from "../persona-images.ts";
 import { type PushWakeSender } from "../push.ts";
 import type { RivalsClient } from "../rivals.ts";
+import type { RuntimeProvider } from "../runtime-provider.ts";
 import { type VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
 import { type WorkItemsService } from "../work-items.ts";
 import { type WorkerMcp } from "../worker-mcp.ts";
@@ -155,9 +156,9 @@ export interface ClankieAppDependencies {
   supportTelemetry?: BodyTelemetry;
   /** Tenant telemetry key or a dedicated random key persisted on this body volume. */
   supportDeviceRefKey?: Uint8Array;
-  /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */
-  hostedCredits?: Pick<HostedBodyClient, "readCredits">;
   composerTranscriptions?: ComposerTranscriptions;
+  /** Optional host policy; ordinary installations do not supply a provider. */
+  runtimeProvider?: RuntimeProvider;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;
   hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice"> &
     Partial<Pick<HostedDeviceSecurity, "publishSupportDevice">>;
