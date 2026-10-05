@@ -230,7 +230,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
   }
 
   async function reviewHarnessLaunch(
-    harness: "claude" | "codex" | "opencode",
+    harness: "claude" | "codex" | "opencode" | "grok",
     argument: string,
     shell: ClankieFaceShell,
   ): Promise<void> {
@@ -285,6 +285,14 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint: "[--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
       takesArgument: true,
       run: (argument, shell) => reviewHarnessLaunch("opencode", argument, shell),
+    },
+    {
+      name: "grok",
+      aliases: [],
+      description: "Review a Clankie launch in Grok Build",
+      argumentHint: "[--resume] [--conversation ID] [--dry-run]",
+      takesArgument: true,
+      run: (argument, shell) => reviewHarnessLaunch("grok", argument, shell),
     },
   );
 

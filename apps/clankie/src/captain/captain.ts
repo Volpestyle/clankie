@@ -41,6 +41,8 @@ import { readCodexGoal } from "@clankie/agent-transcript";
 import { personaImageBriefing } from "@clankie/persona-images";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
 import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
+import { createGrokSeatAdapter } from "./grok-seat-adapter.ts";
+import type { GrokNativeHost } from "./grok-native-host.ts";
 import type { createOpenCodeNativeHost } from "./opencode-native-host.ts";
 import {
   createRemoteCodexSeatAdapter,
@@ -591,6 +593,7 @@ export interface CaptainOptions {
   readonly evalSessionBoundary?: EvalSessionBoundary;
   /** Override local harness control adapters (including deterministic test adapters). */
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
+  readonly grokNative?: GrokNativeHost;
   readonly openCodeNative?: ReturnType<typeof createOpenCodeNativeHost>;
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
   readonly projectHireIdentity?: (
@@ -997,7 +1000,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   ];
   const herdrRunner = routeHerdrFleets(
     options.nativeHerdrRunner ??
-      createHerdrWatchRunner(deps.herdrAvailable, undefined, options.openCodeNative?.createCommandTab),
+      createHerdrWatchRunner(
+        deps.herdrAvailable,
+        undefined,
+        (options.openCodeNative ?? options.grokNative)?.createCommandTab,
+      ),
     async () =>
       new Map([
         ...(await refreshFleets()).map((fleet) => {
@@ -1187,6 +1194,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
       ),
       claudeWorkerSeats,
+      ...(options.grokNative === undefined
+        ? []
+        : [
+            createGrokSeatAdapter({
+              repoRoot: options.repoRoot,
+              stateDir: options.stateDir,
+              native: options.grokNative,
+              processHelper: join(options.repoRoot, "integrations/opencode-plugin/process-birth.py"),
+            }),
+          ]),
       ...(options.openCodeNative === undefined
         ? []
         : [

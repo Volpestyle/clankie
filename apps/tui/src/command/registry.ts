@@ -367,13 +367,15 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
-    nouns: ["claude", "claude2", "codex", "opencode"],
+    nouns: ["claude", "claude2", "codex", "opencode", "grok"],
     lines: [
       "  claude[N]               Open a separate chat using claude or a numbered shell account command (e.g. claude2)",
       "  codex[N]                Open Codex; a numbered command selects its exact registered account label",
       "  opencode                Open a separate Clankie chat in OpenCode (TTY)",
+      "  grok                    Open a separate Clankie chat in Grok Build (TTY; macOS, 1.0.46)",
       "    [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]",
-      "                           All harness commands accept these flags; --dry-run prints a plan without creating a chat",
+      "                           Grok accepts --resume, --conversation and --dry-run; no --plugin-dir",
+      "                           --dry-run prints a plan without creating a chat",
     ],
   },
   { nouns: ["seat"], lines: [] }, // Hidden compatibility alias; internal hooks keep their separate names.
@@ -472,7 +474,7 @@ export function commandHelp(): string {
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",
     "prompt / memory-card print plain text, and only for the bearer's own lane:",
     "  operator, discord_voice, discord_presence, gameplay (default: operator).",
-    "claude / codex / opencode need a TTY and that harness on PATH; mcp speaks JSON-RPC and is",
+    "claude / codex / opencode / grok need a TTY and that harness on PATH; mcp speaks JSON-RPC and is",
     "  for a harness's MCP config, not for people.",
     "Secret entry uses /auth, /discord, /connect, /voice, or rivals connect --token-stdin. The",
     "credential store is shared — what /auth writes is what this CLI's services read.",

@@ -1695,7 +1695,7 @@ later hires use `placement: "split"` with the same pipeline and split its last
 stage, preserving focus. `split` without a pipeline refuses. A same-named tab
 with unmarked panes refuses instead of appending to an unrelated lane. Pipeline
 names belong to the hire, not a blanket role or fleet default. Prepared
-initial-command Pi/OpenCode hires can create the first pipeline tab but cannot
+initial-command Pi/OpenCode/Grok hires can create the first pipeline tab but cannot
 yet split into an existing one; they refuse rather than rebuild it.
 
 This policy allocates new panes only. Resuming an already live native session
@@ -3199,6 +3199,40 @@ chat; dry-run creates none. `/opencode`
 in the console reviews the same plan. Installation, per-launch settings,
 removal, native delivery semantics and current verification limits are in the
 [OpenCode seat guide](../integrations/opencode-plugin/README.md).
+
+### Grok Build worker and operator seats
+
+`clankie grok --dry-run` or `clankie seat --harness grok --dry-run` reviews the
+native launch, profile, selected skills and conversation. Remove `--dry-run`
+to open the interactive Grok Build TUI. This adapter requires macOS and verified
+Grok Build 1.0.46 on PATH, an existing Grok sign-in, and Clankie's operator
+credential. It uses the current `GROK_HOME` (otherwise `~/.grok`); it never
+changes accounts or signs in. `/grok` reviews the same plan in the console.
+
+Each fresh launch creates a separate workspace chat. `--conversation ID`
+selects an existing conversation; `--resume` retains its exact native session,
+profile and chat after a confirmed exit. An uncertain prior exit or delivery
+refuses another launch until the original TUI and receipts are inspected.
+`--plugin-dir` and numbered account commands are unsupported. Persona and the
+memory card come from the selected service conversation; selected skills are
+provided as paths to their `SKILL.md` files. Native transcripts and service wakes
+follow that conversation through the existing operator API/outbox.
+
+`hire_agent` with `harness: "grok"` creates a visible worker in its own repo tab.
+The brief and `message_seat` follow-ups use leader IPC/ACP on that exact TUI
+session. Explicit model/effort choices must match the native registry; unavailable
+choices refuse. The worker gets the fleet meta tools and `message_clankie`.
+Queue consumption is a delivery receipt, not a completed reply. A saved Grok
+transcript without its original live controller cannot be resumed as a hire.
+Pipeline splitting and control adoption after a service restart are unsupported.
+
+Native permissions remain owner decisions. Grok leader mode ignores CLI
+`--allow`/`--deny`; this launcher does not claim they isolate tools. An observed
+enabled direct Linear MCP endpoint refuses before the worker brief: disable it
+in that Grok profile and start a fresh seat. A missing native catalog, changed
+session or process, unavailable sign-in, or uncertain acknowledgment retains
+the original evidence and names the refusal; no headless or terminal-input
+fallback runs. See [ADR 0224](adr/0224-grok-build-shares-the-visible-native-session.md).
 
 ### Delivery receipt stages
 

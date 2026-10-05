@@ -134,7 +134,7 @@ index). Configure through the headless CLI:
 | Desktop expressions / quiet hours     | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`    |
 | Minecraft profiles and play           | `clankie minecraft configure`, `profiles`, `status`, `join PROFILE`, `leave`; load `minecraft`         |
 | Fleet connected tools / peer messages | `clankie fleet status`, `clankie fleet set --tools off`, `clankie fleet set --peer-messages off`       |
-| Native conversation seats             | `clankie claude`, `codex`, `opencode` with `--conversation ID`; inspect with `--dry-run`               |
+| Native conversation seats             | `clankie claude`, `codex`, `opencode`, `grok` with `--conversation ID`; inspect with `--dry-run`       |
 | Herdr session                         | `clankie herdr status --json`, `clankie herdr use NAME`, `clankie herdr create`                        |
 | His working directory                 | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                          |
 | State your assignment (for agents)    | `clankie work-on "Objective" [--repo REPO_ID --issue ISSUE_ID]`, `clankie work-on clear`               |
@@ -270,7 +270,22 @@ confirm those through the native harness. Unavailable observations stay unproven
 The owner's `clankie harness install` asks per local Claude/Codex profile;
 `clankie herdr prepare FLEET_ID` explicitly ships/enables remote profiles.
 Generated/symlinked Codex configuration requires its source-owned setup, never
-TOML appends. OpenCode/Pi setup gaps are reported, not silently called ready.
+TOML appends. OpenCode/Pi/Grok setup gaps are reported, not silently called ready.
+
+Grok Build native control requires macOS and verified 1.0.46. Review
+`clankie seat --harness grok --dry-run`; launch uses the current `GROK_HOME`
+and its existing sign-in. Each fresh operator launch creates its own workspace
+chat; resume retains the original profile/session/chat after a confirmed exit.
+Skills are readable `SKILL.md` paths, not a claimed plugin installation.
+Worker hires use a fresh native TUI and its private leader IPC/ACP session.
+Queue consumption does not establish a completed model reply. A saved history
+without its live controller cannot resume a worker, and pipeline splitting is
+unsupported. Inspect an uncertain original pane and receipt before another hire.
+Native permission prompts require the owner. Leader mode ignores `--allow` and
+`--deny`; an observed enabled direct Linear endpoint refuses before the brief
+and asks the owner to disable it in that Grok profile, then start a fresh seat.
+Do not change the account/configuration or use a headless/terminal-input fallback
+to repair that refusal. See the Grok section of `{repoRoot}/docs/cli.md`.
 
 ## Repository-bound worktree roots
 

@@ -116,7 +116,9 @@ export function createLaneMcpEndpoint({
         ...bank.tools.map((tool) => ({
           name: tool.name,
           description: tool.description,
-          inputSchema: tool.inputSchema as { type: "object" },
+          // MCP requires an explicit object root. TypeBox unions of object
+          // variants omit it; retain their combinators and argument validation.
+          inputSchema: { ...tool.inputSchema, type: "object" as const },
         })),
         ...(lane === "operator" ? [reconciliationTool] : []),
       ],
