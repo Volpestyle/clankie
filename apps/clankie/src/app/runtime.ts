@@ -1,6 +1,8 @@
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
+import { SupportGrantStore } from "../support-access.ts";
+import { SUPPORT_DEVICE_GRANTS } from "@clankie/protocol/support-access";
 import { createIntegrationRoutes } from "../integrate-routes.ts";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
 import {
@@ -42,6 +44,7 @@ import {
   type DomainEvent,
 } from "@clankie/protocol";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
+import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
 import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/public-gateway";
 import { PersonaSettingsSchema, SettingsStore } from "@clankie/settings";
 import { Hono, type Context } from "hono";
@@ -73,6 +76,7 @@ import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../even
 import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-routes.ts";
 import { ExecutionConnectSchema } from "../herdr-session.ts";
 import { createHostedCreditsRoutes } from "../hosted-credits-routes.ts";
+import { createComposerTranscriptionRoutes } from "../composer-transcription.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
@@ -152,6 +156,55 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   // Projections rebuilt from the durable log.
   const devices: DeviceRegistry = new Map<string, DeviceRecord>();
+  let supportSyncRunning = false;
+  let supportSyncClosed = false;
+  let supportSyncedRevision: number | undefined;
+  let supportSyncRetryAt = 0;
+  const syncSupportGrants = async () => {
+    if (
+      supportSyncRunning ||
+      supportSyncClosed ||
+      dependencies.supportGrantSync === undefined ||
+      clock().getTime() < supportSyncRetryAt
+    )
+      return;
+    supportSyncRunning = true;
+    try {
+      const snapshot = supportGrants.snapshot();
+      if (snapshot.revision === supportSyncedRevision) return;
+      await dependencies.supportGrantSync.syncSupportGrants(snapshot);
+      supportSyncedRevision = snapshot.revision;
+    } catch {
+      supportSyncRetryAt = clock().getTime() + 5000;
+      logger.warn({ event: "support.sync_unavailable" }, "Support grant sync will retry");
+    } finally {
+      supportSyncRunning = false;
+    }
+  };
+  const supportGrants = new SupportGrantStore({
+    events: storedEvents,
+    recordEvent,
+    clock,
+    requireAudit: dependencies.hostedBody !== undefined || dependencies.hostedPairing !== undefined,
+    ...(dependencies.supportTelemetry === undefined ? {} : { telemetry: dependencies.supportTelemetry }),
+    ...(dependencies.supportDeviceRefKey === undefined
+      ? {}
+      : { deviceRefKey: dependencies.supportDeviceRefKey }),
+    changed: () => {
+      void syncSupportGrants();
+    },
+  });
+  supportGrants.expire();
+  const supportTimer = setInterval(() => {
+    try {
+      supportGrants.expire();
+    } catch {
+      logger.warn({ event: "support.expiry_unavailable" }, "Support grant expiration will retry");
+    }
+    void syncSupportGrants();
+  }, 1000);
+  supportTimer.unref();
+  void syncSupportGrants();
   for (const event of storedEvents) applyDeviceEvent(devices, event);
   const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
   const discordUserSessionOptIns = new DiscordUserSessionOptInProjection(storedEvents);
@@ -179,6 +232,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? undefined
       : new DeviceSessionSigner(dependencies.deviceSessionKey);
   let securityClosed = false;
+  let composerAuthKeyId: string | undefined;
+  const publishHostedSupportDevice = async (record: DeviceRecord) => {
+    if (record.supportGrantId === undefined || dependencies.hostedBody === undefined) return;
+    if (dependencies.hostedDeviceSecurity?.publishSupportDevice === undefined)
+      throw new Error("Hosted support device publication unavailable");
+    await dependencies.hostedDeviceSecurity.publishSupportDevice(record.deviceId, record.supportGrantId);
+  };
   const reconcileHostedSecurity = async () => {
     if (securityClosed || deviceSessionSigner !== undefined) return;
     try {
@@ -189,6 +249,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           .filter((record) => record.status === "revoked")
           .map((record) => record.deviceId),
       );
+      for (const record of devices.values()) await publishHostedSupportDevice(record);
       if (securityClosed) return;
       for (const tombstone of restored.revocations) {
         const record = devices.get(tombstone.dev);
@@ -210,6 +271,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       // Publish the signer last. Pairing, refresh and relay self-authorize
       // remain unavailable throughout reconciliation or any failed retry.
       deviceSessionSigner = new DeviceSessionSigner(restored.key);
+      composerAuthKeyId = restored.keyId;
     } catch {
       logger.warn({ event: "hosted.security.unavailable" }, "hosted device admission unavailable");
     }
@@ -241,7 +303,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!bodyRequestsOpen) return false;
     const origin = owner.discord;
     if (origin !== undefined) {
-      const source = discordTurnReceipts.get(`discord:${origin.messageId}`)?.origin;
+      const source = discordTurnReceipts.get(`discord:${origin.deliveryId ?? origin.messageId}`)?.origin;
       if (
         source === undefined ||
         source.baseSessionKey !== origin.baseSessionKey ||
@@ -347,6 +409,26 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   storedEvents.length = 0;
 
   const app = new Hono();
+  const supportAuditedRequests = new WeakSet<Request>();
+  let managedDiscordClosed = false;
+  let managedDiscordSyncRunning = false;
+  const syncManagedDiscord = async () => {
+    if (managedDiscordClosed || managedDiscordSyncRunning || dependencies.managedDiscord === undefined)
+      return;
+    managedDiscordSyncRunning = true;
+    try {
+      await dependencies.managedDiscord.sync();
+    } finally {
+      managedDiscordSyncRunning = false;
+    }
+  };
+  void syncManagedDiscord();
+  const managedDiscordTimer =
+    dependencies.managedDiscord === undefined
+      ? undefined
+      : setInterval(() => void syncManagedDiscord(), 5000);
+  managedDiscordTimer?.unref();
+  const discordWebRequests = new WeakMap<Request, RoomAuthorization>();
 
   /** Device session token → trusted identity; grants come from the projection, never the token. */
   const authenticateDevice = async (
@@ -356,7 +438,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const header = request.headers.get("authorization");
     const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
     if (token === undefined || token.length === 0) return { denied: "invalid" };
-    const now = clock();
+    let now = clock();
     let claims;
     try {
       claims = deviceSessionSigner.verify(token, Math.floor(now.getTime() / 1000));
@@ -364,10 +446,47 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       if (error instanceof DeviceSessionError && error.code === "expired") return { denied: "expired" };
       return { denied: "invalid" };
     }
-    const record = devices.get(claims.deviceId);
+    let record = devices.get(claims.deviceId);
     if (record === undefined || isDevicePendingExpired(record, now)) return { denied: "invalid" };
     if (record.status === "revoked") return { denied: "revoked" };
     if (record.status !== "active") return { denied: "invalid" };
+    try {
+      await publishHostedSupportDevice(record);
+    } catch {
+      return "unavailable";
+    }
+    now = clock();
+    record = devices.get(claims.deviceId);
+    if (record === undefined || isDevicePendingExpired(record, now)) return { denied: "invalid" };
+    if (record.status === "revoked") return { denied: "revoked" };
+    if (record.status !== "active") return { denied: "invalid" };
+    if (claims.expiresAt <= Math.floor(now.getTime() / 1000)) return { denied: "expired" };
+    if (record.supportGrantId !== undefined) {
+      const grant = supportGrants.active(record.supportGrantId);
+      if (grant === undefined) return { denied: "revoked" };
+      if (grant.scope !== "read-state") return { denied: "invalid" };
+      const path = new URL(request.url).pathname;
+      // Support pairing carries read-state only; shell access is the fleet's separate path.
+      if (
+        !(
+          (request.method === "GET" && path === "/v1/devices/self") ||
+          (request.method === "POST" && path === "/v1/devices/self/session/refresh")
+        )
+      )
+        return { denied: "invalid" };
+      if (!supportAuditedRequests.has(request)) {
+        try {
+          supportGrants.accessed(
+            record.supportGrantId,
+            record.deviceId,
+            path === "/v1/devices/self/session/refresh" ? "device-session" : "device-state",
+          );
+        } catch {
+          return "unavailable";
+        }
+        supportAuditedRequests.add(request);
+      }
+    }
     if (record.lastSeenAt === undefined || now.getTime() - Date.parse(record.lastSeenAt) >= 60_000) {
       const seen = recordEvent("device.seen", `device:${record.deviceId}`, now.toISOString(), {
         schemaVersion: 1,
@@ -377,7 +496,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     return {
       deviceId: record.deviceId,
-      grants: record.grants,
+      grants: record.supportGrantId === undefined ? record.grants : SUPPORT_DEVICE_GRANTS,
       sessionExpiresAt: new Date(claims.expiresAt * 1000).toISOString(),
     };
   };
@@ -409,6 +528,32 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       },
     };
   app.post(HOSTED_OPERATOR_PATH, bodyLimit({ maxSize: 2 * 1024 * 1024 }), async (context) => {
+    if (dependencies.hostedDiscordOperator !== undefined && !context.req.header("authorization")) {
+      const parsed = HostedDiscordEnvelopeSchema.safeParse(await readJson(context.req.raw));
+      if (!parsed.success) return context.json({ error: "unauthorized" }, 401);
+      return dependencies.hostedDiscordOperator.accept(parsed.data, async (request) => {
+        const inner = new Request(`http://control${request.path}`, {
+          method: request.method,
+          headers: {
+            "content-type": "application/json",
+            ...(request.body === undefined
+              ? {}
+              : { "content-length": String(Buffer.byteLength(request.body)) }),
+          },
+          signal: context.req.raw.signal,
+          ...(request.body === undefined ? {} : { body: request.body }),
+        });
+        discordWebRequests.set(inner, {
+          guard: request.guard,
+          current: () => !inner.signal.aborted && request.current(),
+        });
+        try {
+          return await app.fetch(inner);
+        } finally {
+          discordWebRequests.delete(inner);
+        }
+      });
+    }
     const identity = await authenticateDevice(context.req.raw);
     if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
     if ("denied" in identity) return deviceDenialResponse(context, identity);
@@ -422,9 +567,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const parsed = z
       .object({
         method: z.enum(["GET", "POST"]),
-        path: z
-          .string()
-          .regex(/^(?:\/health|\/operator\/v1\/dispatch|\/v1\/[A-Za-z0-9_/-]+)(?:\?includeAutonomy=true)?$/u),
+        path: z.string().max(2048),
         body: z
           .string()
           .max(1024 * 1024)
@@ -545,6 +688,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     request: Request,
     access: RoomAccess,
   ): Promise<RoomAuthorization | undefined> => {
+    const web = discordWebRequests.get(request);
+    if (web !== undefined) return access !== "guidance" && web.current() ? web : undefined;
     const hostedOriginal = hostedOriginalRequests.get(request);
     const original = hostedOriginal ?? request;
     if (hostedOriginal === undefined) {
@@ -594,6 +739,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         ...(dependencies.discordDirectory ? { directory: dependencies.discordDirectory } : {}),
         ...(dependencies.discordPermissions ? { permissions: dependencies.discordPermissions } : {}),
         ...(dependencies.discordTestPost ? { testPost: dependencies.discordTestPost } : {}),
+        ...(dependencies.managedDiscord ? { policy: dependencies.managedDiscord } : {}),
         authorize: authorizeRoom,
         captain: dependencies.captain,
         observations: dependencies.roomObservations,
@@ -808,6 +954,42 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
   app.route("/", createHostedCreditsRoutes(dependencies.hostedCredits, authorizeOwnerDevice));
+  app.route(
+    "/",
+    createComposerTranscriptionRoutes(dependencies.composerTranscriptions, async (request) => {
+      const original = hostedOriginalRequests.get(request) ?? request;
+      const identity = await authenticateDevice(original);
+      if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
+      const eligible = () => {
+        const record = devices.get(identity.deviceId);
+        return (
+          record?.status === "active" &&
+          record.grants.chat &&
+          record.supportGrantId === undefined &&
+          !original.signal.aborted &&
+          clock().getTime() < Date.parse(identity.sessionExpiresAt)
+        );
+      };
+      if (!eligible()) return undefined;
+      return {
+        deviceId: identity.deviceId,
+        sessionExpiresAtMs: Date.parse(identity.sessionExpiresAt),
+        support: devices.get(identity.deviceId)?.supportGrantId !== undefined,
+        ...(composerAuthKeyId === undefined ? {} : { authKeyId: composerAuthKeyId }),
+        current: eligible,
+        authorize: async () => {
+          const fresh = await authenticateDevice(original);
+          return (
+            fresh !== "unavailable" &&
+            !("denied" in fresh) &&
+            fresh.deviceId === identity.deviceId &&
+            fresh.grants.chat &&
+            eligible()
+          );
+        },
+      };
+    }),
+  );
 
   /** Captain or authenticated operator, for reads the owner should never have to authorize. */
   const authenticateCaptainOrOperator = async (
@@ -2082,6 +2264,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   registerLinearRoutes({ app, dependencies, settingsSource, clock });
   const { wakeRevocationTimer } = registerPairingRoutes({
+    get supportGrants() {
+      return supportGrants;
+    },
+    get questionOwnerAuthority() {
+      return questionOwnerAuthority;
+    },
     get dependencies() {
       return dependencies;
     },
@@ -2106,6 +2294,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     get authenticateDevice() {
       return authenticateDevice;
     },
+    get publishHostedSupportDevice() {
+      return publishHostedSupportDevice;
+    },
     get deviceDenialResponse() {
       return deviceDenialResponse;
     },
@@ -2122,7 +2313,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return hostDisplayName;
     },
   });
-  const { workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
+  const { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
     get app() {
       return app;
     },
@@ -2226,8 +2417,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: () => {
+      managedDiscordClosed = true;
+      if (managedDiscordTimer !== undefined) clearInterval(managedDiscordTimer);
       stopBodyRequests();
       securityClosed = true;
+      supportSyncClosed = true;
+      clearInterval(supportTimer);
+      dependencies.composerTranscriptions?.close();
       if (securityRetryTimer !== undefined) clearInterval(securityRetryTimer);
       if (wakeRevocationTimer !== undefined) clearInterval(wakeRevocationTimer);
       stopObservingMessages?.();

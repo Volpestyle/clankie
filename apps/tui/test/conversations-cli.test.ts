@@ -123,13 +123,27 @@ it("lists and replays a Discord room through the authenticated conversation API,
     sessionState: "waiting",
     revision: 0,
   };
+  const child = {
+    ...conversation,
+    conversationId: "handoff-test",
+    title: "James · Investigate this request",
+    roomHandoff: {
+      roomConversationId: conversation.conversationId,
+      deliveryId: "discord:handoff-test",
+      actorId: "789",
+      source: "text",
+      request: "Investigate this request",
+      state: "running",
+      host: "pi",
+    },
+  };
   const requests: Record<string, unknown>[] = [];
   const fetchImpl: typeof fetch = async (_input, init) => {
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-captain");
     const request = JSON.parse(String(init?.body));
     requests.push(request);
     return request.op === "list"
-      ? Response.json({ op: "list", schemaVersion: 1, conversations: [conversation] })
+      ? Response.json({ op: "list", schemaVersion: 1, conversations: [conversation, child] })
       : Response.json({
           op: "replay",
           schemaVersion: 1,
@@ -138,7 +152,7 @@ it("lists and replays a Discord room through the authenticated conversation API,
             status: "page",
             surfaceClientId: "clankie-cli",
             retainedFromCursor: "000000000000",
-            conversationId: "room-test",
+            conversationId: request.replay.conversationId,
             events: [],
             nextCursor: "000000000003",
             safeCursor: "000000000003",
@@ -157,7 +171,7 @@ it("lists and replays a Discord room through the authenticated conversation API,
     },
   };
   expect(await runConversationsCommand(["list"], options)).toBe(0);
-  expect(JSON.parse(output)).toEqual([conversation]);
+  expect(JSON.parse(output)).toEqual([conversation, child]);
   output = "";
   expect(
     await runConversationsCommand(["show", "456", "--cursor", "000000000002", "--limit", "10"], options),
@@ -167,6 +181,19 @@ it("lists and replays a Discord room through the authenticated conversation API,
     op: "replay",
     replay: { conversationId: "room-test", cursor: "000000000002", limit: 10 },
   });
+  for (const [selector, selected] of [
+    ["123:456", conversation],
+    [child.conversationId, child],
+    [child.title, child],
+  ] as const) {
+    output = "";
+    expect(await runConversationsCommand(["show", selector], options)).toBe(0);
+    expect(JSON.parse(output)).toMatchObject({ conversation: selected, status: "page" });
+    expect(requests.at(-1)).toMatchObject({
+      op: "replay",
+      replay: { conversationId: selected.conversationId },
+    });
+  }
   await expect(runConversationsCommand(["show", "456", "--limit", "0"], options)).rejects.toThrow("Usage");
 });
 

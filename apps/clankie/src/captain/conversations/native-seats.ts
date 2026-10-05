@@ -4,6 +4,7 @@ import {
   type OperatorConversationEventBody,
   type OperatorConversationStreamEvent,
 } from "@clankie/protocol";
+import { nativeSessionId } from "../native-session-resume.ts";
 import { createHash } from "node:crypto";
 import { ConversationServiceRun, waitForConversationRun } from "../conversation-run.ts";
 import type { HerdrSeatTranscript } from "../herdr-transcript.ts";
@@ -203,12 +204,11 @@ export function attachedConversationForNative(
 ): string | undefined {
   if (!source.session) return undefined;
   const sessionId =
-    source.session.kind === "id"
-      ? source.session.value
-      : source.session.value
-          .split(/[\\/]/u)
-          .at(-1)
-          ?.replace(/\.jsonl$/u, "");
+    nativeSessionId(source) ??
+    source.session.value
+      .split(/[\\/]/u)
+      .at(-1)
+      ?.replace(/\.jsonl$/u, "");
   const matches = [...ctx["metas"].values()].filter((meta) => {
     if (meta.scope.kind !== "global" && meta.scope.kind !== "workspace" && meta.scope.kind !== "room")
       return false;

@@ -29,6 +29,7 @@ import { resolveDiscordSettings } from "@clankie/settings";
 import type { CaptainPort } from "./captain/port.ts";
 import type { DiscordRoomObservations } from "./discord-room-observations.ts";
 import { discordSetupChecks } from "./discord-setup.ts";
+import type { ManagedDiscord } from "./managed-discord.ts";
 
 export type RoomAccess = "observe" | "guidance" | "settings";
 export interface RoomAuthorization {
@@ -51,6 +52,7 @@ export interface DiscordRoomRoutesOptions {
     body: DiscordDirectorySnapshot["body"],
   ): Promise<DiscordDirectorySnapshot>;
   environment?: NodeJS.ProcessEnv;
+  policy?: Pick<ManagedDiscord, "sync" | "status" | "invitationApplicationId">;
   authorize(request: Request, access: RoomAccess): Promise<RoomAuthorization | undefined>;
   captain: Pick<CaptainPort, "serveOperatorConversation">;
   observations: DiscordRoomObservations;
@@ -90,12 +92,15 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
   const setup = async (settings: ClankieSettings["discord"]) => {
     const effective = resolveDiscordSettings(settings, options.environment ?? {}).settings;
     const body = effective.activeBody;
+    const applicationId = options.policy
+      ? await options.policy.invitationApplicationId()
+      : effective.applicationId;
     return options.machineName
       ? {
           setup: {
             definition: discordSetupDefinition(effective),
             machineName: options.machineName,
-            ...(effective.applicationId
+            ...(applicationId
               ? {
                   invite: {
                     role: effective.role,
@@ -103,7 +108,7 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
                       effective.role === "admin"
                         ? DISCORD_ADMIN_INVITE_PERMISSIONS
                         : DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
-                    url: discordRoleInviteUrl(effective.applicationId, effective.role, effective.serverId),
+                    url: discordRoleInviteUrl(applicationId, effective.role, effective.serverId),
                   },
                 }
               : {}),
@@ -145,7 +150,7 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
       rooms:
         result.op === "list"
           ? result.conversations
-              .filter((room) => room.scope.kind === "room")
+              .filter((room) => room.scope.kind === "room" && room.roomHandoff === undefined)
               .map((room) => ({
                 ...options.observations.status(room.conversationId),
                 ...(discordRoomDisplayTitle(room.title) === undefined
@@ -170,7 +175,11 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
     });
     await authority.guard();
     if (!authority.current()) return context.json({ error: "room_guidance_required" }, 403);
-    if (room.op !== "get" || room.conversation?.scope.kind !== "room")
+    if (
+      room.op !== "get" ||
+      room.conversation?.scope.kind !== "room" ||
+      room.conversation.roomHandoff !== undefined
+    )
       return context.json({ error: "room_not_found" }, 404);
     return context.json(
       options.observations.setGuidance(
@@ -189,7 +198,10 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
     const authority = await options.authorize(context.req.raw, "observe");
     if (!authority) return context.json({ error: "room_observe_required" }, 403);
     const settings = (await options.settings.load()).discord;
-    const metadata = await setup(settings);
+    const metadata = {
+      ...(await setup(settings)),
+      ...(options.policy ? { managedPolicy: await options.policy.status() } : {}),
+    };
     if (
       discordSettingsRevision((await options.settings.load()).discord) !== discordSettingsRevision(settings)
     )
@@ -271,7 +283,11 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
         if (!authority.current()) throw new Error("operator_revoked");
       },
     );
-    const metadata = await setup(updated.discord);
+    await options.policy?.sync();
+    const metadata = {
+      ...(await setup(updated.discord)),
+      ...(options.policy ? { managedPolicy: await options.policy.status() } : {}),
+    };
     if (
       discordSettingsRevision((await options.settings.load()).discord) !==
       discordSettingsRevision(updated.discord)

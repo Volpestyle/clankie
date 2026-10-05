@@ -23,7 +23,7 @@ export interface DiscordVoiceTurn {
   /** Bounded gateway observations and original speech; context, never authority. */
   readonly roomContext?: string;
   readonly presenceSessionId: string;
-  /** A queued ask must not execute after its voice conversation is gone. */
+  /** Guards local submission. Durably admitted service work continues; the stay guards late speech. */
   readonly isCurrent?: () => boolean;
 }
 
@@ -48,58 +48,19 @@ export interface DiscordVoiceIngressOptions {
   readonly transportKind: DiscordTransportKind;
 }
 
-/** Routes one speaker-attributed transcript through the durable Discord voice captain lane. */
+/** Routes one attributed ask to its own captain child; the service bounds all room work. */
 export class DiscordVoiceIngress {
   private readonly port: DiscordVoiceCaptainPort;
   private readonly options: DiscordVoiceIngressOptions;
-  private readonly rooms = new Map<
-    string,
-    {
-      speakerId: string;
-      active: number;
-      waiting: { speakerId: string; start: () => void }[];
-    }
-  >();
 
   public constructor(port: DiscordVoiceCaptainPort, options: DiscordVoiceIngressOptions) {
     this.port = port;
     this.options = options;
   }
 
-  public async handle(turn: DiscordVoiceTurn): Promise<DiscordVoiceTurnOutcome> {
-    // Keep one actor in the durable lane until all of their steers settle.
-    // Other people's asks wait, without holding the realtime conversation.
-    const key = JSON.stringify([turn.guildId, turn.channelId]);
-    let room = this.rooms.get(key);
-    if (room === undefined) {
-      room = { speakerId: turn.userId, active: 0, waiting: [] };
-      this.rooms.set(key, room);
-    }
-    const lane = room;
-    return new Promise((resolve, reject) => {
-      const start = (): void => {
-        lane.active += 1;
-        void this.submit(turn)
-          .then(resolve, reject)
-          .finally(() => {
-            lane.active -= 1;
-            if (lane.active !== 0) return;
-            const next = lane.waiting.shift();
-            if (next === undefined) {
-              this.rooms.delete(key);
-              return;
-            }
-            lane.speakerId = next.speakerId;
-            next.start();
-            // Admit queued refinements from that same person together.
-            const refinements = lane.waiting.filter((item) => item.speakerId === lane.speakerId);
-            lane.waiting = lane.waiting.filter((item) => item.speakerId !== lane.speakerId);
-            for (const refinement of refinements) refinement.start();
-          });
-      };
-      if (lane.speakerId === turn.userId) start();
-      else lane.waiting.push({ speakerId: turn.userId, start });
-    });
+  public handle(turn: DiscordVoiceTurn): Promise<DiscordVoiceTurnOutcome> {
+    // The service owns admission across text and voice; speakers own independent children.
+    return this.submit(turn);
   }
 
   private async submit(turn: DiscordVoiceTurn): Promise<DiscordVoiceTurnOutcome> {

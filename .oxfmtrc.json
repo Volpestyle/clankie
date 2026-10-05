@@ -11,6 +11,7 @@
     "**/.eve/**",
     "packages/model-registry/data/**",
     "vendor/opinionated-skills/**",
-    ".agents/skills/herdr/**"
+    ".agents/skills/herdr/**",
+    "apps/clankie/test/fixtures/linear-api/schema.graphql"
   ]
 }

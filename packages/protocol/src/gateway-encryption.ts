@@ -7,7 +7,10 @@ export const GATEWAY_PUSH_AUTHORIZE_PATH = "/v1/gateway/push-authorize";
 export const GATEWAY_ENCRYPTION_VERSION = 1 as const;
 export const GATEWAY_PLAINTEXT_BYTES_MAX = 1024 * 1024;
 export const GATEWAY_RESPONSE_BYTES_MAX = 16 * 1024 * 1024;
-const Base64 = z.string().regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u);
+const Base64 = z
+  .string()
+  .regex(/^[A-Za-z0-9+/]*={0,2}$/u)
+  .refine((value) => value.length % 4 === 0);
 export const GatewayEncryptionCredentialSchema = z
   .object({
     hostId: z

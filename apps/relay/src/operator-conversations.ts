@@ -1,4 +1,5 @@
 import { DeviceConversationRefusal, type DeviceConversationDispatch } from "./conversation-upstream.ts";
+import { supportReadOperationAllowed } from "../../../packages/protocol/src/support-access.ts";
 import {
   DISCORD_VOICE_TRANSCRIPTS_PATH,
   DiscordVoiceTranscriptPageSchema,
@@ -451,7 +452,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             : "chat";
     // Reading a request may span sleep or a control-plane restart. Admission
     // before that await is not authority to dispatch after it.
-    const currentAuthorization = await authorizeGrant(options, token, response, grant);
+    const currentAuthorization = await authorizeGrant(options, token, response, grant, serviceRequest.op);
     if (currentAuthorization === undefined) return true;
     if (path === OPERATOR_CONVERSATION_TAIL_PATH) {
       if (serviceRequest.op !== "tail") {
@@ -541,7 +542,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       if (abort.signal.aborted) return true;
       // Recheck even a retained send receipt. Never downgrade owner authority
       // after a dispatch, or route/retry a write under another principal.
-      const fresh = await authorizeGrant(options, token, response, grant);
+      const fresh = await authorizeGrant(options, token, response, grant, serviceRequest.op);
       if (fresh === undefined || abort.signal.aborted) return true;
       if (
         fresh.device.deviceId !== currentAuthorization.device.deviceId ||
@@ -578,13 +579,23 @@ async function authorizeGrant(
   token: string,
   response: ServerResponse,
   grant: "chat" | "steer" | "terminalObserve" | "terminalControl",
+  op?: string,
 ): Promise<Extract<RelayDeviceAuthorization, { authorized: true }> | undefined> {
   const authorization = await options.authorizeDevice.authorize(token);
   if (!authorization.authorized) {
     writeAuthDenial(response, authorization.denial);
     return undefined;
   }
-  if (!authorization.device.grants[grant]) {
+  if (authorization.device.supportGrantId !== undefined) {
+    if (
+      op === undefined ||
+      authorization.device.supportScope !== "read-state" ||
+      !supportReadOperationAllowed(op, authorization.device.supportScope)
+    ) {
+      writeGrantDenial(response, grant);
+      return undefined;
+    }
+  } else if (!authorization.device.grants[grant]) {
     writeGrantDenial(response, grant);
     return undefined;
   }
@@ -624,7 +635,7 @@ async function streamTail(input: StreamTailInput): Promise<void> {
       await writeTailAuthFailure(response, authorization.denial);
       return;
     }
-    if (!authorization.device.grants.chat) {
+    if (!authorization.device.grants.chat && authorization.device.supportGrantId === undefined) {
       logger.warn(
         {
           route: "tail",
@@ -683,7 +694,15 @@ async function streamTail(input: StreamTailInput): Promise<void> {
       response.end();
       return;
     }
-    for (const event of page.events) await writeNdjson(response, { kind: "event", event });
+    for (const event of page.events) {
+      const fresh = await options.authorizeDevice.authorize(input.token);
+      const denial = tailAuthorizationDenial(fresh, "chat");
+      if (denial !== undefined) {
+        await writeTailAuthFailure(response, denial);
+        return;
+      }
+      await writeNdjson(response, { kind: "event", event });
+    }
     cursor = page.nextCursor;
     pages += 1;
     if (options.tailMaxPages !== undefined && pages >= options.tailMaxPages) {
@@ -785,6 +804,12 @@ async function streamTerminalTail(input: StreamTerminalTailInput): Promise<void>
       return;
     }
     for (const frame of page.frames) {
+      const fresh = await options.authorizeDevice.authorize(input.token);
+      const denial = tailAuthorizationDenial(fresh, "terminalObserve");
+      if (denial !== undefined) {
+        await writeTailAuthFailure(response, denial);
+        return;
+      }
       await writeNdjson(response, { kind: "frame", streamId: page.cursor.streamId, frame });
     }
     cursor = page.cursor;
@@ -910,6 +935,13 @@ function tailAuthorizationDenial(
   grant: StreamGrant,
 ): string | undefined {
   if (!authorization.authorized) return authorization.denial;
+  if (authorization.device.supportGrantId !== undefined) {
+    const scope = authorization.device.supportScope;
+    return scope === "read-state" &&
+      supportReadOperationAllowed(grant === "chat" ? "tail" : "terminal_tail", scope)
+      ? undefined
+      : "support_scope_required";
+  }
   if (authorization.device.grants[grant]) return undefined;
   return grant === "chat" ? "chat_grant_required" : "terminal_observe_grant_required";
 }

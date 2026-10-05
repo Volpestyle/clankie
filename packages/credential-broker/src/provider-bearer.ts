@@ -14,13 +14,21 @@
 import { normalizeProviderId, type CredentialStore, type ProviderCredential } from "./credential-store.ts";
 import { LINEAR_PROVIDER_ID, linearOauthNeedsRefresh, refreshLinearOauth } from "./linear-oauth.ts";
 import { refreshLinearApp } from "./linear-app.ts";
+import { LINEAR_API_PROVIDER_ID, refreshLinearApiOauth } from "./linear-api-oauth.ts";
 
 type OauthCredential = Extract<ProviderCredential, { type: "oauth" }>;
 
 /** Providers whose expired access tokens this process knows how to renew. */
-const REFRESHERS: Readonly<Record<string, (credential: OauthCredential) => Promise<OauthCredential>>> = {
-  [LINEAR_PROVIDER_ID]: (credential) =>
-    credential.linearAuth === "app" ? refreshLinearApp(credential) : refreshLinearOauth(credential),
+const REFRESHERS: Readonly<
+  Record<string, (credential: OauthCredential, request?: typeof fetch) => Promise<OauthCredential>>
+> = {
+  [LINEAR_PROVIDER_ID]: (credential, request) => {
+    if (credential.linearAuth === "api") throw new Error("Linear API credential cannot authenticate MCP");
+    return credential.linearAuth === "app"
+      ? refreshLinearApp(credential, request)
+      : refreshLinearOauth(credential, request);
+  },
+  [LINEAR_API_PROVIDER_ID]: refreshLinearApiOauth,
 };
 
 /**
@@ -34,9 +42,21 @@ export async function resolveProviderBearer(
   providerId: string,
   credentials: CredentialStore,
   now = Date.now(),
+  options: { fetch?: typeof fetch } = {},
 ): Promise<string | undefined> {
   const id = normalizeProviderId(providerId);
   const stored = await credentials.get(id);
+  const assertAudience = (credential: ProviderCredential | undefined) => {
+    if (id === LINEAR_PROVIDER_ID && credential?.type === "oauth" && credential.linearAuth === "api")
+      throw new Error("Linear API credential cannot authenticate MCP");
+    if (
+      id === LINEAR_API_PROVIDER_ID &&
+      credential !== undefined &&
+      (credential.type !== "oauth" || credential.linearAuth !== "api")
+    )
+      throw new Error("Linear API requires its registered OAuth credential");
+  };
+  assertAudience(stored);
   const refresh = REFRESHERS[id];
   if (stored?.type !== "oauth" || !linearOauthNeedsRefresh(stored, now) || refresh === undefined) {
     return providerCredentialBearer(stored);
@@ -45,16 +65,18 @@ export async function resolveProviderBearer(
     throw new Error(`Credential store cannot safely refresh ${id}`);
   }
   const current = await credentials.update(id, async (current) => {
+    assertAudience(current);
     // Another client may have refreshed or replaced the account while we waited.
     if (current.type !== "oauth" || !linearOauthNeedsRefresh(current, Math.max(now, Date.now())))
       return current;
     try {
-      return await refresh(current);
+      return await refresh(current, options.fetch);
     } catch (error) {
       if (current.expires !== 0 && current.expires <= Math.max(now, Date.now())) throw error;
       return current;
     }
   });
+  assertAudience(current);
   return providerCredentialBearer(current);
 }
 

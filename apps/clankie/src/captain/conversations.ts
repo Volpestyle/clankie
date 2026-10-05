@@ -5,7 +5,7 @@ export {
   OPERATOR_CONVERSATION_RETENTION_MS,
 } from "./conversations/constants.ts";
 export { ConversationRefusedError, ConversationResetError } from "./conversations/errors.ts";
-export { ConversationStore } from "./conversations/store.ts";
+export { ConversationStore, roomHandoffConversationId } from "./conversations/store.ts";
 export {
   type ChannelProjection,
   type ConversationRunner,

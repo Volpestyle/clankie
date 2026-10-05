@@ -835,34 +835,58 @@ The owner-authorized API offers `GET /v1/accounts/codex` and
 Local transcript discovery, `clankie agents`, resumed sessions and follow-up
 queue delivery use the account's home; seat-sync uses the hook's transcript path.
 
-### `accounts [list]` / `accounts connect github` / `accounts disconnect PROVIDER` / `accounts apps`
+### `accounts [list]` / `accounts connect github|linear` / `accounts disconnect PROVIDER` / `accounts apps`
 
 The owner's own GitHub and Linear accounts, linked to this body
-([ADR 0196](adr/0196-account-connections-keep-tokens-on-the-body.md)). The
+([ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md)). The
 service runs each flow and keeps the token in the credential broker (`github`,
-`linear`); nothing here prints a token. `accounts` lists each provider's
+`linear-api` for registered Linear API OAuth); nothing here prints a token. `accounts` lists each provider's
 `status` (`connected`, `not_connected`, `unconfigured`), account, scopes and
 where to manage it. `accounts connect github` prints the code to type at
 GitHub on stderr, polls at GitHub's interval, and returns the connection.
+`accounts start github` and `accounts poll github --flow-id ID` expose the same
+flow as separate steps for interactive clients.
 `accounts disconnect github|linear` revokes at the provider when it can and
 always deletes the local token; `revoked: false` comes with the `manageUrl`
-to revoke by hand. Linear connects from `/connect linear` on a Mac, or from the
-app through `/v1/accounts/linear/start` and `/complete`.
+to revoke by hand. Disconnecting Linear clears its API and legacy MCP/app lanes
+and pending flows. The app's Connections settings and the account page use the
+same encrypted lifecycle. `/connections` exposes account identity, granted
+scopes, connect and disconnect beside machines in the console.
+
+`accounts connect linear` returns the registered app's authorize URL, single-use
+state and expiry. The body retains the S256 verifier and exchanges the callback
+code. `accounts complete linear --json-stdin` consumes `{state,code}` from stdin;
+codes do not belong in argv or logs. The console accepts the Open Clankie
+callback link through a masked prompt. The separately configured Mac
+`/connect linear` MCP connection remains available.
 
 For worker names and portraits, use a workspace-owned app:
 `accounts connect linear-app --client-id ID --secret-stdin`. The secret enters
 through stdin and is verified and stored by the service, never returned.
 `/connect linear` also offers **Connect a Clankie app**. `accounts list` reports
-the verified `actor` and `workspace`. This replaces the one Linear connection
-and requires new worker grants. Setup and scope: [worker posts](linear-worker-posts.md).
+the verified `actor` and `workspace`. This updates the legacy MCP/app lane;
+the registered API connection remains separate and takes precedence when present.
+Changing the active app identity requires new worker grants. Setup and scope:
+[worker posts](linear-worker-posts.md).
 
 `accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID]
 [--linear-redirect-uri URL]` reads or writes the public OAuth client settings
 (`oauthApps` in `settings.json`); they apply without a restart.
 `CLANKIE_GITHUB_OAUTH_CLIENT_ID`, `CLANKIE_LINEAR_OAUTH_CLIENT_ID` and
 `CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them, which is how a hosted body
-is configured. GitHub revocation needs the OAuth app's client secret as the
-broker entry `github-oauth-app`.
+is configured. An owner-run self-hosted body may revoke its own GitHub token
+using its own OAuth app's secret as broker entry `github-oauth-app`.
+Explicit owner provisioning on that self-hosted body uses
+`accounts apps github-secret --client-id ID --secret-stdin`; it stores the secret
+only in the broker and returns a closed outcome. It requires operator access
+and refuses hosted bodies. Clankie's shared developer secret is never delivered
+to customer bodies. Hosted GitHub disconnect removes local access and returns
+the GitHub permission-management URL with `revoked: false`. Self-hosted
+revocation deletes only the selected token, preserving other body tokens.
+Hosted public app
+IDs and the exact gateway `/account/connections/callback` arrive through body
+bootstrap; developer secrets are excluded. Provider app registration and terms
+acceptance remain owner actions.
 
 ### `voice [status]` / `voice model set MODEL_ID` / `voice model clear`
 
@@ -2221,6 +2245,17 @@ inspection. Voice rooms contain captain handoffs, not unrecorded ambient voice.
 The existing authenticated conversation API provides these same list/get/replay/tail
 operations. See [ADR 0176](adr/0176-every-room-is-an-inspectable-conversation.md).
 
+Room handoffs also appear as separate child records with `roomHandoff` metadata
+and in the fleet snapshot's `roomHandoffs` array. Use their child conversation ID
+with `show` or `tail`; the original `roomConversationId` identifies the asking
+room and its delivery evidence. The inline TUI dock shows active jobs above
+fleet seats; `Ctrl+G` retains finished jobs and their results in its picker.
+The app collapses finished jobs behind an explicit expansion control.
+The recorded `host` is the actual executor: all non-owner work under a Codex
+head runs on Pi with the original room authority and grant. Only the verified
+owner's work uses native Codex children. Completed delivery retries return the
+saved result. See [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md).
+
 ### `send --conversation ID [--delivery steer|queue] [--attach PATH]... (MESSAGE | --stdin)`
 
 Send to an existing operator conversation through the shared service API.
@@ -2457,7 +2492,26 @@ Filtered by lane exactly as the session's own injection is: operator-private
 notes reach only the operator lane. An empty store still returns a labeled
 card. An unchanged hook turn can print nothing, which is not an error.
 
-### `telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval SECONDS]`
+### `support [list | create read-state|shell --hours 1..72 --ref REFERENCE | revoke ID | offer ID]`
+
+Manage a customer-issued support grant through the owner-authenticated body API.
+`list` (the default) returns active and terminal grants. `create` requires a
+support reference, defaults to 24 hours and accepts at most 72 hours. Read state
+permits a support device to inspect conversation history and Clankie state;
+it cannot change settings, send commands or read terminal output. Shell permits
+commands and the content those commands can read during the grant window.
+
+`offer ID` requires a Read state grant and returns a short-lived, read-only
+pairing offer attached to it. The resulting device loses access on grant expiry
+or revocation. Shell grants refuse pairing with
+`support_pairing_requires_read_state` and authorize only the hosted Systems
+Manager `StartSession` path. `revoke ID`
+closes the grant. Responses are JSON. This command requires the operator
+credential; a captain bearer cannot issue support access. `/support` exposes
+the same command in the console. The hosted app and web account page provide
+the customer controls without requiring a CLI.
+
+### `telemetry ship --spool DIR --cursor FILE --log-group NAME [--audit-log-group NAME] [--once] [--interval SECONDS]`
 
 Hosted infrastructure only. Ships a body's metadata telemetry spool (what
 `CLANKIE_BODY_TELEMETRY_DIR` collects) to a CloudWatch Logs group, stream
@@ -2467,6 +2521,17 @@ instance ids and the credentials come from the instance, never from the
 spool. Every line is parsed against the event schema again before it leaves;
 anything else is counted as `dropped`. The cursor file records how far each
 spool file has shipped and advances only after CloudWatch accepts.
+
+Support grants and accesses use the mandatory `support-audit/` child spool,
+independent of diagnostic consent and diagnostic pruning. Hosted installations
+pass `--audit-log-group clankie-obs-<stage>-audit`: each support record goes to
+both the body and audit groups, with a separate acknowledgement cursor for
+each destination. A failed destination retries without suppressing the other.
+The host needs a writable mount for the support child directory so it can
+remove completed prior-hour files after both groups accept them. Unacknowledged
+support records remain; failed local audit persistence refuses support access.
+If an outage exceeds CloudWatch's event-age limit, the log timestamp is the
+ingestion time and the payload retains the original `atMs`.
 
 `--interval` is 10–3600 seconds (default 60). Without `--once` it runs until
 `SIGTERM`, printing `{"ok":true,"shipped":N,"dropped":N,"files":N}` per pass
@@ -3096,6 +3161,8 @@ most 200 entries (default 100); pass the returned `nextCursor` as `--after`.
 failed read from a complete empty list. People and channel/thread coverage may
 be partial. No account is connected or configured by this command. Requires
 operator authentication. See [the directory contract](discord-rooms.md#discord-directory-for-settings-pickers).
+Hosted bodies obtain this view from the managed provider, restricted to their
+bound server and current installation, without a local Discord control port.
 
 ### `discord definition`
 
@@ -3151,6 +3218,11 @@ than overwriting someone else's changes. Hosted consoles and CLI use their
 existing encrypted transport. Raw local fields and credentials are not written
 through a hosted connection. Body settings retain their existing restart
 requirement; a save does not claim the running gateway has applied it.
+Managed edge policy synchronization is reported in `managedPolicy`: a saved
+body revision can be pending while the edge retries. Only `synced` identifies
+the revision the edge acknowledged. The hosted dashboard edits the same role
+model using a Discord-only signed owner bridge; disconnect/reinstall revokes
+that account connection grant and refuses later admissions.
 
 The explicit diagnostic `clankie discord setup test-post --channel general`
 remains available. It requires settings-level operator authority, a current

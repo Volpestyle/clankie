@@ -908,6 +908,25 @@ export const ClosedWorkerPaneSchema = z
   .strict();
 export type ClosedWorkerPane = z.infer<typeof ClosedWorkerPaneSchema>;
 
+/** An attributed room request delegated into its own inspectable conversation. */
+export const RoomHandoffMetadataSchema = z
+  .object({
+    roomConversationId: OperatorConversationIdSchema,
+    deliveryId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    actorId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    actorName: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
+    source: z.enum(["voice", "text"]),
+    request: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
+    doing: z.string().max(OPERATOR_CONVERSATION_SUMMARY_MAX).optional(),
+    state: z.enum(["pending", "running", "waiting_user", "completed", "failed"]),
+    host: z.enum(["pi", "claude", "codex", "opencode"]),
+    /** Actual native child reference, supplied by the dispatch acknowledgment. */
+    nativeChildSessionId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+    result: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX).optional(),
+  })
+  .strict();
+export type RoomHandoffMetadata = z.infer<typeof RoomHandoffMetadataSchema>;
+
 export const OperatorFleetSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -929,6 +948,11 @@ export const OperatorFleetSnapshotSchema = z
     workerReports: z.array(WorkerReportSummarySchema).max(1000).optional(),
     personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_AGENT_PERSONA_LIST_MAX),
     channels: z.array(OperatorChannelSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
+    /** Clankie’s room handoffs are conversations, not invented fleet seats. */
+    roomHandoffs: z
+      .array(z.lazy(() => OperatorConversationSchema))
+      .max(OPERATOR_CONVERSATION_LIST_MAX)
+      .optional(),
     /**
      * Today's counts for the seats that have any (ADR 0162). Optional so a
      * surface written before the ledger keeps reading snapshots unchanged.
@@ -1253,6 +1277,7 @@ export const OperatorConversationSchema = z
     assignment: OperatorWorkAssignmentSchema.optional(),
     /** Present only for an ephemeral side conversation forked from this parent. */
     parentConversationId: OperatorConversationIdSchema.optional(),
+    roomHandoff: RoomHandoffMetadataSchema.optional(),
     designatedHeadConversationId: OperatorConversationIdSchema.optional(),
     /**
      * A harness sits in this conversation's seat and takes its turns instead

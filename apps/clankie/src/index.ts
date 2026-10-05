@@ -137,12 +137,14 @@ import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { retireLinearNotifications } from "./linear-notifications.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
+import { createLinearApiTracker } from "./linear-api-tracker.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { readDiscordBodyDirectory } from "./discord-directory.ts";
+import { ManagedDiscord } from "./managed-discord.ts";
 import { readDiscordBodyPermissions, postDiscordBodyTest } from "./discord-setup-body.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
 import { createFileMemory, defaultMemoryDir } from "./memory.ts";
@@ -153,6 +155,7 @@ import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts"
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import {
+  applyHostedAccountApps,
   applyHostedModelPolicy,
   configureHostedModels,
   hostedWorkerLimit,
@@ -164,6 +167,7 @@ import { PublicGatewayConnector, type PublicGatewayDoorwayChange } from "./publi
 import { startHostedModelForwarder } from "./hosted-model-forwarder.ts";
 import { hostedPiSeatModel } from "./hosted-seat-model.ts";
 import { createHostedCustomerModels, customerSeatModel } from "./hosted-customer-model.ts";
+import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import { createLocalTracker } from "@clankie/work-items";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
@@ -243,6 +247,7 @@ await ensureOperatorCredential({ env: process.env, store: operatorCredentialStor
 const discordBodyInLoadout =
   serviceInLoadout("discord-bridge", process.env) || serviceInLoadout("discord-user-session", process.env);
 const hostedBootstrap = readHostedBodyBootstrap(process.env);
+if (hostedBootstrap !== undefined) await applyHostedAccountApps(hostedBootstrap, settingsStore);
 const hostedBody =
   hostedBootstrap === undefined
     ? undefined
@@ -257,6 +262,15 @@ const hostedPairing =
         join(stateRoot, "hosted-pair-tickets.json"),
       );
 await accountDiagnostics.refresh();
+const managedDiscord =
+  hostedBody === undefined
+    ? undefined
+    : new ManagedDiscord({
+        client: hostedBody,
+        settings: settingsStore,
+        statePath: join(stateRoot, "managed-discord-policy.json"),
+        environment: captainDiscordEnvironment,
+      });
 if (hostedBody !== undefined) {
   const timer = setInterval(() => void accountDiagnostics.refresh(), 60_000);
   timer.unref();
@@ -459,6 +473,10 @@ const deviceSessionKeyPath = process.env.CLANKIE_DEVICE_SESSION_KEY_PATH
   ? resolve(process.env.CLANKIE_DEVICE_SESSION_KEY_PATH)
   : join(stateRoot, "device-session.key");
 const deviceSessionKey = await loadOrCreateDeviceSessionKey(deviceSessionKeyPath);
+const supportDeviceRefKey =
+  hostedBody?.bootstrap.tenantTelemetryKey === undefined
+    ? await loadOrCreateDeviceSessionKey(join(stateRoot, "telemetry-device.key"))
+    : Uint8Array.from(Buffer.from(hostedBody.bootstrap.tenantTelemetryKey, "base64url"));
 if (deviceSessionKey === undefined) {
   logger.warn(
     { deviceSessionKeyPath },
@@ -556,6 +574,7 @@ const boundApp = (): ClankieApp => {
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
 const mcpHost = createMcpHost({
+  linearApiTracker: createLinearApiTracker({ credentials: operatorCredentialStore }),
   localTracker: createLocalTracker({ directory: join(stateRoot, "tracker") }),
   trackerIdentity: join(stateRoot, "tracker"),
   trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
@@ -631,14 +650,16 @@ const discordTracking = new DiscordTracking({
   serverPermissions: async (serverId) => {
     const current = await settingsStore.load();
     const body = resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings.activeBody;
-    return readDiscordBodyPermissions(
-      { guildId: serverId },
-      {
-        body,
-        env: process.env,
-        token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-      },
-    );
+    return managedDiscord
+      ? managedDiscord.permissions({ guildId: serverId }, body)
+      : readDiscordBodyPermissions(
+          { guildId: serverId },
+          {
+            body,
+            env: process.env,
+            token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+          },
+        );
   },
   serverAction: async (action) => {
     const current = await settingsStore.load();
@@ -1146,23 +1167,32 @@ const workerMcp = new WorkerMcp({
 
 const clankie = await createClankieApp({
   discordPermissions: (query, body) =>
-    readDiscordBodyPermissions(query, {
-      body,
-      env: process.env,
-      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-    }),
-  discordTestPost: (query, body) =>
-    postDiscordBodyTest(query, {
-      body,
-      env: process.env,
-      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-    }),
+    managedDiscord
+      ? managedDiscord.permissions(query, body)
+      : readDiscordBodyPermissions(query, {
+          body,
+          env: process.env,
+          token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+        }),
+  ...(hostedBody === undefined
+    ? {
+        discordTestPost: (query, body) =>
+          postDiscordBodyTest(query, {
+            body,
+            env: process.env,
+            token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+          }),
+      }
+    : {}),
   discordDirectory: (query, body) =>
-    readDiscordBodyDirectory(query, {
-      body,
-      env: process.env,
-      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-    }),
+    managedDiscord
+      ? managedDiscord.directory(query, body)
+      : readDiscordBodyDirectory(query, {
+          body,
+          env: process.env,
+          token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+        }),
+  ...(managedDiscord === undefined ? {} : { managedDiscord }),
   fleetProjectMembership,
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
@@ -1216,8 +1246,11 @@ const clankie = await createClankieApp({
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   localFleet,
-  ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
+  ...(hostedDiscord === undefined
+    ? {}
+    : { discordIngress: hostedDiscord.ingress, hostedDiscordOperator: hostedDiscord.operator }),
   accounts: createAccounts({
+    hosted: hostedBody !== undefined,
     store: operatorCredentialStore,
     apps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env),
   }),
@@ -1230,11 +1263,23 @@ const clankie = await createClankieApp({
   ...(hostedPairing === undefined
     ? {}
     : { hostedPairing, onHostedPairing: () => hostedHeartbeat?.interactive() }),
+  ...(rawBodyTelemetry === undefined ? {} : { supportTelemetry: rawBodyTelemetry }),
+  ...(supportDeviceRefKey === undefined ? {} : { supportDeviceRefKey }),
   ...(hostedBody === undefined
     ? {}
     : {
         hostedBody,
+        supportGrantSync: hostedBody,
         hostedCredits: hostedBody,
+        composerTranscriptions: new ComposerTranscriptions({
+          root: join(stateRoot, "composer-transcription"),
+          installationId: hostedBody.bootstrap.installationId,
+          cloud: {
+            status: (device) => hostedBody.composerTranscriptionStatus(device),
+            transcribe: (input, signal) => hostedBody.composerTranscribe(input, signal),
+            receipt: (input) => hostedBody.composerTranscriptionReceipt(input),
+          },
+        }),
         accountSettings: hostedBody,
         hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),
       }),

@@ -11,9 +11,9 @@ Work items in the repo's own tracking convention ([ADR 0191](../../docs/adr/0191
   `ConventionNeededError` with the owner's one question.
 - Backends: `createFilesBackend` (`default` at `.clankie/work/`, or `markdown`
   in the repo's directory), `createGithubBackend` (the owner's `gh`, or `githubRestApi` with the
-  body's GitHub account connection, ADR 0196), and
-  `createLinearBackend` (a Linear MCP tool call; the service supplies Clankie's
-  connected account).
+  body's GitHub account connection, ADR 0232), and
+  `createLinearBackend` (the service supplies Clankie's connected account through
+  its registered API adapter or the separately configured Linear MCP connection).
 - `parseBody` / `patchBody`: the shared Markdown. Criteria are a checklist under
   `## Acceptance Criteria`, evidence a captioned link list under `## Evidence`.
   Patches touch only the sections they name, so owner-written issue bodies keep
@@ -32,6 +32,15 @@ connected Linear. No connection selects local storage; connected provider
 failures retain their errors and never replay locally. `clankie doctor` reports
 selection and reason. Repository adapters keep GitHub/Markdown issue storage
 and carry ancillary records in durable local metadata within that scope.
+
+Hosted registered OAuth selects the service's in-process GraphQL adapter with
+broker entry `linear-api` ([ADR 0232](../../docs/adr/0232-hosted-connections-use-the-body-broker.md)).
+It retains account/repository/fleet fences and mutation receipts, and never
+passes that token to MCP. Disconnect clears both API and legacy MCP credentials.
+Optional customer-needs/releases expansions and unsupported provider mutations
+refuse explicitly. Description patches reread the stored body but cannot provide
+provider-wide compare-and-set; media-bearing description edits refuse, so add
+evidence in a comment instead.
 
 Priority is native Linear `0..4`, Markdown `priority:` front matter and reserved
 GitHub priority labels. Open-work listing sorts Urgent→High→Medium→Low→none

@@ -47,6 +47,7 @@ import { buildMemoryCommands } from "./memory-commands.ts";
 import { buildPairCommands, runConsolePair } from "./pair-commands.ts";
 import { listDevices } from "../bin/devices.ts";
 import { buildDevicesCommands } from "./devices-commands.ts";
+import { buildSupportCommands } from "./support-commands.ts";
 import { buildGatewayCommands } from "./gateway-commands.ts";
 import {
   createCaptainRouteClient,
@@ -520,6 +521,7 @@ const commands = [
   ...buildProviderCommands(services),
   ...buildPairCommands({ repoRoot, env: process.env, host: serviceUrl }),
   ...buildDevicesCommands({ env: process.env, host: serviceUrl }),
+  ...buildSupportCommands({ env: process.env, host: serviceUrl }),
   ...buildGatewayCommands({
     settings: settingsStore,
     credentials: services.store,
@@ -539,6 +541,11 @@ const shell: ClankieFaceShell = new ClankieFaceShell({
   onHerdrJump: jumpToFleetAgent,
   liveAgents: () => herdrRoster.snapshot().liveAgents ?? [],
   workerReports: () => herdrRoster.snapshot().workerReports ?? [],
+  roomHandoffs: () => herdrRoster.snapshot().roomHandoffs ?? [],
+  onOpenRoomHandoff: async (conversation) => {
+    await conversationsContext.select(conversation.conversationId);
+    expandedAgent = undefined;
+  },
   expandedAgent: () => expandedAgent?.name,
   expandedAgentSeatId: () => expandedAgent?.seatId,
   onOpenLiveAgent: async ({ seat, name }) => {

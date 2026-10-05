@@ -46,6 +46,20 @@ export {
 } from "./linear-oauth.ts";
 export { resolveProviderBearer, providerCredentialBearer } from "./provider-bearer.ts";
 export {
+  LINEAR_API_PROVIDER_ID,
+  LINEAR_API_AUTHORIZE_ENDPOINT,
+  LINEAR_API_TOKEN_ENDPOINT,
+  LINEAR_API_REVOKE_ENDPOINT,
+  LINEAR_API_GRAPHQL_ENDPOINT,
+  LINEAR_API_OAUTH_SCOPES,
+  buildLinearApiAuthorizeUrl,
+  exchangeLinearApiAuthorizationCode,
+  refreshLinearApiOauth,
+  revokeLinearApiOauth,
+  verifyLinearApiOauthAccount,
+  providerGrantedScopes,
+} from "./linear-api-oauth.ts";
+export {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   ClankieAccountAuthError,
   beginClankieAccountLogin,

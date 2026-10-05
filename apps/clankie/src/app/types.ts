@@ -1,5 +1,6 @@
 import type { HarnessRefreshAuthority } from "../runtime-update-routes.ts";
 import type { HerdrFleet } from "../herdr-fleet.ts";
+import type { BodyTelemetry } from "@clankie/observability/body-telemetry";
 import type { IntegrationQueue } from "../integrate.ts";
 import type { DeployHolds } from "../deploy-holds.ts";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
@@ -43,10 +44,13 @@ import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
 import type { HostedBodyClient } from "../hosted-body.ts";
+import type { ComposerTranscriptions } from "../composer-transcription.ts";
 import type { HostedDeviceSecurity } from "../hosted-device-security.ts";
+import type { HostedDiscordOperator } from "../hosted-discord.ts";
 import type { HostedPairing } from "../hosted-pairing.ts";
 import { type LinearActivityEvent, type LinearWriteReceipts } from "../linear-webhook.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
+import type { ManagedDiscord } from "../managed-discord.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { MinecraftService } from "../minecraft.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
@@ -142,12 +146,21 @@ export interface ClankieAppDependencies {
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;
   hostedPairing?: HostedPairing;
+  hostedDiscordOperator?: HostedDiscordOperator;
+  managedDiscord?: ManagedDiscord;
   onHostedPairing?: () => void;
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
+  supportGrantSync?: Pick<HostedBodyClient, "syncSupportGrants">;
+  /** Mandatory support audit bypasses ordinary diagnostic consent. */
+  supportTelemetry?: BodyTelemetry;
+  /** Tenant telemetry key or a dedicated random key persisted on this body volume. */
+  supportDeviceRefKey?: Uint8Array;
   /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */
   hostedCredits?: Pick<HostedBodyClient, "readCredits">;
+  composerTranscriptions?: ComposerTranscriptions;
   accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;
-  hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice">;
+  hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice"> &
+    Partial<Pick<HostedDeviceSecurity, "publishSupportDevice">>;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */

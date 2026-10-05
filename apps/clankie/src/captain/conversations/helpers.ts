@@ -144,5 +144,6 @@ export function publicConversation(meta: ConversationMeta): OperatorConversation
       : { designatedHeadConversationId: meta.designatedHeadConversationId }),
     ...(meta.contextUsage === undefined ? {} : { contextUsage: meta.contextUsage }),
     ...(meta.parentConversationId === undefined ? {} : { parentConversationId: meta.parentConversationId }),
+    ...(meta.roomHandoff === undefined ? {} : { roomHandoff: { ...meta.roomHandoff } }),
   };
 }

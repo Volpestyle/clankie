@@ -37,6 +37,7 @@ tags:
   - name: Media
   - name: Pairing
   - name: Devices
+  - name: Support
   - name: Workers
 security: []
 
@@ -386,6 +387,175 @@ paths:
           description: Durable inbox is at capacity
         "503":
           description: Durable admission unavailable
+  /v1/composer/transcription/status:
+    get:
+      tags: [Devices]
+      operationId: composerTranscriptionStatus
+      summary: Read local or managed availability and included allowance
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      responses:
+        "200":
+          description: Availability and bounds
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionStatus" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/begin:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionBegin
+      summary: Begin one bounded composer recording
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionBegin" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/chunk:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionChunk
+      summary: Append one recording chunk at an exact byte offset
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionChunk" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/commit:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionCommit
+      summary: Transcribe a completed recording once
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionRequest" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/cancel:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionCancel
+      summary: Discard a recording and prevent late draft delivery
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionRequest" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
+  /v1/composer/transcription/receipt:
+    post:
+      tags: [Devices]
+      operationId: composerTranscriptionReceipt
+      summary: Reconcile the same recording without repeating provider dispatch
+      security: [{ deviceBearer: [] }]
+      description: |
+        Active ordinary paired device with chat access only; captain/operator
+        bearers and support devices are refused. Gateway calls preserve the
+        existing encrypted device envelope. No-store; never logs audio or text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposerTranscriptionRequest" }
+      responses:
+        "200":
+          description: Device-scoped draft receipt; only complete carries text
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposerTranscriptionReceipt" }
+        "400": { description: Invalid request or PCM WAV audio }
+        "401": { description: Active paired device session required }
+        "403": { description: Forbidden, ineligible or included allowance exhausted }
+        "404": { description: Request does not belong to this device }
+        "409": { description: Recording id, byte offset or lifecycle conflict }
+        "413": { description: Request exceeds the bounded chunk envelope }
+        "429": { description: Capacity or rate limit reached }
+        "503": { description: Managed transcription unavailable }
   /v1/model-keys:
     get:
       tags: [Operator]
@@ -659,7 +829,7 @@ paths:
       operationId: listAccounts
       summary: List GitHub and Linear account connections
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
@@ -678,7 +848,7 @@ paths:
       operationId: startGithubAccount
       summary: Start a GitHub device flow; return the user code and verification URL
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
         The device code stays on the body. Unconfigured without a GitHub OAuth client ID.
@@ -708,7 +878,7 @@ paths:
       operationId: pollGithubAccount
       summary: Poll a GitHub device flow; returns pending, connected or a closed error
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
         Polls faster than GitHub's interval are answered by the body without calling GitHub.
@@ -742,12 +912,12 @@ paths:
     post:
       tags: [Operator]
       operationId: startLinearAccount
-      summary: Start Linear OAuth with PKCE; return the authorize URL
+      summary: Start registered Linear app OAuth with S256 PKCE; return the authorize URL
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
-        The PKCE verifier stays on the body. Unconfigured without a redirect URI.
+        The PKCE verifier stays on the body. Tokens use the separate linear-api broker entry and GraphQL tracker, never MCP. Unconfigured without a redirect URI.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
@@ -774,7 +944,7 @@ paths:
       operationId: completeLinearAccount
       summary: Hand back Linear's redirect code; the body exchanges it with its verifier
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
         state is single use.
@@ -845,13 +1015,15 @@ paths:
     post:
       tags: [Operator]
       operationId: disconnectAccount
-      summary: Revoke a connection at the provider and delete its token
+      summary: Disconnect locally and report actual provider revocation
       description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0196). Public
+        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
         gateway calls require the encrypted envelope. Never returns or logs a token or
         provider error text. Cache-Control no-store.
         revoked is false when the provider could not revoke; the token is deleted either way
         and manageUrl names where to revoke it by hand.
+        Hosted GitHub disconnect never uses a developer app secret and reports revoked false.
+        Owner-run self-hosted GitHub revocation deletes only the stored token, never an app grant.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
@@ -4075,6 +4247,112 @@ paths:
         "200":
           description: ok, pending, or refused
 
+  /v1/support/grants:
+    get:
+      tags: [Support]
+      operationId: listSupportGrants
+      summary: Read owner-issued support grants
+      description: Exact active owner device with terminalControl or the local operator; captain and support-device authority are refused. Hosted inner requests require the hosted account operator device and cannot fall back to local operator authority.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Grant history with body-only support references
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grants]
+                additionalProperties: false
+                properties:
+                  grants:
+                    type: array
+                    items: { $ref: "#/components/schemas/SupportGrant" }
+        "403": { description: Owner authority required }
+    post:
+      tags: [Support]
+      operationId: createSupportGrant
+      summary: Create a support window of at most 72 hours
+      description: Owner authority only. Mandatory audit failure refuses creation on hosted bodies; 1024 concurrent unexpired original windows includes revoked tombstones until their original expiry.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SupportGrantCreateRequest" }
+      responses:
+        "200":
+          description: Active grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupportGrant" }
+        "400": { description: Invalid support grant }
+        "403": { description: Owner authority required }
+        "409": { description: Support window capacity reached }
+        "503": { description: Support audit or storage unavailable }
+
+  /v1/support/grants/{id}/revoke:
+    post:
+      tags: [Support]
+      operationId: revokeSupportGrant
+      summary: Revoke support access
+      description: Owner authority only. Durable terminal state closes support reads before audit retries and remains closed after restart.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Current revoked or expired grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupportGrant" }
+        "403": { description: Owner authority required }
+        "404": { description: Grant not found }
+
+  /v1/support/grants/{id}/pairing-offer:
+    post:
+      tags: [Support, Pairing]
+      operationId: createSupportPairingOffer
+      summary: Offer pairing for an active read-state support grant
+      description: Owner authority only. Offers expire no later than five minutes or the grant window. All four ordinary device grants are false; the relay admits only the closed state/history read allowlist. Shell grants refuse pairing. Publishing rechecks owner authority and live grant before installing the offer.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Read-state pairing offer wire }
+        "403": { description: Owner authority required }
+        "409": { description: support_pairing_requires_read_state }
+        "410": { description: Grant inactive or expired }
+        "503": { description: Public gateway unavailable }
+
+  /v1/hosted/support:
+    post:
+      tags: [Support]
+      operationId: hostedSupportCommand
+      summary: Apply an exact command authorized by a hosted account ticket
+      description: Separate support crypto domain and durable one-use ticket fence. The signed ticket binds account, tenant, installation, exact command digest, browser key and nonce, with at most 120 seconds lifetime. No bearer fallback. Replies use authenticated Ed25519 plus ECDH/HKDF/AES-GCM; support references remain outside fleet metadata and central audit.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, supportTicket, browserPublicKey, nonce, command]
+              properties:
+                version: { const: 1 }
+                supportTicket: { type: string, minLength: 1, maxLength: 4096 }
+                browserPublicKey: { type: string, pattern: "^[A-Za-z0-9_-]{87}$" }
+                nonce: { type: string, pattern: "^[A-Za-z0-9_-]{22}$" }
+                command: { $ref: "#/components/schemas/SupportAccessCommand" }
+      responses:
+        "200":
+          { description: Encrypted version-2 response with ephemeralPublicKey, iv, ciphertext and signature }
+        "401": { description: Invalid, expired or replayed ticket }
+        "404": { description: Hosted pairing unavailable on this body }
+        "429": { description: Support ticket rate limit reached }
+        "503": { description: Durable ticket admission or command unavailable }
+
   /v1/pairing/offer:
     post:
       tags: [Pairing]
@@ -4335,6 +4613,54 @@ paths:
 
 components:
   schemas:
+    SupportGrantCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, durationSeconds, supportRef]
+      properties:
+        scope: { type: string, enum: [read-state, shell] }
+        durationSeconds: { type: integer, minimum: 1, maximum: 259200 }
+        supportRef:
+          { type: string, minLength: 1, maxLength: 128, description: Trimmed body-only customer reference }
+    SupportGrant:
+      type: object
+      additionalProperties: false
+      required: [grantId, scope, status, createdAt, expiresAt, supportRef]
+      properties:
+        grantId: { type: string, format: uuid }
+        scope: { type: string, enum: [read-state, shell] }
+        status: { type: string, enum: [active, revoked, expired] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, description: At most 72 hours after creation }
+        revokedAt: { type: string, format: date-time, description: Required only for revoked grants }
+        supportRef: { type: string, minLength: 1, maxLength: 128 }
+    SupportAccessCommand:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [action]
+          properties:
+            action: { const: list }
+        - type: object
+          additionalProperties: false
+          required: [action, scope, durationSeconds, supportRef]
+          properties:
+            action: { const: create }
+            scope: { type: string, enum: [read-state, shell] }
+            durationSeconds: { type: integer, minimum: 1, maximum: 259200 }
+            supportRef: { type: string, minLength: 1, maxLength: 128 }
+        - type: object
+          additionalProperties: false
+          required: [action, grantId]
+          properties:
+            action: { const: revoke }
+            grantId: { type: string, format: uuid }
+        - type: object
+          additionalProperties: false
+          required: [action, grantId]
+          properties:
+            action: { const: pairing-offer }
+            grantId: { type: string, format: uuid }
     FleetReleasePolicy:
       description: Owner guidance for official tags, packages and store submissions; confers no account or tool authority. A time rule is checked by the agent, not evaluated by a scheduler.
       oneOf:
@@ -4359,6 +4685,83 @@ components:
       oneOf:
         - { $ref: "#/components/schemas/FleetReleasePolicy" }
         - { type: object, nullable: true, enum: [null] }
+    ComposerTranscriptionRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId]
+      properties:
+        requestId: { type: string, format: uuid }
+    ComposerTranscriptionBegin:
+      type: object
+      additionalProperties: false
+      required: [requestId, audioBytes]
+      properties:
+        requestId: { type: string, format: uuid }
+        audioBytes: { type: integer, minimum: 46, maximum: 5825580 }
+    ComposerTranscriptionChunk:
+      type: object
+      additionalProperties: false
+      required: [requestId, offset, dataBase64]
+      properties:
+        requestId: { type: string, format: uuid }
+        offset: { type: integer, minimum: 0, maximum: 5825580 }
+        dataBase64:
+          type: string
+          contentEncoding: base64
+          minLength: 4
+          maxLength: 349528
+          description: Canonical base64 of at most 256 KiB; offset must append or repeat identical acknowledged bytes.
+    ComposerTranscriptionStatus:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, mode, state, maxDurationMs, maxAudioBytes, maxChunkBytes]
+      properties:
+        schemaVersion: { const: 1 }
+        mode: { enum: [local, managed] }
+        state: { enum: [available, unavailable, ineligible, allowance_exhausted] }
+        maxDurationMs: { type: integer, minimum: 1, maximum: 180000 }
+        maxAudioBytes: { type: integer, minimum: 1, maximum: 5825580 }
+        maxChunkBytes: { type: integer, minimum: 1, maximum: 262144 }
+        allowance:
+          type: object
+          additionalProperties: false
+          required: [limitMs, remainingMs, resetsAt]
+          properties:
+            limitMs: { type: integer, minimum: 0 }
+            remainingMs: { type: integer, minimum: 0 }
+            resetsAt: { type: string, format: date-time }
+    ComposerTranscriptionReceipt:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, requestId, state]
+      properties:
+        schemaVersion: { const: 1 }
+        requestId: { type: string, format: uuid }
+        state: { enum: [uploading, transcribing, complete, cancelled, failed, uncertain] }
+        receivedBytes: { type: integer, minimum: 0, maximum: 5825580 }
+        text:
+          {
+            type: string,
+            maxLength: 16000,
+            description: Present exactly when state is complete; transient editable draft only.,
+          }
+        error:
+          enum:
+            [
+              authentication_required,
+              forbidden,
+              unavailable,
+              ineligible,
+              allowance_exhausted,
+              invalid_request,
+              invalid_audio,
+              capacity,
+              not_found,
+              conflict,
+              cancelled,
+              uncertain,
+              provider_failed,
+            ]
     DeployHoldOverride:
       type: object
       additionalProperties: false

@@ -40,6 +40,25 @@ set; the [agent-host guide](../packages/agent-hosts/README.md) owns native
 worker support. [ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)
 records the separation between Clankie and his connections.
 
+## Customer support authority
+
+The body owns customer-issued support grants, durable revocation and mandatory
+audit. An owner operator or paired device with terminal control can create a
+referenced Read state or Shell window of at most 72 hours through
+[`clankie support`](cli.md). Read-state pairing carries no ordinary device
+grants: the relay admits only a closed state/history read allowlist and rechecks
+the live window before each disclosure, including streams. Shell windows refuse
+pairing; hosted shell enforcement belongs to private `clankie-ops`.
+
+Hosted account tickets bind the exact command, account, tenant, installation,
+browser key and nonce. The body durably fences replay before executing and seals
+the response. Neither account metadata nor captain authority creates a grant.
+Support audit uses keyed device references and a separate durable spool;
+disclosure fails closed without it. Independent sink acknowledgements govern
+spool pruning, regardless of diagnostic consent. Public/private artifacts and
+hosted rollout must be coordinated; source integration alone does not prove
+production enforcement.
+
 ## Approved commit integration
 
 The source-checkout service owns an approved-commit integration queue through
@@ -298,6 +317,17 @@ Ordinary operator sends and resets remain read-only for these records. An
 attached native seat can execute admitted room turns and return correlated replies
 through the existing Discord transport. See
 [ADR 0176](adr/0176-every-room-is-an-inspectable-conversation.md).
+
+Every admitted room handoff has a separate durable child conversation, visible
+under Clankie in the TUI dock and app with who asked, current work and result.
+A shared queue admits four voice and text requests globally, at most two per
+room, and holds at most 32 waiting jobs; excess requests receive a busy result.
+The canonical room retains authority and the reply destination. A service head
+runs separate Pi threads; a Claude head starts restricted native children; a
+Codex head starts native children only for the verified owner and uses Pi under
+the original room lane and grant for every other speaker. Actual native ancestry establishes
+child references, and taken or uncertain native requests are never replayed as
+Pi work. See [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md).
 
 Conversations are files under `~/.clankie/captain/`. Each settled operator or
 Discord captain turn also appends one metrics line to
@@ -624,6 +654,12 @@ Linear-shaped tracker tool surface to Clankie and workers, using the connected
 owner account or durable local storage when disconnected; repository conventions
 adapt GitHub and Markdown to that same surface. `clankie doctor` reports backend
 selection and reason ([ADR 0226](adr/0226-one-tracker-tool-surface.md)).
+Account Connections in the app and account page use body-owned GitHub device
+authorization and registered Linear S256 PKCE. Provider tokens stay in the
+body's broker; the portals exchange only sealed lifecycle requests and public
+connection metadata. Registered Linear API OAuth uses a separate `linear-api`
+credential and in-process tracker, preserving the existing MCP audience and
+grant fences ([ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md)).
 Herdr contains the native
 interactive workers; Clankie uses their supported channels or session APIs for
 delivery. Linked independent agents can write first with `message_clankie`. Untrusted input stays fenced, secrets stay in the credential

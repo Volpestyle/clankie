@@ -17,7 +17,8 @@ type Identity = z.infer<typeof IdentitySchema>;
 /** Public body half of the fleet's security-state contract. No customer keys leave this machine. */
 export class HostedDeviceSecurity {
   private generation = -1;
-  private readonly client: Pick<HostedBodyClient, "readSecurityState" | "declareAuthKey" | "revokeDevice">;
+  private readonly client: Pick<HostedBodyClient, "readSecurityState" | "declareAuthKey" | "revokeDevice"> &
+    Partial<Pick<HostedBodyClient, "declareSupportDevice">>;
   private readonly identityPath: string;
   constructor(client: HostedDeviceSecurity["client"], identityPath: string) {
     this.client = client;
@@ -31,7 +32,14 @@ export class HostedDeviceSecurity {
     return state;
   }
 
-  async prepare(localKey: Uint8Array | undefined, locallyRevoked: readonly string[]) {
+  async prepare(
+    localKey: Uint8Array | undefined,
+    locallyRevoked: readonly string[],
+  ): Promise<{
+    key: Uint8Array<ArrayBuffer>;
+    keyId?: string;
+    revocations: { dev: string; at: number; gen: number }[];
+  }> {
     let state = await this.read(); // No disk identity mutation before a verified, nonce-bound read.
     const remote = new Set(state.rev.map((entry) => entry.dev));
     for (const deviceId of locallyRevoked) {
@@ -75,13 +83,30 @@ export class HostedDeviceSecurity {
       // response is recoverable next boot because the same key/id is on disk.
       state = await this.read();
       if (state.ak?.kid !== identity.keyId) continue;
-      return { key: Uint8Array.from(Buffer.from(identity.key, "base64url")), revocations: state.rev };
+      return {
+        key: Uint8Array.from(Buffer.from(identity.key, "base64url")),
+        keyId: identity.keyId,
+        revocations: state.rev,
+      };
     }
     throw new Error("Hosted authentication key changed during recovery");
   }
 
   async revokeDevice(deviceId: string): Promise<void> {
     await this.client.revokeDevice(deviceId);
+  }
+
+  async publishSupportDevice(deviceId: string, supportGrantId: string): Promise<void> {
+    const existing = (await this.read()).sp?.find((entry) => entry.dev === deviceId);
+    if (existing !== undefined) {
+      if (existing.grant !== supportGrantId) throw new Error("Hosted support device purpose conflicts");
+      return;
+    }
+    if (this.client.declareSupportDevice === undefined)
+      throw new Error("Hosted support device publication unavailable");
+    await this.client.declareSupportDevice(deviceId, supportGrantId);
+    const confirmed = (await this.read()).sp?.find((entry) => entry.dev === deviceId);
+    if (confirmed?.grant !== supportGrantId) throw new Error("Hosted support device publication unconfirmed");
   }
 
   private async load(): Promise<Identity | undefined> {

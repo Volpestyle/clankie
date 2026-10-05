@@ -9,7 +9,46 @@ import {
   PublicGatewayHostIdSchema,
 } from "@clankie/protocol/public-gateway";
 import { HostedCreditsSchema, type HostedCredits } from "@clankie/protocol/hosted-credits";
+import {
+  SupportAccessCommandSchema,
+  SupportGrantSyncSchema,
+  type SupportAccessCommand,
+  type SupportGrantMetadata,
+} from "@clankie/protocol/support-access";
 import type { CredentialStore } from "@clankie/credential-broker";
+import { SettingsStore } from "@clankie/settings";
+import {
+  ManagedDiscordDirectoryResponseSchema,
+  ManagedDiscordPermissionsResponseSchema,
+  ManagedDiscordPolicyStateResponseSchema,
+  ManagedDiscordPolicyRequestSchema,
+  ManagedDiscordPolicyResponseSchema,
+  ManagedDiscordPolicyConflictSchema,
+  type ManagedDiscordPolicyRequest,
+  type ManagedDiscordPolicyState,
+} from "@clankie/protocol/managed-discord";
+import { HostedDiscordAuthorizationClaimsSchema } from "@clankie/protocol/hosted-discord";
+import { verifyHostedDiscordPermit } from "@clankie/protocol/hosted-discord-crypto";
+import type { DiscordDirectoryRequest, DiscordPermissionsRequest } from "@clankie/protocol";
+import {
+  HostedDevicePurposeRequestSchema,
+  HostedSupportDeviceStateSchema,
+} from "@clankie/protocol/hosted-device-security";
+import { parseProtocolResponse, safeParseProtocolResponse } from "@clankie/protocol";
+import {
+  HOSTED_COMPOSER_STATUS_PATH,
+  HOSTED_COMPOSER_TRANSCRIBE_PATH,
+  HOSTED_COMPOSER_RECEIPT_PATH,
+  ComposerTranscriptionDeviceSchema,
+  HostedComposerTranscriptionSchema,
+  HostedComposerReceiptSchema,
+  ComposerTranscriptionStatusSchema,
+  ComposerTranscriptionReceiptSchema,
+  ComposerTranscriptionErrorSchema,
+  type ComposerTranscriptionDevice,
+  type HostedComposerTranscription,
+  type HostedComposerReceipt,
+} from "@clankie/protocol/composer-transcription";
 import {
   loadConfig,
   parseModelRef,
@@ -43,6 +82,23 @@ const BootstrapSchema = z
       .optional(),
     /** The plan's limit on hired agents running at once (VUH-1388); absent, two per vCPU. */
     maxHiredWorkers: z.number().int().min(1).max(64).optional(),
+    /** Public developer-app IDs only; customer/provider secrets are broker-only. */
+    accounts: z
+      .object({
+        github: z
+          .object({ clientId: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/u) })
+          .strict()
+          .optional(),
+        linear: z
+          .object({
+            clientId: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/u),
+            redirectUri: z.url(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     /**
      * The plan's task-based model routing. Absent leaves the body's own
      * routing untouched; present, it is written over the body's routing
@@ -57,8 +113,34 @@ const BootstrapSchema = z
       .strict()
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((bootstrap, context) => {
+    if (
+      bootstrap.accounts?.linear &&
+      bootstrap.accounts.linear.redirectUri !== `${bootstrap.gatewayOrigin}/account/connections/callback`
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["accounts", "linear", "redirectUri"],
+        message: "must be the gateway account callback",
+      });
+  });
 export type HostedBodyBootstrap = z.infer<typeof BootstrapSchema>;
+
+/** Public client configuration reaches the body, never a customer token. */
+export async function applyHostedAccountApps(
+  bootstrap: Pick<HostedBodyBootstrap, "accounts">,
+  settings: Pick<SettingsStore, "update">,
+): Promise<void> {
+  if (bootstrap.accounts === undefined) return;
+  await settings.update((current) => ({
+    ...current,
+    oauthApps: {
+      github: bootstrap.accounts?.github ?? {},
+      linear: bootstrap.accounts?.linear ?? {},
+    },
+  }));
+}
 
 /** Applies the plan's routing (see `modelRouting`) to the body's model config. */
 export async function applyHostedModelRouting(
@@ -240,7 +322,12 @@ function hostedVerifyKeys(json: string): ReadonlyMap<string, KeyObject> {
 
 function signedClaims(
   token: string,
-  typ: "clankie-host" | "clankie-pair" | "clankie-security",
+  typ:
+    | "clankie-host"
+    | "clankie-pair"
+    | "clankie-security"
+    | "clankie-support"
+    | "clankie-discord-authorization",
   keys: ReadonlyMap<string, KeyObject>,
 ): unknown {
   const parts = token.split(".");
@@ -281,6 +368,12 @@ const HostClaimsSchema = z
     inst: PublicGatewayInstallationIdSchema,
   })
   .strict();
+const SupportClaimsSchema = PairClaimsSchema.omit({ purpose: true })
+  .extend({
+    sub: BootstrapSchema.shape.accountId,
+    cmd: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
+  })
+  .strict();
 
 /** Fleet-signed rollback-independent state; the request nonce fences old answers. */
 const SecurityStateClaimsSchema = z
@@ -313,20 +406,35 @@ const SecurityStateClaimsSchema = z
       .object({ key: z.string().regex(/^[A-Za-z0-9_-]{43}$/u), gen: z.number().int().nonnegative() })
       .strict()
       .nullable(),
+    sp: z.array(HostedSupportDeviceStateSchema).max(1024).optional(),
   })
   .strict();
 export type HostedSecurityState = Pick<
   z.infer<typeof SecurityStateClaimsSchema>,
-  "gen" | "rev" | "ak" | "pk"
+  "gen" | "rev" | "ak" | "pk" | "sp"
 >;
 
 /** Resource/key refusal is not revocation of this body's entitlement. */
 export class HostedBodyResourceError extends Error {
-  readonly code: "key_retired" | "stale_auth_key" | "device_revoked" | "too_many_revocations";
+  readonly code:
+    | "key_retired"
+    | "stale_auth_key"
+    | "device_revoked"
+    | "too_many_revocations"
+    | "discord_grant_revoked"
+    | "discord_scope_refused"
+    | "wrong_guild";
   constructor(code: HostedBodyResourceError["code"]) {
     super(`Fleet request refused (${code})`);
     this.name = "HostedBodyResourceError";
     this.code = code;
+  }
+}
+export class ManagedDiscordPolicyConflictError extends Error {
+  readonly current: ManagedDiscordPolicyState;
+  constructor(current: ManagedDiscordPolicyState) {
+    super("discord_policy_conflict");
+    this.current = current;
   }
 }
 
@@ -354,6 +462,25 @@ export class HostedBodyDeniedError extends Error {
     this.name = "HostedBodyDeniedError";
   }
 }
+
+/** A validated composer admission refusal; it contains no upstream response text. */
+export class HostedComposerRefusedError extends Error {
+  readonly code: z.infer<typeof ComposerTranscriptionErrorSchema>["error"];
+  constructor(code: HostedComposerRefusedError["code"]) {
+    super(code);
+    this.name = "HostedComposerRefusedError";
+    this.code = code;
+  }
+}
+const COMPOSER_ADMISSION_REFUSALS = new Set([
+  "authentication_required",
+  "forbidden",
+  "ineligible",
+  "allowance_exhausted",
+  "invalid_request",
+  "invalid_audio",
+  "capacity",
+]);
 
 /** One renewable credential for the connector and every fleet call. Secrets stay in the broker. */
 export class HostedBodyClient {
@@ -423,6 +550,44 @@ export class HostedBodyClient {
     )
       throw new Error("Invalid pair ticket binding or lifetime");
     return claims;
+  }
+
+  verifySupportTicket(
+    ticket: string,
+    browserPublicKey: string,
+    nonce: string,
+    command: SupportAccessCommand,
+  ) {
+    const claims = SupportClaimsSchema.parse(signedClaims(ticket, "clankie-support", this.keys));
+    const now = Math.floor(this.clock() / 1000);
+    if (
+      claims.sub !== this.bootstrap.accountId ||
+      claims.tid !== this.bootstrap.tenantId ||
+      claims.hid !== this.hostId ||
+      claims.exp <= now ||
+      claims.iat > now + 60 ||
+      claims.exp <= claims.iat ||
+      claims.exp - claims.iat > 120 ||
+      claims.non !== nonce ||
+      claims.bkh !==
+        createHash("sha256").update(Buffer.from(browserPublicKey, "base64url")).digest("base64url") ||
+      claims.cmd !==
+        createHash("sha256")
+          .update(JSON.stringify(SupportAccessCommandSchema.parse(command)))
+          .digest("base64url")
+    )
+      throw new Error("Invalid support ticket binding or lifetime");
+    return claims;
+  }
+
+  async syncSupportGrants(snapshot: { revision: number; grants: SupportGrantMetadata[] }): Promise<void> {
+    const body = SupportGrantSyncSchema.parse({
+      schemaVersion: 1,
+      installationId: this.bootstrap.installationId,
+      ...snapshot,
+    });
+    const response = await this.post("support-grants", body);
+    if (!response.ok) throw new Error("Support grant sync unavailable");
   }
 
   async resolveHostToken(): Promise<{ token: string; expiresAt: number; refreshAt: number }> {
@@ -502,6 +667,17 @@ export class HostedBodyClient {
       }
       if (response.status === 403 || response.status === 409) {
         const code = await errorCode(response);
+        if (path === "discord-policy" && response.status === 409 && code === "discord_policy_conflict") {
+          const conflict = ManagedDiscordPolicyConflictSchema.parse(await response.json());
+          throw new ManagedDiscordPolicyConflictError(conflict.current);
+        }
+        if (
+          path.startsWith("discord-") &&
+          (code === "discord_grant_revoked" || code === "discord_scope_refused" || code === "wrong_guild")
+        ) {
+          await response.body?.cancel();
+          throw new HostedBodyResourceError(code);
+        }
         if (
           (path === "pairing-key" && code === "key_retired") ||
           (path === "wake-keys" && code === "device_revoked") ||
@@ -592,11 +768,81 @@ export class HostedBodyClient {
     this.credential = credential;
   }
   async post(
-    path: "wake-keys" | "wake-keys/revoke" | "heartbeat" | "discord-key" | "devices/revoke" | "auth-key",
+    path:
+      | "wake-keys"
+      | "wake-keys/revoke"
+      | "heartbeat"
+      | "discord-key"
+      | "devices/revoke"
+      | "auth-key"
+      | "support-grants"
+      | "device-purpose",
     body: Readonly<Record<string, unknown>>,
   ): Promise<Response> {
     const credential = await this.resolveHostToken();
     return this.request(path, { ...body, installationId: this.bootstrap.installationId }, credential.token);
+  }
+  private async discordRequest(path: string, body: Readonly<Record<string, unknown>>) {
+    const credential = await this.resolveHostToken();
+    return this.request(path, { ...body, installationId: this.bootstrap.installationId }, credential.token);
+  }
+  async readDiscordDirectory(query: DiscordDirectoryRequest) {
+    return ManagedDiscordDirectoryResponseSchema.parse(
+      await (await this.discordRequest("discord-directory", { query })).json(),
+    );
+  }
+  async readDiscordPermissions(query: DiscordPermissionsRequest) {
+    return ManagedDiscordPermissionsResponseSchema.parse(
+      await (await this.discordRequest("discord-permissions", { query })).json(),
+    );
+  }
+  async readDiscordPolicyState() {
+    return ManagedDiscordPolicyStateResponseSchema.parse(
+      await (await this.discordRequest("discord-policy-state", {})).json(),
+    );
+  }
+  async syncDiscordPolicy(policy: Omit<ManagedDiscordPolicyRequest, "installationId">) {
+    const input = ManagedDiscordPolicyRequestSchema.parse({
+      ...policy,
+      installationId: this.bootstrap.installationId,
+    });
+    return ManagedDiscordPolicyResponseSchema.parse(
+      await (await this.discordRequest("discord-policy", input)).json(),
+    );
+  }
+  async authorizeDiscordWeb(permit: string): Promise<number> {
+    const expected = verifyHostedDiscordPermit(permit, {
+      tenantId: this.bootstrap.tenantId,
+      installationId: this.bootstrap.installationId,
+      verifyKeys: this.keys,
+      nowMs: this.clock(),
+    });
+    if (expected.sub !== this.bootstrap.accountId) throw new Error("discord_owner_required");
+    const nonce = randomBytes(16).toString("base64url");
+    const response = await this.discordRequest("discord-authorize", { permit, nonce });
+    const wire = z
+      .object({ authorization: z.string().min(1).max(4096) })
+      .strict()
+      .parse(await response.json());
+    const claims = HostedDiscordAuthorizationClaimsSchema.parse(
+      signedClaims(wire.authorization, "clankie-discord-authorization", this.keys),
+    );
+    const now = this.clock();
+    if (
+      claims.tid !== expected.tid ||
+      claims.inst !== expected.inst ||
+      claims.sub !== expected.sub ||
+      claims.gen !== expected.gen ||
+      claims.dig !== expected.dig ||
+      claims.prm !== expected.jti ||
+      claims.non !== nonce ||
+      claims.exp * 1000 <= now ||
+      claims.iat * 1000 > now + 1000 ||
+      claims.exp <= claims.iat ||
+      claims.exp - claims.iat > 5
+    )
+      throw new Error("Invalid Discord authorization proof");
+    return claims.exp * 1000;
   }
   async readSecurityState(): Promise<HostedSecurityState> {
     let state: HostedSecurityState | undefined;
@@ -607,7 +853,7 @@ export class HostedBodyClient {
       credential.token,
       async (response, nonce) => {
         const wire = z
-          .object({ state: z.string().max(256_000) })
+          .object({ state: z.string().max(1_048_576) })
           .strict()
           .parse(await response.json());
         const claims = SecurityStateClaimsSchema.parse(
@@ -623,11 +869,20 @@ export class HostedBodyClient {
           claims.exp <= claims.iat ||
           claims.exp - claims.iat > 60 ||
           claims.rev.some((entry) => entry.gen > claims.gen) ||
+          claims.sp?.some(
+            (entry) => entry.gen > claims.gen || entry.inst !== this.bootstrap.installationId,
+          ) ||
           (claims.ak !== null && claims.ak.gen > claims.gen) ||
           (claims.pk !== null && claims.pk.gen > claims.gen)
         )
           throw new Error("Invalid hosted security state");
-        state = { gen: claims.gen, rev: claims.rev, ak: claims.ak, pk: claims.pk };
+        state = {
+          gen: claims.gen,
+          rev: claims.rev,
+          ak: claims.ak,
+          pk: claims.pk,
+          ...(claims.sp === undefined ? {} : { sp: claims.sp }),
+        };
       },
     );
     if (state === undefined) throw new Error("Hosted security state unavailable");
@@ -638,6 +893,15 @@ export class HostedBodyClient {
     z.object({ generation: z.number().int().nonnegative() })
       .strict()
       .parse(await response.json());
+  }
+  async declareSupportDevice(deviceId: string, supportGrantId: string): Promise<void> {
+    const input = HostedDevicePurposeRequestSchema.parse({
+      installationId: this.bootstrap.installationId,
+      deviceId,
+      supportGrantId,
+    });
+    const response = await this.post("device-purpose", input);
+    await response.body?.cancel();
   }
   async declareAuthKey(keyId: string, previousKeyId?: string): Promise<void> {
     const response = await this.post("auth-key", {
@@ -708,6 +972,64 @@ export class HostedBodyClient {
       return response;
     }
   }
+  /** Signed, one-attempt paired-device composer transport. No audio resend after uncertainty. */
+  private async composerRequest(path: string, input: unknown, signal?: AbortSignal) {
+    await this.pairingRegistration;
+    const { token } = await this.resolveHostToken();
+    const bytes = JSON.stringify(input);
+    const digest = createHash("sha256").update(bytes).digest("base64url");
+    // An uncertain upload is never resent, even when a model forwarder would retry it.
+    const response = await this.fetcher(new URL(path, this.bootstrap.gatewayOrigin), {
+      method: "POST",
+      redirect: "error",
+      body: bytes,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        ...this.signature(path, digest),
+      },
+      signal: signal ?? AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      if ([400, 401, 403, 429].includes(response.status)) {
+        const refusal = safeParseProtocolResponse(
+          ComposerTranscriptionErrorSchema,
+          await response.json().catch(() => undefined),
+        );
+        if (refusal.success && COMPOSER_ADMISSION_REFUSALS.has(refusal.data.error))
+          throw new HostedComposerRefusedError(refusal.data.error);
+      }
+      await response.body?.cancel();
+      throw new Error("Composer transcription unavailable");
+    }
+    return response.json() as Promise<unknown>;
+  }
+  async composerTranscriptionStatus(device: ComposerTranscriptionDevice) {
+    return parseProtocolResponse(
+      ComposerTranscriptionStatusSchema,
+      await this.composerRequest(
+        HOSTED_COMPOSER_STATUS_PATH,
+        ComposerTranscriptionDeviceSchema.parse(device),
+      ),
+    );
+  }
+  async composerTranscribe(input: HostedComposerTranscription, signal: AbortSignal) {
+    return parseProtocolResponse(
+      ComposerTranscriptionReceiptSchema,
+      await this.composerRequest(
+        HOSTED_COMPOSER_TRANSCRIBE_PATH,
+        HostedComposerTranscriptionSchema.parse(input),
+        signal,
+      ),
+    );
+  }
+  async composerTranscriptionReceipt(input: HostedComposerReceipt) {
+    return parseProtocolResponse(
+      ComposerTranscriptionReceiptSchema,
+      await this.composerRequest(HOSTED_COMPOSER_RECEIPT_PATH, HostedComposerReceiptSchema.parse(input)),
+    );
+  }
+
   /** Signed, read-only account default; no other account fields leave the fleet. */
   async readAccountSettings(): Promise<
     import("@clankie/protocol/account-diagnostics").AccountDiagnosticsDefault

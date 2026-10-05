@@ -8,6 +8,7 @@ export {
   type EffectiveHireProfile,
 } from "./hire-profile.ts";
 export * from "./presence.ts";
+export * from "./support-access.ts";
 export * from "./response.ts";
 export * from "./discord-settings.ts";
 export * from "./discord-setup.ts";
@@ -691,3 +692,5 @@ export {
   SkillQuickActionSchema,
   type SkillQuickAction,
 } from "./operator-conversations.ts";
+
+export { RoomHandoffMetadataSchema, type RoomHandoffMetadata } from "./operator-conversations.ts";

@@ -3035,17 +3035,12 @@ export class DiscordVoiceSession {
       });
       return;
     }
-    const normalizedRequest = request
-      .toLowerCase()
-      .replaceAll(/\s+/gu, " ")
-      .replace(/[.!?]+$/u, "")
-      .trim();
     const joinCallId = (JSON.parse(call.argumentsJson) as { join_call_id?: unknown }).join_call_id;
     const duplicate = [...this.handoffs].find(
       ([id, handoff]) =>
         handoff.conversation === conversation &&
         handoff.userId === userId &&
-        (id === joinCallId || handoff.request === normalizedRequest),
+        (id === call.callId || id === joinCallId),
     );
     if (duplicate !== undefined) {
       // A new ask after quiet requests the original result again, without rerunning work.
@@ -3077,7 +3072,7 @@ export class DiscordVoiceSession {
         () => isCurrent() && this.handoffs.has(call.callId) && quietEpoch === this.quietEpoch,
       );
     }, HANDOFF_ACKNOWLEDGMENT_MS);
-    const handoff = { userId, request: normalizedRequest, timer, quietEpoch, conversation };
+    const handoff = { userId, request, timer, quietEpoch, conversation };
     this.handoffs.set(call.callId, handoff);
     const deliveryId = exchange?.deliveryId ?? randomUUID();
     const startedAtMs = this.clock();

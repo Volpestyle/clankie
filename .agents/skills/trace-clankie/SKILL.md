@@ -22,6 +22,16 @@ not ambient speech. Historical discovery covers native room journals modified
 within conversation retention (30 days); older source files remain inspectable
 through the trail map.
 
+Room handoffs also have individual child conversations shown under Clankie in
+the dock and app. `roomHandoff` metadata retains the asking actor, original room,
+delivery ID, executor, state and result; follow the child ID for its transcript
+and the original room ID for delivery evidence. A native child reference appears
+only after native ancestry is verified. Under a Codex head, every non-owner
+executes as a Pi room thread with their original grant; only the verified owner
+can use native Codex children. Finished jobs remain inspectable in history
+without occupying the active dock above fleet seats.
+An execution result is not proof that Discord delivered or spoke the answer.
+
 A live attached native seat receives that conversation's worker reports, wakes
 and watches. Worker reports follow the hiring/adopting conversation, not always
 `global-default`. Peer exchanges are agent-role audit context and do not wake him.

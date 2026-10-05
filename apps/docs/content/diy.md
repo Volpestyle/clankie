@@ -306,7 +306,7 @@ it at login; it does not keep the Mac awake.
 ### Connect your services
 
 Use `/connect` for available account integrations;
-[`clankie accounts`](/cli/#accounts-list-accounts-connect-github-accounts-disconnect-provider-accounts-apps)
+[`clankie accounts`](/cli/#accounts-list-accounts-connect-github-linear-accounts-disconnect-provider-accounts-apps)
 inspects connected GitHub and Linear accounts. Secret entry stays in the console.
 GitHub, Linear, and mailbox connections have different setup and access rules. Clankie's mailbox connection
 is his own address, not automatic access to your personal inbox. The

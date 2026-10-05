@@ -47,6 +47,7 @@ export interface PairingOfferRecord {
   readonly expiresAt: string;
   /** Long-lived review offer (ADR 0154). */
   readonly review?: true;
+  readonly supportGrantId?: string;
 }
 
 /**
@@ -78,6 +79,7 @@ export interface MintPairingOfferOptions {
   readonly now: Date;
   readonly mintedBy: string;
   readonly ttlMs?: number;
+  readonly supportGrantId?: string;
   /** Review offer lifetime in days; the route validates the ceiling. */
   readonly review?: { readonly days: number };
   /** Non-secret id source only; code and offer secret always come from crypto randomness. */
@@ -103,6 +105,7 @@ export function mintPairingOffer(options: MintPairingOfferOptions): StoredPairin
     createdAt: options.now.toISOString(),
     expiresAt: new Date(options.now.getTime() + ttlMs).toISOString(),
     ...(options.review === undefined ? {} : { review: true as const }),
+    ...(options.supportGrantId === undefined ? {} : { supportGrantId: options.supportGrantId }),
   };
 }
 

@@ -5,6 +5,12 @@ clients, relay, and hosted-service boundary. It depends on Zod, with no other
 workspace package dependencies. It does not run agents, store credentials, or
 implement a gateway.
 
+`@clankie/protocol/composer-transcription` defines bounded recording chunks,
+availability and draft receipts. Its WAV parser validates actual sample bytes
+without Node dependencies. The [composer API guide](../../docs/composer-transcription.md)
+describes paired-device authority, cancellation and the unchanged encrypted
+transport limit. Provider credentials and plan configuration remain private.
+
 The package's [exports](package.json) are the public entry points. The root
 [index](src/index.ts) defines the operator-conversation and related contracts;
 separate entry points cover device encryption, public gateway routes, connected
