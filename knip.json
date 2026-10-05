@@ -61,7 +61,11 @@
         "test/fixtures/mcp-stdio-bridge.ts",
         "src/computer-windows-host.ts",
         "src/hosted-body.ts",
-        "test/fixtures/fleet-ssh-recovery/*.mjs"
+        "test/fixtures/fleet-ssh-recovery/*.mjs",
+        "test/helpers/project-native-proof/bridge-harness.mjs",
+        "test/helpers/project-native-proof/client.mjs",
+        "test/helpers/project-native-proof/foreground-keeper.mjs",
+        "test/helpers/project-native-proof/harness.mjs"
       ]
     },
     "packages/protocol": {

@@ -3,7 +3,7 @@ import type { NativeSocketProcess } from "../../src/local-fleet-process.ts";
 import { ancestors, clientPid } from "../../src/local-fleet-proof.ts";
 import { nativeProcessStart } from "../../src/local-fleet-process.ts";
 
-export function processFixtureBirth(start = "Sat Oct  3 10:00:00 2026"): [string, string] {
+function processFixtureBirth(start = "Sat Oct  3 10:00:00 2026"): [string, string] {
   if (/^\d+\.\d{6}$/u.test(start)) return start.split(".") as [string, string];
   const delta = (Date.parse(start) - Date.parse("Sat Oct  3 10:00:00 2026")) / 1000;
   return [String(1791190000 + delta), "123456"];
