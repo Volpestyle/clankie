@@ -60,7 +60,7 @@ All focused checks passed on 2026-10-05:
 Core reproduction:
 
 ```sh
-pnpm exec vitest run apps/clankie/test/presence.test.ts apps/clankie/test/presence-service.test.ts apps/clankie/test/presence-events.integration.test.ts packages/protocol/test/presence.test.ts
+pnpm exec vitest run apps/clankie/test/presence.test.ts apps/clankie/test/presence-service.test.ts apps/clankie/test/presence-events.integration.test.ts
 pnpm --filter @clankie/clankie typecheck
 pnpm --filter @clankie/protocol typecheck
 ```
@@ -82,6 +82,20 @@ error/message expiry changes the cursor. The app drawing fixture checks real
 sheet rectangles and canonical translations, shared timing, and static
 Reduce Motion faces with zero animation timers. It supplies the native canvas
 host; this establishes drawing calls, not an on-device Skia capture.
+
+## Review cleanup (2026-10-05)
+
+Removed the redundant protocol-only presence schema test under ADR 0221.
+The service event integration and app HTTP polling integration retain coverage
+of the protocol boundary, legacy compatibility and all five faces. The app's
+11 new body table cases now retain three distinct behavior boundaries: legacy
+fallback, explicit face priority without replacing the body, and accessible
+attention waking the idle pet. Production code and art are unchanged.
+
+The reproduction commands above passed after cleanup: 12 core tests in three
+files, 67 app tests in seven files, and protocol, service, command-center and
+macOS typechecks. Scoped app lint, this document's formatting and both diffs
+also passed. These results supersede the earlier test counts in the table.
 
 ## Remaining verification
 
