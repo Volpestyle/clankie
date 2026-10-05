@@ -23,7 +23,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { activityTools } from "../src/captain/activity-tools.ts";
 import { DeliveredFileStore } from "../src/delivered-files.ts";
 import { HostedBodyClient } from "../src/hosted-body.ts";
-import { HostedHeartbeat } from "../src/hosted-heartbeat.ts";
+import type { RuntimeProvider } from "../src/runtime-provider.ts";
 import type { ActivitySession } from "@clankie/protocol/activity-sharing";
 
 const cleanup: (() => Promise<unknown> | void)[] = [];
@@ -177,8 +177,10 @@ async function fixture(options: { local?: boolean } = {}) {
     sourceRoot: root,
     path: "picture.png",
   });
-  const heartbeat = new HostedHeartbeat(body, { clock: () => now });
-  cleanup.push(() => heartbeat.close());
+  const busyEdges: boolean[] = [];
+  const heartbeat: Pick<NonNullable<RuntimeProvider["heartbeat"]>, "activitySharing"> = {
+    activitySharing: (active) => busyEdges.push(active),
+  };
   const privateWrites: string[] = [];
   const sharing = new ActivitySharing({
     files,
@@ -199,7 +201,7 @@ async function fixture(options: { local?: boolean } = {}) {
           launch: (session, requestId) => body.launchActivity(session, requestId),
           stop: (session, requestId) => body.stopActivity(session, requestId),
         }),
-    onBusyChange: (active) => heartbeat.setExternal("activity-share", active),
+    onBusyChange: (active) => heartbeat.activitySharing(active),
   });
   const app = await createClankieApp({
     captain: createStubCaptain(),
@@ -254,7 +256,7 @@ async function fixture(options: { local?: boolean } = {}) {
     root,
     body,
     sharing,
-    heartbeat,
+    busyEdges,
     artifact,
     conversationId,
     origin,
@@ -299,7 +301,7 @@ async function fixture(options: { local?: boolean } = {}) {
 it("uses signed body HTTP, fleet media permits and an embedded private producer; refuses cross scope and wrong purpose", async () => {
   const f = await fixture(),
     session = await f.start();
-  expect(f.heartbeat.snapshot()).toMatchObject({ busy: true, reasons: ["activity-share"] });
+  expect(f.busyEdges).toEqual([true]);
   expect(f.seen).toContain("launch");
   expect(
     (
@@ -344,7 +346,7 @@ it("uses signed body HTTP, fleet media permits and an embedded private producer;
   controller.abort();
   await reader.cancel().catch(() => undefined);
   await f.owner({ action: "stop", shareId: session.shareId, generation: session.generation });
-  expect(f.heartbeat.snapshot().busy).toBe(false);
+  expect(f.busyEdges).toEqual([true, false]);
 }, 15_000);
 
 it("revokes a quiet admitted HTTP media stream without rejecting the body account", async () => {
@@ -369,7 +371,7 @@ it("revokes a quiet admitted HTTP media stream without rejecting the body accoun
   controller.abort();
   await expect(f.body.resolveHostToken()).resolves.toHaveProperty("token");
   f.sharing.close();
-  expect(f.heartbeat.snapshot().busy).toBe(false);
+  expect(f.busyEdges).toEqual([true, false]);
 }, 15_000);
 
 it("captain sharing pins artifact ownership and rejects a foreign server or stale conversation", async () => {

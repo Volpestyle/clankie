@@ -60,7 +60,7 @@ export interface WindowsComputerObservationClient {
 /** Documented Windows window2 primitives. Native calls return no effect or stop receipt.
  * Coordinate arguments are window-relative logical pixels, not desktop/image pixels.
  */
-export interface WindowsComputerActionClient extends WindowsComputerObservationClient {
+interface WindowsComputerActionClient extends WindowsComputerObservationClient {
   click(input: {
     window: NativeWindow;
     screenshotId: string;
