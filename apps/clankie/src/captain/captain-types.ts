@@ -14,6 +14,7 @@ import { type HerdrCensusRunner } from "./herdr-census.ts";
 import { type HerdrWatchRunner, type NativeLaunchPolicy } from "./herdr-watch.ts";
 import { type RoutedSelection } from "./model.ts";
 import type { createOpenCodeNativeHost } from "./opencode-native-host.ts";
+import type { createPreparedNativeHost } from "./prepared-native-host.ts";
 import type { ProjectHireProcessProof } from "./project-hires.ts";
 import { type TurnContext } from "./tools.ts";
 
@@ -24,6 +25,7 @@ export interface CaptainOptions {
   readonly seatAdapters?: readonly HarnessSeatAdapter[];
   readonly grokNative?: GrokNativeHost;
   readonly openCodeNative?: ReturnType<typeof createOpenCodeNativeHost>;
+  readonly piNative?: ReturnType<typeof createPreparedNativeHost>;
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
   readonly projectHireIdentity?: (
     fleet: string,

@@ -42,7 +42,7 @@ function within(root: string, path: string) {
   );
 }
 export function createLocalAgentHost(
-  options: { home?: string; codexHomes?: readonly string[] } = {},
+  options: { home?: string; codexHomes?: readonly string[]; piSessionRoots?: readonly string[] } = {},
 ): AgentHost {
   const home = options.home ?? homedir();
   const roots = [
@@ -52,7 +52,10 @@ export function createLocalAgentHost(
       (options.home ? [join(home, ".codex")] : codexAccounts().map((account) => account.home))
     ).map((codexHome) => ({ harness: "codex" as const, path: join(codexHome, "sessions") })),
     { harness: "grok" as const, path: join(home, ".grok", "sessions") },
-    { harness: "pi" as const, path: join(home, ".pi", "agent", "sessions") },
+    ...(options.piSessionRoots ?? piSessionRoots(options.home ? {} : process.env, home)).map((path) => {
+      if (!isAbsolute(path)) throw new Error("Pi transcript roots must be absolute");
+      return { harness: "pi" as const, path };
+    }),
   ];
   return {
     id: "local",
@@ -112,6 +115,18 @@ export function createLocalAgentHost(
       }
     },
   };
+}
+
+/** Same effective native Pi profile as the selected interactive executable. */
+export function piSessionRoots(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  home = homedir(),
+): readonly string[] {
+  const root =
+    env.PI_CODING_AGENT_SESSION_DIR ??
+    join(env.PI_CODING_AGENT_DIR ?? join(home, ".pi", "agent"), "sessions");
+  if (!isAbsolute(root)) throw new Error("Native Pi session root must be absolute");
+  return [root];
 }
 const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 const psQuote = (text: string) => `'${text.replaceAll("'", "''")}'`;

@@ -1685,7 +1685,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const received =
         brief === undefined
           ? exact
-          : transcript?.entries.some(
+          : input.harness !== "pi" &&
+            transcript?.entries.some(
               (entry) =>
                 entry.type === "message" &&
                 entry.role === "operator" &&
@@ -2222,21 +2223,25 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (authority !== undefined) await assertConversationAuthority(authority);
       await this.admitProjectLaunch(input);
       if (adapter?.prepare) {
+        if (input.chrome) throw new Error(`${input.harness} has no supported Chrome launch option`);
+        const requestedModel =
+          input.model === undefined || !this.resolveModel
+            ? input.model
+            : await this.resolveModel(input.harness, input.model);
+        const model = input.harness === "pi" ? await this.hostedPiModel(requestedModel) : requestedModel;
         const allocation = this.projectAllocations.get(input);
         const required = allocation === undefined ? undefined : this.projectHires.requiredModel(allocation);
-        if (required !== undefined && input.model !== required)
+        if (
+          required !== undefined &&
+          model !== (this.resolveModel ? await this.resolveModel(input.harness, required) : required)
+        )
           throw new Error("This role's required model is unavailable");
-        if (input.chrome) throw new Error("OpenCode has no supported Chrome launch option");
         nativeLaunch = {
           harness: adapter.harness,
           cwd: input.workingDirectory,
           brief: brief ?? "",
           ...(resume === undefined ? {} : { resumeSessionId: resume.sessionId }),
-          ...(input.model === undefined
-            ? {}
-            : {
-                model: this.resolveModel ? await this.resolveModel(input.harness, input.model) : input.model,
-              }),
+          ...(model === undefined ? {} : { model }),
           ...(input.effort === undefined ? {} : { effort: input.effort }),
           ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
           harnessArgs: skillLaunch.args,
@@ -2303,17 +2308,25 @@ export class HerdrWatchStore implements HerdrWatchPort {
         this.hireOwners.bind(paneId, authority.owner, undefined, authority.intentId);
       // A pi seat's durable identity is the session its herdr extension
       // reports; make sure the extension is there before starting one.
-      if (input.harness === "pi" && remote === undefined) await this.runner.installPiIntegration?.();
+      if (input.harness === "pi" && remote === undefined && nativePrepared === undefined)
+        await this.runner.installPiIntegration?.();
       const subject = subjectOverride ?? herdrAgentName(input.title);
       if (receiptKey !== undefined) {
         const receipt = this.hireReceipts.pending(receiptKey)!;
         this.hireReceipts.update(receiptKey, receipt.messageId, { paneId, agentName: subject });
       }
       const requestedModel =
-        input.model === undefined || !this.resolveModel
-          ? input.model
-          : await this.resolveModel(input.harness, input.model);
-      const model = input.harness === "pi" ? await this.hostedPiModel(requestedModel) : requestedModel;
+        nativePrepared !== undefined
+          ? nativeLaunch?.model
+          : input.model === undefined || !this.resolveModel
+            ? input.model
+            : await this.resolveModel(input.harness, input.model);
+      const model =
+        nativePrepared !== undefined
+          ? nativeLaunch?.model
+          : input.harness === "pi"
+            ? await this.hostedPiModel(requestedModel)
+            : requestedModel;
       const requiredModel =
         projectAllocation === undefined ? undefined : this.projectHires.requiredModel(projectAllocation);
       if (
@@ -2683,7 +2696,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         } while (Date.now() < deadline);
         return false;
       }
-      if (this.stateUnreadable && current.agent === "opencode") return false;
+      if (this.stateUnreadable && (current.agent === "opencode" || current.agent === "pi")) return false;
       // End programmatic control first, so nothing outlives its pane.
       const control = await this.seatControl.attach(current);
       await guard?.();

@@ -46,7 +46,10 @@
         "integrations/opencode-plugin/worker-tui.mjs",
         "integrations/opencode-plugin/worker-server.mjs",
         "scripts/manual/computer-use/run.mjs",
-        "scripts/manual/computer-use/fixture-server.d.mts"
+        "scripts/manual/computer-use/fixture-server.d.mts",
+        "integrations/pi-plugin/worker.mjs",
+        "integrations/pi-plugin/worker-runtime.d.mts",
+        "integrations/pi-plugin/worker-connection.d.mts"
       ],
       "paths": {
         "/clankie/*": ["./*"]
