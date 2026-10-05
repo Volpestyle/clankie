@@ -15,6 +15,8 @@ export const ReceiptSchema = z
     agentName: z.string().optional(),
     beforeIds: z.array(z.string()).optional(),
     seatId: z.string().optional(),
+    /** A terminal inbound lookup refusal; this original ID may never dispatch. */
+    notSent: z.literal(true).optional(),
     /** Only explicit stable deliveries keep a confirmed receipt after settlement. */
     completed: z
       .object({
@@ -78,8 +80,15 @@ export class DeliveryFence {
       if (value.completed && value.completed.at <= Date.now() - COMPLETED_RETENTION_MS)
         this.records.delete(id);
     const value = { ...receipt, messageId: receipt.messageId ?? randomUUID() };
+    const previous = this.records.get(key);
     this.records.set(key, value);
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      if (previous) this.records.set(key, previous);
+      else this.records.delete(key);
+      throw error;
+    }
     return value;
   }
 

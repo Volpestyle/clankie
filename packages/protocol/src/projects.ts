@@ -7,6 +7,7 @@ import {
   ProjectAutonomySchema,
   ProjectAutonomyPatchSchema,
 } from "./autonomy.ts";
+import type { WorkerBridgeStatus } from "./index.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -371,6 +372,8 @@ export interface FleetPaneMembership {
   eligibility: "eligible" | "unsupported" | "unproven" | "stale" | "private-unbound" | "ineligible";
   reason: string;
   projectId?: string;
+  /** Read-only service bridge observations, independent of host project eligibility. */
+  workerTools?: WorkerBridgeStatus;
 }
 export interface FleetMembershipReport {
   machine: string;

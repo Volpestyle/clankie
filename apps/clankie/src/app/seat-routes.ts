@@ -260,6 +260,8 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     context.header("cache-control", "no-store");
     const authority = await peerSeatAuthority(context);
     if (!authority) return context.json({ error: "native_peer_sender_required" }, 403);
+    if (ctx.dependencies.settings && (await ctx.dependencies.settings.load()).fleet.peerMessages === "off")
+      return context.json({ error: "peer_messages_disabled" }, 403);
     const seats = await ctx.dependencies.captain.listFleetPeerSeats(authority);
     return seats ? context.json(seats) : context.json({ error: "peer_messaging_unavailable" }, 403);
   });

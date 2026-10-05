@@ -733,12 +733,26 @@ export const WorkerReportRoutingSchema = z
   .strict();
 export type WorkerReportRouting = z.infer<typeof WorkerReportRoutingSchema>;
 
+/** Service-observed worker tool traffic; never native membership or tool authority. */
+export const WorkerBridgeStatusSchema = z
+  .object({
+    status: z.enum(["pending", "ready", "missing", "stalled", "not-observed"]),
+    reason: z.string().min(1).max(1024),
+    observedAt: z.string().datetime().optional(),
+    pendingSince: z.string().datetime().optional(),
+    tools: z.array(z.string().min(1).max(256)).max(4096).optional(),
+  })
+  .strict();
+export type WorkerBridgeStatus = z.infer<typeof WorkerBridgeStatusSchema>;
+
 export const OperatorFleetSeatSchema = z
   .object({
     /** Host-observed bridge facts, not tool or message delivery acceptance. */
     harnessBridge: OperatorHarnessBridgeSchema.optional(),
     /** Native client acceptance for this exact occupying session. */
     toolCatalog: FleetSeatToolCatalogHealthSchema.optional(),
+    /** Authenticated bridge/catalog observations only; not proof that the harness loaded its tools. */
+    workerTools: WorkerBridgeStatusSchema.optional(),
     account: OperatorCodexAccountSchema.optional(),
     seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     /** Harness-session identity; stable when the same agent moves panes. */

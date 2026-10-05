@@ -318,6 +318,9 @@ path. An approval is never remote process proof or a tool grant.
 For missing native fleet tools, inspect `clankie doctor` or `clankie doctor
 --machine FLEET_ID`: profile version, enabled state, bridge, hooks and `clankie`
 skill are independent facts. Static installation is not live native membership.
+Doctor and roster `workerTools` separately report observed worker catalogs,
+pending requests, missing tools and stalled reads with their reasons. An unknown
+catalog remains `not-observed`; those observations grant no tool authority.
 The selected remote machine also reports host-observed eligibility per pane,
 including actual cwd, native session and hire state. `nativeTools: "not-verified"`
 means it has not checked that pane's bridge socket, catalog or reply delivery;

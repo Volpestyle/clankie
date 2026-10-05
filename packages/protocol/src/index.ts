@@ -198,6 +198,8 @@ export {
   type OperatorSeatSubagents,
   WorkerReportRoutingSchema,
   type WorkerReportRouting,
+  WorkerBridgeStatusSchema,
+  type WorkerBridgeStatus,
   OperatorFleetSeatSchema,
   type OperatorFleetSeat,
   OperatorSeatDayTallySchema,

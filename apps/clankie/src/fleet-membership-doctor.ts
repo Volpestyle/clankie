@@ -3,6 +3,7 @@ import { projectsRevision } from "@clankie/settings";
 import type { FleetMembershipReport, FleetPaneMembership } from "@clankie/protocol/projects";
 import { createProjectMembershipResolver } from "./project-membership.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
+import type { WorkerBridgeStatus } from "@clankie/protocol";
 
 type Options = Parameters<typeof createProjectMembershipResolver>[0] & {
   machine: string;
@@ -11,6 +12,8 @@ type Options = Parameters<typeof createProjectMembershipResolver>[0] & {
   /** Rechecks the exact registered connection captured by the owner route. No socket claim. */
   connected(): Promise<boolean>;
   supportedHarnesses: readonly string[];
+  /** Synchronous service observations only; no request identity or new native probe. */
+  bridgeStatus?(fleet: string, pane: string): WorkerBridgeStatus;
 };
 
 /** Host-only diagnostics: this never returns a LocalFleetIdentity, bearer, or tool grant. */
@@ -29,6 +32,9 @@ export async function inspectFleetMembership(options: Options): Promise<FleetMem
       eligibility: "unproven",
       reason:
         "Native project membership could not be proven. Fleet tools depend on link admission and fleet.tools, not project eligibility; the native bridge/catalog were not verified.",
+      ...(options.bridgeStatus === undefined
+        ? {}
+        : { workerTools: options.bridgeStatus(options.machine, entry.pane) }),
     };
     if (!options.supportedHarnesses.includes(entry.harness))
       return {
