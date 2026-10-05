@@ -65,7 +65,8 @@
         "test/helpers/project-native-proof/bridge-harness.mjs",
         "test/helpers/project-native-proof/client.mjs",
         "test/helpers/project-native-proof/foreground-keeper.mjs",
-        "test/helpers/project-native-proof/harness.mjs"
+        "test/helpers/project-native-proof/harness.mjs",
+        "test/helpers/project-native-proof/process-churn.mjs"
       ]
     },
     "packages/protocol": {
