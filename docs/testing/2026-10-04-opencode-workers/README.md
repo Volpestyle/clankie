@@ -15,6 +15,14 @@ an unrelated seat unaddressed, confirms native exit even when its reply drops,
 and refuses a switched session. A runtime test also refuses an observed A→B→A
 route change during exit authorization.
 
+The SSH history/follow-up case models pickup when its injected SDK accepts the
+third prompt: native session status becomes busy, and the fixture applies the
+real controller's `pane.report_agent` state to Herdr. Its `message_seat` receipt
+must report working while retaining consumed delivery and one native dispatch.
+Keeping either boundary permanently idle forces the production pickup loop to
+spend its full ten-second wait, which can exhaust the unchanged 30-second test
+budget under load. The fixture changes neither that wait nor the timeout.
+
 A separate private-service native E2E used OpenCode 1.18.18 and the existing
 `openai/gpt-6.1-sol` provider. All 19 fleet reads retained Oriana Vale's hire
 persona and conversation despite the distinct native `OC | oriana-vale-6303`

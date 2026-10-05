@@ -70,6 +70,9 @@ async function fixture(
   let layouts = 0;
   let messages = 0;
   let sendFailure = false;
+  let sessionStatus: "idle" | "busy" = "idle";
+  let nextPromptStartsTurn = false;
+  const reportedStates: string[] = [];
   const execute = promisify(execFile);
   const socketSamples = new Map<string, Promise<string>>();
   const executable = await realpath(process.execPath);
@@ -117,7 +120,7 @@ async function fixture(
         return ready;
       },
       config: { mcp: { clankie: { type: "local", command: ["clankie", "mcp", "--fleet"], enabled: true } } },
-      session: { permission: () => [], question: () => [], status: () => ({ type: "idle" }) },
+      session: { permission: () => [], question: () => [], status: () => ({ type: sessionStatus }) },
     },
     client: {
       session: {
@@ -126,12 +129,18 @@ async function fixture(
           return { data: { id: sessionId } };
         },
         get: async () => ({ data: { id: sessionId, directory: root } }),
-        status: async () => ({ data: {} }),
+        status: async () => ({
+          data: sessionStatus === "idle" ? {} : { [sessionId]: { type: sessionStatus } },
+        }),
         messages: async () => ({ data: [] }),
         promptAsync: async (input: { parts: { type: string; text: string }[] }) => {
           receivedBriefs.push(input.parts[0]!.text);
           messages++;
           if (sendFailure) throw new Error("Fixture native acknowledgment lost");
+          if (nextPromptStartsTurn) {
+            nextPromptStartsTurn = false;
+            sessionStatus = "busy";
+          }
           return { response: { status: 204 } };
         },
       },
@@ -168,6 +177,8 @@ async function fixture(
       };
     if (method === "pane.get") return { result: { pane: { ...pane } } };
     if (method === "pane.report_agent") {
+      pane.agent_status = String(params.state);
+      reportedStates.push(pane.agent_status);
       pane.agent_session = {
         source: String(params.source),
         kind: "id",
@@ -455,6 +466,10 @@ async function fixture(
     database,
     root,
     receivedBriefs,
+    reportedStates,
+    startNextPrompt: () => {
+      nextPromptStartsTurn = true;
+    },
     completeTask,
     counts: () => ({ exitCommands, physicalCloses }),
     ssh,
@@ -630,13 +645,19 @@ test("SSH native hire, API history and follow-up reuse the original controller w
   expect(f.ssh!.commands.some((command) => command.includes("opencode serve"))).toBe(false);
   const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
   const message = bank.tools.find((tool) => tool.name === "message_seat")!;
+  // Model native pickup at the SDK boundary, then let the real controller
+  // report it to Herdr. An eternally idle fixture spends the full pickup wait.
+  f.startNextPrompt();
   const receipt = await message.call({ seat: f.hired.seat.seatId, message: "Native remote message" });
   expect(receipt.isError).not.toBe(true);
   expect(JSON.parse((receipt.content[0] as { text: string }).text)).toMatchObject({
     outcome: "delivered",
     deliveryStage: "consumed",
     seatId: f.hired.seat.seatId,
+    status: "working",
   });
+  expect(f.reportedStates).toContain("working");
+  expect(f.receivedBriefs.at(-1)).toBe("Native remote message");
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
 });
 
