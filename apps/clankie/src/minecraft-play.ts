@@ -37,12 +37,7 @@ export type MinecraftPlayNotable = {
   turn: number;
   objective: string | null;
 };
-type MinecraftPlayOutcome =
-  | "stopped"
-  | "budget_exhausted"
-  | "idle"
-  | "mind_unavailable"
-  | "world_ended";
+type MinecraftPlayOutcome = "stopped" | "budget_exhausted" | "idle" | "mind_unavailable" | "world_ended";
 export interface MinecraftPlayTurn {
   turn: number;
   decision: MinecraftPlayDecision | null;
