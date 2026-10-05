@@ -513,6 +513,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               sessionId: string,
               text: string,
               beforeDispatch?: () => Promise<boolean>,
+              paneId?: string,
             ) => {
               await refreshFleets();
               const fleet = remoteFleets.find((entry) => entry.id === fleetId);
@@ -522,19 +523,43 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               if (cached === undefined || cached.revision !== revision) {
                 cached = {
                   revision,
-                  queue: remoteCodexQueue(fleet, async (...args) => {
-                    if ((fleetRevisions.get(fleetId) ?? 0) !== revision)
-                      throw new Error("Machine connection changed or disconnected");
-                    return deps.fleets!.shell!(fleet)(...args);
-                  }),
+                  queue: remoteCodexQueue(
+                    fleet,
+                    async (...args) => {
+                      if ((fleetRevisions.get(fleetId) ?? 0) !== revision)
+                        throw new Error("Machine connection changed or disconnected");
+                      return deps.fleets!.shell!(fleet)(...args);
+                    },
+                    (targetPane) =>
+                      remoteCodexControl(
+                        fleet,
+                        async (...args) => {
+                          if ((fleetRevisions.get(fleetId) ?? 0) !== revision)
+                            throw new Error("Machine connection changed or disconnected");
+                          return deps.fleets!.shell!(fleet)(...args);
+                        },
+                        async (...args) => {
+                          if ((fleetRevisions.get(fleetId) ?? 0) !== revision)
+                            throw new Error("Machine connection changed or disconnected");
+                          return deps.fleets!.run(fleet)(...args);
+                        },
+                        targetPane,
+                        { mode: "queue" },
+                      ),
+                  ),
                 };
                 queues.set(fleetId, cached);
               }
-              return cached.queue(sessionId, text, async () => {
-                await refreshFleets();
-                if ((fleetRevisions.get(fleetId) ?? 0) !== revision) return false;
-                return beforeDispatch ? beforeDispatch() : true;
-              });
+              return cached.queue(
+                sessionId,
+                text,
+                async () => {
+                  await refreshFleets();
+                  if ((fleetRevisions.get(fleetId) ?? 0) !== revision) return false;
+                  return beforeDispatch ? beforeDispatch() : true;
+                },
+                paneId,
+              );
             };
           })(),
           remoteSeatAdapters: (fleetId: string) => {
