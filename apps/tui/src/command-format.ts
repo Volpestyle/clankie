@@ -10,7 +10,7 @@ type Json = Record<string, unknown>;
 const record = (value: unknown): Json => (value !== null && typeof value === "object" ? (value as Json) : {});
 
 /** Aligned `label  value` rows, skipping rows with nothing to say. */
-export function rows(entries: readonly (readonly [string, string | undefined])[]): string[] {
+function rows(entries: readonly (readonly [string, string | undefined])[]): string[] {
   const shown = entries.filter((entry): entry is readonly [string, string] => entry[1] !== undefined);
   const width = Math.max(0, ...shown.map(([label]) => label.length));
   return shown.map(([label, value]) => `  ${label.padEnd(width)}  ${value}`);

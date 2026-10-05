@@ -6,7 +6,7 @@
 import type { ClankieFaceShell } from "./shell/shell.ts";
 import type { SetupFlow } from "./shell/setup-flow.ts";
 
-export interface SettingAction {
+interface SettingAction {
   readonly value: string;
   readonly label: string;
   readonly hint?: string;

@@ -23,7 +23,7 @@ import {
   type MinecraftPlayUsage,
 } from "./minecraft-play-mind.ts";
 
-export interface MinecraftPlayBody {
+interface MinecraftPlayBody {
   observe(): Promise<MinecraftObservation>;
   /** Active phase + exact connection/driver generation identity, or an inactive phase. */
   mode(): Promise<string>;
@@ -37,7 +37,7 @@ export type MinecraftPlayNotable = {
   turn: number;
   objective: string | null;
 };
-export type MinecraftPlayOutcome =
+type MinecraftPlayOutcome =
   | "stopped"
   | "budget_exhausted"
   | "idle"

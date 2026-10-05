@@ -22,7 +22,7 @@ export interface MinecraftPlayUsage {
   costUsd: number;
   known: boolean;
 }
-export interface MinecraftPlayView {
+interface MinecraftPlayView {
   turn: number;
   observation: MinecraftObservation;
   mode: string;
