@@ -60,6 +60,7 @@ export {
   type RelaySettings,
   type VoiceSettings,
 } from "./schema.ts";
+export { MinecraftPlaySettingsSchema, type MinecraftPlaySettings } from "@clankie/protocol";
 export { discordAttachmentRoot } from "./attachments.ts";
 export { characterNames, personaInstructions, type PersonaRegister } from "./persona.ts";
 export { bundledSkills, projectSkillPlugin } from "./bundled-skills.ts";

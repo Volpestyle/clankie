@@ -61,7 +61,7 @@ export class MinecraftMcpPort implements MinecraftPort {
       await this.call("join", { ...request, endpoint }, MinecraftSessionStatusSchema, async () => {
         if (!isDeepStrictEqual(endpoint, await this.options.resolveProfile(request.profileId)))
           throw new Error("minecraft_profile_changed");
-        await this.requireGuard(guard)();
+        return this.requireGuard(guard)();
       }),
     );
     this.joined = { profileId: request.profileId, session: request.session, endpoint };
@@ -201,7 +201,7 @@ export class MinecraftMcpPort implements MinecraftPort {
   private profileFence(session: MinecraftSessionRef, guard: MinecraftGuard): MinecraftGuard {
     return async () => {
       if (!(await this.approved(session))) throw new Error("minecraft_profile_revoked");
-      await guard();
+      return guard();
     };
   }
 

@@ -4,6 +4,7 @@
  * and profile setup stay on their subcommands.
  */
 import { MinecraftServerProfileSchema, MinecraftStatusSchema } from "@clankie/protocol";
+import { selectMinecraftDriver } from "./minecraft-driver-menu.ts";
 import type { ClankieFaceShell } from "./shell/shell.ts";
 
 type Run = (args: readonly string[]) => Promise<Record<string, unknown>>;
@@ -31,8 +32,9 @@ export async function runMinecraftMenu(shell: ClankieFaceShell, minecraft: Run):
               where.phase === "paused"
                 ? { value: "resume", label: "Resume" }
                 : { value: "pause", label: "Pause", hint: "stays connected" },
-              { value: "chat", label: "Say something…" },
-              { value: "follow", label: "Follow a player…" },
+              { value: "driver", label: "Choose driver…", hint: "play mind, owner or native worker" },
+              { value: "chat", label: "Say something…", hint: "owner driver" },
+              { value: "follow", label: "Follow a player…", hint: "owner driver" },
               ...(running.length ? [{ value: "cancel", label: "Cancel running actions" }] : []),
               { value: "leave", label: "Leave", hint: `disconnect from ${world}` },
             ]
@@ -46,7 +48,10 @@ export async function runMinecraftMenu(shell: ClankieFaceShell, minecraft: Run):
       if (choice === undefined) return;
       try {
         if (choice.startsWith("join:")) await minecraft(["join", choice.slice(5)]);
-        else if (choice === "chat") {
+        else if (choice === "driver") {
+          await selectMinecraftDriver(flow, minecraft);
+          continue;
+        } else if (choice === "chat") {
           const text = await flow.readText({ message: "Chat", allowBack: true });
           if (!text?.trim()) continue;
           await minecraft(["chat", text.trim()]);

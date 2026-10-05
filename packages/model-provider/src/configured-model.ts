@@ -51,9 +51,13 @@ export interface ConfiguredLanguageModel {
   readonly modelContextWindowTokens?: number;
   readonly modelMaxOutputTokens?: number;
   readonly modelOptions?: VariantCallOptions;
+  /** Registry USD per million tokens, retained for bounded autonomous consumers. */
+  readonly cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
 }
 
 export interface ResolveConfiguredLanguageModelOptions {
+  /** Explicit consumer setting; retains the same credentials, registry and provider fences. */
+  readonly ref?: string;
   readonly role?: ModelRole;
   /** Route the captain role by task (routing.ts); omitted reads `model` directly. */
   readonly purpose?: ModelPurpose;
@@ -162,9 +166,11 @@ export async function resolveConfiguredLanguageModel(
     );
   }
   const config =
-    role === "model" && options.purpose !== undefined
-      ? configForRef(loaded, routeFor(loaded, options.purpose).ref)
-      : loaded;
+    options.ref !== undefined
+      ? configForRef(loaded, options.ref)
+      : role === "model" && options.purpose !== undefined
+        ? configForRef(loaded, routeFor(loaded, options.purpose).ref)
+        : loaded;
   const configured = resolveRole(role, { config, catalog: sourceCatalog });
   if (configured === undefined)
     throw new ConfiguredModelError(`No ${role.replace("_", " ")} is configured; run /model`);
@@ -221,6 +227,20 @@ export async function resolveConfiguredLanguageModel(
     providerId: resolved.providerId,
     modelId: resolved.modelId,
     model,
+    ...(resolved.model.cost === undefined
+      ? {}
+      : {
+          cost: {
+            input: resolved.model.cost.input,
+            output: resolved.model.cost.output,
+            ...(resolved.model.cost.cache_read === undefined
+              ? {}
+              : { cacheRead: resolved.model.cost.cache_read }),
+            ...(resolved.model.cost.cache_write === undefined
+              ? {}
+              : { cacheWrite: resolved.model.cost.cache_write }),
+          },
+        }),
     ...(context > 0 ? { modelContextWindowTokens: context } : {}),
     ...(maxOutput > 0 ? { modelMaxOutputTokens: maxOutput } : {}),
     ...(Object.keys(modelOptions).length > 0 ? { modelOptions } : {}),

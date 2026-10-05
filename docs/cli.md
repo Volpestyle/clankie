@@ -1032,6 +1032,29 @@ DNS/SRV targets are resolved and checked before dial; public endpoints require a
 owner allowlist. Clankie’s setup tools can configure profiles for owners/individual
 operators; gameplay tools select approved profile ids.
 
+`minecraft configure play` reads the default play loop settings. Flags update
+them without changing profiles or destinations:
+
+```sh
+clankie minecraft configure play --model openai/gpt-4.1-mini --max-tokens 100000 --max-cost-usd 1
+clankie minecraft configure play --turn-interval-ms 2000 --idle-backoff-ms 15000 --idle-stop-ms 900000
+clankie minecraft configure play --enabled off
+```
+
+Play is enabled by default with the model and limits shown above. The token and
+reported cost ceilings are per mind run; reaching either stops further decision
+calls. Model, budget and pacing changes apply on the next join or handoff back to
+the mind. Disabling play quiesces the current mind. The existing authenticated
+`GET`/`PUT /v1/minecraft/configuration` API carries these same fields in `play`
+alongside the full profiles and allowlist configuration.
+
+`minecraft driver` reads who currently drives the session. `driver mind` returns
+it to Clankie's play loop; `driver owner` takes direct control for the owning
+conversation; `driver worker fleet:FLEET:pane:SEAT` hands it to that exact hired
+native seat. Direct actions require the selected owner or worker driver. In the
+TUI, `/minecraft driver` shows the current driver and a selector with a worker
+principal prompt; `/minecraft configure play` exposes the same settings flags.
+
 `minecraft status|profiles|join PROFILE|leave|cancel [ACTION]|pause|resume|observe`
 manages the session. `chat TEXT`, `follow PLAYER [DISTANCE]`, `goto X Y Z`,
 `dig X Y Z`, `place X Y Z ITEM`, `craft ITEM COUNT`, and `action JSON` return

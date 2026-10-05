@@ -18,6 +18,7 @@ import {
   type BodyLeaseResult,
   type MinecraftAction,
   type MinecraftActionStatus,
+  type MinecraftActionRequest,
   type MinecraftSessionRef,
   type MinecraftSessionStatus,
   type MinecraftStatus,
@@ -47,6 +48,12 @@ const RecordSchema = z.strictObject({
   sequence: z.number().int().nonnegative(),
 });
 type SessionRecord = z.infer<typeof RecordSchema>;
+export type MinecraftDriver = { kind: "mind" | "owner" } | { kind: "worker"; principalId: string };
+export interface MinecraftWorkerDriver {
+  readonly principalId: string;
+  /** The admitted fleet channel supplies this fence, never tool arguments. */
+  readonly guard: MinecraftGuard;
+}
 
 export class MinecraftServiceError extends Error {
   public readonly code: string;
@@ -77,6 +84,9 @@ export class MinecraftService {
   private pumping = false;
   private suspended = false;
   private readonly now: () => number;
+  private driver: MinecraftDriver = { kind: "owner" };
+  private driverGeneration = 0;
+  private switchingDriver = false;
 
   private readonly options: {
     port: MinecraftPort;
@@ -84,6 +94,7 @@ export class MinecraftService {
     path: string;
     now?: () => number;
     onDisconnect?: (session: MinecraftSessionRef) => void;
+    automaticPlay?: boolean;
     configuration?: {
       settings: Pick<SettingsStore, "load" | "update">;
       guard(identity: BodyConversationIdentity | undefined): Promise<() => void>;
@@ -203,13 +214,16 @@ export class MinecraftService {
     this.route = identity!.route;
     this.restartReference = undefined;
     this.suspended = false;
+    this.driver = { kind: this.options.automaticPlay ? "mind" : "owner" };
+    this.driverGeneration++;
     this.save(); // Identity and lease are durable before the first possible bot effect.
     let dispatched = false;
     try {
       await this.guardOwner(identity, record);
       const result = await this.options.port.join({ profileId, session: record.status.session }, async () => {
-        await this.guardOwner(identity, record);
+        const current = await this.guardOwner(identity, record);
         dispatched = true;
+        return current;
       });
       this.acceptStatus(record, result);
       return result;
@@ -242,9 +256,238 @@ export class MinecraftService {
     const request = MinecraftActionSchema.parse(action);
     const id = MinecraftActionIdSchema.parse(actionId);
     const record = await this.owned(identity);
+    if (this.driver.kind !== "owner" || this.switchingDriver)
+      throw new MinecraftServiceError("minecraft_driver_busy");
+    const generation = this.driverGeneration;
+    await this.requireSettledMotor(record, () => this.guardOwnerDriver(identity, record, generation), id);
     return this.options.port.act({ session: record.status.session, actionId: id, action: request }, () =>
-      this.guardOwner(identity, record),
+      this.guardOwnerDriver(identity, record, generation),
     );
+  }
+
+  /** Change only the driver of this same owned stay; the conversation's play lease never transfers. */
+  public async setDriver(driver: MinecraftDriver, identity?: BodyConversationIdentity) {
+    const record = await this.owned(identity, true);
+    if (
+      driver.kind === "worker" &&
+      !/^fleet:[a-z][a-z0-9-]*:pane:(?!unverified$)\S{1,128}$/u.test(driver.principalId)
+    )
+      throw new MinecraftServiceError("minecraft_driver_identity_invalid");
+    if (this.switchingDriver) throw new MinecraftServiceError("minecraft_driver_changing");
+    this.switchingDriver = true;
+    this.driverGeneration++; // Invalidate every queued decision before awaiting motor quiescence.
+    this.driver = { kind: "owner" };
+    try {
+      await this.guardOwner(identity, record, true);
+      const status = await this.options.port.status();
+      const unsettled = status.actions.filter((action) =>
+        ["running", "cancel_requested", "uncertain"].includes(action.state),
+      );
+      for (const action of unsettled) {
+        await this.options.port.cancel(record.status.session, action.actionId, () =>
+          this.guardOwner(identity, record, true),
+        );
+      }
+      const deadline = this.now() + 2_000;
+      while (unsettled.length > 0) {
+        await this.guardOwner(identity, record, true);
+        const current = await this.options.port.status();
+        if (
+          !current.actions.some((action) =>
+            ["running", "cancel_requested", "uncertain"].includes(action.state),
+          )
+        )
+          break;
+        if (this.now() >= deadline) throw new MinecraftServiceError("minecraft_driver_motor_unsettled");
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      }
+      await this.guardOwner(identity, record);
+      this.driver = driver;
+      return { driver: this.driver, generation: this.driverGeneration };
+    } finally {
+      this.switchingDriver = false;
+    }
+  }
+
+  public async driverStatus(identity?: BodyConversationIdentity) {
+    await this.owned(identity, true);
+    return { driver: this.driver, generation: this.driverGeneration, changing: this.switchingDriver };
+  }
+
+  /** Host-only view of the existing play claim/guard/stop seam; no new authority. */
+  public mindContext() {
+    const record = this.record;
+    if (
+      !record ||
+      record.finished ||
+      this.authority === undefined ||
+      this.driver.kind !== "mind" ||
+      this.switchingDriver
+    )
+      return undefined;
+    const generation = this.driverGeneration;
+    const current = () =>
+      this.record === record &&
+      !record.finished &&
+      this.driver.kind === "mind" &&
+      this.driverGeneration === generation &&
+      !this.switchingDriver;
+    const guard = async () => {
+      if (!current()) throw new MinecraftServiceError("minecraft_driver_changed");
+      const held = await this.guardRecord(record);
+      if (!current()) throw new MinecraftServiceError("minecraft_driver_changed");
+      return () => {
+        held();
+        if (!current()) throw new MinecraftServiceError("minecraft_driver_changed");
+      };
+    };
+    return {
+      session: record.status.session,
+      profileId: record.status.profileId,
+      conversationId: record.reference.conversationId,
+      route: this.route,
+      generation,
+      current,
+      guard,
+      observe: async () => this.options.port.observe(record.status.session, guard),
+      mode: async () => {
+        await guard();
+        const status = await this.options.port.status();
+        await guard();
+        if (!status.session || !sameMinecraftSession(record.status.session, status.session.session))
+          return "world_ended";
+        this.acceptStatus(record, status.session);
+        return status.session.phase;
+      },
+      act: async (request: MinecraftActionRequest) => {
+        await guard();
+        if (!sameMinecraftSession(record.status.session, request.session))
+          throw new MinecraftServiceError("minecraft_stale_session");
+        await this.requireSettledMotor(record, guard, request.actionId);
+        return this.options.port.act(request, guard);
+      },
+      actionStatus: async (actionId: string) =>
+        this.options.port.actionStatus(record.status.session, actionId, guard),
+      cancel: async (actionId: string) =>
+        this.options.port.cancel(record.status.session, actionId, async () => {
+          if (this.record !== record || record.finished)
+            throw new MinecraftServiceError("minecraft_stale_session");
+          return this.guardRecord(record, true);
+        }),
+      leave: async () => {
+        await guard();
+        const status = await this.options.port.leave(record.status.session, guard);
+        this.acceptStatus(record, status);
+        return status;
+      },
+    };
+  }
+
+  public async workerCommand(
+    command: {
+      action: "observe" | "status" | "cancel" | "act";
+      request?: MinecraftAction | undefined;
+      actionId?: string | undefined;
+    },
+    worker: MinecraftWorkerDriver,
+  ) {
+    const record = this.record;
+    const generation = this.driverGeneration;
+    const guard = async () => {
+      await worker.guard();
+      if (
+        !record ||
+        this.record !== record ||
+        record.finished ||
+        this.switchingDriver ||
+        this.driver.kind !== "worker" ||
+        this.driver.principalId !== worker.principalId ||
+        this.driverGeneration !== generation
+      )
+        throw new MinecraftServiceError("minecraft_driver_not_selected");
+      const held = await this.guardRecord(record, command.action === "cancel");
+      const admitted = await worker.guard();
+      if (this.driverGeneration !== generation) throw new MinecraftServiceError("minecraft_driver_changed");
+      return () => {
+        admitted?.();
+        held();
+        if (
+          this.switchingDriver ||
+          this.driver.kind !== "worker" ||
+          this.driver.principalId !== worker.principalId ||
+          this.driverGeneration !== generation
+        )
+          throw new MinecraftServiceError("minecraft_driver_changed");
+      };
+    };
+    await guard();
+    const session = record!.status.session;
+    switch (command.action) {
+      case "observe":
+        return this.options.port.observe(session, guard);
+      case "status": {
+        if (command.actionId)
+          return this.options.port.actionStatus(
+            session,
+            MinecraftActionIdSchema.parse(command.actionId),
+            guard,
+          );
+        const status = await this.options.port.status();
+        await guard();
+        return status;
+      }
+      case "act": {
+        await this.requireSettledMotor(record!, guard, command.actionId);
+        return this.options.port.act(
+          {
+            session,
+            actionId: MinecraftActionIdSchema.parse(command.actionId ?? randomUUID()),
+            action: MinecraftActionSchema.parse(command.request),
+          },
+          guard,
+        );
+      }
+      case "cancel": {
+        const status = await this.options.port.status();
+        await guard();
+        const id =
+          command.actionId ??
+          status.actions.find((action) => ["running", "cancel_requested", "uncertain"].includes(action.state))
+            ?.actionId;
+        return id === undefined
+          ? null
+          : this.options.port.cancel(session, MinecraftActionIdSchema.parse(id), guard);
+      }
+    }
+  }
+
+  private async guardOwnerDriver(
+    identity: BodyConversationIdentity | undefined,
+    record: SessionRecord,
+    generation: number,
+  ) {
+    const held = await this.guardOwner(identity, record);
+    if (this.driver.kind !== "owner" || this.driverGeneration !== generation || this.switchingDriver)
+      throw new MinecraftServiceError("minecraft_driver_changed");
+    return () => {
+      held();
+      if (this.driver.kind !== "owner" || this.driverGeneration !== generation || this.switchingDriver)
+        throw new MinecraftServiceError("minecraft_driver_changed");
+    };
+  }
+
+  private async requireSettledMotor(record: SessionRecord, guard: MinecraftGuard, replayId?: string) {
+    const status = await this.options.port.status();
+    await guard();
+    if (!status.session || !sameMinecraftSession(record.status.session, status.session.session))
+      throw new MinecraftServiceError("minecraft_stale_session");
+    if (
+      status.actions.some(
+        (action) =>
+          action.actionId !== replayId && ["running", "cancel_requested", "uncertain"].includes(action.state),
+      )
+    )
+      throw new MinecraftServiceError("minecraft_motor_unsettled");
   }
 
   public async chat(text: string, identity?: BodyConversationIdentity) {
@@ -305,14 +548,19 @@ export class MinecraftService {
     if (record === null || record.finished) return true;
     const expected = this.restartReference ?? record.reference;
     const recoveryFence = async () => {
-      await guard();
-      const current = this.options.store.recoveryReference("play");
-      if (
-        this.record !== record ||
-        current?.token !== expected.token ||
-        current.conversationId !== expected.conversationId
-      )
-        throw new MinecraftServiceError("minecraft_stale_session");
+      const admitted = await guard();
+      const assertCurrent = () => {
+        admitted?.();
+        const current = this.options.store.recoveryReference("play");
+        if (
+          this.record !== record ||
+          current?.token !== expected.token ||
+          current.conversationId !== expected.conversationId
+        )
+          throw new MinecraftServiceError("minecraft_stale_session");
+      };
+      assertCurrent();
+      return assertCurrent;
     };
     try {
       await recoveryFence();
@@ -398,6 +646,7 @@ export class MinecraftService {
   private async sessionOperation(method: "pause" | "resume" | "leave", identity?: BodyConversationIdentity) {
     const stopping = method !== "resume";
     const record = await this.owned(identity, stopping);
+    this.driverGeneration++; // Stop queued decisions and give resume a fresh driver incarnation.
     const result = await this.options.port[method](record.status.session, () =>
       this.guardOwner(identity, record, stopping),
     );
@@ -428,8 +677,13 @@ export class MinecraftService {
       if (lease !== undefined) this.denyLease({ outcome: "busy", lease });
       throw new MinecraftServiceError("minecraft_stale_session");
     }
-    await this.guardRecord(record, stopping);
+    const held = await this.guardRecord(record, stopping);
     await this.admit(identity);
+    return () => {
+      held();
+      if (!identity!.current() || identity!.conversationId !== record.reference.conversationId)
+        throw new MinecraftServiceError("minecraft_identity_required");
+    };
   }
 
   private async guardRecord(record: SessionRecord, stopping = false) {
@@ -449,6 +703,13 @@ export class MinecraftService {
     if (valid.outcome !== "valid") this.denyLease(valid);
     const renewed = this.options.store.renew(record.reference, 30_000);
     if (renewed.outcome !== "renewed") this.denyLease(renewed);
+    return () => {
+      this.requireAvailable();
+      if (this.record !== record || record.finished || this.authority === undefined)
+        throw new MinecraftServiceError("minecraft_stale_session");
+      const valid = this.options.store.validate(record.reference, record.operationId);
+      if (valid.outcome !== "valid") this.denyLease(valid);
+    };
   }
 
   private async admit(identity: BodyConversationIdentity | undefined) {

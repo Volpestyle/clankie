@@ -59,6 +59,7 @@ import { MODEL_COMPACTION_USAGE, runModelCompactionCommand } from "./command/mod
 import { imageModelSet, imageModelStatus } from "./command/image-model.ts";
 import { videoModelSet, videoModelStatus } from "./command/video-model.ts";
 import type { MenuOption, SetupFlow } from "./shell/setup-flow.ts";
+import { onOff, runSettingsMenu } from "./settings-menu.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface ProviderServices {
@@ -340,6 +341,10 @@ function compactionCommand(services: ProviderServices): FaceShellCommand {
     takesArgument: true,
     async run(argument, shell): Promise<void> {
       const args = argument.trim().split(/\s+/u).filter(Boolean);
+      if (!args.length) {
+        await runCompactionMenu(shell, services);
+        return;
+      }
       try {
         const status = await runModelCompactionCommand(args, { env: services.env, cwd: services.cwd });
         shell.insertCommandResult(
@@ -383,6 +388,10 @@ function routingCommand(services: ProviderServices): FaceShellCommand {
     takesArgument: true,
     async run(argument, shell): Promise<void> {
       const args = argument.trim().split(/\s+/u).filter(Boolean);
+      if (!args.length) {
+        await runRoutingMenu(shell, services);
+        return;
+      }
       try {
         const status = await runModelRoutingCommand(args, { env: services.env, cwd: services.cwd });
         shell.insertCommandResult(
@@ -1516,4 +1525,166 @@ async function usableModelCredentials(
       modelCredentialAllowed(id, credential, { env: services.env }),
     ),
   );
+}
+
+// --- bare /routing and /compaction menus ---
+
+const ROUTING_PURPOSE_LABELS: Record<string, string> = {
+  operator: "Console",
+  discord_social: "Discord, social",
+  discord_granted: "Discord, with tools",
+  gameplay: "Gameplay",
+};
+
+function runRoutingMenu(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
+  const options = { env: services.env, cwd: services.cwd };
+  const routing = (args: readonly string[]) => runModelRoutingCommand(args, options);
+  const readModel = (flow: SetupFlow, message: string, current: string | null) =>
+    flow.readText({
+      message,
+      placeholder: "providerId/modelId",
+      ...(current === null ? {} : { defaultValue: current }),
+      allowBack: true,
+      validate: (value) => (/^[^/\s]+\/\S+$/u.test(value.trim()) ? undefined : "Use providerId/modelId."),
+    });
+  return runSettingsMenu(shell, "/routing", async () => {
+    const status = await routing([]);
+    return {
+      title: `Routing · ${status.enabled ? `routine turns on ${status.routineModel}` : "off, every turn on the work model"}`,
+      actions: [
+        {
+          value: "routine",
+          label: "Routine model",
+          hint: status.routineModel ?? "off",
+          async run(flow) {
+            const model = await readModel(
+              flow,
+              "Routine model (cheaper, for everyday turns)",
+              status.routineModel,
+            );
+            if (model === undefined) return undefined;
+            await routing(["set", model.trim()]);
+            return `Routine turns go to ${model.trim()}.`;
+          },
+        },
+        ...(status.enabled
+          ? [
+              {
+                value: "off",
+                label: "Turn routing off",
+                hint: "every turn uses the work model",
+                async run() {
+                  await routing(["off"]);
+                  return "Routing off.";
+                },
+              },
+              {
+                value: "escalate",
+                label: "Escalate hard turns",
+                hint: `${onOff(status.escalate)}${status.escalationModel ? ` · ${status.escalationModel}` : ""}`,
+                async run(flow: SetupFlow) {
+                  if (status.escalate) {
+                    await routing(["escalate", "off"]);
+                    return "Escalation off.";
+                  }
+                  const model = await readModel(
+                    flow,
+                    "Escalate to",
+                    status.escalationModel ?? status.workModel,
+                  );
+                  if (model === undefined) return undefined;
+                  await routing(["escalate", "on", "--model", model.trim()]);
+                  return `Hard turns escalate to ${model.trim()}.`;
+                },
+              },
+              {
+                value: "turns",
+                label: "Routine turn limit",
+                hint: String(status.routineTurnLimit),
+                async run(flow: SetupFlow) {
+                  const limit = await flow.readText({
+                    message: "Routine turns before the work model takes over (empty: default)",
+                    defaultValue: String(status.routineTurnLimit),
+                    allowBack: true,
+                    validate: (value) =>
+                      value.trim() === "" || /^\d+$/u.test(value.trim())
+                        ? undefined
+                        : "Enter a whole number.",
+                  });
+                  if (limit === undefined) return undefined;
+                  await routing(["turn-limit", limit.trim() || "default"]);
+                  return `Turn limit ${limit.trim() || "default"}.`;
+                },
+              },
+              ...Object.entries(status.purposes).map(([purpose, route]) => ({
+                value: `purpose:${purpose}`,
+                label: ROUTING_PURPOSE_LABELS[purpose] ?? purpose,
+                hint: `${route.tier}${route.model ? ` · ${route.model}` : ""}`,
+                async run(flow: SetupFlow) {
+                  const tier = await flow.readSelect({
+                    message: `${ROUTING_PURPOSE_LABELS[purpose] ?? purpose} turns use`,
+                    options: [
+                      { value: "routine", label: "Routine model" },
+                      { value: "work", label: "Work model" },
+                      { value: "default", label: "Default" },
+                    ],
+                    currentValue: route.tier,
+                    allowBack: true,
+                  });
+                  if (tier === undefined) return undefined;
+                  await routing(["purpose", purpose, tier]);
+                  return `${ROUTING_PURPOSE_LABELS[purpose] ?? purpose}: ${tier}.`;
+                },
+              })),
+            ]
+          : []),
+      ],
+    };
+  });
+}
+
+function runCompactionMenu(shell: ClankieFaceShell, services: ProviderServices): Promise<void> {
+  const options = { env: services.env, cwd: services.cwd };
+  return runSettingsMenu(shell, "/compaction", async () => {
+    const status = await runModelCompactionCommand([], options);
+    const tokens = (value: number) => value.toLocaleString("en-US");
+    return {
+      title:
+        status.compactAtTokens === null
+          ? `Compaction · default (${tokens(status.includedUsageDefault)} tokens on included usage)`
+          : `Compaction · every model at ${tokens(status.compactAtTokens)} tokens`,
+      actions: [
+        {
+          value: "set",
+          label: "Compact at…",
+          hint: status.compactAtTokens === null ? "default" : tokens(status.compactAtTokens),
+          async run(flow) {
+            const value = await flow.readText({
+              message: "Compact when a conversation reaches this many tokens",
+              defaultValue: String(status.compactAtTokens ?? status.includedUsageDefault),
+              allowBack: true,
+              validate: (text) =>
+                /^\d+$/u.test(text.trim().replaceAll(",", "")) ? undefined : "Enter a number.",
+            });
+            if (value === undefined) return undefined;
+            const next = value.trim().replaceAll(",", "");
+            await runModelCompactionCommand(["set", next], options);
+            return `Compacts at ${tokens(Number(next))} tokens.`;
+          },
+        },
+        ...(status.compactAtTokens === null
+          ? []
+          : [
+              {
+                value: "default",
+                label: "Use the default",
+                async run() {
+                  await runModelCompactionCommand(["default"], options);
+                  return "Compaction back to default.";
+                },
+              },
+            ]),
+      ],
+    };
+  });
 }

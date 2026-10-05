@@ -2745,8 +2745,8 @@ paths:
     post:
       tags: [Operator]
       operationId: commandMinecraft
-      summary: Join, act, inspect, pause, cancel or leave Minecraft
-      description: Select an approved profile id or submit a typed Minecraft action. Long work returns a handle. The shared play lease is retained until exact confirmed disconnect. Completion is distinct from server-verified effects.
+      summary: Join, choose a driver, act, inspect, pause, cancel or leave Minecraft
+      description: Joining starts the configured continuous play mind. Use driver to hand off to owner, mind or a chosen admitted worker; it quiesces prior motor work without transferring the conversation play lease. Direct act requires owner driver. Long work returns a handle. The shared play lease is retained until exact confirmed disconnect. Completion is distinct from server-verified effects.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -2759,11 +2759,34 @@ paths:
                 action:
                   {
                     type: string,
-                    enum: [status, profiles, join, observe, act, action_status, pause, resume, cancel, leave],
+                    enum:
+                      [
+                        status,
+                        profiles,
+                        join,
+                        observe,
+                        act,
+                        action_status,
+                        pause,
+                        resume,
+                        cancel,
+                        leave,
+                        driver,
+                      ],
                   }
                 profileId: { type: string }
                 actionId: { type: string }
                 request: { type: object, description: Domain action including its type and bounded arguments }
+                driver:
+                  type: object
+                  required: [kind]
+                  properties:
+                    kind: { type: string, enum: [mind, owner, worker] }
+                    principalId:
+                      {
+                        type: string,
+                        description: Required for worker; exact fleet:FLEET:pane:SEAT principal,
+                      }
       responses:
         "200": { description: Session or action handle with settlement and evidence }
         "400": { description: Invalid typed command }
@@ -2843,7 +2866,7 @@ paths:
     get:
       tags: [Operator]
       operationId: getMinecraftConfiguration
-      summary: Read owner Minecraft profiles and destination allowlist
+      summary: Read owner Minecraft profiles, destination allowlist and play settings
       description: Offline host, port, version, username and explicit public destination grants. This operator configuration does not appear in model tools.
       security: [{ operatorBearer: [] }]
       responses:
@@ -2852,7 +2875,7 @@ paths:
     put:
       tags: [Operator]
       operationId: configureMinecraft
-      summary: Replace offline Minecraft profiles and public destination grants
+      summary: Replace offline Minecraft profiles, public destination grants and play settings
       description: Owner-only settings write. DNS and SRV destinations are checked again before dial; model calls cannot supply raw host or authentication arguments.
       security: [{ operatorBearer: [] }]
       requestBody:
@@ -2865,6 +2888,17 @@ paths:
               properties:
                 profiles: { type: array, maxItems: 32, items: { type: object } }
                 publicAllowlist: { type: array, maxItems: 64, items: { type: object } }
+                play:
+                  type: object
+                  description: Defaulted continuous play settings. Model, budgets and pacing apply at next mind run; enabled=false quiesces the current mind.
+                  properties:
+                    enabled: { type: boolean, default: true }
+                    model: { type: string, default: openai/gpt-4.1-mini }
+                    maxTokens: { type: integer, default: 100000 }
+                    maxCostUsd: { type: number, default: 1 }
+                    turnIntervalMs: { type: integer, default: 2000 }
+                    idleBackoffMs: { type: integer, default: 15000 }
+                    idleStopMs: { type: integer, default: 900000 }
       responses:
         "200": { description: Updated offline profiles and public allowlist }
         "400": { description: Invalid settings }

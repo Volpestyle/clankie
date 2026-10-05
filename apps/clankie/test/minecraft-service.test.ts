@@ -163,8 +163,10 @@ describe("Minecraft conversation-owned stay", () => {
     let current = true;
     const owner = { ...identity(), current: () => current };
     const session = await active(f, owner);
-    await f.service.chat("private chosen words", owner);
+    const chat = await f.service.chat("private chosen words", owner);
     expect((await f.service.status(identity("conversation-b"))).actions).toEqual([]);
+    await f.service.cancel(chat.actionId, owner);
+    f.port.confirmCancelled(session, chat.actionId);
     const act = vi.spyOn(f.port, "act").mockImplementation(async (request, guard) => {
       current = false;
       await guard?.();

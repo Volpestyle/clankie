@@ -15,6 +15,24 @@ export const MinecraftServerProfileSchema = z.strictObject({
 });
 export type MinecraftServerProfile = z.infer<typeof MinecraftServerProfileSchema>;
 
+/** Owner-configured play mind and per-session ceilings; no connection or driver authority. */
+export const MinecraftPlaySettingsSchema = z.strictObject({
+  enabled: z.boolean().default(true),
+  model: z
+    .string()
+    .trim()
+    .min(3)
+    .max(256)
+    .regex(/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.:/-]+$/u, "Expected providerId/modelId")
+    .default("openai/gpt-4.1-mini"),
+  maxTokens: z.number().int().min(1_000).max(10_000_000).default(100_000),
+  maxCostUsd: z.number().positive().max(100).default(1),
+  turnIntervalMs: z.number().int().min(100).max(60_000).default(2_000),
+  idleBackoffMs: z.number().int().min(100).max(300_000).default(15_000),
+  idleStopMs: z.number().int().min(1_000).max(3_600_000).default(900_000),
+});
+export type MinecraftPlaySettings = z.infer<typeof MinecraftPlaySettingsSchema>;
+
 /** A reconnect creates a new generation, even when the logical session is retained. */
 export const MinecraftSessionRefSchema = z.strictObject({
   /** Host-allocated unique logical session identity, never reused for another play session. */
@@ -286,6 +304,16 @@ export type MinecraftStatus = z.infer<typeof MinecraftStatusSchema>;
 
 /** Operator and captain commands share profile references; only owner settings contain endpoints. */
 export const MinecraftCommandSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    action: z.literal("driver"),
+    driver: z
+      .discriminatedUnion("kind", [
+        z.strictObject({ kind: z.literal("mind") }),
+        z.strictObject({ kind: z.literal("owner") }),
+        z.strictObject({ kind: z.literal("worker"), principalId: z.string().min(1).max(256) }),
+      ])
+      .optional(),
+  }),
   z.strictObject({ action: z.literal("status") }),
   z.strictObject({ action: z.literal("profiles") }),
   z.strictObject({ action: z.literal("join"), profileId: MinecraftServerProfileIdSchema }),

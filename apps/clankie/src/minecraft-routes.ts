@@ -29,6 +29,10 @@ async function dispatch(
   identity: BodyConversationIdentity,
 ): Promise<unknown> {
   switch (command.action) {
+    case "driver":
+      return command.driver === undefined
+        ? service.driverStatus(identity)
+        : service.setDriver(command.driver, identity);
     case "status":
       return service.status(identity);
     case "profiles":

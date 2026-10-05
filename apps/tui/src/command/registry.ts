@@ -278,6 +278,10 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["minecraft"],
     lines: [
       "  minecraft configure [PROFILE HOST --version VERSION --port PORT]",
+      "  minecraft configure play [--enabled on|off] [--model PROVIDER/MODEL]",
+      "      [--max-tokens N] [--max-cost-usd N] [--turn-interval-ms N]",
+      "      [--idle-backoff-ms N] [--idle-stop-ms N]",
+      "  minecraft driver [mind|owner|worker fleet:FLEET:pane:SEAT]",
       "  minecraft status|profiles|join PROFILE|leave|cancel [ACTION]|pause|resume",
       "  minecraft observe|chat TEXT|follow PLAYER|goto X Y Z|dig X Y Z|place X Y Z ITEM",
       "                           Play in an approved offline Java server (JSON)",

@@ -118,6 +118,9 @@ importers:
       '@pokeagents/world-protocol':
         specifier: 0.3.1
         version: 0.3.1
+      ai:
+        specifier: ^7.0.19
+        version: 7.0.19(zod@4.4.3)
       hono:
         specifier: 4.12.28
         version: 4.12.28

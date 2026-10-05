@@ -2,8 +2,24 @@
 
 Clankie can join an owner-configured Java server as his own offline player,
 chat, follow a player, navigate, dig, place blocks, craft inventory recipes and
-build a sequence of placements. His existing conversation chooses the actions;
-the service-owned MCP motor handles physics and navigation.
+build a sequence of placements. His play mind observes, chooses, acts, verifies
+and remembers continuously by default; the service-owned MCP motor handles
+physics, navigation and immediate falling/drowning/combat reflexes.
+
+In-game chat and the active Discord room reach the same mind. Its journal retains
+working notes, objectives, action evidence and per-call token/spend usage. It
+re-observes before acting, caps decision preemption, backs off repeated failures
+and quiet worlds, and leaves its own bot on idle/budget/failure stop. No activity
+or words are scripted. Defaults and model selection live in `minecraft.play`;
+`clankie minecraft configure play` and `/minecraft` expose them.
+
+One driver operates the existing conversation-owned play lease. Use
+`clankie minecraft driver owner` before direct actions, `driver mind` to resume
+autonomous play, or `driver worker fleet:FLEET:pane:SEAT` to hand off to a chosen
+native worker. The worker discovers `clankie_minecraft_*` through fleet tools and
+uses `clankie_call`; raw motor, joins, configuration and administration remain
+outside that handoff. Driver changes cancel prior work and require settlement.
+The owner can take back control through the same command.
 
 Owner-configured external profiles support offline protocol login. His own
 Paper server supports premium-verifying hybrid authentication; a Microsoft

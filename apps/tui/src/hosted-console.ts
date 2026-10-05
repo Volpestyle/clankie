@@ -1,3 +1,4 @@
+import { formatPlain } from "./command-format.ts";
 import { questionConsoleCommand } from "./question-commands.ts";
 import { ClankieApiClient } from "@clankie/api-client";
 import { buildDiscordCommands } from "./discord-commands.ts";
@@ -172,7 +173,7 @@ export async function runHostedConsole() {
   const show = async (args: string[]) =>
     shell.insertCommandResult(
       `/${args.join(" ")}`,
-      JSON.stringify(await hostedCommand(args, transport), null, 2),
+      formatPlain(await hostedCommand(args, transport)),
       "success",
     );
   const questionCommand = questionConsoleCommand(client, () => selection.conversationId);
@@ -271,7 +272,7 @@ export async function runHostedConsole() {
           if (key)
             active.insertCommandResult(
               "/keys",
-              JSON.stringify(
+              formatPlain(
                 await transport.request("/v1/model-keys/set", { providerId: argument.trim(), apiKey: key }),
               ),
               "success",
@@ -420,7 +421,7 @@ export async function runHostedConsole() {
               request: async (path, body) => (await transport.request(path, body)) as Record<string, unknown>,
               prompt: (line) => flow.renderLine(line, "success"),
             });
-            flow.renderLine(JSON.stringify(result), "success");
+            shell.insertCommandResult("/connect", formatPlain(result), "success");
           } finally {
             flow.end();
           }
@@ -447,7 +448,7 @@ export async function runHostedConsole() {
               state: start.flowId,
               code: url.searchParams.get("code"),
             });
-            flow.renderLine(JSON.stringify(result), "success");
+            shell.insertCommandResult("/connect", formatPlain(result), "success");
           } finally {
             flow.end();
           }

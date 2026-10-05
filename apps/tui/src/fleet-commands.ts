@@ -60,7 +60,7 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
       `settings file: ${result.settingsFile}`,
       "",
       ...formatFleetLines(result.fleet),
-      ...result.roleProfiles.map((r) => `${r.projectId}/${r.role}: ${JSON.stringify(r.profile)}`),
+      ...result.roleProfiles.map((r) => `${r.projectId}/${r.role}: ${hireProfileLine(r.profile)}`),
     ].join("\n"),
     "success",
   );
@@ -157,4 +157,20 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
   } finally {
     flow.end();
   }
+}
+
+/** `codex · gpt-6 · high · subagents gpt-6-mini` — the fields a role actually sets. */
+function hireProfileLine(profile: Record<string, unknown>): string {
+  const subagents = profile.subagents as { model?: string; effort?: string } | null | undefined;
+  return [
+    profile.harness,
+    profile.model,
+    profile.effort,
+    profile.delegation,
+    profile.placement,
+    profile.account === undefined ? undefined : `account ${String(profile.account)}`,
+    subagents ? `subagents ${[subagents.model, subagents.effort].filter(Boolean).join(" ")}` : undefined,
+  ]
+    .filter((value) => value !== undefined && value !== "")
+    .join(" · ");
 }
