@@ -158,7 +158,7 @@ Codex session reference alone cannot recover its in-memory control after a
 service restart. Never replay uncertainty through another delivery path.
 
 Briefed local Claude hires use the approved `clankie-worker` channel and report
-`control.mode: "channel"`; Codex and local OpenCode report `adapter`. Missing
+`control.mode: "channel"`; Codex and supported OpenCode workers report `adapter`. Missing
 structured control reports `unavailable` with `control.reason` (and `control.fix` when owner action
 is needed). `terminal` is only an unbriefed native launch. Each hire logs its
 lane. Folder trust and channel consent remain owner decisions; a visible prompt
@@ -171,7 +171,7 @@ failed hire. Claude writes channel receipts as internal `isMeta`/system user
 records. A standalone `clankie-seat` bridge must not poll when only the worker
 plugin's channel is selected, or it can consume mail Claude never receives.
 
-## Local OpenCode worker control
+## OpenCode worker control
 
 A local `hire_agent` may select `opencode` with a direct native **1.18.18** binary
 on macOS. `model` is `provider/model`; `effort` requires that model and a supported
@@ -187,12 +187,23 @@ exact-session. An owned live worker can exit through its original TUI; success
 requires its original terminal to disappear. Cold, replaced or switched sessions
 refuse, with no unconditional physical pane-close fallback.
 
+On a linked Mac POSIX fleet, pass its `fleet` ID to `hire_agent`. The same native
+TUI/controller uses a private loopback SSH forward; fresh probes check the exact
+SSH child, remote UID/process birth, executable, cwd, Herdr binding and displayed
+session. Disconnects and retargets refuse without local fallback or reconnect.
+The remote machine needs Node 24+, Python 3, Herdr, native OpenCode 1.18.18 and
+its existing Clankie fleet link. Windows remote OpenCode remains unsupported.
+Registered remote history uses `<fleet>:ses_…` with the existing agent APIs/CLI;
+resume requires the original live controller on that exact SSH target. The helper
+reads only dedicated native worker profiles; it is not a model/session writer.
+Remote integration fixtures establish these boundaries; live remote acceptance
+is still pending.
+
 Use `clankie agents list` and `clankie agents read` for registered dedicated worker
 SQLite history and `clankie agents resume … --conversation ID` only with the
 original live controller and fresh identity/cwd checks. History is bounded stored
 v1 content, not proof of current TUI selection or control. General profile
-discovery, remote control, new-process resume and restart reattachment remain
-unavailable. Keep deterministic fixtures, later native persona/exit evidence and
+discovery, new-process resume and restart reattachment remain unavailable. Keep deterministic fixtures, later native persona/exit evidence and
 remaining live acceptance separate; read
 `{repoRoot}/docs/testing/2026-10-04-opencode-workers/README.md`.
 

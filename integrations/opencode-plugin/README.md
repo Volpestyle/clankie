@@ -132,8 +132,17 @@ Registered dedicated worker SQLite history is available through
 `clankie agents list` and `clankie agents read`. It is bounded stored v1 content,
 not proof of the currently displayed session or control.
 `clankie agents resume … --conversation ID` requires the original live controller
-and fresh identity/cwd checks, even without a brief. General profile discovery, remote control,
+and fresh identity/cwd checks, even without a brief. General profile discovery,
 restart reattachment and new-process resume remain unavailable.
+
+Linked Mac POSIX workers use the same plugin and controller over a private
+loopback SSH forward. The service stages its own helper/plugin files in an owned
+private remote directory, proves both socket ends and checks the native process
+and Herdr allocation afresh. The helper reuses Clankie's registered SQLite reader;
+provider secrets and owner-wide profiles do not cross the link. Remote history
+uses `<fleet>:ses_…`; live reuse never creates another writer. Node 24+, Python 3,
+Herdr, native 1.18.18 and the existing Clankie fleet link are required there.
+Windows is unsupported. Remote fixture coverage is not a live acceptance claim.
 
 An owned live worker can exit through its original TUI's `app.exit` command;
 success requires its original terminal to disappear. Cold, replaced or switched

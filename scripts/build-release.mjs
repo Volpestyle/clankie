@@ -46,6 +46,7 @@ const entrypoints = [
   "apps/tui/bin/clankie.ts",
   "apps/clankie/src/index.ts",
   "apps/clankie/src/herdr-runtime.ts",
+  "apps/clankie/src/captain/remote-opencode-helper.ts",
   "apps/relay/src/index.ts",
   "apps/discord-bridge/src/index.ts",
   "apps/discord-bridge/src/presence-runtime-module.ts",

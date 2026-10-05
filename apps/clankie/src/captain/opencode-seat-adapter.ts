@@ -1,4 +1,4 @@
-import { OpenCodeProfiles } from "../opencode-profiles.ts";
+import { OpenCodeProfiles, type OpenCodeWorkerProfile } from "../opencode-profiles.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { constants } from "node:fs";
@@ -41,6 +41,13 @@ export interface OpenCodeSeatDeps {
   readonly discover?: (launch: SeatLaunch) => Promise<{ executable: string; version: string }>;
   readonly controller?: typeof createOpenCodeController;
   readonly timeoutMs?: number;
+  readonly profiles?: Pick<OpenCodeProfiles, "allocate" | "register">;
+  readonly configure?: (
+    launch: SeatLaunch,
+    profile: OpenCodeWorkerProfile,
+    controller: OpenCodeController,
+    directory: string,
+  ) => Promise<{ env: Record<string, string>; cwd: string; retire(): Promise<void> }>;
 }
 
 /** --version imports native modules with filesystem initialization; isolate all paths. */
@@ -112,10 +119,55 @@ async function discover(launch: SeatLaunch): Promise<{ executable: string; versi
   throw new Error("Native OpenCode executable unavailable");
 }
 
+async function configureLocal(
+  deps: OpenCodeSeatDeps,
+  launch: SeatLaunch,
+  profile: OpenCodeWorkerProfile,
+  controller: OpenCodeController,
+  directory: string,
+) {
+  const env = { ...process.env, ...launch.env };
+  const baseConfig = z.record(z.string(), z.unknown()).parse(JSON.parse(env.OPENCODE_CONFIG_CONTENT || "{}"));
+  const plugins = z.array(z.unknown()).parse(baseConfig.plugin ?? []);
+  const baseTui = env.OPENCODE_TUI_CONFIG
+    ? z.record(z.string(), z.unknown()).parse(JSON.parse(await readFile(env.OPENCODE_TUI_CONFIG, "utf8")))
+    : {};
+  const tuiPlugins = z.array(z.unknown()).parse(baseTui.plugin ?? []);
+  const pluginRoot = join(deps.repoRoot, "integrations/opencode-plugin");
+  const tuiPath = join(directory, "tui.json");
+  await writeFile(
+    tuiPath,
+    JSON.stringify({
+      ...baseTui,
+      plugin: [
+        ...tuiPlugins,
+        [
+          pathToFileURL(join(pluginRoot, "worker-tui.mjs")).href,
+          { endpoint: controller.endpoint, token: controller.token },
+        ],
+      ],
+    }),
+    { mode: 0o600 },
+  );
+  const scopedEnv: Record<string, string> = {
+    ...launch.env,
+    OPENCODE_TUI_CONFIG: tuiPath,
+    OPENCODE_DB: profile.database,
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      ...baseConfig,
+      autoupdate: false,
+      plugin: [...plugins, pathToFileURL(join(pluginRoot, "worker-server.mjs")).href],
+    }),
+    OPENCODE_ROUTE: "",
+    OPENCODE_FAST_BOOT: "",
+  };
+  return { env: scopedEnv, cwd: await realpath(launch.cwd), retire: async () => {} };
+}
+
 /** The one native TUI owns the SDK; there is no headless server or second writer. */
 export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAdapter {
   const controls = new Map<string, SeatControl>();
-  const profiles = new OpenCodeProfiles(deps.stateDir);
+  const profiles = deps.profiles ?? new OpenCodeProfiles(deps.stateDir);
   const fence = new DeliveryFence(join(deps.stateDir, "opencode-workers", "receipts.json"));
   return {
     harness: "opencode",
@@ -154,6 +206,7 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
       // Native-owned persistent history survives uncertain creation and controller retirement.
       const profile = await profiles.allocate();
       const directory = await mkdtemp(join(launchRoot, "launch-"));
+      let configuration: Awaited<ReturnType<NonNullable<OpenCodeSeatDeps["configure"]>>> | undefined;
       let controller: OpenCodeController | undefined;
       let root: OpenCodeNativeRoot | undefined;
       let ref: SeatRef | undefined;
@@ -171,7 +224,13 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
         disposed = true;
         signal?.removeEventListener("abort", onAbort);
         if (ref && controls.get(ref.sessionId) === ownedControl) controls.delete(ref.sessionId);
-        cleanup = rm(directory, { recursive: true, force: true });
+        cleanup = (async () => {
+          try {
+            await configuration?.retire();
+          } finally {
+            await rm(directory, { recursive: true, force: true });
+          }
+        })();
         return cleanup;
       };
       const dispose = () =>
@@ -189,45 +248,14 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
           onRetire: retireConfig,
           ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
         });
-        const env = { ...process.env, ...launch.env };
-        const baseConfig = z
-          .record(z.string(), z.unknown())
-          .parse(JSON.parse(env.OPENCODE_CONFIG_CONTENT || "{}"));
-        const plugins = z.array(z.unknown()).parse(baseConfig.plugin ?? []);
-        const baseTui = env.OPENCODE_TUI_CONFIG
-          ? z
-              .record(z.string(), z.unknown())
-              .parse(JSON.parse(await readFile(env.OPENCODE_TUI_CONFIG, "utf8")))
-          : {};
-        const tuiPlugins = z.array(z.unknown()).parse(baseTui.plugin ?? []);
-        const pluginRoot = join(deps.repoRoot, "integrations/opencode-plugin");
-        const tuiPath = join(directory, "tui.json");
-        await writeFile(
-          tuiPath,
-          JSON.stringify({
-            ...baseTui,
-            plugin: [
-              ...tuiPlugins,
-              [
-                pathToFileURL(join(pluginRoot, "worker-tui.mjs")).href,
-                { endpoint: controller.endpoint, token: controller.token },
-              ],
-            ],
-          }),
-          { mode: 0o600 },
-        );
-        const scopedEnv: Record<string, string> = {
-          ...launch.env,
-          OPENCODE_TUI_CONFIG: tuiPath,
-          OPENCODE_DB: profile.database,
-          OPENCODE_CONFIG_CONTENT: JSON.stringify({
-            ...baseConfig,
-            autoupdate: false,
-            plugin: [...plugins, pathToFileURL(join(pluginRoot, "worker-server.mjs")).href],
-          }),
-          OPENCODE_ROUTE: "",
-          OPENCODE_FAST_BOOT: "",
-        };
+        configuration = await (deps.configure
+          ? deps.configure(launch, profile, controller, directory)
+          : configureLocal(deps, launch, profile, controller, directory));
+        if (disposed) {
+          await configuration.retire();
+          throw new Error("Native controller retired during preparation");
+        }
+        const scopedEnv = configuration.env;
         const native = controller;
         const verify = async (expected: SeatRef) => {
           if (
@@ -289,7 +317,7 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                 await native.request(
                   "initialize",
                   {
-                    cwd: await realpath(launch.cwd),
+                    cwd: configuration!.cwd,
                     title: view.name ?? "Clankie worker",
                     resumeSessionId: launch.resumeSessionId,
                     model: launch.model,

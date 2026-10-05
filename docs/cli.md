@@ -2537,6 +2537,15 @@ after its terminal disappears. Cold, replaced or switched sessions refuse;
 there is no unconditional physical pane-close fallback. See the
 [worker checkpoint and live limits](testing/2026-10-04-opencode-workers/README.md).
 
+Linked Mac POSIX OpenCode hires use `harness: "opencode"` and the configured fleet
+ID. Their original native controller is carried over private loopback SSH with
+fresh remote process/socket/Herdr proofs, no local fallback and no automatic
+reconnection. `clankie agents list --host FLEET` and `clankie agents read FLEET:ses_…`
+read only registered dedicated worker SQLite history. Resume uses the original
+live controller on that exact SSH target. The remote Mac needs Node 24+, Python
+3, Herdr, native OpenCode 1.18.18 and its existing Clankie fleet link. Windows is
+unsupported. Remote live acceptance remains open; [fixture evidence and limits](testing/2026-10-05-remote-opencode/README.md).
+
 Every hire logs its selected lane and reason. The result carries `control.mode`:
 `channel` for the Claude worker channel, `adapter` for Codex or OpenCode,
 `terminal` for an unbriefed native launch, or `unavailable` with `control.reason`

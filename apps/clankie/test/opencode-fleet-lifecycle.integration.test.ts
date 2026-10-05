@@ -17,6 +17,7 @@ import { occupantIdForHerdrSession, readFleet } from "../src/captain/herdr-censu
 import { withSeatSubagents } from "../src/captain/seat-subagents.ts";
 import { createAgentSessions } from "../src/agent-sessions.ts";
 import { OpenCodeProfiles } from "../src/opencode-profiles.ts";
+import { remoteOpenCodeFixture } from "./helpers/remote-opencode-fixture.ts";
 import { writeOpenCodeNativeSession } from "./helpers/opencode-native-db.ts";
 
 // Integration, not a native invocation: only OS/Herdr and SDK input boundaries
@@ -29,7 +30,11 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture(preferencesOnly = false) {
+async function fixture(
+  options: { remote?: boolean; preferencesOnly?: boolean; historyFirst?: boolean; assignRole?: boolean } = {},
+) {
+  const { remote = false, preferencesOnly = false, historyFirst = false, assignRole = true } = options;
+  const tabLabel = assignRole ? "Oriana Vale · tester" : "Oriana Vale";
   const root = await realpath(await mkdtemp(join(tmpdir(), "opencode-fleet-integration-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const state = join(root, "captain");
@@ -62,6 +67,9 @@ async function fixture(preferencesOnly = false) {
   let exitCommands = 0;
   let physicalCloses = 0;
   const receivedBriefs: string[] = [];
+  let layouts = 0;
+  let messages = 0;
+  let sendFailure = false;
   const execute = promisify(execFile);
   const socketSamples = new Map<string, Promise<string>>();
   const executable = await realpath(process.execPath);
@@ -122,6 +130,8 @@ async function fixture(preferencesOnly = false) {
         messages: async () => ({ data: [] }),
         promptAsync: async (input: { parts: { type: string; text: string }[] }) => {
           receivedBriefs.push(input.parts[0]!.text);
+          messages++;
+          if (sendFailure) throw new Error("Fixture native acknowledgment lost");
           return { response: { status: 204 } };
         },
       },
@@ -130,6 +140,47 @@ async function fixture(preferencesOnly = false) {
     },
   };
   cleanups.push(async () => dispose());
+  const nativeRequest = async (_binding: unknown, method: string, input: unknown) => {
+    const params = input as Record<string, unknown>;
+    if (method === "layout.apply") {
+      layouts++;
+      expect(params.workspace_id).toBe("w1");
+      expect(params.tab_label).toBe(tabLabel);
+      const command = params.root as { env: Record<string, string> };
+      const config = JSON.parse(await readFile(command.env.OPENCODE_TUI_CONFIG!, "utf8"));
+      database = command.env.OPENCODE_DB!;
+      present = true;
+      initialization = module.default.tui(api, config.plugin.at(-1)[1]).then(() => {
+        ready = true;
+      });
+      return { result: { layout: { root: { type: "pane", pane_id: pane.pane_id } } } };
+    }
+    if (!present) throw new Error("pane_not_found");
+    if (method === "pane.process_info")
+      return {
+        result: {
+          process_info: {
+            pane_id: pane.pane_id,
+            shell_pid: process.pid,
+            foreground_process_group_id: process.pid,
+          },
+        },
+      };
+    if (method === "pane.get") return { result: { pane: { ...pane } } };
+    if (method === "pane.report_agent") {
+      pane.agent_session = {
+        source: String(params.source),
+        kind: "id",
+        value: String(params.agent_session_id),
+      };
+      return { result: { type: "ok" } };
+    }
+    if (method === "agent.rename") {
+      pane.name = String(params.name);
+      return { result: { agent: { ...pane } } };
+    }
+    throw new Error(`Unexpected native method ${method}`);
+  };
   const native = createOpenCodeNativeHost({
     binding: async () => ({ runtime: "external", session: "fixture", socketPath: join(root, "herdr.sock") }),
     platform: "darwin",
@@ -156,46 +207,7 @@ async function fixture(preferencesOnly = false) {
       }
       return sample;
     },
-    request: async (_binding, method, input) => {
-      const params = input as Record<string, unknown>;
-      if (method === "layout.apply") {
-        expect(params.workspace_id).toBe("w1");
-        expect(params.tab_label).toBe("Oriana Vale · tester");
-        const command = params.root as { env: Record<string, string> };
-        const config = JSON.parse(await readFile(command.env.OPENCODE_TUI_CONFIG!, "utf8"));
-        database = command.env.OPENCODE_DB!;
-        present = true;
-        initialization = module.default.tui(api, config.plugin.at(-1)[1]).then(() => {
-          ready = true;
-        });
-        return { result: { layout: { root: { type: "pane", pane_id: pane.pane_id } } } };
-      }
-      if (!present) throw new Error("pane_not_found");
-      if (method === "pane.process_info")
-        return {
-          result: {
-            process_info: {
-              pane_id: pane.pane_id,
-              shell_pid: process.pid,
-              foreground_process_group_id: process.pid,
-            },
-          },
-        };
-      if (method === "pane.get") return { result: { pane: { ...pane } } };
-      if (method === "pane.report_agent") {
-        pane.agent_session = {
-          source: String(params.source),
-          kind: "id",
-          value: String(params.agent_session_id),
-        };
-        return { result: { type: "ok" } };
-      }
-      if (method === "agent.rename") {
-        pane.name = String(params.name);
-        return { result: { agent: { ...pane } } };
-      }
-      throw new Error(`Unexpected native method ${method}`);
-    },
+    request: nativeRequest,
   });
   const herdr = async (args: readonly string[]) => {
     if (args[0] === "pane" && args[1] === "list")
@@ -216,7 +228,7 @@ async function fixture(preferencesOnly = false) {
             workspaces: [{ workspace_id: "w1", label: "Fixture", number: 1 }],
             tabs: [
               { tab_id: "w1:t1", workspace_id: "w1", label: "Owner task" },
-              ...(present ? [{ tab_id: "w1:t2", workspace_id: "w1", label: "Oriana Vale · tester" }] : []),
+              ...(present ? [{ tab_id: "w1:t2", workspace_id: "w1", label: tabLabel }] : []),
             ],
             panes: [
               { ...unrelated, workspace_id: "w1", tab_id: "w1:t1" },
@@ -237,6 +249,9 @@ async function fixture(preferencesOnly = false) {
     }
     throw new Error(`Unsupported Herdr fixture command ${args.join(" ")}`);
   };
+  const ssh = remote ? await remoteOpenCodeFixture({ root, state, executable, nativeRequest }) : undefined;
+  if (ssh) cleanups.push(() => ssh.close());
+  if (ssh && historyFirst) expect(await ssh.workers.list(ssh.fleet.id)).toEqual([]);
   const runner = createHerdrWatchRunner(undefined, herdr, native.createCommandTab);
   const adapter = createOpenCodeSeatAdapter({
     repoRoot: fileURLToPath(new URL("../../../", import.meta.url)),
@@ -268,7 +283,20 @@ async function fixture(preferencesOnly = false) {
         ],
       }),
     }));
-  const sessions = createAgentSessions(settings, undefined, new OpenCodeProfiles(state));
+  if (ssh && !preferencesOnly)
+    await settings.update((current) => ({
+      ...current,
+      projects: ProjectsSettingsSchema.parse({
+        projects: [
+          {
+            id: "default",
+            name: "Fixture project",
+            workspaces: [{ id: "local", machineId: "local", path: root, platform: "posix" }],
+          },
+        ],
+      }),
+    }));
+  const sessions = createAgentSessions(settings, undefined, new OpenCodeProfiles(state), ssh?.workers);
   const census = async (_command: string, args: readonly string[]) => ({
     stdout: await herdr(args),
     stderr: "",
@@ -279,9 +307,20 @@ async function fixture(preferencesOnly = false) {
   };
   const deps: CaptainDeps = {
     agentSessions: sessions,
-    mcp: { catalog: unused, call: unused },
+    ...(ssh === undefined
+      ? {}
+      : {
+          fleets: {
+            list: [ssh.fleet],
+            current: ssh.fleets,
+            run: () => herdr,
+            shell: () => ssh.shell,
+            remoteWorkspace: async () => true,
+          },
+        }),
+    mcp: { catalog: async () => [], call: unused },
     email: { list: unused, read: unused, search: unused, send: unused },
-    browser: { catalog: unused, call: unused },
+    browser: { catalog: async () => ({ schemaVersion: 1, available: false, tools: [] }), call: unused },
     media: { generateImage: unused, generateVideo: unused, finishedRenders: unused },
     embodiment: { submitIntent: unused, getSession: unused, getLiveSession: unused },
     activity: { current: unused },
@@ -298,8 +337,13 @@ async function fixture(preferencesOnly = false) {
     repoRoot: root,
     stateDir: state,
     settings,
-    seatAdapters: [adapter],
-    nativeHerdrRunner: runner,
+    seatAdapters: ssh ? [] : [adapter],
+    ...(ssh === undefined ? {} : { remoteOpenCode: ssh.workers }),
+    nativeHerdrRunner: ssh
+      ? createHerdrWatchRunner(undefined, async () => {
+          throw new Error("Local fallback forbidden");
+        })
+      : runner,
     nativeCensusRunner: census,
     projectHireTools: async () => [],
     projectHireIdentity: async (fleet, selectedPane) =>
@@ -318,7 +362,7 @@ async function fixture(preferencesOnly = false) {
   const created = await captain.serveOperatorConversation({
     schemaVersion: 1,
     op: "create",
-    scope: { kind: "global" },
+    scope: ssh || preferencesOnly ? { kind: "workspace", workspaceId: root } : { kind: "global" },
     title: "Native hire",
   });
   if (created.op !== "create") throw new Error("create expected");
@@ -330,8 +374,9 @@ async function fixture(preferencesOnly = false) {
       schemaVersion: 1,
       harness: "opencode",
       title: "Oriana Vale",
-      role: "tester",
+      ...(assignRole ? { role: "tester" } : {}),
       workingDirectory: root,
+      ...(ssh === undefined ? {} : { fleet: ssh.fleet.id }),
     },
     ...(preferencesOnly ? {} : { brief: "Fixture native brief" }),
   });
@@ -406,11 +451,18 @@ async function fixture(preferencesOnly = false) {
     hired: hired.result,
     census,
     sessions,
+    settings,
     database,
     root,
     receivedBriefs,
     completeTask,
     counts: () => ({ exitCommands, physicalCloses }),
+    ssh,
+    created,
+    deliveries: () => ({ messages, layouts }),
+    loseSend: () => {
+      sendFailure = true;
+    },
     switchRoute: () => {
       route = { name: "session", params: { sessionID: "ses_foreignSession123" } };
     },
@@ -418,7 +470,7 @@ async function fixture(preferencesOnly = false) {
 }
 
 test("a hire without an explicit brief delivers resolved working preferences through the real native channel once", async () => {
-  const f = await fixture(true);
+  const f = await fixture({ preferencesOnly: true });
   expect(f.hired.deliveryStage).toBe("consumed");
   expect(f.receivedBriefs).toHaveLength(1);
   const brief = f.receivedBriefs[0]!;
@@ -440,7 +492,7 @@ test("a hire without an explicit brief delivers resolved working preferences thr
 });
 
 test("native prepared hire survives real census/roster reconciliation and exits only its original TUI", async () => {
-  const f = await fixture(true);
+  const f = await fixture({ preferencesOnly: true });
   const expected = f.hired.seat;
   expect(f.pane.name).toBeDefined();
   expect(f.pane.label).toBe("Oriana Vale · tester");
@@ -510,5 +562,201 @@ test("a switched native session cannot exit through the previously hired seat", 
       seatId: f.hired.seat.seatId,
     }),
   ).toMatchObject({ closed: false });
+  expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
+});
+
+async function remoteFollowup(f: Awaited<ReturnType<typeof fixture>>, brief = "SSH native follow-up") {
+  const result = await f.captain.serveOperatorConversation({
+    schemaVersion: 1,
+    op: "spawn_seat",
+    conversationId: f.created.conversation.conversationId,
+    seat: {
+      schemaVersion: 1,
+      harness: "opencode",
+      title: "Oriana Vale",
+      role: "tester",
+      workingDirectory: f.root,
+      fleet: f.ssh!.fleet.id,
+      resume: f.ssh!.fleet.id + ":ses_nativeWorker123",
+    },
+    brief,
+  });
+  return result;
+}
+
+test("SSH native hire, API history and follow-up reuse the original controller without local allocation", async () => {
+  const f = await fixture({ remote: true });
+  const host = f.ssh!.fleet.id;
+  expect(f.hired.seat.seatId).toBe(host + "/term_native123");
+  expect(f.hired.control).toMatchObject({ mode: "adapter" });
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+  const db = new DatabaseSync(f.database);
+  try {
+    db.exec("PRAGMA foreign_keys=OFF");
+    db.prepare("INSERT INTO message VALUES(?,?,?,?,?)").run(
+      "msg_remoteText123",
+      "ses_nativeWorker123",
+      3,
+      3,
+      JSON.stringify({ role: "assistant", time: { created: 3, completed: 4 } }),
+    );
+    db.prepare("INSERT INTO part VALUES(?,?,?,?,?,?)").run(
+      "prt_remoteText123",
+      "msg_remoteText123",
+      "ses_nativeWorker123",
+      3,
+      3,
+      JSON.stringify({ type: "text", text: "Remote stored fixture" }),
+    );
+  } finally {
+    db.close();
+  }
+  const page = await f.sessions.read(host + ":ses_nativeWorker123");
+  expect(page.session).toMatchObject({ ref: host + ":ses_nativeWorker123", host, harness: "opencode" });
+  expect(
+    page.entries.some((entry) => entry.type === "message" && entry.text === "Remote stored fixture"),
+  ).toBe(true);
+  expect((await f.sessions.list({ host })).sessions).toEqual([
+    expect.objectContaining({ ref: host + ":ses_nativeWorker123", host, harness: "opencode" }),
+  ]);
+  const reused = await remoteFollowup(f);
+  expect(reused).toMatchObject({ result: { outcome: "spawned", seat: { seatId: f.hired.seat.seatId } } });
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
+  expect(
+    f.ssh!.commands.some(
+      (command) => command.includes("ControlPath=none") && command.includes("127.0.0.1:0:127.0.0.1:"),
+    ),
+  ).toBe(true);
+  expect(f.ssh!.commands.some((command) => command.includes("opencode serve"))).toBe(false);
+  const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
+  const message = bank.tools.find((tool) => tool.name === "message_seat")!;
+  const receipt = await message.call({ seat: f.hired.seat.seatId, message: "Native remote message" });
+  expect(receipt.isError).not.toBe(true);
+  expect(JSON.parse((receipt.content[0] as { text: string }).text)).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "consumed",
+    seatId: f.hired.seat.seatId,
+  });
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
+});
+
+test.each([
+  "birth",
+  "uid",
+  "socket-owner",
+  "disconnect",
+  "retarget",
+  "during-probe",
+  "windows",
+  "link-loss",
+  "session",
+])("remote %s change refuses follow-up/reuse without another writer or local fallback", async (mode) => {
+  const f = await fixture({ remote: true });
+  if (mode === "session") f.switchRoute();
+  else f.ssh!.mutate(mode);
+  const result = await remoteFollowup(f);
+  expect(result).toMatchObject({ result: { outcome: "failed" } });
+  if (result.op === "spawn_seat" && result.result.outcome === "failed")
+    expect(result.result.detail).not.toContain("Hire from a project conversation");
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+  expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
+});
+
+test("conflicting host and fleet SSH identities refuse every native history API before transport", async () => {
+  const f = await fixture({ remote: true });
+  const ref = f.ssh!.fleet.id + ":ses_nativeWorker123";
+  await f.settings.update((current) => ({
+    ...current,
+    agentHosts: { connections: [{ id: f.ssh!.fleet.id, ssh: "fixture@other", shell: "posix" }] },
+  }));
+  const count = f.ssh!.commands.length;
+  await expect(f.sessions.hosts()).rejects.toThrow("identities conflict");
+  await expect(f.sessions.list()).rejects.toThrow("identities conflict");
+  await expect(f.sessions.read(ref)).rejects.toThrow("identities conflict");
+  await expect(f.sessions.resolve(ref)).rejects.toThrow("identities conflict");
+  expect(f.ssh!.commands).toHaveLength(count);
+});
+
+test("lost native send receipt over SSH is not replayed by a repeated live-session follow-up", async () => {
+  const f = await fixture({ remote: true });
+  f.loseSend();
+  expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
+  expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
+});
+
+test("stored remote history grants no cold controller adoption, and unknown hosts do not read local history", async () => {
+  const f = await fixture({ remote: true });
+  const ref = f.ssh!.fleet.id + ":ses_nativeWorker123";
+  f.ssh!.mutate("link-loss");
+  expect(await f.sessions.read(ref)).toMatchObject({ session: { ref, harness: "opencode" } });
+  await expect(f.sessions.read("unknown:ses_nativeWorker123")).rejects.toThrow("Unknown remote");
+  expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+});
+
+test("history-first native hire keeps Captain admission during a prepare drop and return", async () => {
+  // Cache admission is independent of concurrent project role journal writes.
+  const f = await fixture({ remote: true, historyFirst: true, assignRole: false });
+  const ssh = f.ssh!;
+  const before = ssh.operations.length;
+  ssh.onNextDiscover(async () => {
+    ssh.mutate("disconnect");
+    await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+    ssh.mutate("reconnect");
+  });
+  const result = await f.captain.serveOperatorConversation({
+    schemaVersion: 1,
+    op: "spawn_seat",
+    conversationId: f.created.conversation.conversationId,
+    seat: {
+      schemaVersion: 1,
+      harness: "opencode",
+      title: "Oriana Vale",
+      role: "tester",
+      workingDirectory: f.root,
+      fleet: ssh.fleet.id,
+    },
+    brief: "Must not allocate after observed loss",
+  });
+  expect(result).toMatchObject({ result: { outcome: "failed" } });
+  const after = ssh.operations.slice(before);
+  expect(after).toContain("discover");
+  expect(after).not.toContain("allocate");
+  expect(after).not.toContain("configure");
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+});
+
+test("Captain-first history works after a reconnect without adopting its old controller", async () => {
+  const f = await fixture({ remote: true, assignRole: false });
+  const ssh = f.ssh!;
+  const ref = ssh.fleet.id + ":ses_nativeWorker123";
+  // Warm history after Captain, the other ordering that formerly reused its guard.
+  expect(await f.sessions.read(ref)).toMatchObject({ session: { ref } });
+  ssh.mutate("disconnect");
+  await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+  ssh.mutate("reconnect");
+  expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
+  expect(await f.sessions.read(ref)).toMatchObject({ session: { ref, harness: "opencode" } });
+  expect((await f.sessions.list({ host: ssh.fleet.id })).sessions).toContainEqual(
+    expect.objectContaining({ ref }),
+  );
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+});
+
+test("advancing a fleet revision closes and evicts the old helper and SSH forward", async () => {
+  const f = await fixture({ remote: true, historyFirst: true, assignRole: false });
+  const ssh = f.ssh!;
+  const old = ssh.workers.forFleet(ssh.fleet, async () => {}, 0);
+  const owned = ssh.transportState();
+  expect(owned.some((entry) => entry.kind === "helper" && !entry.closed)).toBe(true);
+  expect(owned.some((entry) => entry.kind === "forward" && !entry.closed)).toBe(true);
+  ssh.workers.forFleet(ssh.fleet, async () => {}, 1);
+  for (const entry of owned)
+    expect(ssh.transportState().find((current) => current.id === entry.id)).toMatchObject({ closed: true });
+  await expect(old.list()).rejects.toThrow("retired");
+  expect(() => ssh.workers.forFleet(ssh.fleet, async () => {}, 0)).toThrow("revision");
+  const ref = ssh.fleet.id + ":ses_nativeWorker123";
+  expect(await f.sessions.read(ref)).toMatchObject({ session: { ref } });
   expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
 });

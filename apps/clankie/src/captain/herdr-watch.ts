@@ -1951,9 +1951,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
           await checkProof();
           // A matching UUID is not the saved native session: cwd and Pi's
           // independently resolved transcript address must also stay exact.
-          if (session.host !== "local" || input.fleet !== undefined)
-            throw new Error("Prepared native saved-session reuse is local only");
-          const savedCwd = await realpath(session.workingDirectory);
+          const remoteOpenCode =
+            session.host !== "local" &&
+            session.source !== undefined &&
+            input.harness === "opencode" &&
+            input.fleet !== undefined &&
+            session.source.machineId === session.host.id;
+          if (!remoteOpenCode && (session.host !== "local" || input.fleet !== undefined))
+            throw new Error("Prepared native saved-session reuse requires its original machine/controller");
+          // Remote metadata was confined/canonicalized by the fresh SSH reader;
+          // controller proof independently checks that machine's root cwd.
+          const savedCwd = remoteOpenCode
+            ? session.source!.workingDirectory
+            : await realpath(session.workingDirectory);
           const savedPath = session.source === undefined ? await realpath(session.file.path) : undefined;
           const matchesSaved = (agent: HerdrAgentSnapshot) =>
             savedCwd === session.workingDirectory &&
