@@ -23,7 +23,7 @@ it("native continuation goes through one hire/adoption path and preserves the ex
   vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
   const spawn = vi
     .spyOn(HerdrWatchStore.prototype, "spawnSeat")
-    .mockImplementation(async (_seat, _subject, _brief, _resume, _authority, adopt) => {
+    .mockImplementation(async (_seat, _subject, _brief, _resume, _authority, adopt, flushAdoption) => {
       const result = {
         outcome: "spawned",
         seat: {
@@ -38,6 +38,7 @@ it("native continuation goes through one hire/adoption path and preserves the ex
         },
       } as const;
       adopt?.(result);
+      await flushAdoption?.().catch(() => {});
       return result;
     });
   const resolve = vi.fn(async () => session);
@@ -88,6 +89,7 @@ it("native continuation goes through one hire/adoption path and preserves the ex
       session,
       expect.objectContaining({ owner: { conversationId: "global-default" } }),
       expect.any(Function),
+      expect.any(Function),
     );
     expect(track).toHaveBeenCalledWith("term_existing");
     for (const bad of [
@@ -119,7 +121,7 @@ it("passes a human fallback into native hire and preserves the owner rename on a
   vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
   const spawn = vi
     .spyOn(HerdrWatchStore.prototype, "spawnSeat")
-    .mockImplementation(async (request, _subject, _brief, _resume, _authority, adopt) => {
+    .mockImplementation(async (request, _subject, _brief, _resume, _authority, adopt, flushAdoption) => {
       const result = {
         outcome: "spawned",
         seat: {
@@ -134,6 +136,7 @@ it("passes a human fallback into native hire and preserves the owner rename on a
         },
       } as const;
       adopt?.(result);
+      await flushAdoption?.().catch(() => {});
       return result;
     });
   const captain = createCaptain({} as CaptainDeps, {
