@@ -4,13 +4,13 @@ Clankie is a personal assistant with a memory, a personality, and tools to get
 things done. You can have his machine looked after for you, or run him yourself.
 Choose the setup you want; both start with a conversation.
 
-|                           | Hosted Clankie                                   | Run him yourself                                                        |
-| ------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------- |
-| Where he lives            | A private machine managed for you                | Your Mac, or an advanced Linux deployment                               |
-| Start here                | Your account and the iPhone or iPad app          | Install, connect a model, open the console                              |
-| Models                    | Included usage or your own supported credentials | Your provider subscription, API key, or local model                     |
-| Optional depth            | Helper agents and the app's work views           | Models, skills, coding agents, Discord, voice, and service integrations |
-| Who maintains the machine | The hosted service                               | You                                                                     |
+|                           | Hosted Clankie                          | Run him yourself                                                        |
+| ------------------------- | --------------------------------------- | ----------------------------------------------------------------------- |
+| Where he lives            | A private machine managed for you       | Your Mac, or an advanced Linux deployment                               |
+| Start here                | Your account and the iPhone or iPad app | Install, connect a model, open the console                              |
+| Models                    | AI credits from your plan or account    | Your provider subscription, API key, or local model                     |
+| Optional depth            | Helper agents and the app's work views  | Models, skills, coding agents, Discord, voice, and service integrations |
+| Who maintains the machine | The hosted service                      | You                                                                     |
 
 Current plans and app availability live on [clankie.bot](https://clankie.bot).
 The Discord calls and game night in the promo use the Mac setup; they are not
@@ -18,15 +18,22 @@ part of the hosted app experience advertised there.
 
 ## Hosted: start in the app
 
-1. Open [Get Clankie](https://clankie.bot/#get) to create or sign in to your
-   account and set up your Clankie.
-2. Get the iPhone or iPad app from the [official app link](https://clankie.bot/#app).
-   That page names the current distribution channel.
-3. Follow your account's pairing flow, then open **Messages** and choose
-   **Clankie**. Say hello, tell him what you are working on, or ask for help.
+1. Check the [official app link](https://clankie.bot/#app) to make sure you can
+   install the iPhone or iPad app before buying a plan. That page names the
+   current distribution channel.
+2. Open [Get Clankie](https://clankie.bot/#get) to create or sign in to your
+   account. Choose a plan with AI credits and complete checkout. A machine-only
+   plan needs a pack or top-up from your account before Clankie can answer.
+3. Your account shows when Clankie is ready. Open its secure app link on your
+   iPhone or iPad, review the connection, and connect. If you are using another
+   screen, scan the QR or copy the complete secure link into the app.
+4. Open **Messages** and choose **Clankie**. Say hello, tell him what you are
+   working on, or ask for help.
 
 Your account manages the hosted machine and plan. The app is where you talk
-to him. You do not need to install the Mac service to use hosted Clankie.
+to him. Your first conversation uses the managed model; you do not need a
+Mac installation, a model subscription, or an API key. If your AI credits run
+out, return to your account to add credits.
 
 Prefer a terminal as well? The Mac console can connect to an existing hosted
 Clankie with `clankie connect hosted`. The [connection reference](/cli/#local-and-hosted-connection-modes)
