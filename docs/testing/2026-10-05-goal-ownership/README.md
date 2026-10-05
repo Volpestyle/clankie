@@ -1,7 +1,9 @@
 # VUH-1676: goal ownership and enforced budgets
 
-Candidate for Pell's integration, from `fix/vuh-1676` based on `origin/main`
-`9a0589caa124264647a54eefa268174eb15a4f30`. This is isolated fixture evidence;
+Candidate for Pell's integration, from `fix/vuh-1676`. Focused checks ran against
+base `9a0589caa124264647a54eefa268174eb15a4f30`; the handoff was then rebased onto
+`origin/main` `236b8499` (relay/public-gateway reads only, unchanged goal inputs).
+This is isolated fixture evidence;
 no goals were created against the live service, and no live service, accounts
 or sign-ins were changed. No evals or full `pnpm check` ran.
 
