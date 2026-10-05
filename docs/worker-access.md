@@ -327,6 +327,19 @@ The current invocation never sends a replacement; a subsequent invocation can
 send a new message. Authentication failures expose a generic refusal, while
 authenticated downstream failures retain their actual reason.
 
+A binding read fails before a message ID or claim is allocated. Transport or
+response failures there report `unavailable` with a safe diagnostic reason and
+confirm that nothing was sent. A subsequent deliberate call can try the binding
+again; an existing original claim still reconciles without a new POST. A server
+upgrade does not replace JavaScript already loaded in a worker bridge. Older
+senders that only recognize `stored` cannot settle the new exact `not_sent`
+response. Replace the worker's Clankie MCP connection through the native
+controller while preserving its thread, pane and account home. For isolated
+Codex workers, change the transport revision before `config/mcpServer/reload`;
+reload alone can reuse a ready old connection. The existing catalog controller
+implements this sequence. Do not remove claim files or retry an unresolved
+message to compensate for an old bridge.
+
 Local hired Codex servers outlive a service restart. Their completed launch
 registrations persist in `local-codex-seats.json` under `CLANKIE_STATE` (default
 `~/.clankie`), independently of the pinned code checkout. After restart, each

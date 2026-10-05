@@ -1,7 +1,7 @@
 // Shared by the installed dependency-free bridge and `clankie mcp --seat`.
 // The file is an exclusive unresolved claim, never an outgoing replay queue.
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const hash = (text) => createHash("sha256").update(text.replace(/\r\n?/gu, "\n").trim()).digest("hex");
@@ -105,10 +105,29 @@ export function createInboundSender({ directory, scope, request }) {
     try {
       record = inspect();
       if (record) return await reconcile(record, text);
+      if (existsSync(`${path}.lock`)) return uncertain();
       // No write attempt until the authenticated service identifies the native
       // session. Older services are readable but cannot supply durable receipts.
-      const bindingResponse = await request("");
-      const binding = bindingResponse.ok ? (await bindingResponse.json())?.binding : undefined;
+      let bindingResponse;
+      let binding;
+      try {
+        bindingResponse = await request("");
+        binding = bindingResponse.ok ? (await bindingResponse.json())?.binding : undefined;
+      } catch (error) {
+        // A concurrent bridge may have claimed an original during discovery.
+        // Its state still fences this invocation, including orphaned locks.
+        record = inspect();
+        if (record || existsSync(`${path}.lock`)) return uncertain(record);
+        const reason =
+          error?.name === "AbortError" || error?.name === "TimeoutError"
+            ? "Binding discovery timed out or was interrupted"
+            : refusedConnection(error)
+              ? "Binding discovery connection was refused"
+              : error instanceof SyntaxError
+                ? "Binding discovery returned an invalid response"
+                : "Binding discovery transport failed";
+        return { received: false, deliveryStage: "unavailable", detail: `${reason}; nothing was sent.` };
+      }
       if (!hex(binding))
         return {
           received: false,

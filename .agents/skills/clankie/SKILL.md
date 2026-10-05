@@ -138,6 +138,15 @@ and use its lookup; do not delete it or replay the original to recover.
 Neither sends a replacement in the same invocation. Timeouts, connection resets,
 unverified lookups and mismatched evidence retain the uncertain original.
 
+Before a claim exists, a failed native binding read reports `unavailable` and
+its safe diagnostic reason; that invocation made no POST. Recover the bridge
+before a deliberate new call. Updating the service does not replace a running
+worker's loaded bridge code. Older senders can recognize `stored` but may ignore
+`not_sent`: replace that worker's Clankie MCP connection through its controller,
+keeping the same native thread, pane and home. Plain MCP reload can reuse the
+old connection; the isolated Codex controller changes its transport revision
+before reload. Never delete claims or replay unresolved writes to upgrade.
+
 `recipient_gone` with outcome `unconfirmed` is terminal: the original recipient
 lost its binding, so delivery stays unknown and must never be resent. The bridge
 clears that original claim; a later deliberate call may send fresh intent. The
