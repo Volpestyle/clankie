@@ -1,6 +1,6 @@
 # ADR 0223: Hires use repo workspaces and pipeline tabs
 
-Status: proposed for review (2026-10-04; VUH-1550).
+Status: accepted (2026-10-04; VUH-1550, landed in `4384b34b`).
 
 Extends the placement preference in [ADR 0216](0216-projects-own-agent-roles-and-tool-policy.md).
 Implements [VUH-1550](https://linear.app/vuhlp/issue/VUH-1550).

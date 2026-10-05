@@ -41,6 +41,7 @@ import { HostedHeartbeat } from "./hosted-heartbeat.ts";
 import { hostedHireCapacity, watchHostedHerdrWork } from "./hosted-work.ts";
 import { WorkerMcp } from "./worker-mcp.ts";
 import { OpenCodeProfiles } from "./opencode-profiles.ts";
+import { RemoteOpenCodeWorkers } from "./captain/remote-opencode-workers.ts";
 import { createAgentSessions } from "./agent-sessions.ts";
 /**
  * Composition root for the merged Clankie service: the surviving control-plane
@@ -712,10 +713,18 @@ const integration =
     : undefined;
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
+const remoteOpenCodeWorkers = new RemoteOpenCodeWorkers({
+  repoRoot,
+  stateDir: join(stateRoot, "captain"),
+  fleets: () => runtimes.fleets(),
+  shell: (fleet) => runtimes.fleetShell(fleet),
+  stream: (fleet) => runtimes.fleetStream(fleet),
+});
 const agentSessions = createAgentSessions(
   settingsStore,
   undefined,
   new OpenCodeProfiles(join(stateRoot, "captain")),
+  remoteOpenCodeWorkers,
 );
 // Work items in each repo's own convention (ADR 0191): Linear rides his
 // connected account, GitHub the owner's GitHub connection or gh login (a
@@ -1054,6 +1063,7 @@ const captain = createCaptain(
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
     grokNative,
+    remoteOpenCode: remoteOpenCodeWorkers,
     openCodeNative: createOpenCodeNativeHost({
       binding: localFleetBinding,
       processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),

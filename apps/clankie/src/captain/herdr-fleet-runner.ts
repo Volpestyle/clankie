@@ -2,6 +2,7 @@ import { fleetQualified, splitFleetQualified, type HerdrFleet, type HerdrFleetRu
 import { createSshAgentHost } from "@clankie/agent-hosts";
 import type { AgentTranscriptHost } from "@clankie/agent-transcript";
 import { remoteHerdrTranscriptReader } from "./remote-herdr-transcript.ts";
+import type { PreparedCommandTab } from "./prepared-native-host.ts";
 import {
   createHerdrWatchRunner,
   parseHerdrPaneList,
@@ -47,9 +48,15 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 export function createRemoteHerdrRunner(
   fleet: HerdrFleet,
   run: HerdrFleetRun,
-  options: { readonly pollMs?: number; readonly transcriptHost?: AgentTranscriptHost } = {},
+  options: {
+    readonly pollMs?: number;
+    readonly transcriptHost?: AgentTranscriptHost;
+    readonly createCommandTab?: (input: PreparedCommandTab) => Promise<string>;
+  } = {},
 ): HerdrWatchRunner {
-  const base = createHerdrWatchRunner(undefined, run, undefined, { localCodexRecovery: false });
+  const base = createHerdrWatchRunner(undefined, run, options.createCommandTab, {
+    localCodexRecovery: false,
+  });
   const pollMs = options.pollMs ?? REMOTE_POLL_MS;
   let cached: { readonly at: number; readonly panes: Promise<readonly HerdrAgentSnapshot[]> } | undefined;
 

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { clientPid } from "../local-fleet-proof.ts";
 import type { SeatProcessIdentity } from "@clankie/agent-hosts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
+import { fleetQualified } from "../herdr-fleet.ts";
 
 const execute = promisify(execFile);
 const Birth = z.object({
@@ -74,6 +75,11 @@ export interface PreparedNativeHostOptions {
   readonly platform?: string;
   readonly run?: (file: string, args: readonly string[]) => Promise<string>;
   readonly request?: (binding: HerdrBinding, method: string, params: unknown) => Promise<unknown>;
+  /** Machine-local observations supplied by the bound SSH controller, never a fallback. */
+  readonly canonical?: (path: string) => Promise<string>;
+  readonly ownerUid?: () => Promise<number>;
+  readonly fleet?: string;
+  readonly socketOwner?: (socket: Socket, pid: number) => Promise<boolean>;
 }
 
 export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
@@ -88,6 +94,8 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
     (async (file, args) =>
       (await execute(file, [...args], { timeout: 5_000, maxBuffer: 1024 * 1024, encoding: "utf8" })).stdout);
   const request = input.request ?? nativeRequest;
+  const canonical = input.canonical ?? realpath;
+  const qualify = (pane: string) => (input.fleet === undefined ? pane : fleetQualified(input.fleet, pane));
   const binding = async () => {
     if ((input.platform ?? process.platform) !== "darwin")
       throw new Error("Prepared native control is currently macOS-only");
@@ -123,8 +131,9 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
       const original = await binding();
       // The controller selected the initial argv. For script runtimes this proves
       // the original interpreter root, not an independently observed script argv.
-      const canonicalExecutable = await realpath(executable);
-      const canonicalCwd = await realpath(cwd);
+      const canonicalExecutable = await canonical(executable);
+      const canonicalCwd = await canonical(cwd);
+      const ownerUid = input.ownerUid ? await input.ownerUid() : process.getuid?.();
       const info = async () =>
         z
           .object({
@@ -173,10 +182,10 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
           .map((line) => line.slice(1));
         if (
           before.pid !== pid ||
-          before.uid !== process.getuid?.() ||
+          before.uid !== ownerUid ||
           directory.length !== 1 ||
-          (await realpath(directory[0]!)) !== canonicalCwd ||
-          (await realpath(before.executable)) !== canonicalExecutable
+          (await canonical(directory[0]!)) !== canonicalCwd ||
+          (await canonical(before.executable)) !== canonicalExecutable
         )
           throw new Error("Native root executable or cwd changed");
         const after = Birth.parse(
@@ -210,8 +219,8 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
       };
       await current();
       return {
-        paneId,
-        terminalId: originalAllocation.terminal_id,
+        paneId: qualify(paneId),
+        terminalId: qualify(originalAllocation.terminal_id),
         process: { pid, startTime: `${birth.birth[0]}.${birth.birth[1].padStart(6, "0")}` },
         verifyAllocation: current,
         async check(socket) {
@@ -232,11 +241,13 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
               clientPort,
               serverPort,
             );
+          const owned = () =>
+            input.socketOwner ? input.socketOwner(socket, pid) : owner().then((value) => value === pid);
           try {
             await current();
-            if (!alive() || (await owner()) !== pid) return false;
+            if (!alive() || !(await owned())) return false;
             await current();
-            return alive() && (await owner()) === pid && alive();
+            return alive() && (await owned()) && alive();
           } catch {
             return false;
           }
@@ -271,8 +282,8 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
           await current();
           const process = { pid, startTime: `${birth.birth[0]}.${birth.birth[1].padStart(6, "0")}` };
           return {
-            fleet: "default",
-            pane: paneId,
+            fleet: input.fleet ?? "default",
+            pane: qualify(paneId),
             nativeOccupantId: occupantIdForHerdrSession(session),
             binding: {
               socketPath: original.socketPath,
