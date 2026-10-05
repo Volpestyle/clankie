@@ -14,7 +14,7 @@ it("a hire names the persona's role and a later write refuses without confirmed 
   vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
   vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
   vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(
-    async (_seat, _subject, _brief, _resume, _authority, adopt) => {
+    async (_seat, _subject, _brief, _resume, _authority, adopt, flushAdoption) => {
       const result = {
         outcome: "spawned",
         seat: {
@@ -29,6 +29,7 @@ it("a hire names the persona's role and a later write refuses without confirmed 
         },
       } as const;
       adopt?.(result);
+      await flushAdoption?.().catch(() => {});
       return result;
     },
   );
@@ -102,7 +103,7 @@ it.each(["save_failed", "commit_unknown", "journal_failed"] as const)(
     vi.spyOn(census, "readFleet").mockResolvedValue({ seats: [] });
     const spawn = vi
       .spyOn(HerdrWatchStore.prototype, "spawnSeat")
-      .mockImplementation(async (_seat, _subject, _brief, _resume, _authority, adopt) => {
+      .mockImplementation(async (_seat, _subject, _brief, _resume, _authority, adopt, flushAdoption) => {
         if (failure === "journal_failed" && _seat.role !== undefined) {
           const { mkdirSync } = await import("node:fs");
           const { createHash } = await import("node:crypto");
@@ -127,6 +128,7 @@ it.each(["save_failed", "commit_unknown", "journal_failed"] as const)(
           },
         } as const;
         adopt?.(result);
+        await flushAdoption?.().catch(() => {});
         return result;
       });
     const captain = createCaptain({ ...({} as CaptainDeps) }, { repoRoot: root, stateDir: root, settings });
@@ -252,7 +254,7 @@ it.each(["pending", "unsaved", "saved"] as const)(
     let adoptions = 0;
     const spawn = vi
       .spyOn(HerdrWatchStore.prototype, "spawnSeat")
-      .mockImplementation(async (_seat, _subject, _brief, _resume, _authority, adopt) => {
+      .mockImplementation(async (_seat, _subject, _brief, _resume, _authority, adopt, flushAdoption) => {
         calls += 1;
         const number = _seat.role === "designer" ? 1 : 2;
         await admitted;
@@ -277,6 +279,7 @@ it.each(["pending", "unsaved", "saved"] as const)(
         if (number === 1) firstAdopted();
         if (++adoptions === 2) adopted();
         if (firstOutcome !== "saved") await bothAdopted;
+        await flushAdoption?.().catch(() => {});
         return result;
       });
     const captain = createCaptain({ ...({} as CaptainDeps) }, { repoRoot: root, stateDir: root, settings });
