@@ -27,7 +27,13 @@ import { runConversationsCommand } from "../src/command/conversations.ts";
 import { openHerdr, runFleetHerdr } from "../src/session/herdr-connection.ts";
 import { type CredentialStore } from "@clankie/credential-broker";
 import { type ServiceRegistryOptions } from "./services.ts";
-import { doctorCommand, machineDoctorCommand, type ExecFileImpl } from "../src/command/doctor.ts";
+import {
+  doctorCommand,
+  machineDoctorCommand,
+  formatDoctorSummary,
+  formatMachineDoctorSummary,
+  type ExecFileImpl,
+} from "../src/command/doctor.ts";
 import { statusCommand } from "../src/command/status.ts";
 import { runModelCommand } from "../src/command/model.ts";
 import { runPersonaCommand } from "../src/command/persona.ts";
@@ -164,10 +170,17 @@ export async function runHeadlessCaptainCommand(
       return result.ok ? 0 : 1;
     }
     if (command === "doctor") {
-      if (rest.length) {
-        if (rest.length !== 2 || rest[0] !== "--machine")
-          throw new Error("Usage: clankie doctor [--machine FLEET_ID]");
-        outputJson(stdout, await machineDoctorCommand(rest[1]!, options));
+      const json = rest.includes("--json");
+      const args = rest.filter((arg) => arg !== "--json");
+      if (
+        rest.filter((arg) => arg === "--json").length > 1 ||
+        (args.length !== 0 && (args.length !== 2 || args[0] !== "--machine" || args[1]!.startsWith("--")))
+      )
+        throw new Error("Usage: clankie doctor [--machine FLEET_ID] [--json]");
+      if (args.length) {
+        const result = await machineDoctorCommand(args[1]!, options);
+        if (json) outputJson(stdout, result);
+        else stdout.write(`${formatMachineDoctorSummary(result)}\n`);
         return 0;
       }
       const result = await doctorCommand({
@@ -175,7 +188,8 @@ export async function runHeadlessCaptainCommand(
         env: options.env ?? process.env,
         ...(options.execFileImpl === undefined ? {} : { execFileImpl: options.execFileImpl }),
       });
-      outputJson(stdout, result);
+      if (json) outputJson(stdout, result);
+      else stdout.write(`${formatDoctorSummary(result)}\n`);
       return 0;
     }
     if (command === "update") {

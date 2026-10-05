@@ -8,6 +8,52 @@ import {
 
 export type { ExecFileImpl, InstallDoctorReport };
 
+/** Readiness first; optional rooms never hide the reason a first turn fails. */
+export function formatDoctorSummary(report: InstallDoctorReport): string {
+  if (!report.captain.ready) {
+    return report.captain.reason === "no_model"
+      ? "Choose a model — run `clankie`, then `/setup`."
+      : `Sign in to ${report.captain.providerId} — run \`clankie\`, then \`/setup\`.`;
+  }
+  const endpoint = report.selectedModel?.endpoint;
+  if (endpoint && (!endpoint.reachable || !endpoint.declaresModel)) {
+    return `The selected model ${report.model} is unavailable — run \`clankie\`, then \`/setup\` to choose a working model.`;
+  }
+  if (endpoint?.authRequired && !endpoint.credentialStored) {
+    return `The selected model needs a key — run \`clankie\`, then \`/auth ${report.selectedModel?.providerId}\`.`;
+  }
+  if (report.doorway.state === "unreachable") {
+    return "Clankie is not answering — run `clankie`.";
+  }
+  if (report.doorway.state === "sign_in_required") {
+    return "Phone access is signed out — run `clankie remote-access on`.";
+  }
+  if (report.doorway.state === "unavailable") {
+    return "Phone access has no connection — run `clankie restart`.";
+  }
+  if (report.doorway.state === "connecting") {
+    return "Phone access is still connecting — run `clankie gateway status` to check again.";
+  }
+  const remediation = report.remediations[0];
+  if (remediation !== undefined) {
+    const line = remediation.replace(/\s+/gu, " ").trim();
+    return line.includes("`") || line.includes("/discord")
+      ? line
+      : `${line} Run \`clankie\`, then \`/setup\`.`;
+  }
+  return "ready";
+}
+
+/** Machine cards remain available verbatim via --json; observations are not tool acceptance. */
+export function formatMachineDoctorSummary(report: Record<string, unknown>): string {
+  const unavailable = [report.harnesses, report.membership].some(
+    (card) => typeof card === "object" && card !== null && "status" in card && card.status === "unavailable",
+  );
+  return unavailable
+    ? `Cannot inspect ${report.machine} — run \`clankie connections\` to repair its connection.`
+    : "ready";
+}
+
 export async function doctorCommand(options: InspectInstallOptions): Promise<InstallDoctorReport> {
   const report = await inspectInstall(options);
   let remoteHarnesses: readonly unknown[];

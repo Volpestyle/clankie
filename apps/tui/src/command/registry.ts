@@ -133,8 +133,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["doctor"],
     lines: [
-      "  doctor [--machine ID]    Install, per-profile harness registration and connected fleet diagnostics",
-      "                           (JSON; exit 0 — ok means the card was produced)",
+      "  doctor [--machine ID] [--json]    One-line diagnosis; --json shows the full install and fleet card",
+      "                           (exit 0 when produced; JSON ok means the card was produced)",
     ],
   },
   {

@@ -98,4 +98,4 @@ configuration, enabling following, status, and recovery.
 
 ## Headless
 
-Use headless commands for scripts: `clankie status`, `clankie doctor`, `clankie model set`, and `clankie persona set` print JSON and exit 0 or 1. Pairing, device listing and operator credential rotation default to human-readable output; pass `--json`, for example `clankie pair --json`. Other output exceptions are listed in the CLI reference. The full contract, with every flag and payload, is the [CLI reference](/cli/). Secret entry stays interactive — `/auth`, `/discord`, `/connect`, `/voice` — because tokens never become flags.
+Use headless commands for scripts: `clankie status`, `clankie doctor --json`, `clankie model set`, and `clankie persona set` print JSON and exit 0 or 1. Pairing, device listing and operator credential rotation default to human-readable output; pass `--json`, for example `clankie pair --json`. Other output exceptions are listed in the CLI reference. The full contract, with every flag and payload, is the [CLI reference](/cli/). Secret entry stays interactive — `/auth`, `/discord`, `/connect`, `/voice` — because tokens never become flags.

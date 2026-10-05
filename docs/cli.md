@@ -53,7 +53,8 @@ the token is never an argument, settings value, or printed result.
 
 | Command                                                                                                                       | stdout                                                                                       |
 | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `health`, `status`, `doctor`, `restart`, `down`, `autostart …`, `awake`                                                       | JSON                                                                                         |
+| `doctor [--machine NAME]`                                                                                                     | Human summary; `--json` preserves the full card                                              |
+| `health`, `status`, `restart`, `down`, `autostart …`, `awake`                                                                 | JSON                                                                                         |
 | `model …`, `effort …`, `image-model …`, `video-model …`                                                                       | JSON                                                                                         |
 | `linear …`, `persona …`, `games …`, `browser …`, `fleet …`, `herdr use/create/disable`, `workdir …`, `discord …`, `gateway …` | JSON (`herdr open` opens the terminal viewer)                                                |
 | `play status`                                                                                                                 | JSON                                                                                         |
@@ -123,8 +124,16 @@ they opt in.
 ### `doctor`
 
 The install card ([ADR 0142](adr/0142-the-install-tells-him-the-truth.md)).
-Always JSON, always exit 0. `ok` means the card was produced. Missing optional
-tools are facts in `remediations`, not failures.
+`clankie doctor` prints one line: `ready`, or the most important problem and
+its repair command. Model setup and service reachability take priority over
+optional integration warnings. `ready` means these probes found no repair; it
+does not prove a model turn or native worker tool acceptance.
+
+Use `clankie doctor --json` for the full, unchanged install card; scripts must
+pass this flag. `clankie doctor --machine NAME --json` preserves the machine
+card too. Both formats always exit 0 when the card is produced. JSON `ok` means
+the card was produced, not that every integration works. `/doctor` in the
+console continues to show the full card.
 
 Local fleet discovery uses `<CLANKIE_STATE>/links`, defaulting to
 `~/.clankie/links`. Local hires carry the service's absolute state path, including

@@ -349,7 +349,7 @@ describe("headless clankie commands", () => {
     tempDirs.push(root);
     await writeFile(join(root, "package.json"), `${JSON.stringify({ version: "0.2.0" })}\n`);
 
-    const exitCode = await runHeadlessCaptainCommand(["doctor"], {
+    const exitCode = await runHeadlessCaptainCommand(["doctor", "--json"], {
       repoRoot: root,
       env: {
         HOME: join(root, "home"),
@@ -370,6 +370,22 @@ describe("headless clankie commands", () => {
       repoRoot: root,
       model: null,
     });
+    const summary = outputBuffer();
+    expect(
+      await runHeadlessCaptainCommand(["doctor"], {
+        repoRoot: root,
+        env: {
+          HOME: join(root, "home"),
+          XDG_CONFIG_HOME: join(root, "config"),
+          CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
+        },
+        execFileImpl: async () => {
+          throw Object.assign(new Error("not found"), { code: "ENOENT" });
+        },
+        stdout: summary.stream,
+      }),
+    ).toBe(0);
+    expect(summary.text()).toBe("Choose a model — run `clankie`, then `/setup`.\n");
   });
 
   it("rejects an unknown restart target without signalling anything", async () => {

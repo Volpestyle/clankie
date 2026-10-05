@@ -43,7 +43,8 @@ prints the same index.
 clankie                         # choose mode on first run; open the selected console
 clankie --chat <conversationId> # select a server-owned conversation
 clankie status                  # probe every launcher-owned service
-clankie doctor                  # this install: checkout vs release, models, credentials, optional herdr
+clankie doctor                  # ready, or the first repair and its command
+clankie doctor --json           # full install card for scripts and investigation
 clankie restart [service]       # restart in dependency order
 clankie down [service]          # stop in reverse dependency order
 clankie autostart enable        # start clankie + relay at login (also status, disable)
@@ -224,7 +225,7 @@ credential holder.
   there are captain handoffs, not the Discord conversation.
 - `/status` renders `clankie status`, then adds console presence, conversation,
   workspace, model context, activity availability, and the Herdr pane roster.
-  `/doctor` renders the same install report as `clankie doctor`.
+  `/doctor` renders the full install report from `clankie doctor --json`.
 - `/awake [on|off]` is `clankie awake`: the launcher's keep-awake while plugged in,
   with the Mac's current power state ([always on](../../docs/always-on.md)).
 - `/herdr` offers **Use an existing Herdr session** or **Create a session for

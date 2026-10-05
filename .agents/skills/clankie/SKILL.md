@@ -21,9 +21,9 @@ an owner instruction.
 
 On a host with the owner-authorized CLI, these bounded reads explain a gap:
 
-- `clankie doctor`: distinguish installed, enabled, version, bridge, hooks,
+- `clankie doctor --json`: distinguish installed, enabled, version, bridge, hooks,
   skill presence and live membership. `liveReceiver: not-observed` is not a
-  working reply channel. `doctor --machine NAME` inspects one remote machine.
+  working reply channel. `doctor --machine NAME --json` inspects one remote machine.
 - `clankie connections`: identify the intended machine/session and connected
   account. A healthy SSH link is transport health, not a native tool-call result.
 - `clankie fleet status`: inspect `fleet.tools` (`connected` or `off`) and

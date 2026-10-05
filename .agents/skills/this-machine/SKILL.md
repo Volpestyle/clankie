@@ -8,7 +8,7 @@ description: >-
 
 # This machine
 
-You are a running Clankie, not a git checkout. Run `clankie doctor` and believe
+You are a running Clankie, not a git checkout. Run `clankie doctor --json` and believe
 that JSON. Do not invent `~/dev/clankie`, do not `pnpm` against a guessed tree,
 and do not treat the conversation workspace as your body.
 
@@ -107,11 +107,11 @@ index). Configure through the headless CLI:
 
 | Job                                   | Command                                                                                                |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| This install                          | `clankie doctor` (JSON; exit 0; `ok` means the card was produced)                                      |
-| Can he take a turn                    | `clankie doctor` → `captain` (`ready`, or `no_model` / `no_credential`)                                |
+| This install                          | `clankie doctor --json` (JSON; exit 0; `ok` means the card was produced)                               |
+| Can he take a turn                    | `clankie doctor --json` → `captain` (`ready`, or `no_model` / `no_credential`)                         |
 | Start at login                        | `clankie autostart status`, `clankie autostart enable`                                                 |
 | Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                                  |
-| Bundled skill classes and selection   | `clankie skills`; also `clankie doctor` → `skills`                                                     |
+| Bundled skill classes and selection   | `clankie skills`; also `clankie doctor --json` → `skills`                                              |
 | Turn opinionated guidance off/on      | `clankie skills opinionated off` / `on`                                                                |
 | Exclude/restore an opinionated skill  | `clankie skills exclude NAME` / `include NAME`                                                         |
 | Service model + local providers       | `clankie model status`                                                                                 |

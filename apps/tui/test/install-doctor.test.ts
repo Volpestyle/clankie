@@ -6,6 +6,8 @@ import { SETTINGS_SCHEMA_VERSION, SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectInstall, inspectInstallKind, type ExecFileImpl } from "../src/install-doctor.ts";
 
+import { formatDoctorSummary } from "../src/command/doctor.ts";
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -221,6 +223,7 @@ describe("install doctor", () => {
         empty,
       );
       expect(report.selectedModel?.endpoint).toMatchObject({ reachable: false });
+      expect(formatDoctorSummary(report)).toContain("selected model ds4/DeepSeek-V4-Flash is unavailable");
       expect(report.remediations).toContain(
         "Start the runtime behind http://127.0.0.1:8000/v1; every captain turn on ds4/DeepSeek-V4-Flash fails until it answers.",
       );
@@ -237,6 +240,7 @@ describe("install doctor", () => {
         empty,
       );
       expect(report.selectedModel?.endpoint).toMatchObject({ reachable: true, authRequired: true });
+      expect(formatDoctorSummary(report)).toContain("/auth ds4");
       expect(report.remediations).toContain(
         "http://127.0.0.1:8000/v1 requires a key and none is stored for ds4; add it with `/auth ds4`.",
       );
@@ -262,10 +266,12 @@ describe("install doctor", () => {
       const healthy = await doctorWith(
         localProvider,
         "ds4/DeepSeek-V4-Flash",
-        () => Promise.resolve(new Response("{}", { status: 401 })),
+        () =>
+          Promise.resolve(new Response(JSON.stringify({ doorway: { state: "disabled" } }), { status: 401 })),
         store,
       );
       expect(healthy.remediations).toEqual([]);
+      expect(formatDoctorSummary(healthy)).toBe("ready");
 
       const probed: string[] = [];
       const builtin = await doctorWith(
