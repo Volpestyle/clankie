@@ -52,13 +52,13 @@ const roomHandoff = (id: string, source: "voice" | "text", completed = false) =>
       request: source === "voice" ? "Check the bakery hours" : "Find the train times",
       doing: "Reading the source",
       state: completed ? "completed" : "running",
-      host: "codex",
-      nativeChildSessionId: `native-${id}`,
+      host: source === "voice" ? "codex" : "pi",
+      ...(source === "voice" ? { nativeChildSessionId: `native-${id}` } : {}),
       ...(completed ? { result: "The last train leaves at 10." } : {}),
     },
   });
 
-it("keeps independent voice and text handoffs visible and opens their exact child conversations", async () => {
+it("prioritizes active handoffs in the dock and keeps finished results selectable in the picker", async () => {
   const handoffs = [roomHandoff("voice-child", "voice"), roomHandoff("text-child", "text", true)];
   const open = vi.fn(async (_conversation: ReturnType<typeof roomHandoff>) => {});
   const openSeat = vi.fn(async () => {});
@@ -77,21 +77,30 @@ it("keeps independent voice and text handoffs visible and opens their exact chil
   const rows = plain(shell.tui.render(180));
   expect(rows).toContain("↳ Clankie · Check the bakery hours");
   expect(rows).toContain("Asked by James · running");
-  expect(rows).toContain("Asked by Mira · completed");
-  expect(rows).toContain("The last train leaves at 10.");
+  expect(rows).not.toContain("Asked by Mira · completed");
+  expect(rows).not.toContain("The last train leaves at 10.");
   const ui = shell as unknown as { routeInput(data: string): unknown };
-  ui.routeInput("\x1b[B");
-  ui.routeInput("\x1b[B");
-  ui.routeInput("\r");
+  const showPicker = vi.spyOn(shell, "showModalOverlay");
+  ui.routeInput("\x07");
+  expect(showPicker).toHaveBeenCalledOnce();
+  const roomPicker = showPicker.mock.calls[0]![0];
+  expect(plain(roomPicker.render(180))).toContain("Asked by Mira · completed");
+  roomPicker.handleInput?.("\x1b[B");
+  roomPicker.handleInput?.("\r");
   await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
   expect(open.mock.calls[0]?.[0]).toBe(handoffs[1]);
   expect(openSeat).not.toHaveBeenCalled();
 
-  const strip = new LiveAgentStrip(() => [], theme, { roomHandoffs: () => handoffs });
+  const seats = [agent("working")];
+  const strip = new LiveAgentStrip(() => seats, theme, { roomHandoffs: () => handoffs });
+  expect(plain(strip.render(180))).toContain("Worker working");
+  expect(plain(strip.render(180))).not.toContain("completed");
   strip.select("handoff:text-child");
-  const picker = new LiveAgentPicker(() => [], strip, theme, {
+  const pickerOpen = vi.fn();
+  const picker = new LiveAgentPicker(() => seats, strip, theme, {
     maxHeight: () => 35,
     onOpen: () => {},
+    onOpenHandoff: pickerOpen,
     onClose: () => {},
     onRender: () => {},
   });
@@ -100,6 +109,8 @@ it("keeps independent voice and text handoffs visible and opens their exact chil
   expect(details).toContain("Job: Find the train times");
   expect(details).toContain("Doing: Reading the source");
   expect(details).toContain("Result: The last train leaves at 10.");
+  picker.handleInput("\r");
+  expect(pickerOpen).toHaveBeenCalledExactlyOnceWith(handoffs[1]);
   for (const width of [24, 40, 100]) {
     expect(strip.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);
     expect(picker.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);

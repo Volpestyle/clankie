@@ -64,7 +64,6 @@ export interface CreateDiscordTurnsContext {
   readonly conversations: ConversationStore;
   readonly settings: () => Promise<ClankieSettings>;
   readonly deps: CaptainDeps;
-  readonly headSeat: import("./herdr-census.ts").ObservedHeadSeat | undefined;
   readonly seatOutbox: (conversationId: string) => SeatOutbox;
   readonly shutdown: AbortController;
   readonly roomConversations: RoomConversations;
@@ -341,6 +340,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     systemTools: boolean,
     guard?: () => Promise<void>,
     nativeEventKind: "escalation" | "message" = "escalation",
+    preferPi = false,
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = ctx.conversations.roomConversation(normalized.lane, normalized.targetId);
     return ctx.conversations.runWithConversationDriver<CaptainChannelTurnResult>(
@@ -348,13 +348,9 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       () => {
         const outbox = ctx.seatOutbox(conversationId);
         if (normalized.handoffConversationId !== undefined) {
-          // Pi is selected before admission for ambient Codex. Any selected native
-          // execution happens through the dedicated child callback, never this inbox.
-          if (
-            !systemTools &&
-            (ctx.conversations.nativeSource(conversationId)?.agent ?? ctx.headSeat?.harness) === "codex"
-          )
-            return undefined;
+          // Host-selected Pi room work bypasses the operator inbox without changing
+          // its existing social or machine grant. Native admission uses the child path.
+          if (preferPi) return undefined;
           if (!outbox.bound() && !outbox.uncertain()) return undefined;
           return {
             run: async () => ({

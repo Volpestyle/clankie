@@ -87,7 +87,7 @@ it.each(["claude", "codex"] as const)(
     if (harness === "codex")
       await settings.update((current) => ({
         ...current,
-        discord: { ...current.discord, systemActorUserIds: ["11111", "22222"] },
+        discord: { ...current.discord, ownerUserId: "11111", systemActorUserIds: ["11111"] },
       }));
     const native: HerdrAgentSnapshot = {
       paneId: "w1:p1",
@@ -344,7 +344,7 @@ it.each(["claude", "codex"] as const)(
       if (harness === "claude") expect(roomBank.tools.some((tool) => tool.name === "bash")).toBe(false);
 
       // A native parent releases its turn after background spawning, so another
-      // speaker can receive a new native child while the first is still working.
+      // request can receive a new native child while the first is still working.
       const waiting = await service.app.request(
         `/v1/seat/transcript?conversationId=${parentConversationId}`,
         {
@@ -362,15 +362,15 @@ it.each(["claude", "codex"] as const)(
         trigger: {
           ...request.trigger,
           id: "room-message-2",
-          actorId: "22222",
-          body: "A second speaker's independent request",
+          actorId: harness === "codex" ? "11111" : "22222",
+          body: "A second independent room request",
         },
       };
       secondRun = captain.submitDiscordTurn(secondRequest);
       const [secondEvent] = await secondPoll;
       expect(secondEvent?.source).toBe("room-task");
       expect(firstSettled).toBe(false);
-      if (secondEvent === undefined) throw new Error("Second speaker did not receive a native child");
+      if (secondEvent === undefined) throw new Error("Second request did not receive a native child");
       expect(await captain.acknowledgeSeatEvent(secondEvent.id, parentConversationId)).toBe(true);
       expect(secondEvent.content).not.toContain(secondRequest.trigger.body);
       const secondPayload = JSON.parse(
@@ -427,7 +427,7 @@ it.each(["claude", "codex"] as const)(
       expect(secondChild.roomHandoff).toMatchObject({
         host: harness,
         nativeChildSessionId: secondChildId,
-        actorId: "22222",
+        actorId: secondRequest.trigger.actorId,
         state: "completed",
         result: "Second native room answer",
       });

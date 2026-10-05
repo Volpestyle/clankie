@@ -1080,7 +1080,7 @@ export class ClankieFaceShell {
       if (this.agentNavigationBusy) return { consume: true };
       const agentList = this.routeAgentListInput(data);
       if (agentList !== undefined) return agentList;
-      if (matchesKey(data, Key.ctrl("g")) && this.liveAgents.selected()) {
+      if (matchesKey(data, Key.ctrl("g")) && this.liveAgents.selectedItem()) {
         this.openLiveAgents();
         return { consume: true };
       }

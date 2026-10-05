@@ -16,6 +16,7 @@ import {
   type OperatorDeliveredFile,
   type OperatorGoal,
   type RoomHandoffMetadata,
+  type CaptainChannelTurnResult,
 } from "@clankie/protocol";
 import { z } from "zod";
 import { type StoredOwnerAttachment } from "../../delivered-files.ts";
@@ -138,6 +139,7 @@ export interface ConversationMeta {
   readonly parentConversationId?: string;
   roomHandoff?: RoomHandoffMetadata;
   roomHandoffFingerprint?: string;
+  roomHandoffResult?: CaptainChannelTurnResult;
   /** Exclusive replay boundary immediately before the oldest retained event. */
   retainedFromCursor?: string;
   /** Newest external event already carried by a Linear hook turn. */

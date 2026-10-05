@@ -113,12 +113,14 @@ response receipts even when Vox logged a successful start and drain.
 ### Chaotic group calls
 
 Voice ingress keeps each ask in its own visible handoff. Clankie's service admits
-up to four room handoffs concurrently, so different speakers' work can progress
+up to four room handoffs concurrently, at most two per room, with at most 32
+waiting jobs. Excess asks get a busy result. Different speakers' work can progress
 in parallel. The realtime conversation and local voice tools keep running while
 work waits. Tool results retain their recipient, and the mouth gives that person
 the gist, expanding when warranted. Speech responses serialize through provider
 completion and, for external voices, TTS drain. The executor follows the live
-head; ambient work under a Codex head uses Pi with the original room authority.
+head; every non-owner under a Codex head uses Pi with their original room grant.
+Only the verified owner can use native Codex children.
 See [ADR 0229](../../docs/adr/0229-room-handoffs-are-visible-parallel-threads.md).
 
 A realtime server error can abandon the current local response attempt as failed,

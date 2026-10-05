@@ -21,7 +21,12 @@ transcript. The existing room conversation remains the authority and reply
 destination; the child is an execution record, not a new grant or an ephemeral
 `/btw` fork.
 
-A shared admission queue bounds concurrent work to four handoffs. Separate
+A shared admission queue bounds concurrent work to four handoffs globally and
+two per room, with at most 32 waiting jobs. Excess requests get a clear busy
+result instead of an unbounded pending record. Live admitted jobs retain their
+records; inactive and abandoned records follow bounded conversation retention.
+Completed delivery retries return the saved result, including after restart.
+Separate
 handoffs use separate execution sessions and captures; another speaker cannot
 steer an active request. Exact delivery IDs keep existing receipt semantics.
 Different requests with identical wording remain different handoffs. An explicit
@@ -38,8 +43,8 @@ Execution follows the live head:
 | ----------- | ----------------- | --------------------------------------------------------- |
 | Service Pi  | Social or machine | Separate Pi room thread                                   |
 | Claude Code | Social or machine | Native Claude child with only the scoped room proxy tools |
-| Codex       | Machine           | Native Codex child                                        |
-| Codex       | Social            | Separate Pi thread under the original room lane           |
+| Codex       | Verified owner    | Native Codex child                                        |
+| Codex       | Any non-owner     | Separate Pi thread under the original room lane and grant |
 
 Native requests use the existing parent seat channel. Clankie starts a real native
 subagent; the service verifies its parent, exact task marker and, for Claude,
@@ -63,9 +68,9 @@ flowchart TD
   Input[Attributed voice or text handoff] --> Record[Visible child record and existing delivery receipt]
   Record --> Queue[Bounded parallel admission]
   Queue --> Authority[Refresh original room authority]
-  Authority --> Pi[Pi child: service head or ambient Codex]
+  Authority --> Pi[Pi child: service head or non-owner under Codex]
   Authority --> Claude[Restricted native Claude child]
-  Authority --> Codex[Native Codex child: machine grant only]
+  Authority --> Codex[Native Codex child: verified owner only]
   Pi --> Result[Original room result and child transcript]
   Claude --> Result
   Codex --> Result
@@ -84,11 +89,14 @@ Sources: [role application](https://github.com/openai/codex/blob/rust-v0.160.0/c
 [tool registration](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/tools/spec_plan.rs),
 [internal tool policy](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/ext/extension-api/src/tool_policy.rs).
 
-James selected Pi execution for ambient Codex handoffs instead of granting
-operator authority or refusing the work. Metadata shows the actual Pi executor.
+James selected Pi execution for every non-owner Codex handoff instead of
+granting operator authority or refusing the work. Individual, guild and channel
+machine grants authorize the room tool set; none conveys the operator seat's
+full MCP, shell and file-edit authority. Only the verified owner can use native
+Codex children. Metadata shows the actual executor.
 The upstream ask is a public, enforced per-child tool and MCP ceiling, applied
 at both catalog construction and dispatch, without changing the parent seat's
-permissions. Full native ambient Codex execution depends on that capability;
+permissions. Full native non-owner Codex execution depends on that capability;
 hooks that can fail open do not establish this boundary.
 
 ## Verification

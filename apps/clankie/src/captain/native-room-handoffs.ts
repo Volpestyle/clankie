@@ -42,7 +42,8 @@ export interface NativeRoomHandoffInput {
   readonly brief: string;
   readonly conversationId: string;
   readonly owner: ConversationOwner;
-  readonly routeMode: "social" | "machine";
+  /** Owner means the original actor has current, host-verified owner identity. */
+  readonly routeMode: "owner" | "machine" | "social";
   readonly signal: AbortSignal;
   /** The original actor, destination, and room grant are checked before each effect. */
   readonly guard: () => Promise<void>;
@@ -60,7 +61,7 @@ export interface NativeRoomHandoffResult {
   readonly nativeChildSessionId?: string;
 }
 
-/** Undefined is permitted only before native admission, including ambient Codex. */
+/** Undefined is permitted only before native admission, including non-owner Codex. */
 export type NativeRoomHandoffExecutor = (
   input: NativeRoomHandoffInput,
 ) => Promise<NativeRoomHandoffResult | undefined>;
@@ -121,8 +122,7 @@ export class NativeRoomHandoffs {
       throw new Error("Native task owner does not match the original room.");
     await input.guard();
     const parent = await this.options.selectParent(input);
-    if (parent === undefined || (parent.harness === "codex" && input.routeMode !== "machine"))
-      return undefined;
+    if (parent === undefined || (parent.harness === "codex" && input.routeMode !== "owner")) return undefined;
     await parent.assertCurrent();
     await input.guard();
     const id = randomUUID();
@@ -353,7 +353,7 @@ export class NativeRoomHandoffs {
     const instruction =
       task.parent.harness === "claude"
         ? `Use your native Agent tool with subagent_type exactly ${CLAUDE_ROOM_AGENT_TYPE}, run_in_background true, and the task payload as its prompt. Do not execute the room request in this parent. The restricted agent has only room_task_tools, room_task_call, and room_task_complete.`
-        : "Use your native spawn_agent tool for a fresh child with the task payload as its message. This room already has a machine grant; the child inherits this native seat's machine tools. Do not execute the room request in this parent.";
+        : "Use your native spawn_agent tool for a fresh child with the task payload as its message. The original actor is the verified owner; the child inherits this native seat's operator tools. Do not execute the room request in this parent.";
     return `<clankie-native-room-task>\n${instruction}\nAfter spawning, return and release this parent turn immediately. Do not wait for the child or fetch its output; the service receives completion independently. Native admission is not completion. Spawn once; metadata-only retries must never spawn another child. The child reads its original request through room_task_tools, acts through room_task_call, and finishes through room_task_complete. Never use reply for this task.\n${JSON.stringify({ taskId: task.id, capability: task.capability, marker: task.marker, handoffId: task.input.handoffId })}\n</clankie-native-room-task>`;
   }
 }

@@ -95,6 +95,7 @@ import {
 import { ConversationServiceRun, waitForConversationRun } from "./conversation-run.ts";
 import {
   ConversationStore,
+  roomHandoffConversationId,
   type ConversationRunner,
   type ConversationTurnContext,
   type OwnerAttachmentHost,
@@ -214,9 +215,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
       get seatOutbox() {
         return seatOutbox;
-      },
-      get headSeat() {
-        return headSeat;
       },
       get shutdown() {
         return shutdown;
@@ -2494,6 +2492,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const fingerprint = deliveryFingerprint(
         JSON.stringify({ request, verifiedOwner: authority?.verifiedOwner === true }),
       );
+      const prior = conversations.findRoomHandoff(parentId, request.deliveryId, fingerprint);
+      if (prior?.result !== undefined) return prior.result;
       const readAuthoritySettings = async () => {
         if (authority?.sourceCurrent?.() === false) throw new Error("room_handoff_source_expired");
         const { settings: discord } = resolveDiscordSettings(
@@ -2525,298 +2525,350 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       });
       void admission.catch(() => undefined);
-      const child = conversations.beginRoomHandoff(
-        {
-          roomConversationId: parentId,
-          deliveryId: request.deliveryId,
-          actorId: request.trigger.actorId,
-          source: lane === "discord_voice" ? "voice" : "text",
-          request: (request.trigger.body?.trim() || "(sent attachments)").slice(0, 16_384),
-          state: "pending",
-          host: "pi",
-        },
-        fingerprint,
-      );
+      let admittedChild: OperatorConversation | undefined;
       return roomHandoffs
-        .submit(child.conversationId, fingerprint, async () => {
-          if (child.roomHandoff?.state !== "pending")
-            return {
-              state: "failed",
-              code: "room_handoff_already_recorded",
-              turnId: child.conversationId,
-            };
-          try {
-            const result = await (async (): Promise<CaptainChannelTurnResult> => {
-              const { settings: discord } = resolveDiscordSettings(
-                (await settings()).discord,
-                options.discordEnvironment,
-              );
-              const admitted = await admission;
-              const currentPlan = planDiscordTurnSession({
-                baseSessionKey: discordTurnSessionKey(request),
-                durable: true,
-                actorId: request.trigger.actorId,
-                ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
-                channelId: request.trigger.channelId,
-                transportKind: request.identity.transportKind,
-                settings:
-                  authority?.verifiedOwner === true
-                    ? {
-                        ...discord,
-                        systemActorUserIds: [...discord.systemActorUserIds, request.trigger.actorId],
-                      }
-                    : discord,
-              });
-              const plan =
-                admitted.plan.systemTools && currentPlan.systemTools
-                  ? currentPlan
-                  : {
-                      kind: "social" as const,
-                      durable: false,
-                      systemTools: false as const,
-                      sessionKey: admitted.plan.sessionKey,
-                    };
-              const owner =
-                admitted.owner &&
-                (authority?.verifiedOwner === true || discord.ownerUserId === request.trigger.actorId);
-              const sender = owner
-                ? ("owner" as const)
-                : plan.systemTools &&
-                    admitted.grantedActor &&
-                    discord.systemActorUserIds.includes(request.trigger.actorId)
-                  ? ("granted" as const)
-                  : undefined;
-              const heard = await normalizeDiscordTurn(request, deps, {
-                ...(sender === undefined ? {} : { sender }),
-                carriesHistory: false,
-                roomHistory: conversations.roomHandoffContext(parentId, request.deliveryId),
-              });
-              const normalized: NormalizedDiscordTurn = {
-                ...heard,
-                sessionKey: `${plan.sessionKey}:handoff:${child.conversationId}`,
-                durable: false,
-                handoffConversationId: child.conversationId,
-                readAuthoritySettings,
-              };
-              if (request.room !== undefined) {
-                const room = request.room;
-                const title =
-                  normalized.guildId === undefined
-                    ? `Discord DM · ${room.peerName ?? room.channelName ?? normalized.channelId}`
-                    : `Discord ${normalized.lane === "discord_voice" ? "voice" : "text"} · ${room.guildName ?? normalized.guildId} / ${normalized.lane === "discord_presence" ? "#" : ""}${room.channelName ?? normalized.channelId}`;
-                conversations.nameRoomConversation(
-                  conversations.roomConversation(normalized.lane, normalized.targetId),
-                  title.slice(0, 200),
-                );
-              }
-              const toolProgressEnabled =
-                normalized.lane === "discord_presence" &&
-                request.trigger.unprompted !== true &&
-                normalized.guildId !== undefined &&
-                discord.toolProgressChannelIds.includes(normalized.channelId);
-              const origin: DiscordWatchOrigin = {
-                baseSessionKey: discordTurnSessionKey(request),
+        .submit(
+          parentId,
+          roomHandoffConversationId(parentId, request.deliveryId),
+          fingerprint,
+          () => {
+            admittedChild = conversations.beginRoomHandoff(
+              {
+                roomConversationId: parentId,
                 deliveryId: request.deliveryId,
-                targetId: normalized.targetId,
-                actorId: normalized.actorId,
-                ...(normalized.guildId === undefined ? {} : { guildId: normalized.guildId }),
-                channelId: normalized.channelId,
-                messageId: normalized.messageId,
-                transportKind: request.identity.transportKind,
+                actorId: request.trigger.actorId,
+                source: lane === "discord_voice" ? "voice" : "text",
+                request: (request.trigger.body?.trim() || "(sent attachments)").slice(0, 16_384),
+                state: "pending",
+                host: "pi",
+              },
+              fingerprint,
+              true,
+            );
+          },
+          async () => {
+            const child = admittedChild!;
+            if (child.roomHandoff?.state !== "pending")
+              return {
+                state: "failed",
+                code: "room_handoff_already_recorded",
+                turnId: child.conversationId,
               };
-              const finish =
-                request.trigger.unprompted === true ? undefined : deps.onWorkStarted?.("captain-turn");
-              try {
-                conversations.updateRoomHandoff(child.conversationId, {
-                  state: "running",
-                  doing: "Working on the request",
-                });
-                await refreshFleet();
-                const nativeCapture: TurnContext = { shell: plan.systemTools };
-                const nativeIdentity = captureDiscordBodyIdentity(
-                  nativeCapture,
-                  parentId,
-                  origin,
-                  readAuthoritySettings,
-                  shutdown.signal,
+            try {
+              const result = await (async (): Promise<CaptainChannelTurnResult> => {
+                const { settings: discord } = resolveDiscordSettings(
+                  (await settings()).discord,
+                  options.discordEnvironment,
                 );
-                nativeCapture.bodyIdentity = nativeIdentity;
-                nativeCapture.conversationAuthority = {
-                  owner: { conversationId: parentId, discord: { ...origin } },
-                  current: nativeIdentity.current,
-                  authorize: () => nativeIdentity.authorize("discord_mouth", "effect"),
-                };
-                nativeCapture.room = roomKey(normalized.lane, normalized.targetId);
-                nativeCapture.targetId = normalized.targetId;
-                nativeCapture.actorId = normalized.actorId;
-                nativeCapture.guildId = normalized.guildId;
-                nativeCapture.channelId = normalized.channelId;
-                nativeCapture.messageId = normalized.messageId;
-                nativeCapture.requestText = normalized.heard;
-                nativeCapture.discordOrigin = normalized.lane === "discord_presence" ? origin : undefined;
-                const guard = async () => {
-                  shutdown.signal.throwIfAborted();
-                  if (authority?.sourceCurrent?.() === false) throw new Error("room_handoff_source_expired");
-                  if (
-                    !(await nativeIdentity.authorize("discord_mouth", "effect")) ||
-                    !(await validateConversationOwner(
-                      { conversationId: parentId, discord: origin },
-                      plan.systemTools ? "machine" : "social",
-                      {
-                        readSettings: readAuthoritySettings,
-                        ...(authority?.sourceCurrent === undefined
-                          ? {}
-                          : { sourceCurrent: authority.sourceCurrent }),
-                      },
-                    ))
-                  )
-                    throw new Error("room_handoff_authority_revoked");
-                  if (authority?.sourceCurrent?.() === false) throw new Error("room_handoff_source_expired");
-                };
-                await guard();
-                const native = await (options.runNativeRoomHandoff ?? nativeRoomHandoffs.execute)({
-                  handoffId: child.conversationId,
-                  brief: normalized.prompt,
-                  conversationId: parentId,
-                  owner: { conversationId: parentId, discord: { ...origin } },
-                  routeMode: plan.systemTools ? "machine" : "social",
-                  signal: shutdown.signal,
-                  guard,
-                  roomToolBank: async () => {
-                    await guard();
-                    const currentSettings = await settings();
-                    const bank = await buildLaneToolBank(
-                      desktopDeps,
-                      nativeCapture,
-                      laneLog,
-                      normalized.lane,
-                      currentSettings.gameplay,
-                      autonomy,
-                      herdrWatches,
-                      hireSeat,
-                      messageSeat,
-                    );
-                    await guard();
-                    return bank;
-                  },
-                  onTranscript: (transcript) =>
-                    conversations.syncRoomTranscript(child.conversationId, transcript),
-                  onStarted: (started) =>
-                    conversations.updateRoomHandoff(child.conversationId, {
-                      host: started.harness,
-                      nativeChildSessionId: started.nativeChildSessionId,
-                      doing: "Working in the native child",
-                    }),
+                const admitted = await admission;
+                const currentPlan = planDiscordTurnSession({
+                  baseSessionKey: discordTurnSessionKey(request),
+                  durable: true,
+                  actorId: request.trigger.actorId,
+                  ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
+                  channelId: request.trigger.channelId,
+                  transportKind: request.identity.transportKind,
+                  settings:
+                    authority?.verifiedOwner === true
+                      ? {
+                          ...discord,
+                          systemActorUserIds: [...discord.systemActorUserIds, request.trigger.actorId],
+                        }
+                      : discord,
                 });
-                if (native !== undefined) {
+                const plan =
+                  admitted.plan.systemTools && currentPlan.systemTools
+                    ? currentPlan
+                    : {
+                        kind: "social" as const,
+                        durable: false,
+                        systemTools: false as const,
+                        sessionKey: admitted.plan.sessionKey,
+                      };
+                const owner =
+                  admitted.owner &&
+                  (authority?.verifiedOwner === true || discord.ownerUserId === request.trigger.actorId);
+                const sender = owner
+                  ? ("owner" as const)
+                  : plan.systemTools &&
+                      admitted.grantedActor &&
+                      discord.systemActorUserIds.includes(request.trigger.actorId)
+                    ? ("granted" as const)
+                    : undefined;
+                const heard = await normalizeDiscordTurn(request, deps, {
+                  ...(sender === undefined ? {} : { sender }),
+                  carriesHistory: false,
+                  roomHistory: conversations.roomHandoffContext(parentId, request.deliveryId),
+                });
+                const normalized: NormalizedDiscordTurn = {
+                  ...heard,
+                  sessionKey: `${plan.sessionKey}:handoff:${child.conversationId}`,
+                  durable: false,
+                  handoffConversationId: child.conversationId,
+                  readAuthoritySettings,
+                };
+                if (request.room !== undefined) {
+                  const room = request.room;
+                  const title =
+                    normalized.guildId === undefined
+                      ? `Discord DM · ${room.peerName ?? room.channelName ?? normalized.channelId}`
+                      : `Discord ${normalized.lane === "discord_voice" ? "voice" : "text"} · ${room.guildName ?? normalized.guildId} / ${normalized.lane === "discord_presence" ? "#" : ""}${room.channelName ?? normalized.channelId}`;
+                  conversations.nameRoomConversation(
+                    conversations.roomConversation(normalized.lane, normalized.targetId),
+                    title.slice(0, 200),
+                  );
+                }
+                const toolProgressEnabled =
+                  normalized.lane === "discord_presence" &&
+                  request.trigger.unprompted !== true &&
+                  normalized.guildId !== undefined &&
+                  discord.toolProgressChannelIds.includes(normalized.channelId);
+                const origin: DiscordWatchOrigin = {
+                  baseSessionKey: discordTurnSessionKey(request),
+                  deliveryId: request.deliveryId,
+                  targetId: normalized.targetId,
+                  actorId: normalized.actorId,
+                  ...(normalized.guildId === undefined ? {} : { guildId: normalized.guildId }),
+                  channelId: normalized.channelId,
+                  messageId: normalized.messageId,
+                  transportKind: request.identity.transportKind,
+                };
+                const finish =
+                  request.trigger.unprompted === true ? undefined : deps.onWorkStarted?.("captain-turn");
+                try {
+                  conversations.updateRoomHandoff(child.conversationId, {
+                    state: "running",
+                    doing: "Working on the request",
+                  });
+                  await refreshFleet();
+                  const nativeCapture: TurnContext = { shell: plan.systemTools };
+                  const nativeIdentity = captureDiscordBodyIdentity(
+                    nativeCapture,
+                    parentId,
+                    origin,
+                    readAuthoritySettings,
+                    shutdown.signal,
+                  );
+                  nativeCapture.bodyIdentity = nativeIdentity;
+                  nativeCapture.conversationAuthority = {
+                    owner: { conversationId: parentId, discord: { ...origin } },
+                    current: nativeIdentity.current,
+                    authorize: () => nativeIdentity.authorize("discord_mouth", "effect"),
+                  };
+                  nativeCapture.room = roomKey(normalized.lane, normalized.targetId);
+                  nativeCapture.targetId = normalized.targetId;
+                  nativeCapture.actorId = normalized.actorId;
+                  nativeCapture.guildId = normalized.guildId;
+                  nativeCapture.channelId = normalized.channelId;
+                  nativeCapture.messageId = normalized.messageId;
+                  nativeCapture.requestText = normalized.heard;
+                  nativeCapture.discordOrigin = normalized.lane === "discord_presence" ? origin : undefined;
+                  const guard = async () => {
+                    shutdown.signal.throwIfAborted();
+                    if (authority?.sourceCurrent?.() === false)
+                      throw new Error("room_handoff_source_expired");
+                    if (
+                      !(await nativeIdentity.authorize("discord_mouth", "effect")) ||
+                      !(await validateConversationOwner(
+                        { conversationId: parentId, discord: origin },
+                        plan.systemTools ? "machine" : "social",
+                        {
+                          readSettings: readAuthoritySettings,
+                          ...(authority?.sourceCurrent === undefined
+                            ? {}
+                            : { sourceCurrent: authority.sourceCurrent }),
+                        },
+                      ))
+                    )
+                      throw new Error("room_handoff_authority_revoked");
+                    if (authority?.sourceCurrent?.() === false)
+                      throw new Error("room_handoff_source_expired");
+                  };
                   await guard();
-                  if (native.outcome === "waiting_user")
+                  const nativeOwner =
+                    owner &&
+                    (authority?.verifiedOwner === true ||
+                      (await readAuthoritySettings()).ownerUserId === request.trigger.actorId);
+                  const nativeRouteMode = nativeOwner ? "owner" : plan.systemTools ? "machine" : "social";
+                  const nativeGuard = async () => {
+                    await guard();
+                    if (
+                      nativeRouteMode === "owner" &&
+                      authority?.verifiedOwner !== true &&
+                      (await readAuthoritySettings()).ownerUserId !== request.trigger.actorId
+                    )
+                      throw new Error("room_handoff_owner_revoked");
+                    await guard();
+                  };
+                  const native = await (options.runNativeRoomHandoff ?? nativeRoomHandoffs.execute)({
+                    handoffId: child.conversationId,
+                    brief: normalized.prompt,
+                    conversationId: parentId,
+                    owner: { conversationId: parentId, discord: { ...origin } },
+                    routeMode: nativeRouteMode,
+                    signal: shutdown.signal,
+                    guard: nativeGuard,
+                    roomToolBank: async () => {
+                      await nativeGuard();
+                      const currentSettings = await settings();
+                      const bank = await buildLaneToolBank(
+                        desktopDeps,
+                        nativeCapture,
+                        laneLog,
+                        normalized.lane,
+                        currentSettings.gameplay,
+                        autonomy,
+                        herdrWatches,
+                        hireSeat,
+                        messageSeat,
+                      );
+                      await nativeGuard();
+                      return bank;
+                    },
+                    onTranscript: (transcript) =>
+                      conversations.syncRoomTranscript(child.conversationId, transcript),
+                    onStarted: (started) =>
+                      conversations.updateRoomHandoff(child.conversationId, {
+                        host: started.harness,
+                        nativeChildSessionId: started.nativeChildSessionId,
+                        doing: "Working in the native child",
+                      }),
+                  });
+                  if (native !== undefined) {
+                    await nativeGuard();
+                    if (native.outcome === "waiting_user")
+                      return {
+                        state: "waiting_user",
+                        captainSessionId: normalized.sessionKey,
+                        turnId: child.conversationId,
+                        prompt: native.prompt ?? "Continue on the authenticated operator surface.",
+                        approvalRequired: native.approvalRequired === true,
+                      };
+                    if (native.outcome === "completed" && native.text?.trim()) {
+                      const response = native.text.trim().slice(0, 16_384);
+                      conversations.publishRoomEvent(child.conversationId, {
+                        type: "message",
+                        role: "captain",
+                        text: response,
+                        streaming: false,
+                      });
+                      return response === CAPTAIN_SILENT_REPLY_SENTINEL
+                        ? {
+                            state: "silent",
+                            captainSessionId: normalized.sessionKey,
+                            turnId: child.conversationId,
+                          }
+                        : {
+                            state: "settled",
+                            captainSessionId: normalized.sessionKey,
+                            turnId: child.conversationId,
+                            response,
+                          };
+                    }
                     return {
-                      state: "waiting_user",
+                      state: "failed",
                       captainSessionId: normalized.sessionKey,
                       turnId: child.conversationId,
-                      prompt: native.prompt ?? "Continue on the authenticated operator surface.",
-                      approvalRequired: native.approvalRequired === true,
+                      code:
+                        native.outcome === "uncertain"
+                          ? "captain_seat_delivery_uncertain"
+                          : native.outcome === "canceled"
+                            ? "captain_turn_cancelled"
+                            : "native_room_child_unavailable",
                     };
-                  if (native.outcome === "completed" && native.text?.trim()) {
-                    const response = native.text.trim().slice(0, 16_384);
-                    conversations.publishRoomEvent(child.conversationId, {
-                      type: "message",
-                      role: "captain",
-                      text: response,
-                      streaming: false,
-                    });
-                    return response === CAPTAIN_SILENT_REPLY_SENTINEL
-                      ? {
-                          state: "silent",
-                          captainSessionId: normalized.sessionKey,
-                          turnId: child.conversationId,
-                        }
-                      : {
-                          state: "settled",
-                          captainSessionId: normalized.sessionKey,
-                          turnId: child.conversationId,
-                          response,
-                        };
                   }
-                  return {
-                    state: "failed",
-                    captainSessionId: normalized.sessionKey,
-                    turnId: child.conversationId,
-                    code:
-                      native.outcome === "uncertain"
-                        ? "captain_seat_delivery_uncertain"
-                        : native.outcome === "canceled"
-                          ? "captain_turn_cancelled"
-                          : "native_room_child_unavailable",
-                  };
+                  const preferPi =
+                    nativeRouteMode !== "owner" &&
+                    (conversations.nativeSource(parentId)?.agent ?? headSeat?.harness) === "codex";
+                  if (preferPi)
+                    conversations.updateRoomHandoff(child.conversationId, {
+                      host: "pi",
+                      doing: "Working in Pi under the original room grant; native Codex is owner-only",
+                    });
+                  const outcome = await dispatchDiscordTurn(
+                    normalized,
+                    request.deliveryId,
+                    toolProgressEnabled,
+                    origin,
+                    plan.systemTools,
+                    guard,
+                    "escalation",
+                    preferPi,
+                  );
+                  await guard();
+                  return outcome;
+                } finally {
+                  finish?.();
                 }
-                if (
-                  !plan.systemTools &&
-                  (conversations.nativeSource(parentId)?.agent ?? headSeat?.harness) === "codex"
-                )
-                  conversations.updateRoomHandoff(child.conversationId, {
-                    host: "pi",
-                    doing: "Working in Pi; native Codex room isolation is unavailable",
-                  });
-                const outcome = await dispatchDiscordTurn(
-                  normalized,
-                  request.deliveryId,
-                  toolProgressEnabled,
-                  origin,
-                  plan.systemTools,
-                  guard,
-                );
-                await guard();
-                return outcome;
-              } finally {
-                finish?.();
-              }
-            })();
-            conversations.updateRoomHandoff(child.conversationId, {
-              state:
-                result.state === "waiting_user"
-                  ? "waiting_user"
-                  : result.state === "failed"
-                    ? "failed"
-                    : "completed",
-              doing: undefined,
-              result:
-                result.state === "settled"
-                  ? result.response
-                  : result.state === "waiting_user"
-                    ? result.prompt
-                    : result.state === "failed"
-                      ? result.code
-                      : result.state === "silent"
-                        ? "Chose silence."
-                        : "Joined existing work.",
-            });
-            return result;
-          } catch (error) {
-            conversations.updateRoomHandoff(child.conversationId, {
-              state: "failed",
-              doing: undefined,
-              result: error instanceof Error ? error.message.slice(0, 16_384) : "Handoff failed",
-            });
-            return {
-              state: "failed",
-              code: shutdown.signal.aborted ? "captain_turn_cancelled" : "captain_session_failed",
-              turnId: child.conversationId,
-            };
-          }
-        })
+              })();
+              conversations.updateRoomHandoff(
+                child.conversationId,
+                {
+                  state:
+                    result.state === "waiting_user"
+                      ? "waiting_user"
+                      : result.state === "failed"
+                        ? "failed"
+                        : "completed",
+                  doing: undefined,
+                  result:
+                    result.state === "settled"
+                      ? result.response
+                      : result.state === "waiting_user"
+                        ? result.prompt
+                        : result.state === "failed"
+                          ? result.code
+                          : result.state === "silent"
+                            ? "Chose silence."
+                            : "Joined existing work.",
+                },
+                result,
+              );
+              return result;
+            } catch (error) {
+              const result: CaptainChannelTurnResult = {
+                state: "failed",
+                code: shutdown.signal.aborted ? "captain_turn_cancelled" : "captain_session_failed",
+                turnId: child.conversationId,
+              };
+              conversations.updateRoomHandoff(
+                child.conversationId,
+                {
+                  state: "failed",
+                  doing: undefined,
+                  result: error instanceof Error ? error.message.slice(0, 16_384) : "Handoff failed",
+                },
+                result,
+              );
+              return result;
+            }
+          },
+        )
         .catch((error: unknown) => {
-          conversations.updateRoomHandoff(child.conversationId, {
-            state: "failed",
-            doing: undefined,
-            result: error instanceof Error ? error.message.slice(0, 16_384) : "Handoff cancelled",
-          });
-          return {
+          if (error instanceof Error && error.message === "room_handoff_queue_full")
+            return {
+              state: "settled",
+              captainSessionId: discordTurnSessionKey(request),
+              turnId: parentId,
+              response:
+                "My room work queue is full. I can run up to four requests, at most two per room, and hold 32 waiting. Please try again after a request finishes.",
+            };
+          const result: CaptainChannelTurnResult = {
             state: "failed",
             code: shutdown.signal.aborted ? "captain_turn_cancelled" : "captain_session_failed",
-            turnId: child.conversationId,
+            ...(admittedChild === undefined ? {} : { turnId: admittedChild.conversationId }),
           };
+          if (admittedChild !== undefined)
+            conversations.updateRoomHandoff(
+              admittedChild.conversationId,
+              {
+                state: "failed",
+                doing: undefined,
+                result: error instanceof Error ? error.message.slice(0, 16_384) : "Handoff cancelled",
+              },
+              result,
+            );
+          return result;
         });
     },
 

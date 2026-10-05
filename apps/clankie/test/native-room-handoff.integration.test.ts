@@ -101,7 +101,7 @@ describe("native room handoff through the real MCP surface", () => {
               transportKind: "bot",
             },
           },
-          routeMode: harness === "codex" ? "machine" : "social",
+          routeMode: harness === "codex" ? "owner" : "social",
           signal: new AbortController().signal,
           guard: async () => {
             if (!allowed) throw new Error("room grant revoked");
@@ -353,35 +353,38 @@ describe("native room handoff through the real MCP surface", () => {
     },
   );
 
-  it("declines ambient Codex before native delivery so the room can use Pi", async () => {
-    const outbox = new SeatOutbox();
-    const handoffs = new NativeRoomHandoffs({
-      selectParent: async () => ({
-        host: "local",
-        conversationId: "parent",
-        harness: "codex",
-        parentSessionId: randomUUID(),
-        session: { source: "native-test", kind: "path", value: "/unused" },
-        outbox,
-        assertCurrent: async () => {},
-      }),
-    });
-    expect(
-      await handoffs.execute({
-        handoffId: "ambient",
-        brief: "ambient request",
-        conversationId: "room",
-        owner: { conversationId: "room" },
-        routeMode: "social",
-        signal: new AbortController().signal,
-        guard: async () => {},
-        roomToolBank: async () => ({ lane: "discord_presence", tools: [] }),
-        onStarted: () => {
-          throw new Error("No native start is permitted");
-        },
-      }),
-    ).toBeUndefined();
-    expect(await outbox.poll(0)).toEqual([]);
-    outbox.close();
-  });
+  it.each(["social", "machine"] as const)(
+    "declines non-owner Codex %s work before native delivery so the room can use Pi",
+    async (routeMode) => {
+      const outbox = new SeatOutbox();
+      const handoffs = new NativeRoomHandoffs({
+        selectParent: async () => ({
+          host: "local",
+          conversationId: "parent",
+          harness: "codex",
+          parentSessionId: randomUUID(),
+          session: { source: "native-test", kind: "path", value: "/unused" },
+          outbox,
+          assertCurrent: async () => {},
+        }),
+      });
+      expect(
+        await handoffs.execute({
+          handoffId: `non-owner-${routeMode}`,
+          brief: "non-owner request",
+          conversationId: "room",
+          owner: { conversationId: "room" },
+          routeMode,
+          signal: new AbortController().signal,
+          guard: async () => {},
+          roomToolBank: async () => ({ lane: "discord_presence", tools: [] }),
+          onStarted: () => {
+            throw new Error("No native start is permitted");
+          },
+        }),
+      ).toBeUndefined();
+      expect(await outbox.poll(0)).toEqual([]);
+      outbox.close();
+    },
+  );
 });

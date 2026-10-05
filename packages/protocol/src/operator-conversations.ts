@@ -910,7 +910,6 @@ export const RoomHandoffMetadataSchema = z
   .strict();
 export type RoomHandoffMetadata = z.infer<typeof RoomHandoffMetadataSchema>;
 
-
 export const OperatorFleetSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -933,7 +932,10 @@ export const OperatorFleetSnapshotSchema = z
     personas: z.array(OperatorAgentPersonaSchema).max(OPERATOR_AGENT_PERSONA_LIST_MAX),
     channels: z.array(OperatorChannelSchema).max(OPERATOR_CONVERSATION_LIST_MAX),
     /** Clankie’s room handoffs are conversations, not invented fleet seats. */
-    roomHandoffs: z.array(z.lazy(() => OperatorConversationSchema)).max(OPERATOR_CONVERSATION_LIST_MAX).optional(),
+    roomHandoffs: z
+      .array(z.lazy(() => OperatorConversationSchema))
+      .max(OPERATOR_CONVERSATION_LIST_MAX)
+      .optional(),
     /**
      * Today's counts for the seats that have any (ADR 0162). Optional so a
      * surface written before the ledger keeps reading snapshots unchanged.

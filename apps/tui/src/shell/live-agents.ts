@@ -154,9 +154,11 @@ function dockItems(
       },
     ];
   });
-  // Retain every independent room job under Clankie; a native child is never a fake seat.
+  const active = roomItems.filter((item) => item.status !== "completed" && item.status !== "failed");
+  const finished = roomItems.filter((item) => item.status === "completed" || item.status === "failed");
+  // Active room jobs precede seats; settled jobs remain in the full picker.
   return [
-    ...roomItems,
+    ...active,
     ...attentionOrder(agents, theme).map((agent) => ({
       id: agent.seat.seatId,
       name: clean(agent.name),
@@ -165,6 +167,7 @@ function dockItems(
       ...(currentStep(agent) ? { step: currentStep(agent)! } : {}),
       agent,
     })),
+    ...finished,
   ];
 }
 
@@ -207,8 +210,13 @@ export class LiveAgentStrip implements Component {
     return this.readHandoffs();
   }
 
-  private ordered(): DockItem[] {
-    return dockItems(this.agents(), this.handoffs(), this.theme);
+  private ordered(includeFinished = true): DockItem[] {
+    return dockItems(this.agents(), this.handoffs(), this.theme).filter(
+      (item) =>
+        includeFinished ||
+        item.handoff === undefined ||
+        (item.status !== "completed" && item.status !== "failed"),
+    );
   }
 
   selected(): LiveAgent | undefined {
@@ -219,8 +227,8 @@ export class LiveAgentStrip implements Component {
     return this.selectedItem()?.handoff;
   }
 
-  selectedItem(): DockItem | undefined {
-    const agents = this.ordered();
+  selectedItem(includeFinished = true): DockItem | undefined {
+    const agents = this.ordered(includeFinished);
     const selected = agents.find((agent) => agent.id === this.selectedId) ?? agents[0];
     this.selectedId = selected?.id;
     return selected;
@@ -236,7 +244,7 @@ export class LiveAgentStrip implements Component {
 
   /** Expand onto the most urgent seat; false when there is nothing to browse. */
   focus(): boolean {
-    const first = this.ordered()[0];
+    const first = this.ordered(false)[0];
     if (first === undefined) return false;
     this.selectedId = first.id;
     this.expanded = true;
@@ -249,8 +257,8 @@ export class LiveAgentStrip implements Component {
 
   /** Keys while expanded. Anything that is not navigation collapses and goes back to the prompt. */
   handleInput(data: string): LiveAgentStripInput {
-    const agents = this.ordered();
-    const index = agents.findIndex((agent) => agent.id === this.selectedItem()?.id);
+    const agents = this.ordered(false);
+    const index = agents.findIndex((agent) => agent.id === this.selectedItem(false)?.id);
     if (matchesKey(data, Key.up)) {
       if (index <= 0) {
         this.blur();
@@ -278,7 +286,7 @@ export class LiveAgentStrip implements Component {
   }
 
   render(width: number): string[] {
-    const agents = this.ordered();
+    const agents = this.ordered(false);
     const reports = this.reports();
     const reportRows = [...new Set(reports.map((report) => report.paneId))].slice(0, 3).map((pane) => {
       const pending = reports.some((report) => report.paneId === pane && report.state !== "delivered");
@@ -312,7 +320,7 @@ export class LiveAgentStrip implements Component {
         ...reportNotice,
       ].map(fit);
     }
-    const selected = this.selectedItem();
+    const selected = this.selectedItem(false);
     const index = Math.max(
       0,
       agents.findIndex((agent) => agent.id === selected?.id),

@@ -301,11 +301,12 @@ through the existing Discord transport. See
 
 Every admitted room handoff has a separate durable child conversation, visible
 under Clankie in the TUI dock and app with who asked, current work and result.
-A shared four-slot queue admits separate voice and text requests in parallel.
+A shared queue admits four voice and text requests globally, at most two per
+room, and holds at most 32 waiting jobs; excess requests receive a busy result.
 The canonical room retains authority and the reply destination. A service head
 runs separate Pi threads; a Claude head starts restricted native children; a
-Codex head starts native children for machine-authorized work and uses Pi under
-the original room lane for ambient work. Actual native ancestry establishes
+Codex head starts native children only for the verified owner and uses Pi under
+the original room lane and grant for every other speaker. Actual native ancestry establishes
 child references, and taken or uncertain native requests are never replayed as
 Pi work. See [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md).
 

@@ -1,5 +1,6 @@
 import { createServer, type ServerResponse } from "node:http";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
@@ -14,17 +15,23 @@ import { createCaptain } from "../src/captain/captain.ts";
 import { createFileMemory } from "../src/memory.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { ConversationOwner } from "../src/captain/conversation-owner.ts";
+import { readHerdrSeatTranscript } from "@clankie/agent-transcript";
+import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
+import { ConversationStore, OPERATOR_CONVERSATION_RETAINED_MAX } from "../src/captain/conversations.ts";
 
 // Select the loopback provider; Pi, its tools/extensions, sessions and journals remain real.
 const selection = vi.hoisted(() => ({ value: undefined as unknown }));
 vi.mock("../src/captain/model.ts", () => ({ createCaptainModelRuntime: async () => selection.value }));
 
-function request(index: number): DiscordPresenceChannelTurnRequest {
+function request(
+  index: number,
+  channelId = index === 5 ? "99999" : index === 2 || index === 3 ? "77777" : "67890",
+): DiscordPresenceChannelTurnRequest {
   return {
     schemaVersion: 1,
     deliveryId: `delivery-${index}`,
     identity: {
-      presenceSessionId: `body:${index === 5 ? "room-b" : "room-a"}`,
+      presenceSessionId: `body:${channelId}`,
       correlationId: `correlation-${index}`,
       characterId: "clankie",
       credentialRef: "discord_bot",
@@ -35,7 +42,7 @@ function request(index: number): DiscordPresenceChannelTurnRequest {
       kind: index === 5 ? "voice_event" : "message",
       id: `message-${index}`,
       guildId: "12345",
-      channelId: index === 5 ? "99999" : "67890",
+      channelId,
       actorId: `1000${index}`,
       body: "same request from a different delivery",
       attachments: [],
@@ -44,7 +51,7 @@ function request(index: number): DiscordPresenceChannelTurnRequest {
   };
 }
 
-it("real Pi room children execute four at once, queue FIFO, retain source authority and survive restart", async () => {
+it("real Pi room children bound admission fairly, keep grants under a bound Codex head, and replay typed results after restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-room-handoffs-"));
   const calls: {
     body: { messages: { role: string; content: unknown }[]; tools?: { function: { name: string } }[] };
@@ -68,7 +75,7 @@ it("real Pi room children execute four at once, queue FIFO, retain source author
       body,
       response,
       actor:
-        [...JSON.stringify(body.messages).matchAll(/Trigger message from <(1000[0-9])>/gu)].at(-1)?.[1] ??
+        [...JSON.stringify(body.messages).matchAll(/Trigger message from <(1000[0-9]+)>/gu)].at(-1)?.[1] ??
         "unknown",
       finish: () => {
         if (response.writableEnded) return;
@@ -141,8 +148,62 @@ it("real Pi room children execute four at once, queue FIFO, retain source author
   const memory = createFileMemory({ dataDir: join(root, "memory") });
   const owners: ConversationOwner[] = [];
   let routeCurrent = true;
+  const nativeParentId = randomUUID();
+  const nativeParentPath = join(root, "native", `rollout-2026-10-05T12-00-00-${nativeParentId}.jsonl`);
+  await mkdir(join(root, "native"), { recursive: true });
+  await writeFile(
+    nativeParentPath,
+    `${JSON.stringify({ type: "session_meta", payload: { id: nativeParentId, source: "cli" } })}\n`,
+  );
+  let codexVisible = false;
+  const native: HerdrAgentSnapshot = {
+    paneId: "w1:p1",
+    terminalId: "term-native-head",
+    name: "clankie",
+    agent: "codex",
+    status: "idle",
+    title: "Clankie",
+    workingDirectory: root,
+    session: { source: "herdr:codex", kind: "path", value: nativeParentPath },
+  };
+  const wire = {
+    pane_id: native.paneId,
+    terminal_id: native.terminalId,
+    name: native.name,
+    agent: "codex",
+    agent_status: "idle",
+    title: native.title,
+    cwd: root,
+    agent_session: native.session,
+  };
+  const census = async (_command: string, args: readonly string[]) => {
+    let result: unknown;
+    if (args[0] === "agent" && args[1] === "list") result = { agents: codexVisible ? [wire] : [] };
+    else if (args[0] === "agent" && args[1] === "get") result = { agent: codexVisible ? wire : undefined };
+    else if (args[0] === "api" && args[1] === "snapshot")
+      result = { snapshot: { workspaces: [], tabs: [], panes: codexVisible ? [wire] : [] } };
+    else throw new Error(`Unexpected Herdr argv: ${args.join(" ")}`);
+    return { stdout: JSON.stringify({ result }), stderr: "" };
+  };
+  const nativeRunner: HerdrWatchRunner = {
+    list: async () => (codexVisible ? [native] : []),
+    get: async () => {
+      if (!codexVisible) throw new Error("Native fixture head is not present");
+      return native;
+    },
+    resolveTerminal: async () => (codexVisible ? native : undefined),
+    wait: async (_target, signal) =>
+      new Promise((_resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    transcript: async () => readHerdrSeatTranscript("codex", native.session!),
+  };
   const deps = {
-    herdrAvailable: () => false,
+    herdrAvailable: () => true,
     embodiment: {},
     conversationRouteAuthorized: (owner: ConversationOwner) => {
       owners.push(owner);
@@ -163,10 +224,15 @@ it("real Pi room children execute four at once, queue FIFO, retain source author
     workingDirectory: root,
     settings,
     discordEnvironment: {},
+    nativeCensusRunner: census,
+    nativeHerdrRunner: nativeRunner,
+    seatAdapters: [],
     personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
   };
   let captain = createCaptain(deps, options);
   let work: Promise<unknown>[] = [];
+  const pollAbort = new AbortController();
+  let nativePoll: ReturnType<typeof captain.pollSeatEvents> | undefined;
   try {
     work = Array.from({ length: 6 }, (_, index) => captain.submitDiscordTurn(request(index)));
     const retry = captain.submitDiscordTurn(request(0));
@@ -273,7 +339,112 @@ it("real Pi room children execute four at once, queue FIFO, retain source author
     expect(calls).toHaveLength(7);
     const withHosted = await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
     if (withHosted.op !== "fleet") throw new Error("Expected fleet");
-    const allChildren = withHosted.snapshot.roomHandoffs!;
+    routeCurrent = true;
+    codexVisible = true;
+    const headConversationId = captain.seatContext()!.conversationId;
+    expect(
+      captain.syncSeatTranscript(headConversationId, {
+        sessionId: nativeParentId,
+        entries: [],
+        activity: "waiting",
+      }),
+    ).toBe(true);
+    nativePoll = captain.pollSeatEvents(20_000, pollAbort.signal, headConversationId);
+    await vi.waitFor(() => expect(captain.operatorSeatReady?.()).toBe(true));
+    await settings.update((current) => ({
+      ...current,
+      discord: {
+        ...current.discord,
+        ownerUserId: "99999",
+        systemActorUserIds: ["10008"],
+      },
+    }));
+    const friend = captain.submitDiscordTurn(request(8));
+    work.push(friend);
+    await vi.waitFor(() => expect(calls).toHaveLength(8));
+    expect(calls[7]!.body.tools?.some((tool) => tool.function.name === "bash")).toBe(true);
+    expect(captain.operatorSeatReady?.()).toBe(true);
+    calls[7]!.finish();
+    expect(await friend).toMatchObject({ state: "settled", response: "answer-10008" });
+    await settings.update((current) => ({
+      ...current,
+      discord: {
+        ...current.discord,
+        systemActorUserIds: [],
+        systemActorGuildIds: ["12345"],
+      },
+    }));
+    const guildFriend = captain.submitDiscordTurn(request(9));
+    work.push(guildFriend);
+    await vi.waitFor(() => expect(calls).toHaveLength(9));
+    expect(calls[8]!.body.tools?.some((tool) => tool.function.name === "bash")).toBe(true);
+    expect(captain.operatorSeatReady?.()).toBe(true);
+    calls[8]!.finish();
+    expect(await guildFriend).toMatchObject({ state: "settled", response: "answer-10009" });
+    const granted = await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+    if (granted.op !== "fleet") throw new Error("Expected fleet");
+    const attachedHead = await captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "get",
+      conversationId: headConversationId,
+    });
+    if (attachedHead.op !== "get") throw new Error("Expected attached head");
+    expect(attachedHead.conversation?.driver?.harness).toBe("codex");
+    for (const deliveryId of ["delivery-8", "delivery-9"])
+      expect(
+        granted.snapshot.roomHandoffs?.find((child) => child.roomHandoff?.deliveryId === deliveryId)
+          ?.roomHandoff,
+      ).toMatchObject({ state: "completed", host: "pi" });
+    await settings.update((current) => ({
+      ...current,
+      discord: { ...current.discord, systemActorGuildIds: [] },
+    }));
+    const overload = Array.from({ length: 36 }, (_, i) =>
+      captain.submitDiscordTurn(request(i + 10, i % 2 ? "77777" : "67890")),
+    );
+    work.push(...overload);
+    await vi.waitFor(() => expect(calls).toHaveLength(13));
+    const saturated = await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+    if (saturated.op !== "fleet") throw new Error("Expected fleet");
+    const live = saturated.snapshot.roomHandoffs!.filter((child) =>
+      ["running", "pending"].includes(child.roomHandoff!.state),
+    );
+    expect(live.filter((child) => child.roomHandoff!.state === "running")).toHaveLength(4);
+    expect(live.filter((child) => child.roomHandoff!.state === "pending")).toHaveLength(32);
+    for (const room of new Set(live.map((child) => child.roomHandoff!.roomConversationId)))
+      expect(
+        live.filter(
+          (child) => child.roomHandoff!.roomConversationId === room && child.roomHandoff!.state === "running",
+        ),
+      ).toHaveLength(2);
+    const fullRetry = captain.submitDiscordTurn(request(10, "67890"));
+    const overflow = await captain.submitDiscordTurn(request(46));
+    expect(overflow).toMatchObject({
+      state: "settled",
+      response: expect.stringContaining("room work queue is full"),
+    });
+    const afterOverflow = await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+    if (afterOverflow.op !== "fleet") throw new Error("Expected fleet");
+    expect(afterOverflow.snapshot.roomHandoffs).toHaveLength(saturated.snapshot.roomHandoffs!.length);
+    expect(
+      afterOverflow.snapshot.roomHandoffs?.some((child) => child.roomHandoff?.deliveryId === "delivery-46"),
+    ).toBe(false);
+    // Releasing either room advances that room's FIFO without admitting a third active child.
+    calls.find((call) => call.actor === "100010")!.finish();
+    expect(await fullRetry).toEqual(await overload[0]);
+    await vi.waitFor(() => expect(calls).toHaveLength(14));
+    expect(calls[13]!.actor).toBe("100014");
+    calls.find((call) => call.actor === "100011")!.finish();
+    await vi.waitFor(() => expect(calls).toHaveLength(15));
+    expect(calls[14]!.actor).toBe("100015");
+    draining = true;
+    for (const call of calls) call.finish();
+    await Promise.all(overload);
+    pollAbort.abort();
+    expect(await nativePoll).toEqual([]);
+    const all = await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
+    if (all.op !== "fleet") throw new Error("Expected fleet");
+    const allChildren = all.snapshot.roomHandoffs!;
     await captain.close();
     captain = createCaptain(deps, options);
     const restored = await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
@@ -283,13 +454,14 @@ it("real Pi room children execute four at once, queue FIFO, retain source author
     );
     expect(
       restored.snapshot.roomHandoffs?.filter((child) => child.roomHandoff?.state === "completed"),
-    ).toHaveLength(7);
-    expect(await captain.submitDiscordTurn(request(0))).toMatchObject({
-      state: "failed",
-      code: "room_handoff_already_recorded",
-    });
-    expect(calls).toHaveLength(7);
+    ).toHaveLength(45);
+    expect(await captain.submitDiscordTurn(request(0))).toEqual(await work[0]);
+    expect(await captain.submitDiscordTurn(request(8))).toEqual(await friend);
+    expect(await captain.submitDiscordTurn(request(9))).toEqual(await guildFriend);
+    expect(calls).toHaveLength(45);
   } finally {
+    pollAbort.abort();
+    await nativePoll?.catch(() => undefined);
     draining = true;
     for (const call of calls) if (!call.response.writableEnded) call.finish();
     await Promise.allSettled(work);
@@ -301,3 +473,40 @@ it("real Pi room children execute four at once, queue FIFO, retain source author
     await rm(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+it("durable retention prunes abandoned pending children while preserving admitted pending work", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-room-retention-"));
+  const store = new ConversationStore(root, async () => undefined);
+  try {
+    const roomConversationId = store.roomConversation("discord_presence", "12345:67890");
+    const draft = {
+      roomConversationId,
+      actorId: "11111",
+      source: "text" as const,
+      request: "pending request",
+      state: "pending" as const,
+      host: "pi" as const,
+    };
+    const abandoned = store.beginRoomHandoff({ ...draft, deliveryId: "abandoned" }, "abandoned");
+    const admitted = store.beginRoomHandoff({ ...draft, deliveryId: "admitted" }, "admitted", true);
+    for (let i = 0; i < OPERATOR_CONVERSATION_RETAINED_MAX + 2; i += 1)
+      await store.serve({
+        schemaVersion: 1,
+        op: "create",
+        scope: { kind: "global" },
+        title: `retention-${i}`,
+      });
+    await expect(readFile(join(root, abandoned.conversationId, "meta.json"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(
+      JSON.parse(await readFile(join(root, admitted.conversationId, "meta.json"), "utf8")).roomHandoff.state,
+    ).toBe("pending");
+    expect(
+      store.findRoomHandoff(roomConversationId, "admitted", "admitted")?.conversation.conversationId,
+    ).toBe(admitted.conversationId);
+  } finally {
+    await store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
