@@ -125,6 +125,7 @@ import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-pr
 import { LinearWriteReceipts, linearWriteIssue } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { LinearNotifications } from "./linear-notifications.ts";
+import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
@@ -593,6 +594,46 @@ const mcpHost = createMcpHost({
 });
 await mcpHost.warm();
 
+const discordTracking = new DiscordTracking({
+  path: join(stateRoot, "discord-tracking.json"),
+  localMachineId: "local",
+  settings: async () => {
+    const current = await settingsStore.load();
+    return {
+      ...current,
+      discord: resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings,
+    };
+  },
+  account: async () => {
+    const own = await mcpHost.account("linear", "operator");
+    return { workspaceId: own.account.workspaceId, binding: own.binding };
+  },
+  resolveProject: async (query) => {
+    const result = await mcpHost.call({
+      lane: "operator",
+      server: "linear",
+      tool: "get_project",
+      arguments: { query },
+      resultMode: "data",
+    });
+    if (result.outcome !== "ok" || result.isError) throw new Error("Bound Linear project unavailable");
+    return JSON.parse(result.content);
+  },
+  resolveIssueProject: async (id) => {
+    const result = await mcpHost.call({
+      lane: "operator",
+      server: "linear",
+      tool: "get_issue",
+      arguments: { id },
+      resultMode: "data",
+    });
+    if (result.outcome !== "ok" || result.isError) throw new Error("Tracked Linear issue unavailable");
+    return JSON.parse(result.content);
+  },
+  serverAction: (action) => createDiscordCaptainActionClient(process.env).serverAction(action),
+  onError: () => logger.warn("Discord project tracking retained an unavailable or uncertain delivery"),
+});
+
 const email = createEmailPort({
   credentials: operatorCredentialStore,
   settings: settingsStore,
@@ -791,6 +832,7 @@ const minecraftHost = new MinecraftHostService({
 let fleetProjectMembership: FleetProjectMembership | undefined;
 const captain = createCaptain(
   {
+    discordTracking,
     ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
     roomObservations,
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
@@ -1295,6 +1337,7 @@ const clankie = await createClankieApp({
     writes: linearWrites,
     recordActivity: (activity) => {
       linearAttribution.record(activity);
+      discordTracking.record(activity);
       if (activity.issueId && activity.organizationId && activity.conversationOwner)
         captain.recordLinearWorkOwner(
           { issueId: activity.issueId, organizationId: activity.organizationId },
@@ -1496,6 +1539,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await linearNotifications.close();
+    await discordTracking.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
     await browserHost?.close().catch(() => undefined);

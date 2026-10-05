@@ -317,6 +317,8 @@ interface ConversationMeta {
      */
     readonly provisioned?: true;
   };
+  /** An explicit disconnect or uncertain creation must never silently create a duplicate. */
+  channelDiscordAutoProvision?: "disabled" | "uncertain";
 }
 
 /** Optional seat for a turn that arrived from a herdr-hosted console. */
@@ -423,6 +425,10 @@ type PersonaPresentation = (personaId: string) => Promise<{
  * said, so the round treats this as best-effort.
  */
 export interface ChannelProjection {
+  /** Fresh Admin fleet settings allow existing local groups to acquire their first destination. */
+  autoProvision?: () => Promise<boolean>;
+  /** Participant fleets share one designated channel and never need webhooks. */
+  participantPost?: (message: { readonly username: string; readonly content: string }) => Promise<boolean>;
   post: (post: {
     readonly guildId: string;
     readonly channelId: string;
@@ -457,6 +463,8 @@ export interface ChannelProjection {
   rooms?: () => Promise<readonly DiscordGuildRoom[]>;
   /** The one guild rooms may live in, which a pasted webhook is held to. */
   swarmGuildId?: () => string | undefined;
+  /** Refresh the connected server before any explicit or automatic projection mutation. */
+  currentGuildId?: () => Promise<string | undefined>;
   /**
    * Delete one webhook in Discord — the cleanup half of `provision`, called
    * when a room is unprojected or removed. Authenticated by the token itself,
@@ -626,6 +634,7 @@ export class ConversationStore {
   private readonly drafts = new Map<string, OperatorConversationLiveDraft>();
   /** Serializes host file reads so transcript order survives async publication. */
   private readonly deliveredFilePublishes = new Map<string, Promise<void>>();
+  private readonly channelProjectionCreates = new Map<string, Promise<void>>();
   private readonly pendingTranscriptImages = new Set<string>();
   private readonly transcriptImageAttempts = new Map<string, number>();
   private draftSequence = 0;
@@ -2536,6 +2545,7 @@ export class ConversationStore {
     if (request.discord?.kind === "off") {
       this.discardProjection(meta.channelDiscord);
       delete meta.channelDiscord;
+      meta.channelDiscordAutoProvision = "disabled";
     } else if (discord !== undefined) {
       // Re-projecting elsewhere retires the old credential the same way
       // unprojecting does; nothing keeps posting through a webhook no room uses.
@@ -2543,6 +2553,7 @@ export class ConversationStore {
         this.discardProjection(meta.channelDiscord);
       }
       meta.channelDiscord = discord;
+      delete meta.channelDiscordAutoProvision;
     }
     meta.updatedAt = now;
     this.saveMeta(meta);
@@ -2571,7 +2582,9 @@ export class ConversationStore {
     // Required before either path resolves, never merely compared against when
     // it happens to be set: an unset managed server is not "no opinion", it is no
     // server Clankie controls, and the fleet may not be put anywhere at all.
-    const swarmGuildId = this.projection.swarmGuildId?.();
+    const swarmGuildId = this.projection.currentGuildId
+      ? await this.projection.currentGuildId()
+      : this.projection.swarmGuildId?.();
     if (swarmGuildId === undefined) {
       throw new Error("Clankie has no swarm server set, so a room cannot go to Discord.");
     }
@@ -3102,17 +3115,57 @@ export class ConversationStore {
     personaId: string,
     content: string,
   ): Promise<void> {
-    const target = this.liveProjection(meta);
-    if (target === undefined || this.projection === undefined) return;
+    if (this.projection === undefined) return;
     try {
       const presentation =
         personaId === "operator" || personaId === CHANNEL_NOTICE_AUTHOR
           ? { username: personaId }
           : ((await this.personaPresentation?.(personaId)) ?? { username: personaId });
+      if (
+        await this.projection.participantPost?.({
+          username: presentation.username,
+          content: `**${meta.title}**\n${content}`,
+        })
+      )
+        return;
+      await this.provisionFleetProjection(meta);
+      const target = this.liveProjection(meta);
+      if (target === undefined) return;
       const { provisioned: _provisioned, ...credential } = target;
       await this.projection.post({ ...credential, ...presentation, content });
     } catch {
       // The transcript is the record; the room in Discord is a view of it.
+    }
+  }
+
+  private async provisionFleetProjection(meta: ConversationMeta): Promise<void> {
+    const pending = this.channelProjectionCreates.get(meta.conversationId);
+    if (pending !== undefined) return pending;
+    if (
+      meta.scope.kind !== "channel" ||
+      meta.channelDiscord !== undefined ||
+      meta.channelDiscordAutoProvision !== undefined ||
+      !(await this.projection?.autoProvision?.())
+    )
+      return;
+    // A concurrent first message may have finished its settings read before this one.
+    const concurrent = this.channelProjectionCreates.get(meta.conversationId);
+    if (concurrent !== undefined) return concurrent;
+    if (meta.channelDiscord !== undefined || meta.channelDiscordAutoProvision !== undefined) return;
+    const channelId = meta.scope.channelId;
+    meta.channelDiscordAutoProvision = "uncertain";
+    this.saveMeta(meta);
+    const creation = (async () => {
+      const destination = await this.resolveProjection({ kind: "provision" }, channelId, meta.title);
+      meta.channelDiscord = destination;
+      delete meta.channelDiscordAutoProvision;
+      this.saveMeta(meta);
+    })();
+    this.channelProjectionCreates.set(meta.conversationId, creation);
+    try {
+      await creation;
+    } finally {
+      this.channelProjectionCreates.delete(meta.conversationId);
     }
   }
 

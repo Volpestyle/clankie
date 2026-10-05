@@ -1,3 +1,4 @@
+import { createDiscordPresenceRuntime } from "./presence-runtime-module.ts";
 import {
   createMinecraftLoginCodeDelivery,
   tryHandleMinecraftLoginCodeRequest,
@@ -1460,6 +1461,10 @@ async function locateVoiceMember(
 async function executeCaptainDiscordAction(
   input: DiscordCaptainActionInput,
 ): Promise<DiscordCaptainActionResult> {
+  if (input.action === "server_action") {
+    const { action: _action, callId: _callId, source, sourceGuildId, ...request } = input;
+    return createDiscordPresenceRuntime().serverAction(request, { source, sourceGuildId });
+  }
   // He has started writing, so the delivery he is answering lights its channel
   // (ADR 0118). Nothing is posted from here and no channel is named — this is
   // the body's own in-flight turn, already admitted when it was accepted.

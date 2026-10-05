@@ -14,6 +14,7 @@ import {
   DISCORD_SETUP_TEST_POST_PATH,
   DISCORD_SETUP_TEST_TEXT,
   DiscordSettingsSchema,
+  DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
   DiscordSetupDefinitionSchema,
   DiscordPermissionsRequestSchema,
   parseProtocolResponse,
@@ -83,7 +84,7 @@ async function fixture() {
   const ready = () =>
     packet("READY", { user: { id: "30001", bot: true }, guilds: [{ id: "10001", unavailable: true }] });
   const raw = structuredClone(cache.raw);
-  raw.roles[1]!.permissions = String(2048n | 16n | (1n << 29n));
+  raw.roles[1]!.permissions = String(BigInt(DISCORD_PARTICIPANT_INVITE_PERMISSIONS) | 16n | (1n << 29n));
   raw.members[0]!.roles = ["10002"];
   raw.channels[1]!.permission_overwrites = [
     { id: "30001", type: 1, allow: "0", deny: String(2048n | (1n << 29n)) },
@@ -153,6 +154,9 @@ async function fixture() {
     ...current,
     discord: {
       ...current.discord,
+      serverId: "10001",
+      role: "participant",
+      applicationId: "90001",
       guildId: "10001",
       ingressGuildIds: ["10001"],
       presenceGuildIds: ["10001"],
@@ -223,7 +227,7 @@ async function fixture() {
 it("computes connected gateway permissions through native body HTTP, owner API, shared setup and CLI without posting on reads", async () => {
   const f = await fixture();
   const allowed = await f.read({ guildId: "10001", channelId: "20001" });
-  expect(allowed.permissions).toEqual({
+  expect(allowed.permissions).toMatchObject({
     view_channel: "passed",
     send_messages: "passed",
     manage_channels: "passed",
@@ -241,23 +245,33 @@ it("computes connected gateway permissions through native body HTTP, owner API, 
   const view = await f.setup.read();
   expect(
     view.sentences
-      .find((sentence) => sentence.id === "talk")!
-      .checks.find((check) => check.kind === "send_messages")!.status,
-  ).toBe("passed");
-  expect(
-    view.sentences
-      .find((sentence) => sentence.id === "team")!
-      .checks.find((check) => check.kind === "manage_webhooks")!.status,
-  ).toBe("passed");
+      .find((sentence) => sentence.id === "connect")!
+      .checks.every((check) => check.status === "passed"),
+  ).toBe(true);
+  expect(new URL(view.snapshot.setup!.invite!.url).searchParams.get("permissions")).toBe(
+    DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
+  );
   expect(await runDiscordSetupCommand([], f.client)).toEqual(view);
-  await runDiscordSetupCommand(["choices", "talk"], f.client);
-  await runDiscordSetupCommand(["talk", "--channel", "dev"], f.client);
+  await runDiscordSetupCommand(["choices", "connect"], f.client);
+  const participant = await runDiscordSetupCommand(
+    ["connect", "--server", "Studio", "--role", "participant"],
+    f.client,
+  );
+  expect("snapshot" in participant && participant.snapshot.settings.ingressChannelIds).toEqual([]);
+  await runDiscordSetupCommand(["connect", "--role", "admin"], f.client);
   const denied = await f.setup.read();
   expect(
     denied.sentences
-      .find((sentence) => sentence.id === "talk")!
-      .checks.find((check) => check.kind === "send_messages")!.status,
+      .find((sentence) => sentence.id === "connect")!
+      .checks.find((check) => check.kind === "administrator")!.status,
   ).toBe("failed");
+  expect(new URL(denied.snapshot.setup!.invite!.url).searchParams.get("permissions")).toBe("8");
+  f.packet("GUILD_ROLE_UPDATE", { guild_id: "10001", role: { id: "10002", permissions: "8" } });
+  expect(
+    (await f.setup.read()).sentences
+      .find((sentence) => sentence.id === "connect")!
+      .checks.find((check) => check.kind === "administrator")!.status,
+  ).toBe("passed");
   expect(f.deliveries).toHaveLength(0);
   expect(f.requests.every((request) => request.method === "GET")).toBe(true);
   // Exact two-field setup response schema shipped at 2fcb9d73; no checks/action capability.
@@ -279,7 +293,7 @@ it("computes connected gateway permissions through native body HTTP, owner API, 
   f.disconnect();
   expect(
     (await f.setup.read(view.snapshot)).sentences
-      .find((sentence) => sentence.id === "talk")!
+      .find((sentence) => sentence.id === "connect")!
       .checks.find((check) => check.kind === "send_messages")!.status,
   ).toBe("not_checked");
   expect(
@@ -289,8 +303,8 @@ it("computes connected gateway permissions through native body HTTP, owner API, 
   ).toBe(true);
   expect(
     (await f.setup.read()).sentences
-      .find((sentence) => sentence.id === "talk")!
-      .checks.find((check) => check.kind === "send_messages")!.status,
+      .find((sentence) => sentence.id === "connect")!
+      .checks.find((check) => check.kind === "administrator")!.status,
   ).toBe("not_checked");
   await evidence("setup-checks.json", {
     allowed,
@@ -343,6 +357,10 @@ it("honors role-union and member-overwrite precedence, owner/admin bypass, timeo
     manage_webhooks: "failed",
   });
   f.packet("GUILD_CREATE", f.raw);
+  f.packet("GUILD_ROLE_UPDATE", {
+    guild_id: "10001",
+    role: { id: "10002", permissions: String(2048n | 16n | (1n << 29n)) },
+  });
   update([], 2);
   expect((await f.read({ channelId: "20001" })).permissions.manage_channels).toBe("failed");
   f.packet("GUILD_ROLE_UPDATE", {
@@ -497,7 +515,7 @@ it("reports a lost native receipt as unconfirmed and never retries the post", as
   });
 });
 
-it("the real TUI opens without posting, then sends only after the owner chooses the explicit action and room", async () => {
+it("the real TUI opens the role setup and rechecks grants without offering a default room picker or posting", async () => {
   const f = await fixture();
   const shell = new ClankieFaceShell({
     commands: buildDiscordCommands({
@@ -537,19 +555,19 @@ it("the real TUI opens without posting, then sends only after the owner chooses 
     current.handleInput("\r");
   };
   try {
-    const opening = await prompt("Send a test post");
+    const opening = await prompt("Fleet in Discord");
     const openingFrame = stripVTControlCharacters(opening.render(180).join("\n"));
     expect(openingFrame).toContain("✓ Send Messages");
+    expect(openingFrame).toContain("Project tracking");
+    expect(openingFrame).not.toContain("Send a test post");
+    expect(openingFrame).not.toContain("He talks with");
     expect(f.deliveries).toHaveLength(0);
-    await choose("Send a test post", "Send a test post");
-    await prompt("test post to which room");
+    await choose("Fleet in Discord", "Recheck setup");
+    await prompt("Fleet in Discord");
     expect(f.deliveries).toHaveLength(0);
-    await choose("test post to which room", "general");
-    await prompt("Send a test post");
-    expect(f.deliveries).toHaveLength(1);
-    await choose("Send a test post", "Done");
+    await choose("Fleet in Discord", "Done");
     await running;
-    await evidence("tui-explicit-post.json", { openingFrame, nativePosts: f.deliveries });
+    await evidence("tui-role-setup.json", { openingFrame, nativePosts: f.deliveries });
   } finally {
     for (let attempt = 0; !finished && attempt < 10; attempt++) {
       shell.setupFlow.handleSubmit("/cancel");

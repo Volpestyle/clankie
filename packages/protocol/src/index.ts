@@ -21,6 +21,8 @@ import {
   type ProjectProposalTarget,
   type ProjectProposalResult,
 } from "./projects.ts";
+import { DiscordServerActionSchema } from "./discord-server.ts";
+export * from "./discord-server.ts";
 export * from "./discord-settings.ts";
 export * from "./discord-setup.ts";
 export * from "./discord-directory.ts";
@@ -4579,6 +4581,15 @@ const DiscordCaptainActionContextSchema = z.object({
 
 /** IDs are host-stamped from the active turn; the model supplies only action content. */
 export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
+  DiscordServerActionSchema.extend({
+    action: z.literal("server_action"),
+    callId: z.string().min(1).max(256),
+    source: z.enum(["operator", "discord"]),
+    sourceGuildId: z
+      .string()
+      .regex(/^\d{5,32}$/u)
+      .optional(),
+  }).strict(),
   DiscordCaptainActionContextSchema.extend({
     action: z.literal("react"),
     emoji: z.string().trim().min(1).max(64),
@@ -4644,6 +4655,11 @@ export const DiscordCaptainActionResultSchema = z
     ok: z.boolean(),
     message: z.string().min(1).max(1_000),
     messageId: z.string().min(1).max(128).optional(),
+    resourceId: z
+      .string()
+      .regex(/^\d{5,32}$/u)
+      .optional(),
+    data: z.json().optional(),
   })
   .strict();
 export type DiscordCaptainActionResult = z.infer<typeof DiscordCaptainActionResultSchema>;

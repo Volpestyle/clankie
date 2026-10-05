@@ -38,12 +38,14 @@ import type { FinishedRender } from "../media-generation.ts";
 import type { TldrawHost } from "../tldraw-host.ts";
 import type { RivalsClient } from "../rivals.ts";
 import type { WorkItemsService } from "../work-items.ts";
+import type { DiscordTracking } from "../discord-tracking.ts";
 
 /**
  * Everything the captain's tools reach in the rest of the service, as plain
  * in-process function calls.
  */
 export interface CaptainDeps {
+  readonly discordTracking?: Pick<DiscordTracking, "configureProject">;
   /** Exact conversation-owned Minecraft stay, sharing the Pokémon play lease. */
   readonly minecraft?: import("../minecraft.ts").MinecraftService;
   readonly minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;

@@ -127,9 +127,9 @@ index). Configure through the headless CLI:
 | Linear wake rules                     | `clankie linear wake show`, `clankie linear wake set --owner-user-ids ID --actors owner`               |
 | Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`                       |
 | Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                                |
-| Discord picker directory              | `clankie discord directory [servers                                                                    | channels | roles | people] --server ID` (omit server for servers; inspect state/reason before claiming coverage) |
+| Discord picker directory              | `clankie discord directory [servers                                                                    | channels                      | roles                                              | people] --server ID` (omit server for servers; inspect state/reason before claiming coverage) |
 | Shared Discord settings definition    | `clankie discord definition` (host wording, picker/check kinds, Advanced fields; no credentials)       |
-| Discord sentence setup                | `clankie discord setup`, `… choices SENTENCE`, `… SENTENCE` with named choices (see `docs/cli.md`)     |
+| Discord server setup                  | `clankie discord setup`, `… connect --server NAME --role participant                                   | admin`, `… fleet --enabled on | off`, `… tracking --level LEVEL`(see`docs/cli.md`) |
 | Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                                    |
 | Explicit Discord test post            | `clankie discord setup test-post --channel NAME` only when the owner asks to post; no automatic probe  |
 | Desktop expressions / quiet hours     | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`    |
@@ -152,6 +152,15 @@ index). Configure through the headless CLI:
 Everything else about the launcher (Linear inbox, devices, memory, sleep,
 steering a turn, model refresh, setup and conflicts) is in
 [launcher details](reference/launcher.md).
+
+Discord setup connects one server with Participant or Admin, fleet display and
+a tracking level. Participant follows Discord permissions. Admin controls the
+dedicated server through `discord_server_action`, including channels, categories,
+roles, webhooks and members, without another permission request. The adapter
+refuses server deletion and ownership transfer. This role never grants machine
+tools. Participant projection posts use the given channel under Advanced;
+Admin project mirrors may be channels or forums. `discord_tracking_project`
+lets Clankie choose that representation before the first event.
 
 ## Authority
 

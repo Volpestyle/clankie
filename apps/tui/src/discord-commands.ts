@@ -1,5 +1,11 @@
 import { stripVTControlCharacters } from "node:util";
-import { DiscordSettingsSchema, DISCORD_SETTING_GROUPS } from "@clankie/protocol";
+import {
+  DiscordSettingsSchema,
+  DISCORD_SETTING_GROUPS,
+  DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
+  discordRoleInviteUrl,
+  discordServerSettings,
+} from "@clankie/protocol";
 import type { ClankieApiClient } from "@clankie/api-client";
 import type { DiscordSetupApi } from "@clankie/api-client";
 import { runDiscordSetup, showDiscordSetup } from "./discord-setup.ts";
@@ -93,7 +99,7 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
     {
       name: "discord",
       aliases: [],
-      description: "Choose Discord servers, rooms and computer access",
+      description: "Connect a Discord server, choose Clankie’s role, fleet and project tracking",
       argumentHint: "[status|invite|rooms|guide|call]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -220,23 +226,15 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
   ];
 }
 
-/**
- * Bot invite permissions: View Channel, Send Messages, Embed Links, Attach
- * Files, Read Message History, Add Reactions, Connect, Speak, Use VAD, Use
- * Application Commands, Manage Channels, Manage Webhooks. The last two are what
- * let him make a channel's room and its webhook himself (ADR 0146), and they
- * are needed in the configured managed server specifically — without them the only
- * projection left is a webhook made by hand in that same server and pasted per
- * room. Message Content is a privileged *intent*, not a bit here — the primer
- * tells the owner to flip it in the portal.
- */
-export const DISCORD_BOT_INVITE_PERMISSIONS = 2_721_172_560;
+/** Compatibility export: normal member grants; Admin invitations request Administrator. */
+export const DISCORD_BOT_INVITE_PERMISSIONS = Number(DISCORD_PARTICIPANT_INVITE_PERMISSIONS);
 
-export function discordBotInviteUrl(applicationId: string): string {
-  return (
-    `https://discord.com/oauth2/authorize?client_id=${applicationId}` +
-    `&permissions=${String(DISCORD_BOT_INVITE_PERMISSIONS)}&scope=bot%20applications.commands`
-  );
+export function discordBotInviteUrl(
+  applicationId: string,
+  role: DiscordSettings["role"] = "participant",
+  serverId?: string,
+): string {
+  return discordRoleInviteUrl(applicationId, role, serverId);
 }
 
 const DISCORD_BOT_PRIMER = [
@@ -244,7 +242,7 @@ const DISCORD_BOT_PRIMER = [
   "2. Bot → Add Bot → Reset Token. Paste that token under Tokens.",
   "3. Privileged Gateway Intents: enable Message Content (required for text).",
   "4. Copy the Application ID from General Information, then /discord invite.",
-  "5. Open the invite link, pick your server, and come back to set allowlists.",
+  "5. Open the role-correct invite link, pick your server, then connect it under /discord and recheck setup.",
 ].join("\n");
 
 const SNOWFLAKE = /^\d{5,32}$/u;
@@ -1059,11 +1057,10 @@ export async function showDiscordInvite(
   shell: ClankieFaceShell,
   services: DiscordCommandServices,
 ): Promise<void> {
-  const applicationId = (
-    services.setup
-      ? (await services.setup.discordSettings()).settings
-      : (await services.settings.load()).discord
-  ).applicationId;
+  const settings = services.setup
+    ? (await services.setup.discordSettings()).settings
+    : (await services.settings.load()).discord;
+  const applicationId = settings.applicationId;
   if (applicationId === undefined) {
     shell.insertCommandResult(
       "/discord invite",
@@ -1076,9 +1073,9 @@ export async function showDiscordInvite(
     "/discord invite",
     [
       "Open this as the Discord user who can add bots to the server:",
-      discordBotInviteUrl(applicationId),
+      discordBotInviteUrl(applicationId, settings.role, settings.serverId),
       "",
-      "Then enable text/voice under /discord. Message Content is a portal intent, not this link.",
+      "Then connect the server under /discord and recheck setup. Message Content is a portal intent, not this link.",
     ].join("\n"),
     "success",
   );
@@ -1141,10 +1138,13 @@ async function editAllDiscordSettings(
   });
   if (raw === undefined || !raw.trim()) return;
   const transform = (value: DiscordSettings) =>
-    DiscordSettingsSchema.parse({
-      ...value,
-      [key]: raw.trim() === "none" ? undefined : parseDiscordSettingValue(key, raw, value),
-    });
+    discordServerSettings(
+      DiscordSettingsSchema.parse({
+        ...value,
+        [key]: raw.trim() === "none" ? undefined : parseDiscordSettingValue(key, raw, value),
+      }),
+      value,
+    );
   if (snapshot && services.setup)
     await services.setup.updateDiscordSettings({
       expectedRevision: snapshot.revision,

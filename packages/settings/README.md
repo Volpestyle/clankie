@@ -37,6 +37,17 @@ A missing settings file uses defaults. Invalid content, permission errors and
 other read failures propagate; they never silently replace configured access
 restrictions with defaults.
 
+## Discord server role
+
+`discord.serverId` connects one server. `discord.role` is `participant` by
+default, or `admin` for a dedicated server. `fleetEnabled` defaults off;
+`trackingLevel` is `off`, `project_updates`, `project_activity` or `all_issues`.
+Participant projection messages use `fleetChannelId` under Advanced. Connecting
+projects the server into body ingress/presence/voice lists and clears channel
+filters. Discord's own permissions determine Participant access. Role changes
+never modify machine grants. Admin server actions refuse deletion and ownership
+transfer. See [Discord setup](../../docs/discord-rooms.md).
+
 ## Environment precedence
 
 `resolveDiscordSettings(stored, env)` merges the two with **environment winning**.

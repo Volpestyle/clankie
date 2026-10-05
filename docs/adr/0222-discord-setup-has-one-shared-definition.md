@@ -1,6 +1,9 @@
 # ADR 0222: Discord setup has one shared definition
 
-Status: accepted foundation for VUH-1622, VUH-1624 and VUH-1625 (2026-10-04).
+Status: shared foundation accepted (2026-10-04). The four-sentence setup and
+separate managed-server choice are superseded by
+[ADR 0226](0226-discord-connects-a-server-with-a-role.md). The following records
+the earlier design; the current setup is server, role, fleet and tracking.
 
 The public protocol owns the four Discord sentence parts, picker kinds, help
 text, check kinds, choice labels and Advanced field groups. The app, console

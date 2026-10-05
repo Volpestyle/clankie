@@ -23,6 +23,17 @@ export const DiscordPermissionsSnapshotSchema = z
         send_messages: DiscordPermissionStatusSchema,
         manage_channels: DiscordPermissionStatusSchema,
         manage_webhooks: DiscordPermissionStatusSchema,
+        administrator: DiscordPermissionStatusSchema.optional(),
+        read_message_history: DiscordPermissionStatusSchema.optional(),
+        send_messages_in_threads: DiscordPermissionStatusSchema.optional(),
+        connect: DiscordPermissionStatusSchema.optional(),
+        speak: DiscordPermissionStatusSchema.optional(),
+        add_reactions: DiscordPermissionStatusSchema.optional(),
+        embed_links: DiscordPermissionStatusSchema.optional(),
+        attach_files: DiscordPermissionStatusSchema.optional(),
+        use_vad: DiscordPermissionStatusSchema.optional(),
+        use_application_commands: DiscordPermissionStatusSchema.optional(),
+        create_public_threads: DiscordPermissionStatusSchema.optional(),
       })
       .strict(),
   })

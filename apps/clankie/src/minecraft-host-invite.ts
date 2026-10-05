@@ -124,7 +124,7 @@ const Status = z.object({
 
 /** Only trusted status and immutable requesting-channel identity enter this post. */
 export function createMinecraftHostInvite(options: {
-  discordActions: ReturnType<typeof createDiscordCaptainActionClient>;
+  discordActions: Pick<ReturnType<typeof createDiscordCaptainActionClient>, "execute">;
   guard: (identity: BodyConversationIdentity) => Promise<void>;
 }) {
   return async (identity: BodyConversationIdentity, raw: unknown) => {

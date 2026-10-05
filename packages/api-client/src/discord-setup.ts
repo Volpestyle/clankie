@@ -1,5 +1,6 @@
 import {
   DiscordSettingsSchema,
+  discordServerSettings,
   type DiscordDirectoryEntry,
   type DiscordDirectoryRequest,
   type DiscordDirectorySnapshot,
@@ -20,6 +21,7 @@ export interface DiscordPickerSelection {
   ids?: string[];
   visible?: boolean;
   access?: DiscordAccessChoice;
+  value?: string;
 }
 export interface DiscordSetupView {
   snapshot: DiscordSettingsSnapshot;
@@ -119,6 +121,9 @@ function pickerText(view: DiscordSetupView, part: DiscordSetupPicker): string {
       .join(", ");
   if (part.picker === "team_visibility")
     return label(snapshot.settings[part.fields[0]!] === false ? "team_hidden" : "team_visible");
+  if (part.picker === "role" || part.picker === "tracking")
+    return label(String(snapshot.settings[part.fields[0]!]));
+  if (part.picker === "fleet") return label(snapshot.settings.fleetEnabled ? "on" : "off");
   if (part.picker === "server") {
     const ids = discordPickerIds(snapshot, part);
     return ids.length ? named(ids, "servers", "unavailable_server") : label("no_server");
@@ -177,8 +182,12 @@ function render(view: DiscordSetupView): DiscordSetupView {
       status:
         hostChecks?.find((check) => check.sentenceId === sentence.id && check.kind === kind)?.status ??
         ((kind === "account" &&
-          view.directories.some(
-            (directory) => directory.kind === "servers" && directory.state === "connected",
+          discordSetupPickers(sentence).some(
+            (part) =>
+              part.picker === "server" &&
+              discordPickerIds(snapshot, part).some((id) =>
+                entries(view, "servers").some((entry) => entry.id === id),
+              ),
           )) ||
         (kind === "view_channel" &&
           discordSetupPickers(sentence).some(
@@ -222,6 +231,19 @@ export class DiscordSetupClient {
       expectedRevision: view.snapshot.revision,
     });
   }
+  /** Explicit diagnostics may inspect rooms; the default setup reads only servers. */
+  async testRooms(view: DiscordSetupView): Promise<DiscordSetupView> {
+    const guildId = view.snapshot.settings.serverId ?? view.snapshot.settings.guildId;
+    if (!guildId || !entries(view, "servers").some((entry) => entry.id === guildId)) return view;
+    const channels = await this.directory({ kind: "channels", guildId });
+    const servers = view.directories.find((directory) => directory.kind === "servers");
+    if (servers && channels.body !== servers.body)
+      throw new Error("The connected Discord account changed. Reopen setup.");
+    return render({
+      ...view,
+      directories: [...view.directories.filter((directory) => directory.kind !== "channels"), channels],
+    });
+  }
   private async directory(
     query: Pick<DiscordDirectoryRequest, "kind" | "guildId">,
   ): Promise<DiscordDirectorySnapshot> {
@@ -262,7 +284,12 @@ export class DiscordSetupClient {
       ),
     );
     const directories = [servers];
-    for (const guildId of serverIds) {
+    const needsRooms = snapshot.setup.definition.sentences.some((sentence) =>
+      discordSetupPickers(sentence).some(
+        (part) => part.picker === "channels" || part.picker === "computer_access",
+      ),
+    );
+    for (const guildId of needsRooms ? serverIds : []) {
       if (!servers.entries.some((entry) => entry.id === guildId)) continue;
       directories.push(
         ...(await Promise.all([
@@ -299,7 +326,12 @@ export class DiscordSetupClient {
       if (selection.unchanged) continue;
       const part = sentence && discordSetupPickers(sentence)[pickerIndex];
       if (!sentence || !part) throw new Error("This host does not provide that Discord sentence picker.");
-      if (part.picker === "team_visibility") {
+      if (part.picker === "role" || part.picker === "fleet" || part.picker === "tracking") {
+        if (!selection.value || !part.choices?.includes(selection.value))
+          throw new Error("Choose one of the setup options supplied by this host.");
+        for (const field of part.fields)
+          write(field, part.picker === "fleet" ? selection.value === "on" : selection.value);
+      } else if (part.picker === "team_visibility") {
         if (typeof selection.visible !== "boolean")
           throw new Error("Choose whether the team’s rooms show up or stay hidden.");
         for (const field of part.fields) write(field, selection.visible);
@@ -353,7 +385,7 @@ export class DiscordSetupClient {
     }
     const saved = await this.api.updateDiscordSettings({
       expectedRevision: snapshot.revision,
-      settings: DiscordSettingsSchema.parse(settings),
+      settings: discordServerSettings(DiscordSettingsSchema.parse(settings)),
     });
     return this.read(saved);
   }

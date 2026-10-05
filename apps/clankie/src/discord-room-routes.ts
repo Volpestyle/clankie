@@ -7,7 +7,12 @@ import {
   DISCORD_SETTINGS_PATH,
   DiscordRoomGuidanceRequestSchema,
   DiscordSettingsUpdateSchema,
-  DISCORD_SETUP_DEFINITION,
+  discordSetupDefinition,
+  discordServerSettings,
+  DiscordSettingsSchema,
+  discordRoleInviteUrl,
+  DISCORD_ADMIN_INVITE_PERMISSIONS,
+  DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
   DISCORD_DIRECTORY_PATH,
   DiscordDirectoryRequestSchema,
   type DiscordDirectoryRequest,
@@ -83,18 +88,28 @@ export function discordRoomDisplayTitle(title: string): string | undefined {
 export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono {
   const app = new Hono();
   const setup = async (settings: ClankieSettings["discord"]) => {
-    const body = resolveDiscordSettings(settings, options.environment ?? {}).settings.activeBody;
+    const effective = resolveDiscordSettings(settings, options.environment ?? {}).settings;
+    const body = effective.activeBody;
     return options.machineName
       ? {
           setup: {
-            definition: DISCORD_SETUP_DEFINITION,
+            definition: discordSetupDefinition(effective),
             machineName: options.machineName,
+            ...(effective.applicationId
+              ? {
+                  invite: {
+                    role: effective.role,
+                    permissions:
+                      effective.role === "admin"
+                        ? DISCORD_ADMIN_INVITE_PERMISSIONS
+                        : DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
+                    url: discordRoleInviteUrl(effective.applicationId, effective.role, effective.serverId),
+                  },
+                }
+              : {}),
             ...(options.permissions
               ? {
-                  checks: await discordSetupChecks(
-                    resolveDiscordSettings(settings, options.environment ?? {}).settings,
-                    (query) => options.permissions!(query, body),
-                  ),
+                  checks: await discordSetupChecks(effective, (query) => options.permissions!(query, body)),
                 }
               : {}),
             ...(options.testPost ? { testPostAvailable: true } : {}),
@@ -217,7 +232,8 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
   app.post(DISCORD_SETTINGS_PATH, async (context) => {
     const authority = await options.authorize(context.req.raw, "settings");
     if (!authority) return context.json({ error: "operator_required" }, 403);
-    const parsed = DiscordSettingsUpdateSchema.safeParse(await context.req.json());
+    const request: unknown = await context.req.json();
+    const parsed = DiscordSettingsUpdateSchema.safeParse(request);
     if (!parsed.success) return context.json({ error: "invalid_discord_settings" }, 400);
     if (!options.settings.update) return context.json({ error: "settings_unavailable" }, 503);
     const updated = await options.settings.update(
@@ -225,16 +241,29 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
         if (!authority.current()) throw new Error("operator_revoked");
         if (discordSettingsRevision(current.discord) !== parsed.data.expectedRevision)
           throw new Error("settings_revision_conflict");
-        // An older client's response schema cannot carry this additive field
-        // back. Omission preserves its current gate; explicit true restores it.
+        // Older clients cannot carry the new server model back. Omission must
+        // preserve current authority rather than resetting role/toggles to defaults.
+        const incoming = (request as { settings: Record<string, unknown> }).settings;
+        const serverModelWriter = ["role", "fleetEnabled", "trackingLevel"].every((key) =>
+          Object.hasOwn(incoming, key),
+        );
+        const discord = { ...parsed.data.settings };
+        for (const key of [
+          "serverId",
+          "role",
+          "fleetEnabled",
+          "fleetChannelId",
+          "trackingLevel",
+          "teamVisible",
+        ] as const)
+          if (
+            !Object.hasOwn(incoming, key) &&
+            !(serverModelWriter && (key === "serverId" || key === "fleetChannelId"))
+          )
+            (discord as Record<string, unknown>)[key] = current.discord[key];
         return {
           ...current,
-          discord: {
-            ...parsed.data.settings,
-            ...(parsed.data.settings.teamVisible === undefined && current.discord.teamVisible !== undefined
-              ? { teamVisible: current.discord.teamVisible }
-              : {}),
-          },
+          discord: discordServerSettings(DiscordSettingsSchema.parse(discord), current.discord),
         };
       },
       async () => {

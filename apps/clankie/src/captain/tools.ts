@@ -40,7 +40,7 @@ import {
   type InlineExtension,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { GameplaySettings } from "@clankie/settings";
+import { readDiscordServerSettings, type GameplaySettings } from "@clankie/settings";
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
@@ -337,6 +337,7 @@ export function captainTools(
     }),
     ...discordVoicePresenceTools(deps, turn, lane),
     ...discordActionTools(deps, turn, lane),
+    ...discordServerTools(deps, turn, lane),
     ...discordMusicTools(deps, turn, lane),
     defineTool({
       name: "pokeagent_world",
@@ -1315,6 +1316,92 @@ function discordVoicePresenceTools(
       parameters: Type.Object({}),
       execute: () => call("leave"),
     }),
+  ];
+}
+
+function discordServerTools(
+  deps: CaptainDeps,
+  turn: TurnContext,
+  lane: CaptainSessionLaneV2,
+): ToolDefinition[] {
+  if (deps.discordActions === undefined || (lane !== "operator" && !lane.startsWith("discord_"))) return [];
+  return [
+    defineTool({
+      name: "discord_server_action",
+      label: "Manage connected Discord server",
+      description:
+        "Use native Discord REST in your connected server. In admin role you have full rein over channels, " +
+        "categories, placement, archives, roles, webhooks, and members, without asking permission. " +
+        "Never delete the server or transfer ownership. Use /guilds/@server for the connected server; " +
+        "use actual channel, role, webhook, and member IDs from your directory or GET reads. " +
+        "Examples: POST /guilds/@server/channels with {name,type:0|4|15,parent_id?}; " +
+        "PATCH /channels/<id> with {parent_id} or {archived:true} for a thread; " +
+        "PATCH /guilds/@server/channels with an array of {id,position,parent_id}; " +
+        "POST /channels/<forum>/threads with {name,message:{content}}. " +
+        "Participant role can only publish projection messages to its configured channel through this tool; " +
+        "your ordinary conversation tools still follow Discord permissions. This grants no machine access. " +
+        "The body checks each resource belongs to the server and redacts credential-bearing response fields.",
+      parameters: Type.Object({
+        method: Type.Union([
+          Type.Literal("GET"),
+          Type.Literal("POST"),
+          Type.Literal("PATCH"),
+          Type.Literal("PUT"),
+          Type.Literal("DELETE"),
+        ]),
+        path: Type.String({ minLength: 1, maxLength: 512 }),
+        body: Type.Optional(
+          Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Array(Type.Unknown())]),
+        ),
+      }),
+      execute: (callId, input) =>
+        deps
+          .discordActions!.execute({
+            method: input.method,
+            path: input.path,
+            ...(input.body === undefined ? {} : { body: input.body }),
+            action: "server_action",
+            callId,
+            source: lane === "operator" ? "operator" : "discord",
+            ...(turn.guildId === undefined ? {} : { sourceGuildId: turn.guildId }),
+          } as Parameters<NonNullable<CaptainDeps["discordActions"]>["execute"]>[0])
+          .then(json),
+    }),
+    ...(deps.discordTracking === undefined
+      ? []
+      : [
+          defineTool({
+            name: "discord_tracking_project",
+            label: "Choose project mirror",
+            description:
+              "Choose a tracked project's Discord representation before its first event: a channel, or a forum with one post per issue. Use your judgment. Existing mirrors refuse a different representation to preserve their history. This chooses representation; the owner's tracking level still decides which events are posted.",
+            parameters: Type.Object({
+              projectId: Type.String({ minLength: 1, maxLength: 128 }),
+              representation: Type.Union([Type.Literal("channel"), Type.Literal("forum")]),
+            }),
+            execute: async (_callId, input) => {
+              const settings = await readDiscordServerSettings();
+              if (
+                settings.role !== "admin" ||
+                settings.serverId === undefined ||
+                (lane !== "operator" && turn.guildId !== settings.serverId)
+              )
+                return json({
+                  ok: false,
+                  message: "Project mirrors require the admin role in the connected server.",
+                });
+              try {
+                await deps.discordTracking!.configureProject(input.projectId, input.representation);
+                return json({ ok: true, message: "Project mirror representation saved." });
+              } catch (error) {
+                return json({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Project mirror unavailable.",
+                });
+              }
+            },
+          }),
+        ]),
   ];
 }
 

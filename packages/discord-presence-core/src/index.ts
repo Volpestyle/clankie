@@ -307,3 +307,10 @@ export {
   createMinecraftLoginCodeDelivery,
   tryHandleMinecraftLoginCodeRequest,
 } from "./minecraft-login-code.ts";
+
+export {
+  discordServerAuthority,
+  executeDiscordServerAction,
+  type DiscordServerAuthority,
+  type DiscordServerRequest,
+} from "./server-actions.ts";

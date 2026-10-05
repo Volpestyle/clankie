@@ -74,6 +74,7 @@ import {
   FLEET_MODEL_GUIDANCE,
   FLEET_SIZE_GUIDANCE,
   personaInstructions,
+  readDiscordServerSettings,
   resolveDiscordSettings,
   SettingsStore,
   projectsRevision,
@@ -2316,6 +2317,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       await created;
     },
     createChannelProjection({
+      fleetSettings: () => readDiscordServerSettings(options.discordEnvironment, settingsStore),
+      ...(deps.discordActions?.serverAction === undefined
+        ? {}
+        : {
+            participantPost: async (channelId: string, content: string) => {
+              const result = await deps.discordActions!.serverAction({
+                method: "POST",
+                path: `/channels/${channelId}/messages`,
+                body: { content, allowed_mentions: { parse: [] } },
+              });
+              if (!result.ok) throw new Error(result.message);
+            },
+          }),
       ...(options.discordChannels?.provisionChannel === undefined
         ? {}
         : { provision: (input) => options.discordChannels!.provisionChannel!(input) }),
@@ -3855,6 +3869,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     reconcileFleetPeerMessage: (authority, delivery, fingerprint) =>
       peerMessages.reconcile(authority, delivery, fingerprint),
     async submitChannelProjectionMessage(request) {
+      const discord = await readDiscordServerSettings(options.discordEnvironment, settingsStore);
+      if (
+        !discord.fleetEnabled ||
+        discord.teamVisible === false ||
+        discord.role !== "admin" ||
+        discord.serverId !== request.guildId
+      )
+        return { schemaVersion: 1 as const, state: "not_projected" as const };
       await refreshFleet();
       const accepted = conversations.submitProjectedMessage(request.guildId, request.channelId, request.body);
       return accepted === undefined

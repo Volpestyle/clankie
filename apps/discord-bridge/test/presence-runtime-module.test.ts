@@ -95,14 +95,17 @@ describe("channel provisioning against the managed server", () => {
     delete process.env.DISCORD_USER_TOKEN;
     delete process.env.DISCORD_BOT_TOKEN;
     process.env.CLANKIE_CREDENTIALS_FILE = path;
+    process.env.CLANKIE_SETTINGS_FILE = join(directory, "settings.json");
+    delete process.env.DISCORD_SERVER_ID;
+    delete process.env.DISCORD_MANAGED_GUILD_ID;
     // The command server and the presence allowlist name guilds that are NOT
     // the managed server, and the managed server appears on neither. Provisioning has
     // to work anyway: the two are separate authorities, so a managed server that
     // only worked when it was also a presence guild would be the same field
     // wearing two names.
-    process.env.DISCORD_GUILD_ID = "command-guild";
-    process.env.DISCORD_SWARM_GUILD_ID = "guild-1";
-    process.env.DISCORD_PRESENCE_GUILD_IDS = "inhabited-guild";
+    process.env.DISCORD_GUILD_ID = "10101";
+    process.env.DISCORD_SWARM_GUILD_ID = "20202";
+    process.env.DISCORD_PRESENCE_GUILD_IDS = "30303";
     delete process.env.DISCORD_PRESENCE_CHANNEL_IDS;
     const calls: string[] = [];
     const rest = {
@@ -131,11 +134,11 @@ describe("channel provisioning against the managed server", () => {
 
   it("provisions only into the managed server, never the command server or an inhabited guild", async () => {
     const { runtime } = await runtimeWithFakeRest();
-    expect(runtime.swarmGuildId()).toBe("guild-1");
+    expect(runtime.swarmGuildId()).toBe("20202");
     // Every route it builds names the managed server, though the command server and
     // an inhabited presence guild are both configured and one of them would
     // have answered before the managed server existed as its own field.
-    expect((await runtime.provisionChannel({ name: "Atlas slowness" })).guildId).toBe("guild-1");
+    expect((await runtime.provisionChannel({ name: "Atlas slowness" })).guildId).toBe("20202");
 
     delete process.env.DISCORD_SWARM_GUILD_ID;
     const { createDiscordPresenceRuntime } = await import("../src/presence-runtime-module.ts");
@@ -153,7 +156,7 @@ describe("channel provisioning against the managed server", () => {
       { kind: "channel", channelId: "43", name: "fleet" },
       { kind: "channel", channelId: "42", name: "general" },
     ]);
-    expect(calls).toEqual(["GET /guilds/guild-1/channels"]);
+    expect(calls).toEqual(["GET /guilds/20202/channels"]);
   });
 
   it("puts the webhook on a room the server already has, making no channel", async () => {
@@ -164,13 +167,13 @@ describe("channel provisioning against the managed server", () => {
         room: { kind: "channel", channelId: "43" },
       }),
     ).toEqual({
-      guildId: "guild-1",
+      guildId: "20202",
       channelId: "43",
       webhookId: "webhook-1",
       webhookToken: "webhook-secret",
     });
     // No POST to /guilds/…/channels: the room was already there.
-    expect(calls).toEqual(["GET /guilds/guild-1/channels", "POST /channels/43/webhooks"]);
+    expect(calls).toEqual(["GET /guilds/20202/channels", "POST /channels/43/webhooks"]);
   });
 
   it("creates one post in a selected forum and targets the parent webhook at that thread", async () => {
@@ -181,14 +184,14 @@ describe("channel provisioning against the managed server", () => {
         room: { kind: "forum", channelId: "45" },
       }),
     ).toEqual({
-      guildId: "guild-1",
+      guildId: "20202",
       channelId: "45",
       threadId: "forum-post-1",
       webhookId: "webhook-1",
       webhookToken: "webhook-secret",
     });
     expect(calls).toEqual([
-      "GET /guilds/guild-1/channels",
+      "GET /guilds/20202/channels",
       "POST /channels/45/threads",
       "POST /channels/45/webhooks",
     ]);
@@ -204,16 +207,16 @@ describe("channel provisioning against the managed server", () => {
     ).rejects.toThrow(/discord_channel_not_in_swarm_guild/);
     // The guild-scoped grant would otherwise reach a room in a guild Clankie
     // only inhabits, which the swarm fence is supposed to be the whole of.
-    expect(calls).toEqual(["GET /guilds/guild-1/channels"]);
+    expect(calls).toEqual(["GET /guilds/20202/channels"]);
   });
 
   it("makes the channel and its webhook when no existing room is named", async () => {
     const { runtime, calls } = await runtimeWithFakeRest();
     expect(await runtime.provisionChannel({ name: "Atlas slowness" })).toMatchObject({
-      guildId: "guild-1",
+      guildId: "20202",
       channelId: "new-channel",
       webhookId: "webhook-1",
     });
-    expect(calls).toEqual(["POST /guilds/guild-1/channels", "POST /channels/new-channel/webhooks"]);
+    expect(calls).toEqual(["POST /guilds/20202/channels", "POST /channels/new-channel/webhooks"]);
   });
 });

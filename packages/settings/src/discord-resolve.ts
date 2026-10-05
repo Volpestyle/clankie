@@ -1,5 +1,21 @@
 import { envOverrideReaders } from "./env-override.ts";
 import { DiscordSettingsSchema, type DiscordSettings } from "./schema.ts";
+import { discordServerSettings } from "@clankie/protocol/discord-settings";
+import { SettingsStore, defaultSettingsPath } from "./store.ts";
+
+const materializedEnvironment = new WeakMap<NodeJS.ProcessEnv, Map<string, string>>();
+
+/** Read fresh authority while retaining actual shell overrides, not startup’s copied settings. */
+export async function readDiscordServerSettings(
+  env: NodeJS.ProcessEnv = process.env,
+  settingsStore = new SettingsStore(defaultSettingsPath(env)),
+): Promise<DiscordSettings> {
+  const overrides = { ...env };
+  for (const [name, value] of materializedEnvironment.get(env) ?? [])
+    if (overrides[name] === value) delete overrides[name];
+  const stored = await settingsStore.load();
+  return resolveDiscordSettings(stored.discord, overrides).settings;
+}
 
 /**
  * Merge stored settings with environment overrides.
@@ -27,6 +43,11 @@ export function resolveDiscordSettings(
   const merged: Record<string, unknown> = { ...stored };
   const { overridden, takeString, takeList, takeBoolean, takeInteger } = envOverrideReaders(env);
 
+  takeString(merged, "serverId", "DISCORD_SERVER_ID");
+  takeString(merged, "role", "DISCORD_ROLE");
+  takeBoolean(merged, "fleetEnabled", "DISCORD_FLEET_ENABLED");
+  takeString(merged, "fleetChannelId", "DISCORD_FLEET_CHANNEL_ID");
+  takeString(merged, "trackingLevel", "DISCORD_TRACKING_LEVEL");
   takeString(merged, "applicationId", "DISCORD_APPLICATION_ID");
   takeString(merged, "guildId", "DISCORD_GUILD_ID");
   takeString(merged, "swarmGuildId", "DISCORD_SWARM_GUILD_ID");
@@ -76,7 +97,7 @@ export function resolveDiscordSettings(
   takeString(merged, "activityTunnelHostname", "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME");
 
   return {
-    settings: DiscordSettingsSchema.parse(merged),
+    settings: discordServerSettings(DiscordSettingsSchema.parse(merged)),
     overriddenByEnvironment: overridden,
   };
 }
@@ -111,18 +132,22 @@ export function applyDiscordSettingsToEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   const applied: string[] = [];
+  const copied = materializedEnvironment.get(env) ?? new Map<string, string>();
+  materializedEnvironment.set(env, copied);
   for (const [name, value] of Object.entries(discordSettingsToEnvironment(settings))) {
     // Preserve the legacy spelling's environment-wins behavior during migration.
     if (name === "DISCORD_MANAGED_GUILD_ID" && env.DISCORD_SWARM_GUILD_ID?.trim()) continue;
     const existing = env[name];
     if (existing !== undefined && existing.length > 0) continue;
     env[name] = value;
+    copied.set(name, value);
     applied.push(name);
   }
   return applied;
 }
 
 export function discordSettingsToEnvironment(settings: DiscordSettings): Record<string, string> {
+  settings = discordServerSettings(settings);
   const env: Record<string, string> = {};
   const put = (name: string, value: string | undefined): void => {
     if (value !== undefined && value.length > 0) env[name] = value;
@@ -131,6 +156,11 @@ export function discordSettingsToEnvironment(settings: DiscordSettings): Record<
     if (values.length > 0) env[name] = values.join(",");
   };
 
+  put("DISCORD_SERVER_ID", settings.serverId);
+  env.DISCORD_ROLE = settings.role;
+  env.DISCORD_FLEET_ENABLED = String(settings.fleetEnabled);
+  put("DISCORD_FLEET_CHANNEL_ID", settings.fleetChannelId);
+  env.DISCORD_TRACKING_LEVEL = settings.trackingLevel;
   put("DISCORD_APPLICATION_ID", settings.applicationId);
   put("DISCORD_GUILD_ID", settings.guildId);
   put("DISCORD_MANAGED_GUILD_ID", settings.swarmGuildId);
