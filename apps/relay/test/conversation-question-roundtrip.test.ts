@@ -72,6 +72,7 @@ async function fixture(hosted = false, text = false) {
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
   let now = Date.now();
+  const clock = () => now;
   const key = randomBytes(32),
     signer = new DeviceSessionSigner(key);
   const names = ["control", "other", "read", "unminted"];
@@ -79,14 +80,18 @@ async function fixture(hosted = false, text = false) {
     names.map((id) => [
       id,
       signer.issue(
-        mintDeviceSessionClaims({ deviceId: id, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 600 }),
+        mintDeviceSessionClaims({
+          deviceId: id,
+          nowEpochSeconds: Math.floor(clock() / 1000),
+          ttlSeconds: 600,
+        }),
       ),
     ]),
   );
   const events = names.flatMap((deviceId) => {
     const grants = deviceId === "read" ? SUPERVISE_GRANTS : TAKE_CONTROL_GRANTS;
     const base = {
-      occurredAt: new Date(now).toISOString(),
+      occurredAt: new Date(clock()).toISOString(),
       missionId: `device:${deviceId}`,
       correlationId: "fixture",
       profileHash: "fixture",
@@ -104,14 +109,19 @@ async function fixture(hosted = false, text = false) {
           platform: "ios",
           offeredGrants: grants,
           mintedBy: hosted && deviceId !== "unminted" ? "hosted-account-operator" : "local-owner",
-          pendingExpiresAt: new Date(now + 600_000).toISOString(),
+          pendingExpiresAt: new Date(clock() + 600_000).toISOString(),
         },
       },
       {
         ...base,
         id: randomUUID(),
         type: "device.activated",
-        data: { schemaVersion: 1, deviceId, grants, sessionExpiresAt: new Date(now + 600_000).toISOString() },
+        data: {
+          schemaVersion: 1,
+          deviceId,
+          grants,
+          sessionExpiresAt: new Date(clock() + 600_000).toISOString(),
+        },
       },
     ];
   });
@@ -160,7 +170,7 @@ async function fixture(hosted = false, text = false) {
     }),
     eventLogPath: log,
     deviceSessionKey: key,
-    clock: () => new Date(now),
+    clock: () => new Date(clock()),
     authenticateCaptain: async (r) =>
       r.headers.get("authorization") === "Bearer fixture-captain-token"
         ? { captainId: "captain", steerSourceLane: "api" }
@@ -170,9 +180,9 @@ async function fixture(hosted = false, text = false) {
     ...(hosted
       ? {
           hostedPairing: new HostedPairing(
-            new HostedBodyClient(hf.bootstrap, { clock: () => now }),
+            new HostedBodyClient(hf.bootstrap, { clock }),
             generateKeyPairSync("ed25519").privateKey,
-            { clock: () => now },
+            { clock },
           ),
         }
       : {}),
@@ -217,6 +227,7 @@ async function fixture(hosted = false, text = false) {
   });
   const messages: unknown[] = [];
   const options = {
+    clock,
     authorizeDevice: authorizer,
     dispatch: captain,
     deviceDispatch: owner,
@@ -281,6 +292,7 @@ async function fixture(hosted = false, text = false) {
   return {
     id,
     key,
+    clock,
     store,
     service,
     tokens,
@@ -395,7 +407,7 @@ it.each(["captain", "wrong-signer", "expired", "revoked"])(
       token = new DeviceSessionSigner(randomBytes(32)).issue(
         mintDeviceSessionClaims({
           deviceId: "control",
-          nowEpochSeconds: Math.floor(Date.now() / 1000),
+          nowEpochSeconds: Math.floor(f.clock() / 1000),
           ttlSeconds: 600,
         }),
       );
@@ -508,13 +520,16 @@ it("send dedup identity is stable through grant upgrade and token rotation", asy
   if (first.op !== "send" || first.result.status !== "accepted") throw new Error("not accepted");
   await f.store.awaitRun(first.result.runId);
   control = true;
+  // Force wall time across the next second while the service fixture stays frozen.
+  vi.spyOn(Date, "now").mockReturnValue(f.clock() + 1_000);
   const rotated = new DeviceSessionSigner(f.key).issue(
     mintDeviceSessionClaims({
       deviceId: "control",
-      nowEpochSeconds: Math.floor(Date.now() / 1000),
+      nowEpochSeconds: Math.floor(f.clock() / 1000),
       ttlSeconds: 500,
     }),
   );
+  expect(rotated).not.toBe(f.tokens.control);
   const [a, b] = await Promise.all([f.raw(request), f.raw(request, rotated)]);
   expect(await a.json()).toEqual(first);
   expect(await b.json()).toEqual(first);
@@ -619,7 +634,7 @@ it("encrypted public transport reaches the real hosted relay/bridge without expo
         key: encryptionKey,
         subject: "control",
         stage: "device",
-        expiresAt: Date.now() + 600_000,
+        expiresAt: f.clock() + 600_000,
       }),
       `clankie-gateway-ticket-v1:${hostId}`,
     ),
