@@ -97,13 +97,14 @@ import {
   type OperatorConversation,
   type OperatorConversationActivityPhase,
   type OperatorFleetSeat,
+  type OperatorGoal,
   type OperatorSeatEventKind,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
 } from "@clankie/protocol";
 import { sanitizeForSupportBundle } from "@clankie/observability";
 import { type ModelPurpose, type PiModelSelection } from "@clankie/model-provider";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -680,6 +681,105 @@ interface LaneSession {
    * a second prompt.
    */
   starting?: Promise<void> | undefined;
+}
+
+const NATIVE_GOAL_UNSUPPORTED =
+  "native_goal_unsupported: Service goals are unavailable in a native harness seat: continuations cannot reach this seat with enforced token accounting. Continue the task in this harness without create_goal, or use a Pi-owned conversation.";
+
+/**
+ * Charge each provider response before Pi can request another one. The native
+ * request hook is used because extension hook exceptions are only diagnostics.
+ * A single response can overshoot; subsequent requests and continuations cannot.
+ */
+export function enforceGoalBudget(
+  session: AgentSession,
+  autonomy: AutonomyStore,
+  conversationId: string,
+  goal: OperatorGoal,
+  autonomous: boolean,
+): () => void {
+  const original = session.agent.prepareRequest;
+  const originalStream = session.agent.streamFunction;
+  // Cache refreshes use a separate runtime stream and are optional. Keep
+  // goal spend on the guarded request path instead of refreshing in parallel.
+  const warmingMode = session.settingsManager.getCacheWarmingMode();
+  session.setCacheWarmingMode("off");
+  let accountingRefusal: string | undefined;
+  const check = (): void => {
+    const current = autonomy.getGoal(conversationId);
+    if (current !== goal) {
+      throw new Error("goal_replaced");
+    }
+    if (accountingRefusal !== undefined) throw new Error(accountingRefusal);
+    if (current.tokenBudget === undefined || current.tokensUsed >= current.tokenBudget)
+      throw new Error("goal_budget_limited");
+    if (current.status === "budget_limited" || current.status === "usage_limited")
+      throw new Error(`goal_${current.status}`);
+    if (autonomous && current.status === "paused") throw new Error("goal_paused");
+  };
+  const guarded: NonNullable<typeof original> = async (request, signal) => {
+    check();
+    const prepared = original === undefined ? undefined : await original(request, signal);
+    check();
+    return prepared ?? undefined;
+  };
+  session.agent.prepareRequest = guarded;
+  const charge = (message: AssistantMessage): void => {
+    const tokens = message.usage?.totalTokens;
+    // Pi reports zero when a request fails or is cancelled before any usage.
+    // Keep its retries and the owner's next prompt available in those cases.
+    const unaccounted =
+      typeof tokens !== "number" ||
+      !Number.isSafeInteger(tokens) ||
+      tokens < 0 ||
+      (tokens === 0 && message.stopReason !== "error" && message.stopReason !== "aborted") ||
+      !Number.isSafeInteger(goal.tokensUsed + tokens);
+    if (unaccounted) accountingRefusal = "goal_usage_limited";
+    const current = unaccounted
+      ? autonomy.limitUsage(conversationId, goal)
+      : autonomy.recordUsage(conversationId, tokens ?? 0, goal);
+    if (
+      current !== undefined &&
+      (unaccounted ||
+        current.tokenBudget === undefined ||
+        current.tokensUsed >= current.tokenBudget ||
+        current.status === "budget_limited" ||
+        current.status === "usage_limited")
+    ) {
+      // abort() cancels synchronously before awaiting Pi's settlement. The
+      // request guard also covers retries and later tools in this same run.
+      void session.abort().catch(() => undefined);
+    }
+  };
+  const guardedStream: typeof originalStream = async (model, context, options) => {
+    check();
+    const stream = await originalStream(model, context, options);
+    // This includes compaction and summarization calls, which do not emit
+    // ordinary assistant message events. Count each response once, including
+    // failed retries, before the next request can pass the same guard.
+    void stream
+      .result()
+      .then(charge)
+      .catch(() => {
+        accountingRefusal = "goal_usage_limited";
+        try {
+          autonomy.limitUsage(conversationId, goal);
+        } catch {
+          // The in-memory guard still closes when durable accounting fails.
+        }
+        void session.abort().catch(() => undefined);
+      });
+    return stream;
+  };
+  session.agent.streamFunction = guardedStream;
+  return () => {
+    if (session.agent.prepareRequest === guarded) {
+      if (original === undefined) delete session.agent.prepareRequest;
+      else session.agent.prepareRequest = original;
+    }
+    if (session.agent.streamFunction === guardedStream) session.agent.streamFunction = originalStream;
+    session.setCacheWarmingMode(warmingMode);
+  };
 }
 
 /**
@@ -1841,6 +1941,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return seatEventKindFor(context, true);
   }
 
+  function goalExecutionReason(conversationId: string): string | undefined {
+    return conversations.hasNativeSeat(conversationId) ||
+      conversationDriver(conversationId) !== undefined ||
+      seatOutboxes.get(conversationId)?.uncertain() === true
+      ? NATIVE_GOAL_UNSUPPORTED
+      : undefined;
+  }
+
+  function refuseNativeGoal(conversationId: string): boolean {
+    if (goalExecutionReason(conversationId) === undefined) return false;
+    autonomy.pauseGoal(conversationId);
+    return true;
+  }
+
   const conversations: ConversationStore = new ConversationStore(
     join(options.stateDir, "conversations"),
     trackHostedConversationRunner(async (conversationId, incoming, publish, context) => {
@@ -1874,6 +1988,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const message = preparedMessage;
       if (message === undefined) return;
       signal.throwIfAborted();
+      if (context.origin === "goal") {
+        if (refuseNativeGoal(conversationId)) return;
+        if (
+          context.expectedGoal === undefined ||
+          autonomy.getGoal(conversationId) !== context.expectedGoal ||
+          context.expectedGoal.status !== "active"
+        )
+          return;
+      }
       return conversations.runWithConversationDriver<void>(
         conversationId,
         () => {
@@ -1955,6 +2078,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // on disk as the record of what it ran.
           // ponytail: one tree per wake, unbounded; prune by mtime if it grows.
           run.signal.throwIfAborted();
+          if (context.origin === "goal") {
+            if (refuseNativeGoal(conversationId)) return;
+            if (
+              context.expectedGoal === undefined ||
+              autonomy.getGoal(conversationId) !== context.expectedGoal ||
+              context.expectedGoal.status !== "active"
+            )
+              return;
+          }
           const oneShot = context.origin === "hook";
           const cwd = context.workspace ?? workingDirectory;
           const lane = oneShot
@@ -2035,6 +2167,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               : undefined;
           lane.capture.room = roomKey("operator", conversationId);
           lane.capture.targetId = conversationId;
+          lane.capture.goalExecutionReason = () => goalExecutionReason(conversationId);
           lane.capture.publishFile = (input) => conversations.publishFile({ conversationId, ...input });
           if (releaseStarting === undefined && lane.starting !== undefined)
             try {
@@ -2058,8 +2191,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           if (metrics !== undefined)
             captureEvaluationStart(context.runId, conversationId, lane.session, message);
           const skillCalls = new Map<string, string>();
-          const goalWasActive = autonomy.getGoal(conversationId)?.status === "active";
-          let runTokens = 0;
+          const candidateGoal =
+            context.origin === "goal"
+              ? context.expectedGoal
+              : live
+                ? undefined
+                : autonomy.getGoal(conversationId);
+          const runGoal =
+            context.origin === "goal"
+              ? candidateGoal
+              : candidateGoal?.status === "active"
+                ? candidateGoal
+                : undefined;
+          const releaseGoalBudget =
+            runGoal === undefined
+              ? () => undefined
+              : enforceGoalBudget(lane.session, autonomy, conversationId, runGoal, context.origin === "goal");
           let activity: OperatorConversationActivityPhase | undefined;
           const publishActivity = (phase: OperatorConversationActivityPhase): void => {
             if (activity === phase) return;
@@ -2132,7 +2279,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     });
                   }
                 } else if (event.type === "message_end" && event.message.role === "assistant") {
-                  runTokens += event.message.usage.totalTokens;
                   // Every message he finishes is a message he said — including the
                   // one he says before reaching for a tool. The draft comes down
                   // here because this durable event is what replaces it.
@@ -2153,6 +2299,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           let settled: TurnSettledOutcome | undefined;
           try {
             shutdown.signal.throwIfAborted();
+            if (
+              context.origin === "goal" &&
+              (refuseNativeGoal(conversationId) ||
+                runGoal === undefined ||
+                autonomy.getGoal(conversationId) !== runGoal ||
+                runGoal.status !== "active")
+            )
+              return;
             if (!live) await run.wait("model synchronization", syncModel(lane));
             // After the sync, so a `/model` or `/effort` change made under a live
             // conversation is attributed to this turn — the first one to execute it.
@@ -2222,6 +2376,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             }
             // The resource loader disables discovered extensions and prompt templates;
             // exact, loaded operator skills are the only input allowed to reach Pi expansion.
+            if (
+              context.origin === "goal" &&
+              (refuseNativeGoal(conversationId) ||
+                runGoal === undefined ||
+                autonomy.getGoal(conversationId) !== runGoal ||
+                runGoal.status !== "active")
+            )
+              return;
             const role = await run.wait(
               "Pi execution",
               runDurableTurn(
@@ -2269,14 +2431,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 text,
               }),
             );
-            if (goalWasActive || autonomy.getGoal(conversationId)?.status === "active") {
-              autonomy.finishTurn(conversationId, runTokens);
-            }
+            if (runGoal !== undefined) autonomy.finishTurn(conversationId, 0, runGoal);
             settled = context.signal.aborted ? "interrupted" : "completed";
           } catch (error) {
             if (metrics !== undefined) settled = context.signal.aborted ? "interrupted" : "failed";
             throw error;
           } finally {
+            releaseGoalBudget();
             run.signal.removeEventListener("abort", onInterrupt);
             unsubscribeProgress();
             if (settled !== undefined) {
@@ -2705,13 +2866,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * keeps live agent names unique, so the census carries at most one.
    */
   function bindHeadSeat(head: ObservedHeadSeat | undefined): void {
+    if (head !== undefined) {
+      conversations.rememberNativeHead(conversations.defaultGlobalConversationId(), head.occupantId);
+      autonomy.pauseGoal(conversations.defaultGlobalConversationId());
+    }
     if (head?.seatId === headSeat?.seatId) {
       headSeat = head;
       return;
     }
     if (headSeat !== undefined) herdrWatches.untrackSeat(headSeat.seatId);
     headSeat = head;
-    if (head !== undefined) herdrWatches.trackSeat(head.seatId, "head");
+    if (head !== undefined) {
+      herdrWatches.trackSeat(head.seatId, "head");
+    }
   }
 
   function conversationGoal(conversationId: string) {
@@ -2774,6 +2941,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // delivery, which a bare bearer does not carry, and the tools that need
     // one already say so.
     const capture: TurnContext = {};
+    if (lane === "operator") capture.goalExecutionReason = () => NATIVE_GOAL_UNSUPPORTED;
     let toolLane = lane;
     if (lane === "operator") {
       const binding = seatContext(conversationId);
@@ -3097,12 +3265,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
-  autonomy.start(async (conversationId, prompt, origin) => {
+  autonomy.start(async (conversationId, prompt, origin, expectedGoal) => {
     if (!conversations.runsCaptainTurns(conversationId)) {
       autonomy.clearConversation(conversationId);
       return;
     }
-    const result = conversations.submitInternal(conversationId, prompt, origin);
+    if (origin === "goal") {
+      if (
+        expectedGoal === undefined ||
+        autonomy.getGoal(conversationId) !== expectedGoal ||
+        expectedGoal.status !== "active"
+      )
+        return;
+      await refreshFleet();
+      if (refuseNativeGoal(conversationId)) return;
+      if (autonomy.getGoal(conversationId) !== expectedGoal || expectedGoal.status !== "active") return;
+    }
+    const result = conversations.submitInternal(conversationId, prompt, origin, expectedGoal);
     if (result.status !== "accepted") throw new Error("Internal autonomy turn was not accepted");
     if (!(await conversations.awaitRunResult(result.runId))) {
       throw new Error("Internal autonomy turn failed");
@@ -4324,6 +4503,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (!conversations.runsCaptainTurns(request.conversationId)) {
           throw new Error("Only Clankie's own conversations have captain autonomy");
         }
+        if (
+          request.command.action === "set_goal" ||
+          request.command.action === "accept_goal" ||
+          (request.command.action === "set_goal_status" && request.command.status === "active")
+        ) {
+          await refreshFleet();
+          const reason = goalExecutionReason(request.conversationId);
+          if (reason !== undefined) throw new ConversationRefusedError(reason);
+        }
         return Promise.resolve({
           op: "autonomy",
           schemaVersion: 1,
@@ -5047,6 +5235,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     seatContext,
     syncSeatTranscript: (id, transcript) => {
       if (!conversations.syncNativeSeatTranscript(id, transcript.sessionId, transcript.entries)) return false;
+      autonomy.pauseGoal(id);
       if (
         transcript.activity !== undefined &&
         seatOutbox(id).observeTurn(transcript.sessionId, transcript.activity)
@@ -5112,6 +5301,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     pollSeatEvents(waitMs, signal, conversationId) {
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
+      if (waitMs > 0 || goalExecutionReason(binding.conversationId) !== undefined)
+        autonomy.pauseGoal(binding.conversationId);
       conversations.cancelPendingQuestion(binding.conversationId, "native_seat_takeover");
       void recoverWorkerReports(binding.conversationId).catch(() => undefined);
       const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);

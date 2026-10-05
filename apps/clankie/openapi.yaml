@@ -1849,7 +1849,11 @@ paths:
         complete bounded unread payloads and ackDeliveryIds without acknowledging;
         only fully offered IDs may be marked read. Roster/fleet report summaries
         survive disappeared panes, and delivery receipts never establish reading.
-        The TUI and relay both speak this. Seat scopes
+        The TUI and relay both speak this.
+        The `autonomy` command `set_goal` activates an owner-authored goal;
+        `accept_goal` confirms an inactive model proposal. Service goals default
+        to a finite 1,000,000-token budget and refuse activation for native heads.
+        Seat scopes
         identify Herdr direct-send/projection threads. `cancel` interrupts one
         accepted run: the captain aborts the live model turn and the durable
         log settles that run as `cancelled`. `fork` clones the current Pi leaf

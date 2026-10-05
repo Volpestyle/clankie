@@ -94,8 +94,9 @@ with [Discord and play setup](/diy/#hang-out-and-play).
 Closing a window does not stop the service. A local Mac must stay awake and
 online; hosted availability follows its account and resource limits.
 
-For a DIY task that should continue across turns, use `/goal` and explicitly
-enable `/autonomy`. You can pause the goal or turn continuation off. This is
+For a DIY task that should continue across turns in a Pi-owned conversation,
+use `/goal` and explicitly enable `/autonomy`. Goals have a finite token budget;
+you can pause the goal or turn continuation off. This is
 separate from keeping an ordinary conversation open. See [ongoing work](/diy/#give-him-ongoing-work)
 for the controls and their limits.
 

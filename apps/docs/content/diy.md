@@ -285,9 +285,11 @@ In the local console:
 
 A goal gives that conversation a durable objective. Autonomy enables further
 turns and scheduled wakes; it does not grant new tools or access. Use `/goal`
-to inspect, pause, resume, or clear the goal, and `/autonomy off` to stop new
-automatic continuations. An in-flight tool call may still finish. Set a token
-budget when you need a bound; the [console reference](/console/) owns
+to inspect, accept a proposed goal, pause, resume, or clear the goal, and
+`/autonomy off` to stop new automatic continuations. Goals default to a 1,000,000
+model-token budget; `/goal --tokens <n> <objective>` overrides it. An in-flight
+request or tool call may still finish. Service goals require a Pi-owned
+conversation; native harness seats refuse them. The [console reference](/console/) owns
 the exact syntax. These are [console controls](/cli/#console-only-not-missing),
 with no standalone headless goal or autonomy command.
 

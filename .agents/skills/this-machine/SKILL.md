@@ -212,6 +212,15 @@ notes. Local Codex `/goal` state appears automatically, including paused,
 blocked, budget/usage limits and completion. Remote or unsupported native goal
 stores remain unknown. Goal state and busy/idle turn status are independent.
 
+Service goals require a Pi-owned conversation. Pi's `create_goal` stores an
+inactive proposal for the owner to confirm with `/goal accept`; only owner
+commands activate it. Native harness MCP seats refuse service `create_goal`
+with `native_goal_unsupported`, since the service cannot enforce their goal
+continuations or usage. Every service goal has a finite token budget (default
+1,000,000; owner override `/goal --tokens <n> <objective>`), including restored
+goals. A refused native goal is a boundary to explain, not a cue to start a
+second lead through another conversation.
+
 ## Presence and desktop body
 
 `get_self_state` reports current activity; `clankie status` reports process

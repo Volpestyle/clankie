@@ -1547,6 +1547,7 @@ export const OperatorAutonomyCommandSchema = z.discriminatedUnion("action", [
       tokenBudget: z.number().int().positive().optional(),
     })
     .strict(),
+  z.object({ action: z.literal("accept_goal") }).strict(),
   z.object({ action: z.literal("set_goal_status"), status: z.enum(["active", "paused"]) }).strict(),
   z.object({ action: z.literal("clear_goal") }).strict(),
   z.object({ action: z.literal("clear_wake") }).strict(),

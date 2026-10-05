@@ -92,6 +92,8 @@ export interface TurnContext {
   discordOrigin?: DiscordWatchOrigin | undefined;
   /** True for a host-authored goal continuation or scheduled wake. */
   autonomous?: boolean | undefined;
+  /** Current host-owned refusal reason for service goals; native seats cannot budget that loop. */
+  goalExecutionReason?: (() => string | undefined) | undefined;
   /** Bound by an operator conversation to publish one deliberate finished file into its transcript. */
   publishFile?:
     | ((input: {
@@ -1223,22 +1225,23 @@ function autonomyTools(autonomy: AutonomyStore, turn: TurnContext): ToolDefiniti
       name: "create_goal",
       label: "Create goal",
       description:
-        "Create an active durable goal for this conversation. Use only when the owner or system explicitly asks for a goal; never infer a goal from an ordinary task or from your own idea. Propose self-authored goals conversationally instead. State the objective as a checkable result, not a duration of effort.",
+        "Propose a durable goal for this Pi-owned conversation. It stays inactive until the owner confirms with /goal accept. Never infer a goal from an ordinary task. State a checkable objective; every goal has a finite token budget (default 1,000,000). Native harness seats refuse service goals because their continuations and usage cannot be enforced by this loop.",
       parameters: Type.Object({
         objective: Type.String({ minLength: 1, maxLength: 16_384 }),
-        token_budget: Type.Optional(Type.Number({ minimum: 1 })),
+        token_budget: Type.Optional(Type.Integer({ minimum: 1 })),
       }),
       executionMode: "sequential",
       execute: async (_id, params) => {
-        if (turn.autonomous === true) throw new Error("Autonomous turns may propose goals, not create them");
-        return json(autonomy.createGoal(conversationId(), params.objective, params.token_budget));
+        const reason = turn.goalExecutionReason?.();
+        if (reason !== undefined) throw new Error(reason);
+        return json(autonomy.proposeGoal(conversationId(), params.objective, params.token_budget));
       },
     }),
     defineTool({
       name: "get_goal",
       label: "Inspect goal",
       description:
-        "Read this conversation's active goal, usage, autonomy switch, pending self-wake, and the goal's recent decision journal.",
+        "Read this conversation's proposed or active goal, usage, autonomy switch, pending self-wake, and the goal's recent decision journal.",
       parameters: Type.Object({}),
       execute: async () =>
         json({

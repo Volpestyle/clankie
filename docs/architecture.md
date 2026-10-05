@@ -320,19 +320,22 @@ environment for authenticated requests.
 
 ### Goals and autonomous continuation
 
-The service also keeps `autonomy.json`: one owner-approved goal and one
+The service also keeps `autonomy.json`: one proposed or owner-approved goal and one
 replaceable self-wake per operator conversation, plus a global enable switch.
 An unreadable file fails closed and surfaces `state_unreadable` to operator
 clients instead of silently re-enabling autonomous work.
-An active goal queues host-authored continuation turns through the same
+An active goal in a Pi-owned conversation queues host-authored continuation turns through the same
 conversation chain as operator messages, so every tool call and reply stays in
 the existing Pi session and public event log. A human message that arrives
 while that run is streaming steers it by default; in-flight tool calls still
 finish. Explicit `delivery: "steer"` also joins a human-started Pi turn, while
 `delivery: "queue"` waits for a separate turn on the conversation FIFO
 ([ADR 0091](adr/0091-a-mid-turn-message-steers-the-turn.md)). A
-token budget moves a goal to `budget_limited`; `/goal` owns activation,
-pause/resume, and clearing, while `/autonomy off` stops new continuations and
+finite token budget (default 1,000,000) moves a goal to `budget_limited` before
+another provider request; failed turns retain recorded usage. Model calls persist
+inactive proposals, confirmed only by `/goal accept`. Native harness seats refuse
+service goals, and a queued goal pauses on discovering a native head.
+`/goal` owns activation, pause/resume, and clearing, while `/autonomy off` stops new continuations and
 wakes. A due wake queues one turn with Clankie's recorded reason and may be
 replaced by another. Neither path changes the conversation's tool set or
 authority ([ADR 0130](adr/0130-goals-and-self-wakes-share-the-operator-thread.md)).
