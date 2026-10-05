@@ -73,7 +73,7 @@ describe("service-only Minecraft MCP transport", () => {
     expect(f.connect).toHaveBeenCalledTimes(1);
     expect(f.calls).not.toHaveBeenCalled();
     expect(await f.port.join({ profileId: "paper", session }, async () => {})).toEqual(connected);
-    expect(f.calls).toHaveBeenCalledWith("join", { profileId: "paper", session, endpoint });
+    expect(f.calls).toHaveBeenCalledWith("join", { profileId: "paper", session, endpoint }, 60_000);
     await f.host.close();
   });
 

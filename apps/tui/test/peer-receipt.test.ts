@@ -381,7 +381,13 @@ it("the worker bridge discovers peers, routes once outside MCP retries, and obse
                 capabilities: { tools: {} },
                 serverInfo: { name: "fixture", version: "1" },
               }
-            : { tools: [{ name: "clankie_tools", inputSchema: { type: "object" } }] };
+            : {
+                tools: ["clankie_tools", "clankie_call"].map((name) => ({
+                  name,
+                  inputSchema: { type: "object" },
+                })),
+                _meta: { clankie: { tools: "connected", peerMessages: enabled ? "on" : "off" } },
+              };
         res.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result }));
       } else if (url.pathname.endsWith("/peers")) {
         res.statusCode = enabled ? 200 : 403;
@@ -428,6 +434,7 @@ it("the worker bridge discovers peers, routes once outside MCP retries, and obse
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
       "message_clankie",
       "clankie_tools",
+      "clankie_call",
       "list_fleet_seats",
       "message_peer",
     ]);
@@ -454,6 +461,7 @@ it("the worker bridge discovers peers, routes once outside MCP retries, and obse
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
       "message_clankie",
       "clankie_tools",
+      "clankie_call",
     ]);
     expect(
       parse(await client.callTool({ name: "message_peer", arguments: { seat: "peer-seat", text: "next" } }))
