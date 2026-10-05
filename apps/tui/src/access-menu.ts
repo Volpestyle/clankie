@@ -9,7 +9,7 @@ type Json = Record<string, unknown>;
 const record = (value: unknown): Json => (value !== null && typeof value === "object" ? (value as Json) : {});
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-export interface AccessGrantRow {
+interface AccessGrantRow {
   readonly id: string;
   readonly label: string;
   readonly hint: string;
@@ -17,7 +17,7 @@ export interface AccessGrantRow {
 }
 
 /** The grant list is the service's own record shape; read it defensively. */
-export function accessGrantRows(list: unknown, now = Date.now()): AccessGrantRow[] {
+function accessGrantRows(list: unknown, now = Date.now()): AccessGrantRow[] {
   return (Array.isArray(list) ? list : []).flatMap((entry) => {
     const item = record(entry);
     const grant = record(item.grant);

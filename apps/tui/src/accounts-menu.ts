@@ -17,7 +17,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 const home = (path: string) => path.replace(/^\/(?:Users|home)\/[^/]+/u, "~");
 
 /** `signed in · 42% headroom` for Codex; Claude profiles carry no readable status. */
-export function codexAccountHint(account: CodexAccount): string {
+function codexAccountHint(account: CodexAccount): string {
   return [
     account.authPresent ? "signed in" : "not signed in",
     account.headroom === null ? "headroom unknown" : `${Math.round(account.headroom * 100)}% headroom`,

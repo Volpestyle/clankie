@@ -25,7 +25,7 @@ const ROLE_FIELDS: readonly {
 const shown = (value: unknown) => (value === undefined || value === null ? "inherit" : String(value));
 
 /** One-line role summary: only the fields the owner actually set. */
-export function roleSummary(policy: RolePolicy | undefined): string {
+function roleSummary(policy: RolePolicy | undefined): string {
   if (!policy) return "built-in";
   const set = ROLE_FIELDS.flatMap((field) => {
     const value = field.read(policy);

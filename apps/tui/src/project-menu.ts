@@ -30,7 +30,7 @@ async function attempt(flow: SetupFlow, work: () => Promise<unknown>, done: stri
 }
 
 /** `id · 3 roles · cap 4 · tracker` — the facts worth seeing before opening a project. */
-export function projectHint(project: Project): string {
+function projectHint(project: Project): string {
   return [
     project.id,
     project.roles.length
