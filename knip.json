@@ -53,7 +53,11 @@
       }
     },
     "apps/clankie": {
-      "entry": ["test/fixtures/mcp-stdio-bridge.ts", "src/computer-windows-host.ts"]
+      "entry": [
+        "test/fixtures/mcp-stdio-bridge.ts",
+        "src/computer-windows-host.ts",
+        "test/fixtures/fleet-ssh-recovery/*.mjs"
+      ]
     },
     "packages/protocol": {
       "entry": ["test/fixtures/*.ts"]
