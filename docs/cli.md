@@ -2039,7 +2039,7 @@ requires `expectedRevision`; stale requests refuse without changing history.
 
 <a id="conversation-commands"></a>
 
-### `conversations list | show ID | tail ID`
+### `conversations list | show ID | tail ID | goal ID`
 
 Recent-history reads include native agent seats. Backward replay returns a
 bounded window and an exclusive `previousCursor`; native cursors are opaque
@@ -2053,6 +2053,10 @@ clankie conversations list
 clankie conversations show 1551975693582336060
 clankie conversations show ROOM_ID --cursor 000000000100 --limit 100
 clankie conversations tail ROOM_ID --cursor 000000000100
+clankie conversations goal global-default accept
+clankie conversations goal global-default set --tokens 1000000 "Finish the checked task"
+clankie conversations goal global-default pause
+clankie conversations goal global-default resume
 ```
 
 `list` returns JSON metadata. `show` returns metadata plus one replay page of
@@ -2522,7 +2526,15 @@ activation or resume also refuses while a native head owns the conversation.
 Queued or restored service goals pause on finding a native head, so they cannot
 start another Pi lead alongside the seat. Model calls in Pi create inactive
 proposals; `/goal accept` confirms one. `/goal <objective>` creates an active goal
-directly. Every service goal defaults to a 1,000,000 model-token budget, overridden
+directly. Starting, accepting and resuming a goal, and `/autonomy on`, require the
+owner/device credential; the shared captain bearer receives HTTP 403
+`goal_owner_required`. The console uses its owner transport, and headless owners
+can use `clankie conversations goal ID accept|resume` or
+`clankie conversations goal ID set [--tokens N] <objective>`. An omitted action
+reads status; `pause|clear` and status use the captain transport. This raises the
+activation bar, but a same-UID shell can still read Keychain credentials or the
+device signing key; it does not provide OS-level owner isolation (ADR 0130).
+Every service goal defaults to a 1,000,000 model-token budget, overridden
 with `/goal --tokens <n> <objective>`. Recorded usage survives budget migration
 for older goals, and exhausted goals stop before another provider request.
 Stalled service preparation releases its admission so the attached seat can take

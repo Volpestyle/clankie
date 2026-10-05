@@ -1819,6 +1819,9 @@ paths:
         The `autonomy` command `set_goal` activates an owner-authored goal;
         `accept_goal` confirms an inactive model proposal. Service goals default
         to a finite 1,000,000-token budget and refuse activation for native heads.
+        Starting, accepting or resuming a goal, and enabling autonomy, require
+        an operator credential or active terminalControl device authority.
+        A captain bearer alone receives 403 goal_owner_required.
         Seat scopes
         identify Herdr direct-send/projection threads. `cancel` interrupts one
         accepted run: the captain aborts the live model turn and the durable
@@ -1904,7 +1907,7 @@ paths:
           required: false
           schema: { type: string }
           description: Caller Herdr session's exact socket path, required for pane identity.
-      security: [{ captainBearer: [] }]
+      security: [{ captainBearer: [] }, { operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
         content:
@@ -1985,6 +1988,8 @@ paths:
       responses:
         "200":
           description: Discriminated result
+        "403":
+          description: goal_owner_required for activation without owner/device authority
 
   /captain/v1/lanes:
     get:

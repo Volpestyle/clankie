@@ -108,6 +108,8 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
       "                           Inspect every conversation, including Discord tools (JSON)",
+      "  conversations goal ID [status|accept|pause|resume|clear]",
+      "  conversations goal ID set [--tokens N] <objective>",
       "  conversations channels | rooms | channel [ID] [--title T] [--member PERSONA_ID]...",
       "  conversations questions ID [--request UUID]",
       "  conversations answer|cancel-question ID REQUEST --incarnation UUID --revision N [--option UUID | --text TEXT | --stdin]",

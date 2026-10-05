@@ -14,6 +14,8 @@ import {
   UpsertOperatorChannelSchema,
   ConversationQuestionTargetSchema,
   ConversationQuestionAnswerSchema,
+  OperatorAutonomyCommandSchema,
+  operatorAutonomyCommandRequiresOwner,
   type OperatorConversationServiceClient,
   type UpsertOperatorChannel,
 } from "@clankie/protocol";
@@ -21,6 +23,8 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 
 const USAGE = [
   "Usage: clankie conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]",
+  "       clankie conversations goal ID [status|accept|pause|resume|clear]",
+  "       clankie conversations goal ID set [--tokens N] <objective>",
   "       clankie conversations project-proposal ID --request UUID --incarnation UUID",
   "       clankie conversations confirm-project ID --request UUID --incarnation UUID --revision N --proposal UUID --artifact SHA --projects-revision SHA",
   "       clankie conversations channels | rooms",
@@ -46,6 +50,7 @@ export async function runConversationsCommand(
     readonly stdin?: AsyncIterable<unknown> & { readonly isTTY?: boolean };
   },
 ): Promise<number> {
+  if (args[0] === "goal") return runGoalAction(args.slice(1), options);
   if (
     ["questions", "answer", "cancel-question", "project-proposal", "confirm-project"].includes(args[0] ?? "")
   )
@@ -123,6 +128,59 @@ export async function runConversationsCommand(
 }
 
 type ConversationsCommandOptions = Parameters<typeof runConversationsCommand>[1];
+
+async function runGoalAction(args: readonly string[], options: ConversationsCommandOptions): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: { tokens: { type: "string" } },
+  });
+  const [conversationId, action = "status", ...objective] = positionals;
+  if (
+    !conversationId ||
+    !["status", "set", "accept", "pause", "resume", "clear"].includes(action) ||
+    (action !== "set" && (objective.length > 0 || values.tokens !== undefined))
+  )
+    throw new Error(USAGE);
+  const tokenBudget = values.tokens === undefined ? undefined : Number(values.tokens);
+  if (tokenBudget !== undefined && (!Number.isSafeInteger(tokenBudget) || tokenBudget <= 0))
+    throw new Error("--tokens must be a positive integer.");
+  const command = OperatorAutonomyCommandSchema.parse(
+    action === "set"
+      ? {
+          action: "set_goal",
+          objective: objective.join(" "),
+          ...(tokenBudget === undefined ? {} : { tokenBudget }),
+        }
+      : action === "accept"
+        ? { action: "accept_goal" }
+        : action === "pause" || action === "resume"
+          ? { action: "set_goal_status", status: action === "pause" ? "paused" : "active" }
+          : action === "clear"
+            ? { action: "clear_goal" }
+            : { action: "status" },
+  );
+  let client: OperatorConversationServiceClient;
+  if (operatorAutonomyCommandRequiresOwner(command)) {
+    const env = options.env ?? process.env;
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    if (credential === undefined)
+      throw new Error("Owner operator credential required to start, accept, or resume a goal.");
+    const owner = createCaptainRouteClient({
+      host: commandHost({ ...options, env }),
+      captainToken: credential.token,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    });
+    client = createCaptainOperatorConversationClient(owner, owner);
+  } else {
+    client = await serviceClient(options);
+  }
+  outputJson(options.stdout ?? process.stdout, await client.autonomy(conversationId, command));
+  return 0;
+}
 
 async function serviceClient(
   options: ConversationsCommandOptions,

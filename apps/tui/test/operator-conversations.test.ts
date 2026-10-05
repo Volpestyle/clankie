@@ -6,10 +6,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mintCaptainToken, type CredentialStore } from "@clankie/credential-broker";
 import { runHeadlessCaptainCommand } from "../bin/headless-captain.ts";
-import type {
-  OperatorConversation,
-  OperatorConversationRecovery,
-  OperatorConversationStreamEvent,
+import {
+  OperatorConversationServiceRequestSchema,
+  type OperatorAutonomyCommand,
+  type OperatorConversation,
+  type OperatorConversationRecovery,
+  type OperatorConversationStreamEvent,
 } from "@clankie/protocol";
 import {
   createCaptainOperatorConversationClient,
@@ -378,6 +380,81 @@ describe("TUI operator conversation selection", () => {
       "explicit",
     );
     expect(await resolveCaptainRouteToken({ env: {}, store })).toBe(stored);
+  });
+
+  it("uses owner HTTP authentication for goal activation and never falls back to captain", async () => {
+    const requests: Array<{ command: OperatorAutonomyCommand; authorization: string | undefined }> = [];
+    const server = createServer((request, response) => {
+      void (async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const parsed = OperatorConversationServiceRequestSchema.parse(
+          JSON.parse(Buffer.concat(chunks).toString("utf8")),
+        );
+        if (parsed.op !== "autonomy") throw new Error("Expected autonomy dispatch");
+        requests.push({ command: parsed.command, authorization: request.headers.authorization });
+        const denied = request.headers.authorization === "Bearer rejected-owner";
+        response.writeHead(denied ? 403 : 200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify(
+            denied
+              ? { error: "goal_owner_required" }
+              : { op: "autonomy", schemaVersion: 1, status: { enabled: false } },
+          ),
+        );
+      })().catch(() => {
+        response.writeHead(400);
+        response.end();
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("Missing server address");
+      const host = `http://127.0.0.1:${address.port}`;
+      const captain = createCaptainRouteClient({ host, captainToken: "goal-captain" });
+      const owner = createCaptainRouteClient({ host, captainToken: "goal-owner" });
+      const connected = createCaptainOperatorConversationClient(captain, owner);
+      const activation: OperatorAutonomyCommand[] = [
+        { action: "set_goal", objective: "An explicitly accepted task", tokenBudget: 100 },
+        { action: "accept_goal" },
+        { action: "set_goal_status", status: "active" },
+        { action: "set_enabled", enabled: true },
+      ];
+      const passive: OperatorAutonomyCommand[] = [
+        { action: "status" },
+        { action: "set_goal_status", status: "paused" },
+        { action: "clear_goal" },
+        { action: "clear_wake" },
+        { action: "set_enabled", enabled: false },
+      ];
+      for (const command of [...activation, ...passive]) {
+        expect(await connected.autonomy("global-default", command)).toEqual({ enabled: false });
+      }
+      expect(requests).toEqual([
+        ...activation.map((command) => ({ command, authorization: "Bearer goal-owner" })),
+        ...passive.map((command) => ({ command, authorization: "Bearer goal-captain" })),
+      ]);
+      const captainOnly = createCaptainOperatorConversationClient(captain);
+      for (const command of activation) {
+        await expect(captainOnly.autonomy("global-default", command)).rejects.toThrow(
+          "Owner authentication required",
+        );
+      }
+      expect(requests).toHaveLength(activation.length + passive.length);
+      const rejectedOwner = createCaptainOperatorConversationClient(
+        captain,
+        createCaptainRouteClient({ host, captainToken: "rejected-owner" }),
+      );
+      await expect(rejectedOwner.autonomy("global-default", activation[0]!)).rejects.toThrow(
+        "Owner authentication required",
+      );
+      expect(requests.at(-1)?.authorization).toBe("Bearer rejected-owner");
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("degrades to no bearer when the store is empty, failing, or holds an invalid token", async () => {

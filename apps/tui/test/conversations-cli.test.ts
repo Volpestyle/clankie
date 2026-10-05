@@ -1,5 +1,115 @@
+import { once } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  FileCredentialStore,
+  mintOperatorToken,
+  OPERATOR_CREDENTIAL_PROVIDER_ID,
+} from "@clankie/credential-broker";
+import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
 import { expect, it } from "vitest";
 import { runConversationsCommand } from "../src/command/conversations.ts";
+
+it("runs goal CLI commands through real HTTP with separate owner and captain authority", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-goal-cli-"));
+  const ownerToken = mintOperatorToken();
+  const ownerCredentials = new FileCredentialStore(join(root, "owner.json"));
+  await ownerCredentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: ownerToken });
+  const requests: Array<{ command: unknown; conversationId: string; authorization: string | undefined }> = [];
+  const server = createServer((request, response) => {
+    void (async () => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const parsed = OperatorConversationServiceRequestSchema.parse(
+        JSON.parse(Buffer.concat(chunks).toString("utf8")),
+      );
+      if (parsed.op !== "autonomy") throw new Error("Expected autonomy dispatch");
+      requests.push({
+        command: parsed.command,
+        conversationId: parsed.conversationId,
+        authorization: request.headers.authorization,
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ op: "autonomy", schemaVersion: 1, status: { enabled: false } }));
+    })().catch(() => {
+      response.writeHead(400);
+      response.end();
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Missing server address");
+    let output = "";
+    const options = {
+      host: `http://127.0.0.1:${address.port}`,
+      env: { CLANKIE_CAPTAIN_TOKEN: "goal-cli-captain", CLANKIE_OPERATOR_TOKEN: ownerToken },
+      stdout: { write: (text: string) => (output += text) },
+      captainCredentialStore: new FileCredentialStore(join(root, "captain.json")),
+      operatorCredentialStore: ownerCredentials,
+    };
+    for (const action of [[], ["status"], ["pause"], ["clear"]]) {
+      expect(await runConversationsCommand(["goal", "goal-room", ...action], options)).toBe(0);
+    }
+    for (const action of [["set", "--tokens", "250", "Finish", "the", "task"], ["accept"], ["resume"]]) {
+      output = "";
+      expect(
+        await runConversationsCommand(["goal", "goal-room", ...action], {
+          ...options,
+          env: {},
+        }),
+      ).toBe(0);
+      expect(JSON.parse(output)).toEqual({ enabled: false });
+    }
+    expect(requests).toEqual([
+      ...[
+        { action: "status" },
+        { action: "status" },
+        { action: "set_goal_status", status: "paused" },
+        { action: "clear_goal" },
+      ].map((command) => ({
+        conversationId: "goal-room",
+        command,
+        authorization: "Bearer goal-cli-captain",
+      })),
+      ...[
+        { action: "set_goal", objective: "Finish the task", tokenBudget: 250 },
+        { action: "accept_goal" },
+        { action: "set_goal_status", status: "active" },
+      ].map((command) => ({
+        conversationId: "goal-room",
+        command,
+        authorization: `Bearer ${ownerToken}`,
+      })),
+    ]);
+    const acceptedRequests = requests.length;
+    const captainOnly = {
+      ...options,
+      env: { CLANKIE_CAPTAIN_TOKEN: "goal-cli-captain" },
+      operatorCredentialStore: new FileCredentialStore(join(root, "no-owner.json")),
+    };
+    for (const action of [["set", "a task"], ["accept"], ["resume"]]) {
+      await expect(runConversationsCommand(["goal", "goal-room", ...action], captainOnly)).rejects.toThrow(
+        "Owner operator credential required",
+      );
+    }
+    for (const action of [
+      ["set", "--tokens", "0", "task"],
+      ["set", "--tokens", "1.5", "task"],
+      ["accept", "--tokens", "100"],
+    ]) {
+      await expect(runConversationsCommand(["goal", "goal-room", ...action], captainOnly)).rejects.toThrow();
+    }
+    expect(requests).toHaveLength(acceptedRequests);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 it("lists and replays a Discord room through the authenticated conversation API, including cursor paging", async () => {
   const conversation = {
