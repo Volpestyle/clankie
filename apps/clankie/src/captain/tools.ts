@@ -170,7 +170,9 @@ export function captainTools(
   );
   return [
     ...desktopTools(deps.desktop),
-    ...(deps.activitySharing && (lane === "operator" || lane.startsWith("discord_")) ? activityTools(deps.activitySharing,turn) : []),
+    ...(deps.activitySharing && (lane === "operator" || lane.startsWith("discord_"))
+      ? activityTools(deps.activitySharing, turn)
+      : []),
     ...(lane === "operator" && deps.linearWake ? linearWakeTools(deps.linearWake) : []),
     ...(deps.bodyLeases === undefined
       ? []
