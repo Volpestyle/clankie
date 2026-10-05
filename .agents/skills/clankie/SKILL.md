@@ -73,7 +73,13 @@ tool schemas stay present during temporary provider/discovery failures; calls
 still prove current admission and account or native peer authority. A timeout
 does not authorize replaying a mutation. Doctor and roster `workerTools` show
 observed missing/stalled catalogs and reasons; `not-observed` proves no failure.
-HTTP refusals retain their service reason. A `No durable native binding` receipt
+Authenticated failures retain their service reason; unauthenticated refusals are generic.
+Connected calls return a `receiptId`. If a dispatched call times out, its typed
+`outcome: uncertain` means it may have applied. Call `clankie_call` with only
+`{receiptId}` to read the original result; never repeat its name and arguments.
+The bridge keeps that ID even when the HTTP reply is lost. Receipt lookup proves
+current admission, tool grant and account binding and never dispatches a write.
+A `No durable native binding` receipt
 means no new message was sent; report the pane and inspect its native binding.
 
 The bridge reports catalog changes every five seconds. Locally hired Codex
@@ -121,6 +127,12 @@ to bypass uncertainty. While the original is unresolved, another call reads only
 that receipt. After it settles, a different follow-up remains unsent; invoke again
 deliberately if that message is still needed. A confirmed delivery means the stated native handoff;
 it does not prove the recipient model read it or accepted its authority.
+
+A refused connection before an inbound POST reaches the service releases only
+that exact claim. An authenticated definitive unknown-delivery lookup also
+releases it after the service seals the original ID against delayed delivery.
+Neither sends a replacement in the same invocation. Timeouts, connection resets,
+unverified lookups and mismatched evidence retain the uncertain original.
 
 `recipient_gone` with outcome `unconfirmed` is terminal: the original recipient
 lost its binding, so delivery stays unknown and must never be resent. The bridge

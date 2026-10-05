@@ -490,7 +490,14 @@ async function receiptService() {
   let drop = true;
   let beforeAcceptance = false;
   let denyLookup = false;
+  let denyPostReply = false;
   let legacyReply = false;
+  let refusePost = false;
+  let stopped: Promise<void> | undefined;
+  let redirect = false;
+  const redirects: string[] = [];
+  let dropBeforeAdmission = false;
+  let mismatchLookup = false;
   const seen: { method: string; path: string; body: string }[] = [];
   const server = createServer((request, response) => {
     let raw = "";
@@ -509,33 +516,65 @@ async function receiptService() {
       }
       seen.push({ method: request.method ?? "", path: url.pathname, body: raw });
       response.setHeader("content-type", "application/json");
+      if (url.pathname === "/redirected-message") {
+        redirects.push(raw);
+        response.destroy();
+        return;
+      }
       if (request.method === "GET" && url.pathname.endsWith("/messages")) {
+        if (refusePost) response.setHeader("connection", "close");
         response.end(JSON.stringify({ schemaVersion: 1, binding: "a".repeat(64) }));
+        if (refusePost) {
+          refusePost = false;
+          stopped = new Promise<void>((resolve) => server.close(() => resolve()));
+        }
         return;
       }
       if (request.method === "GET") {
         if (denyLookup) {
           response.statusCode = 403;
-          response.end("{}");
+          response.end(
+            JSON.stringify({
+              schemaVersion: 1,
+              received: false,
+              deliveryStage: "unavailable",
+              definitive: "not_sent",
+              deliveryId: url.pathname.split("/").at(-1),
+              binding: url.searchParams.get("binding"),
+              fingerprint: url.searchParams.get("fingerprint"),
+            }),
+          );
           return;
         }
-        response.end(
-          JSON.stringify(
-            receipts.reconcile(
-              "w8:p3",
-              { id: url.pathname.split("/").at(-1)!, binding: url.searchParams.get("binding")! },
-              url.searchParams.get("fingerprint")!,
-            ),
-          ),
+        const receipt = receipts.lookup(
+          "w8:p3",
+          { id: url.pathname.split("/").at(-1)!, binding: url.searchParams.get("binding")! },
+          url.searchParams.get("fingerprint")!,
         );
+        response.end(JSON.stringify({ ...receipt, ...(mismatchLookup ? { binding: "b".repeat(64) } : {}) }));
         return;
       }
       const input = JSON.parse(raw);
+      if (dropBeforeAdmission) {
+        dropBeforeAdmission = false;
+        response.destroy();
+        return;
+      }
       if (beforeAcceptance)
         vi.spyOn(store, "submitInbound").mockImplementationOnce(() => {
           throw new Error("crash before acceptance");
         });
       const receipt = receipts.accept("w8:p3", input.delivery, input.text, `Agent output: ${input.text}`);
+      if (denyPostReply) {
+        response.statusCode = 403;
+        response.end(JSON.stringify({ ...receipt, received: false, deliveryStage: "unavailable" }));
+        return;
+      }
+      if (redirect) {
+        response.writeHead(307, { location: "/redirected-message" });
+        response.end();
+        return;
+      }
       if (drop) {
         response.destroy();
         return;
@@ -555,8 +594,18 @@ async function receiptService() {
     url: `http://127.0.0.1:${address.port}`,
     seen,
     runner,
+    redirects,
     setDrop: (value: boolean) => {
       drop = value;
+    },
+    setRedirect: () => {
+      redirect = true;
+    },
+    dropBeforeAdmission: () => {
+      dropBeforeAdmission = true;
+    },
+    mismatchLookup: (value: boolean) => {
+      mismatchLookup = value;
     },
     setPending: () => {
       beforeAcceptance = true;
@@ -564,8 +613,18 @@ async function receiptService() {
     setDenied: (value: boolean) => {
       denyLookup = value;
     },
+    setDeniedPostReply: () => {
+      denyPostReply = true;
+    },
     setLegacyReply: () => {
       legacyReply = true;
+    },
+    refuseNextPost: () => {
+      refusePost = true;
+    },
+    reopen: async () => {
+      await stopped;
+      await new Promise<void>((resolve) => server.listen(address.port, "127.0.0.1", resolve));
     },
     restart: async () => {
       await store.close();
@@ -660,7 +719,8 @@ function rawReceiptBridge(
         result: { tools: { name: string }[] };
         error?: { code: number; message: string };
       },
-    tool: (name: string, args: unknown = {}) => call("tools/call", { name, arguments: args }),
+    tool: (name: string, args: unknown = {}, meta?: unknown) =>
+      call("tools/call", { name, arguments: args, ...(meta === undefined ? {} : { _meta: meta }) }),
     message: async (text = "original") =>
       JSON.parse(
         (await call("tools/call", { name: "message_clankie", arguments: { text } })).result.content[0]!.text,
@@ -738,6 +798,181 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
     },
   );
 });
+it.each(["fleet", "seat"] as const)(
+  "%s settles a refused POST claim so a later invocation can send a new message once",
+  async (mode) => {
+    const service = await receiptService();
+    service.refuseNextPost();
+    const bridge = rawReceiptBridge(mode, await linkedHome(service.url, true), service.url);
+    await bridge.init();
+    const refused = await bridge.message("not dispatched");
+    expect(refused.deliveryStage).toBe("unavailable");
+    expect(service.seen.filter((entry) => entry.method === "POST")).toEqual([]);
+    await service.reopen();
+    service.setDrop(false);
+    const next = await bridge.message("new message");
+    expect(next).toMatchObject({ received: true, deliveryStage: "stored" });
+    expect(next.deliveryId).not.toBe(refused.deliveryId);
+    const posts = service.seen.filter((entry) => entry.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(posts[0]!.body).text).toBe("new message");
+  },
+);
+
+it("settles only an authenticated exact terminal unknown receipt and sends no replacement in that invocation", async () => {
+  const service = await receiptService();
+  service.setDrop(false);
+  service.dropBeforeAdmission();
+  const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url);
+  await bridge.init();
+  const original = await bridge.message("never admitted");
+  expect(original.deliveryStage).toBe("uncertain");
+  service.setDenied(true);
+  expect((await bridge.message("replacement")).deliveryStage).toBe("uncertain");
+  service.setDenied(false);
+  service.mismatchLookup(true);
+  expect((await bridge.message("replacement")).deliveryStage).toBe("uncertain");
+  service.mismatchLookup(false);
+  expect(await bridge.message("replacement")).toMatchObject({
+    received: false,
+    deliveryStage: "unavailable",
+    deliveryId: original.deliveryId,
+  });
+  const originals = service.seen.filter((entry) => entry.method === "POST");
+  expect(originals).toHaveLength(1);
+  expect(service.runner).not.toHaveBeenCalled();
+  // A service terminal negative must also reject a late original, rather than
+  // allowing acceptance after the client has released its local claim.
+  const late = await fetch(`${service.url}/v1/fleet/seats/w8%3Ap3/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: originals[0]!.body,
+  });
+  expect(await late.json()).toMatchObject({
+    received: false,
+    definitive: "not_sent",
+    deliveryId: original.deliveryId,
+  });
+  expect(service.runner).not.toHaveBeenCalled();
+  const next = await bridge.message("new original");
+  expect(next).toMatchObject({ received: true, deliveryStage: "stored" });
+  expect(next.deliveryId).not.toBe(original.deliveryId);
+  expect(service.runner).toHaveBeenCalledOnce();
+  expect(service.seen.filter((entry) => entry.method === "POST")).toHaveLength(3);
+});
+
+it("retains an accepted redirect receipt without letting fetch send another POST", async () => {
+  const service = await receiptService();
+  service.setRedirect();
+  const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url);
+  await bridge.init();
+  const original = await bridge.message();
+  expect(original.deliveryStage).toBe("uncertain");
+  expect(await bridge.message()).toMatchObject({
+    received: true,
+    deliveryStage: "stored",
+    deliveryId: original.deliveryId,
+  });
+  expect(service.redirects).toEqual([]);
+  expect(service.seen.filter((entry) => entry.method === "POST")).toHaveLength(1);
+  expect(service.runner).toHaveBeenCalledOnce();
+});
+
+it("keeps an original claim when HTTP403 carries an exact-looking refusal body", async () => {
+  const service = await receiptService();
+  service.setDrop(false);
+  service.setDeniedPostReply();
+  const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url);
+  await bridge.init();
+  const original = await bridge.message();
+  expect(original.deliveryStage).toBe("uncertain");
+  expect(await bridge.message()).toMatchObject({
+    received: true,
+    deliveryStage: "stored",
+    deliveryId: original.deliveryId,
+  });
+  expect(service.seen.filter((entry) => entry.method === "POST")).toHaveLength(1);
+  expect(service.runner).toHaveBeenCalledOnce();
+});
+
+it.each([false, true])(
+  "handles a real AggregateError cause chain without clearing a lost accepted reply=%s",
+  async (accepted) => {
+    const service = await receiptService();
+    service.setDrop(accepted);
+    const home = await linkedHome(service.url, true);
+    const closed = createServer();
+    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    const address = closed.address();
+    if (!address || typeof address === "string") throw new Error("No fixture port");
+    await new Promise<void>((resolve) => closed.close(() => resolve()));
+    const child = spawn(process.execPath, [
+      "--input-type=module",
+      "-e",
+      `
+    import {createInboundSender} from ${JSON.stringify(pathToFileURL(join(bin, "inbound-receipt.mjs")).href)};
+    import {createConnection} from 'node:net';
+    import {createInterface} from 'node:readline';
+    const endpoint=${JSON.stringify(`${service.url}/v1/fleet/seats/w8%3Ap3/messages`)};
+    let refuse=true;
+    const send=createInboundSender({directory:${JSON.stringify(join(home, ".clankie", "inbound-receipts"))},scope:'aggregate-fixture',request:async(suffix,init)=>{
+      if(init?.method==='POST' && refuse){
+        refuse=false;
+        let refused;
+        try {
+          await new Promise((resolve,reject)=>{
+            const socket=createConnection({host:'fixture',port:${address.port},autoSelectFamily:true,lookup:(_host,_options,callback)=>callback(null,[{address:'::1',family:6},{address:'127.0.0.1',family:4}])});
+            socket.on('error',reject).on('connect',()=>{socket.destroy();resolve();});
+          });
+        } catch(error) {
+          process.stderr.write(JSON.stringify({name:error.name,codes:error.errors?.map((entry)=>entry.code)})+'\\n');
+          refused=error;
+        }
+        if(${accepted}) {
+          let lost;
+          try { await fetch(endpoint+suffix,init); } catch(error) { lost=error; }
+          throw new TypeError('fetch failed',{cause:new AggregateError([refused,lost],'refused and lost reply')});
+        }
+        throw new TypeError('fetch failed',{cause:refused});
+      }
+      return fetch(endpoint+suffix,init);
+    }});
+    for await(const line of createInterface({input:process.stdin})) process.stdout.write(JSON.stringify(await send(JSON.parse(line).text))+'\\n');
+  `,
+    ]);
+    cleanups.push(() => child.kill());
+    const replies: { received: boolean; deliveryStage: string }[] = [];
+    let buffered = "";
+    let stderr = "";
+    child.stderr.on("data", (bytes: Buffer) => {
+      stderr += String(bytes);
+    });
+    child.stdout.on("data", (bytes: Buffer) => {
+      buffered += String(bytes);
+      while (buffered.includes("\n")) {
+        const at = buffered.indexOf("\n");
+        replies.push(JSON.parse(buffered.slice(0, at)));
+        buffered = buffered.slice(at + 1);
+      }
+    });
+    child.stdin.write(`${JSON.stringify({ text: "refused original" })}\n`);
+    await expect.poll(() => replies.length, { timeout: 5_000 }).toBe(1);
+    expect(JSON.parse(stderr.trim())).toEqual({
+      name: "AggregateError",
+      codes: ["ECONNREFUSED", "ECONNREFUSED"],
+    });
+    expect(replies[0]).toMatchObject({
+      received: false,
+      deliveryStage: accepted ? "uncertain" : "unavailable",
+    });
+    expect(service.seen.filter((entry) => entry.method === "POST")).toHaveLength(accepted ? 1 : 0);
+    child.stdin.write(`${JSON.stringify({ text: accepted ? "refused original" : "new original" })}\n`);
+    await expect.poll(() => replies.length, { timeout: 5_000 }).toBe(2);
+    expect(replies[1]).toMatchObject({ received: true, deliveryStage: "stored" });
+    expect(service.seen.filter((entry) => entry.method === "POST")).toHaveLength(1);
+  },
+);
+
 it.each(["fleet", "seat"] as const)(
   "%s reconciles lost acceptance after raw bridge and service replacement, without another POST",
   async (mode) => {
@@ -866,6 +1101,10 @@ async function recoveryService(
     holdCatalog?: boolean;
     peerMessages?: "on" | "off";
     nativePeerProofRequired?: boolean;
+    connectedCallReceipts?: boolean;
+    loseConnectedReply?: boolean;
+    hangConnectedReply?: boolean;
+    redirectConnectedReply?: boolean;
   } = {},
 ) {
   let initializes = 0;
@@ -877,6 +1116,28 @@ async function recoveryService(
   let peerMessages = options.peerMessages;
   let toolRefusal: { status: number; error: string; reason: string } | undefined;
   let peerRefusal: { status: number; error: string; reason: string } | undefined;
+  let connectedReceipt: string | undefined;
+  const connectedMetadata: (string | undefined)[] = [];
+  let connectedDispatches = 0;
+  let connectedRedirects = 0;
+  let connectedSettled = false;
+  const connectedSchema = {
+    type: "object",
+    anyOf: [
+      {
+        type: "object",
+        properties: { name: { type: "string" }, arguments: { type: "object" } },
+        required: ["name", "arguments"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: { receiptId: { type: "string", format: "uuid" } },
+        required: ["receiptId"],
+        additionalProperties: false,
+      },
+    ],
+  };
   let prematureCall = false;
   let releaseHandshake: () => void = () => {};
   const handshake = options.holdInitialized
@@ -902,6 +1163,11 @@ async function recoveryService(
     });
     request.on("end", () => {
       response.setHeader("content-type", "application/json");
+      if (request.url === "/redirected-connected") {
+        connectedRedirects++;
+        response.destroy();
+        return;
+      }
       if (request.url?.includes("/events?")) {
         mailboxRequests++;
         setTimeout(() => response.end(JSON.stringify({ schemaVersion: 1, events: [] })), 200);
@@ -931,7 +1197,15 @@ async function recoveryService(
           );
         return;
       }
-      const rpc = JSON.parse(text) as { id?: number; method: string; params?: { name?: string } };
+      const rpc = JSON.parse(text) as {
+        id?: number;
+        method: string;
+        params?: {
+          name?: string;
+          arguments?: { receiptId?: string };
+          _meta?: { clankieReceiptId?: string };
+        };
+      };
       bridgeRequests.push({
         method: rpc.method,
         bridgeId: String(request.headers["x-clankie-bridge-id"] ?? ""),
@@ -975,7 +1249,16 @@ async function recoveryService(
             reply({
               tools: ["clankie_tools", "clankie_call"].map((name) => ({
                 name,
-                inputSchema: { type: "object" },
+                inputSchema:
+                  name === "clankie_call" && options.connectedCallReceipts
+                    ? connectedSchema
+                    : { type: "object" },
+                ...(name === "clankie_call" && options.connectedCallReceipts
+                  ? {
+                      description:
+                        "Reconcile an uncertain result with receiptId only; never retry name/arguments.",
+                    }
+                  : {}),
               })),
               _meta: { clankie: { tools: "connected", ...(peerMessages ? { peerMessages } : {}) } },
             }),
@@ -987,6 +1270,36 @@ async function recoveryService(
       if (toolRefusal) {
         response.statusCode = toolRefusal.status;
         response.end(JSON.stringify(toolRefusal));
+        return;
+      }
+      if (name === "clankie_call" && options.connectedCallReceipts) {
+        connectedMetadata.push(rpc.params?._meta?.clankieReceiptId);
+        if (rpc.params?.arguments?.receiptId === undefined) {
+          connectedReceipt = rpc.params?._meta?.clankieReceiptId;
+          connectedDispatches++;
+          if (options.redirectConnectedReply) {
+            response.writeHead(307, { location: "/redirected-connected" });
+            response.end();
+            return;
+          }
+          if (options.loseConnectedReply) {
+            response.destroy();
+            return;
+          }
+          if (options.hangConnectedReply) {
+            response.writeHead(200);
+            response.write(`{"jsonrpc":"2.0","id":${String(rpc.id)},"result":`);
+            return;
+          }
+        }
+        const result = connectedSettled
+          ? { outcome: "ok", receiptId: connectedReceipt, content: "update completed", isError: false }
+          : {
+              outcome: "uncertain",
+              receiptId: connectedReceipt,
+              detail: "may have applied; reconcile, don’t retry",
+            };
+        reply({ content: [{ type: "text", text: JSON.stringify(result) }], isError: false });
         return;
       }
       if (name === "mutate") {
@@ -1014,6 +1327,13 @@ async function recoveryService(
     calls,
     bridgeRequests,
     health,
+    connectedSchema,
+    connectedMetadata,
+    connectedDispatches: () => connectedDispatches,
+    connectedRedirects: () => connectedRedirects,
+    settleConnectedCall: () => {
+      connectedSettled = true;
+    },
     initializes: () => initializes,
     peerRequests: () => peerRequests,
     mailboxRequests: () => mailboxRequests,
@@ -1041,6 +1361,117 @@ async function recoveryService(
     loseMutationReply: () => mutationResponse?.destroy(),
   };
 }
+
+it("preserves a connected-call uncertain receipt and advertises read-only receipt reconciliation", async () => {
+  const service = await recoveryService({ peerMessages: "on", connectedCallReceipts: true });
+  const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url, false, 1_000);
+  await bridge.init();
+  const listed = (await bridge.list()).result.tools as {
+    name: string;
+    description?: string;
+    inputSchema: unknown;
+  }[];
+  const tool = listed.find((entry) => entry.name === "clankie_call");
+  expect(tool?.inputSchema).toEqual(service.connectedSchema);
+  expect(tool?.description).toContain("never retry name/arguments");
+  const original = await bridge.tool("clankie_call", {
+    name: "linear_update_issue",
+    arguments: { id: "VUH-1677" },
+  });
+  expect(original.result.isError).toBe(false);
+  const uncertain = JSON.parse(original.result.content[0]!.text);
+  expect(uncertain).toMatchObject({
+    outcome: "uncertain",
+    receiptId: expect.stringMatching(/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/u),
+    detail: "may have applied; reconcile, don’t retry",
+  });
+  expect(service.connectedMetadata).toEqual([uncertain.receiptId]);
+  expect(service.connectedDispatches()).toBe(1);
+  service.settleConnectedCall();
+  const reconciled = await bridge.tool("clankie_call", { receiptId: uncertain.receiptId });
+  expect(JSON.parse(reconciled.result.content[0]!.text)).toEqual({
+    outcome: "ok",
+    receiptId: uncertain.receiptId,
+    content: "update completed",
+    isError: false,
+  });
+  expect(service.connectedDispatches()).toBe(1);
+  expect(service.connectedMetadata).toEqual([uncertain.receiptId, undefined]);
+  expect(service.calls).toEqual(["clankie_call", "clankie_call"]);
+});
+
+it.each(["lost", "body timeout", "redirect"] as const)(
+  "retains its own receipt ID after a connected-call %s, ignoring caller metadata",
+  async (failure) => {
+    const service = await recoveryService({
+      peerMessages: "on",
+      connectedCallReceipts: true,
+      loseConnectedReply: failure === "lost",
+      hangConnectedReply: failure === "body timeout",
+      redirectConnectedReply: failure === "redirect",
+    });
+    const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url, false, 500);
+    await bridge.init();
+    await bridge.list();
+    const callerId = "a9e2fb38-d24a-4ec6-b89a-d8f095b7abc1";
+    const lost = await bridge.tool(
+      "clankie_call",
+      { name: "linear_update_issue", arguments: { id: "VUH-1677" } },
+      { clankieReceiptId: callerId },
+    );
+    expect(lost.result.isError).toBe(false);
+    const uncertain = JSON.parse(lost.result.content[0]!.text);
+    expect(uncertain).toEqual({
+      outcome: "uncertain",
+      receiptId: expect.stringMatching(/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/u),
+      detail: "may have applied; reconcile, don’t retry",
+      reason: expect.stringContaining(
+        failure === "body timeout" ? "timed out within its 500 ms" : "fetch failed",
+      ),
+    });
+    expect(uncertain.receiptId).not.toBe(callerId);
+    expect(service.connectedMetadata).toEqual([uncertain.receiptId]);
+    expect(service.connectedDispatches()).toBe(1);
+    expect(service.connectedRedirects()).toBe(0);
+    expect(service.calls).toEqual(["clankie_call"]);
+    service.settleConnectedCall();
+    const reconciled = await bridge.tool("clankie_call", { receiptId: uncertain.receiptId });
+    expect(JSON.parse(reconciled.result.content[0]!.text)).toEqual({
+      outcome: "ok",
+      receiptId: uncertain.receiptId,
+      content: "update completed",
+      isError: false,
+    });
+    expect(service.connectedMetadata).toEqual([uncertain.receiptId, undefined]);
+    expect(service.connectedDispatches()).toBe(1);
+    expect(service.calls).toEqual(["clankie_call", "clankie_call"]);
+  },
+);
+
+it("returns a connected-call auth refusal with its real reason and no replay", async () => {
+  const service = await recoveryService({ peerMessages: "on", connectedCallReceipts: true });
+  const bridge = rawReceiptBridge("fleet", await linkedHome(service.url, true), service.url, false, 500);
+  await bridge.init();
+  await bridge.list();
+  service.refuseTools({
+    status: 403,
+    error: "worker_grant_unavailable",
+    reason: "The admitted seat has no current native binding",
+  });
+  const refused = await bridge.tool("clankie_call", {
+    name: "linear_update_issue",
+    arguments: { id: "VUH-1677" },
+  });
+  expect(JSON.parse(refused.result.content[0]!.text)).toEqual({
+    outcome: "refused",
+    reason:
+      "Fleet tools answered 403: The admitted seat has no current native binding: worker_grant_unavailable",
+    detail: "The service refused current access. Nothing was resubmitted.",
+  });
+  expect(refused.result.isError).toBe(true);
+  expect(service.connectedDispatches()).toBe(0);
+  expect(service.calls).toEqual(["clankie_call"]);
+});
 
 it.each([
   { status: 403, error: "worker_grant_unavailable", reason: "Local fleet membership unavailable" },

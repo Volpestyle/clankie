@@ -2792,7 +2792,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           binding: delivery.binding,
           fingerprint,
         };
-      return inboundReceipts.reconcile(agent!.paneId, delivery, fingerprint);
+      return inboundReceipts.lookup(agent!.paneId, delivery, fingerprint);
     },
 
     async receiveFleetSeatMessage(paneId, text, delivery) {
@@ -2822,7 +2822,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         text,
       ].join("\n");
       const previous = inboundReceipts.reconcile(agent.paneId, delivery, deliveryFingerprint(text));
-      if (previous.received) return previous;
+      if (previous.received || previous.definitive) return previous;
       try {
         herdrWatches.nativeOwner(agent);
       } catch {

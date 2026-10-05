@@ -2,7 +2,7 @@ import { ProjectIdSchema, type ProjectsSettings } from "@clankie/protocol/projec
 import type { FleetSettings } from "@clankie/settings";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -28,6 +28,8 @@ import { verifyLinearMcpAccount, type McpHost } from "./mcp-host.ts";
 import { isLinearWorkerTool } from "./linear-publishing.ts";
 import { MinecraftActionSchema, type WorkerBridgeStatus } from "@clankie/protocol";
 import type { MinecraftService } from "./minecraft.ts";
+import { DurableReceiptStore } from "./durable-receipt-store.ts";
+import { canonicalJson } from "@clankie/play";
 
 const minecraftWorkerSchemas = {
   clankie_minecraft_observe: z.strictObject({}),
@@ -100,12 +102,45 @@ const FleetSearchSchema = z
     names: z.array(z.string().min(1).max(256)).min(1).max(10).optional(),
   })
   .strict();
-const FleetCallSchema = z
-  .object({
+const FleetCallSchema = z.union([
+  z.strictObject({
     name: z.string().min(1).max(256),
     arguments: z.record(z.string(), z.json()),
-  })
-  .strict();
+  }),
+  z.strictObject({ receiptId: z.string().uuid() }),
+]);
+const WorkerCallResultSchema = z.strictObject({
+  outcome: z.literal("ok"),
+  content: z.string(),
+  isError: z.boolean(),
+});
+const WorkerCallReceiptSchema = z.object({
+  id: z.string().uuid(),
+  owner: z.string(),
+  server: z.string(),
+  tool: z.string(),
+  binding: z.string(),
+  /** Absent only on journals written before caller-held receipt IDs. */
+  fingerprint: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .optional(),
+  createdAt: z.number(),
+  state: z.enum(["uncertain", "settled"]),
+  reason: z.string().max(500).optional(),
+  result: WorkerCallResultSchema.optional(),
+});
+type WorkerCallReceipt = z.infer<typeof WorkerCallReceiptSchema>;
+const uncertainWorkerCall = (receiptId: string, reason?: string) => ({
+  outcome: "uncertain" as const,
+  receiptId,
+  detail: "may have applied; reconcile, don’t retry",
+  ...(reason === undefined ? {} : { reason: reason.slice(0, 500) }),
+});
+const workerCallResponse = <T extends { outcome: string; isError?: boolean }>(result: T) => ({
+  content: [{ type: "text" as const, text: JSON.stringify(result) }],
+  isError: result.outcome === "uncertain" ? false : result.outcome !== "ok" || result.isError === true,
+});
 const FLEET_TOOLS = [
   {
     name: "clankie_tools",
@@ -116,8 +151,8 @@ const FLEET_TOOLS = [
   {
     name: "clankie_call",
     description:
-      "Call an available tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Tracker calls use the active backend; other provider calls use Clankie's verified connected account.",
-    inputSchema: z.toJSONSchema(FleetCallSchema) as { type: "object" },
+      "Call an available tool by its qualified name and arguments. Use clankie_tools to find its name and input schema. Tracker calls use the active backend; other provider calls use Clankie's verified connected account. Calls return a receiptId. An uncertain call may have applied: reconcile with only {receiptId}, never retry its name and arguments. Receipt lookup is read-only and rechecks current access.",
+    inputSchema: { ...z.toJSONSchema(FleetCallSchema), type: "object" as const },
   },
 ];
 const uuid = z.string().uuid();
@@ -183,12 +218,18 @@ export class WorkerMcp {
     }
   >();
   private readonly requestTimeoutMs: number;
+  private readonly callReceipts: DurableReceiptStore<WorkerCallReceipt>;
   private closed = false;
   constructor(options: WorkerMcp["options"]) {
     this.options = options;
     const timeout = options.requestTimeoutMs ?? WORKER_REQUEST_TIMEOUT_MS;
     if (!Number.isInteger(timeout) || timeout <= 0) throw new Error("Invalid worker request timeout");
     this.requestTimeoutMs = Math.min(timeout, WORKER_REQUEST_TIMEOUT_MS);
+    this.callReceipts = new DurableReceiptStore({
+      path: join(options.directory, "receipts", "connected-calls.json"),
+      schema: WorkerCallReceiptSchema,
+      unreadableMessage: "Worker call receipts are unreadable; no connected call was dispatched",
+    });
   }
 
   private readonly bridges = new Map<
@@ -545,6 +586,115 @@ export class WorkerMcp {
     }>;
   }
 
+  private beginCallReceipt(
+    id: string,
+    authority: WorkerAuthorization,
+    record: GrantRecord,
+    tool: string,
+    fingerprint: string,
+  ): WorkerCallReceipt | undefined {
+    const records = this.callReceipts.load();
+    const previous = records.get(id);
+    if (previous) {
+      this.assertCallReceipt(previous, authority, record, tool, fingerprint);
+      return previous;
+    }
+    records.set(id, {
+      id,
+      owner: authority.key,
+      server: record.server,
+      tool,
+      binding: record.grant.profileHash,
+      fingerprint,
+      createdAt: Date.now(),
+      state: "uncertain",
+    });
+    // Admission is durable before the synchronous hook permits provider dispatch.
+    this.callReceipts.save();
+    return undefined;
+  }
+
+  private assertCallReceipt(
+    receipt: WorkerCallReceipt,
+    authority: WorkerAuthorization,
+    record: GrantRecord,
+    tool: string,
+    fingerprint: string,
+  ): void {
+    if (
+      receipt.owner !== authority.key ||
+      receipt.server !== record.server ||
+      receipt.tool !== tool ||
+      receipt.binding !== record.grant.profileHash ||
+      receipt.fingerprint !== fingerprint
+    )
+      throw new Error(
+        "Worker call receipt ID does not match its original owner, account, tool and arguments",
+      );
+  }
+
+  private callReceiptResult(receipt: WorkerCallReceipt) {
+    return receipt.result
+      ? { ...receipt.result, receiptId: receipt.id }
+      : uncertainWorkerCall(receipt.id, receipt.reason);
+  }
+
+  private uncertainCallReceipt(receiptId: string, reason: string) {
+    try {
+      const receipt = this.callReceipts.load().get(receiptId);
+      if (receipt && receipt.state === "uncertain") {
+        receipt.reason = reason.slice(0, 500);
+        this.callReceipts.save();
+      }
+    } catch {
+      // A receipt-journal failure after admission cannot make a write retryable.
+    }
+    return uncertainWorkerCall(receiptId, reason);
+  }
+
+  private settleCallReceipt(id: string, result: z.infer<typeof WorkerCallResultSchema>): void {
+    const record = this.callReceipts.load().get(id);
+    if (!record) throw new Error("Missing original worker call receipt");
+    record.state = "settled";
+    record.result = result;
+    this.callReceipts.save();
+  }
+
+  private async reconcileCallReceipt(receiptId: string, authority: WorkerAuthorization, signal: AbortSignal) {
+    receiptId = receiptId.toLowerCase();
+    const receipt = this.callReceipts.load().get(receiptId);
+    // The original may still be awaiting admission. Mere absence cannot prove
+    // that it will never dispatch, and this read never permits a retry.
+    if (!receipt) return uncertainWorkerCall(receiptId);
+    if (receipt.owner !== authority.key) throw new Error("Worker call receipt unavailable");
+    const records =
+      authority.fleet === undefined
+        ? authority.records
+        : await this.connectedFleetRecords(authority, `${receipt.server}_${receipt.tool}`);
+    signal.throwIfAborted();
+    const current = records.find(
+      (record) =>
+        record.server === receipt.server &&
+        record.grant.profileHash === receipt.binding &&
+        record.tools.some((rule) => rule.name === receipt.tool),
+    );
+    if (!current) throw new Error("Worker call receipt unavailable with current access");
+    await this.checkBinding(current);
+    if (authority.fleet !== undefined) {
+      if (!(await authority.validateFleet!())) throw new Error("Fleet admission unavailable");
+      const snapshot = await this.options.fleetToolsSnapshot?.();
+      if (snapshot) {
+        if (snapshot.tools !== "connected") throw new Error("Fleet tools are off");
+        snapshot.assertCurrent();
+      } else if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
+      if (authority.currentFleet?.() !== true) throw new Error("Fleet admission unavailable");
+    }
+    signal.throwIfAborted();
+    // Reload after fresh authorization: the original call may have settled meanwhile.
+    const latest = this.callReceipts.load().get(receiptId)!;
+    return this.callReceiptResult(latest);
+  }
+
   async handle(request: Request): Promise<Response> {
     return this.handleAuthorized(request, async (token) => {
       const record = await this.authorize(token);
@@ -706,9 +856,9 @@ export class WorkerMcp {
     let authority: WorkerAuthorization;
     try {
       authority = await authenticate(token);
-    } catch (error) {
+    } catch {
       return Response.json(
-        { error: "worker_grant_unavailable", reason: error instanceof Error ? error.message : String(error) },
+        { error: "worker_grant_unavailable", reason: "Worker access unavailable" },
         { status: 403 },
       );
     }
@@ -833,6 +983,9 @@ export class WorkerMcp {
       ),
     );
     server.setRequestHandler(CallToolRequestSchema, async (call, extra) => {
+      let receiptId: string | undefined;
+      let admitted = false;
+      let repeatedReceipt: WorkerCallReceipt | undefined;
       try {
         return await this.operation(
           authority,
@@ -845,6 +998,12 @@ export class WorkerMcp {
             if (authorityNow.key !== authority.key) throw new Error("Worker session changed");
             let name = call.params.name;
             let args = call.params.arguments ?? {};
+            if (authorityNow.fleet === undefined && name === "clankie_call") {
+              const reconciliation = z.strictObject({ receiptId: uuid }).parse(args);
+              return workerCallResponse(
+                await this.reconcileCallReceipt(reconciliation.receiptId, authorityNow, signal),
+              );
+            }
             if (authorityNow.fleet !== undefined) {
               if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
               if (name === "clankie_tools") {
@@ -895,6 +1054,10 @@ export class WorkerMcp {
               }
               if (name !== "clankie_call") throw new Error("Use clankie_call for connected tools");
               const invocation = FleetCallSchema.parse(args);
+              if ("receiptId" in invocation)
+                return workerCallResponse(
+                  await this.reconcileCallReceipt(invocation.receiptId, authorityNow, signal),
+                );
               name = invocation.name;
               args = invocation.arguments;
             }
@@ -956,9 +1119,43 @@ export class WorkerMcp {
               if (!(await this.fleetToolsEnabled())) throw new Error("Fleet tools are off");
               if (!(await authorityNow.validateFleet!())) throw new Error("Fleet admission unavailable");
             }
+            const suppliedId = call.params._meta?.clankieReceiptId;
+            receiptId = suppliedId === undefined ? randomUUID() : uuid.parse(suppliedId).toLowerCase();
+            const id = receiptId;
+            const fingerprint = createHash("sha256")
+              .update(canonicalJson([name, args]))
+              .digest("hex");
+            const previous = this.callReceipts.load().get(id);
+            if (previous) {
+              this.assertCallReceipt(previous, authorityNow, current, rule.name, fingerprint);
+              return workerCallResponse(await this.reconcileCallReceipt(id, authorityNow, signal));
+            }
             const result = await this.options.host.call({
               timeoutMs: remaining(),
-              onDispatch: () => signal.throwIfAborted(),
+              onDispatch: () => {
+                signal.throwIfAborted();
+                if (!admitted) {
+                  const previous = this.beginCallReceipt(id, authorityNow, current, rule.name, fingerprint);
+                  if (previous) {
+                    repeatedReceipt = previous;
+                    // Another request admitted this ID while host discovery awaited.
+                    // Throwing here refuses the second provider dispatch.
+                    throw new Error("Worker call already admitted; reconcile its receipt");
+                  }
+                  admitted = true;
+                }
+              },
+              onSettled: (settled) => {
+                this.settleCallReceipt(id, { outcome: "ok", ...settled });
+                const health = this.bridge(authorityNow);
+                if (!settled.isError && health?.last?.status === "stalled")
+                  health.last = {
+                    ...health.last,
+                    status: "ready",
+                    reason: "Connected tool call completed after the earlier timeout",
+                    observedAt: new Date().toISOString(),
+                  };
+              },
               lane: current.lane,
               server: current.server,
               tool: rule.name,
@@ -994,25 +1191,38 @@ export class WorkerMcp {
                     },
                   }),
             });
-            const health = this.bridge(authorityNow);
-            if (result.outcome === "ok" && !result.isError && health?.last?.status === "stalled")
-              health.last = {
-                ...health.last,
-                status: "ready",
-                reason: "Connected tool call completed after the earlier timeout",
-                observedAt: new Date().toISOString(),
-              };
-            return {
-              content: [{ type: "text", text: result.outcome === "ok" ? result.content : result.detail }],
-              isError: result.outcome !== "ok" || result.isError,
-            };
+            if (repeatedReceipt) return workerCallResponse(this.callReceiptResult(repeatedReceipt));
+            if (result.outcome === "ok" && admitted) this.settleCallReceipt(id, result);
+            if (result.outcome !== "ok" && admitted && !this.callReceipts.load().get(id)?.result) {
+              const health = this.bridge(authorityNow);
+              if (health)
+                health.last = {
+                  status: "stalled",
+                  reason: `Connected tool call has no confirmed result: ${result.detail}`.slice(0, 500),
+                  observedAt: new Date().toISOString(),
+                  ...(health.last?.tools ? { tools: health.last.tools } : {}),
+                };
+            }
+            return workerCallResponse(
+              result.outcome === "ok"
+                ? { ...result, ...(admitted ? { receiptId: id } : {}) }
+                : admitted
+                  ? this.uncertainCallReceipt(id, result.detail)
+                  : result,
+            );
           },
         );
       } catch (error) {
-        return {
-          content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-          isError: true,
-        };
+        if (repeatedReceipt) return workerCallResponse(this.callReceiptResult(repeatedReceipt));
+        return workerCallResponse(
+          admitted && receiptId
+            ? this.uncertainCallReceipt(receiptId, error instanceof Error ? error.message : String(error))
+            : {
+                outcome: "refused",
+                reason: "worker_request_failed",
+                detail: error instanceof Error ? error.message : String(error),
+              },
+        );
       }
     });
     const transport = new WebStandardStreamableHTTPServerTransport({

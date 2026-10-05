@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +13,9 @@ import { LinearWriteReceipts } from "../src/linear-webhook.ts";
 import { publishLinearWorker } from "../src/linear-publishing.ts";
 
 const roots: string[] = [];
+const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 const account = {
@@ -44,7 +47,10 @@ const args = {
 const id = "00000000-0000-4000-8000-000000000002";
 const now = new Date("2026-10-02T05:10:00Z");
 
-async function fixture() {
+async function fixture(overrides?: {
+  linearFetch?: typeof fetch;
+  linearAuthor?: (personaId: string) => Promise<{ name: string; avatarUrl: string } | undefined>;
+}) {
   const root = await mkdtemp(join(tmpdir(), "linear-publishing-"));
   roots.push(root);
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
@@ -83,14 +89,154 @@ async function fixture() {
     settings: new SettingsStore(join(root, "settings.json")),
     logger: { info() {}, warn() {} },
     connect: async () => upstream,
-    linearAuthor: author,
-    linearFetch,
+    linearAuthor: overrides?.linearAuthor ?? author,
+    linearFetch: overrides?.linearFetch ?? linearFetch,
     observeCall: (call) => writes.record(call, now),
   });
   return { root, credentials, host, upstream, writes, linearFetch, author };
 }
 
+async function tracker(mode: "headers" | "body" = "headers") {
+  let response: ServerResponse | undefined;
+  let requestCount = 0;
+  let received!: () => void;
+  const started = new Promise<void>((resolve) => {
+    received = resolve;
+  });
+  const body = JSON.stringify({
+    data: {
+      commentCreate: {
+        success: true,
+        comment: { id, body: args.body, updatedAt: now.toISOString(), url: "https://linear.app/test" },
+      },
+    },
+  });
+  const server = createServer(async (request, outgoing) => {
+    let posted = "";
+    for await (const chunk of request) posted += chunk.toString();
+    expect(JSON.parse(posted).variables.input.issueId).toBe(args.issueId);
+    requestCount += 1;
+    response = outgoing;
+    if (mode === "body") {
+      outgoing.writeHead(200, { "content-type": "application/json" });
+      outgoing.write(body.slice(0, 1));
+    }
+    received();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("fixture tracker has no TCP address");
+  const release = () => {
+    if (!response || response.writableEnded) return;
+    if (mode === "headers") response.writeHead(200, { "content-type": "application/json" });
+    response.end(mode === "body" ? body.slice(1) : body);
+  };
+  cleanups.push(async () => {
+    release();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  });
+  const fetchImpl: typeof fetch = (url, init) => {
+    expect(String(url)).toBe("https://api.linear.app/graphql");
+    return fetch(`http://127.0.0.1:${address.port}/graphql`, init);
+  };
+  return { fetch: fetchImpl, started, release, requests: () => requestCount };
+}
+
 describe("worker Linear publishing", () => {
+  it.each(["headers", "body"] as const)(
+    "bounds a real Linear %s wait and observes the original write once after the caller times out",
+    async (mode) => {
+      const upstream = await tracker(mode);
+      const f = await fixture({ linearFetch: upstream.fetch });
+      let confirm!: (result: { content: string; isError: boolean }) => void;
+      const confirmed = new Promise<{ content: string; isError: boolean }>((resolve) => {
+        confirm = resolve;
+      });
+      const dispatch = vi.fn();
+      const started = Date.now();
+      const call = f.host.call({
+        lane: "operator",
+        server: "linear",
+        tool: "create_worker_comment",
+        arguments: args,
+        timeoutMs: 300,
+        onDispatch: dispatch,
+        onSettled: confirm,
+      });
+      await upstream.started;
+      expect(await call).toMatchObject({
+        outcome: "refused",
+        possiblyDispatched: true,
+        detail: expect.stringContaining("timed out after 300ms"),
+      });
+      expect(Date.now() - started).toBeLessThan(1_500);
+      expect(dispatch).toHaveBeenCalledOnce();
+      expect(upstream.requests()).toBe(1);
+      upstream.release();
+      expect(await confirmed).toMatchObject({ isError: false });
+      expect(JSON.parse((await confirmed).content)).toMatchObject({ id, url: "https://linear.app/test" });
+      expect(upstream.requests()).toBe(1);
+      await f.host.close();
+    },
+  );
+
+  it.each(["author", "beforeWrite"] as const)(
+    "never notifies or dispatches after the budget expires during %s",
+    async (phase) => {
+      const upstream = await tracker();
+      let release!: () => void;
+      let entered!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const f = await fixture({
+        linearFetch: upstream.fetch,
+        ...(phase === "author"
+          ? {
+              linearAuthor: async () => {
+                entered();
+                await held;
+                return { name: "Azure", avatarUrl: "https://example.test/a.png" };
+              },
+            }
+          : {}),
+      });
+      let fences = 0;
+      const dispatch = vi.fn();
+      const settled = vi.fn();
+      const call = f.host.call({
+        lane: "operator",
+        server: "linear",
+        tool: "create_worker_comment",
+        arguments: args,
+        timeoutMs: 150,
+        onDispatch: dispatch,
+        onSettled: settled,
+        fence: async () => {
+          fences += 1;
+          if (phase === "beforeWrite" && fences === 2) {
+            entered();
+            await held;
+          }
+        },
+      });
+      await waiting;
+      expect(await call).toMatchObject({ outcome: "refused", possiblyDispatched: false });
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(upstream.requests()).toBe(0);
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(settled).not.toHaveBeenCalled();
+      await f.host.close();
+    },
+  );
+
   it("keeps a thread reply and an issue creation under their separate existing personas", async () => {
     const f = await fixture();
     const reply = { ...args, parentId: id };

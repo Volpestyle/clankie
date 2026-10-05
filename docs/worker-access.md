@@ -300,6 +300,23 @@ retries an uncertain mutation. Codex can retain its startup catalog despite tool
 notifications, so the owner may need to reconnect MCP or restart a pane after
 cutover. A displayed stale tool never bypasses current service authorization.
 
+Connected calls return typed JSON with a `receiptId`. A deadline after provider
+dispatch returns `outcome: "uncertain"`: the write may have applied. Reconcile
+with `clankie_call({receiptId})`, without the tool name or arguments. That lookup
+reads the durable original receipt under the same authenticated worker, granted
+tool and connected account; it never dispatches another provider call. Already
+admitted calls retain their bounded original completion lifetime so a late
+response can settle the receipt. The bridge chooses its receipt ID before
+forwarding, preserving reconciliation when the HTTP response is lost.
+
+Inbound message claims remain exclusive through timeouts and lost accepted
+responses. A definitely refused connection before POST delivery releases only
+the matching claim. An exact authenticated unknown-delivery response releases
+it only after persisting a terminal ID fence against a delayed original POST.
+The current invocation never sends a replacement; a subsequent invocation can
+send a new message. Authentication failures expose a generic refusal, while
+authenticated downstream failures retain their actual reason.
+
 Local hired Codex servers outlive a service restart. Their completed launch
 registrations persist in `local-codex-seats.json` under `CLANKIE_STATE` (default
 `~/.clankie`), independently of the pinned code checkout. After restart, each

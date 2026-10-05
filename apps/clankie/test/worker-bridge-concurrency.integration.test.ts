@@ -444,13 +444,16 @@ it("keeps six native-first hires' tools and admitted tracker reads through share
       arguments: { name: "linear_get_issue", arguments: { id: "VUH-after-replacement" } },
     });
     expect(replacementRead.isError).not.toBe(true);
-    expect(text(replacementRead)).toContain('"provider":"replacement"');
+    const replacementReceipt = JSON.parse(text(replacementRead));
+    expect(replacementReceipt).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
+    expect(JSON.parse(replacementReceipt.content)).toMatchObject({ provider: "replacement" });
     f.response.release();
     const completed = await Promise.all(reads);
     for (const [i, result] of completed.entries()) {
       expect(result.isError, `VUH-read-${i}: ${text(result)}`).not.toBe(true);
-      expect(text(result)).toContain(`"id":"VUH-read-${i}"`);
-      expect(text(result)).toContain('"provider":"original"');
+      const receipt = JSON.parse(text(result));
+      expect(receipt).toMatchObject({ outcome: "ok", receiptId: expect.any(String) });
+      expect(JSON.parse(receipt.content)).toMatchObject({ id: `VUH-read-${i}`, provider: "original" });
     }
     expect(f.calls.filter((call) => call.id.startsWith("VUH-read-"))).toHaveLength(6);
     expect(f.providerSessions()).toBe(2);
@@ -485,7 +488,12 @@ it("returns a specific stalled tracker error within the worker request budget an
       }),
     ]);
     const result = await pending;
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(text(result))).toMatchObject({
+      outcome: "uncertain",
+      receiptId: expect.any(String),
+      detail: "may have applied; reconcile, don’t retry",
+    });
     expect(text(result)).toMatch(/timed out|timeout|deadline/iu);
     expect(text(result)).not.toContain("inspect the current grant and account");
     expect(performance.now() - started).toBeLessThan(1_500);

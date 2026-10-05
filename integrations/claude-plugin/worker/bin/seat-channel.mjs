@@ -41,6 +41,8 @@ const INSTRUCTIONS =
   "Use list_fleet_seats to discover admitted peers and message_peer to write directly within this fleet. " +
   "Clankie's connected accounts, such as his Linear workspace, are reachable through clankie_tools and clankie_call " +
   "(often loaded as deferred tools); search clankie_tools before concluding a tracker or account tool is unavailable. " +
+  "An uncertain clankie_call may have applied: reconcile with its receiptId only, never resend name and arguments. " +
+  "If no receiptId arrived, report the unresolved reply to Clankie without resending the call. " +
   "When work he gave you finishes or is blocked, report it with message_clankie in a few lines " +
   "(outcome; branch and commit; checks and their result; evidence path; open gaps or a decision needed), " +
   "rather than typing into his pane. " +
@@ -158,6 +160,8 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId) {
     signal.throwIfAborted();
     const response = await fetch(new URL("/v1/fleet/mcp", active.link.url), {
       method: "POST",
+      // A redirect must not transparently replay an already admitted call.
+      redirect: "error",
       headers: {
         ...authorization(active.link),
         "content-type": "application/json",
@@ -275,10 +279,14 @@ function fleetTools(current, refresh, requestTimeoutMs, bridgeId) {
       }
       throw new Error("Granted catalog pagination exceeds its bound");
     },
-    async call(name, args) {
+    async call(name, args, receiptId) {
       const result = await request(
         "tools/call",
-        { name, arguments: args ?? {} },
+        {
+          name,
+          arguments: args ?? {},
+          ...(receiptId === undefined ? {} : { _meta: { clankieReceiptId: receiptId } }),
+        },
         operationSignal(undefined, requestTimeoutMs),
       );
       if (!Array.isArray(result?.content)) throw new Error("Malformed fleet tool result");
@@ -747,18 +755,42 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           },
         });
       }
+      // This host-held ID survives a lost HTTP reply. Never adopt reserved
+      // metadata from the native caller, or generate another ID for a lookup.
+      const connectedCall = params?.name === "clankie_call";
+      const receiptLookup = connectedCall && Object.hasOwn(params?.arguments ?? {}, "receiptId");
+      const receiptId = connectedCall && !receiptLookup ? randomUUID() : undefined;
       try {
-        const result = await granted.call(params?.name, params?.arguments);
+        const result = await granted.call(params?.name, params?.arguments, receiptId);
         send({ id, result });
         report("ready");
         return;
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
+        const heldId = receiptId ?? (receiptLookup ? params.arguments.receiptId : undefined);
+        const uncertain = typeof heldId === "string" && !(error instanceof FleetToolsDenied);
+        const text =
+          connectedCall && error instanceof FleetToolsDenied
+            ? JSON.stringify({
+                outcome: "refused",
+                reason,
+                detail: "The service refused current access. Nothing was resubmitted.",
+              })
+            : uncertain
+              ? JSON.stringify({
+                  outcome: "uncertain",
+                  receiptId: heldId,
+                  detail: "may have applied; reconcile, don’t retry",
+                  reason,
+                })
+              : `Clankie's ${String(params?.name)} failed: ${reason}`;
         send({
           id,
           result: {
-            content: [{ type: "text", text: `Clankie's ${String(params?.name)} failed: ${reason}` }],
-            isError: true,
+            content: [{ type: "text", text }],
+            // The receipt is usable even when the mutation's result is unknown.
+            // Marking it as a tool failure can invite an unsafe native retry.
+            isError: !uncertain,
           },
         });
         if (error instanceof FleetRequestTimeout) report("stalled", reason);
