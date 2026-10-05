@@ -9,6 +9,25 @@ This guide covers customization on your own Mac. Use the console or supported
 CLI commands to change settings; Clankie can help you run them. Keep API keys
 in the setup wizards, never in a chat message.
 
+## Safety for work
+
+Open `/safety` and choose the **Work** preset to make Clankie an orchestrator:
+he reads, plans and coordinates native workers, while his direct shell and file
+edits are blocked. External tool calls require review unless you allow them.
+Workers keep their native harness permissions.
+
+```sh
+clankie safety preset work
+clankie restart captain
+```
+
+The preset also carries instructions to draft external replies, ask before
+MRs/PRs, comments, merges and pipeline actions, and never push to protected
+branches. Those semantic rules remain instructions; native harness permissions
+and branch protection enforce them for workers. `/safety` lets you edit tool
+rules and standing instructions, and review an exact proposed action once.
+See the [safety commands](/cli/#safety-settings).
+
 <a id="shape-his-character-and-skills"></a>
 
 ## Persona

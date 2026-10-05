@@ -44,6 +44,7 @@ import type { DiscordTracking } from "../discord-tracking.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  readonly safety?: Pick<import("../safety.ts").SafetyBoundary, "status">;
   /** Non-secret wake settings, shared by the CLI, API and Clankie's own tool. */
   readonly linearWake?: {
     readonly settings: Pick<import("@clankie/settings").SettingsStore, "load" | "update">;

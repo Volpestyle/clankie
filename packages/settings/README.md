@@ -122,6 +122,15 @@ files, and herdr. Empty means nobody — Discord stays social. It is not
 turns show the content-free tool-activity card. It is empty by default and the
 owner changes it in Discord with `/clankie tools mode:on|off|status`.
 
+## Safety
+
+`safety` stores owner tool rules and standing work instructions. Configure through
+`clankie safety`, the console `/safety` menu or the owner API. The opt-in work
+preset delegates code changes to native harness workers and requires review of
+other Clankie tool calls. Worker harness permissions remain native. See
+[owner safety settings](../../docs/safety.md) for enforcement, approval lifetime
+and the distinction between tool restrictions and semantic instructions.
+
 ## Execution connections
 
 `execution.connections` stores up to 15 named Herdr endpoints with immutable

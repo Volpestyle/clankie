@@ -1,4 +1,5 @@
 import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
+import { safetyCommandRequest } from "./safety.ts";
 import { runAccountsCommand } from "./accounts.ts";
 import { gatewayEnableWithAccount } from "./gateway.ts";
 import { createInterface } from "node:readline/promises";
@@ -215,6 +216,10 @@ export async function hostedCommand(
   transport: ReturnType<typeof createHostedTransport>,
 ): Promise<unknown> {
   const [command, action, value] = args;
+  if (command === "safety") {
+    const request = safetyCommandRequest(args.slice(1));
+    return transport.request(request.path, request.body);
+  }
   if (command === "status" || command === "health") {
     const health = await transport.request("/health");
     return { mode: "hosted", label: transport.label, status: transport.status(), health };

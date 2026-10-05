@@ -16,6 +16,7 @@ import type { GameplaySettings } from "@clankie/settings";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { Type } from "typebox";
 import type { AutonomyStore } from "./autonomy.ts";
 import { connectionTools } from "./connect-tools.ts";
 import type { CaptainDeps } from "./deps.ts";
@@ -45,6 +46,18 @@ export function laneAuthoredTools(
   reports?: WorkerReportActions,
 ): ToolDefinition[] {
   return [
+    ...(lane === "operator" && deps.safety
+      ? [
+          {
+            name: "safety_status",
+            label: "Owner safety settings",
+            description:
+              "Read the current owner safety settings. This cannot change rules or approve actions.",
+            parameters: Type.Object({}),
+            execute: async () => toolJson({ safety: await deps.safety!.status() }),
+          } satisfies ToolDefinition,
+        ]
+      : []),
     ...((lane === "operator" || turn.shell === true) && reports ? workerReportTools(reports, turn) : []),
     ...runtimeUpdateTools(deps.runtimeUpdater, turn),
     ...(lane === "operator" ? questionTools(turn) : []),

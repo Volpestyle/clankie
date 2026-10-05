@@ -41,6 +41,7 @@ import { runAutostartCommand } from "./command/autostart.ts";
 import { buildConnectCommands, runLinearFollowMenu } from "./connect-commands.ts";
 import { buildDiscordCommands, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import { buildPersonaCommands } from "./persona-commands.ts";
+import { buildSafetyCommands } from "./safety-commands.ts";
 import { buildFleetCommands } from "./fleet-commands.ts";
 import { buildVoiceCommands } from "./voice-commands.ts";
 import { buildMemoryCommands } from "./memory-commands.ts";
@@ -530,6 +531,7 @@ const commands = [
   ...buildConnectCommands(connectServices),
   ...buildDiscordCommands(brokeredCommands),
   ...buildPersonaCommands({ settings: settingsStore }),
+  ...buildSafetyCommands({ host: serviceUrl, env: process.env }),
   ...buildFleetCommands({ settings: settingsStore }),
   ...buildVoiceCommands(brokeredCommands),
   ...buildMemoryCommands(operatorClient === undefined ? {} : { client: operatorClient }),

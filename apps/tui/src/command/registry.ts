@@ -3,6 +3,14 @@ import { operatorHarness } from "./harness-command.ts";
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["safety"],
+    lines: [
+      "  safety [status] | preset work|default | set JSON",
+      "  safety approvals | approve|reject ID FINGERPRINT",
+      "                           Configure Clankie's safety rules and review exact action approvals",
+    ],
+  },
+  {
     nouns: ["integrate"],
     lines: [
       "  integrate SHA... [--app SHA]... [--push] | status UUID | push UUID | revert UUID | holds | hold | release  Compose, isolate the full gate, and land approved commits (JSON)",

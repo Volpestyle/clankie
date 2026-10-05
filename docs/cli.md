@@ -1302,6 +1302,41 @@ needed. The TUI `/image-model` command calls the same functions.
 The same contract for video generation, with a `videoModel` result field. The
 TUI `/video-model` command calls the same functions.
 
+<a id="safety-settings"></a>
+
+### `safety [status] | preset work|default | set JSON`
+
+Configure owner safety settings. `preset work` makes Clankie an orchestrator,
+blocks his direct shell, file edits and browser JavaScript, permits built-in
+research and coordination tools, and asks before other tool calls. Native
+workers retain their harness permissions. The preset carries draft-first,
+protected-branch and explicit-approval instructions into Clankie's prompt and
+worker briefs. `preset default` restores existing behavior.
+
+`set` accepts a strict partial object with `codeExecution` (`direct|delegate`),
+`defaultDecision` (`allow|ask|deny`), `rules` (`{tool,decision}` records, full-name
+patterns with `*`) and `instructions` (up to 8,000 characters). Matching rules
+combine as deny, then ask, then allow. Omitted fields retain their values.
+Owner authentication is required; tool restrictions apply immediately. Restart
+the captain to refresh prompts and available built-ins.
+
+```sh
+clankie safety preset work
+clankie safety set '{"defaultDecision":"ask"}'
+```
+
+### `safety approvals | approve|reject ID FINGERPRINT`
+
+Read exact proposed tool calls and approve or reject one through the owner API.
+The console `/safety` menu shows the full call before approval. Proposals expire
+after 15 minutes and are discarded on restart. Approval is single-use and binds
+the tool, arguments, conversation scope and safety settings; changed calls need
+fresh review. Approval does not execute or automatically resume a call.
+
+See [owner safety settings](safety.md) for the work preset, examples, API and the
+boundary between enforced tool restrictions, standing instructions and native
+worker permissions.
+
 ### `persona [status]`
 
 Return the complete owner-authored persona plus `settingsFile` and the restart
@@ -2296,6 +2331,10 @@ Sections default to the five a session is built with, joined by one blank line:
 
 A seat that carries the identity some other way asks for the rest:
 `clankie prompt --sections persona,reach,address`.
+
+Configured owner safety settings are always appended, including when selecting
+individual sections. The read-only `safety_status` operator tool returns current
+rules without needing a shell; it cannot change settings or approve actions.
 
 With a selected conversation (`--conversation` or `CLANKIE_CONVERSATION_ID`),
 the prompt ends with that workspace's project instructions. `--harness claude`

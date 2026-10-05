@@ -5,6 +5,7 @@ import {
   FLEET_MODEL_GUIDANCE,
   FLEET_SIZE_GUIDANCE,
   personaInstructions,
+  safetyInstructions,
   type ClankieSettings,
   type PersonaRegister,
 } from "@clankie/settings";
@@ -139,7 +140,9 @@ export function assembleLanePrompt(
   const machine = systemTools
     ? [
         "# Machine access",
-        "You have shell and filesystem tools in this authorized context.",
+        currentSettings.safety.codeExecution === "delegate"
+          ? "You can read files and coordinate native harness workers in this authorized context. Your direct shell and file edits are blocked."
+          : "You have shell and filesystem tools in this authorized context.",
         // VUH-1391: a reply has an output limit and a long one is cut off mid-file.
         "Long code and long documents go in files: put a whole script, module or write-up in one and say where it is rather than pasting it into a reply that can be cut off.",
         ...(harnessReach.length > 0 ? ["", harnessReach] : []),
@@ -173,10 +176,11 @@ export function assembleLanePrompt(
     address,
     ...extra,
   };
-  return selected
+  const prompt = selected
     .map((name) => sections[name]?.trim() ?? "")
     .filter((text) => text.length > 0)
     .join("\n\n");
+  return [prompt, safetyInstructions(currentSettings.safety)].filter(Boolean).join("\n\n");
 }
 
 /**

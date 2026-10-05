@@ -1,4 +1,5 @@
 export * from "./worker-reports.ts";
+export * from "./safety.ts";
 export * from "./discord-server.ts";
 export {
   HireProfileSchema,

@@ -1,3 +1,5 @@
+export { SafetySettingsSchema, type SafetySettings } from "@clankie/protocol";
+export { workSafetySettings, safetyDecision, safetyInstructions } from "./safety.ts";
 export {
   AgentHostConnectionSchema,
   type AgentHostConnection,

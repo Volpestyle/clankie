@@ -1,4 +1,5 @@
 import { runComputerCommand } from "../src/command/computer.ts";
+import { runSafetyCommand } from "../src/command/safety.ts";
 import { runDesktopCommand } from "../src/command/desktop.ts";
 import { runHarnessCommand } from "../src/command/harness.ts";
 import { runUpdateCommand } from "../src/command/update.ts";
@@ -267,6 +268,10 @@ export async function runHeadlessCaptainCommand(
     if (command === "persona") {
       const result = await runPersonaCommand(rest, options);
       outputJson(stdout, result);
+      return 0;
+    }
+    if (command === "safety") {
+      outputJson(stdout, await runSafetyCommand(rest, options));
       return 0;
     }
     if (command === "body") {

@@ -3,6 +3,7 @@ import {
   AutonomySettingsSchema,
   FLEET_WORKING_PREFERENCE_FIELDS,
   HireProfileSchema,
+  SafetySettingsSchema,
 } from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
@@ -705,6 +706,7 @@ export const ClankieSettingsSchema = z
     // which a bare `{}` literal does not satisfy.
     discord: DiscordSettingsSchema.default(() => DiscordSettingsSchema.parse({})),
     persona: PersonaSettingsSchema.default(() => PersonaSettingsSchema.parse({})),
+    safety: SafetySettingsSchema.default(() => SafetySettingsSchema.parse({})),
     voice: VoiceSettingsSchema.default(() => VoiceSettingsSchema.parse({})),
     relay: RelaySettingsSchema.default(() => RelaySettingsSchema.parse({})),
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),

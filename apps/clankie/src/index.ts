@@ -1,4 +1,5 @@
 import { ComputerBody } from "./computer-body.ts";
+import { SafetyBoundary } from "./safety.ts";
 import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
 import { detectWindowsComputerUseHarnesses } from "./computer-windows-discovery.ts";
 import { detectComputerUseHarnesses } from "./computer-use-harnesses.ts";
@@ -207,6 +208,7 @@ loadRepoEnvFile();
 // boot are not real environment overrides.
 const captainDiscordEnvironment = { ...process.env };
 const settingsStore = new SettingsStore();
+const safety = new SafetyBoundary(async () => (await settingsStore.load()).safety);
 const startupSettings = await settingsStore.load();
 const settingsFilledNames = [
   ...applyDiscordSettingsToEnvironment(startupSettings.discord),
@@ -1059,6 +1061,7 @@ const captain = createCaptain(
       ? {}
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
+    safety,
     settings: settingsStore,
     personaImages,
     linearFollowing,
@@ -1155,6 +1158,7 @@ const workerMcp = new WorkerMcp({
 });
 
 const clankie = await createClankieApp({
+  safety,
   discordPermissions: (query, body) =>
     managedDiscord
       ? managedDiscord.permissions(query, body)

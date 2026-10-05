@@ -42,6 +42,101 @@ tags:
 security: []
 
 paths:
+  /v1/operator/safety:
+    get:
+      tags: [Operator]
+      summary: Read owner safety settings
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Owner safety settings
+        "401":
+          description: Owner operator or Take Control device required
+    post:
+      tags: [Operator]
+      summary: Update owner safety settings
+      description: Omitted fields retain current values. Tool restrictions apply immediately; restart to refresh prompts and available built-ins. Native worker permissions remain unchanged.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                codeExecution:
+                  type: string
+                  enum: [direct, delegate]
+                defaultDecision:
+                  type: string
+                  enum: [allow, ask, deny]
+                instructions:
+                  type: string
+                  maxLength: 8000
+                rules:
+                  type: array
+                  maxItems: 128
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [tool, decision]
+                    properties:
+                      tool:
+                        type: string
+                        minLength: 1
+                        maxLength: 256
+                      decision:
+                        type: string
+                        enum: [allow, ask, deny]
+      responses:
+        "200":
+          description: Saved owner safety settings
+        "400":
+          description: Invalid settings patch
+        "401":
+          description: Owner operator or Take Control device required
+  /v1/operator/safety/approvals:
+    get:
+      tags: [Operator]
+      summary: Review exact proposed Clankie tool calls
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Current process-local pending, approved, rejected and consumed action records
+        "401":
+          description: Owner operator or Take Control device required
+    post:
+      tags: [Operator]
+      summary: Approve or reject one exact proposed action
+      description: Approval is single-use and binds tool, arguments, conversation scope and safety settings. Records expire after 15 minutes and are discarded on restart. Approval does not execute the action.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, fingerprint, approve]
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                fingerprint:
+                  type: string
+                  pattern: "^[a-f0-9]{64}$"
+                approve:
+                  type: boolean
+      responses:
+        "200":
+          description: Approved or rejected record
+        "400":
+          description: Invalid action review
+        "401":
+          description: Owner operator or Take Control device required
+        "409":
+          description: Request is no longer pending or the reviewed action changed
   /v1/integrate:
     post:
       tags: [Operator]

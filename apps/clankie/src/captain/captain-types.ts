@@ -19,6 +19,7 @@ import type { ProjectHireProcessProof } from "./project-hires.ts";
 import { type TurnContext } from "./tools.ts";
 
 export interface CaptainOptions {
+  readonly safety?: import("../safety.ts").SafetyBoundary;
   /** Native room child execution, selected before admission under the original room ceiling. */
   readonly runNativeRoomHandoff?: NativeRoomHandoffExecutor;
   /** Explicit controller-created eval boundary; ordinary sessions remain unchanged. */

@@ -130,6 +130,7 @@ export interface TrustedDeviceIdentity {
 export type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 export interface ClankieAppDependencies {
+  safety?: import("../safety.ts").SafetyBoundary;
   integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;

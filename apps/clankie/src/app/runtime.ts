@@ -79,6 +79,7 @@ import { registerLinearRoutes } from "./linear-routes.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
 import { createModelKeyRoutes } from "../model-key-routes.ts";
+import { createSafetyRoutes } from "../safety-routes.ts";
 import { PairingOfferStore, replayReviewOffers } from "../pairing.ts";
 import { createProjectRoutes } from "../project-routes.ts";
 import { createPushDispatcher, type PushDispatcher } from "../push.ts";
@@ -846,6 +847,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     createFleetProjectMembershipRoutes(dependencies.fleetProjectMembership, authorizeOwnerSecrets),
   );
   app.route("/", createModelKeyRoutes(dependencies.modelKeys, authorizeOwnerSecrets));
+  app.route(
+    "/",
+    createSafetyRoutes({
+      settings: settingsSource,
+      ...(dependencies.safety ? { boundary: dependencies.safety } : {}),
+      authorize: async (request) => {
+        const original = hostedOriginalRequests.get(request);
+        return (await authorizeOwnerSecrets(original ?? request)) === true;
+      },
+    }),
+  );
   app.route("/", createAccountRoutes(dependencies.accounts, authorizeOwnerSecrets, settingsSource));
   app.route(
     "/",

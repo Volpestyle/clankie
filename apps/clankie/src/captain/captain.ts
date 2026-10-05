@@ -7,6 +7,7 @@ import { fleetInstructions } from "./captain-prompts.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
+import { SafetyBoundary, safetyExtension, safetyScope } from "../safety.ts";
 import {
   CAPTAIN_SILENT_REPLY_SENTINEL,
   type CaptainChannelTurnResult,
@@ -659,10 +660,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const seatLedger: SeatLedger = createSeatLedger(seatLedgerPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();
   const settingsStore = options.settings ?? new SettingsStore();
+  const safety = options.safety ?? new SafetyBoundary(async () => (await settingsStore.load()).safety);
   const desktop = new DesktopExpressions(async () => (await settingsStore.load()).desktop);
   const desktopDeps = {
     ...deps,
     desktop,
+    safety,
     linearWake: {
       settings: settingsStore,
       targetAllowed: (id: string) => conversations.linearWakeTargetAllowed(id),
@@ -891,6 +894,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         systemPrompt: systemPrompt(lane, systemTools, currentSettings, sideConversation, computerUse),
         noExtensions: true,
         extensionFactories: [
+          safetyExtension(safety, () => safetyScope(lane, capture)),
           ...(systemTools
             ? [
                 captainFleetSettingsExtension({
@@ -993,7 +997,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // shared rooms, while private owner DMs and explicitly trusted guild
           // lanes may bind them durably. A tools list is a boundary; prompt framing
           // around untrusted channel history is not.
-          ...(systemTools ? {} : { noTools: "builtin" as const }),
+          ...(systemTools
+            ? currentSettings.safety.codeExecution === "delegate"
+              ? { excludeTools: ["bash", "powershell", "edit", "write"] }
+              : {}
+            : { noTools: "builtin" as const }),
         });
         preparingSession = created.session;
         if (run?.signal.aborted) {
@@ -1414,6 +1422,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         "Working preferences for this assignment:",
         ...formatFleetAutonomyGuidance(policy),
         "These are standing work preferences, not tool, account or machine authority. Existing authentication, payment, credential and explicitly authorized eval boundaries still apply. Do not run evals as part of release checks without explicit owner authorization.",
+        ...(current.safety.instructions.trim()
+          ? [
+              `Owner work instructions (retain your native harness permissions):\n${current.safety.instructions.trim()}`,
+            ]
+          : []),
         WORKER_RESULT_BRIEF,
       ].join("\n\n");
       if (brief.includes("\0") || Buffer.byteLength(brief) > 32 * 1024)
@@ -1790,9 +1803,32 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       messageSeat,
       workerReportActions,
     );
-    return lane === "operator" && conversationId !== undefined
-      ? { ...bank, tools: [...bank.tools, ...nativeRoomHandoffs.tools(conversationId)] }
-      : bank;
+    const tools =
+      lane === "operator" && conversationId !== undefined
+        ? [...bank.tools, ...nativeRoomHandoffs.tools(conversationId)]
+        : bank.tools;
+    return {
+      ...bank,
+      tools: tools.map((tool) => ({
+        ...tool,
+        async call(args: Record<string, unknown>) {
+          try {
+            const deferred = tool.name === "mcp_tool_call" && typeof args.name === "string";
+            const actual = deferred ? (args.name as string) : tool.name;
+            const input = deferred ? ((args.arguments ?? {}) as Record<string, unknown>) : args;
+            await safety.check(safetyScope(toolLane, capture), actual, input);
+            return await tool.call(args);
+          } catch (error) {
+            return {
+              content: [
+                { type: "text" as const, text: error instanceof Error ? error.message : String(error) },
+              ],
+              isError: true,
+            };
+          }
+        },
+      })),
+    };
   }
 
   async function recordNativeToolCatalog(
@@ -3085,6 +3121,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const toolName = memoryCall === undefined ? name : "memory";
       const [tool] = laneAuthoredToolsNamed(desktopDeps, capture, laneLog, "discord_voice", [toolName]);
       if (tool === undefined) throw new Error(`${name} is not in the discord_voice tool bank`);
+      await safety.check(safetyScope("discord_voice", capture), toolName, memoryCall ?? args);
       return tool.call(memoryCall ?? args);
     },
 

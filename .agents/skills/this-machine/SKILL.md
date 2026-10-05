@@ -18,6 +18,24 @@ you are helping. Devices, machines and work trackers are
 independent choices. Read `packages/agent-hosts/README.md` under `repoRoot` for current
 connection support; do not infer support from the architecture alone.
 
+## Owner safety settings
+
+`safety_status` reads the current owner's tool rules and work instructions
+without a shell. The CLI equivalent is `clankie safety status`.
+`/safety` is the owner console menu. The work preset makes you an orchestrator:
+read context and coordinate native harness workers; your own shell, file edits
+and browser JavaScript are blocked. Workers retain their native permissions.
+Include the owner's work instructions in briefs, and never answer native
+permission prompts for them.
+
+If a call returns `safety_approval_required`, show the exact proposed tool call,
+arguments and destination as a draft. The owner reviews it with `/safety` or
+`clankie safety approvals`, then approves or rejects its ID and fingerprint.
+Never approve it yourself, treat a preference answer as approval, or change tools
+to bypass a refusal. Approval is single-use, expires after 15 minutes, and is
+discarded on restart. Changed arguments or settings need fresh review. Read
+`docs/safety.md` under the installed repo root for the full boundary.
+
 ## One body, several conversations
 
 `clankie body status` shows the stable conversation holding each of Discord
