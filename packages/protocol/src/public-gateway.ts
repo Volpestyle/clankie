@@ -72,6 +72,9 @@ import {
 export { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
 
 export const PUBLIC_GATEWAY_ROUTES = [
+  // Host-route traffic is behind the gateway encryption gate. The trusted
+  // Activity media tunnel separately requires a fleet permit and live audience checks.
+  { method: "POST", path: "/v1/activity/viewer", target: "control" },
   { method: "GET", path: COMPOSER_TRANSCRIPTION_STATUS_PATH, target: "control" },
   { method: "POST", path: COMPOSER_TRANSCRIPTION_BEGIN_PATH, target: "control" },
   { method: "POST", path: COMPOSER_TRANSCRIPTION_CHUNK_PATH, target: "control" },

@@ -7,6 +7,7 @@ import { RenderedSurfaceHub } from "./frame-hub.ts";
 import type { ActivityShareRegistry } from "./share-registry.ts";
 
 const CLIENT_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "client.html");
+const BUNDLE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../dist/activity-client.js");
 
 /**
  * Discord proxies every activity request through discordsays.com, and the
@@ -26,6 +27,8 @@ export interface DiscordActivityServerOptions {
   /** Unauthenticated sockets cannot hold an unbounded admission queue. */
   maxPendingViewers?: number;
   admissionTimeoutMs?: number;
+  /** Official hosting never exposes the public legacy compatibility stream. */
+  viewerMode?: { mode: "official"; applicationId: string } | { mode: "local" };
 }
 
 export interface DiscordActivityServer {
@@ -46,7 +49,7 @@ export function createDiscordActivityServer(options: DiscordActivityServerOption
   });
 
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
-    void serveRequest(request, response, options.avatarDirectory);
+    void serveRequest(request, response, options);
   });
 
   server.on("upgrade", (request, socket, head) => {
@@ -57,7 +60,7 @@ export function createDiscordActivityServer(options: DiscordActivityServerOption
       return;
     }
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
-    const share = /^\/(?:\.proxy\/)?shares\/([a-f0-9-]+)\/frames$/u.exec(path);
+    const share = /^\/(?:\.proxy\/)?(?:activity\/)?shares\/([a-f0-9-]+)\/frames$/u.exec(path);
     if (share !== null && options.shares !== undefined) {
       if (pendingViewers >= maxPendingViewers) {
         socket.destroy();
@@ -78,7 +81,7 @@ export function createDiscordActivityServer(options: DiscordActivityServerOption
       });
       return;
     }
-    if (!FRAME_PATHS.has(path)) {
+    if (!FRAME_PATHS.has(path) || options.viewerMode?.mode === "official") {
       socket.destroy();
       return;
     }
@@ -130,7 +133,7 @@ function attachShareViewer(
     get bufferedAmount() {
       return socket.bufferedAmount;
     },
-    close: () => socket.close(),
+    close: () => socket.close(4403, "admission_ended"),
   };
   const timer = setTimeout(() => {
     release();
@@ -187,9 +190,30 @@ function bounded(value: number, maximum: number): number {
 async function serveRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  avatarDirectory: string | undefined,
+  options: DiscordActivityServerOptions,
 ): Promise<void> {
+  const { avatarDirectory } = options;
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
+  if (request.method === "GET" && (path === "/activity/config" || path === "/.proxy/activity/config")) {
+    response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify(options.viewerMode ?? { mode: "local" }));
+    return;
+  }
+  if (request.method === "GET" && (path === "/activity-client.js" || path === "/.proxy/activity-client.js")) {
+    try {
+      const script = await readFile(BUNDLE_PATH);
+      response
+        .writeHead(200, {
+          "content-type": "text/javascript; charset=utf-8",
+          "cache-control": "no-cache",
+          "x-content-type-options": "nosniff",
+        })
+        .end(script);
+    } catch {
+      response.writeHead(503).end();
+    }
+    return;
+  }
   const avatar =
     /^\/(?:\.proxy\/)?avatars\/(agent-(?:[a-f0-9]{64}|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})-[a-f0-9]{64})\.png$/u.exec(
       path,

@@ -24,6 +24,7 @@ This directory and the module READMEs hold the technical references.
 | [Tracker identity](worker-tracker-identity.md)      | Connected-account enforcement and remaining isolation work                 |
 | [Worker posts](linear-worker-posts.md)              | One Linear app, worker names and portraits, compact handoffs               |
 | [Discord media](discord-media.md)                   | Voice, music, Activity, Go Live, and screen-share differences              |
+| [Activity sharing](activity.md)                     | Existing media, local/hosted controls, viewer admission and receipts       |
 | [Remote Discord ingress](discord-ingress.md)        | Authenticated sealed text ingress protocol, independent of rollout         |
 | [Desktop control](desktop-control.md)               | Native computer-use workflow and evidence limits                           |
 | [Rivals integration](rivals.md)                     | Separate game bridge, including its explicit disabled status               |

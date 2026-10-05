@@ -10,7 +10,9 @@ const HEADLESS_COMMAND_HELP = [
   },
   {
     nouns: ["share"],
-    lines: ["  share [list | request JSON]  Control local Activity artifact shares (owner-only, JSON)"],
+    lines: [
+      "  share [list | request JSON]  Control Activity shares on the current connection (owner/device, JSON)",
+    ],
   },
   {
     nouns: ["harness"],

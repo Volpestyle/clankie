@@ -4,20 +4,25 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:viewer": "node scripts/build-viewer.mjs",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "viewer-probe": "tsx scripts/viewer-probe.ts"
+    "viewer-probe": "tsx scripts/viewer-probe.ts",
+    "test:browser": "node scripts/build-viewer.mjs && ACTIVITY_BROWSER_INTEGRATION=1 vitest run test/activity-browser.integration.test.ts"
   },
   "dependencies": {
     "@clankie/credential-broker": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",
+    "@clankie/protocol": "workspace:*",
+    "@discord/embedded-app-sdk": "2.5.0",
     "ws": "8.21.0"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
     "@types/ws": "8.18.1",
+    "playwright-core": "1.63.0",
     "tsx": "4.23.0",
     "typescript": "5.9.3",
     "vitest": "4.1.10"

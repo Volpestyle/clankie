@@ -6,6 +6,16 @@ import { afterEach, expect, it, vi } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { serve } from "@hono/node-server";
+import { ActivitySharing } from "../src/activity-sharing.ts";
+import { DeliveredFileStore } from "../src/delivered-files.ts";
+import { RenderedSurfaceHub } from "../../discord-activity/src/frame-hub.ts";
+import { ActivityShareRegistry } from "../../discord-activity/src/share-registry.ts";
+import { createFrameProducerServer } from "../../discord-activity/src/producer.ts";
+import { hostedCommand } from "../../tui/src/command/hosted.ts";
+import { runShareCommand, shareConsoleCommand } from "../../tui/src/command/share.ts";
+import type { ClankieFaceShell } from "../../tui/src/shell/shell.ts";
+import { runHeadlessCaptainCommand } from "../../tui/bin/headless-captain.ts";
 import { FLEET_AUTONOMY_DEFAULTS } from "@clankie/protocol";
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
@@ -34,9 +44,13 @@ afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-async function fixture(purpose: "operator" | null = "operator", tamper = false) {
-  const f = hostedFixture();
-  vi.spyOn(Date, "now").mockReturnValue(f.now);
+async function fixture(
+  purpose: "operator" | null = "operator",
+  tamper = false,
+  options: { activitySharing?: ActivitySharing; realClock?: boolean } = {},
+) {
+  const f = hostedFixture(options.realClock ? Math.floor(Date.now() / 1000) * 1000 : undefined);
+  if (!options.realClock) vi.spyOn(Date, "now").mockReturnValue(f.now);
   const root = await mkdtemp(join(tmpdir(), "hosted-tui-"));
   roots.push(root);
   const store = new FileCredentialStore(join(root, "credentials.json")),
@@ -84,6 +98,7 @@ async function fixture(purpose: "operator" | null = "operator", tamper = false) 
       },
     }),
     hostedPairing,
+    ...(options.activitySharing === undefined ? {} : { activitySharing: options.activitySharing }),
     settings: serviceSettings,
     deviceSessionKey: randomBytes(32),
     clock: () => new Date(f.now),
@@ -144,6 +159,10 @@ async function fixture(purpose: "operator" | null = "operator", tamper = false) 
     app,
     store,
     settings,
+    env: {
+      CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+      CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
+    },
     serviceSettings,
     fetchImpl,
     seen,
@@ -218,6 +237,145 @@ it("ordinary hosted pairing cannot become an operator by claiming macOS", async 
   await expect(createHostedTransport(session, f.store, f.fetchImpl).request("/health")).rejects.toThrow(
     "operator_device_required",
   );
+});
+it("hosted share CLI and console use the signed paired-device encrypted HTTP route, retain receipts, and refuse after revocation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hosted-share-"));
+  roots.push(root);
+  const shares = new ActivityShareRegistry();
+  const producer = createFrameProducerServer({
+    hub: new RenderedSurfaceHub(),
+    shares,
+    token: "fixture-private-media",
+  });
+  const port = await producer.listen(0);
+  const sharing = new ActivitySharing({
+    files: new DeliveredFileStore(join(root, "files")),
+    token: async () => "fixture-private-media",
+    url: `http://127.0.0.1:${port}`,
+    tenantId: `tn_${"a".repeat(20)}`,
+    installationId: "i".repeat(22),
+    authorizeDestination: async (scope) => scope.guildId === "10001" && scope.channelId === "20001",
+    sources: {
+      resolve: async (id) =>
+        id === "play"
+          ? { source: { kind: "game", id: "firered", title: "FireRed" }, attach: () => {} }
+          : undefined,
+    },
+    launch: async (session, receiptId) => ({
+      outcome: "confirmed",
+      receiptId,
+      session,
+      inviteUrl: "https://discord.gg/fixtureInvite",
+    }),
+  });
+  const f = await fixture("operator", false, { activitySharing: sharing, realClock: true });
+  const paired = await f.pair();
+  // The established signed-pairing fixture supplies the account boundary;
+  // command requests themselves use actual loopback HTTP and production crypto.
+  const gateway = serve({ fetch: (request) => f.fetchImpl(request), hostname: "127.0.0.1", port: 0 });
+  await new Promise<void>((done) => gateway.once("listening", done));
+  const address = gateway.address();
+  if (address === null || typeof address === "string") throw new Error("gateway_fixture_unavailable");
+  const session = { ...paired, gatewayUrl: `http://127.0.0.1:${address.port}` };
+  await f.store.set("clankie-hosted-device", { type: "api", key: JSON.stringify(session) });
+  await f.settings.update((settings) => ({
+    ...settings,
+    client: { mode: "hosted", gatewayUrl: session.gatewayUrl, hostId: session.encryption.hostId },
+  }));
+  const transport = createHostedTransport(session, f.store);
+  try {
+    const started = (await hostedCommand(
+      [
+        "share",
+        "request",
+        JSON.stringify({ action: "start", sourceId: "play", guildId: "10001", channelId: "20001" }),
+      ],
+      transport,
+    )) as {
+      session: { shareId: string; generation: number; scope: unknown };
+      receipt: { outcome: string; inviteUrl: string };
+    };
+    expect(started.receipt).toMatchObject({
+      outcome: "confirmed",
+      inviteUrl: "https://discord.gg/fixtureInvite",
+    });
+    expect(started.session.scope).toEqual({
+      tenantId: f.f.bootstrap.tenantId,
+      installationId: f.f.bootstrap.installationId,
+      guildId: "10001",
+      channelId: "20001",
+    });
+    const client = new ClankieApiClient({
+      baseUrl: transport.host,
+      fetchImpl: transport.fetchImpl,
+      operatorToken: "hosted-device-transport",
+    });
+    expect(await client.activityShares({ action: "list" })).toMatchObject({ sessions: [started.session] });
+    let cliOutput = "",
+      cliError = "";
+    expect(
+      await runHeadlessCaptainCommand(["share", "list"], {
+        repoRoot: root,
+        env: f.env,
+        stdout: {
+          write: (value) => {
+            cliOutput += value;
+          },
+        },
+        stderr: {
+          write: (value) => {
+            cliError += value;
+          },
+        },
+      }),
+      cliError,
+    ).toBe(0);
+    expect(JSON.parse(cliOutput)).toMatchObject({ sessions: [started.session] });
+    const results: { text: string; tone: string }[] = [];
+    const command = shareConsoleCommand((args) => runShareCommand(args, { request: transport.request }));
+    const shell = {
+      insertCommandResult: (_name: string, text: string, tone: string) => results.push({ text, tone }),
+    } as unknown as ClankieFaceShell;
+    await command.run("list", shell);
+    expect(results[0]?.tone).toBe("success");
+    expect(JSON.parse(results[0]!.text)).toMatchObject({ sessions: [started.session] });
+    await hostedCommand(
+      [
+        "share",
+        "request",
+        JSON.stringify({
+          action: "stop",
+          shareId: started.session.shareId,
+          generation: started.session.generation,
+        }),
+      ],
+      transport,
+    );
+    expect(await hostedCommand(["share", "list"], transport)).toEqual({ sessions: [] });
+    const wire = JSON.stringify(f.seen.filter((request) => request.path.startsWith("/h/")));
+    for (const secret of [
+      session.deviceToken,
+      session.encryption.key,
+      "fixture-private-media",
+      "fixtureInvite",
+      "sourceId",
+      "account-only-secret",
+    ])
+      expect(wire).not.toContain(secret);
+    await f.app.app.request(`/v1/devices/${session.deviceId}/revoke`, {
+      method: "POST",
+      headers: { authorization: "Bearer owner" },
+      body: JSON.stringify({ deviceId: session.deviceId }),
+    });
+    await expect(hostedCommand(["share", "list"], transport)).rejects.toThrow("revoked");
+    await command.run("list", shell);
+    expect(results.at(-1)?.tone).toBe("error");
+    expect(results.at(-1)?.text).toContain("revoked");
+  } finally {
+    await sharing.close();
+    await producer.close();
+    await new Promise<void>((done) => gateway.close(() => done()));
+  }
 });
 it("persists fleet and project autonomy over the real signed encrypted operator bridge while preserving its route boundary", async () => {
   const f = await fixture(),

@@ -80,7 +80,7 @@ Do not edit `~/.config/clankie/clankie.json`,
 
 | Task                                                   | Commands                                                |
 | ------------------------------------------------------ | ------------------------------------------------------- |
-| [Control local Activity shares](#activity-shares)      | `share list`, `share request JSON`                      |
+| [Control Activity shares](#activity-shares)            | `share list`, `share request JSON`                      |
 | [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                            |
 | [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`, `awake`                 |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                            |
@@ -3995,46 +3995,71 @@ limitation.
 
 ## Activity shares
 
-`clankie share [list | request JSON]` controls local Activity artifact shares
-with the owner operator bearer. `/share` exposes the same controls in the local
-console. Requests use `POST /v1/activity/shares`; output is JSON and exit status
-follows the HTTP result. This core does not launch a Discord Activity. Hosted
-launch/routing and Discord audience admission await the official app decision
-and private ops integration; hosted customers never configure a tunnel or app.
+`clankie share [list | request JSON]` and `/share` control Activity shares on
+the current connection. Local commands use the owner operator bearer; hosted
+commands use the existing encrypted paired-device transport, including the
+hosted console. Requests use `POST /v1/activity/shares`. The typed API client
+exposes `activityShares(request)` with the same canonical request/response
+schemas. Output retains the service's session and launch/stop receipt.
 
-First publish the PNG through the existing conversation file contract:
+Share the current authorized game producer with `sourceId:"play"`:
 
 ```bash
-clankie file publish --conversation ID image.png
-# Use the returned artifactId, which is bound to exactly this conversation:
-clankie share request '{"action":"image","conversationId":"ID","artifactId":"ARTIFACT_ID","guildId":"GUILD_ID","channelId":"CHANNEL_ID"}'
+clankie share request '{"action":"start","sourceId":"play","guildId":"GUILD_ID","channelId":"CHANNEL_ID"}'
 clankie share list
-clankie share request '{"action":"grant","shareId":"SHARE_ID","generation":1}'
-clankie share request '{"action":"switch","shareId":"SHARE_ID","generation":1,"conversationId":"ID","artifactId":"OTHER_ARTIFACT_ID"}'
-clankie share request '{"action":"stop","shareId":"SHARE_ID","generation":2}'
+```
+
+For an image, first publish it through the existing conversation file contract;
+the share request selects its exact conversation and artifact ID:
+
+```bash
+clankie file publish --conversation CONVERSATION_ID image.png
+clankie share request '{"action":"image","conversationId":"CONVERSATION_ID","artifactId":"ARTIFACT_ID","guildId":"GUILD_ID","channelId":"CHANNEL_ID"}'
+```
+
+An existing delivered GIF, MP4, WAV or MP3 uses its registered artifact source ID:
+`artifact:CONVERSATION_UUID:ARTIFACT_ID`. GIF is an animation; MP4 is a finite demo.
+PNG is also accepted through this source form. Files are checked against the
+stored digest; animations/demos are bounded to 32 MiB and 120 seconds.
+
+```bash
+clankie share request '{"action":"start","sourceId":"artifact:CONVERSATION_UUID:ARTIFACT_ID","guildId":"GUILD_ID","channelId":"CHANNEL_ID"}'
+clankie share request '{"action":"switch","shareId":"SHARE_ID","generation":1,"sourceId":"play"}'
+clankie share request '{"action":"switch","shareId":"SHARE_ID","generation":2,"conversationId":"CONVERSATION_ID","artifactId":"OTHER_ARTIFACT_ID"}'
+clankie share request '{"action":"stop","shareId":"SHARE_ID","generation":3}'
 ```
 
 IDs above are placeholders; guild/channel IDs must be Discord snowflakes.
-Only an existing delivered PNG is accepted, with its exact conversation and
-stored digest. No source URL, filesystem path or capture permission is accepted
-by the share request. Tenant and installation scope are assigned by the service.
-An image request accepts optional `ttlMs` (default 30 minutes, at most two hours).
-It returns `{session}`. List returns `{sessions}`; stop returns `{stopped:true}`.
+A switch chooses exactly one registered source or conversation/artifact pair.
+No source URL, filesystem path or capture permission is accepted. The service
+assigns tenant/installation scope and checks destination authority. Start/image
+accept optional `ttlMs` (default 30 minutes, at most two hours). Start and switch
+return `{session,receipt?}`, list returns `{sessions}`, and stop returns
+`{stopped:true,receipt?}`. Use the returned generation on later controls.
 
-A grant response is `{grant,expiresAt}`. On the configured viewer origin, open
-`/#share=SHARE_ID&grant=GRANT`; the read-only grant stays in the URL fragment.
-Treat it as delegated access, not proof of Discord membership. Never put an
-operator or producer bearer in a viewer URL. Grants expire after at most five
-minutes for admission; existing viewers last until the share ends. Source
-switch advances generation, clears old media and revokes old grants for joins,
-while current viewers follow it. Use the returned generation on later controls.
-Stop, expiry or producer loss is terminal; old grants cannot revive the share.
+A hosted launch/stop receipt reports `outcome:"confirmed"|"refused"|"uncertain"`,
+a request-bound `receiptId`, its exact session, and an invite URL when confirmed.
+An unavailable or lost external reply stays uncertain. Commands never replay an
+uncertain effect; use list and the receipt to reconcile before deciding another
+action. Self-hosted sessions without a configured official launch adapter can
+stream media but do not claim a Discord launch receipt.
 
-Controls never replay automatically. A lost/invalid private response returns
-`outcome:"uncertain"`, operation and the share/generation when known. Read the
-registry before deciding a next action; an unknown start also has finite TTL.
-Local service close invalidates its producer sockets. The existing public
-watch-me-play route, self-host launcher and named tunnel retain their transport;
-private artifact shares never appear on that public stream. See the
-[Activity reference](../apps/discord-activity/README.md#scoped-general-media-core)
-for wire contracts and bounds.
+The official hosted viewer performs Discord's SDK ready/authorize/authenticate
+handshake and obtains scoped admission from the server. SDK query parameters and
+URL fragments do not choose a tenant or room. Admission/configuration failure
+opens no media socket; there is no anonymous legacy fallback. Audience access is
+revalidated during viewing and revocation is terminal. Hosted customers do not
+configure applications, bot credentials or tunnels.
+
+For local self-hosted delegated viewing, `action:"grant"` returns
+`{grant,expiresAt}`. On the configured viewer origin use
+`/#share=SHARE_ID&grant=GRANT`; keep the read-only grant in the fragment and never
+put an operator/producer bearer in a viewer URL. Grants are delegated access,
+not proof of Discord membership, and expire for existing viewers too after at
+most five minutes. Switch clears media/text/audio, advances generation and
+revokes old grants for later joins; current viewers follow until their original
+grant expires. Stop, share expiry or producer loss is terminal. Private scoped
+media never appears on the self-hosted public legacy stream.
+
+See [Activity sharing](activity.md) and the
+[wire reference](../apps/discord-activity/README.md#scoped-general-media-core).

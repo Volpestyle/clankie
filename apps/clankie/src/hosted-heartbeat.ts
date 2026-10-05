@@ -2,8 +2,13 @@ import { z } from "zod";
 import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
 import type { HostedBodyClient } from "./hosted-body.ts";
 
-export type HostedBusyReason = "captain-turn" | "herdr-agent" | "scheduled-job";
-const REASONS: readonly HostedBusyReason[] = ["captain-turn", "herdr-agent", "scheduled-job"];
+export type HostedBusyReason = "captain-turn" | "herdr-agent" | "scheduled-job" | "activity-share";
+const REASONS: readonly HostedBusyReason[] = [
+  "captain-turn",
+  "herdr-agent",
+  "scheduled-job",
+  "activity-share",
+];
 const DesiredSchema = z.object({ desired: z.enum(["running", "sleeping", "suspended"]) }).strict();
 const WORK_OPS = new Set([
   "create",

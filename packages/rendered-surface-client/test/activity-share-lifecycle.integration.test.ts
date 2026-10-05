@@ -3,7 +3,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { RenderedSurfaceHub } from "../../../apps/discord-activity/src/frame-hub.ts";
 import { createFrameProducerServer } from "../../../apps/discord-activity/src/producer.ts";
 import { ActivityShareRegistry } from "../../../apps/discord-activity/src/share-registry.ts";
-import { createActivityShareClient } from "../src/activity-share-client.ts";
+import { createActivityShareClient, createActivityShareFrameSink } from "../src/activity-share-client.ts";
+import { createHash } from "node:crypto";
 
 const controlToken = "lifecycle-control-secret";
 const scope = (guildId = "guild") => ({
@@ -49,7 +50,13 @@ function holdResponse(path: string) {
   };
 }
 
-async function privatePlane(options: { fetch?: typeof fetch; maxCachedShares?: number } = {}) {
+async function privatePlane(
+  options: {
+    fetch?: typeof fetch;
+    maxCachedShares?: number;
+    onSessionEnded?: (session: ActivityShareSession) => void;
+  } = {},
+) {
   const shares = new ActivityShareRegistry();
   const server = createFrameProducerServer({ shares, hub: new RenderedSurfaceHub(), token: controlToken });
   const port = await server.listen(0);
@@ -149,4 +156,62 @@ it("refuses overlapping same-share switch and stop before dispatching another mu
   expect(switched).toEqual(applied);
   await client.stop(switched);
   expect(await client.status()).toEqual([]);
+});
+
+it("streams an authorized legacy producer through the private viewer client and releases admission on abort", async () => {
+  const ended: ActivityShareSession[] = [];
+  const { client, shares } = await privatePlane({ onSessionEnded: (session) => ended.push(session) });
+  const session = await client.start({
+    scope: scope(),
+    source: { kind: "demo", id: "authored-demo", title: "Authored demo" },
+  });
+  await expect(client.openViewer(session, "not-a-grant")).rejects.toMatchObject({
+    operation: "viewer",
+    outcome: "refused",
+  });
+  const grant = await client.grant(session);
+  const abort = new AbortController();
+  const response = await client.openViewer(session, grant.grant, abort.signal);
+  expect(response.headers.get("content-type")).toBe("application/x-ndjson");
+  const reader = response.body!.getReader();
+  cleanup.push(async () => {
+    abort.abort();
+    await reader.cancel().catch(() => undefined);
+  });
+  const initial = await reader.read();
+  expect(JSON.parse(Buffer.from(initial.value!).toString())).toEqual({ kind: "session", session });
+  const sink = createActivityShareFrameSink(client.sink(session));
+  await vi.waitFor(() => expect(sink.connected).toBe(true));
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
+    "base64",
+  );
+  sink.publishFrame({
+    schemaVersion: 1,
+    surface: "gba_emulator",
+    sequence: 1,
+    frame: 42,
+    width: 1,
+    height: 1,
+    encoding: "png",
+    data: png.toString("base64"),
+    byteLength: png.length,
+    sha256: createHash("sha256").update(png).digest("hex"),
+    capturedAt: new Date().toISOString(),
+  });
+  const next = JSON.parse(Buffer.from((await reader.read()).value!).toString());
+  expect(next).toMatchObject({
+    kind: "frame",
+    shareId: session.shareId,
+    generation: 1,
+    frame: { schemaVersion: 2, frame: 42 },
+  });
+  expect(next.frame).not.toHaveProperty("surface");
+  const pending = reader.read();
+  abort.abort();
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await vi.waitFor(() => expect(shares.stats()[0]!.viewerCount).toBe(0));
+  sink.close();
+  expect(ended).toEqual([session]);
+  await vi.waitFor(async () => expect(await client.status()).toEqual([]));
 });

@@ -10,8 +10,9 @@ selfbot token. Activities are the supported alternative: a web app hosted in an
 iframe inside a voice channel, launched by the bot through an
 `EMBEDDED_APPLICATION` invite. This app is that web app.
 
-It is a **rendering client only**. It holds no Discord credentials, no
-authority, and no emulator core. The host feeds it frames and bounded PCM; it
+It is a **rendering client only**. It holds no bot or media-control credentials,
+no capture authority, and no emulator core. Official admission uses only the
+viewer's ephemeral user OAuth token for the SDK handshake. The host feeds it frames and bounded PCM; it
 draws the frames and plays sound after the viewer presses **Enable sound**.
 The button reads **Sound ready** until valid PCM actually reaches the browser;
 **Sound on** means packets are arriving. The slider beside it sets playback
@@ -41,22 +42,32 @@ separate v2 stream for game, image, animation and demo sources. Each finite shar
 has its own scope, generation, hub and producer capability. Scoped media never
 appears on public legacy `/frames`. Self-host launcher/tunnel transport stays.
 
-The owner's `clankie share` / `/share` controls project an existing delivered PNG
-by exact conversation/artifact ID. See the [CLI](../../docs/cli.md#activity-shares).
-This creates no Discord invite or Activity launch. Hosted routing, Discord
-instance/user admission, automatic infrastructure and a continuing-share compute
-lease await the official app decision and private ops integration. Hosted
-customers will not configure accounts, bot tokens, app registrations or tunnels.
+The owner's `clankie share` / `/share` controls use the same request on local
+and hosted connections. `sourceId:"play"` selects the existing authorized game
+producer. An image names its delivered conversation/artifact exactly;
+`artifact:<conversationUUID>:<artifact48hex>` also registers PNG, GIF animation
+or finite MP4 demo sources. No URL, path or new capture permission is accepted.
+See [Activity sharing](../../docs/activity.md) and the
+[CLI](../../docs/cli.md#activity-shares).
+
+The hosted path uses the existing encrypted paired-device transport and the
+official bot's server-owned launch/audience adapter. Launch/stop receipts remain
+confirmed, refused or uncertain; neither client replays an uncertain effect.
+Hosted customers do not configure bot keys, app registrations or tunnels.
+Local self-hosting retains delegated fragment grants; automatic official-app
+launch/participant admission is a separate adapter and is not supplied by that
+compatibility path.
 
 Private control on port 4322 requires the broker-owned producer bearer:
 
-| Method and path          | Contract                                               |
-| ------------------------ | ------------------------------------------------------ |
-| `GET /shares`            | `{sessions}`: active metadata, no credentials/media    |
-| `POST /shares`           | `{scope,source,ttlMs?}` → `{session,producerToken}`    |
-| `POST /shares/ID/switch` | `{generation,source}` → next session and rotated token |
-| `POST /shares/ID/grant`  | `{generation,ttlMs?}` → `{grant,expiresAt}`            |
-| `POST /shares/ID/stop`   | `{generation}` → `{stopped:true}`                      |
+| Method and path          | Contract                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `GET /shares`            | `{sessions}`: active metadata, no credentials/media                                  |
+| `POST /shares`           | `{scope,source,ttlMs?}` → `{session,producerToken}`                                  |
+| `POST /shares/ID/switch` | `{generation,source}` → next session and rotated token                               |
+| `POST /shares/ID/grant`  | `{generation,ttlMs?}` → `{grant,expiresAt}`                                          |
+| `POST /shares/ID/stop`   | `{generation}` → `{stopped:true}`                                                    |
+| `POST /shares/ID/viewer` | `{generation,grant}` or `{generation,mode:"live"}` → bounded read-only NDJSON stream |
 
 Scope is `{tenantId,installationId,guildId,channelId}` from the trusted controller;
 source is `{kind,id,title}`. `@clankie/rendered-surface-client` supplies
@@ -69,13 +80,13 @@ Public `/shares/ID/frames` and `/.proxy/shares/ID/frames` require first message
 `{kind:"admit",grant}` within five seconds. The viewer URL uses
 `/#share=ID&grant=GRANT`: the fragment stays out of HTTP requests and referrers.
 Never put control/producer bearers there. Grants prove delegated read access;
-Discord participant/room verification belongs to the pending admission adapter.
+They do not prove Discord participant membership.
 Missing, wrong, foreign, expired or revoked grants receive no media. Scoped
 launches never fall back to the public stream.
 
 Switch clears media/text/audio, advances generation and resets sequences for
 existing viewers. It revokes old grants for later joins. Grant TTL bounds
-admission; an admitted connection lasts until the share ends. Stop, expiry and
+admission and existing connections; expiry or explicit revocation closes them. Stop, expiry and
 producer loss end the share permanently. Installation replacement ends all old
 shares in the guild; guild binding stays reserved to its tenant until registry
 restart. Reconnect cannot open a different share or restore terminal media.
@@ -89,6 +100,42 @@ socket sides cap writes at 512 KiB including text/status. Slow updates drop;
 slow lifecycle delivery closes the connection. The process reports drop counters
 without retaining raw media or secrets. The viewer caps sound scheduling at
 350 ms and invalidates pending decode/playback on switch, stop or socket loss.
+
+## Official SDK viewer
+
+`GET /.proxy/activity/config` selects explicit `official` or local mode. Official
+mode requires an application ID and loads the bundled `/activity-client.js`
+through the same proxy. The shipped Embedded App SDK runs ready, authorize and
+authenticate. `POST /.proxy/activity/admit {code,instanceId}` returns trusted
+`{session,grant,expiresAt,mediaPath,accessToken}`; the viewer sends the grant as
+its first WebSocket message. SDK guild/channel claims and fragments confer no
+hosted scope. Config/admission failure never opens legacy media.
+
+The private HTTP viewer projection releases its bounded registry slot on
+response cancellation. Its grant form keeps the delegated grant's expiry;
+the controller-authenticated `mode:"live"` form lasts until the share expires.
+The latter requires the private producer bearer; public viewer routes cannot
+request it. The hosted body verifies current scope and audience authority before
+opening it. The gateway revalidates that authority at most every 15 seconds and
+terminates on failure. Initial
+public admission has a short one-use deadline, separate from the admitted
+viewer lifetime. Source switches preserve already admitted viewers within
+their applicable lifetime. No bot or control credential reaches the browser,
+CDN or model.
+
+Build and verify locally:
+
+```bash
+pnpm --filter @clankie/discord-activity build:viewer
+pnpm --filter @clankie/discord-activity test:browser
+```
+
+The opt-in browser gate uses installed Chromium (override
+`ACTIVITY_TEST_CHROMIUM`), actual PNG decoding and Web Audio against loopback HTTP
+and WebSockets, with the shipped SDK talking to a local Discord RPC fixture.
+It writes desktop, phone and tablet screenshots under
+`.local/testing/activity-browser/`. Live Discord launch configuration and human
+playback quality remain owner checks.
 
 ## Running it
 

@@ -34,6 +34,7 @@ import {
   pairHostedAccount,
 } from "./hosted-session.ts";
 import { hostedCommand, HOSTED_LOCAL_ONLY } from "./command/hosted.ts";
+import { runShareCommand, shareConsoleCommand } from "./command/share.ts";
 import { clankieStateHome } from "./state-home.ts";
 
 /** The connection picker is shared by /settings, /connect hosted and /gateway's guard. */
@@ -193,6 +194,7 @@ export async function runHostedConsole() {
     operatorToken: "hosted-device-transport",
   });
   const commands: FaceShellCommand[] = [
+    shareConsoleCommand((args) => runShareCommand(args, { request: transport.request })),
     ...buildDiscordCommands({
       settings,
       localAdvanced: false,

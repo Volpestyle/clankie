@@ -56,6 +56,7 @@ import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { desktopTools } from "./desktop.ts";
 import { rivalsTools } from "./rivals-tools.ts";
+import { activityTools } from "./activity-tools.ts";
 import { minecraftTools } from "./minecraft-tools.ts";
 import { fleetEfficiencyTools } from "./fleet-efficiency-tools.ts";
 import { minecraftHostTools } from "./minecraft-host-tools.ts";
@@ -169,6 +170,7 @@ export function captainTools(
   );
   return [
     ...desktopTools(deps.desktop),
+    ...(deps.activitySharing && (lane === "operator" || lane.startsWith("discord_")) ? activityTools(deps.activitySharing,turn) : []),
     ...(lane === "operator" && deps.linearWake ? linearWakeTools(deps.linearWake) : []),
     ...(deps.bodyLeases === undefined
       ? []

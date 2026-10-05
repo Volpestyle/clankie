@@ -1,3 +1,8 @@
+import {
+  ActivityLaunchReceiptSchema,
+  ActivityAuthorizationSchema,
+  type ActivitySession,
+} from "@clankie/protocol/activity-sharing";
 import { createHash, createPublicKey, randomBytes, sign, verify, type KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -672,6 +677,13 @@ export class HostedBodyClient {
           throw new ManagedDiscordPolicyConflictError(conflict.current);
         }
         if (
+          path === "activity" &&
+          ["activity_denied", "activity_scope_denied", "activity_viewer_denied"].includes(code ?? "")
+        ) {
+          await response.body?.cancel();
+          throw new Error("activity_destination_refused");
+        }
+        if (
           path.startsWith("discord-") &&
           (code === "discord_grant_revoked" || code === "discord_scope_refused" || code === "wrong_guild")
         ) {
@@ -785,6 +797,32 @@ export class HostedBodyClient {
   private async discordRequest(path: string, body: Readonly<Record<string, unknown>>) {
     const credential = await this.resolveHostToken();
     return this.request(path, { ...body, installationId: this.bootstrap.installationId }, credential.token);
+  }
+  async authorizeActivityDestination(scope: ActivitySession["scope"]): Promise<boolean> {
+    try {
+      const result = await (await this.discordRequest("activity", { action: "authorize", scope })).json();
+      return z
+        .object({ authorized: z.literal(true) })
+        .strict()
+        .safeParse(result).success;
+    } catch {
+      return false;
+    }
+  }
+  async launchActivity(session: ActivitySession, requestId: string) {
+    return ActivityLaunchReceiptSchema.parse(
+      await (await this.discordRequest("activity", { action: "launch", session, requestId })).json(),
+    );
+  }
+  async stopActivity(session: ActivitySession, requestId: string) {
+    return ActivityLaunchReceiptSchema.parse(
+      await (await this.discordRequest("activity", { action: "stop", session, requestId })).json(),
+    );
+  }
+  async revalidateActivity(authorization: string) {
+    return ActivityAuthorizationSchema.parse(
+      await (await this.discordRequest("activity", { action: "revalidate", authorization })).json(),
+    );
   }
   async readDiscordDirectory(query: DiscordDirectoryRequest) {
     return ManagedDiscordDirectoryResponseSchema.parse(
