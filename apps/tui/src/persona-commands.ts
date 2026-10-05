@@ -1,3 +1,4 @@
+import { formatPersonaImages } from "./command-format.ts";
 import { SettingsStore, type PersonaSettings } from "@clankie/settings";
 import { formatPersonaLines, personaStatus, personaUpdate, runPersonaCommand } from "./command/persona.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
@@ -112,7 +113,7 @@ async function runPersonaWizard(shell: ClankieFaceShell, services: PersonaComman
         const result = await runPersonaCommand(["images", action, ...(folder ? [folder] : [])], {
           settings: services.settings,
         });
-        flow.renderLine(JSON.stringify(result.images, null, 2), "success");
+        shell.insertCommandResult("/persona images", formatPersonaImages(result.images), "success");
         flow.renderLine(result.restart, "success");
       } else if (choice === "character") await editCharacter(shell, services);
       else if (choice === "names") await editNames(shell, services);

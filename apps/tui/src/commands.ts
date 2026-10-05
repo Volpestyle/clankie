@@ -11,6 +11,9 @@ import { runProjectCommand } from "./command/project.ts";
 import { runMachinesCommand } from "./command/machines.ts";
 import { runProjectSettingsCommand } from "./command/project-settings.ts";
 import { planSeat, parseSeatArgs } from "./command/seat.ts";
+import { formatRivals, formatSeatPlan } from "./command-format.ts";
+import { runRivalsMenu } from "./rivals-menu.ts";
+import { onOff, runSettingsMenu } from "./settings-menu.ts";
 import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runLinearCommand } from "./command/linear.ts";
@@ -266,7 +269,12 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       });
       shell.insertCommandResult(
         `/${harness}`,
-        `Launch from a terminal: clankie ${harness} ${args.map((value) => JSON.stringify(value)).join(" ")}\n${JSON.stringify(plan, null, 2)}\nNative permissions remain owner decisions. /skills controls bundled skill selection.`,
+        [
+          formatSeatPlan(plan),
+          "",
+          `Launch from a terminal: clankie ${harness} ${args.map((value) => JSON.stringify(value)).join(" ")}`,
+          "Native permissions remain owner decisions. /skills controls bundled skill selection.",
+        ].join("\n"),
         "success",
       );
     } catch (error) {
@@ -894,6 +902,41 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           return;
         }
         const input = argument.trim().toLowerCase();
+        if (input === "") {
+          const autonomy = conversations.autonomy;
+          await runSettingsMenu(shell, "/autonomy", async () => {
+            const status = await autonomy({ action: "status" });
+            const [title, ...details] = formatAutonomyStatus(status).split("\n");
+            return {
+              title: `${title} · ${details.join(" · ")}`,
+              actions: [
+                {
+                  value: "toggle",
+                  label: status.enabled ? "Turn autonomy off" : "Turn autonomy on",
+                  hint: "goal and wake runner",
+                  async run() {
+                    await autonomy({ action: "set_enabled", enabled: !status.enabled });
+                    return `Autonomy ${onOff(!status.enabled)}.`;
+                  },
+                },
+                ...(status.wake === undefined
+                  ? []
+                  : [
+                      {
+                        value: "clear",
+                        label: "Clear the scheduled wake",
+                        hint: status.wake.at,
+                        async run() {
+                          await autonomy({ action: "clear_wake" });
+                          return "Wake cleared.";
+                        },
+                      },
+                    ]),
+              ],
+            };
+          });
+          return;
+        }
         const command: OperatorAutonomyCommand | undefined =
           input.length === 0 || input === "status"
             ? { action: "status" }
@@ -1136,6 +1179,60 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           shell.insertCommandResult("/desktop", "Desktop settings are unavailable.", "error");
           return;
         }
+        if (!argument.trim()) {
+          await runSettingsMenu(shell, "/desktop", async () => {
+            const hours = (await runDesktopCommand([], { settings })).desktop.quietHours;
+            return {
+              title: hours
+                ? `Desktop · quiet ${hours.start}–${hours.end} (${hours.timeZone})`
+                : "Desktop · no quiet hours",
+              actions: [
+                {
+                  value: "set",
+                  label: "Quiet hours…",
+                  hint: hours ? `${hours.start}–${hours.end}` : "off",
+                  async run(flow) {
+                    const time = (message: string, current?: string) =>
+                      flow.readText({
+                        message,
+                        placeholder: "HH:MM",
+                        ...(current ? { defaultValue: current } : {}),
+                        allowBack: true,
+                        validate: (value) => (/^\d{2}:\d{2}$/u.test(value.trim()) ? undefined : "Use HH:MM."),
+                      });
+                    const start = await time("Quiet from", hours?.start ?? "22:00");
+                    if (start === undefined) return undefined;
+                    const end = await time("Quiet until", hours?.end ?? "08:00");
+                    if (end === undefined) return undefined;
+                    const zone = await flow.readText({
+                      message: "Time zone",
+                      defaultValue: hours?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+                      allowBack: true,
+                    });
+                    if (zone === undefined) return undefined;
+                    await runDesktopCommand(["quiet-hours", start.trim(), end.trim(), zone.trim()], {
+                      settings,
+                    });
+                    return `Quiet ${start.trim()}–${end.trim()}.`;
+                  },
+                },
+                ...(hours
+                  ? [
+                      {
+                        value: "off",
+                        label: "Turn quiet hours off",
+                        async run() {
+                          await runDesktopCommand(["quiet-hours", "off"], { settings });
+                          return "Quiet hours off.";
+                        },
+                      },
+                    ]
+                  : []),
+              ],
+            };
+          });
+          return;
+        }
         try {
           const result = await runDesktopCommand(argument.trim().split(/\s+/u).filter(Boolean), { settings });
           const hours = result.desktop.quietHours;
@@ -1201,7 +1298,48 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           return;
         }
         const words = argument.trim().toLowerCase().split(/\s+/u).filter(Boolean);
-        if (words.length === 0 || (words.length === 1 && words[0] === "status")) {
+        if (words.length === 0) {
+          await runSettingsMenu(shell, "/browser", async () => {
+            const { browser } = await browserStatus({ settings });
+            return {
+              title: "Browser",
+              actions: [
+                {
+                  value: "record",
+                  label: "Record browsing",
+                  hint: `${onOff(browser.recordSessions)} · newest 50 kept`,
+                  async run() {
+                    await browserSetRecording(!browser.recordSessions, { settings });
+                    return `Recording ${onOff(!browser.recordSessions)}; applies from his next burst of browsing.`;
+                  },
+                },
+                {
+                  value: "delegate",
+                  label: "Offer computer-use harnesses",
+                  hint: browser.harnessDelegation ? "offered" : "off",
+                  async run() {
+                    await browserSetDelegation(!browser.harnessDelegation, { settings });
+                    return `Harnesses ${browser.harnessDelegation ? "off" : "offered"}; applies from his next session.`;
+                  },
+                },
+                {
+                  value: "harnesses",
+                  label: "Which harnesses are ready",
+                  async run() {
+                    shell.insertCommandResult(
+                      "/browser harnesses",
+                      formatBrowserHarnesses(await browserHarnesses({ settings })),
+                      "success",
+                    );
+                    return undefined;
+                  },
+                },
+              ],
+            };
+          });
+          return;
+        }
+        if (words.length === 1 && words[0] === "status") {
           const result = await browserStatus({ settings });
           shell.insertCommandResult("/browser", formatBrowserSettings(result.browser), "success");
           return;
@@ -1255,15 +1393,16 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       argumentHint: "[status|connect URL|start MODE|objective|observe|share|stop]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
+        const options = settings === undefined ? {} : { settings };
+        if (!argument.trim()) {
+          await runRivalsMenu(shell, (args) => runRivalsCommand(args, options));
+          return;
+        }
         try {
-          const result = await runRivalsCommand(
-            argument.trim().split(/\s+/u).filter(Boolean),
-            settings === undefined ? {} : { settings },
-          );
-          const { data: _image, ...display } = result;
+          const result = await runRivalsCommand(argument.trim().split(/\s+/u).filter(Boolean), options);
           shell.insertCommandResult(
             "/rivals",
-            JSON.stringify(display, null, 2),
+            formatRivals(result),
             result.outcome === "refused" ? "error" : "success",
           );
         } catch (error) {
@@ -1527,6 +1666,27 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         const words = argument.trim().toLowerCase().split(/\s+/u).filter(Boolean);
         if (words.length > 1 || (words[0] !== undefined && !["status", "on", "off"].includes(words[0]))) {
           shell.insertCommandResult("/awake", "Usage: /awake [on|off]", "error");
+          return;
+        }
+        if (!words.length) {
+          const awake = context.commandAwake;
+          await runSettingsMenu(shell, "/awake", async () => {
+            const result = await awake([]);
+            const [title, power] = formatAwake(result).split("\n");
+            return {
+              title: `${title} · ${power}`,
+              actions: [
+                {
+                  value: "toggle",
+                  label: result.keepAwake ? "Let this Mac sleep" : "Keep this Mac awake",
+                  hint: "while plugged in",
+                  async run() {
+                    return formatAwake(await awake([result.keepAwake ? "off" : "on"])).split("\n")[0];
+                  },
+                },
+              ],
+            };
+          });
           return;
         }
         try {
