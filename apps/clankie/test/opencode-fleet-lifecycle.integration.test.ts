@@ -192,8 +192,8 @@ async function fixture(
           uid: process.getuid!(),
           birth: ["1700000000", "123456"],
           executable,
+          cwd: root,
         });
-      if (args.includes("cwd")) return `p${process.pid}\nn${root}\n`;
       // One real loopback ownership sample per fixture socket. Other OS facts
       // are golden inputs too; the live E2E repeats lifetime/owner observation.
       const key = JSON.stringify(args);

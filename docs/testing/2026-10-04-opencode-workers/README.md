@@ -59,8 +59,12 @@ checking its OS socket owner against the allocated pane's original native root.
 The root must remain the foreground process and canonical installed executable,
 with the expected actual cwd, Herdr instance, terminal, and microsecond kernel
 birth time. The public macOS libproc ABI helper validates the struct and exact
-return lengths; the original socket and root are rechecked around admission
-awaits. A secret in the private launch config routes the connection but cannot
+return lengths, including the PID's cwd through `PROC_PIDVNODEPATHINFO`. Cwd
+proof does not launch `lsof`'s blocking filesystem metadata probes. Process facts
+are read before and after each validation; the original socket and root are
+rechecked around admission awaits. The real-process/Unix-socket golden test also
+revokes proof after a native cwd change or process exit, without extending its
+30-second timeout. A secret in the private launch config routes the connection but cannot
 substitute for those observations. Loss or replacement retires control; there is
 no reconnect or process adoption. Retirement closes the owned listener and all owned sockets, evicts only the
 matching adapter control, and removes only temporary launch config. Uncertain
