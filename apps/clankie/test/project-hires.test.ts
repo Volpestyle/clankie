@@ -541,7 +541,22 @@ describe("project hiring", () => {
 
   it("inherits role harness, model and effort at the actual native launch", async () => {
     const f = await fixture();
-    expect((await f.store.spawnSeat(request(f.root))).outcome).toBe("spawned");
+    let adoptedProject: string | undefined;
+    expect(
+      (
+        await f.store.spawnSeat(
+          request(f.root),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (_result, projectId) => {
+            adoptedProject = projectId;
+          },
+        )
+      ).outcome,
+    ).toBe("spawned");
+    expect(adoptedProject).toBe("game");
     expect(f.runner.startAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "claude",

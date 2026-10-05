@@ -13,6 +13,7 @@ import {
 export * from "./presence.ts";
 export * from "./response.ts";
 import {
+  ProjectIdSchema,
   ProjectProposalLocatorSchema,
   ProjectProposalTargetSchema,
   ProjectProposalResultSchema,
@@ -581,12 +582,13 @@ export const UpdateOperatorAgentPersonaSchema = z
   );
 export type UpdateOperatorAgentPersona = z.infer<typeof UpdateOperatorAgentPersonaSchema>;
 
-/** Assign or clear one persona's role (ADR 0208); `null` clears it. */
+/** Assign or clear a current member's project role; omission selects the default project. */
 export const SetOperatorAgentPersonaRoleSchema = z
   .object({
     schemaVersion: z.literal(1),
     personaId: OperatorAgentPersonaIdSchema,
     role: OperatorAgentRoleSchema.nullable(),
+    projectId: ProjectIdSchema.optional(),
   })
   .strict();
 export type SetOperatorAgentPersonaRole = z.infer<typeof SetOperatorAgentPersonaRoleSchema>;
@@ -2834,6 +2836,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
       personaId: OperatorAgentPersonaIdSchema,
       role: OperatorAgentRoleSchema.nullable(),
+      projectId: ProjectIdSchema.optional(),
     })
     .strict(),
   /**
@@ -3476,7 +3479,11 @@ export interface OperatorConversationServiceClient {
   /** Rename or restyle one character for every surface, including Discord. */
   updatePersona?(input: UpdateOperatorAgentPersona): Promise<OperatorAgentPersona>;
   /** Assign or clear a persona's team role (ADR 0208). */
-  setPersonaRole?(personaId: string, role: OperatorAgentRole | null): Promise<OperatorAgentPersona>;
+  setPersonaRole?(
+    personaId: string,
+    role: OperatorAgentRole | null,
+    projectId?: string,
+  ): Promise<OperatorAgentPersona>;
   /** Observable terminals in Herdr's native hierarchy; absent on older injected clients. */
   terminalCatalog?(): Promise<readonly OperatorTerminalSession[]>;
   /** Acquire, renew, or release the exclusive input lease on one terminal; absent on older injected clients. */
@@ -3722,8 +3729,14 @@ export function createOperatorConversationServiceClient(
       }
       return result.persona;
     },
-    async setPersonaRole(personaId, role) {
-      const result = await dispatch({ op: "set_persona_role", schemaVersion: 1, personaId, role });
+    async setPersonaRole(personaId, role, projectId) {
+      const result = await dispatch({
+        op: "set_persona_role",
+        schemaVersion: 1,
+        personaId,
+        role,
+        ...(projectId === undefined ? {} : { projectId }),
+      });
       if (result.op !== "set_persona_role") {
         throw new Error(`Unexpected ${result.op} result for set_persona_role`);
       }

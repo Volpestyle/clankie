@@ -48,7 +48,13 @@ tester, reviewer and researcher; you can also use a custom role such as "sound
 designer" (1–24 letters, digits, spaces, hyphens). The owner's world places the
 agent at that station and reads its backlog from work items labelled with the
 role. Prefer a role already in use (`clankie agents roles`) over a near-duplicate.
-`clankie agents role NAME "ROLE"|none` changes it later. Fleet seats you hired or opened report native
+`clankie agents role NAME "ROLE"|none [--project PROJECT]` changes a current
+member's saved role in that project; omission selects `default`. The host checks
+the exact native seat and confirmed hire membership, refusing offline, unknown
+or other-project agents. This changes the semantic station role without changing
+the live harness's launch profile. With one positional role,
+`clankie agents role ROLE --project PROJECT [profile flags]` still edits the
+project's hire profile. Fleet seats you hired or opened report native
 Claude, Codex and registered local OpenCode worker subagents as `subagents`;
 absent means unknown (ADR 0208).
 Recent entries can carry a stable native `id` and `startedAt`/`endedAt`; older

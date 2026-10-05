@@ -1,4 +1,6 @@
 import { readIssueMetrics } from "./issue-metrics.ts";
+import { FleetMembershipReadError, type FleetProjectMembership } from "../fleet-project-membership.ts";
+import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
 import { DesktopExpressions } from "./desktop.ts";
 import { projectPresence, pollPresence, captainIsThinking } from "./presence.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
@@ -74,6 +76,7 @@ import {
   personaInstructions,
   resolveDiscordSettings,
   SettingsStore,
+  projectsRevision,
   type ClankieSettings,
   type PersonaRegister,
 } from "@clankie/settings";
@@ -110,6 +113,7 @@ import type { EvalSessionBoundary } from "./eval-session-boundary.ts";
 import { RoomConversations, roomSeatTurnResult } from "./room-conversations.ts";
 import { LinearWorkOwnerSchema } from "../linear-webhook.ts";
 import {
+  ConversationRefusedError,
   ConversationResetError,
   ConversationStore,
   LINEAR_INBOX_CONVERSATION_ID,
@@ -601,6 +605,8 @@ export interface CaptainOptions {
     pane: string,
   ) => Promise<ProjectHireProcessProof | undefined>;
   readonly projectHireTools?: (projectId: string) => Promise<readonly string[]>;
+  /** The same native membership producer exposed by the HTTP app, created after the captain. */
+  readonly fleetProjectMembership?: () => Pick<FleetProjectMembership, "read"> | undefined;
   readonly projectHireWorkspace?: (proof: ProjectHireProcessProof) => Promise<string | undefined>;
   readonly nativeHerdrRunner?: HerdrWatchRunner;
   readonly nativeCensusRunner?: HerdrCensusRunner;
@@ -2483,24 +2489,37 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     await personas.prepareRoleAdoption(request.role);
     let adopted: ReturnType<typeof personas.adoptSpawn> | undefined;
     let adoptedRoleWrite: PersonaRoleWrite | undefined;
-    const result = await herdrWatches.spawnSeat(request, undefined, brief, resume, authority, (spawned) => {
-      // Runs synchronously behind the final authority check, before the native
-      // receipt is cleared. A revoked/replaced origin keeps its uncertain claim.
-      if (!authority.current()) throw new Error("Hiring conversation was replaced before adoption");
-      const title = resume === undefined ? request.title : hireDisplayName(spawned.seat.title);
-      const seat = personas.adoptSpawn(spawned.seat, title, request.role, (status) => {
-        adoptedRoleWrite = status;
-      });
-      conversations.bindPersona(seat.personaId, seat.seatId, seat.title);
-      liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
-      seatByPersona.set(seat.personaId, seat.seatId);
-      herdrWatches.trackSeat(seat.seatId);
-      seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
-      fleetChanges.touch();
-      if (work && !conversations.bindLinearWorkOwner(work, authority.owner))
-        throw new Error("Hiring conversation no longer owns its Linear work");
-      adopted = seat;
-    });
+    const result = await herdrWatches.spawnSeat(
+      request,
+      undefined,
+      brief,
+      resume,
+      authority,
+      (spawned, projectId) => {
+        // Runs synchronously behind the final authority check, before the native
+        // receipt is cleared. A revoked/replaced origin keeps its uncertain claim.
+        if (!authority.current()) throw new Error("Hiring conversation was replaced before adoption");
+        const title = resume === undefined ? request.title : hireDisplayName(spawned.seat.title);
+        const seat = personas.adoptSpawn(
+          spawned.seat,
+          title,
+          request.role,
+          (status) => {
+            adoptedRoleWrite = status;
+          },
+          projectId,
+        );
+        conversations.bindPersona(seat.personaId, seat.seatId, seat.title);
+        liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
+        seatByPersona.set(seat.personaId, seat.seatId);
+        herdrWatches.trackSeat(seat.seatId);
+        seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
+        fleetChanges.touch();
+        if (work && !conversations.bindLinearWorkOwner(work, authority.owner))
+          throw new Error("Hiring conversation no longer owns its Linear work");
+        adopted = seat;
+      },
+    );
     if (result.outcome !== "spawned") return result;
     try {
       await personas.flushProjectRoles();
@@ -4175,11 +4194,81 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return { op: "roles", schemaVersion: 1, roles: [...personas.roles()] };
       }
       if (request.op === "set_persona_role") {
-        const updated = await personas.setProjectRole({
-          schemaVersion: 1,
-          personaId: request.personaId,
-          role: request.role,
-        });
+        if (!personas.all([], () => undefined).some((persona) => persona.personaId === request.personaId))
+          throw new Error(`Unknown agent ${request.personaId}`);
+        const projectId = request.projectId ?? DEFAULT_PROJECT_ID;
+        const seats = (await refreshFleet()).filter((seat) => seat.personaId === request.personaId);
+        const seat = seats.length === 1 ? seats[0] : undefined;
+        const membership = options.fleetProjectMembership?.();
+        if (!seat || seat.status === "offline" || !membership)
+          throw new ConversationRefusedError(
+            `Agent is not a confirmed current member of project ${projectId}`,
+          );
+        const authorize = async () => {
+          if (authority) await authorizeQuestion(authority);
+          return true as const;
+        };
+        const qualified = splitFleetQualified(seat.seatId);
+        const settings = await settingsStore.loadFenced();
+        const snapshot = await membership
+          .read(
+            {
+              schemaVersion: 1,
+              seats: [
+                {
+                  seatId: qualified?.id ?? seat.seatId,
+                  occupantId: seat.occupantId,
+                  fleet: qualified?.fleet ?? "default",
+                },
+              ],
+            },
+            new AbortController().signal,
+            authorize,
+          )
+          .catch((error: unknown) => {
+            if (error instanceof FleetMembershipReadError)
+              throw new ConversationRefusedError(
+                "Agent project membership is unavailable or changed; check the current project member",
+              );
+            throw error;
+          });
+        const observed = snapshot.seats[0];
+        if (
+          observed?.seatId !== (qualified?.id ?? seat.seatId) ||
+          observed.occupantId !== seat.occupantId ||
+          observed.membership.outcome !== "member" ||
+          observed.membership.projectId !== projectId
+        )
+          throw new ConversationRefusedError(
+            `Agent is not a confirmed current member of project ${projectId}`,
+          );
+        if (projectsRevision(settings.settings.projects) !== snapshot.projectsRevision)
+          throw new ConversationRefusedError("Project settings changed before role assignment");
+        const updated = await personas.setProjectRole(
+          {
+            schemaVersion: 1,
+            personaId: request.personaId,
+            role: request.role,
+            projectId,
+          },
+          () => {
+            try {
+              settings.assertCurrent();
+            } catch {
+              throw new ConversationRefusedError("Project settings changed before role assignment");
+            }
+            if (authority && !authority.current()) throw new Error("question_owner_unavailable");
+            const current = liveSeats.filter((entry) => entry.personaId === request.personaId);
+            if (
+              current.length !== 1 ||
+              current[0]!.seatId !== seat.seatId ||
+              current[0]!.occupantId !== seat.occupantId ||
+              personas.personaForOccupant(seat.occupantId) !== request.personaId
+            )
+              throw new ConversationRefusedError("Agent native identity changed before role assignment");
+          },
+          settings.settings.projects,
+        );
         fleetChanges.touch();
         return {
           op: "set_persona_role",
@@ -4576,6 +4665,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     bodyRoomConversation: (lane, targetId) => conversations.roomConversation(lane, targetId),
 
+    personaForFleetOccupant: (seatId, occupantId) => {
+      const matches = liveSeats.filter((seat) => seat.seatId === seatId && seat.occupantId === occupantId);
+      return matches.length === 1 && personas.personaForOccupant(occupantId) === matches[0]!.personaId
+        ? matches[0]!.personaId
+        : undefined;
+    },
     projectHireMembershipCandidate: (fleet, pane) => herdrWatches.projectHireMembershipCandidate(fleet, pane),
     confirmedProjectHireAssignment: (fleet, pane, revision, proof) =>
       herdrWatches.confirmedProjectHireAssignment(fleet, pane, revision, proof),

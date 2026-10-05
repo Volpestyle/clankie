@@ -1641,17 +1641,27 @@ now opens the agents that are live, with offline agents that kept a thread behin
 one "Past agents" entry. `clankie agents contacts` returns every known identity,
 live or not, through the existing fleet API.
 
-`clankie agents role NAME|PERSONA_ID ROLE|none` assigns an agent's team role
+`clankie agents role NAME|PERSONA_ID ROLE|none [--project PROJECT]` assigns a current
+member's role in the selected project. Omit `--project` for the default project.
+The host verifies the agent's current native seat and confirmed hire membership;
+offline agents, unknown membership and members of a different project are refused.
+The assignment changes the project's semantic role, preserving the live harness
+and its launch profile
 ([ADR 0208](adr/0208-agents-carry-a-role-the-world-reads-it.md)). The built-ins
 `planner`, `designer`, `builder`, `tester`, `reviewer` and `researcher` are
 suggestions; a custom role is 1–24 letters, digits, spaces and hyphens. Quote a
 role with spaces: `clankie agents role Smith "sound designer"`. The role is the
-last argument and everything before it names the agent. A name must match
+last positional argument and everything before it names the agent. A name must match
 exactly one agent, case-insensitively; otherwise pass the persona id from
 `agents contacts`. Roles are trimmed, inner whitespace collapses, and a built-in
 in any casing is stored lowercase. A custom role keeps the casing you typed
 and compares case-insensitively, so `Sound Designer` and `sound designer` are
-one role. `none` clears it. It prints the updated persona.
+one role. `none` clears it in the selected project. It prints the updated persona
+with that project's role. For example,
+`clankie agents role "Pixel Smith" tester --project clankie` updates a Clankie
+project member. Existing contacts' `role` remains the default-project compatibility
+view; the confirmed project membership snapshot carries the selected project's
+current saved role, including a cleared role.
 
 `clankie agents role ROLE --project PROJECT` edits a project hire profile through
 its revision-bearing owner API. Set any of `--harness`, `--model`, `--effort`,
@@ -1730,10 +1740,12 @@ saved name, so an avatar finishing later cannot undo a completed rename.
 
 `clankie agents roles` lists the built-ins (always, with counts), then custom
 roles personas hold, most held first, each as `{ role, builtIn, count }`. Counts
-include offline personas. The role is semantic, unlike the cosmetic
-`appearance.accessory`, and persists with the persona across seats. The same
+include offline personas in the default-project compatibility view. The role is
+semantic, unlike the cosmetic `appearance.accessory`, and persists as a project
+association across seats. The same
 settings are the `set_persona_role` operator op (`{ personaId, role: ROLE |
-null }`, steer grant), the `roles` op (read), and `hire_agent`'s and
+null, projectId?: PROJECT }`, steer grant; omitted project defaults to `default`
+and requires the same current membership check), the `roles` op (read), and `hire_agent`'s and
 `spawn_seat`'s `role` (required in the model-facing hire tool, optional for older API clients). In the TUI, `/agents role NAME "ROLE"` and
 `/agents roles` opens the project hire-profile editor. The `/agents` picker shows each live agent's role.
 

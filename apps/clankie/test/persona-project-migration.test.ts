@@ -3,7 +3,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { SettingsStore, setDefaultProjectRole } from "@clankie/settings";
+import {
+  SettingsStore,
+  setDefaultProjectRole,
+  setProjectRole,
+  projectRoleForPersona,
+} from "@clankie/settings";
 import { ProjectSchema } from "@clankie/protocol/projects";
 import { PersonaStore } from "../src/captain/personas.ts";
 const roots: string[] = [];
@@ -76,50 +81,72 @@ it("restarts between settings commit and identity cleanup without restoring a su
   expect(restarted.all([], () => undefined)[0]?.role).toBe("reviewer");
   expect(JSON.parse(readFileSync(f.path, "utf8")).personas[0]).not.toHaveProperty("role");
 });
-it("redirects the compatibility setter and survives a pending assignment across restart", async () => {
+it.each(["default", "repo"])("survives a pending %s assignment across restart", async (projectId) => {
   const f = fixture();
+  if (projectId !== "default")
+    await f.settings.update((s) => ({
+      ...s,
+      projects: {
+        ...s.projects,
+        projects: [ProjectSchema.parse({ id: projectId, name: "Repository" })],
+      },
+    }));
   const store = new PersonaStore(f.root);
   await store.ready(f.settings);
   vi.spyOn(f.settings, "update").mockRejectedValueOnce(new Error("disk full"));
   await expect(
-    store.setProjectRole({ schemaVersion: 1, personaId: "alice", role: "tester" }),
+    store.setProjectRole({ schemaVersion: 1, personaId: "alice", role: "tester", projectId }),
   ).rejects.toThrow("disk full");
   expect(JSON.parse(readFileSync(f.path, "utf8")).personas[0]).not.toHaveProperty("role");
   await store.close();
   const restarted = new PersonaStore(f.root);
   await restarted.ready(f.settings);
-  expect(restarted.all([], () => undefined)[0]?.role).toBe("tester");
-  await restarted.setProjectRole({ schemaVersion: 1, personaId: "alice", role: null });
-  expect(restarted.all([], () => undefined)[0]).not.toHaveProperty("role");
+  expect(projectRoleForPersona((await f.settings.load()).projects, "alice", projectId)).toBe("tester");
+  expect(restarted.all([], () => undefined)[0]?.role).toBe(
+    projectId === "default" ? "tester" : "Sound Designer",
+  );
+  await restarted.setProjectRole({ schemaVersion: 1, personaId: "alice", role: null, projectId });
+  expect(projectRoleForPersona((await f.settings.load()).projects, "alice", projectId)).toBeUndefined();
   expect(() => restarted.setRole({ schemaVersion: 1, personaId: "alice", role: "builder" })).toThrow(
     "project role setter",
   );
 });
-it("does not replay a committed pending write over later owner changes", async () => {
-  const f = fixture();
-  const store = new PersonaStore(f.root);
-  await store.ready(f.settings);
-  const pendingPath = join(
-    f.root,
-    "owner",
-    `persona-project-roles-${createHash("sha256").update(f.path).digest("hex")}.pending.json`,
-  );
-  vi.spyOn(f.settings, "update").mockRejectedValueOnce(new Error("disk full"));
-  await expect(
-    store.setProjectRole({ schemaVersion: 1, personaId: "alice", role: "tester" }),
-  ).rejects.toThrow();
-  const pending = readFileSync(pendingPath, "utf8");
-  await store.flushProjectRoles();
-  await f.settings.update((s) => ({
-    ...s,
-    projects: setDefaultProjectRole(s.projects, "alice", "reviewer"),
-  }));
-  writeFileSync(pendingPath, pending);
-  await store.close();
-  const restarted = new PersonaStore(f.root);
-  await restarted.ready(f.settings);
-  expect(restarted.all([], () => undefined)[0]?.role).toBe("reviewer");
-});
+it.each(["default", "repo"])(
+  "does not replay a committed %s write over later owner changes",
+  async (projectId) => {
+    const f = fixture();
+    if (projectId !== "default")
+      await f.settings.update((s) => ({
+        ...s,
+        projects: {
+          ...s.projects,
+          projects: [ProjectSchema.parse({ id: projectId, name: "Repository" })],
+        },
+      }));
+    const store = new PersonaStore(f.root);
+    await store.ready(f.settings);
+    const pendingPath = join(
+      f.root,
+      "owner",
+      `persona-project-roles-${createHash("sha256").update(f.path).digest("hex")}.pending.json`,
+    );
+    vi.spyOn(f.settings, "update").mockRejectedValueOnce(new Error("disk full"));
+    await expect(
+      store.setProjectRole({ schemaVersion: 1, personaId: "alice", role: "tester", projectId }),
+    ).rejects.toThrow();
+    const pending = readFileSync(pendingPath, "utf8");
+    await store.flushProjectRoles();
+    await f.settings.update((s) => ({
+      ...s,
+      projects: setProjectRole(s.projects, "alice", "reviewer", projectId),
+    }));
+    writeFileSync(pendingPath, pending);
+    await store.close();
+    const restarted = new PersonaStore(f.root);
+    await restarted.ready(f.settings);
+    expect(projectRoleForPersona((await f.settings.load()).projects, "alice", projectId)).toBe("reviewer");
+  },
+);
 it("rejects another live journal writer and permits an explicitly closed writer's replacement", async () => {
   const f = fixture();
   const first = new PersonaStore(f.root);

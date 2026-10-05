@@ -4828,7 +4828,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       parsed.data.op === "input_answer" ||
       parsed.data.op === "input_cancel";
     if (questionOp && !owner) return context.json({ error: "question_owner_required" }, 403);
-    if (owner && (questionOp || parsed.data.op === "send")) {
+    if (owner && (questionOp || parsed.data.op === "send" || parsed.data.op === "set_persona_role")) {
       const binding = dependencies.herdrBinding?.();
       const sameSession =
         binding !== undefined
@@ -4940,8 +4940,24 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }
     }
     try {
-      return context.json(await dependencies.captain.serveOperatorConversation(parsed.data));
+      let roleAuthority: QuestionAuthority | undefined;
+      if (parsed.data.op === "set_persona_role") {
+        let current = true;
+        const original = structuredClone(captain);
+        roleAuthority = {
+          principal: { kind: "operator", id: captain.captainId },
+          current: () => current,
+          authorize: async () => {
+            const fresh = await authenticateCaptain(context.req.raw, dependencies);
+            current = !!fresh && fresh !== "unavailable" && isDeepStrictEqual(fresh, original);
+            return current;
+          },
+        };
+      }
+      return context.json(await dependencies.captain.serveOperatorConversation(parsed.data, roleAuthority));
     } catch (error) {
+      if (error instanceof Error && error.message === "question_owner_unavailable")
+        return context.json({ error: "captain_authentication_required" }, 403);
       if (error instanceof HerdrUnavailableError)
         return context.json({ error: "herdr_unavailable", message: error.message }, 503);
       if (error instanceof ConversationResetError)
