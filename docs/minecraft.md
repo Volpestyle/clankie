@@ -185,6 +185,16 @@ Premium friends ask Clankie to whitelist their usual Minecraft name and join
 with their normal Java launcher. Premium classification is checked against
 Mojang and persisted in FastLogin before admission; those names require real
 Mojang session authentication, including during a lookup outage.
+Approved enrollment also prepares and verifies the premium name's AuthMe account
+before whitelist admission. Premium friends receive no login code and do not
+self-register. An AuthMe registration prompt for an approved premium name is a
+server provisioning failure to resolve through the approved enrollment flow.
+Startup repairs missing AuthMe accounts for previously approved premium names
+already in this server's whitelist, without enrolling or whitelisting new names.
+FastLogin keeps `premiumUuid: false` to preserve the world's existing player
+identity; Mojang session verification still authenticates premium players.
+Managed AuthMe keeps `settings.useAsyncTasks: true` for FastLogin's asynchronous
+automatic login hook, while player self-registration stays disabled.
 
 Nonpremium friends ask in Discord using their Minecraft name. Clankie records
 the authenticated requester, and a designated owner/admin approves that recorded

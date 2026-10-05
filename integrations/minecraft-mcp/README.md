@@ -173,6 +173,32 @@ Empty-server timeout defaults to 15 minutes; maximum requested-run uptime to six
 hours, including crash restarts. Shutdown saves/backs up and stops the tunnel.
 Configuration is stopped-only. See [hosting setup](../../docs/minecraft.md#host-clankies-own-server).
 
+Premium enrollment prepares both the persisted FastLogin premium marker and an
+AuthMe account before whitelist admission. The pinned FastLogin
+[AuthMe hook](https://github.com/TuxCoding/FastLogin/blob/1.12-kick-toggle/bukkit/src/main/java/com/github/games647/fastlogin/bukkit/hook/AuthMeHook.java)
+uses API registration, but AuthMe 5.6.0's
+[registration precheck](https://github.com/AuthMe/AuthMeReloaded/blob/5.6.0/src/main/java/fr/xephi/authme/process/register/AsyncRegister.java)
+rejects that API path while player registration is disabled. Enrollment uses
+AuthMe's [native administrator registration](https://github.com/AuthMe/AuthMeReloaded/blob/5.6.0/src/main/java/fr/xephi/authme/command/executable/authme/RegisterAdminCommand.java)
+with an internal random password, preserves an existing account's hash, and
+verifies the account row before admitting the name. No password or code is
+issued to a premium friend; player self-registration stays disabled.
+After plugin readiness, startup also repairs missing AuthMe accounts only for
+the intersection of this host's whitelist names and persisted FastLogin
+`Premium=1` records. This migration preserves existing accounts and changes
+neither premium classification nor whitelist membership.
+`premiumUuid: false` preserves the established offline-mode player identity for
+world data and whitelist compatibility. In FastLogin's pinned
+[verification path](https://github.com/TuxCoding/FastLogin/blob/1.12-kick-toggle/bukkit/src/main/java/com/github/games647/fastlogin/bukkit/listener/protocollib/VerifyResponseTask.java),
+Mojang session authentication occurs separately from optional UUID rewriting.
+AuthMe must retain `settings.useAsyncTasks: true` for FastLogin's async hook.
+In pinned 5.6.0, [task dispatch](https://github.com/AuthMe/AuthMeReloaded/blob/5.6.0/src/main/java/fr/xephi/authme/service/BukkitService.java)
+uses that flag to schedule AuthMe work or run it inline, and the
+[login precheck](https://github.com/AuthMe/AuthMeReloaded/blob/5.6.0/src/main/java/fr/xephi/authme/process/login/AsynchronousLogin.java)
+uses the same flag for the pre-login event's async status. Setting it false
+runs on FastLogin's async caller while labeling the event synchronous, which
+Bukkit rejects. Player self-registration remains disabled independently.
+
 Java plugin downloads are separate upstream programs and retain their own licenses:
 [Paper](https://github.com/PaperMC/Paper),
 [FastLogin MIT](https://github.com/TuxCoding/FastLogin/blob/main/LICENSE),
@@ -206,3 +232,15 @@ MINECRAFT_VIAVERSION_INTEGRATION=1 pnpm exec vitest run --config vitest.config.t
 
 It stops and removes its fixture. A graphical vanilla client, positive premium
 session and public tunnel/Discord acceptance remain separate live checks.
+
+The focused AuthMe boundary check uses an already provisioned pinned stack's
+immutable jars and bootstrap cache in a fresh world and broker. It verifies
+premium account provisioning, preserved passwords, closed self-registration,
+async bot/friend login and code revocation, and startup account repair:
+
+```sh
+MINECRAFT_AUTH_INTEGRATION=1 MINECRAFT_AUTH_ARTIFACTS=/path/to/provisioned-host pnpm exec vitest run --config vitest.config.ts integrations/minecraft-mcp/test/hosting-premium.integration.test.ts
+```
+
+It copies no account databases, configuration, credentials or world state.
+Positive FastLogin premium auto-login still requires a real premium session.
