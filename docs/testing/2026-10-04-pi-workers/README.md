@@ -5,6 +5,13 @@ path. Local fixtures exercise production extension and controller code without
 starting Pi, a model turn, an owner session, or a second agent process. A live Mac
 hire remains an explicit acceptance requirement; this document is not live proof.
 
+The local native adapter is **off by default** until that acceptance. Set
+`CLANKIE_PI_NATIVE_ENABLED=1` in the Clankie service environment and restart the
+service to opt in; other values leave it off. Without opt-in the native host is
+not constructed, so normal unbriefed Pi launches do not run the pinned file/hash
+checks. Their hosted included-model/provider preparation remains in place, and
+automated briefs remain unavailable without a structured adapter.
+
 ## Native capability
 
 The selected executable is the installed `@earendil-works/pi-coding-agent` 0.87.1

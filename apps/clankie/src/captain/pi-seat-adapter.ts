@@ -42,6 +42,15 @@ const Delivery = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("unavailable"), detail: z.string() }),
 ]);
 
+/** Native Pi compatibility is pinned and awaits live acceptance. Keep its host
+ * construction and adapter registration absent unless explicitly opted in. */
+export function piNativeOptions(
+  enabled: string | undefined,
+  createNative: () => ReturnType<typeof createPreparedNativeHost>,
+): { readonly piNative?: ReturnType<typeof createPreparedNativeHost> } {
+  return enabled?.trim() === "1" ? { piNative: createNative() } : {};
+}
+
 export function createPiSeatAdapter(deps: {
   readonly repoRoot: string;
   readonly stateDir: string;
