@@ -1,7 +1,11 @@
 import { serve } from "@hono/node-server";
 import { mintOperatorToken } from "@clankie/credential-broker";
 import { ActivityShareFrameSchema, type ActivityShareSession } from "@clankie/interactive-environment";
-import { createActivityShareClient, createActivityShareSink } from "@clankie/rendered-surface-client";
+import {
+  createActivityFrameSink,
+  createActivityShareClient,
+  createActivityShareSink,
+} from "@clankie/rendered-surface-client";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -400,59 +404,70 @@ it("bounds share, admission and viewer capacity and drops oversized viewer updat
   expect(p.shares.stats()[0]).toMatchObject({ droppedUpdateCount: 1, viewerCount: 1 });
 });
 
-it("bounds real producer socket buffering for media, status and overlays", async () => {
-  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-  await new Promise<void>((done) => server.once("listening", done));
-  cleanup.push(async () => {
-    for (const s of server.clients) s.terminate();
-    await new Promise<void>((done) => server.close(() => done()));
-  });
-  server.on("connection", (s) => (s as unknown as { _socket: { pause(): void } })._socket.pause());
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new Error("missing socket address");
-  let socket: WebSocket | undefined;
-  const session: ActivityShareSession = {
-    shareId: "e89ddcc6-7ddb-4a2f-83e2-649c6073f8cb",
-    generation: 1,
-    scope: scope("A"),
-    source,
-    expiresAt: new Date(Date.now() + 30_000).toISOString(),
-  };
-  const sink = createActivityShareSink({
-    url: `ws://127.0.0.1:${address.port}`,
-    token: "test",
-    session,
-    maxBufferedBytes: 4_096,
-    connect: (url) => {
-      socket = new WebSocket(url);
-      return socket;
-    },
-  });
-  cleanup.push(() => {
-    sink.close();
-    socket?.terminate();
-  });
-  await vi.waitFor(() => expect(sink.connected).toBe(true));
-  const status = {
-    schemaVersion: 2 as const,
-    phase: "thinking" as const,
-    updatedAt: new Date().toISOString(),
-  };
-  const overlay = {
-    schemaVersion: 2 as const,
-    sequence: 1,
-    objective: null,
-    intent: null,
-    monologue: "x".repeat(256),
-    effect: null,
-    updatedAt: new Date().toISOString(),
-  };
-  for (let i = 0; i < 40_000; i++) {
-    sink.publishFrame(frame(i));
-    sink.publishStatus(status);
-    sink.publishOverlay({ ...overlay, sequence: i });
-  }
-  expect(sink.droppedFrameCount).toBeGreaterThan(0);
-  expect(sink.droppedMessageCount).toBeGreaterThan(sink.droppedFrameCount);
-  expect(socket!.bufferedAmount).toBeLessThanOrEqual(4_096);
-});
+it.each(["share", "public"] as const)(
+  "bounds real %s producer socket buffering for media, status and overlays",
+  async (kind) => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((done) => server.once("listening", done));
+    cleanup.push(async () => {
+      for (const s of server.clients) s.terminate();
+      await new Promise<void>((done) => server.close(() => done()));
+    });
+    server.on("connection", (s) => (s as unknown as { _socket: { pause(): void } })._socket.pause());
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("missing socket address");
+    let socket: WebSocket | undefined;
+    const session: ActivityShareSession = {
+      shareId: "e89ddcc6-7ddb-4a2f-83e2-649c6073f8cb",
+      generation: 1,
+      scope: scope("A"),
+      source,
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+    };
+    const options = {
+      url: `ws://127.0.0.1:${address.port}`,
+      token: "test",
+      session,
+      maxBufferedBytes: 4_096,
+      connect: (url: string) => {
+        socket = new WebSocket(url);
+        return socket;
+      },
+    };
+    const sink = kind === "share" ? createActivityShareSink(options) : createActivityFrameSink(options);
+    cleanup.push(() => {
+      sink.close();
+      socket?.terminate();
+    });
+    await vi.waitFor(() => expect(sink.connected).toBe(true));
+    const status = {
+      schemaVersion: 2 as const,
+      phase: "thinking" as const,
+      updatedAt: new Date().toISOString(),
+    };
+    const overlay = {
+      schemaVersion: 2 as const,
+      sequence: 1,
+      objective: null,
+      intent: null,
+      monologue: "x".repeat(256),
+      effect: null,
+      updatedAt: new Date().toISOString(),
+    };
+    for (let i = 0; i < 40_000; i++) {
+      if ("droppedMessageCount" in sink) {
+        sink.publishFrame(frame(i));
+        sink.publishStatus(status);
+        sink.publishOverlay({ ...overlay, sequence: i });
+      } else {
+        sink.publishFrame({ ...frame(i), schemaVersion: 1, surface: "gba_emulator", frame: i });
+        sink.publishStatus({ ...status, schemaVersion: 1, surface: "gba_emulator" });
+        sink.publishOverlay({ ...overlay, sequence: i, surface: "gba_emulator" });
+      }
+    }
+    expect(sink.droppedFrameCount).toBeGreaterThan(0);
+    if ("droppedMessageCount" in sink)
+      expect(sink.droppedMessageCount).toBeGreaterThan(sink.droppedFrameCount);
+    expect(socket!.bufferedAmount).toBeLessThanOrEqual(4_096);
+  },
+);

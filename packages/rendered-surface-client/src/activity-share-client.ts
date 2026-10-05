@@ -17,6 +17,9 @@ import {
 import { WebSocket } from "ws";
 import type { ActivityFrameSocket } from "./activity-frame-sink.ts";
 
+// Client frames include masking and length fields: reserve the maximum 14-byte header.
+const MAX_CLIENT_FRAME_HEADER_BYTES = 14;
+
 export interface ActivityShareSink {
   publishFrame(frame: ActivityShareFrame): void;
   publishAudio(audio: ActivityShareAudio): void;
@@ -75,7 +78,10 @@ export function createActivityShareSink(options: ActivityShareSinkOptions): Acti
       return;
     }
     const payload = JSON.stringify(message);
-    if ((socket.bufferedAmount ?? 0) + Buffer.byteLength(payload) > maxBufferedBytes) {
+    if (
+      (socket.bufferedAmount ?? 0) + Buffer.byteLength(payload) + MAX_CLIENT_FRAME_HEADER_BYTES >
+      maxBufferedBytes
+    ) {
       dropped();
       return;
     }

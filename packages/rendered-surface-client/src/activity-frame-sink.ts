@@ -67,6 +67,8 @@ export interface ActivityFrameSink {
 
 const OPEN = 1;
 const DEFAULT_RECONNECT_DELAY_MS = 2_000;
+// Client frames include masking and length fields: reserve the maximum 14-byte header.
+const MAX_CLIENT_FRAME_HEADER_BYTES = 14;
 
 /**
  * Resolve the broker-owned bearer and build a sink, or return undefined when
@@ -108,7 +110,10 @@ export function createActivityFrameSink(options: ActivityFrameSinkOptions): Acti
       if (closed || socket !== next || latestStatus === undefined) return;
       try {
         const payload = JSON.stringify({ kind: "status", status: latestStatus });
-        if ((next.bufferedAmount ?? 0) + Buffer.byteLength(payload) <= maxBufferedBytes) {
+        if (
+          (next.bufferedAmount ?? 0) + Buffer.byteLength(payload) + MAX_CLIENT_FRAME_HEADER_BYTES <=
+          maxBufferedBytes
+        ) {
           next.send(payload);
         }
       } catch {
@@ -136,7 +141,10 @@ export function createActivityFrameSink(options: ActivityFrameSinkOptions): Acti
       return;
     }
     const payload = JSON.stringify(message);
-    if ((socket.bufferedAmount ?? 0) + Buffer.byteLength(payload) > maxBufferedBytes) {
+    if (
+      (socket.bufferedAmount ?? 0) + Buffer.byteLength(payload) + MAX_CLIENT_FRAME_HEADER_BYTES >
+      maxBufferedBytes
+    ) {
       dropped();
       return;
     }
