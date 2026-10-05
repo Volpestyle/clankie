@@ -189,11 +189,7 @@ const failureDetail = (detail: string | undefined) => {
 };
 
 /** A bounded native snapshot, not a prose classifier or accumulated usage report. */
-export function parseSeatTelemetry(
-  harness: "codex" | "claude",
-  raw: string,
-  sessionId?: string,
-): SeatTelemetry {
+function parseSeatTelemetry(harness: "codex" | "claude", raw: string, sessionId?: string): SeatTelemetry {
   let model: string | undefined;
   let effort: string | undefined;
   let window: number | undefined;
