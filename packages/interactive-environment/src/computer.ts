@@ -20,6 +20,19 @@ export const ComputerCoordinatesSchema = z.strictObject({
 });
 export type ComputerCoordinates = z.infer<typeof ComputerCoordinatesSchema>;
 
+/** Native accessibility strings are observation data, never instructions or guessed element IDs. */
+export const ComputerAccessibilitySchema = z.strictObject({
+  tree: z.string().max(65536),
+  focused_element: z.string().max(65536).optional(),
+  document_text: z.string().max(65536).optional(),
+  selected_text: z.string().max(65536).optional(),
+  selected_elements: z.array(z.string().max(4096)).max(1600).optional(),
+});
+export const ComputerEffectSchema = z.strictObject({
+  field: z.enum(["tree", "focused_element", "document_text", "selected_text"]),
+  equals: z.string().max(65536),
+});
+
 /** The environment lease clock/identity conventions, bound to one computer and conversation. */
 export const ComputerLeaseSchema = z
   .strictObject({
@@ -53,6 +66,7 @@ export const ComputerScreenshotSchema = z.strictObject({
   height: z.number().int().positive().max(16384),
   coordinates: ComputerCoordinatesSchema,
   inputReady: z.boolean(),
+  accessibility: ComputerAccessibilitySchema.optional(),
   elements: z.array(z.strictObject({ id, label: z.string().max(4096), actionable: z.boolean() })).max(1600),
   sha256: RenderedSurfaceFrameSchema.shape.sha256,
 });
@@ -95,32 +109,49 @@ const pixel = z.strictObject({
   x: z.number().nonnegative().max(16384),
   y: z.number().nonnegative().max(16384),
 });
+const expectedEffect = { expect: ComputerEffectSchema.optional() };
 export const ComputerInputSchema = z.discriminatedUnion("kind", [
   z.strictObject({
+    ...expectedEffect,
     foreground: z.boolean().default(false),
     kind: z.literal("click"),
     at: pixel,
     button: z.enum(["left", "right"]).default("left"),
   }),
-  z.strictObject({ foreground: z.boolean().default(false), kind: z.literal("element"), elementId: id }),
   z.strictObject({
+    ...expectedEffect,
+    foreground: z.boolean().default(false),
+    kind: z.literal("element"),
+    elementId: id,
+  }),
+  z.strictObject({
+    ...expectedEffect,
     foreground: z.boolean().default(false),
     kind: z.literal("type"),
     text: z.string().min(1).max(16384),
     clear: z.boolean().default(false),
   }),
   z.strictObject({
+    ...expectedEffect,
     foreground: z.boolean().default(false),
     kind: z.literal("key"),
     keys: z.string().min(1).max(256),
   }),
   z.strictObject({
+    ...expectedEffect,
     foreground: z.boolean().default(false),
     kind: z.literal("scroll"),
     direction: z.enum(["up", "down", "left", "right"]),
     amount: z.number().int().min(1).max(100),
+    at: pixel.optional(),
   }),
-  z.strictObject({ foreground: z.boolean().default(false), kind: z.literal("drag"), from: pixel, to: pixel }),
+  z.strictObject({
+    ...expectedEffect,
+    foreground: z.boolean().default(false),
+    kind: z.literal("drag"),
+    from: pixel,
+    to: pixel,
+  }),
 ]);
 export type ComputerInput = z.infer<typeof ComputerInputSchema>;
 export const ComputerReceiptSchema = z.strictObject({

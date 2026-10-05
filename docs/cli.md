@@ -3984,12 +3984,21 @@ even during an input batch; its next input refuses. Recovery still needs host st
 proof.
 
 The service registers a macOS Peekaboo adapter. A native Windows Codex
-`node_repl` can explicitly attach the read-only Windows observation host; the
+`node_repl` can explicitly attach the Windows computer host; the
 same command targets it through `CLANKIE_CONTROL_PLANE_URL` (loopback or an SSH
-forward). Its frames have `inputReady: false`; input is unavailable. Windows
+forward). An observation-only client stays read-only. The full native client
+supports coordinate click, type, key, scroll and drag, one primitive per capture.
+Windows input requires `foreground: true` and `expect: {"field":"document_text","equals":"EXPECTED_RESULT"}`
+(or `tree`, `focused_element`, `selected_text`): the observed field must change
+to that exact value in a fresh same-window observation. Read the capture's
+`accessibility` fields and its actual PNG before choosing the action.
+Scroll also requires `at` in image pixels; its `amount` is a native logical-pixel
+delta. Typing requires verified focus; clear-and-type and guessed element IDs
+refuse. Dispatch or a changed PNG alone cannot confirm an effect. Windows
 setup is in [desktop control](desktop-control.md#windows-observation-host).
 A host without an attached adapter returns `computer_body_unavailable`.
-Native reasoning/provider loops and hosted displays are not implemented. [Desktop control](desktop-control.md#shared-computer-body)
+The attached native harness supplies its own app grants and turn stops; no second
+reasoning loop starts. Hosted displays are not implemented. [Desktop control](desktop-control.md#shared-computer-body)
 explains capture freshness, coordinate mapping and the provider's recovery
 limitation.
 

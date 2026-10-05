@@ -4124,8 +4124,12 @@ paths:
         a persistent requestId; identical retries reconcile, never replay. Failed
         and uncertain are distinct from confirmed. Expiry/restart/uncertainty retain
         the lease until host stop proof. Local macOS Peekaboo and an explicitly attached
-        read-only Windows native-harness observation host; Windows input, native model
-        and hosted display routes are not implemented.
+        Windows native-harness host. Full Windows clients capture native accessibility
+        strings and accept one foreground primitive per fresh observation, with an
+        exact changed accessibility postcondition (input.expect.field/equals);
+        scroll also needs an image-pixel at point. Native dispatch alone cannot
+        confirm an effect. Observation-only clients remain read-only. No additional
+        model loop starts; hosted display routes are not implemented.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true

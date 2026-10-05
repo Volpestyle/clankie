@@ -17,12 +17,15 @@ interface WindowsComputerHostOptions {
   authorityURL: string;
 }
 
-/** Authenticated HTTP projection of a supplied native observation client. */
+/** Authenticated projection of the supplied native client. Its trusted harness
+ * retains app grants/turn stops; a native capability is not proof of app access.
+ */
 export class WindowsComputerHost {
   readonly app: Hono;
   readonly bodyId: string;
   readonly conversationId: string;
   private readonly store: BodyLeaseStore;
+  private readonly adapter: WindowsComputerAdapter;
   private open = true;
   constructor(options: WindowsComputerHostOptions) {
     const authority = new URL("/v1/computer/authority", options.authorityURL);
@@ -40,6 +43,7 @@ export class WindowsComputerHost {
     this.bodyId = adapter.bodyId;
     this.conversationId = conversationId;
     this.store = store;
+    this.adapter = adapter;
     this.app = new Hono();
     const app = this.app;
     registerComputerRoutes(app, {
@@ -76,6 +80,9 @@ export class WindowsComputerHost {
       },
     });
   }
+  get inputReady(): boolean {
+    return this.open && this.adapter.inputReady;
+  }
   close() {
     this.open = false;
     this.store.close();
@@ -102,7 +109,9 @@ export async function startWindowsComputerHost(options: WindowsComputerHostOptio
       bodyId: host.bodyId,
       conversationId: host.conversationId,
       url: `http://127.0.0.1:${address.port}`,
-      inputReady: false,
+      get inputReady() {
+        return host.inputReady;
+      },
       async close() {
         host.close();
         await new Promise<void>((resolve, reject) =>

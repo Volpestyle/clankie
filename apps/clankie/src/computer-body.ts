@@ -28,6 +28,7 @@ export interface ComputerObservation {
   readonly coordinates: ComputerCoordinates;
   readonly inputReady: boolean;
   readonly elements: ComputerScreenshot["elements"];
+  readonly accessibility?: ComputerScreenshot["accessibility"];
   /** Provider-owned snapshot/reference stays inside the body host. */
   readonly reference: unknown;
 }
@@ -266,6 +267,7 @@ export class ComputerBody {
           height: png.readUInt32BE(20),
           coordinates: observation.coordinates,
           inputReady: observation.inputReady && command.capture !== "classic_read_only",
+          ...(observation.accessibility === undefined ? {} : { accessibility: observation.accessibility }),
           elements: observation.elements,
           sha256: createHash("sha256").update(png).digest("hex"),
         });
@@ -314,6 +316,7 @@ export class ComputerBody {
         }
         try {
           if (input.kind === "click") computerPoint(frame.screenshot, input.at);
+          if (input.kind === "scroll" && input.at !== undefined) computerPoint(frame.screenshot, input.at);
           if (input.kind === "drag") {
             computerPoint(frame.screenshot, input.from);
             computerPoint(frame.screenshot, input.to);
