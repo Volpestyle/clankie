@@ -1,3 +1,4 @@
+import { FleetAutonomySchema } from "@clankie/protocol";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
@@ -128,7 +129,7 @@ it("inherits each project field independently using the native conversation's ca
   const f = await fixture();
   await f.settings.update((current) => ({
     ...current,
-    autonomy: { fleet: { closure: "owner", machineSetup: "owner" } },
+    autonomy: { fleet: FleetAutonomySchema.parse({ closure: "owner", machineSetup: "owner" }) },
     projects: ProjectsSettingsSchema.parse({
       projects: [
         f.project("garden", f.garden, { fleet: { closure: "lead" } }),
@@ -161,7 +162,7 @@ it("refreshes global and project policy on the same native conversation without 
   const writer = new SettingsStore(f.settings.path);
   await writer.update((current) => ({
     ...current,
-    autonomy: { fleet: { closure: "lead", machineSetup: "owner" } },
+    autonomy: { fleet: FleetAutonomySchema.parse({ closure: "lead", machineSetup: "owner" }) },
   }));
   policy(await f.prompt(id), "owner", "owner");
   await writer.update((current) => ({
@@ -184,7 +185,7 @@ it("refreshes global and project policy on the same native conversation without 
   policy(await f.prompt(id), "lead", "lead");
   await writer.update((current) => ({
     ...current,
-    autonomy: { fleet: { closure: "owner", machineSetup: "owner" } },
+    autonomy: { fleet: FleetAutonomySchema.parse({ closure: "owner", machineSetup: "owner" }) },
   }));
   policy(await f.prompt(id), "owner", "lead");
   expect(f.captain.seatContext(id)).toEqual({ conversationId: id, cwd: f.garden });
@@ -194,7 +195,7 @@ it("refuses ambiguous project attribution instead of selecting a permissive over
   const f = await fixture();
   await f.settings.update((current) => ({
     ...current,
-    autonomy: { fleet: { closure: "lead", machineSetup: "lead" } },
+    autonomy: { fleet: FleetAutonomySchema.parse({ closure: "lead", machineSetup: "lead" }) },
     projects: ProjectsSettingsSchema.parse({
       projects: [f.project("garden", f.garden, { fleet: { closure: "owner", machineSetup: "owner" } })],
     }),

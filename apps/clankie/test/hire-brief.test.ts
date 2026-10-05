@@ -73,7 +73,11 @@ test.each(["pi", "claude", "codex"])(
       expect(send).not.toHaveBeenCalled();
       const brief = spawn.mock.calls[0]?.[2];
       expect(brief).toMatch(/^Implement SPEC.md and report the tests.\n\n/u);
-      expect(brief?.match(/short report the lead can act on without your transcript/gu)).toHaveLength(1);
+      expect(
+        brief?.match(
+          /report in the resolved reporting style that the lead can act on without your transcript/gu,
+        ),
+      ).toHaveLength(1);
       expect(brief).toContain("links to its evidence, unresolved gaps");
     } finally {
       await captain.close();

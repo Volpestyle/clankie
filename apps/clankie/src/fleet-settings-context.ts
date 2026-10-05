@@ -128,6 +128,7 @@ export async function resolveFleetSettingsContext(
   const project = settings.projects.projects.find((entry) => entry.id === projectId);
   return {
     schemaVersion: 1,
+    workingPreferences: true,
     effective: effectiveFleetAutonomy(settings.autonomy, project?.autonomy),
     ...(projectId === undefined ? {} : { projectId }),
     machine: { id: machineId, linked, targetRevision },

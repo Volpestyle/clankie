@@ -160,12 +160,23 @@ host-established inputs; it cannot prove a pane, grant or caller’s identity.
 Session-wide fleet grants remain unchanged here; VUH-1558 owns explicit retirement
 and per-agent enforcement. No live migration runs as part of tests or build.
 
-## Fleet responsibility
+## Fleet responsibility and working preferences
 
 Global owner settings store `autonomy.fleet.closure` and
-`autonomy.fleet.machineSetup`, both `lead` by default or `owner`. Project
+`autonomy.fleet.machineSetup`, both `lead` by default or `owner`. The same block
+holds `commit` and `push` (`lead` without asking, `owner` ask first), `release`
+(`{mode:"lead"}`, `{mode:"owner"}`, or `{mode:"time_rule",rule:"…"}`),
+`verification` (`review_and_seal` or `change_run_read`) and owner-authored
+`reportingStyle`. Defaults are commit/push without asking, ask before official
+releases, change/run/read verification and "Short and plain." reporting. Project
 `autonomy.fleet` leaves are optional and inherit independently; a null patch
-removes only one override. The logical CLI/API fleet view places them beside
+removes only one override; a global null restores one default. Release mode and
+rule form one atomic override. The logical CLI/API fleet view places them beside
 size/models. Configure through `clankie fleet set` and `clankie project settings`,
 not direct file edits. See [ADR 0230](../../docs/adr/0230-fleet-responsibility-is-owner-settings.md)
 for responsibility, owner-only boundaries and future envelope alignment.
+Legacy reads seed the weekly release rule only for an already-registered
+`clankie` project without an explicit override. Persisted working preferences
+mark the migration complete, so an owner-cleared override is not resurrected.
+No project, workspace or grant is created. New API responses advertise
+`workingPreferences:true`; old wire responses keep missing leaves absent.

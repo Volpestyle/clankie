@@ -1,5 +1,9 @@
 import { DesktopSettingsSchema } from "./desktop.ts";
-import { AutonomySettingsSchema, HireProfileSchema } from "@clankie/protocol";
+import {
+  AutonomySettingsSchema,
+  FLEET_WORKING_PREFERENCE_FIELDS,
+  HireProfileSchema,
+} from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { MinecraftPlaySettingsSchema, MinecraftServerProfileIdSchema } from "@clankie/protocol";
@@ -840,6 +844,47 @@ export type ClankieSettings = z.infer<typeof ClankieSettingsSchema>;
 
 export function emptySettings(): ClankieSettings {
   return ClankieSettingsSchema.parse({ schemaVersion: SETTINGS_SCHEMA_VERSION });
+}
+
+export const LEGACY_CLANKIE_RELEASE_RULE =
+  "Release without asking when the last v* tag is more than one week old and main has user-visible changes worth shipping.";
+
+/** Run on raw disk bytes, before defaults provide the migration receipt. */
+export function migrateLegacyFleetWorkingPreferences(parsed: unknown): unknown {
+  const record = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+  if (!record(parsed)) return parsed;
+  const autonomy = parsed.autonomy;
+  if (autonomy !== undefined && !record(autonomy)) return parsed;
+  const globalFleet = autonomy?.fleet;
+  if (globalFleet !== undefined && !record(globalFleet)) return parsed;
+  // Any saved new global leaf proves migration/default persistence happened.
+  // In particular, an intentionally cleared project release stays inherited.
+  if (globalFleet && FLEET_WORKING_PREFERENCE_FIELDS.some((field) => Object.hasOwn(globalFleet, field)))
+    return parsed;
+  const projects = parsed.projects;
+  if (!record(projects) || !Array.isArray(projects.projects)) return parsed;
+  return {
+    ...parsed,
+    projects: {
+      ...projects,
+      projects: projects.projects.map((project: unknown) => {
+        if (!record(project) || project.id !== "clankie") return project;
+        const projectAutonomy = project.autonomy;
+        if (projectAutonomy !== undefined && !record(projectAutonomy)) return project;
+        const fleet = projectAutonomy?.fleet;
+        if (fleet !== undefined && !record(fleet)) return project;
+        if (fleet && Object.hasOwn(fleet, "release")) return project;
+        return {
+          ...project,
+          autonomy: {
+            ...projectAutonomy,
+            fleet: { ...fleet, release: { mode: "time_rule", rule: LEGACY_CLANKIE_RELEASE_RULE } },
+          },
+        };
+      }),
+    },
+  };
 }
 
 /**

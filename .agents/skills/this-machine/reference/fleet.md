@@ -2,6 +2,30 @@
 
 Hiring workers, skill selection for hires, Codex accounts, where workers run, and reading other agents' conversations.
 
+## Owner working preferences
+
+Read `clankie fleet status` or `clankie doctor --json` in the workspace before work.
+They expose resolved global/project commit, push, official-release, verification
+and reporting preferences from the same `autonomy.fleet` settings as closure and
+machine setup. Unknown or ambiguous project context is reported, not guessed.
+Global defaults allow commit/push without asking, ask before official releases,
+use change/run/read verification and report short and plain. The existing
+registered `clankie` project receives its weekly-release override on migration;
+an explicitly cleared override stays cleared after settings are saved.
+
+Every hire receives the resolved project preferences through its native brief,
+and Clankie's "Your fleet" prompt refreshes them each turn. Agents opened
+independently read the same context through the CLI. Explicit task and integrator
+gates take precedence. Preferences do not add credentials, grants, account access
+or permission to run evals.
+
+Use `clankie fleet set` for global changes and `clankie project settings PROJECT`
+for one project's overrides. `inherit` removes only the selected project leaf.
+Release mode and its owner-authored time rule form one atomic preference; a rule
+is guidance to verify against current evidence, not scheduled execution. The app
+offers the same controls and hides the new ones on older servers without the
+`workingPreferences:true` capability. Never edit settings JSON directly.
+
 ## Optional working guidance
 
 Opinionated skills are on by default. An owner turns them off with

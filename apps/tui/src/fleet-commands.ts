@@ -11,6 +11,13 @@ import {
 } from "@clankie/settings";
 import { fleetStatus, fleetUpdate, formatFleetLines, runFleetCommand } from "./command/fleet.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
+import {
+  FLEET_AUTONOMY_GUIDANCE,
+  FleetReportingStyleSchema,
+  FleetReleasePolicySchema,
+  type FleetAutonomy,
+} from "@clankie/protocol";
+import { formatWorkingPreferences } from "./command/working-preferences.ts";
 
 export interface FleetCommandServices {
   settings: SettingsStore;
@@ -43,7 +50,7 @@ export function buildFleetCommands(services: FleetCommandServices): FaceShellCom
           await runFleetCommand(["clear"], { settings: services.settings });
           shell.insertCommandResult(
             "/fleet clear",
-            "Cleared. Fleet size max, models optimal, closure and machine setup lead, fleet tools connected, peer messages on, and he picks a harness per job with nothing from you.",
+            "Cleared. Fleet size max, models optimal, closure, machine setup, commit and push lead, release owner, focused verification, short plain reports, fleet tools connected and peer messages on.",
             "success",
           );
           return;
@@ -62,6 +69,8 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
       `settings file: ${result.settingsFile}`,
       "",
       ...formatFleetLines(result.fleet),
+      "",
+      ...formatWorkingPreferences(result.workingPreferences),
       ...result.roleProfiles.map((r) => `${r.projectId}/${r.role}: ${hireProfileLine(r.profile)}`),
     ].join("\n"),
     "success",
@@ -163,6 +172,71 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       allowBack: true,
     });
     if (machineSetup !== "lead" && machineSetup !== "owner") return;
+    const preference: Partial<FleetAutonomy> = {};
+    for (const field of ["commit", "push"] as const) {
+      const value = await flow.readSelect({
+        message: `Fleet — who may ${field} completed work`,
+        options: (["lead", "owner"] as const).map((value) => ({
+          value,
+          label: value,
+          description: FLEET_AUTONOMY_GUIDANCE[field][value],
+        })),
+        initialValue: current[field],
+        currentValue: current[field],
+        allowBack: true,
+      });
+      if (value !== "lead" && value !== "owner") return;
+      preference[field] = value;
+    }
+    const release = await flow.readSelect({
+      message: "Fleet — who may publish an official release",
+      options: (["lead", "owner", "time_rule"] as const).map((value) => ({
+        value,
+        label: value,
+        description: FLEET_AUTONOMY_GUIDANCE.release[value],
+      })),
+      initialValue: current.release.mode,
+      currentValue: current.release.mode,
+      allowBack: true,
+    });
+    if (release !== "lead" && release !== "owner" && release !== "time_rule") return;
+    if (release === "time_rule") {
+      const rule = await flow.readText({
+        message: "Fleet — the standing release time rule",
+        defaultValue: current.release.mode === "time_rule" ? current.release.rule : "",
+        multiline: true,
+        allowBack: true,
+        validate: (value: string) =>
+          FleetReportingStyleSchema.safeParse(value).success
+            ? undefined
+            : "Use 1 to 2000 nonempty characters.",
+      });
+      if (rule === undefined) return;
+      preference.release = FleetReleasePolicySchema.parse({ mode: release, rule });
+    } else preference.release = { mode: release };
+    const verification = await flow.readSelect({
+      message: "Fleet — how completed changes are verified",
+      options: (["change_run_read", "review_and_seal"] as const).map((value) => ({
+        value,
+        label: value,
+        description: FLEET_AUTONOMY_GUIDANCE.verification[value],
+      })),
+      initialValue: current.verification,
+      currentValue: current.verification,
+      allowBack: true,
+    });
+    if (verification !== "change_run_read" && verification !== "review_and_seal") return;
+    preference.verification = verification;
+    const reportingStyle = await flow.readText({
+      message: "Fleet — progress and result reporting style",
+      defaultValue: current.reportingStyle,
+      multiline: true,
+      allowBack: true,
+      validate: (value: string) =>
+        FleetReportingStyleSchema.safeParse(value).success ? undefined : "Use 1 to 2000 nonempty characters.",
+    });
+    if (reportingStyle === undefined) return;
+    preference.reportingStyle = FleetReportingStyleSchema.parse(reportingStyle);
     const notes = await flow.readText({
       message: "Fleet — which agents you want on what, and when (empty: he decides)",
       defaultValue: current.notes,
@@ -173,7 +247,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     });
     if (notes === undefined) return;
     await fleetUpdate(
-      { size, models, tools, peerMessages, closure, machineSetup, notes: notes.trim() },
+      { size, models, tools, peerMessages, closure, machineSetup, notes: notes.trim(), ...preference },
       { settings: services.settings },
     );
     flow.renderLine(

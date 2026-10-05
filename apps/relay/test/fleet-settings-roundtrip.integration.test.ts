@@ -198,24 +198,41 @@ it("round-trips owner settings through real relay/device/service HTTP and persis
   for (const device of ["control", "hosted"] as const) {
     const client = new ClankieApiClient({ baseUrl: f.relayUrl, operatorToken: f.tokens[device] });
     const fleet = await client.fleetSettings();
+    expect(fleet.workingPreferences).toBe(true);
     const updated = await client.updateFleetSettings({
       schemaVersion: 1,
       expectedRevision: fleet.revision,
-      changes: { closure: "owner" },
+      changes: {
+        closure: "owner",
+        commit: "owner",
+        push: "owner",
+        release: { mode: "time_rule", rule: "Release after the last v* tag is more than one week old." },
+        verification: "review_and_seal",
+        reportingStyle: "Short and plain.",
+      },
     });
     expect(updated.fleet.closure).toBe("owner");
+    expect(updated.fleet.release).toEqual({
+      mode: "time_rule",
+      rule: "Release after the last v* tag is more than one week old.",
+    });
     const projects = await client.projects();
+    expect(projects.workingPreferences).toBe(true);
     expect(projects.autonomyDefaults?.fleet.closure).toBe("owner");
     const project = await client.updateProjectSettings({
       projectId: "garden",
       expectedRevision: projects.revision,
-      changes: { autonomy: { fleet: { machineSetup: "owner" } } },
+      changes: { autonomy: { fleet: { machineSetup: "owner", commit: "lead", release: { mode: "owner" } } } },
     });
     expect(project.settings.projects[0]!.autonomy?.fleet?.machineSetup).toBe("owner");
+    expect(project.settings.projects[0]!.autonomy?.fleet?.release).toEqual({ mode: "owner" });
     expect(f.forwarded.slice(-4).every((entry) => entry.token === f.tokens[device])).toBe(true);
   }
   expect(f.captainCalls()).toBe(0);
   expect((await new SettingsStore(f.settings.path).load()).autonomy.fleet.closure).toBe("owner");
+  expect((await new SettingsStore(f.settings.path).load()).autonomy.fleet.verification).toBe(
+    "review_and_seal",
+  );
 });
 
 it("refuses chat and steer devices before any settings or captain hop, and denies hosted operator elevation without its mint and terminalControl proof", async () => {

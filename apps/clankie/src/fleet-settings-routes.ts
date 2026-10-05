@@ -5,6 +5,7 @@ import {
   FLEET_SETTINGS_PATH,
   FLEET_SETTINGS_CONTEXT_PATH,
   FleetSettingsContextRequestSchema,
+  FleetAutonomySchema,
   UpdateFleetSettingsSchema,
   type FleetSettingsSnapshot,
 } from "@clankie/protocol";
@@ -18,6 +19,7 @@ function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot
   const fleet = { size: settings.fleet.size, models: settings.fleet.models, ...settings.autonomy.fleet };
   return {
     schemaVersion: 1,
+    workingPreferences: true,
     revision: createHash("sha256").update(JSON.stringify(fleet)).digest("hex"),
     fleet,
   };
@@ -42,7 +44,7 @@ export function createFleetSettingsRoutes(
     if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
     return context.json(fleetSettingsSnapshot(current));
   });
-  app.post(FLEET_SETTINGS_PATH, bodyLimit({ maxSize: 8 * 1024 }), async (context) => {
+  app.post(FLEET_SETTINGS_PATH, bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
     const input = UpdateFleetSettingsSchema.safeParse(await context.req.json().catch(() => null));
     if (!input.success) return context.json({ error: "malformed" }, 400);
@@ -53,7 +55,14 @@ export function createFleetSettingsRoutes(
           if (fleetSettingsSnapshot(current).revision !== input.data.expectedRevision)
             throw new Error("Fleet settings changed");
           before = JSON.stringify(current);
-          const { size, models, closure, machineSetup } = input.data.changes;
+          const { size, models, ...preferences } = input.data.changes;
+          const defaults = FleetAutonomySchema.parse({});
+          const resolved = Object.fromEntries(
+            Object.entries(preferences).map(([field, value]) => [
+              field,
+              value ?? defaults[field as keyof typeof defaults],
+            ]),
+          );
           return {
             ...current,
             fleet: {
@@ -63,11 +72,10 @@ export function createFleetSettingsRoutes(
             },
             autonomy: {
               ...current.autonomy,
-              fleet: {
+              fleet: FleetAutonomySchema.parse({
                 ...current.autonomy.fleet,
-                ...(closure === undefined ? {} : { closure }),
-                ...(machineSetup === undefined ? {} : { machineSetup }),
-              },
+                ...resolved,
+              }),
             },
           };
         },

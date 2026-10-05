@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { HireProfileSchema, HireEffortSchema } from "./hire-profile.ts";
 import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
-import { AutonomySettingsSchema, ProjectAutonomySchema, ProjectAutonomyPatchSchema } from "./autonomy.ts";
+import {
+  AutonomySettingsWireSchema,
+  FleetWorkingPreferencesSchema,
+  ProjectAutonomySchema,
+  ProjectAutonomyPatchSchema,
+} from "./autonomy.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -183,10 +188,18 @@ export const ProjectsSnapshotSchema = z
     settings: ProjectsSettingsSchema,
     hireDefaults: HireProfileSchema.optional(),
     /** Included only by clients opting into the autonomy-aware project view. */
-    autonomyDefaults: AutonomySettingsSchema.optional(),
+    autonomyDefaults: AutonomySettingsWireSchema.optional(),
+    /** Included by the current service only in the autonomy-aware project view. */
+    workingPreferences: z.literal(true).optional(),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.workingPreferences !== true ||
+      FleetWorkingPreferencesSchema.strip().safeParse(value.autonomyDefaults?.fleet).success,
+    "A working-preferences project snapshot must include every global preference",
+  );
 export type Project = z.infer<typeof ProjectSchema>;
 export type ProjectWorkspace = z.infer<typeof ProjectWorkspaceSchema>;
 export type ProjectsSettings = z.infer<typeof ProjectsSettingsSchema>;

@@ -7,6 +7,7 @@ import {
   ClankieSettingsSchema,
   assertNoSecretShapedValue,
   dropRetiredSettings,
+  migrateLegacyFleetWorkingPreferences,
   emptySettings,
   LinearWakeSettingsSchema,
   type ClankieSettings,
@@ -106,9 +107,11 @@ export class SettingsStore {
     }
     // A malformed settings file fails loudly rather than silently reverting to
     // defaults, which would quietly widen an allowlist the operator narrowed.
-    // Retired sections and unchanged legacy Linear defaults migrate on read;
-    // the next ordinary settings write persists the upgraded format.
-    return machineSettings(migrateLinearWakeDefaults(dropRetiredSettings(parsed)));
+    // Retired sections, unchanged legacy Linear defaults and legacy working
+    // preferences migrate on read; the next ordinary write persists the format.
+    return machineSettings(
+      migrateLegacyFleetWorkingPreferences(migrateLinearWakeDefaults(dropRetiredSettings(parsed))),
+    );
   }
 
   /** Apply a transform atomically under a serialized queue. */

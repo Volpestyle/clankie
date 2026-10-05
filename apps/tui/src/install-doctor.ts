@@ -114,6 +114,7 @@ export interface InstallDoctorReport {
   readonly ownerHerdrSessions?: readonly string[];
   readonly herdrPlugin: HerdrPluginReport;
   readonly remoteHarnesses?: readonly unknown[];
+  readonly workingPreferences?: import("./command/working-preferences.ts").WorkingPreferencesReport;
   readonly toolCatalogHealth?:
     | FleetToolCatalogHealthPage
     | { readonly status: "unavailable"; readonly detail: string };

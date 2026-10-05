@@ -1,13 +1,21 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileCredentialStore, LINEAR_WEBHOOK_PROVIDER_ID } from "@clankie/credential-broker";
+import {
+  FileCredentialStore,
+  LINEAR_WEBHOOK_PROVIDER_ID,
+  OPERATOR_CREDENTIAL_PROVIDER_ID,
+  mintOperatorToken,
+} from "@clankie/credential-broker";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { createFleetSettingsRoutes } from "../../clankie/src/fleet-settings-routes.ts";
+import { formatDoctorReport } from "../src/doctor-report.ts";
 import { SETTINGS_SCHEMA_VERSION, SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectInstall, inspectInstallKind, type ExecFileImpl } from "../src/install-doctor.ts";
 import { formatDoctorReport } from "../src/doctor-report.ts";
 
-import { formatDoctorSummary } from "../src/command/doctor.ts";
+import { doctorCommand, formatDoctorSummary } from "../src/command/doctor.ts";
 
 const tempDirs: string[] = [];
 
@@ -27,6 +35,63 @@ const missing: ExecFileImpl = async () => {
 
 /** Probes are a seam so a run never depends on what happens to answer locally. */
 const offline: typeof fetch = () => Promise.reject(new Error("no probe in tests"));
+
+it("doctor resolves current workspace preferences before any agent is started and explains project versus global", async () => {
+  const root = await realpath(await installRoot());
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  const token = mintOperatorToken();
+  await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+  await settings.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "garden",
+          name: "Garden",
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: root }],
+          autonomy: { fleet: { commit: "owner", release: { mode: "time_rule", rule: "After a week." } } },
+        },
+      ],
+    }),
+  }));
+  const routes = createFleetSettingsRoutes(
+    async (request) =>
+      request.headers.get("authorization") === `Bearer ${token}` ? true : "authentication_required",
+    settings,
+  );
+  const options = {
+    repoRoot: root,
+    cwd: root,
+    settings,
+    credentialStore: credentials,
+    env: { HOME: root, CLANKIE_OPERATOR_TOKEN: token },
+    execFileImpl: missing,
+    fetchImpl: (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url));
+      return path.pathname.includes("fleet-settings")
+        ? routes.request(path.pathname + path.search, init)
+        : Response.json({}, { status: 404 });
+    }) as typeof fetch,
+  };
+  const before = await readFile(settings.path, "utf8");
+  const report = await doctorCommand(options);
+  expect(report.workingPreferences).toMatchObject({
+    status: "available",
+    projectId: "garden",
+    effective: { commit: "owner", push: "lead", release: { mode: "time_rule", rule: "After a week." } },
+  });
+  expect(formatDoctorReport(report)).toContain("project garden overrides global defaults");
+  expect(formatDoctorReport(report)).toContain("Release: time_rule.");
+  expect(await readFile(settings.path, "utf8")).toBe(before);
+  await settings.update((current) => ({ ...current, projects: ProjectsSettingsSchema.parse({}) }));
+  const global = await doctorCommand(options);
+  expect(global.workingPreferences).toMatchObject({
+    status: "available",
+    effective: { release: { mode: "owner" } },
+  });
+  expect(formatDoctorReport(global)).toContain("global defaults (no approved project)");
+});
 
 describe("install doctor", () => {
   it("reports the tracker backend and selection reason without probing or writing Linear", async () => {

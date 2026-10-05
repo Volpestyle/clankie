@@ -9,6 +9,7 @@ import {
   ProjectsSettingsSchema,
   FleetSettingsSnapshotSchema,
   FleetSettingsContextSchema,
+  FleetAutonomySchema,
   PROJECTS_PATH,
   PROJECT_UPDATE_SETTINGS_PATH,
 } from "@clankie/protocol";
@@ -150,7 +151,8 @@ it("persists public fleet controls through the owner API/client and fences stale
   const f = await fixture();
   const before = await f.settings.load();
   const original = await f.client.fleetSettings();
-  expect(original.fleet).toEqual({ size: "max", models: "optimal", closure: "lead", machineSetup: "lead" });
+  expect(original.workingPreferences).toBe(true);
+  expect(original.fleet).toEqual({ size: "max", models: "optimal", ...FleetAutonomySchema.parse({}) });
   const updated = FleetSettingsSnapshotSchema.parse(
     await f.client.updateFleetSettings({
       schemaVersion: 1,
@@ -161,11 +163,16 @@ it("persists public fleet controls through the owner API/client and fences stale
   expect(updated.fleet).toEqual({
     size: "small",
     models: "efficient",
+    ...FleetAutonomySchema.parse({}),
     closure: "owner",
     machineSetup: "owner",
   });
   const saved = await new SettingsStore(f.settings.path).load();
-  expect(saved.autonomy.fleet).toEqual({ closure: "owner", machineSetup: "owner" });
+  expect(saved.autonomy.fleet).toEqual({
+    ...FleetAutonomySchema.parse({}),
+    closure: "owner",
+    machineSetup: "owner",
+  });
   expect(saved.projects).toEqual(before.projects);
   expect(saved.fleet.tools).toBe(before.fleet.tools);
   await expect(
@@ -184,6 +191,115 @@ it("persists public fleet controls through the owner API/client and fences stale
     }),
   ).rejects.toThrow("409");
   expect(await f.settings.load()).toEqual(saved);
+});
+
+it("roundtrips working preferences, resolves each project override and restores inheritance through the owner API", async () => {
+  const f = await fixture();
+  const before = await f.settings.load();
+  const initial = await f.client.fleetSettings();
+  const rule =
+    "Release without asking when the last v* tag is more than one week old and main has user-visible changes worth shipping.";
+  const global = {
+    commit: "owner" as const,
+    push: "owner" as const,
+    release: { mode: "time_rule" as const, rule },
+    verification: "review_and_seal" as const,
+    reportingStyle: "One short paragraph with evidence.",
+  };
+  const updated = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: initial.revision,
+    changes: global,
+  });
+  expect(updated.fleet).toEqual({ size: "max", models: "optimal", ...before.autonomy.fleet, ...global });
+  const projects = await f.client.projects();
+  const overrides = {
+    commit: "lead" as const,
+    release: { mode: "owner" as const },
+    reportingStyle: "Short and plain.",
+  };
+  const project = await f.client.updateProjectSettings({
+    projectId: "garden",
+    expectedRevision: projects.revision,
+    changes: { autonomy: { fleet: overrides } },
+  });
+  expect(project.settings.projects[0]!.autonomy!.fleet).toEqual({
+    closure: "owner",
+    machineSetup: "owner",
+    ...overrides,
+  });
+  const resolved = await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "local" });
+  expect(resolved.workingPreferences).toBe(true);
+  expect(resolved.effective).toEqual({
+    ...before.autonomy.fleet,
+    ...global,
+    closure: "owner",
+    machineSetup: "owner",
+    ...overrides,
+  });
+  const inherited = await f.client.updateProjectSettings({
+    projectId: "garden",
+    expectedRevision: project.revision,
+    changes: { autonomy: { fleet: { commit: null, release: null } } },
+  });
+  expect(inherited.settings.projects[0]!.autonomy!.fleet).toEqual({
+    closure: "owner",
+    machineSetup: "owner",
+    reportingStyle: "Short and plain.",
+  });
+  expect(
+    (await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "local" })).effective,
+  ).toEqual({
+    ...before.autonomy.fleet,
+    ...global,
+    closure: "owner",
+    machineSetup: "owner",
+    reportingStyle: "Short and plain.",
+  });
+  const reset = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: updated.revision,
+    changes: { commit: null, push: null, release: null, verification: null, reportingStyle: null },
+  });
+  expect(reset.fleet).toEqual(initial.fleet);
+  const persisted = await new SettingsStore(f.settings.path).load();
+  expect(persisted.autonomy.fleet).toEqual(before.autonomy.fleet);
+  expect(persisted.projects.projects[0]!.workspaces).toEqual(before.projects.projects[0]!.workspaces);
+  expect(persisted.machines).toEqual(before.machines);
+  expect(persisted.fleet).toEqual(before.fleet);
+});
+
+it("rejects malformed release modes, rules and reporting styles without changing owner settings", async () => {
+  const f = await fixture();
+  const initial = await f.client.fleetSettings();
+  const before = await f.settings.load();
+  for (const changes of [
+    { release: { mode: "time_rule" } },
+    { release: { mode: "time_rule", rule: " " } },
+    { release: { mode: "owner", rule: "hidden stale rule" } },
+    { reportingStyle: " " },
+    { verification: "skip_checks" },
+  ]) {
+    expect(
+      (
+        await f.request("/v1/operator/fleet-settings", {
+          schemaVersion: 1,
+          expectedRevision: initial.revision,
+          changes,
+        })
+      ).status,
+    ).toBe(400);
+  }
+  expect(await f.settings.load()).toEqual(before);
+  const reportingStyle = "界".repeat(2000);
+  const release = { mode: "time_rule" as const, rule: "界".repeat(2000) };
+  const multilingual = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: initial.revision,
+    changes: { release, reportingStyle },
+  });
+  expect(multilingual.fleet.release).toEqual(release);
+  expect(multilingual.fleet.reportingStyle).toBe(reportingStyle);
 });
 
 it("gates explicit linked refresh with canonical current source policy, per-target links and live operator authority", async () => {
@@ -286,8 +402,10 @@ it("opts new project clients into current autonomy while preserving legacy wire 
   const legacy = await (await f.request(PROJECTS_PATH)).json();
   expect(legacy.settings.projects[0]).not.toHaveProperty("autonomy");
   expect(legacy).not.toHaveProperty("autonomyDefaults");
+  expect(legacy).not.toHaveProperty("workingPreferences");
   expect(legacy.revision).toBe(projectsRevision(current.projects));
   const snapshot = await f.client.projects();
+  expect(snapshot.workingPreferences).toBe(true);
   expect(snapshot.autonomyDefaults).toEqual(current.autonomy);
   expect(snapshot.settings.projects[0]!.autonomy).toEqual({
     fleet: { closure: "owner", machineSetup: "owner" },
@@ -331,7 +449,7 @@ it("derives policy from the real local source cwd, verifies aliases and current 
   ).toBe(context.machine.targetRevision);
   expect(
     (await f.client.fleetSettingsContext({ workingDirectory: f.other, machine: "local" })).effective,
-  ).toEqual({ closure: "lead", machineSetup: "lead" });
+  ).toEqual(FleetAutonomySchema.parse({}));
   f.disconnect();
   expect(
     (await f.client.fleetSettingsContext({ workingDirectory: f.cwd, machine: "pc" })).machine.linked,

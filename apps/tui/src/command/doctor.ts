@@ -5,6 +5,7 @@ import {
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
+import { readWorkingPreferences } from "./working-preferences.ts";
 import {
   inspectInstall,
   type ExecFileImpl,
@@ -60,8 +61,17 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
     : "ready";
 }
 
-export async function doctorCommand(options: InspectInstallOptions): Promise<InstallDoctorReport> {
+export async function doctorCommand(
+  options: InspectInstallOptions & { cwd?: string; host?: string },
+): Promise<InstallDoctorReport> {
   const report = await inspectInstall(options);
+  const workingPreferences = await readWorkingPreferences({
+    ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.host === undefined ? {} : { host: options.host }),
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    ...(options.credentialStore === undefined ? {} : { operatorCredentialStore: options.credentialStore }),
+  });
   let toolCatalogHealth: NonNullable<InstallDoctorReport["toolCatalogHealth"]>;
   try {
     const credential = await resolveOperatorCredential({
@@ -110,7 +120,7 @@ export async function doctorCommand(options: InspectInstallOptions): Promise<Ins
       { status: "unavailable", detail: error instanceof Error ? error.message : String(error) },
     ];
   }
-  return { ...report, remoteHarnesses, toolCatalogHealth };
+  return { ...report, remoteHarnesses, toolCatalogHealth, workingPreferences };
 }
 
 /** Inspect only the selected registered machine; no local executable/config probes. */

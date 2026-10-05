@@ -1,4 +1,5 @@
 import type { InstallDoctorReport } from "./install-doctor.ts";
+import { formatWorkingPreferences } from "./command/working-preferences.ts";
 
 const mark = (ok: boolean) => (ok ? "✓" : "✗");
 
@@ -41,6 +42,9 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
       : []),
     `  Discord · ${report.discord.activeBody ?? "no body"}${report.discord.voiceEnabled ? " · voice" : ""}`,
     ...(report.mcpServers.length ? [`  MCP · ${report.mcpServers.join(", ")}`] : []),
+    ...(report.workingPreferences === undefined
+      ? []
+      : ["", ...formatWorkingPreferences(report.workingPreferences).map((line) => `  ${line}`)]),
   ];
   if (report.remediations.length) lines.push("", "Fix", ...report.remediations.map((step) => `  ${step}`));
   lines.push("", `Next: ${report.nextStep}`, "", "/doctor json shows the full report.");

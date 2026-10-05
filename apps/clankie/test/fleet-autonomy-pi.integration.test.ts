@@ -1,3 +1,4 @@
+import { FleetAutonomySchema } from "@clankie/protocol";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,7 +49,7 @@ async function fixture(throwUnrelated = false) {
     return assembleLanePrompt(
       "operator",
       true,
-      { ...current, autonomy: { ...current.autonomy, fleet: context.effective } },
+      { ...current, autonomy: { ...current.autonomy, fleet: FleetAutonomySchema.parse(context.effective) } },
       ["fleet"],
     );
   };
@@ -189,9 +190,28 @@ it("refreshes disk-backed global and project leaves on repeated native Pi starts
   await f.writer.update((current) => ({
     ...current,
     fleet: { ...current.fleet, size: "small", models: "efficient", notes: "Current routing preference." },
-    autonomy: { fleet: { closure: "owner", machineSetup: "owner" } },
+    autonomy: {
+      fleet: FleetAutonomySchema.parse({
+        closure: "owner",
+        machineSetup: "owner",
+        commit: "owner",
+        push: "owner",
+        release: { mode: "time_rule", rule: "After one week with user-visible changes." },
+        verification: "review_and_seal",
+        reportingStyle: "Concise evidence links.",
+      }),
+    },
     projects: ProjectsSettingsSchema.parse({
-      projects: [f.project("garden", { fleet: { machineSetup: "lead" } })],
+      projects: [
+        f.project("garden", {
+          fleet: {
+            machineSetup: "lead",
+            push: "lead",
+            release: { mode: "lead" },
+            reportingStyle: "Project report.",
+          },
+        }),
+      ],
     }),
   }));
   const narrowed = await f.refresh();
@@ -199,6 +219,13 @@ it("refreshes disk-backed global and project leaves on repeated native Pi starts
   expect(narrowed).toContain("Fleet size: small.");
   expect(narrowed).toContain("Models: efficient.");
   expect(narrowed).toContain("Current routing preference.");
+  expect(narrowed).toContain("Commit: owner.");
+  expect(narrowed).toContain("Push: lead.");
+  expect(narrowed).toContain("Release: lead.");
+  expect(narrowed).toContain("Verification: review_and_seal.");
+  expect(narrowed).toContain("Reporting style: Project report.");
+  expect(narrowed).toContain("including App Store or TestFlight, follows the resolved release preference");
+  expect(narrowed).toContain("Evals require explicit owner authorization");
   await f.writer.update((current) => ({
     ...current,
     fleet: { ...current.fleet, notes: "Revised routing preference." },
@@ -208,6 +235,10 @@ it("refreshes disk-backed global and project leaves on repeated native Pi starts
   policy(inherited, "owner", "owner");
   expect(inherited).toContain("Revised routing preference.");
   expect(inherited).not.toContain("Current routing preference.");
+  expect(inherited).toContain("Push: owner.");
+  expect(inherited).toContain("Release: time_rule.");
+  expect(inherited).toContain("After one week with user-visible changes.");
+  expect(inherited).toContain("Reporting style: Concise evidence links.");
   expect(f.errors).toEqual([]);
 });
 
@@ -260,7 +291,7 @@ it.each(["invalid JSON", "invalid schema", "filesystem read failure"] as const)(
     await writeFile(f.settings.path, saved);
     await f.writer.update((current) => ({
       ...current,
-      autonomy: { fleet: { closure: "owner", machineSetup: "owner" } },
+      autonomy: { fleet: FleetAutonomySchema.parse({ closure: "owner", machineSetup: "owner" }) },
     }));
     policy(await f.refresh(), "owner", "owner");
     expect(f.errors).toEqual([]);
