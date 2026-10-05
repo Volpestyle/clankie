@@ -174,6 +174,13 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["devices"], lines: ["  devices [--json]         List paired devices"] },
   {
+    nouns: ["support"],
+    lines: [
+      "  support [list | create read-state|shell --hours 1..72 --ref REFERENCE]",
+      "  support revoke ID | offer ID   Owner-issued support access (JSON)",
+    ],
+  },
+  {
     nouns: ["remote-access", "gateway"],
     lines: [
       "  remote-access [status]   Remote access for this Mac (self-host only; gateway alias)",

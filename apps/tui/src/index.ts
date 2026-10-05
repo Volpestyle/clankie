@@ -47,6 +47,7 @@ import { buildMemoryCommands } from "./memory-commands.ts";
 import { buildPairCommands, runConsolePair } from "./pair-commands.ts";
 import { listDevices } from "../bin/devices.ts";
 import { buildDevicesCommands } from "./devices-commands.ts";
+import { buildSupportCommands } from "./support-commands.ts";
 import { buildGatewayCommands } from "./gateway-commands.ts";
 import {
   createCaptainRouteClient,
@@ -520,6 +521,7 @@ const commands = [
   ...buildProviderCommands(services),
   ...buildPairCommands({ repoRoot, env: process.env, host: serviceUrl }),
   ...buildDevicesCommands({ env: process.env, host: serviceUrl }),
+  ...buildSupportCommands({ env: process.env, host: serviceUrl }),
   ...buildGatewayCommands({
     settings: settingsStore,
     credentials: services.store,

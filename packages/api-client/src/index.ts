@@ -1,9 +1,20 @@
 import {
   MinecraftHostCommandSchema,
+  PairingOfferWireSchema,
+  type PairingOfferWire,
   type MinecraftHostCommand,
   parseProtocolResponse,
   safeParseProtocolResponse,
 } from "@clankie/protocol";
+import {
+  SUPPORT_GRANTS_PATH,
+  SupportGrantCreateRequestSchema,
+  SupportGrantSchema,
+  SupportGrantListResponseSchema,
+  type SupportGrant,
+  type SupportGrantCreateRequest,
+  type SupportGrantListResponse,
+} from "@clankie/protocol/support-access";
 export * from "./discord-setup.ts";
 import {
   INTEGRATE_PATH,
@@ -231,6 +242,50 @@ export class ClankieApiClient {
           redirect: "error",
         },
       ),
+    );
+  }
+
+  public async listSupportGrants(): Promise<SupportGrantListResponse> {
+    return parseProtocolResponse(
+      SupportGrantListResponseSchema,
+      await this.request(SUPPORT_GRANTS_PATH, {
+        headers: this.operatorHeaders(),
+        redirect: "error",
+      }),
+    );
+  }
+
+  public async createSupportGrant(input: SupportGrantCreateRequest): Promise<SupportGrant> {
+    return parseProtocolResponse(
+      SupportGrantSchema,
+      await this.request(SUPPORT_GRANTS_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        redirect: "error",
+        body: JSON.stringify(SupportGrantCreateRequestSchema.parse(input)),
+      }),
+    );
+  }
+
+  public async revokeSupportGrant(grantId: string): Promise<SupportGrant> {
+    return parseProtocolResponse(
+      SupportGrantSchema,
+      await this.request(`${SUPPORT_GRANTS_PATH}/${encodeURIComponent(grantId)}/revoke`, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        redirect: "error",
+      }),
+    );
+  }
+
+  public async createSupportPairingOffer(grantId: string): Promise<PairingOfferWire> {
+    return parseProtocolResponse(
+      PairingOfferWireSchema,
+      await this.request(`${SUPPORT_GRANTS_PATH}/${encodeURIComponent(grantId)}/pairing-offer`, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        redirect: "error",
+      }),
     );
   }
 

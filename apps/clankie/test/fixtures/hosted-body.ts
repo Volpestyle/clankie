@@ -1,12 +1,12 @@
 import { createHash, createECDH, randomBytes, generateKeyPairSync, sign } from "node:crypto";
 import { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
-export function hostedFixture() {
+import { SupportAccessCommandSchema, type SupportAccessCommand } from "@clankie/protocol/support-access";
+export function hostedFixture(now = 1_790_000_000_000) {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const kid = createHash("sha256")
     .update(publicKey.export({ format: "der", type: "spki" }))
     .digest("base64url")
     .slice(0, 16);
-  const now = 1_790_000_000_000;
   const accountId = "account-1",
     installationId = "i".repeat(22),
     tenantId = `tn_${"a".repeat(20)}`;
@@ -65,5 +65,23 @@ export function hostedFixture() {
       pk: null,
       ...claims,
     });
-  return { now, bootstrap, host, pair, hostId, browserPublicKey, nonce, security };
+  const support = (
+    command: SupportAccessCommand,
+    publicKey: string,
+    requestNonce: string,
+    claims: Record<string, unknown> = {},
+  ) =>
+    token("clankie-support", {
+      aud: "clankie-body",
+      sub: accountId,
+      jti: randomBytes(16).toString("base64url"),
+      bkh: createHash("sha256").update(Buffer.from(publicKey, "base64url")).digest("base64url"),
+      non: requestNonce,
+      cmd: createHash("sha256")
+        .update(JSON.stringify(SupportAccessCommandSchema.parse(command)))
+        .digest("base64url"),
+      exp: now / 1000 + 120,
+      ...claims,
+    });
+  return { now, bootstrap, host, pair, hostId, browserPublicKey, nonce, security, support };
 }

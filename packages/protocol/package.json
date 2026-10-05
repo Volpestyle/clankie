@@ -7,6 +7,7 @@
     "./public-gateway": "./src/public-gateway.ts",
     "./gateway-encryption": "./src/gateway-encryption.ts",
     "./account-diagnostics": "./src/account-diagnostics.ts",
+    "./support-access": "./src/support-access.ts",
     "./captain-readiness": "./src/captain-readiness.ts",
     "./model-keys": "./src/model-keys.ts",
     "./hosted-credits": "./src/hosted-credits.ts",

@@ -1215,10 +1215,12 @@ const clankie = await createClankieApp({
   ...(hostedPairing === undefined
     ? {}
     : { hostedPairing, onHostedPairing: () => hostedHeartbeat?.interactive() }),
+  ...(rawBodyTelemetry === undefined ? {} : { supportTelemetry: rawBodyTelemetry }),
   ...(hostedBody === undefined
     ? {}
     : {
         hostedBody,
+        supportGrantSync: hostedBody,
         hostedCredits: hostedBody,
         accountSettings: hostedBody,
         hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),

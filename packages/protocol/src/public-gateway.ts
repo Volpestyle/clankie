@@ -86,6 +86,9 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/v1/gateway/push-authorize", target: "control" },
   { method: "POST", path: "/v1/pairing/redeem", target: "control" },
   { method: "POST", path: "/v1/pairing/complete", target: "control" },
+  { method: "POST", path: "/v1/hosted/support", target: "control" },
+  { method: "GET", path: "/v1/support/grants", target: "control" },
+  { method: "POST", path: "/v1/support/grants", target: "control" },
   { method: "GET", path: "/v1/devices/self", target: "control" },
   { method: "GET", path: "/v1/devices", target: "control" },
   { method: "POST", path: "/v1/devices/:id/revoke", target: "control" },
@@ -262,6 +265,8 @@ export function publicGatewayTargetFor(
   path: string,
 ): PublicGatewayTarget | undefined {
   if (method === "POST" && /^\/v1\/devices\/[A-Za-z0-9_-]{1,128}\/revoke$/u.test(path)) return "control";
+  if (method === "POST" && /^\/v1\/support\/grants\/[a-f0-9-]{36}\/(?:revoke|pairing-offer)$/u.test(path))
+    return "control";
   return PUBLIC_GATEWAY_ROUTES.find((route) => route.method === method && route.path === path)?.target;
 }
 

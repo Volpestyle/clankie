@@ -1,3 +1,5 @@
+import { SupportGrantStore } from "../support-access.ts";
+import { SUPPORT_DEVICE_GRANTS, SupportRouteClassSchema } from "@clankie/protocol/support-access";
 import { createIntegrationRoutes } from "../integrate-routes.ts";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
 import {
@@ -159,6 +161,52 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   // Projections rebuilt from the durable log.
   const devices: DeviceRegistry = new Map<string, DeviceRecord>();
+  let supportSyncRunning = false;
+  let supportSyncClosed = false;
+  let supportSyncedRevision: number | undefined;
+  let supportSyncRetryAt = 0;
+  const syncSupportGrants = async () => {
+    if (
+      supportSyncRunning ||
+      supportSyncClosed ||
+      dependencies.supportGrantSync === undefined ||
+      clock().getTime() < supportSyncRetryAt
+    )
+      return;
+    supportSyncRunning = true;
+    try {
+      const snapshot = supportGrants.snapshot();
+      if (snapshot.revision === supportSyncedRevision) return;
+      await dependencies.supportGrantSync.syncSupportGrants(snapshot);
+      supportSyncedRevision = snapshot.revision;
+    } catch {
+      supportSyncRetryAt = clock().getTime() + 5000;
+      logger.warn({ event: "support.sync_unavailable" }, "Support grant sync will retry");
+    } finally {
+      supportSyncRunning = false;
+    }
+  };
+  const supportGrants = new SupportGrantStore({
+    events: storedEvents,
+    recordEvent,
+    clock,
+    requireAudit: dependencies.hostedBody !== undefined || dependencies.hostedPairing !== undefined,
+    ...(dependencies.supportTelemetry === undefined ? {} : { telemetry: dependencies.supportTelemetry }),
+    changed: () => {
+      void syncSupportGrants();
+    },
+  });
+  supportGrants.expire();
+  const supportTimer = setInterval(() => {
+    try {
+      supportGrants.expire();
+    } catch {
+      logger.warn({ event: "support.expiry_unavailable" }, "Support grant expiration will retry");
+    }
+    void syncSupportGrants();
+  }, 1000);
+  supportTimer.unref();
+  void syncSupportGrants();
   for (const event of storedEvents) applyDeviceEvent(devices, event);
   const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
   const discordUserSessionOptIns = new DiscordUserSessionOptInProjection(storedEvents);
@@ -354,6 +402,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   storedEvents.length = 0;
 
   const app = new Hono();
+  const supportAuditedRequests = new WeakSet<Request>();
 
   /** Device session token → trusted identity; grants come from the projection, never the token. */
   const authenticateDevice = async (
@@ -375,6 +424,32 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (record === undefined || isDevicePendingExpired(record, now)) return { denied: "invalid" };
     if (record.status === "revoked") return { denied: "revoked" };
     if (record.status !== "active") return { denied: "invalid" };
+    if (record.supportGrantId !== undefined) {
+      const grant = supportGrants.active(record.supportGrantId);
+      if (grant === undefined) return { denied: "revoked" };
+      const path = new URL(request.url).pathname;
+      // A support session is a read capability, even for an explicit shell grant.
+      if (
+        !(
+          (request.method === "GET" && path === "/v1/devices/self") ||
+          (request.method === "POST" && path === "/v1/devices/self/session/refresh")
+        )
+      )
+        return { denied: "invalid" };
+      if (!supportAuditedRequests.has(request)) {
+        try {
+          supportGrants.accessed(
+            record.supportGrantId,
+            record.deviceId,
+            SupportRouteClassSchema.safeParse(request.headers.get("x-clankie-support-route-class")).data ??
+              (path.endsWith("/refresh") ? "device-session" : "device-state"),
+          );
+        } catch {
+          return "unavailable";
+        }
+        supportAuditedRequests.add(request);
+      }
+    }
     if (record.lastSeenAt === undefined || now.getTime() - Date.parse(record.lastSeenAt) >= 60_000) {
       const seen = recordEvent("device.seen", `device:${record.deviceId}`, now.toISOString(), {
         schemaVersion: 1,
@@ -384,7 +459,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
     return {
       deviceId: record.deviceId,
-      grants: record.grants,
+      grants:
+        record.supportGrantId === undefined
+          ? record.grants
+          : { ...SUPPORT_DEVICE_GRANTS, terminalObserve: record.grants.terminalObserve },
       sessionExpiresAt: new Date(claims.expiresAt * 1000).toISOString(),
     };
   };
@@ -1999,6 +2077,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   registerLinearRoutes({ app, dependencies, settingsSource, clock });
   const { wakeRevocationTimer } = registerPairingRoutes({
+    get supportGrants() { return supportGrants; },
+    get questionOwnerAuthority() { return questionOwnerAuthority; },
     get dependencies() {
       return dependencies;
     },
@@ -2039,7 +2119,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return hostDisplayName;
     },
   });
-  const { workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
+  const { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
     get app() {
       return app;
     },
@@ -2145,6 +2225,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     close: () => {
       stopBodyRequests();
       securityClosed = true;
+      supportSyncClosed = true;
+      clearInterval(supportTimer);
       if (securityRetryTimer !== undefined) clearInterval(securityRetryTimer);
       if (wakeRevocationTimer !== undefined) clearInterval(wakeRevocationTimer);
       stopObservingMessages?.();

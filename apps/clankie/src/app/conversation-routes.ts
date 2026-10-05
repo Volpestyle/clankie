@@ -465,5 +465,5 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     });
     return context.json({ schemaVersion: 1 as const, items });
   });
-  return { workOwnerAuthority, serveWorkWrite };
+  return { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite };
 }

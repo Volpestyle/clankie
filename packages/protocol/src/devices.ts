@@ -58,6 +58,7 @@ export const DeviceRecordSchema = z
     grants: DeviceGrantSetSchema,
     offerId: z.string().min(1),
     mintedBy: z.string().min(1),
+    supportGrantId: z.string().uuid().optional(),
     /** Paired through a long-lived review offer (ADR 0154); revoke after the review. */
     review: z.literal(true).optional(),
     createdAt: z.string().datetime(),
@@ -280,6 +281,8 @@ export type DeviceSessionRefreshResponse = z.infer<typeof DeviceSessionRefreshRe
 export const DeviceSelfResponseSchema = z.object({
   /** Hosting lifecycle is never granted to a device, including through the legacy relay. */
   controlScope: z.literal("hosted").optional(),
+  supportGrantId: z.string().uuid().optional(),
+  supportScope: z.enum(["read-state", "shell"]).optional(),
   directRoute: DeviceDirectRouteSchema.optional(),
   deviceId: z.string().min(1),
   name: z.string().min(1),
@@ -335,6 +338,7 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
       platform: DevicePlatformSchema,
       offeredGrants: DeviceGrantSetSchema,
       mintedBy: z.string().min(1),
+      supportGrantId: z.string().uuid().optional(),
       review: z.literal(true).optional(),
       pendingExpiresAt: z.string().datetime(),
     }),
