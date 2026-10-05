@@ -93,6 +93,19 @@ async function pick(
     });
     return id === "keep" ? { unchanged: true } : id ? { ids: [id] } : undefined;
   }
+  if (part.picker === "role" || part.picker === "fleet" || part.picker === "tracking") {
+    const current = view.snapshot.settings[part.fields[0]!];
+    const value = await flow.readSelect({
+      message,
+      allowBack: true,
+      currentValue: typeof current === "boolean" ? (current ? "on" : "off") : String(current),
+      options: (part.choices ?? []).map((choice) => ({
+        value: choice,
+        label: discordSetupLabel(view.snapshot, choice),
+      })),
+    });
+    return value ? { value } : undefined;
+  }
   if (part.picker === "channels") {
     const ids = await pickMultiple(flow, view, part, message);
     return ids ? { ids } : undefined;
@@ -141,53 +154,45 @@ export async function runDiscordSetup(
             description: plain(sentence.help),
             hint: sentence.checks.map(checkText).join(" · "),
           })),
-          ...(view.snapshot.setup?.testPostAvailable
-            ? [
-                {
-                  value: "test-post",
-                  label: "Send a test post…",
-                  description: "Choose one room, then explicitly send a setup message.",
-                },
-              ]
-            : []),
+          {
+            value: "invite",
+            label: "Invite Clankie to a server…",
+            description: "The link requests the selected role’s permissions.",
+          },
+          {
+            value: "check",
+            label: "Recheck setup",
+            description: "Read the connected account’s current permission grants.",
+          },
           { value: "advanced", label: "Advanced" },
           { value: "done", label: "Done" },
         ],
       });
       if (!choice || choice === "done") return;
-      if (choice === "test-post") {
-        const rooms = view.directories
-          .filter((directory) => directory.kind === "channels")
-          .flatMap((directory) => directory.entries)
-          .filter((entry) => ["text", "announcement"].includes(entry.kind));
-        const roomId = await flow.readSelect({
-          message: "Send a Discord setup test post to which room?",
-          allowBack: true,
-          options: rooms.map((room) => ({
-            value: room.id,
-            label: plain(discordDirectoryEntryLabel(view, room)),
-          })),
-        });
-        const room = rooms.find((item) => item.id === roomId);
-        if (!room) continue;
-        try {
-          const result = await client.testPost(view, room);
-          shell.insertCommandResult(
-            "/discord",
-            result.outcome === "posted"
-              ? `Test post sent to ${plain(discordDirectoryEntryLabel(view, room))}.`
-              : result.outcome === "unconfirmed"
-                ? "Test post delivery is unconfirmed. Inspect the room before trying again."
-                : "Test post unavailable. Recheck the connection and Send Messages permission.",
-            result.outcome === "posted" ? "success" : "error",
-          );
-        } catch (error) {
-          shell.insertCommandResult(
-            "/discord",
-            error instanceof Error ? error.message : String(error),
-            "error",
-          );
-        }
+      if (choice === "check") {
+        shell.insertCommandResult("/discord", formatDiscordSetup(await client.read()), "success");
+        continue;
+      }
+      if (choice === "invite") {
+        const sentence = view.snapshot.setup!.definition.sentences.find((item) => item.id === "connect");
+        const pickerIndex =
+          sentence && discordSetupPickers(sentence).findIndex((part) => part.picker === "role");
+        if (!sentence || pickerIndex === undefined || pickerIndex < 0) continue;
+        const selection = await pick(
+          flow,
+          view,
+          discordSetupPickers(sentence)[pickerIndex]!,
+          "Clankie’s role in the invited server",
+        );
+        if (!selection) continue;
+        const saved = await client.apply(view, "connect", pickerIndex, selection);
+        shell.insertCommandResult(
+          "/discord",
+          saved.snapshot.setup?.invite
+            ? `Invite Clankie as ${discordSetupLabel(saved.snapshot, saved.snapshot.settings.role)}:\n${saved.snapshot.setup.invite.url}\n\nAfter inviting, choose the server under Connect and recheck setup.`
+            : "Set the bot Application ID in Advanced before creating its invite link.",
+          saved.snapshot.setup?.invite ? "success" : "error",
+        );
         continue;
       }
       if (choice === "advanced") {
@@ -215,7 +220,7 @@ export async function runDiscordSetup(
         const saved = await client.applySentence(view, sentence.id, changes);
         shell.insertCommandResult(
           "/discord",
-          `${formatDiscordSetup(saved)}\n\nSaved. Restart the Discord connection to apply server and room changes.`,
+          `${formatDiscordSetup(saved)}\n\nSaved. Restart the Discord connection to apply server and role changes.`,
           "success",
         );
       } catch (error) {

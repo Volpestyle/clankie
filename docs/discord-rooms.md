@@ -58,59 +58,55 @@ operator bridge still requires `mintedBy=hosted-account-operator` and
 `terminalControl`; `steer` does not grant settings access. The canonical schema
 lives in protocol and is reexported by settings. All canonical fields are editable under
 TUI `/discord` → **Advanced** and existing `clankie discord set/clear`.
-The optional `setup` member contains the shared four-sentence definition, picker
-kinds, help, check kinds, Advanced groups and choice labels from protocol's
-`discord-setup.ts`. `machineName` comes from the host (its name when self-hosted,
-“his cloud computer” when hosted). It does not depend on the device opening
-settings. `clankie discord definition` reads the same metadata with operator
-authentication. Optional `setup.checks` reports `passed`, `failed` or
-`not_checked` for View Channel, Send Messages, Manage Channels and Manage
-Webhooks. Both bodies compute from their own connected gateway's guild,
-self-member roles and channel overwrites; setup reads never fetch account
-credentials or call Discord's write API. Missing/malformed role or overwrite
-data, disconnected gateways and unsupported thread evidence stay `not_checked`.
-Owner/administrator bypass, role-overwrite union, member overrides and active
-timeouts follow [Discord's permission rules](https://docs.discord.com/developers/topics/permissions).
-The TUI and `clankie discord setup` render the returned definition through
-`DiscordSetupClient` from `@clankie/api-client`. Optional picker bindings define
-server scopes, room kinds and enablement; surfaces do not maintain their own
-field mappings. Names or numbered choices replace ID entry outside Advanced.
-Each sentence writes atomically through the existing revision fence. Selecting
-a social server or rooms preserves all computer grants; choosing computer
-access explicitly replaces its grants. The independent team visibility picker
-can retain its server even when the directory is disconnected. Team room
-creation checks Manage Channels at guild scope. Team posting and webhooks use
-selected rooms in that server; a guild role alone cannot prove room overwrites.
-Without such room evidence those checks stay `not_checked`. Computer authority
-and an unperformed test post remain unchecked. Nothing posts automatically.
+The optional `setup` member contains the shared server/role, fleet and tracking
+controls from protocol's `discord-setup.ts`. The TUI, app and hosted dashboard
+consume that definition; raw IDs remain under Advanced. Server selection uses
+the connected account's directory. Participant has no setup channel list:
+Discord permissions and overwrites decide which rooms Clankie can use.
+Admin grants full control of a dedicated server, with server deletion and
+ownership transfer refused at the adapter. Machine grants remain separate.
+[ADR 0227](adr/0227-discord-connects-a-server-with-a-role.md) supersedes the
+four-sentence setup.
 
-TUI **Send a test post…** asks for one text room. The equivalent CLI is
-`clankie discord setup test-post --channel general`. This is an explicit owner
-mutation, `POST /v1/discord/setup/test-post`, with `guildId`, `channelId` and
-`expectedRevision`. It uses settings-level operator authority, not Observe or
-Steer, and rechecks configuration, current permission evidence and account
-identity before dispatch. The gateway checks the expected account again.
-The fixed setup message disables mentions. A native receipt returns `posted`
-and a message ID; missing receipts return `unconfirmed`, with no automatic
-retry. Inspect the room before deliberately trying again. Reading settings,
-listing pickers and saving a sentence cannot invoke this mutation.
-Clients read responses through `parseProtocolResponse`; strict settings writes
-retain `expectedRevision` and never accept display metadata or unknown fields.
-Computer access remains a separate explicit choice, never a server/room preset.
-The team's server (`swarmGuildId`) and optional visibility (`teamVisible`) have
-separate pickers. Omission of `teamVisible` means visible; old-client writes
-preserve a stored gate. VUH-1626 owns reversible suspension without deleting
-room webhooks.
+The role-correct invitation requests Administrator for Admin and normal member
+text/thread/voice permissions for Participant. Optional `setup.checks` reports
+`passed`, `failed` or `not_checked` from the connected body's own guild and
+self-member role evidence. Missing evidence is never success. Actual Participant
+room access follows channel overwrites and Discord's platform permissions.
+Opening setup, reading checks and saving controls do not post.
 
-`DISCORD_MANAGED_GUILD_ID` is the preferred environment spelling. The old
-`DISCORD_SWARM_GUILD_ID` is accepted as a compatibility alias, with the preferred
-name winning when both are set. The persisted/wire key `swarmGuildId` stays
-compatible with older clients. A legacy shell override still wins over stored
-settings; exporting settings emits the preferred name.
+`fleetEnabled` and `trackingLevel` are independent. Participant fleet/tracking
+messages use the designated `fleetChannelId`; Admin can create and place fleet
+channels. Admin tracks each already bound project in the verified workspace as
+a channel or forum, with one thread/post per issue. Levels are `off`,
+`project_updates`, `project_activity` (status changes, milestones, new/finished
+issues) and `all_issues`. Private event and destination mappings survive
+turning tracking off. Unconfirmed mutations stay uncertain without automatic
+replay. Disabling fleet display retains its selected server and room webhooks.
+
+Settings are `serverId`, `role`, `fleetEnabled`, `fleetChannelId` and
+`trackingLevel`. Legacy non-secret fields remain available under Advanced.
+Connecting a server projects it into the body's ingress, presence and voice
+server lists and clears channel filters, preserving machine grants and the
+lab body's explicit opt-in. Environment overrides are reported by status.
+
+`POST /v1/discord/setup/test-post` remains an explicit owner diagnostic using
+`guildId`, `channelId` and `expectedRevision`. It requires settings-level
+operator authority and rechecks configuration, connected account and permission
+before dispatch. The fixed message disables mentions. A receipt returns
+`posted` and a message ID; missing receipts return `unconfirmed` and are never
+automatically retried. The CLI is `clankie discord setup test-post --channel
+general`. This diagnostic is outside normal setup.
 
 Credentials remain in the credential broker. Environment overrides and settings
 that require a body restart retain their existing behavior; changing a stored
 field does not claim the running body already applied it.
+
+The official bot supports both roles. The advanced personal-lab user body keeps
+its recorded channel consent. Its current opt-in cannot express full-server
+Admin consent, so server management is refused there. Participant projection
+posts also need the designated channel inside that existing consent. Selecting
+Admin does not widen a lab account's recorded scope.
 
 Body evidence uses an authenticated current Discord body session, exact transport
 and current room allowlists. It cannot grant tools or reconstruct a source owner.

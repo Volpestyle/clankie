@@ -60,6 +60,8 @@ source setup and checks.
 
 ## Proposals, decisions, and evidence
 
+- [Discord server roles](adr/0227-discord-connects-a-server-with-a-role.md) define
+  connected-server authority, fleet and project tracking.
 - [ADRs](adr/README.md) preserve decisions, amendments, and superseded designs.
   Read the current references above for operational instructions.
 - [Testing archive](testing/README.md) contains dated proofs and their limitations;

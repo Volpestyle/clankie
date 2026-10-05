@@ -89,12 +89,12 @@ Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token bounda
 
 {{TUI_README_OPERATOR_BEHAVIOR}}
 
-`/discord` shows the same four setup sentences as the app and dashboard.
-Permission checks use his connected account's gateway data: a proven denial
-says **needs**, and missing evidence says **not checked**. **Send a test post…**
-is an explicit owner action for one text room. Opening setup or changing a
-picker never posts. The CLI equivalent is `clankie discord setup test-post
---channel general`.
+`/discord` connects a server with a Participant or Admin role, a fleet toggle
+and a tracking level. The invitation requests that role's permissions. Gateway
+checks flag proven missing grants as **needs** and unknown evidence as **not
+checked**. Participant room access follows Discord permissions; Admin controls
+its dedicated server except deleting it or transferring ownership. Raw IDs and
+machine grants live under Advanced. Opening or saving setup never posts.
 
 ## Follow Linear
 

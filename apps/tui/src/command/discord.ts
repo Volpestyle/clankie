@@ -1,6 +1,6 @@
 import { ClankieApiClient } from "@clankie/api-client";
 import { runDiscordSetupCommand } from "./discord-setup.ts";
-import { DISCORD_SETTING_GROUPS } from "@clankie/protocol";
+import { DISCORD_SETTING_GROUPS, discordServerSettings } from "@clankie/protocol";
 import { DiscordDirectoryRequestSchema, type DiscordDirectorySnapshot } from "@clankie/protocol";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import type {
@@ -28,7 +28,11 @@ const DISCORD_USAGE = [
   "Usage: clankie discord [status]",
   "       clankie discord rooms",
   "       clankie discord definition",
-  "       clankie discord setup [choices home|talk|computer|team] [--server NAME | --channel NAME | --access nobody|me|people|servers | --visible on|off]",
+  "       clankie discord setup [check | choices connect|fleet|tracking]",
+  "       clankie discord setup connect [--server NAME] [--role participant|admin]",
+  "       clankie discord setup invite [--role participant|admin]",
+  "       clankie discord setup fleet --enabled on|off",
+  "       clankie discord setup tracking --level off|project_updates|project_activity|all_issues",
   "       clankie discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]",
   "       clankie discord setup test-post --channel NAME",
   "       clankie discord guide CONVERSATION_ID TEXT|--clear",
@@ -82,6 +86,12 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
   const showList = (label: string, values: readonly string[]): string =>
     `${label}: ${values.length === 0 ? "—" : values.join(", ")}`;
   return [
+    show("connected server", settings.serverId),
+    `role: ${settings.role}`,
+    `fleet in Discord: ${settings.fleetEnabled ? "on" : "off"}`,
+    `project tracking: ${settings.trackingLevel}`,
+    show("participant fleet channel (Advanced)", settings.fleetChannelId),
+    "",
     show("application id", settings.applicationId),
     `command server: ${settings.guildId ?? "— (commands register globally)"}`,
     // Separate from the command server on purpose: this is the one server he
@@ -152,7 +162,7 @@ export async function discordTransform(
   const settings = store(options);
   const updated = await settings.update((current) => ({
     ...current,
-    discord: transform(current.discord),
+    discord: discordServerSettings(DiscordSettingsSchema.parse(transform(current.discord)), current.discord),
   }));
   return await result(settings, updated.discord, options);
 }
@@ -232,7 +242,10 @@ async function discordClearArgs(
       if (field in defaults) discord[field] = defaults[field] as never;
       else delete discord[field];
     }
-    return { ...current, discord: DiscordSettingsSchema.parse(discord) };
+    return {
+      ...current,
+      discord: discordServerSettings(DiscordSettingsSchema.parse(discord), current.discord),
+    };
   });
   return await result(settings, updated.discord, options);
 }

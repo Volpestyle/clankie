@@ -68,9 +68,12 @@ async function fixture() {
     ...current,
     discord: {
       ...current.discord,
+      applicationId: "90001",
       ownerUserId: "30002",
       swarmGuildId: "10001",
       teamVisible: false,
+      ingressChannelIds: ["20001"],
+      voiceChannelIds: ["20004"],
       systemActorUserIds: ["30005"],
     },
   }));
@@ -113,7 +116,7 @@ async function fixture() {
     // must render its definition and tolerate the additive response fields.
     if (path === "/v1/discord/settings" && result.ok) {
       const wire = await result.json();
-      wire.setup.definition.sentences[0].parts[0].text = "Clankie makes his home in ";
+      wire.setup.definition.sentences[0].parts[0].text = "Clankie connects to ";
       wire.futureOptional = { example: true };
       response.end(JSON.stringify(wire));
     } else response.end(Buffer.from(await result.arrayBuffer()));
@@ -189,54 +192,65 @@ async function choose(shell: ClankieFaceShell, contains: string, filter: string)
   const current = await prompt(shell, contains);
   current.handleInput("\x15");
   for (const char of filter) current.handleInput(char);
+  // Fleet help also mentions Advanced; select the actual Advanced row.
+  if (filter === "Advanced") current.handleInput("\x1b[B");
   current.handleInput("\r");
 }
 const submit = (shell: ClankieFaceShell, text: string) =>
   (shell as unknown as { submitEditorText(text: string): Promise<void> }).submitEditorText(text);
 
-it("the real CLI sets all four sentences by name on a loopback host without granting computer access implicitly", async () => {
+it("the real CLI connects a server and role, toggles fleet and selects tracking without room lists or machine grants", async () => {
   const f = await fixture();
   const initial = await f.cli("setup");
-  expect(initial.sentences[0].text).toBe("Clankie makes his home in no selected server.");
-  expect(initial.sentences[2].text).toContain("Ivo");
-  expect(initial.sentences[3].text).toBe("The team’s rooms stay hidden in Studio.");
-  const home = await f.cli("setup", "home", "--server", "@2");
-  expect(home.sentences[0].text).toBe("Clankie makes his home in Garden.");
-  const choices = await f.cli("setup", "choices", "talk");
-  expect(choices.pickers[0].choices[0].name).toContain("#general");
-  const talk = await f.cli("setup", "talk", "--channel", "general", "--channel", "Talk");
-  expect(talk.snapshot.settings.ingressChannelIds).toEqual(["20011", "20014"]);
-  expect(talk.snapshot.settings.voiceChannelIds).toEqual(["20014"]);
-  expect(talk.snapshot.settings.textIngressEnabled).toBe(true);
-  expect(talk.snapshot.settings.voiceEnabled).toBe(true);
-  expect(talk.snapshot.settings.systemActorUserIds).toEqual(["30005"]);
-  expect(talk.snapshot.settings.userSessionEnabled).toBe(false);
-  expect(talk.snapshot.settings.userSessionVoiceEnabled).toBe(true);
+  expect(initial.sentences[0].text).toBe(
+    "Clankie connects to no selected server with Clankie as Participant.",
+  );
+  expect(initial.sentences).toHaveLength(3);
+  const connect = await f.cli("setup", "connect", "--server", "@2", "--role", "participant");
+  expect(connect.sentences[0].text).toBe("Clankie connects to Garden with Clankie as Participant.");
+  expect(connect.snapshot.settings.serverId).toBe("10002");
+  for (const key of ["ingressGuildIds", "presenceGuildIds", "voiceGuildIds", "userSessionGuildIds"])
+    expect(connect.snapshot.settings[key]).toEqual(["10002"]);
+  for (const key of [
+    "ingressChannelIds",
+    "presenceChannelIds",
+    "voiceChannelIds",
+    "userSessionChannelIds",
+    "userSessionVoiceChannelIds",
+  ])
+    expect(connect.snapshot.settings[key]).toEqual([]);
+  expect(connect.snapshot.settings.textIngressEnabled).toBe(true);
+  expect(connect.snapshot.settings.voiceEnabled).toBe(true);
+  expect(connect.snapshot.settings.systemActorUserIds).toEqual(["30005"]);
+  expect(connect.snapshot.settings.userSessionEnabled).toBe(false);
+  expect(connect.snapshot.settings.userSessionVoiceEnabled).toBe(false);
+  expect(connect.snapshot.settings.swarmGuildId).toBeUndefined();
+  const choices = await f.cli("setup", "choices", "connect");
+  expect(choices.pickers.map((part: { kind: string }) => part.kind)).toEqual(["server", "role"]);
+  expect(choices.pickers[1].choices.map((choice: { choice: string }) => choice.choice)).toEqual([
+    "participant",
+    "admin",
+  ]);
+  const fleet = await f.cli("setup", "fleet", "--enabled", "on");
+  expect(fleet.snapshot.settings.fleetEnabled).toBe(true);
+  const tracking = await f.cli("setup", "tracking", "--level", "project_activity");
+  expect(tracking.snapshot.settings.trackingLevel).toBe("project_activity");
+  const invite = await f.cli("setup", "invite", "--role", "admin");
+  expect(new URL(invite.url).searchParams.get("permissions")).toBe("8");
+  expect((await f.settings.load()).discord.role).toBe("admin");
+  expect((await f.settings.load()).discord.swarmGuildId).toBe("10002");
+  const hidden = await f.cli("setup", "fleet", "--enabled", "off");
+  expect(hidden.snapshot.settings.serverId).toBe("10002");
+  expect(hidden.snapshot.settings.teamVisible).toBe(false);
+  const beforeInvalid = (await f.api.discordSettings()).revision;
+  await expect(f.cli("setup", "connect", "--server", "not in the directory")).rejects.toThrow();
+  expect((await f.api.discordSettings()).revision).toBe(beforeInvalid);
+  expect((await f.settings.load()).discord.systemActorUserIds).toEqual(["30005"]);
   expect(
-    talk.sentences[1].checks.find((check: { kind: string }) => check.kind === "send_messages").status,
-  ).toBe("not_checked");
-  const people = await f.cli("setup", "computer", "--access", "people", "--person", "James");
-  expect(people.snapshot.settings.systemActorUserIds).toEqual(["30002"]);
-  const serverGrant = await f.cli("setup", "computer", "--access", "servers", "--server", "Garden");
-  expect(serverGrant.snapshot.settings.systemActorGuildIds).toEqual(["10002"]);
-  expect(serverGrant.snapshot.settings.systemActorUserIds).toEqual([]);
-  const me = await f.cli("setup", "computer", "--access", "me");
-  expect(me.sentences[2].text).toBe("Only me can ask him to use Fixture’s Mac.");
-  expect(me.snapshot.settings.systemActorGuildIds).toEqual([]);
-  const team = await f.cli("setup", "team", "--visible", "on", "--server", "Garden");
-  expect(team.sentences[3].text).toBe("The team’s rooms show up in Garden.");
-  const hidden = await f.cli("setup", "team", "--visible", "off");
-  expect(hidden.snapshot.settings.swarmGuildId).toBe("10002");
-  const afterHidden = (await f.api.discordSettings()).revision;
-  await expect(
-    f.cli("setup", "team", "--visible", "on", "--server", "not in the directory"),
-  ).rejects.toThrow();
-  expect((await f.api.discordSettings()).revision).toBe(afterHidden);
-  expect(
-    f.requests.filter(({ method, path }) => method === "POST" && path === "/v1/discord/settings"),
-  ).toHaveLength(7);
-  await f.cli("setup", "computer", "--access", "nobody");
-  expect((await f.settings.load()).discord.systemActorUserIds).toEqual([]);
+    f.requests
+      .filter(({ path }) => path.startsWith("/v1/discord/directory"))
+      .every(({ path }) => new URL(path, f.url).searchParams.get("kind") === "servers"),
+  ).toBe(true);
   expect(
     f.requests.every(
       ({ path }) => path.startsWith("/v1/discord/settings") || path.startsWith("/v1/discord/directory"),
@@ -244,7 +258,7 @@ it("the real CLI sets all four sentences by name on a loopback host without gran
   ).toBe(true);
 });
 
-it("real TUI overlays render host copy, pick names, retain Advanced and use the same writer as the CLI", async () => {
+it("real TUI overlays use the shared role, fleet and tracking writer and keep raw IDs in Advanced", async () => {
   const f = await fixture();
   const shell = f.shell();
   let finished = false;
@@ -252,46 +266,46 @@ it("real TUI overlays render host copy, pick names, retain Advanced and use the 
     finished = true;
   });
   try {
-    const main = await prompt(shell, "Clankie makes his home in");
+    const main = await prompt(shell, "Clankie connects to");
     const before = stripVTControlCharacters(main.render(180).join("\n"));
     expect(before).toContain("not checked");
-    expect(before).toContain("Fixture’s Mac");
-    await choose(shell, "Discord", "Clankie makes his home");
-    await choose(shell, "Choose a server", "Garden");
-    await choose(shell, "Discord", "He talks with");
-    await choose(shell, "Computer access is a separate choice", "general");
-    await choose(shell, "Computer access is a separate choice", "Save selection");
-    await choose(shell, "Discord", "can ask him to use");
-    await choose(shell, "Choose explicitly", "Only me");
-    await choose(shell, "Discord", "The team’s rooms");
-    await choose(shell, "Hiding keeps", "show up");
-    await choose(shell, "Hiding keeps", "Garden");
-    await choose(shell, "Discord", "Advanced");
-    await choose(shell, "Discord setting", "Owner user ID");
-    const raw = await prompt(shell, "ownerUserId");
-    for (const char of "30005") raw.handleInput(char);
+    expect(before).not.toContain("He talks with");
+    expect(before).not.toContain("can ask him to use");
+    await choose(shell, "Invite Clankie to a server", "Clankie connects to");
+    await choose(shell, "Participant follows", "Garden");
+    await choose(shell, "Participant / Admin", "Admin");
+    await choose(shell, "Invite Clankie to a server", "Fleet in Discord");
+    await choose(shell, "Admin creates fleet channels", "on");
+    await choose(shell, "Invite Clankie to a server", "Project tracking");
+    await choose(shell, "published updates", "project activity");
+    await choose(shell, "Invite Clankie to a server", "Advanced");
+    await choose(shell, "Discord setting", "Participant fleet channel ID");
+    const raw = await prompt(shell, "fleetChannelId");
+    for (const char of "20011") raw.handleInput(char);
     raw.handleInput("\r");
-    await choose(shell, "Discord", "Done");
+    await choose(shell, "Invite Clankie to a server", "Done");
     await running;
     const view = await f.cli("setup");
-    expect(view.sentences[0].text).toBe("Clankie makes his home in Garden.");
-    expect(view.sentences[1].text).toContain("#general");
-    expect(view.snapshot.settings.voiceChannelIds).toEqual([]);
-    expect(view.snapshot.settings.systemActorUserIds).toEqual(["30002"]);
-    expect(view.snapshot.settings.ownerUserId).toBe("30005");
+    expect(view.sentences[0].text).toBe(
+      "Clankie connects to Garden with Clankie as Admin · dedicated server.",
+    );
+    expect(view.snapshot.settings.role).toBe("admin");
+    expect(view.snapshot.settings.fleetEnabled).toBe(true);
+    expect(view.snapshot.settings.trackingLevel).toBe("project_activity");
+    expect(view.snapshot.settings.fleetChannelId).toBe("20011");
+    expect(view.snapshot.settings.systemActorUserIds).toEqual(["30005"]);
     expect(view.snapshot.settings.swarmGuildId).toBe("10002");
-    expect(view.snapshot.settings.teamVisible).toBe(true);
     f.disconnect();
     finished = false;
     running = submit(shell, "/discord").finally(() => {
       finished = true;
     });
-    await choose(shell, "Discord", "The team’s rooms");
-    await choose(shell, "Hiding keeps", "stay hidden");
-    await choose(shell, "Hiding keeps", "Keep the current choice");
-    await choose(shell, "Discord", "Done");
+    await choose(shell, "Invite Clankie to a server", "Fleet in Discord");
+    await choose(shell, "Admin creates fleet channels", "off");
+    await choose(shell, "Invite Clankie to a server", "Done");
     await running;
-    expect((await f.settings.load()).discord.teamVisible).toBe(false);
+    expect((await f.settings.load()).discord.fleetEnabled).toBe(false);
+    expect((await f.settings.load()).discord.serverId).toBe("10002");
     expect((await f.settings.load()).discord.swarmGuildId).toBe("10002");
   } finally {
     for (let attempt = 0; !finished && attempt < 10; attempt++) {
@@ -306,8 +320,8 @@ it("stale or revoked writes fail and a disconnected account never reports succes
   const f = await fixture();
   const client = new DiscordSetupClient(f.api);
   const stale = await client.read();
-  await f.cli("setup", "home", "--server", "Studio");
-  await expect(client.apply(stale, "team", 0, { visible: true })).rejects.toThrow(
+  await f.cli("setup", "connect", "--server", "Studio");
+  await expect(client.apply(stale, "fleet", 0, { value: "on" })).rejects.toThrow(
     /409|settings_revision_conflict/u,
   );
   expect((await f.settings.load()).discord.teamVisible).toBe(false);
@@ -316,13 +330,13 @@ it("stale or revoked writes fail and a disconnected account never reports succes
   expect(
     view.sentences.flatMap((sentence) => sentence.checks).every((check) => check.status === "not_checked"),
   ).toBe(true);
-  await expect(f.cli("setup", "home", "--server", "Studio")).rejects.toThrow();
+  await expect(f.cli("setup", "connect", "--server", "Studio")).rejects.toThrow();
   f.revoke();
-  await expect(client.apply(view, "team", 0, { visible: true })).rejects.toThrow(/403/u);
+  await expect(client.apply(view, "fleet", 0, { value: "on" })).rejects.toThrow(/403/u);
   expect((await f.settings.load()).discord.teamVisible).toBe(false);
 });
 
-it("an older client strips additive picker bindings and field metadata from a new host response", async () => {
+it("an older four-sentence client refuses the incompatible setup model version explicitly", async () => {
   const f = await fixture();
   // The display contract before VUH-1628: no enables, accessFields or directoryKinds.
   const key = z.enum(Object.keys(DiscordSettingsSchema.shape) as [string, ...string[]]);
@@ -389,14 +403,11 @@ it("an older client strips additive picker bindings and field metadata from a ne
   });
   const wire = await response.json();
   expect(oldSnapshot.safeParse(wire).success).toBe(false);
-  const parsed = parseProtocolResponse(oldSnapshot, wire);
-  expect(parsed.setup.definition.sentences).toHaveLength(4);
-  expect(parsed.setup.definition.sentences[1]!.parts[1]).not.toHaveProperty("enables");
-  expect(parsed.setup.definition.sentences[2]!.parts[0]).not.toHaveProperty("accessFields");
-  expect(
-    parsed.setup.definition.advancedGroups
-      .flatMap((group) => group.fields)
-      .find((field) => field.key === "voiceChannelIds"),
-  ).not.toHaveProperty("directoryKinds");
-  expect(parsed.settings.teamVisible).toBe(false);
+  expect(() => parseProtocolResponse(oldSnapshot, wire)).toThrow();
+  expect(wire.setup.definition.schemaVersion).toBe(2);
+  expect(wire.setup.definition.sentences.map((sentence: { id: string }) => sentence.id)).toEqual([
+    "connect",
+    "fleet",
+    "tracking",
+  ]);
 });

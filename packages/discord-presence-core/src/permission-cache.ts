@@ -8,7 +8,18 @@ const id = (value: unknown): string | undefined =>
 const bits = (value: unknown): bigint | undefined =>
   typeof value === "string" && /^\d{1,64}$/u.test(value) ? BigInt(value) : undefined;
 const FLAGS = {
+  administrator: 1n << 3n,
+  add_reactions: 1n << 6n,
+  embed_links: 1n << 14n,
+  attach_files: 1n << 15n,
+  use_vad: 1n << 25n,
+  use_application_commands: 1n << 31n,
+  create_public_threads: 1n << 35n,
   view_channel: 1n << 10n,
+  read_message_history: 1n << 16n,
+  send_messages_in_threads: 1n << 38n,
+  connect: 1n << 20n,
+  speak: 1n << 21n,
   send_messages: 1n << 11n,
   manage_channels: 1n << 4n,
   manage_webhooks: 1n << 29n,
@@ -81,6 +92,17 @@ export class DiscordPermissionCache {
       ...(id(this.self?.id) ? { actorId: String(this.self!.id) } : {}),
       ...query,
       permissions: {
+        administrator: "not_checked",
+        add_reactions: "not_checked",
+        embed_links: "not_checked",
+        attach_files: "not_checked",
+        use_vad: "not_checked",
+        use_application_commands: "not_checked",
+        create_public_threads: "not_checked",
+        read_message_history: "not_checked",
+        send_messages_in_threads: "not_checked",
+        connect: "not_checked",
+        speak: "not_checked",
         view_channel: "not_checked",
         send_messages: "not_checked",
         manage_channels: "not_checked",
@@ -144,19 +166,36 @@ export class DiscordPermissionCache {
     if (!administrator && typeof timeout === "string") {
       const until = Date.parse(timeout);
       if (!Number.isFinite(until)) return result;
-      if (until > Date.now()) permissions &= FLAGS.view_channel;
+      if (until > Date.now()) permissions &= FLAGS.view_channel | FLAGS.read_message_history;
     }
     for (const [kind, flag] of Object.entries(FLAGS) as Array<[keyof typeof FLAGS, bigint]>) {
       result.permissions[kind] = (permissions & flag) === flag ? "passed" : "failed";
     }
     if (channel) {
       if (result.permissions.view_channel === "failed") {
+        result.permissions.add_reactions = "failed";
+        result.permissions.embed_links = "failed";
+        result.permissions.attach_files = "failed";
+        result.permissions.use_vad = "failed";
+        result.permissions.use_application_commands = "failed";
+        result.permissions.create_public_threads = "failed";
         result.permissions.send_messages = "failed";
+        result.permissions.read_message_history = "failed";
+        result.permissions.send_messages_in_threads = "failed";
+        result.permissions.connect = "failed";
+        result.permissions.speak = "failed";
         result.permissions.manage_channels = "failed";
         result.permissions.manage_webhooks = "failed";
       }
-      if (!administrator && [2, 13].includes(Number(channel.type)) && (permissions & CONNECT) === 0n)
+      if (result.permissions.send_messages === "failed") {
+        result.permissions.embed_links = "failed";
+        result.permissions.attach_files = "failed";
+      }
+      if (!administrator && [2, 13].includes(Number(channel.type)) && (permissions & CONNECT) === 0n) {
         result.permissions.manage_channels = "failed";
+        result.permissions.speak = "failed";
+        result.permissions.use_vad = "failed";
+      }
       if (![0, 2, 5, 13].includes(Number(channel.type))) result.permissions.send_messages = "not_checked";
     }
     if (
@@ -164,7 +203,7 @@ export class DiscordPermissionCache {
       ((guild.data.mfa_level !== 0 && guild.data.mfa_level !== 1) ||
         (guild.data.mfa_level === 1 && self.mfa_enabled !== true))
     ) {
-      for (const kind of ["manage_channels", "manage_webhooks"] as const)
+      for (const kind of ["administrator", "manage_channels", "manage_webhooks"] as const)
         if (result.permissions[kind] === "passed")
           result.permissions[kind] =
             guild.data.mfa_level === 1 && self.mfa_enabled === false ? "failed" : "not_checked";

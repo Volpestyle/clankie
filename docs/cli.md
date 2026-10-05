@@ -2841,68 +2841,64 @@ operator authentication. See [the directory contract](discord-rooms.md#discord-d
 
 ### `discord definition`
 
-Read the host's shared four-sentence Discord definition, picker kinds, help text,
-check kinds, Advanced groups and choice labels as JSON. Requires operator
-authentication, like `discord rooms`. The included `machineName` names the host
-Clankie uses, including “his cloud computer” when hosted. An older host without
-this optional metadata returns a clear unsupported error. See
-[Discord settings](discord-rooms.md) for revision checks and the preferred
-`DISCORD_MANAGED_GUILD_ID` environment name.
+Read the host's shared Discord setup definition, check kinds, Advanced groups,
+choice labels and role-correct invitation URL as JSON. Requires operator
+authentication, like `discord rooms`. The host supplies its computer name.
+See [Discord settings](discord-rooms.md) and
+[ADR 0227](adr/0227-discord-connects-a-server-with-a-role.md).
 
 ### `discord setup`
 
-Read the same four filled sentences and check results as TUI `/discord`, using
-the host’s wording and computer name. Server, room and people names come from
-the connected account’s directory. Lists can be partial; missing names remain
-unavailable. Account connection and selected-room visibility use directory
-evidence. Send Messages, Manage Channels and Manage Webhooks use the connected
-gateway's own guild, self-member roles and channel overwrites. Proven denials
-say **needs**; missing/incomplete evidence says **not checked**. Team room
-creation uses guild permissions; team posting/webhook checks need selected
-room evidence in that server. Computer authority and an unperformed test post
-remain unchecked. Reading or changing setup never posts to Discord.
+Read the connected server, Clankie's role, fleet toggle, tracking level and
+setup checks. TUI `/discord` uses the same host definition and revision-fenced
+writer. The server is chosen by name; channel and Discord-role pickers do not
+appear in normal setup. Raw IDs and machine-access grants live under Advanced.
 
 ```sh
-clankie discord setup choices home
-clankie discord setup home --server Studio
-clankie discord setup choices talk
-clankie discord setup talk --channel general --channel dev
-clankie discord setup computer --access me
-clankie discord setup computer --access people --person James
-clankie discord setup computer --access servers --server Studio
-clankie discord setup computer --access nobody
-clankie discord setup team --server Studio --visible on
-clankie discord setup team --visible off
-clankie discord setup test-post --channel general
+clankie discord setup choices connect
+clankie discord setup invite --role participant
+clankie discord setup connect --server Studio --role participant
+clankie discord setup connect --server Oathkeeper --role admin
+clankie discord setup fleet --enabled on
+clankie discord setup fleet --enabled off
+clankie discord setup tracking --level project_updates
+clankie discord setup tracking --level project_activity
+clankie discord setup tracking --level all_issues
+clankie discord setup tracking --level off
+clankie discord setup check
 ```
 
-`choices home|talk|computer|team` returns names and numbered choices such as
-`@1`. Use a full displayed name or numbered choice when names repeat; an
-ambiguous name fails before writing. Repeated `--channel`, `--person` or
-`--server` flags select several entries where appropriate. Computer access is
-always its own explicit selection: picking a social server, rooms or the team
-never changes machine grants. `me` requires the owner configured under
-Advanced. Picking people replaces server grants; picking servers grants every
-admitted human in those servers and replaces individual grants. `nobody`
-clears all three machine-grant lists.
+Participant uses Discord's own permissions to decide which rooms Clankie can
+read and speak in. Admin is for a dedicated server: the invitation requests
+Administrator and Clankie controls channels, categories, roles, webhooks and
+members. Server deletion and ownership transfer are always refused.
+Selecting a role never grants access to the operator's computer.
 
-`test-post --channel NAME` explicitly sends one fixed setup message with mentions
-disabled. It requires settings-level owner authority and a current settings
-revision, and rechecks the connected account and Send Messages permission.
-The TUI offers **Send a test post…** with the same room picker. A `posted`
-result carries the native message ID; `unconfirmed` means inspect the room
-before trying again. Neither transport retries a missing receipt. Ordinary
-paired Observe/Steer grants do not authorize this write; hosted owner sessions
-use their existing operator bridge.
+Fleet display and tracking are independent. Participant projection messages
+use the designated `fleetChannelId` under Advanced; no channels or webhooks are
+created. Admin can create fleet channels and mirror tracked projects as channels
+or forums, with one thread/post per issue. Tracking levels are **Off**,
+**Project updates only**, **Project activity** (status changes, milestones,
+new/finished issues) and **Every issue notification**. Disabling display or
+tracking preserves retained mappings and connections.
 
-Each sentence saves through the authenticated host API in one revision-fenced
-write. A stale edit fails rather than overwriting someone else’s change.
-Hiding the team preserves its selected server. Raw fields remain under TUI
-`/discord` → **Advanced**; `discord set/clear` remains the local raw-field
-writer. Hosted consoles and CLI use their existing encrypted transport for
-sentence setup and host Advanced fields. Raw local fields and local credentials
-are not written through a hosted connection. Stored body settings retain their
-existing restart requirement; a successful save does not assert live application.
+The invitation requests the selected role's grants. Setup checks the connected
+body's gateway evidence: proven denials say **needs** and missing evidence says
+**not checked**. Admin requires Administrator; Participant checks its normal
+text, thread and voice grants. Channel overwrites still control Participant's
+actual access. Reading setup and saving controls never post to Discord.
+
+Each control saves through the authenticated host API. A stale edit fails rather
+than overwriting someone else's changes. Hosted consoles and CLI use their
+existing encrypted transport. Raw local fields and credentials are not written
+through a hosted connection. Body settings retain their existing restart
+requirement; a save does not claim the running gateway has applied it.
+
+The explicit diagnostic `clankie discord setup test-post --channel general`
+remains available. It requires settings-level operator authority, a current
+revision, exact account identity and verified Send Messages. Missing native
+receipts return `unconfirmed`; inspect the room before deliberately trying
+again. It is never part of opening or saving setup.
 
 ### `discord transcripts [--cursor CURSOR] [--limit N]`
 

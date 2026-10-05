@@ -5,6 +5,8 @@ import type {
   DiscordGuildRoomTarget,
   DiscordPresenceWrite,
   DiscordPresenceWriteResult,
+  DiscordServerAction,
+  DiscordServerActionResult,
 } from "@clankie/protocol";
 
 /**
@@ -12,6 +14,8 @@ import type {
  * runtime module; the service only passes policy-allowed writes (ADR 0024).
  */
 export interface DiscordPresenceRuntimePort {
+  /** Native server REST: configured role and server are enforced inside the body. */
+  serverAction?(input: DiscordServerAction): Promise<DiscordServerActionResult>;
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,

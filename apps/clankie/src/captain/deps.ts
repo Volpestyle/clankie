@@ -37,6 +37,7 @@ import type { FinishedRender } from "../media-generation.ts";
 import type { TldrawHost } from "../tldraw-host.ts";
 import type { RivalsClient } from "../rivals.ts";
 import type { WorkItemsService } from "../work-items.ts";
+import type { DiscordTracking } from "../discord-tracking.ts";
 
 /**
  * Everything the captain's tools reach in the rest of the service, as plain
@@ -48,6 +49,9 @@ export interface CaptainDeps {
     readonly settings: Pick<import("@clankie/settings").SettingsStore, "load" | "update">;
     targetAllowed(conversationId: string): boolean;
   };
+  readonly discordTracking?: Pick<DiscordTracking, "configureProject">;
+  /** This captain's fresh settings and explicit environment, supplied by its host. */
+  readonly discordSettings?: () => Promise<import("@clankie/protocol").DiscordSettings>;
   /** Exact conversation-owned Minecraft stay, sharing the Pokémon play lease. */
   readonly minecraft?: import("../minecraft.ts").MinecraftService;
   readonly minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;

@@ -80,3 +80,5 @@ remains a separate reviewed effort.
 supersedes ADR 0218's Linear routing extension: verified rule-passing webhooks
 wake one ordinary configured chat, `global-default` by default, and retire the
 separate Linear inbox protocol. Clankie can set the non-secret target and rules.
+
+- [0227 — Discord connects a server with a role](0227-discord-connects-a-server-with-a-role.md)

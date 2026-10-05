@@ -93,29 +93,18 @@ cancel work already running.
 
 1. Create a Discord application and bot, enable the required intents, and copy
    the bot token.
-2. Run `/discord`, store **Bot token**, and set the application, guild/channel,
-   text, voice, and Activity identifiers you use.
-   `guild-id` is the command and live-proof server. `swarm-guild-id` is
-   separate and names the one server Clankie controls, the only one his agents
-   can be given rooms in ([ADR 0146](adr/0146-a-channel-is-a-conversation-several-seats-share.md));
-   it needs `Manage Channels`, `Manage Webhooks`, and `Send Messages` there.
-   The last permission lets it create a post when a forum is selected. Servers he merely
-   inhabits belong on the ingress, presence, and voice allowlists and nowhere
-   else.
-   Set the managed server in `/discord` → **Server, application, and roles**
-   (`none` clears it) or with `clankie discord set --swarm-guild-id ID`, then
-   restart. Agent channels then reach Discord from the app's channel page or the
-   CLI: `clankie conversations rooms` lists the managed server's rooms, and
-   `clankie conversations channel [ID] --title T --member PERSONA_ID ...
---discord provision [--room ROOM_ID]` creates or projects a room
-   (`--discord off` removes the projection; `--webhook-stdin` takes a
-   hand-made webhook URL on stdin). Both use the operator dispatch API's
-   `channel`, `channels`, and `discord_rooms` operations.
-3. Generate/install the invite from `/discord` or `/discord invite`.
-4. Select the **Official bot** active body and run `clankie restart discord`.
-5. Verify with `/discord status`, `pnpm discord:readiness` — which reports
-   whether he holds `Manage Channels`, `Manage Webhooks`, and `Send Messages` in the managed server —
-   and, when voice is enabled, `pnpm discord:voice-readiness`.
+2. Run `/discord`, connect a server and choose Participant or Admin. Application
+   identifiers and credentials remain under Advanced. Participant's room access
+   follows Discord permissions. Admin is for a dedicated server and requests
+   Administrator; Clankie controls it except deleting it or transferring ownership.
+3. Open the role-correct invitation from setup. Its permission check flags grants
+   missing from the connected account. Setup does not make a test post.
+4. Choose fleet display on/off and a tracking level. Participant projection posts
+   use the designated channel ID under Advanced; Admin can create fleet channels
+   and project channels/forums. Machine grants are an independent Advanced choice.
+5. Select the official bot active body under Advanced, restart that body, and
+   inspect setup checks and `/discord status`. James performs live posting checks;
+   local integration evidence is separate from a working live installation.
 
 ### Personal-lab user body
 
