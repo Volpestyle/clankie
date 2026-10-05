@@ -76,7 +76,12 @@ function row(pane: string, terminal: string, parent?: string): NativeRow {
 
 /** Raw Herdr and kernel observations are the only substituted dependencies. */
 async function fixture(
-  options: { remote?: boolean; parent?: boolean; parentAdapter?: boolean; nonApiCaptain?: boolean } = {},
+  options: {
+    remote?: boolean;
+    parent?: boolean;
+    parentAdapter?: boolean;
+    nonApiCaptain?: boolean;
+  } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "worker-parent-routing-"));
   roots.push(root);
@@ -88,9 +93,25 @@ async function fixture(
   const nativeSends: string[] = [];
   let nativeReplyLost = false;
   const calls: Array<{ fleet: string; args: readonly string[] }> = [];
+  let failRemoteInventory: "unavailable" | "missing" | "malformed" | "unidentified" | undefined;
+  let inventoryFailures = 0;
   let gate: { remaining: number; entered(): void; wait: Promise<void> } | undefined;
   const execute = async (fleet: string, args: readonly string[], signal?: AbortSignal) => {
     calls.push({ fleet, args });
+    if (failRemoteInventory && fleet === "away" && args[0] === "pane" && args[1] === "list") {
+      const failure = failRemoteInventory;
+      failRemoteInventory = undefined;
+      inventoryFailures += 1;
+      if (failure === "missing") return JSON.stringify({ result: { agents: [] } });
+      if (failure === "malformed") return JSON.stringify({ result: { panes: [{}] } });
+      if (failure === "unidentified") {
+        const panes = structuredClone(remote);
+        return JSON.stringify({
+          result: { panes: panes.map(({ agent_session: _session, ...pane }) => pane) },
+        });
+      }
+      throw new Error("Linked native inventory is unavailable");
+    }
     const current = fleet === "default" ? local : remote;
     if (args[0] === "agent" && args[1] === "wait") {
       return new Promise<string>((_resolve, reject) => {
@@ -289,6 +310,10 @@ async function fixture(
     service,
     open,
     nativeSends,
+    failNextRemoteInventory: (failure: "unavailable" | "missing" | "malformed" | "unidentified") => {
+      failRemoteInventory = failure;
+    },
+    inventoryFailures: () => inventoryFailures,
     loseNativeReply: () => {
       nativeReplyLost = true;
     },
@@ -792,34 +817,40 @@ it.each([false, true])(
   },
 );
 
-it("a bare native session association cannot borrow an equally named session on another fleet", async () => {
-  const f = await fixture({ remote: true });
-  f.remote[1]!.agent_session.value = f.local[1]!.agent_session.value;
-  const target = await conversation(f.service, { kind: "workspace", workspaceId: f.root });
-  expect(
-    (
-      await f.service.operatorRequest(`/v1/seat/transcript?conversationId=${target}`, {
-        sessionId: f.local[1]!.agent_session.value,
-        entries: [],
-      })
-    ).status,
-  ).toBe(200);
-  const attached = await poll(f.service, target);
-  const global = await poll(f.service, "global-default");
-  const receipt = await delivery(f.service);
-  expect(await report(f.service, "Ambiguous native session cannot grant a route", receipt)).toMatchObject({
-    received: false,
-    deliveryStage: "unavailable",
-  });
-  expect(accepted(f.root, receipt.id)).toEqual([]);
-  expect((await roster(f.service)).find((seat) => seat.seatId === "away/term_aaa")).toMatchObject({
-    workerReportRouting: { source: "refused", reason: "authority_unavailable" },
-  });
-  attached.stop.abort();
-  global.stop.abort();
-  expect(await attached.events()).toEqual([]);
-  expect(await global.events()).toEqual([]);
-});
+it.each(["complete", "unavailable", "missing", "malformed", "unidentified"] as const)(
+  "a bare native session association cannot borrow an equally named session on another fleet (inventory: %s)",
+  async (inventory) => {
+    const f = await fixture({ remote: true });
+    f.remote[1]!.agent_session.value = f.local[1]!.agent_session.value;
+    const target = await conversation(f.service, { kind: "workspace", workspaceId: f.root });
+    expect(
+      (
+        await f.service.operatorRequest(`/v1/seat/transcript?conversationId=${target}`, {
+          sessionId: f.local[1]!.agent_session.value,
+          entries: [],
+        })
+      ).status,
+    ).toBe(200);
+    if (inventory !== "complete") f.failNextRemoteInventory(inventory);
+    const attached = await poll(f.service, target);
+    const global = await poll(f.service, "global-default");
+    const receipt = await delivery(f.service);
+    expect(await report(f.service, "Ambiguous native session cannot grant a route", receipt)).toMatchObject({
+      received: false,
+      deliveryStage: "unavailable",
+    });
+    expect(accepted(f.root, receipt.id)).toEqual([]);
+    expect(f.inventoryFailures()).toBe(inventory === "complete" ? 0 : 1);
+    expect(metas(f.root).find((meta) => meta.conversationId === target).nativeSource).toBeUndefined();
+    expect((await roster(f.service)).find((seat) => seat.seatId === "away/term_aaa")).toMatchObject({
+      workerReportRouting: { source: "refused", reason: "authority_unavailable" },
+    });
+    attached.stop.abort();
+    global.stop.abort();
+    expect(await attached.events()).toEqual([]);
+    expect(await global.events()).toEqual([]);
+  },
+);
 
 it.each([false, true])(
   "a replacement native parent cannot take or acknowledge an original report across restart (already taken: %s)",

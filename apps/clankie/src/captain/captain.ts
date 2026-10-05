@@ -2257,11 +2257,50 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   async function operatorNativeSource(conversationId: string): Promise<HerdrAgentSnapshot | undefined> {
     const fleet = await observeFleet(true);
-    const attached = [...(fleet.head === undefined ? [] : [fleet.head]), ...fleet.seats].filter(
+    const occupants = [...(fleet.head === undefined ? [] : [fleet.head]), ...fleet.seats];
+    const attached = occupants.filter(
       (candidate) => conversations.attachedConversationForNative(observedAgent(candidate)) === conversationId,
     );
     if (attached.length > 1) throw new Error("Native operator bridge has ambiguous conversation occupants");
-    return attached[0] === undefined ? undefined : observedAgent(attached[0]);
+    const source = attached[0] === undefined ? undefined : observedAgent(attached[0]);
+    if (source !== undefined && conversations.nativeSource(conversationId) === undefined) {
+      // A bare transcript ID is not a fleet binding. The fail-soft roster
+      // cannot prove uniqueness: require every registered inventory to answer.
+      const sessionId = nativeSessionId(source);
+      let inventory: HerdrAgentSnapshot[];
+      try {
+        if (herdrRunner.list === undefined) return undefined;
+        await refreshFleets();
+        const identities = JSON.stringify([...fleetIdentities]);
+        inventory = (
+          await Promise.all([
+            herdrRunner.list(),
+            ...[...remoteFleets, ...namedLocal].map((fleet) => herdrRunner.list!(fleet.id)),
+          ])
+        ).flat();
+        await refreshFleets();
+        if (JSON.stringify([...fleetIdentities]) !== identities) return undefined;
+      } catch {
+        return undefined;
+      }
+      if (
+        inventory.some(
+          (candidate) =>
+            candidate.agent !== "shell" &&
+            candidate.agent !== "unknown" &&
+            nativeSessionId(candidate) === undefined,
+        )
+      )
+        return undefined;
+      const matches = inventory.filter((candidate) => nativeSessionId(candidate) === sessionId);
+      if (
+        sessionId === undefined ||
+        matches.length !== 1 ||
+        inboundBinding(matches[0]!) !== inboundBinding(source)
+      )
+        return undefined;
+    }
+    return source;
   }
 
   /** Shared report/roster projection. Only receiveFleetSeatMessage admits it. */
@@ -3134,10 +3173,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       void recoverWorkerReports(binding.conversationId).catch(() => undefined);
       const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);
       try {
-        const source = await operatorNativeSource(binding.conversationId);
-        pollSignal.throwIfAborted();
-        const recipientBinding = inboundBinding(source);
-        if (source !== undefined) conversations.rememberNativeSource(binding.conversationId, source);
+        let recipientBinding: string | undefined;
         return await conversations
           .pollConversationDriver(
             binding.conversationId,
@@ -3147,6 +3183,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               return pending;
             },
             pollSignal,
+            async () => {
+              const source = await operatorNativeSource(binding.conversationId);
+              pollSignal.throwIfAborted();
+              recipientBinding = inboundBinding(source);
+              if (source !== undefined) conversations.rememberNativeSource(binding.conversationId, source);
+            },
           )
           .catch((error: unknown) => {
             if (pollSignal.aborted) return [];

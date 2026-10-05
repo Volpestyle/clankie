@@ -568,27 +568,28 @@ describe("createDraftPacer", () => {
   });
 });
 
-it("keeps overlapping voice asks from different people out of each other's durable run", async () => {
+it("keeps overlapping voice asks from different people in independent service runs", async () => {
   const { DiscordVoiceIngress } = await import("@clankie/discord-presence-core");
-  const session = new StubSession();
-  const lane = makeLane(session);
+  const sessions = new Map<string, StubSession>();
   const actors: string[] = [];
   const ingress = new DiscordVoiceIngress(
     {
       getHealth: async () => ({ profileHash: "profile" }),
       submitDiscordCaptainChannelTurn: async (request) => {
         actors.push(request.trigger.actorId);
-        const role = await runDurableTurn(lane, request.trigger.body ?? "", [], {
+        // Service admission gives every delivery a fresh child, including another
+        // ask from the same person. Ingress must never share a streaming lane.
+        const session = new StubSession();
+        sessions.set(request.deliveryId, session);
+        await runDurableTurn(makeLane(session), request.trigger.body ?? "", [], {
           deliveryId: request.deliveryId,
         });
-        return role === "absorbed"
-          ? { state: "absorbed", captainSessionId: "room", turnId: request.deliveryId }
-          : {
-              state: "settled",
-              captainSessionId: "room",
-              turnId: request.deliveryId,
-              response: request.trigger.actorId,
-            };
+        return {
+          state: "settled",
+          captainSessionId: request.deliveryId,
+          turnId: request.deliveryId,
+          response: request.trigger.actorId,
+        };
       },
     },
     { characterId: "clankie", credentialRef: "discord_bot", transportKind: "bot" },
@@ -604,29 +605,35 @@ it("keeps overlapping voice asks from different people out of each other's durab
     });
   const alice = ask("1111", "alice", "look up a game");
   await drain();
-  session.startStreaming();
+  sessions.get("alice")!.startStreaming();
   const bob = ask("2222", "bob", "check the weather");
   const carol = ask("3333", "carol", "find a song");
   const refinement = ask("1111", "alice-refines", "only co-op games");
   await drain();
-  expect(actors).toEqual(["1111", "1111"]);
-  expect(session.calls).toEqual([
-    { text: "look up a game", behavior: undefined },
-    { text: "only co-op games", behavior: "steer" },
-  ]);
-  session.settleRun();
-  await expect(alice).resolves.toMatchObject({ state: "settled", response: "1111" });
-  await expect(refinement).resolves.toMatchObject({ state: "absorbed" });
-  await drain();
-  expect(actors).toEqual(["1111", "1111", "2222"]);
-  session.startStreaming();
-  session.settleRun();
+  expect(actors).toEqual(["1111", "2222", "3333", "1111"]);
+  expect([...sessions.keys()]).toEqual(["alice", "bob", "carol", "alice-refines"]);
+  expect(new Set(sessions.values()).size).toBe(4);
+  for (const [id, text] of [
+    ["alice", "look up a game"],
+    ["bob", "check the weather"],
+    ["carol", "find a song"],
+    ["alice-refines", "only co-op games"],
+  ])
+    expect(sessions.get(id!)!.calls).toEqual([{ text, behavior: undefined }]);
+  let aliceSettled = false;
+  void alice.then(() => {
+    aliceSettled = true;
+  });
+  sessions.get("bob")!.settleRun();
   await expect(bob).resolves.toMatchObject({ state: "settled", response: "2222" });
-  await drain();
-  expect(actors).toEqual(["1111", "1111", "2222", "3333"]);
-  session.settleRun();
+  sessions.get("carol")!.settleRun();
   await expect(carol).resolves.toMatchObject({ state: "settled", response: "3333" });
-  expect(session.calls.slice(2).every((call) => call.behavior === undefined)).toBe(true);
+  sessions.get("alice-refines")!.settleRun();
+  await expect(refinement).resolves.toMatchObject({ state: "settled", response: "1111" });
+  expect(aliceSettled).toBe(false);
+  expect(sessions.get("alice")!.isStreaming).toBe(true);
+  sessions.get("alice")!.settleRun();
+  await expect(alice).resolves.toMatchObject({ state: "settled", response: "1111" });
 });
 
 it("reserves actual lane start while guidance authorizes and never prepares guidance for absorbed input", async () => {
