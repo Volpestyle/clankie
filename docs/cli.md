@@ -2929,6 +2929,35 @@ cached schemas do not authorize a refused call. A `No durable native binding`
 message receipt means the bridge could not prove its delivery binding and sent
 no new message; inspect the pane's native binding before retrying delivery.
 
+### `project create PROJECT --settings FILE.json --revision REVISION`
+
+Requires a service build containing the local project-creation route; a source
+landing does not update an installed CLI or the running service. Read
+`clankie project list`, then review a proposal file and submit it with the returned
+revision. `/project create` uses the same owner-authenticated API. Ordinary
+preference answers do not authorize creation.
+
+The file requires `name` and `workspacePath`; `PROJECT` and `REVISION` are explicit
+arguments and cannot be supplied or overridden by the file. Optional `roles`,
+`workerCap`, `trackerRef` and `fleet` use the existing project policy vocabulary. Role and
+project caps may be `null` to inherit; zero stays an explicit zero. Fleet size
+and model preferences do not imply numeric caps or new hiring guidance.
+
+Creation accepts one existing canonical workspace on the service's local
+machine. Its workspace ID is `primary`. Existing project IDs, path overlaps,
+changed directory identity, changed authority and stale settings fail without
+an automatic retry. Remote enrollment, linked roots, assignments and grants
+are not part of this command; existing `project add` semantics are unchanged.
+The pre-rename authority, directory, tracker and revision guards are asynchronous
+observations, not cross-process compare-and-swap or atomic authority checks.
+
+An optional tracker binding must be
+`{"workspaceId":"primary","path":".clankie/tracking.json"}` and the valid saved
+convention must already exist. This command does not initialize a tracker or
+choose an account. Missing/changed sources report a conflict. See the
+[creation boundary](testing/2026-10-04-project-create/README.md) for exact checks
+and the remaining conversational onboarding and station work.
+
 ### `project list`, `project settings` and `project update`
 
 `clankie project list` reads the current project settings and their revision.

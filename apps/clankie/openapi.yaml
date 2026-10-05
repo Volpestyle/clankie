@@ -1611,6 +1611,109 @@ paths:
         "200": { description: Project settings and SHA-256 revision }
         "401": { description: Owner authentication required }
         "403": { description: Caller is not the owner }
+  /v1/operator/projects/create:
+    post:
+      tags: [Operator]
+      operationId: createProjectSettings
+      summary: Create a reviewed project with one canonical local workspace
+      description: >-
+        Owner only. Strict fields are projectId, name, workspacePath, expectedRevision,
+        roles, workerCap, trackerRef and fleet. The service supplies primary/local
+        workspace identity and its platform. Nullable caps inherit; zero is preserved.
+        Fleet preferences are not numeric caps. Optional trackerRef must name primary
+        and .clankie/tracking.json, an existing valid canonical convention. No tracker
+        initialization, remote enrollment, assignments, hires or grants. Rechecks
+        canonical directory/tracker identity, settings revision and owner authority
+        before the existing SettingsStore rename. These asynchronous observations
+        are not cross-process compare-and-swap or atomic authority/filesystem checks.
+        This documents landed source, not an installed CLI or running-service update.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, name, workspacePath, expectedRevision]
+              properties:
+                projectId: { type: string, pattern: "^[a-z][a-z0-9_-]{0,63}$" }
+                name: { type: string, minLength: 1, maxLength: 100 }
+                workspacePath: { type: string, minLength: 1, maxLength: 4096 }
+                expectedRevision: { type: string, pattern: "^[a-f0-9]{64}$" }
+                roles:
+                  type: array
+                  maxItems: 256
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [role]
+                    properties:
+                      role: { type: string, minLength: 1, maxLength: 24 }
+                      harness:
+                        {
+                          type: string,
+                          enum:
+                            [
+                              claude,
+                              codex,
+                              pi,
+                              gemini,
+                              grok,
+                              opencode,
+                              copilot,
+                              amp,
+                              cursor,
+                              devin,
+                              agy,
+                              cline,
+                              omp,
+                              mastracode,
+                              kimi,
+                              kiro,
+                              droid,
+                              hermes,
+                              kilo,
+                              qodercli,
+                              qwen,
+                              maki,
+                            ],
+                        }
+                      model: { type: string, minLength: 1, maxLength: 200 }
+                      effort: { type: string, enum: [minimal, low, medium, high, xhigh, max, ultra] }
+                      subagents:
+                        type: [object, "null"]
+                        additionalProperties: false
+                        properties:
+                          model: { type: string, minLength: 1, maxLength: 200 }
+                          effort: { type: string, enum: [minimal, low, medium, high, xhigh, max, ultra] }
+                      delegation: { type: string, enum: [native-first, panes] }
+                      account: { type: string, pattern: "^[a-z][a-z0-9_-]{0,63}$" }
+                      placement: { type: string, enum: [new-tab, split] }
+                      concurrencyCap: { type: [integer, "null"], minimum: 0, maximum: 1000 }
+                      hireNaming: { type: string, minLength: 1, maxLength: 500 }
+                workerCap: { type: [integer, "null"], minimum: 0, maximum: 1000 }
+                trackerRef:
+                  type: [object, "null"]
+                  additionalProperties: false
+                  required: [workspaceId, path]
+                  properties:
+                    workspaceId: { type: string, enum: [primary] }
+                    path: { type: string, enum: [.clankie/tracking.json] }
+                fleet:
+                  type: [object, "null"]
+                  additionalProperties: false
+                  properties:
+                    size: { type: string, enum: [max, large, small, solo] }
+                    models: { type: string, enum: [optimal, efficient] }
+      responses:
+        "201": { description: Saved project settings and current revision }
+        "400": { description: Malformed or unsupported creation fields }
+        "401": { description: Owner authentication required }
+        "403": { description: Caller is not the owner }
+        "409": { description: project_create_conflict or project_tracker_unavailable; no retry or setup }
+        "413": { description: Request exceeds 16 KiB }
+        "503": { description: Settings writes unavailable }
   /v1/operator/projects/remove-workspace:
     post:
       tags: [Operator]
