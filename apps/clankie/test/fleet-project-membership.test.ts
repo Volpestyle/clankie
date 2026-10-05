@@ -10,6 +10,7 @@ import {
   type FleetProjectMembershipOptions,
 } from "../src/fleet-project-membership.ts";
 import { occupantIdForHerdrSession, type HerdrCensusAgent } from "../src/captain/herdr-census.ts";
+import { projectProcessFixture } from "./helpers/local-fleet-process.ts";
 import type { ProjectProcessProof } from "../src/project-process-proof.ts";
 
 const directories: string[] = [];
@@ -49,8 +50,8 @@ async function fixture(count = 1) {
       pane: agent.paneId,
       nativeOccupantId: occupantIdForHerdrSession(session),
       binding: { socketPath: binding.socketPath, session: binding.session },
-      shell: { pid: 100 + index, startTime: "Sun Oct  4 10:00:00 2026" },
-      processes: [{ pid: 200 + index, startTime: "Sun Oct  4 10:00:01 2026" }],
+      shell: { pid: 100 + index, startTime: "1791276400.123456" },
+      processes: [{ pid: 200 + index, startTime: "1791276401.123456" }],
     };
     proofs.push(proof);
     const request: SpawnOperatorSeat = {
@@ -458,11 +459,11 @@ it("reproduces the saved generic foreground proof through the actual observer im
           },
         },
       });
-    if (file === "/usr/sbin/lsof") return `p${expected.processes[0]!.pid}\nftxt\nn/trusted/codex\n`;
-    if (file === "/bin/ps") {
-      const shell = Number(args[1]) === expected.shell.pid;
-      return `${shell ? expected.shell.startTime : expected.processes[0]!.startTime} ${shell ? "/bin/zsh" : "/trusted/codex"}\n`;
-    }
+    if (args[0] === "--processes")
+      return projectProcessFixture(Number(args[1]), Number(args[2]), {
+        shellStart: expected.shell.startTime,
+        start: expected.processes[0]!.startTime,
+      });
     throw new Error("Unexpected observer command");
   });
   const observe = createProjectProcessObserver({

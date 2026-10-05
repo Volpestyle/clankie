@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { localFleetProof, localProjectProof } from "../src/local-fleet-proof.ts";
 import { createProjectMembershipResolver } from "../src/project-membership.ts";
-import { socketProcessFixture } from "./helpers/local-fleet-process.ts";
+import { socketProcessFixture, projectProcessFixture } from "./helpers/local-fleet-process.ts";
 
 function fixture() {
   const counts = { socket: 0, executable: 0 };
@@ -25,21 +25,20 @@ function fixture() {
     canonical: async (path: string) => path,
     observeSocket: async (socket: Socket) => {
       counts.socket++;
-      return socketProcessFixture(socket, "p55\nn127.0.0.1:51000->127.0.0.1:42000\n", "55 44\n44 33\n33 1\n");
+      return socketProcessFixture(
+        socket,
+        "p55\nn127.0.0.1:51000->127.0.0.1:42000\n",
+        "55 44\n44 33\n33 1\n",
+        state.start,
+      );
     },
     run: async (command: string, args: string[]) => {
-      if (command === "/usr/sbin/lsof") {
-        if (args.includes("txt")) {
-          counts.executable++;
-          if (state.unavailable) throw new Error("Process observation unavailable");
-          return "p44\nftxt\nn/trusted/codex\n";
-        }
-        throw new Error("Legacy socket census is forbidden");
+      if (args[0] === "--processes") {
+        counts.executable++;
+        if (state.unavailable) throw new Error("Process observation unavailable");
+        return projectProcessFixture(Number(args[1]), Number(args[2]), { start: state.start });
       }
-      if (command === "/bin/ps") {
-        expect(args[0]).not.toBe("-axo");
-        return `${state.start} ${Number(args[1]) === 33 ? "/bin/zsh" : "/trusted/codex"}\n`;
-      }
+      if (command !== "herdr") throw new Error("Legacy process commands forbidden");
       if (args[0] === "agent")
         return JSON.stringify({
           result: {

@@ -1,7 +1,11 @@
 import { expect, it } from "vitest";
 import type { Socket } from "node:net";
 import { ancestors, clientPid, localFleetProof } from "../src/local-fleet-proof.ts";
-import { socketProcessFixture } from "./helpers/local-fleet-process.ts";
+import {
+  socketProcessFixture,
+  projectProcessFixture,
+  processFixtureStart,
+} from "./helpers/local-fleet-process.ts";
 
 const socket = () =>
   ({
@@ -129,7 +133,7 @@ it("project proof requires the socket to descend from the current native agent, 
     canonical: async (path) => path,
     herdrBinary: "herdr",
     binding: async () => binding,
-    observeSocket: async (socket) => socketProcessFixture(socket, owner, chain),
+    observeSocket: async (socket) => socketProcessFixture(socket, owner, chain, nativeStart),
     run: async (command, args) => {
       if (command === "herdr" && args[0] === "agent")
         return JSON.stringify({
@@ -142,14 +146,9 @@ it("project proof requires the socket to descend from the current native agent, 
             },
           },
         });
-      if (command === "/usr/sbin/lsof") {
-        expect(args).toContain("txt");
-        return "p44\nftxt\nn/trusted/codex\n";
-      }
-      if (command === "/bin/ps") {
-        expect(args[0]).not.toBe("-axo");
-        return `${nativeStart} ${Number(args[1]) === 33 ? "/bin/zsh" : "/usr/local/bin/codex"}\n`;
-      }
+      if (args[0] === "--processes")
+        return projectProcessFixture(Number(args[1]), Number(args[2]), { start: nativeStart });
+      if (command !== "herdr") throw new Error("Legacy process commands forbidden");
       return JSON.stringify({
         result: {
           process_info: { pane_id: args.at(-1), shell_pid: 33, foreground_process_group_id: foreground },
@@ -158,7 +157,7 @@ it("project proof requires the socket to descend from the current native agent, 
     },
   });
   const first = await prove(socket(), "w1:p1");
-  expect(first?.processes).toEqual([{ pid: 44, startTime: nativeStart }]);
+  expect(first?.processes).toEqual([{ pid: 44, startTime: processFixtureStart(nativeStart) }]);
   chain = "55 99\n99 33\n33 1\n44 33\n";
   expect(await prove(socket(), "w1:p1")).toBeUndefined();
   chain = "55 44\n44 33\n33 1\n";
@@ -195,14 +194,8 @@ it("admits only a live registered private server matching the foreground native 
       proof: { nativeOccupantId: string },
     ) => registry.allows(chain, pane, binding, proof.nativeOccupantId),
     run: async (command: string, args: string[]) => {
-      if (command === "/usr/sbin/lsof") {
-        expect(args).toContain("txt");
-        return "p44\nftxt\nn/trusted/codex\n";
-      }
-      if (command === "/bin/ps") {
-        expect(args[0]).not.toBe("-axo");
-        return `Sat Oct  3 10:00:00 2026 ${Number(args[1]) === 33 ? "/bin/zsh" : "/trusted/codex"}\n`;
-      }
+      if (args[0] === "--processes") return projectProcessFixture(Number(args[1]), Number(args[2]));
+      if (command !== "herdr") throw new Error("Legacy process commands forbidden");
       if (args[0] === "agent")
         return JSON.stringify({
           result: {
@@ -249,14 +242,8 @@ it("allows a sessionless owner process only through its own socket ancestry, nev
     privateProjectSeat: async () => true,
     observeSocket: async (socket) => socketProcessFixture(socket, owner, tree),
     run: async (command, args) => {
-      if (command === "/usr/sbin/lsof") {
-        expect(args).toContain("txt");
-        return "p44\nftxt\nn/trusted/codex\n";
-      }
-      if (command === "/bin/ps") {
-        expect(args[0]).not.toBe("-axo");
-        return "Sat Oct  3 10:00:00 2026 /trusted/codex\n";
-      }
+      if (args[0] === "--processes") return projectProcessFixture(Number(args[1]), Number(args[2]));
+      if (command !== "herdr") throw new Error("Legacy process commands forbidden");
       if (args[0] === "agent")
         return JSON.stringify({
           result: { agent: { pane_id: "w1:p1", terminal_id: "terminal", agent: "codex" } },
@@ -310,17 +297,14 @@ it.each([
       );
     },
     run: async (command, args) => {
-      if (command === "/usr/sbin/lsof") {
-        if (args.includes("txt")) {
-          if (final && changed === "unavailable") throw new Error("Process observation timed out");
-          return `p44\nftxt\nn${final && changed === "executable" ? "/untrusted/codex" : "/trusted/codex"}\n`;
-        }
-        throw new Error("Legacy socket census is forbidden");
+      if (args[0] === "--processes") {
+        if (final && changed === "unavailable") throw new Error("Process observation timed out");
+        return projectProcessFixture(Number(args[1]), Number(args[2]), {
+          executable: final && changed === "executable" ? "/untrusted/codex" : "/trusted/codex",
+          start: `Sat Oct  3 10:00:0${final && changed === "lifetime" ? "1" : "0"} 2026`,
+        });
       }
-      if (command === "/bin/ps") {
-        expect(args[0]).not.toBe("-axo");
-        return `Sat Oct  3 10:00:0${final && changed === "lifetime" ? "1" : "0"} 2026 ${Number(args[1]) === 33 ? "/bin/zsh" : "/trusted/codex"}\n`;
-      }
+      if (command !== "herdr") throw new Error("Legacy process commands forbidden");
       if (args[0] === "agent")
         return JSON.stringify({
           result: {

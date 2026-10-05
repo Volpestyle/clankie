@@ -138,6 +138,14 @@ export async function isolatedHerdr(logDirectory: string) {
     const shellPid = (await cli("pane", "process-info", "--pane", pane)).result.process_info
       .shell_pid as number;
     if (!Number.isSafeInteger(shellPid) || shellPid <= 1) throw new Error("Missing real pane shell");
+    const waitForClient = async (name: string) => {
+      const until = Date.now() + 5_000;
+      while (!clients.has(name)) {
+        if (Date.now() >= until) throw new Error(`Client ${name} did not connect; see ${logDirectory}`);
+        await delay(20);
+      }
+      return clients.get(name)!.pid;
+    };
     const startClient = async (name: string, endpoint: string, inPane: boolean) => {
       const args = [clientPath, controlPath, name, endpoint, pane];
       if (inPane) await cli("pane", "run", pane, [process.execPath, ...args].map(quote).join(" "));
@@ -145,12 +153,7 @@ export async function isolatedHerdr(logDirectory: string) {
         const child = spawn(process.execPath, args, { env, stdio: "ignore" });
         children.push(child);
       }
-      const until = Date.now() + 5_000;
-      while (!clients.has(name)) {
-        if (Date.now() >= until) throw new Error(`Client ${name} did not connect; see ${logDirectory}`);
-        await delay(20);
-      }
-      return clients.get(name)!.pid;
+      return waitForClient(name);
     };
     let id = 0;
     return {
@@ -159,6 +162,8 @@ export async function isolatedHerdr(logDirectory: string) {
       foreignPane,
       shellPid,
       socketPath,
+      controlPath,
+      waitForClient,
       cli,
       startClient,
       close,

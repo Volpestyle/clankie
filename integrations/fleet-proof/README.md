@@ -32,9 +32,164 @@ The body takes two fresh snapshots around live Herdr and private-seat checks and
 requires agreement. Its per-connection identity pin adds a refusal fence against
 PID or socket replacement. It never caches authority, skips the census, or
 accepts a caller-supplied PID. A missing helper or unsupported platform refuses
-admission; there is no legacy socket-scan fallback. Existing project identity
-checks still inspect the foreground harness separately, including executable
-observations; this change does not relax those checks.
+admission; there is no legacy socket-scan fallback. Project identity separately
+checks the shell and foreground harness through the process mode below.
+
+## Shell and foreground process observations
+
+```sh
+native-process-proof --processes SHELL_PID AGENT_PID [--diagnostics]
+```
+
+Success returns one JSON object, with the two processes in the supplied order:
+
+```json
+{
+  "schemaVersion": 1,
+  "processes": [
+    {
+      "pid": 123,
+      "ppid": 122,
+      "uid": 501,
+      "birth": ["1791220000", "123456"],
+      "executable": "/absolute/path/to/executable",
+      "argv": ["argv[0]", "argv[1]"]
+    }
+  ]
+}
+```
+
+The example abbreviates the array; successful output always contains exactly two
+records. Both require full `PROC_PIDTBSDINFO` observations with effective UID
+equal to the body's `getuid()`, a live 64-bit process, and an absolute
+`proc_pidpath` executable. Birth seconds and microseconds remain decimal strings.
+Each executable and argument must be valid UTF-8; JSON escapes controls, quotes
+and backslashes. Each retained argument is bounded to 4096 bytes. The `argv`
+array contains exactly the first `min(argc, 2)` arguments, including empty
+strings; fewer arguments yield a shorter array, and zero arguments yield `[]`.
+Later arguments and environment values never enter output or diagnostics.
+
+`KERN_PROCARGS2` supplies the argument bytes. The helper reads the bounded kernel
+argument area, verifies size observations and erases its temporary buffer. It
+uses the LP64 executable-path alignment established by XNU's
+[`exec_extract_strings`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_exec.c)
+and [`sysctl_procargsx`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_sysctl.c)
+to locate arguments; skipping all NUL padding would incorrectly consume an empty
+`argv[0]`. Unsupported widths, truncation, malformed data, inaccessible or exited
+targets, and exceeded bounds refuse the entire observation with zero stdout.
+
+The helper captures both processes twice, brackets each executable/argument read
+with full process identities, compares executable and argument observations, and
+rechecks both identities before emitting. It shares the bounded attempt/time
+limits with socket mode, without scanning unrelated processes. The body repeats
+the batch around current Herdr and binding checks; executable observations do
+not grant membership by themselves. There is no `ps` or `lsof` process fallback.
+
+Kernel argument observations read the process's user stack. They do not provide
+immutable exec-time attestation or an atomic snapshot of both processes.
+Repeated reads refuse observed changes, but cannot establish that no change
+occurred and reverted between observations.
+
+## Registered process lifetime
+
+```sh
+native-process-proof --birth PID [--diagnostics]
+```
+
+This narrower observation returns
+`{schemaVersion:1,process:{pid,uid,birth:[seconds,microseconds]}}` using the same
+decimal-string birth contract. It requires two agreeing full same-user BSD
+snapshots of a live process. It reads no executable, arguments or ancestry and
+does not require an LP64 argument layout. The body can compare this fresh
+lifetime with its own existing private-process registration; neither a supplied
+PID nor the observation alone grants authority. Exit, changed identity,
+unavailable data or exceeded bounds refuses the entire observation.
+
+## Reattached Codex server observation
+
+```sh
+native-process-proof --codex-server PID HEX_ENDPOINT HEX_CANONICAL_SOCKET_PATH [--diagnostics]
+```
+
+Success returns the same birth-only schema as `--birth`. This PID-local guard
+requires a live same-user LP64 process, the actual `proc_pidpath` executable
+basename `codex`, and kernel arguments ending exactly in `app-server`, `--listen`
+and the decoded endpoint. The endpoint starts with `unix:///`; the supplied
+canonical socket path is absolute. Both inputs are hex-encoded UTF-8 without
+NUL or control characters, bounded by the SDK's Unix socket path capacity
+(103 pathname bytes plus the terminating NUL; the endpoint also allows its
+seven-byte `unix://` prefix). Hex encoding preserves spaces and non-ASCII paths
+through the private ASCII transport. The caller resolves the canonical path;
+the helper compares it to the kernel's local bound address.
+
+The named process must hold a listening `AF_UNIX` stream socket with that exact
+local `sun_path` and `SO_ACCEPTCONN`. The helper repeats full process birth,
+executable, exact argument-tail and owned descriptor observations, comparing the
+same descriptor, socket and PCB identities and local path before emitting.
+Duplicate descriptors in that process are allowed; distinct matching listener
+identities, disappeared descriptors, unavailable observations and changed
+lifetimes refuse the whole proof. No arguments, endpoint or path enter its output
+or fixed diagnostics. The argument buffer is erased and environment values are
+never parsed.
+
+This guard retains the existing named-listener boundary for recovery. It does
+not establish global Unix socket ownership or bind the filesystem vnode/inode,
+and repeated observations cannot rule out an intervening change and reversal.
+The body's separate fresh TCP ownership/ancestry proof, current private-seat
+checks and actual Codex RPC thread check still decide admission. There is no
+`ps` or `lsof` recovery fallback.
+
+## Body-owned persistent transport
+
+```sh
+native-process-proof --serve
+```
+
+This mode serves the body's private stdin/stdout pipes. It has no listener,
+authentication socket, service registration or global daemon. EOF exits. Keeping
+one owned child alive avoids starting a process for each observation; it does
+not retain a proof, owner, ancestry, process record or admission decision.
+
+Each request is one LF-terminated ASCII line: a positive, strictly increasing
+JavaScript-safe integer ID followed by the existing CLI arguments, separated by
+single spaces. The maximum line is 4096 bytes including LF; the maximum is ten
+tokens including the ID. No quoting, embedded NUL, control characters, non-ASCII
+tokens, repeated spaces or partial final line is accepted. Supported argument
+tokens are flags, decimal ports/PIDs/births, colon-separated socket identity
+and the bounded hex endpoint/path used by Codex recovery.
+
+```text
+1 --processes 123 124
+2 45000 34000 --diagnostics
+3 --birth 123
+4 --codex-server 124 756e69783a2f2f2f746d702f736561742e736f636b 2f746d702f736561742e736f636b
+```
+
+Each completed job returns exactly one JSON line:
+
+```json
+{ "id": 1, "ok": false, "result": null, "stderr": "Native process proof unavailable\n" }
+```
+
+A successful `result` is the existing complete socket, process-batch or
+birth-only JSON object.
+A refused proof has `ok:false` and `result:null`. The `stderr` string contains
+only the same generic failure and requested fixed diagnostics as the CLI.
+Malformed framing, non-monotonic IDs, stream errors or exceeded output bounds
+close the channel with generic stderr; no partial proof grants access. Valid
+framing with invalid proof arguments returns a refusal and permits the next job.
+The entire encoded response is bounded to 1 MiB.
+
+Every job executes the same fresh proof functions and resets clocks, attempts,
+budgets and diagnostic flags. Socket mode still performs its complete process/FD
+census, requires one distinct socket owner and revalidates exact lifetime and
+socket identities; a newly shared descriptor refuses even after an earlier job
+succeeded. Process mode repeats the same full BSD/path/argument observations.
+All proof modes keep their existing three-attempt, per-job 600 ms total bound.
+Request and captured output buffers are erased and freed after each job. The
+body owns queue bounds, cancellation, per-job timeout and child shutdown; these
+transport controls do not substitute for fresh kernel or current Herdr checks.
+The classic one-shot CLI stdout/stderr contract remains unchanged.
 
 ## Build
 

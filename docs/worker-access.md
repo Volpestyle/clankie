@@ -88,6 +88,25 @@ PID reuse and revoked bindings fail closed. Service-owned private app-server
 registrations retain their separate live checks. See the
 [native helper](../integrations/fleet-proof/README.md) for build and verification.
 
+The body owns one persistent native helper over private pipes. Every job still
+checks fresh kernel facts; an earlier admission never substitutes for the
+current check. Herdr foreground and session reads use its socket API directly.
+No helper, Herdr CLI or `ps` process is launched for ordinary mailbox/catalog
+polls or restored-private-seat birth checks. The bounded queue refuses on
+timeout, malformed replies or helper exit, and the body closes its own helper
+at shutdown. Refusals emit `fleet.local_proof.refused` with a fixed reason;
+`fleet.local_proof.diagnostic` records fixed kernel or transport details.
+Neither event contains PIDs, paths, argv or caller headers. Census churn can
+still refuse a legitimate request within the unchanged bounds.
+
+When project identity is required, the same helper reads the foreground agent's
+executable, exact first launcher arguments, and the shell and agent's microsecond
+births. These observations bracket current native-session and foreground-pane
+checks. Socket ancestry must agree with the observed process lifetime, including
+microseconds. There is no foreground `ps`/`lsof` fallback or connection-wide
+admission cache. Generic hire receipts recorded with older display timestamps
+fail closed until a fresh hire records the complete kernel lifetime.
+
 Local admission can refuse when process or descriptor ownership changes during
 the census. The native helper retries a complete census for confirmed descriptor
 churn; it never skips an uncertain record. An exact HTTP 403 with

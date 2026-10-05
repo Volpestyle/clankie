@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { createProjectProcessObserver } from "../src/project-process-proof.ts";
+import { projectProcessFixture, processFixtureStart } from "./helpers/local-fleet-process.ts";
 
 function fixture() {
   const state = {
@@ -40,13 +41,15 @@ function fixture() {
           },
         });
       }
-      if (command === "/usr/sbin/lsof") return `p${state.agent}\nftxt\nn${state.mapped}\n`;
-      if (command === "/bin/ps" && args.at(-1) === "command=") return state.argv;
-      if (command === "/bin/ps") {
-        const pid = Number(args[1]);
-        if (state.change === "process" && ++state.calls > 2) state.start = "Sat Oct  3 10:00:01 2026";
-        return `${state.start} ${pid === state.shell ? "/bin/zsh" : state.command}\n`;
+      if (args[0] === "--processes") {
+        if (state.change === "process" && ++state.calls > 1) state.start = "Sat Oct  3 10:00:01 2026";
+        return projectProcessFixture(Number(args[1]), Number(args[2]), {
+          start: state.start,
+          executable: state.mapped,
+          argv: state.argv ? state.argv.split(/\s+/u).slice(0, 2) : [],
+        });
       }
+      if (command !== "herdr") throw new Error("Legacy OS process commands forbidden");
       if (state.change === "pane" && ++state.calls > 1) state.agent = 99;
       if (state.change === "binding" && ++state.calls > 1) state.binding = "/other/socket";
       return JSON.stringify({
@@ -66,7 +69,7 @@ it("captures the actual native foreground process and shell lifetimes", async ()
   const f = fixture();
   expect(await f.observe("default", "w1:p1")).toMatchObject({
     fleet: "default",
-    processes: [{ pid: 40, startTime: f.state.start }],
+    processes: [{ pid: 40, startTime: processFixtureStart(f.state.start) }],
     shell: { pid: 30 },
   });
 });
@@ -77,7 +80,7 @@ it("proves a hand-started native process before Herdr reports its session", asyn
   expect(pending).toMatchObject({
     nativeSessionPending: true,
     nativeOccupantId: expect.stringMatching(/^process-/u),
-    processes: [{ pid: 40, startTime: f.state.start }],
+    processes: [{ pid: 40, startTime: processFixtureStart(f.state.start) }],
     shell: { pid: 30 },
   });
   f.state.native = "session";

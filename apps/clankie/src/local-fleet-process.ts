@@ -1,11 +1,9 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { Socket } from "node:net";
 import { isAbsolute, join, resolve } from "node:path";
-import { promisify } from "node:util";
 import { z } from "zod";
+import { nativeProcessRequest, type NativeTransportReason } from "./native-process-transport.ts";
 
-const exec = promisify(execFile);
 const birth = z.tuple([z.string().regex(/^[1-9]\d{0,19}$/u), z.string().regex(/^\d{1,6}$/u)]);
 const pid = z.number().int().min(2).max(2_147_483_647);
 const SnapshotSchema = z
@@ -26,6 +24,126 @@ const SnapshotSchema = z
   })
   .strict();
 
+const ProcessSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    processes: z
+      .array(
+        z
+          .object({
+            pid,
+            ppid: z.number().int().min(0).max(2_147_483_647),
+            uid: z.number().int().min(0),
+            birth,
+            executable: z.string().min(1).max(4096).refine(isAbsolute),
+            argv: z.array(z.string().max(4096)).max(2),
+          })
+          .strict(),
+      )
+      .length(2),
+  })
+  .strict();
+
+export type NativeProcessSnapshot = z.infer<typeof ProcessSnapshotSchema>;
+
+/** Lossless kernel birth, including microseconds; never a display timestamp. */
+export function nativeProcessStart(birth: readonly [string, string]): string {
+  return `${birth[0]}.${birth[1].padStart(6, "0")}`;
+}
+
+const ProcessBirthSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    process: z
+      .object({
+        pid,
+        uid: z.number().int().nonnegative(),
+        birth,
+      })
+      .strict(),
+  })
+  .strict();
+
+/** Fresh same-user process lifetime only; no executable, argv or display-time authority. */
+export async function observeNativeBirth(processPid: number): Promise<readonly [string, string] | undefined> {
+  if (process.platform !== "darwin" || !pid.safeParse(processPid).success) return undefined;
+  try {
+    const reply = await nativeProcessRequest(fleetProcessHelper(), ["--birth", String(processPid)]);
+    if (!reply) return undefined;
+    const result = ProcessBirthSchema.parse(JSON.parse(reply.stdout)).process;
+    return result.pid === processPid && result.uid === process.getuid?.() ? result.birth : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Existing server registration plus actual listener/launch observations, never caller authority. */
+export async function observeCodexServer(
+  processPid: number,
+  endpoint: string,
+  canonicalSocketPath: string,
+): Promise<readonly [string, string] | undefined> {
+  if (process.platform !== "darwin" || !pid.safeParse(processPid).success) return undefined;
+  try {
+    const reply = await nativeProcessRequest(fleetProcessHelper(), [
+      "--codex-server",
+      String(processPid),
+      Buffer.from(endpoint).toString("hex"),
+      Buffer.from(canonicalSocketPath).toString("hex"),
+    ]);
+    if (!reply) return undefined;
+    const result = ProcessBirthSchema.parse(JSON.parse(reply.stdout)).process;
+    return result.pid === processPid && result.uid === process.getuid?.() ? result.birth : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Compatibility comparison for old server-owned ps receipts; new receipts retain microseconds. */
+export function nativeProcessReceipt(birth: readonly [string, string], previous?: string): string {
+  if (previous === undefined || /^\d+\.\d{6}$/u.test(previous)) return nativeProcessStart(birth);
+  const date = new Date(Number(birth[0]) * 1_000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()]} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getMonth()]} ${String(date.getDate()).padStart(2, " ")} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${date.getFullYear()}`;
+}
+
+/** Fresh same-user kernel executable/argv/lifetime observations, never a shell fallback. */
+export async function observeNativeProcesses(
+  shellPid: number,
+  agentPid: number,
+  processHelper = fleetProcessHelper(),
+  execute?: (command: string, args: string[]) => Promise<string>,
+  signal?: AbortSignal,
+): Promise<NativeProcessSnapshot | undefined> {
+  if (
+    (execute === undefined && process.platform !== "darwin") ||
+    !isAbsolute(processHelper) ||
+    !pid.safeParse(shellPid).success ||
+    !pid.safeParse(agentPid).success ||
+    shellPid === agentPid
+  )
+    return undefined;
+  try {
+    const args = ["--processes", String(shellPid), String(agentPid)];
+    const stdout = execute
+      ? await execute(processHelper, args)
+      : (await nativeProcessRequest(processHelper, args, signal))?.stdout;
+    if (stdout === undefined) return undefined;
+    const parsed = ProcessSnapshotSchema.safeParse(JSON.parse(stdout));
+    if (!parsed.success) return undefined;
+    const snapshot = parsed.data;
+    if (
+      snapshot.processes[0]!.pid !== shellPid ||
+      snapshot.processes[1]!.pid !== agentPid ||
+      snapshot.processes.some((processIdentity) => processIdentity.uid !== process.getuid?.())
+    )
+      return undefined;
+    return snapshot;
+  } catch {
+    return undefined;
+  }
+}
+
 const DiagnosticSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -41,6 +159,8 @@ const DiagnosticSchema = z
       "ancestry",
       "final_socket",
       "completion",
+      "executable",
+      "argv",
     ]),
     reason: z.enum([
       "clock_unavailable",
@@ -65,6 +185,11 @@ const DiagnosticSchema = z
       "ancestry_unavailable",
       "ancestry_changed",
       "attempts_exhausted",
+      "executable_unavailable",
+      "argv_unavailable",
+      "argv_invalid",
+      "executable_changed",
+      "argv_changed",
     ]),
     errno: z.number().int().min(0),
     attempt: z.number().int().min(0).max(3),
@@ -121,6 +246,7 @@ export async function observeSocketProcess(
   processHelper: string,
   expected?: NativeSocketOwner,
   report?: (event: NativeProcessDiagnostic) => void,
+  transportReport?: (reason: NativeTransportReason) => void,
 ): Promise<NativeSocketProcess | undefined> {
   if (
     process.platform !== "darwin" ||
@@ -135,7 +261,7 @@ export async function observeSocketProcess(
   )
     return undefined;
   try {
-    const { stdout, stderr } = await exec(
+    const reply = await nativeProcessRequest(
       processHelper,
       [
         String(socket.remotePort),
@@ -143,8 +269,11 @@ export async function observeSocketProcess(
         ...(expected === undefined ? [] : [String(expected.pid), ...expected.birth, expected.socket]),
         ...(report === undefined ? [] : ["--diagnostics"]),
       ],
-      { timeout: 1_000, maxBuffer: 65_536, encoding: "utf8" },
+      undefined,
+      transportReport,
     );
+    if (!reply) return undefined;
+    const { stdout, stderr } = reply;
     nativeDiagnostics(stderr, report);
     const result = SnapshotSchema.safeParse(JSON.parse(stdout));
     if (!result.success) return undefined;

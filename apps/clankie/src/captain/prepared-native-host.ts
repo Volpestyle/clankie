@@ -1,5 +1,4 @@
-import { createConnection, type Socket } from "node:net";
-import { randomUUID } from "node:crypto";
+import type { Socket } from "node:net";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { realpath } from "node:fs/promises";
@@ -9,6 +8,8 @@ import { clientPid } from "../local-fleet-proof.ts";
 import type { SeatProcessIdentity } from "@clankie/agent-hosts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { fleetQualified } from "../herdr-fleet.ts";
+
+import { nativeRequest } from "../herdr-native-request.ts";
 
 const execute = promisify(execFile);
 const Birth = z.object({
@@ -292,48 +293,4 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
       };
     },
   };
-}
-
-function nativeRequest(binding: HerdrBinding, method: string, params: unknown): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const socket = createConnection(binding.socketPath);
-    const id = randomUUID();
-    let text = "";
-    let finished = false;
-    const finish = (error?: Error, value?: unknown) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      socket.destroy();
-      if (error) reject(error);
-      else resolve(value);
-    };
-    const timer = setTimeout(
-      () =>
-        finish(
-          new Error(
-            `${method === "layout.apply" ? "Native pane creation unconfirmed" : "Native control unavailable"}; no automatic retry`,
-          ),
-        ),
-      10_000,
-    );
-    socket.on("error", () =>
-      finish(new Error("Native control socket unavailable; allocation may be unconfirmed")),
-    );
-    socket.on("close", () => finish(new Error("Native control reply unavailable; no retry")));
-    socket.on("connect", () => socket.write(`${JSON.stringify({ id, method, params })}\n`));
-    socket.on("data", (chunk: Buffer) => {
-      text += chunk.toString("utf8");
-      if (text.length > 1024 * 1024) return finish(new Error("Native control response too large"));
-      const newline = text.indexOf("\n");
-      if (newline < 0) return;
-      try {
-        const value = JSON.parse(text.slice(0, newline));
-        if (value.id !== id || value.error) return finish(new Error("Native control refused request"));
-        finish(undefined, value);
-      } catch {
-        finish(new Error("Invalid native control response"));
-      }
-    });
-  });
 }

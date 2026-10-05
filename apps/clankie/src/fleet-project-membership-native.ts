@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import type { HerdrBinding } from "@clankie/protocol";
 import { parseHerdrAgentList } from "./captain/herdr-census.ts";
-import { pinHerdrEnvironment } from "./herdr-session.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
+import { nativeRequest } from "./herdr-native-request.ts";
 
 /** Only this read's subprocesses are canceled. Existing tool-proof runners are unchanged. */
 export async function membershipNativeCommand(
@@ -34,12 +34,7 @@ export function fleetMembershipNative(binding: () => Promise<HerdrBinding | unde
   return {
     async roster(current: HerdrBinding, signal: AbortSignal) {
       return parseHerdrAgentList(
-        await membershipNativeCommand(
-          "herdr",
-          ["agent", "list"],
-          signal,
-          pinHerdrEnvironment({ ...process.env }, current.socketPath),
-        ),
+        JSON.stringify(await nativeRequest(current, "agent.list", {}, { signal, timeoutMs: 5_000 })),
       );
     },
     async observe(pane: string, expected: HerdrBinding, signal: AbortSignal) {
@@ -51,7 +46,7 @@ export function fleetMembershipNative(binding: () => Promise<HerdrBinding | unde
           signal.throwIfAborted();
           return JSON.stringify(current) === JSON.stringify(expected) ? current : undefined;
         },
-        run: (file, args, env) => membershipNativeCommand(file, args, signal, env),
+        signal,
       });
       return observe("default", pane);
     },
