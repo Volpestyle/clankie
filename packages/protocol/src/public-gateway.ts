@@ -39,6 +39,8 @@ import {
 } from "./device-push.ts";
 import { DEVICE_WAKE_KEY_PATH } from "./wake.ts";
 import { HOSTED_CREDITS_PATH } from "./hosted-credits.ts";
+import { FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
+import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** ADR 0151's host-to-gateway multiplexing protocol. */
 export const PUBLIC_GATEWAY_SCHEMA_VERSION = 1 as const;
@@ -99,7 +101,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
   { method: "POST", path: "/operator/v1/terminal-tail", target: "relay" },
   { method: "POST", path: OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH, target: "relay" },
-  // Device reads and owner guidance the relay authorizes per grant; settings
+  // Device reads and owner guidance the relay authorizes per grant; Discord settings
   // and voice writes ride the hosted operator bridge instead.
   { method: "GET", path: BODY_LEASE_STATUS_PATH, target: "relay" },
   { method: "GET", path: DISCORD_ROOMS_PATH, target: "relay" },
@@ -109,6 +111,10 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: DISCORD_VOICE_TRANSCRIPTS_PATH, target: "relay" },
   { method: "POST", path: DISCORD_ROOM_GUIDANCE_PATH, target: "relay" },
   { method: "POST", path: DISCORD_SETUP_TEST_POST_PATH, target: "relay" },
+  { method: "GET", path: FLEET_SETTINGS_PATH, target: "relay" },
+  { method: "POST", path: FLEET_SETTINGS_PATH, target: "relay" },
+  { method: "GET", path: PROJECTS_PATH, target: "relay" },
+  { method: "POST", path: PROJECT_UPDATE_SETTINGS_PATH, target: "relay" },
 ] as const;
 
 /**
@@ -262,6 +268,11 @@ export function publicGatewayTargetFor(
   path: string,
 ): PublicGatewayTarget | undefined {
   if (method === "POST" && /^\/v1\/devices\/[A-Za-z0-9_-]{1,128}\/revoke$/u.test(path)) return "control";
+  // Only the explicit autonomy projection may ride a query-bearing route.
+  // Preserve that query for the relay's own validation; never normalize others.
+  if (method === "GET" && path === `${PROJECTS_PATH}?includeAutonomy=true`) path = PROJECTS_PATH;
+  if (method === "POST" && path === `${PROJECT_UPDATE_SETTINGS_PATH}?includeAutonomy=true`)
+    path = PROJECT_UPDATE_SETTINGS_PATH;
   return PUBLIC_GATEWAY_ROUTES.find((route) => route.method === method && route.path === path)?.target;
 }
 

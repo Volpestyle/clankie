@@ -288,7 +288,14 @@ async function installHarnessBridges(options) {
         : managed
           ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install ${pluginId}.` : `Use its source setup to install ${pluginId}; no config file will be modified here.`}`
           : `Install clankie-worker@clankie-fleet from ${marketplace} through Codex's native plugin manager (bridge and skills).`;
-    if (!(await options.consent(harness, detail))) {
+    if (
+      !(await options.consent(harness, detail, {
+        profile: harness === "claude" ? profile : codexProfile,
+        source,
+        managed,
+        ...(sourceSetup ? { sourceSetup } : {}),
+      }))
+    ) {
       results.push({ harness, profile, status: "declined", detail });
       continue;
     }

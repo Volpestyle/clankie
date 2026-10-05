@@ -3,6 +3,8 @@ import {
   FLEET_MODEL_MODES,
   FLEET_SIZE_GUIDANCE,
   FLEET_SIZES,
+  FLEET_CLOSURE_GUIDANCE,
+  FLEET_MACHINE_SETUP_GUIDANCE,
   SettingsStore,
   type FleetModelMode,
   type FleetSize,
@@ -41,7 +43,7 @@ export function buildFleetCommands(services: FleetCommandServices): FaceShellCom
           await runFleetCommand(["clear"], { settings: services.settings });
           shell.insertCommandResult(
             "/fleet clear",
-            "Cleared. Swarm size max, models optimal, fleet tools connected, peer messages on, and he picks a harness per job with nothing from you.",
+            "Cleared. Fleet size max, models optimal, closure and machine setup lead, fleet tools connected, peer messages on, and he picks a harness per job with nothing from you.",
             "success",
           );
           return;
@@ -78,9 +80,9 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
   const flow = shell.setupFlow;
   flow.begin("fleet");
   try {
-    const current = (await services.settings.load()).fleet;
+    const current = (await fleetStatus({ settings: services.settings })).fleet;
     const size = await flow.readSelect({
-      message: "Fleet — the swarm size to aim for (a target, not a cap)",
+      message: "Fleet — the fleet size to aim for (a target, not a cap)",
       options: FLEET_SIZES.map((value) => ({ value, label: value, description: FLEET_SIZE_GUIDANCE[value] })),
       initialValue: current.size,
       currentValue: current.size,
@@ -137,6 +139,30 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       allowBack: true,
     });
     if (peerMessages !== "on" && peerMessages !== "off") return;
+    const closure = await flow.readSelect({
+      message: "Fleet — who accepts and closes completed tracked work",
+      options: (["lead", "owner"] as const).map((value) => ({
+        value,
+        label: value,
+        description: FLEET_CLOSURE_GUIDANCE[value],
+      })),
+      initialValue: current.closure,
+      currentValue: current.closure,
+      allowBack: true,
+    });
+    if (closure !== "lead" && closure !== "owner") return;
+    const machineSetup = await flow.readSelect({
+      message: "Fleet — who approves harness setup on linked machines",
+      options: (["lead", "owner"] as const).map((value) => ({
+        value,
+        label: value,
+        description: FLEET_MACHINE_SETUP_GUIDANCE[value],
+      })),
+      initialValue: current.machineSetup,
+      currentValue: current.machineSetup,
+      allowBack: true,
+    });
+    if (machineSetup !== "lead" && machineSetup !== "owner") return;
     const notes = await flow.readText({
       message: "Fleet — which agents you want on what, and when (empty: he decides)",
       defaultValue: current.notes,
@@ -147,11 +173,11 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
     });
     if (notes === undefined) return;
     await fleetUpdate(
-      { size, models, tools, peerMessages, notes: notes.trim() },
+      { size, models, tools, peerMessages, closure, machineSetup, notes: notes.trim() },
       { settings: services.settings },
     );
     flow.renderLine(
-      "Saved. Fleet tool access and peer-message settings apply immediately. Run `clankie restart` to apply routing preferences.",
+      "Saved. Fleet autonomy, tool access and peer-message settings apply immediately. Run `clankie restart` to apply routing preferences.",
       "success",
     );
   } finally {

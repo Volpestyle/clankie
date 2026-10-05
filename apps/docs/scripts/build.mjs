@@ -359,6 +359,34 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/operator/fleet-settings",
+      {
+        access: "Encrypted live device bearer with terminalControl (Take Control)",
+        purpose: "Read the owner's fleet size, models, work closure and machine setup responsibility.",
+      },
+    ],
+    [
+      "POST /v1/operator/fleet-settings",
+      {
+        access: "Encrypted live device bearer with terminalControl (Take Control)",
+        purpose: "Update fleet settings against the current revision and owner authority.",
+      },
+    ],
+    [
+      "GET /v1/operator/projects",
+      {
+        access: "Encrypted live device bearer with terminalControl (Take Control)",
+        purpose: "Read project settings, including autonomy overrides when explicitly requested.",
+      },
+    ],
+    [
+      "POST /v1/operator/projects/update",
+      {
+        access: "Encrypted live device bearer with terminalControl (Take Control)",
+        purpose: "Update project settings and fleet responsibility overrides with current owner authority.",
+      },
+    ],
+    [
       "POST /v1/hosted/pair-offer",
       {
         access: "Single-use fleet ticket bound to the browser key; managed bodies only",

@@ -183,6 +183,28 @@ Use the actual approved checkout as the hire's `workingDirectory`. Workspace
 changes use the operator endpoint; a hire cannot grant itself another location.
 Capacity is configured per runtime with `clankie runtime capacity ID N|--clear`.
 
+## Fleet responsibility settings
+
+`clankie fleet status` shows global `fleet.closure` and `fleet.machineSetup`;
+`clankie project settings PROJECT` shows that project's independent overrides
+and effective values. Both default to `lead`. `clankie fleet set --closure
+lead|owner --machine-setup lead|owner` changes the defaults. Use `clankie project
+settings PROJECT --closure lead|owner|inherit --machine-setup lead|owner|inherit`
+to override or restore inheritance for either field.
+
+With closure `lead`, the lead closes landed work to Done once relevant checks
+pass and evidence is attached; workers report without parking for owner
+acceptance, and the owner may reopen. Closure `owner` parks delivered work In
+Review. Genuine owner-only gates such as App Store submission, payments, evals
+or owner-account sign-ups get linked follow-ups without keeping delivered work
+open. Never mark unperformed work or missing verification as passed.
+
+Machine setup `lead` permits Clankie's own harness plugins, bridges and worker
+setup on already-linked machines through existing authorized access. `owner`
+requires approval. These settings never grant sign-ins, codes, CAPTCHAs,
+payments, account changes, credentials or destructive actions outside fleet
+workspaces. They neither restart nor steer existing lanes.
+
 ## Cross-device agent conversations
 
 Messages includes seats from registered execution fleets. Opening a remote seat
@@ -197,8 +219,16 @@ published through the local file service.
 or Claude worker over its native channel, as locally; nothing is typed into its
 pane. Codex gets its own app-server on that machine through his ssh. Claude uses
 the `clankie-worker` plugin over the fleet's link, so a briefed remote Claude
-hire fails with the fix until the owner has run `clankie herdr prepare NAME` for
-that machine once. `herdr fleets` reports each link's state.
+hire fails with the fix until `clankie herdr prepare NAME` has prepared
+that linked machine. Read effective `fleet.machineSetup`: `lead` permits the
+lead/workers to prepare Clankie's harness plugins and bridges through existing
+authorized access; `owner` requires the owner's interactive confirmation
+(`--approve`), which a headless process cannot supply. New source setup scripts
+always need that confirmation; only exact remembered setup or the native plugin
+manager runs automatically under `lead`. Server approval receipts are caller
+claims, never proof of human presence. This
+does not grant operator CLI credentials to fleet workers. `herdr fleets` reports
+each link's state. Setup never restarts or steers existing lanes.
 
 For a source-managed remote Codex config, use
 `clankie herdr prepare NAME --codex-source-setup ABSOLUTE_REMOTE_SCRIPT` with its

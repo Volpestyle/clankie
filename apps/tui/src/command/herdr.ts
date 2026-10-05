@@ -3,7 +3,7 @@ import type { HerdrBinding } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath, type HerdrSettings } from "@clankie/settings";
 
 const HERDR_USAGE =
-  "Usage: clankie herdr [status|open|create|disable]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external|disabled\n       clankie herdr fleets\n       clankie herdr add NAME --ssh HOST --session SESSION [--shell posix|powershell]\n       clankie herdr remove NAME\n       clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]";
+  "Usage: clankie herdr [status|open|create|disable]\n       clankie herdr use NAME\n       clankie herdr set --session NAME\n       clankie herdr set --runtime auto|bundled|external|disabled\n       clankie herdr fleets\n       clankie herdr add NAME --ssh HOST --session SESSION [--shell posix|powershell]\n       clankie herdr remove NAME\n       clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT] [--project PROJECT] [--approve]";
 
 /**
  * Remote fleets are runtime connections with an ssh transport (ADR 0184,
@@ -16,12 +16,17 @@ export function herdrFleetRuntimeArgs(args: readonly string[]): string[] | undef
   if (verb === "remove" && args.length === 2 && name !== undefined) return ["disconnect", name];
   if (verb === "add" && name !== undefined && rest.includes("--ssh")) return ["connect", name, ...rest];
   // Prepare native workers on that machine, optionally through its source-owned Codex setup.
-  if (
-    verb === "prepare" &&
-    name !== undefined &&
-    (rest.length === 0 || (rest.length === 2 && rest[0] === "--codex-source-setup"))
-  )
+  if (verb === "prepare" && name) {
+    const seen = new Set<string>();
+    for (let index = 0; index < rest.length; index++) {
+      const flag = rest[index]!;
+      if (seen.has(flag) || !["--approve", "--project", "--codex-source-setup"].includes(flag))
+        throw new Error(HERDR_USAGE);
+      seen.add(flag);
+      if (flag !== "--approve" && !rest[++index]) throw new Error(HERDR_USAGE);
+    }
     return ["prepare", name, ...rest];
+  }
   if (verb === "add" || verb === "remove" || verb === "fleets" || verb === "prepare")
     throw new Error(HERDR_USAGE);
   return undefined;

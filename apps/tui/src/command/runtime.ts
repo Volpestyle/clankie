@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { posix, win32 } from "node:path";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
+import { confirmMachineSetupApproval, machineSetupContext } from "./machine-setup.ts";
 
 export async function runRuntimeCommand(
   args: readonly string[],
@@ -10,6 +11,7 @@ export async function runRuntimeCommand(
     host?: string;
     fetchImpl?: typeof fetch;
     operatorCredentialStore?: CredentialStore;
+    cwd?: string;
   } = {},
 ): Promise<Record<string, unknown>> {
   let path = "/v1/runtime-connections",
@@ -86,18 +88,74 @@ export async function runRuntimeCommand(
   } else if (["harnesses", "membership"].includes(args[0] ?? "") && args.length === 2) {
     path = `/v1/runtime-connections/${encodeURIComponent(args[1]!)}/${args[0]}`;
   } else if (args[0] === "prepare") {
-    if (args.length !== 2 && !(args.length === 4 && args[2] === "--codex-source-setup"))
-      throw new Error("Usage: clankie runtime prepare ID [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]");
-    const codexSourceSetup = args[3];
+    const usage =
+      "Usage: clankie runtime prepare ID [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT] [--project PROJECT] [--approve]";
+    if (!args[1]) throw new Error(usage);
+    const flags = new Map<string, string>();
+    let approvalRequested = false;
+    for (let index = 2; index < args.length; index++) {
+      const flag = args[index]!;
+      if (flag === "--approve" && !approvalRequested) {
+        approvalRequested = true;
+        continue;
+      }
+      if (
+        !["--codex-source-setup", "--project"].includes(flag) ||
+        flags.has(flag) ||
+        args[index + 1] === undefined
+      )
+        throw new Error(usage);
+      flags.set(flag, args[++index]!);
+    }
+    const codexSourceSetup = flags.get("--codex-source-setup");
     if (
       codexSourceSetup !== undefined &&
       (/\p{Cc}/u.test(codexSourceSetup) ||
         !(posix.isAbsolute(codexSourceSetup) || win32.isAbsolute(codexSourceSetup)))
     )
       throw new Error("Codex source setup must be an absolute script path on the remote machine");
+    if (codexSourceSetup !== undefined && !approvalRequested)
+      throw new Error(
+        "New Codex source setup requires interactive owner approval; use --approve in an interactive terminal.",
+      );
+    const requestedProject = flags.get("--project");
+    const contextOptions = {
+      ...options,
+      ...(requestedProject === undefined ? {} : { projectId: requestedProject }),
+    };
+    const context = await machineSetupContext(args[1], contextOptions);
+    let ownerApproved = false;
+    if (approvalRequested) {
+      await confirmMachineSetupApproval(
+        `Prepare harness bridges on machine ${context.machine.id} (${args[1]}) from ${context.workingDirectory}${context.projectId ? ` (project ${context.projectId})` : ""}.${codexSourceSetup ? ` Run and remember Codex source setup ${codexSourceSetup}.` : ""}`,
+      );
+      const after = await machineSetupContext(args[1], contextOptions);
+      if (
+        after.projectId !== context.projectId ||
+        after.workingDirectory !== context.workingDirectory ||
+        after.machine.id !== context.machine.id ||
+        after.machine.targetRevision !== context.machine.targetRevision
+      )
+        throw new Error("The setup workspace, project or machine changed during approval.");
+      ownerApproved = true;
+    }
+    if (context.effective.machineSetup === "owner" && !ownerApproved)
+      throw new Error(
+        "Machine setup requires owner approval; review the proposed setup and use the owner's explicit --approve.",
+      );
+    if (!context.machine.linked && !ownerApproved)
+      throw new Error(
+        "Automatic machine setup requires an already-linked machine; ask the owner to approve or connect it.",
+      );
     path = `/v1/runtime-connections/${encodeURIComponent(args[1]!)}/prepare`;
     method = "POST";
-    if (codexSourceSetup !== undefined) body = JSON.stringify({ codexSourceSetup });
+    body = JSON.stringify({
+      workingDirectory: context.workingDirectory,
+      expectedMachineRevision: context.machine.targetRevision,
+      ...(context.projectId === undefined ? {} : { projectId: context.projectId }),
+      ownerApproved,
+      ...(codexSourceSetup === undefined ? {} : { codexSourceSetup }),
+    });
   } else if (args[0] === "disconnect" && args.length === 2) {
     method = "DELETE";
     path += `/${encodeURIComponent(args[1]!)}`;

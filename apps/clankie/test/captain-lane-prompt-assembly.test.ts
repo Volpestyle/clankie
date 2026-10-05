@@ -65,14 +65,16 @@ describe("lane prompt assembly", () => {
     expect(operator).toContain("# Your fleet");
     expect(operator).toContain("never codex on Swift.");
     // Preference, not a router: he is told he still decides.
-    expect(operator).toContain("not a rule you execute");
+    expect(operator).toContain("still choose a harness for each job");
     expect(operator.indexOf("# Machine access")).toBeLessThan(operator.indexOf("# Your fleet"));
     expect(operator.indexOf("# Your fleet")).toBeLessThan(operator.indexOf("# Your address"));
     expect(operator).not.toMatch(/\n\n\n/u);
     // A room with no shell cannot dispatch, so the section is dead weight there.
     expect(assembleLanePrompt("discord_presence", false, withFleet)).not.toContain("# Your fleet");
-    // Unset renders nothing rather than an empty heading.
-    expect(assembleLanePrompt("operator", true, settings)).not.toContain("# Your fleet");
+    // Default responsibility stays explicit even without routing notes.
+    const defaults = assembleLanePrompt("operator", true, settings);
+    expect(defaults).toContain("Work closure: lead.");
+    expect(defaults).toContain("Machine setup: lead.");
   });
 
   it("states the owner's budget as a target, and a non-default budget alone renders the section", () => {
@@ -82,10 +84,10 @@ describe("lane prompt assembly", () => {
     });
     const operator = assembleLanePrompt("operator", true, efficient);
     expect(operator).toContain("# Your fleet");
-    expect(operator).toContain("Swarm size: small.");
+    expect(operator).toContain("Fleet size: small.");
     expect(operator).toContain("Models: efficient.");
     // A target the lead sizes toward, never a cap he is held to.
-    expect(operator).toContain("not a cap");
+    expect(operator).toContain("not caps");
     expect(operator).not.toMatch(/\n\n\n/u);
     expect(assembleLanePrompt("discord_presence", false, efficient)).not.toContain("# Your fleet");
     // With notes, the default budget still rides along so he knows it is unlimited.
@@ -94,7 +96,7 @@ describe("lane prompt assembly", () => {
       fleet: { notes: "codex is the workhorse." },
     });
     const withNotes = assembleLanePrompt("operator", true, notesOnly);
-    expect(withNotes).toContain("Swarm size: max.");
+    expect(withNotes).toContain("Fleet size: max.");
     expect(withNotes).toContain("No ceiling");
     expect(withNotes.indexOf("Models: optimal.")).toBeLessThan(withNotes.indexOf("codex is the workhorse."));
   });
