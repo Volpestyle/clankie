@@ -373,14 +373,6 @@ function buildNetworkRows() {
       },
     ],
     [
-      "GET /v1/hosted/credits",
-      {
-        access: "Encrypted live device bearer; managed bodies only",
-        purpose:
-          "Read the account’s AI credits (pack, top-ups, low-balance flag, top-up page) from the fleet. Self-hosted bodies return 404.",
-      },
-    ],
-    [
       "POST /v1/discord/ingress",
       {
         purpose: "A trusted Discord connection delivers a sealed addressed turn",

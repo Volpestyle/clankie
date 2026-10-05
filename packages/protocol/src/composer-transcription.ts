@@ -7,9 +7,6 @@ export const COMPOSER_TRANSCRIPTION_CHUNK_PATH = `${COMPOSER_TRANSCRIPTION_ROOT}
 export const COMPOSER_TRANSCRIPTION_COMMIT_PATH = `${COMPOSER_TRANSCRIPTION_ROOT}/commit`;
 export const COMPOSER_TRANSCRIPTION_CANCEL_PATH = `${COMPOSER_TRANSCRIPTION_ROOT}/cancel`;
 export const COMPOSER_TRANSCRIPTION_RECEIPT_PATH = `${COMPOSER_TRANSCRIPTION_ROOT}/receipt`;
-export const HOSTED_COMPOSER_STATUS_PATH = "/fleet/v1/model/composer/status";
-export const HOSTED_COMPOSER_TRANSCRIBE_PATH = "/fleet/v1/model/composer/transcribe";
-export const HOSTED_COMPOSER_RECEIPT_PATH = "/fleet/v1/model/composer/receipt";
 export const COMPOSER_TRANSCRIPTION_DURATION_MS_MAX = 180_000;
 export const COMPOSER_TRANSCRIPTION_CHUNK_BYTES_MAX = 256 * 1024;
 export const COMPOSER_TRANSCRIPTION_AUDIO_BYTES_MAX = 180 * 16_000 * 2 + 64 * 1024 + 44;
@@ -80,28 +77,6 @@ export const ComposerTranscriptionReceiptSchema = ComposerTranscriptionRequestSc
 export type ComposerTranscriptionReceipt = z.infer<typeof ComposerTranscriptionReceiptSchema>;
 export type ComposerTranscriptionBegin = z.infer<typeof ComposerTranscriptionBeginSchema>;
 export type ComposerTranscriptionChunk = z.infer<typeof ComposerTranscriptionChunkSchema>;
-export const ComposerTranscriptionDeviceSchema = z
-  .object({
-    installationId: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
-    deviceId: z.string().min(1).max(128),
-    authKeyId: z.string().regex(/^[A-Za-z0-9_-]{22}$/u),
-    sessionExpiresAtMs: z.number().int().positive(),
-    chat: z.literal(true),
-    support: z.literal(false),
-  })
-  .strict();
-export type ComposerTranscriptionDevice = z.infer<typeof ComposerTranscriptionDeviceSchema>;
-export const HostedComposerTranscriptionSchema = ComposerTranscriptionDeviceSchema.extend({
-  requestId: ComposerTranscriptionRequestIdSchema,
-  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  audioBase64: Base64.min(4).max(Math.ceil(COMPOSER_TRANSCRIPTION_AUDIO_BYTES_MAX / 3) * 4),
-}).strict();
-export const HostedComposerReceiptSchema = ComposerTranscriptionDeviceSchema.extend({
-  requestId: ComposerTranscriptionRequestIdSchema,
-}).strict();
-export type HostedComposerTranscription = z.infer<typeof HostedComposerTranscriptionSchema>;
-export type HostedComposerReceipt = z.infer<typeof HostedComposerReceiptSchema>;
-
 /** Bound the actual RIFF sample data; client duration and container labels grant no allowance. */
 export function parseComposerWav(audio: Uint8Array): { durationMs: number; dataBytes: number } {
   const invalid = () => new Error("invalid_audio");

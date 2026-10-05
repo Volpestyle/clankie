@@ -5,7 +5,6 @@ import {
 } from "@clankie/protocol/activity-sharing";
 import { createHash, createPublicKey, randomBytes, sign, verify, type KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { availableParallelism } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import {
@@ -13,7 +12,6 @@ import {
   PublicGatewayInstallationIdSchema,
   PublicGatewayHostIdSchema,
 } from "@clankie/protocol/public-gateway";
-import { HostedCreditsSchema, type HostedCredits } from "@clankie/protocol/hosted-credits";
 import {
   SupportAccessCommandSchema,
   SupportGrantSyncSchema,
@@ -39,36 +37,9 @@ import {
   HostedDevicePurposeRequestSchema,
   HostedSupportDeviceStateSchema,
 } from "@clankie/protocol/hosted-device-security";
-import { parseProtocolResponse, safeParseProtocolResponse } from "@clankie/protocol";
-import {
-  HOSTED_COMPOSER_STATUS_PATH,
-  HOSTED_COMPOSER_TRANSCRIBE_PATH,
-  HOSTED_COMPOSER_RECEIPT_PATH,
-  ComposerTranscriptionDeviceSchema,
-  HostedComposerTranscriptionSchema,
-  HostedComposerReceiptSchema,
-  ComposerTranscriptionStatusSchema,
-  ComposerTranscriptionReceiptSchema,
-  ComposerTranscriptionErrorSchema,
-  type ComposerTranscriptionDevice,
-  type HostedComposerTranscription,
-  type HostedComposerReceipt,
-} from "@clankie/protocol/composer-transcription";
-import {
-  loadConfig,
-  parseModelRef,
-  subscriptionRefFor,
-  updateGlobalConfig,
-  updateModelRouting,
-  type ClankieConfig,
-} from "@clankie/model-provider";
+import { parseModelRef } from "@clankie/model-provider";
 
-const ModelRefSchema = z
-  .string()
-  .max(512)
-  .refine((ref) => parseModelRef(ref) !== undefined, "expected providerId/modelId");
-
-const BootstrapSchema = z
+export const genericBootstrapSchema = z
   .object({
     hostCredential: z.string().min(1).max(8192),
     credentialExpiresAtMs: z.number().int().positive(),
@@ -85,8 +56,6 @@ const BootstrapSchema = z
       .string()
       .regex(/^[A-Za-z0-9_-]{43}$/u)
       .optional(),
-    /** The plan's limit on hired agents running at once (VUH-1388); absent, two per vCPU. */
-    maxHiredWorkers: z.number().int().min(1).max(64).optional(),
     /** Public developer-app IDs only; customer/provider secrets are broker-only. */
     accounts: z
       .object({
@@ -104,19 +73,6 @@ const BootstrapSchema = z
       })
       .strict()
       .optional(),
-    /**
-     * The plan's task-based model routing. Absent leaves the body's own
-     * routing untouched; present, it is written over the body's routing
-     * settings at every start, so a plan change lands on the next boot.
-     */
-    modelRouting: z
-      .object({
-        routineModel: ModelRefSchema,
-        escalate: z.boolean(),
-        escalationModel: ModelRefSchema.optional(),
-      })
-      .strict()
-      .optional(),
   })
   .strict()
   .superRefine((bootstrap, context) => {
@@ -130,7 +86,26 @@ const BootstrapSchema = z
         message: "must be the gateway account callback",
       });
   });
-export type HostedBodyBootstrap = z.infer<typeof BootstrapSchema>;
+export type HostedBodyBootstrap = z.infer<typeof genericBootstrapSchema>;
+
+// Validate the complete legacy wire before projecting generic identity fields.
+// Only these known provider-owned fields may accompany them; secrets and typos
+// remain errors. The loaded provider owns applying their policy.
+const BootstrapModelRefSchema = z
+  .string()
+  .max(512)
+  .refine((ref) => parseModelRef(ref) !== undefined);
+const bootstrapFileSchema = genericBootstrapSchema.safeExtend({
+  maxHiredWorkers: z.number().int().min(1).max(64).optional(),
+  modelRouting: z
+    .object({
+      routineModel: BootstrapModelRefSchema,
+      escalate: z.boolean(),
+      escalationModel: BootstrapModelRefSchema.optional(),
+    })
+    .strict()
+    .optional(),
+});
 
 /** Public client configuration reaches the body, never a customer token. */
 export async function applyHostedAccountApps(
@@ -147,156 +122,17 @@ export async function applyHostedAccountApps(
   }));
 }
 
-/** Applies the plan's routing (see `modelRouting`) to the body's model config. */
-export async function applyHostedModelRouting(
-  bootstrap: Pick<HostedBodyBootstrap, "modelRouting">,
-  options: { env?: NodeJS.ProcessEnv } = {},
-): Promise<void> {
-  const routing = bootstrap.modelRouting;
-  if (routing === undefined) return;
-  await updateModelRouting(
-    {
-      routineModel: routing.routineModel,
-      escalate: routing.escalate,
-      escalationModel: routing.escalationModel ?? null,
-    },
-    options,
-  );
-}
-
-/** The included model: the fleet proxy's `default` alias, reached through the loopback forwarder. */
-const HOSTED_MODEL_PROVIDER = "clankie";
-export const HOSTED_DEFAULT_MODEL = `${HOSTED_MODEL_PROVIDER}/default`;
-
-/**
- * The proxy's three aliases as one provider. The body never learns which
- * model an alias is pinned to, nor prices it: the proxy does both. Limits
- * are the proxy's clamps, with the context kept under the pinned model's
- * long-context price tier.
- */
-const HOSTED_ALIAS_MODEL = {
-  reasoning: true,
-  tool_call: true,
-  attachment: true,
-  temperature: false,
-  modalities: { input: ["text", "image"], output: ["text"] },
-  // The proxy bounds output per plan at 32,768 (VUH-1391); Pi sends this as the
-  // request's output cap, so it must match or long answers stop at the old 8,192.
-  limit: { context: 272_000, output: 32_768 },
-  reasoning_options: [{ type: "effort", values: ["none", "low", "medium", "high", "xhigh", "max"] }],
-};
-
-/**
- * Points the included model at the forwarder (fleet README, "What the body's
- * forwarder must do"): OpenAI's Responses protocol with no key, since the
- * forwarder signs every call. Which model runs is {@link applyHostedModelPolicy}'s.
- */
-export async function configureHostedModels(
-  baseURL: string,
-  options: { env?: NodeJS.ProcessEnv } = {},
-): Promise<void> {
-  await updateGlobalConfig(
-    (draft) => {
-      draft.provider = {
-        ...draft.provider,
-        [HOSTED_MODEL_PROVIDER]: {
-          name: "Clankie (included)",
-          npm: "@ai-sdk/openai",
-          options: { baseURL },
-          models: Object.fromEntries(
-            (["default", "routine", "escalation"] as const).map((alias) => [
-              alias,
-              { id: alias, name: `Clankie ${alias}`, ...HOSTED_ALIAS_MODEL },
-            ]),
-          ),
-        },
-      };
-    },
-    options.env === undefined ? {} : { env: options.env },
-  );
-}
-
-/**
- * The provider of the customer's own credential behind the selected model: an
- * API key (BYOK) or a subscription login (BYOS), including the subscription an
- * `openai/…` selection runs on (ADR 0052). Undefined is the included model.
- */
-async function customerModelProvider(
-  config: ClankieConfig,
-  hasCredential: (providerId: string) => Promise<boolean>,
-): Promise<string | undefined> {
-  const selected = config.model === undefined ? undefined : parseModelRef(config.model);
-  if (selected === undefined || selected.providerId === HOSTED_MODEL_PROVIDER) return undefined;
-  if (await hasCredential(selected.providerId)) return selected.providerId;
-  const subscription = subscriptionRefFor(selected, config);
-  const subscriptionProvider =
-    subscription === undefined ? undefined : parseModelRef(subscription)?.providerId;
-  return subscriptionProvider !== undefined && (await hasCredential(subscriptionProvider))
-    ? subscriptionProvider
-    : undefined;
-}
-
-const isIncludedRef = (ref: string | undefined) => ref?.startsWith(`${HOSTED_MODEL_PROVIDER}/`) === true;
-
-/**
- * Which path a hosted body's model calls take, decided at every start and
- * after every key or model change (James, 2026-09-26):
- *
- * - The customer's own credential behind the selected model: every turn goes
- *   to their provider. The plan's routing is not applied, and routing that
- *   names the included model (what an earlier plan wrote) is cleared so no
- *   turn falls back to it. The customer's own routing settings are kept.
- * - Otherwise, included usage: `clankie/default`, with the plan's routing from
- *   the bootstrap written as before. Removing the customer's key lands here.
- */
-export async function applyHostedModelPolicy(
-  bootstrap: Pick<HostedBodyBootstrap, "modelRouting">,
-  options: { hasCredential: (providerId: string) => Promise<boolean>; env?: NodeJS.ProcessEnv },
-): Promise<"customer" | "included"> {
-  const env = options.env === undefined ? {} : { env: options.env };
-  const { config } = await loadConfig(env);
-  if ((await customerModelProvider(config, options.hasCredential)) !== undefined) {
-    const routing = config.routing;
-    if (isIncludedRef(routing?.routine_model) || isIncludedRef(routing?.escalation_model)) {
-      await updateGlobalConfig((draft) => {
-        const next = { ...draft.routing };
-        if (isIncludedRef(next.routine_model)) {
-          // The plan's routine model and its escalation switch go together.
-          delete next.routine_model;
-          delete next.escalate;
-        }
-        if (isIncludedRef(next.escalation_model)) delete next.escalation_model;
-        draft.routing = next;
-      }, env);
-    }
-    return "customer";
-  }
-  if (config.model !== HOSTED_DEFAULT_MODEL) {
-    await updateGlobalConfig((draft) => {
-      draft.model = HOSTED_DEFAULT_MODEL;
-    }, env);
-  }
-  await applyHostedModelRouting(bootstrap, env);
-  return "included";
-}
-
-/**
- * How many hired agents a hosted body runs at once (VUH-1388): the plan's
- * limit from the bootstrap, else two per vCPU (Starter 4, Pro 8).
- */
-export function hostedWorkerLimit(
-  bootstrap: Pick<HostedBodyBootstrap, "maxHiredWorkers">,
-  cpus: number = availableParallelism(),
-): number {
-  return bootstrap.maxHiredWorkers ?? Math.max(1, 2 * cpus);
-}
-
 /** Unset is a self-hosted body. Invalid managed configuration fails startup closed. */
 export function readHostedBodyBootstrap(env: NodeJS.ProcessEnv): HostedBodyBootstrap | undefined {
   const path = env.CLANKIE_HOSTED_BOOTSTRAP_FILE?.trim();
   if (!path) return undefined;
   try {
-    return BootstrapSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+    const {
+      modelRouting: _routing,
+      maxHiredWorkers: _workers,
+      ...identity
+    } = bootstrapFileSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+    return genericBootstrapSchema.parse(identity);
   } catch {
     throw new Error("Invalid hosted body bootstrap file");
   }
@@ -350,7 +186,7 @@ function signedClaims(
 }
 const ClaimsBase = {
   iss: z.literal("clankie-fleet"),
-  tid: BootstrapSchema.shape.tenantId,
+  tid: genericBootstrapSchema.shape.tenantId,
   hid: PublicGatewayHostIdSchema,
   iat: z.number().int().positive(),
   exp: z.number().int().positive(),
@@ -369,13 +205,13 @@ const HostClaimsSchema = z
   .object({
     ...ClaimsBase,
     aud: z.literal("clankie-gateway"),
-    sub: BootstrapSchema.shape.accountId,
+    sub: genericBootstrapSchema.shape.accountId,
     inst: PublicGatewayInstallationIdSchema,
   })
   .strict();
 const SupportClaimsSchema = PairClaimsSchema.omit({ purpose: true })
   .extend({
-    sub: BootstrapSchema.shape.accountId,
+    sub: genericBootstrapSchema.shape.accountId,
     cmd: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
   })
   .strict();
@@ -443,10 +279,6 @@ export class ManagedDiscordPolicyConflictError extends Error {
   }
 }
 
-/** The fleet model proxy's endpoints, under `/fleet/v1/model/v1/`. */
-export const HOSTED_MODEL_ENDPOINTS = ["responses", "chat/completions", "images/generations"] as const;
-export type HostedModelEndpoint = (typeof HOSTED_MODEL_ENDPOINTS)[number];
-
 /** The OpenAI-shaped `error.code` (or the fleet's bare `error`), read from a copy. */
 async function errorCode(response: Response): Promise<string | undefined> {
   const body: unknown = await response
@@ -467,25 +299,6 @@ export class HostedBodyDeniedError extends Error {
     this.name = "HostedBodyDeniedError";
   }
 }
-
-/** A validated composer admission refusal; it contains no upstream response text. */
-export class HostedComposerRefusedError extends Error {
-  readonly code: z.infer<typeof ComposerTranscriptionErrorSchema>["error"];
-  constructor(code: HostedComposerRefusedError["code"]) {
-    super(code);
-    this.name = "HostedComposerRefusedError";
-    this.code = code;
-  }
-}
-const COMPOSER_ADMISSION_REFUSALS = new Set([
-  "authentication_required",
-  "forbidden",
-  "ineligible",
-  "allowance_exhausted",
-  "invalid_request",
-  "invalid_audio",
-  "capacity",
-]);
 
 /** One renewable credential for the connector and every fleet call. Secrets stay in the broker. */
 export class HostedBodyClient {
@@ -642,6 +455,7 @@ export class HostedBodyClient {
     token: string,
     accept?: (response: Response, nonce: string) => Promise<void>,
   ): Promise<Response> {
+    if (!/^[a-z0-9][a-z0-9/-]*$/u.test(path)) throw new Error("Invalid signed body request path");
     const registration = path === "pairing-key";
     const pathname = `/fleet/v1/body/${path}`;
     // Serialize once: the digest must cover exactly the bytes fetch sends, including on retry.
@@ -770,7 +584,7 @@ export class HostedBodyClient {
       .object({
         credential: z.string(),
         expiresAtMs: z.number().int().positive(),
-        tenantTelemetryKey: BootstrapSchema.shape.tenantTelemetryKey,
+        tenantTelemetryKey: genericBootstrapSchema.shape.tenantTelemetryKey,
       })
       .strict()
       .parse(await response.json());
@@ -779,18 +593,7 @@ export class HostedBodyClient {
     await this.persist?.(credential.token, credential.expiresAt);
     this.credential = credential;
   }
-  async post(
-    path:
-      | "wake-keys"
-      | "wake-keys/revoke"
-      | "heartbeat"
-      | "discord-key"
-      | "devices/revoke"
-      | "auth-key"
-      | "support-grants"
-      | "device-purpose",
-    body: Readonly<Record<string, unknown>>,
-  ): Promise<Response> {
+  async post(path: string, body: Readonly<Record<string, unknown>>): Promise<Response> {
     const credential = await this.resolveHostToken();
     return this.request(path, { ...body, installationId: this.bootstrap.installationId }, credential.token);
   }
@@ -951,20 +754,25 @@ export class HostedBodyClient {
       .parse(await response.json());
   }
   /**
-   * One model call to the fleet's model proxy (VUH-1371): exactly `bytes`,
-   * signed like every body call, answered with the proxy's own response so
-   * the caller can relay its status and stream unchanged. Retries only what
-   * the forwarder contract allows: a rejected signature (three attempts, each
-   * signed afresh), a missing pairing key (re-registered once), and one
-   * network failure before any response (a new nonce, so a new reservation).
-   * Every other answer, including 429 and 409, is returned as it came.
+   * Send exact bytes to a same-origin signed body endpoint. The caller owns
+   * endpoint semantics; this transport preserves response statuses and streams.
+   * Retry only signature rejection, one missing-key registration and one network
+   * failure before any response. No other status is replayed.
    */
-  async forwardModel(
-    endpoint: HostedModelEndpoint,
+  async signedBytes(
+    pathname: string,
     bytes: Uint8Array<ArrayBuffer>,
     signal?: AbortSignal,
   ): Promise<Response> {
-    const pathname = `/fleet/v1/model/v1/${endpoint}`;
+    const target = new URL(pathname, this.bootstrap.gatewayOrigin);
+    if (
+      !pathname.startsWith("/") ||
+      target.origin !== this.bootstrap.gatewayOrigin ||
+      target.pathname !== pathname ||
+      target.search !== "" ||
+      target.hash !== ""
+    )
+      throw new Error("Invalid signed body request path");
     const digest = createHash("sha256").update(bytes).digest("base64url");
     let signatureAttempts = 0,
       registeredAgain = false,
@@ -1010,62 +818,36 @@ export class HostedBodyClient {
       return response;
     }
   }
-  /** Signed, one-attempt paired-device composer transport. No audio resend after uncertainty. */
-  private async composerRequest(path: string, input: unknown, signal?: AbortSignal) {
+  /** Signed JSON once. The caller parses the answer; uncertain effects are never replayed. */
+  async signedPost(
+    pathname: string,
+    input: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    const target = new URL(pathname, this.bootstrap.gatewayOrigin);
+    if (
+      !pathname.startsWith("/") ||
+      target.origin !== this.bootstrap.gatewayOrigin ||
+      target.pathname !== pathname ||
+      target.search !== "" ||
+      target.hash !== ""
+    )
+      throw new Error("Invalid signed body request path");
     await this.pairingRegistration;
     const { token } = await this.resolveHostToken();
     const bytes = JSON.stringify(input);
     const digest = createHash("sha256").update(bytes).digest("base64url");
-    // An uncertain upload is never resent, even when a model forwarder would retry it.
-    const response = await this.fetcher(new URL(path, this.bootstrap.gatewayOrigin), {
+    return this.fetcher(target, {
       method: "POST",
       redirect: "error",
       body: bytes,
       headers: {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
-        ...this.signature(path, digest),
+        ...this.signature(pathname, digest),
       },
       signal: signal ?? AbortSignal.timeout(10_000),
     });
-    if (!response.ok) {
-      if ([400, 401, 403, 429].includes(response.status)) {
-        const refusal = safeParseProtocolResponse(
-          ComposerTranscriptionErrorSchema,
-          await response.json().catch(() => undefined),
-        );
-        if (refusal.success && COMPOSER_ADMISSION_REFUSALS.has(refusal.data.error))
-          throw new HostedComposerRefusedError(refusal.data.error);
-      }
-      await response.body?.cancel();
-      throw new Error("Composer transcription unavailable");
-    }
-    return response.json() as Promise<unknown>;
-  }
-  async composerTranscriptionStatus(device: ComposerTranscriptionDevice) {
-    return parseProtocolResponse(
-      ComposerTranscriptionStatusSchema,
-      await this.composerRequest(
-        HOSTED_COMPOSER_STATUS_PATH,
-        ComposerTranscriptionDeviceSchema.parse(device),
-      ),
-    );
-  }
-  async composerTranscribe(input: HostedComposerTranscription, signal: AbortSignal) {
-    return parseProtocolResponse(
-      ComposerTranscriptionReceiptSchema,
-      await this.composerRequest(
-        HOSTED_COMPOSER_TRANSCRIBE_PATH,
-        HostedComposerTranscriptionSchema.parse(input),
-        signal,
-      ),
-    );
-  }
-  async composerTranscriptionReceipt(input: HostedComposerReceipt) {
-    return parseProtocolResponse(
-      ComposerTranscriptionReceiptSchema,
-      await this.composerRequest(HOSTED_COMPOSER_RECEIPT_PATH, HostedComposerReceiptSchema.parse(input)),
-    );
   }
 
   /** Signed, read-only account default; no other account fields leave the fleet. */
@@ -1082,20 +864,6 @@ export class HostedBodyClient {
     return AccountDiagnosticsDefaultSchema.parse(await response.json());
   }
 
-  /**
-   * This tenant's AI credits (VUH-1403), from the fleet: `POST
-   * /fleet/v1/body/credits`, signed like every body call. The answer is the
-   * fleet's, parsed and returned unchanged; neither it nor the request is logged.
-   */
-  async readCredits(): Promise<HostedCredits> {
-    const credential = await this.resolveHostToken();
-    const response = await this.request(
-      "credits",
-      { installationId: this.bootstrap.installationId },
-      credential.token,
-    );
-    return HostedCreditsSchema.parse(await response.json());
-  }
   async registerWakeKey(deviceId: string, publicKey: string): Promise<void> {
     await this.post("wake-keys", { deviceId, publicKey });
   }

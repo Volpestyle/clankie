@@ -1,4 +1,4 @@
-import { publicGatewayTargetFor } from "@clankie/protocol/public-gateway";
+import { publicGatewayTargetFor, type PublicGatewayRoute } from "@clankie/protocol/public-gateway";
 
 // The direct device doorway (ADR 0204). The service listens on loopback only;
 // a self-hosted phone on the LAN pairs and restores through this opt-in second
@@ -21,6 +21,7 @@ export const DEFAULT_DEVICE_DOORWAY_PORT = 4311;
 /** Wrap the service's fetch so only device routes answer; everything else is a plain 404. */
 export function deviceDoorwayFetch<Rest extends unknown[]>(
   fetch: (request: Request, ...rest: Rest) => Response | Promise<Response>,
+  gatewayRoutes: readonly PublicGatewayRoute[] = [],
 ): (request: Request, ...rest: Rest) => Response | Promise<Response> {
   return (request, ...rest) => {
     const path = new URL(request.url).pathname;
@@ -28,7 +29,7 @@ export function deviceDoorwayFetch<Rest extends unknown[]>(
     const allowed =
       (method === "GET" || method === "POST") &&
       DEVICE_ROUTE_PREFIXES.some((prefix) => path.startsWith(prefix)) &&
-      publicGatewayTargetFor(method, path) === "control";
+      publicGatewayTargetFor(method, path, gatewayRoutes) === "control";
     return allowed ? fetch(request, ...rest) : Response.json({ error: "not_found" }, { status: 404 });
   };
 }

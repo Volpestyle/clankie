@@ -60,6 +60,7 @@
       "entry": [
         "test/fixtures/mcp-stdio-bridge.ts",
         "src/computer-windows-host.ts",
+        "src/hosted-body.ts",
         "test/fixtures/fleet-ssh-recovery/*.mjs"
       ]
     },

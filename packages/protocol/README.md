@@ -53,6 +53,12 @@ The [public network reference](https://docs.clankie.bot/network/) renders the
 host-route allowlist from [public-gateway.ts](src/public-gateway.ts); the hosted
 account service has separate routes and implementation.
 
+Managed credit schemas and route declarations live in private
+`clankie-ops/packages/hosted-protocol`, outside this package. The public service
+accepts exact optional route declarations from its installed runtime provider;
+ordinary installations add none. The private companion app keeps its consumed
+credits decoder locally and does not require the operations repo in CI.
+
 ```sh
 pnpm --filter @clankie/protocol typecheck
 pnpm --filter @clankie/protocol test

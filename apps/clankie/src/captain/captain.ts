@@ -58,7 +58,6 @@ import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
 import { splitFleetQualified } from "../herdr-fleet.ts";
-import { trackHostedConversationRunner } from "../hosted-work.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
 import { createPersonaImageSource, personaImagesExtension } from "../persona-images.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
@@ -205,6 +204,18 @@ const WORKER_RESULT_BRIEF =
 const BENIGN_COMPACTION_REFUSALS = new Set(["Already compacted", "Nothing to compact (session too small)"]);
 
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
+  function trackConversationRunner(runner: ConversationRunner): ConversationRunner {
+    const heartbeat = options.runtimeProvider?.heartbeat;
+    if (heartbeat === undefined) return runner;
+    return async (...args) => {
+      const finish = heartbeat.begin(args[3].origin);
+      try {
+        await runner(...args);
+      } finally {
+        finish();
+      }
+    };
+  }
   const { validateConversationOwner, wakeConversation, runDiscordWatchTurn, dispatchDiscordTurn } =
     createDiscordTurns({
       get buildSession() {
@@ -1252,7 +1263,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   const conversations: ConversationStore = new ConversationStore(
     join(options.stateDir, "conversations"),
-    trackHostedConversationRunner(
+    trackConversationRunner(
       createConversationRunner({
         get shutdown() {
           return shutdown;
@@ -1309,7 +1320,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           return refuseNativeGoal;
         },
       }),
-      deps.onWorkStarted,
     ),
     (conversationId, scope) => {
       seatOutboxes.get(conversationId)?.close();
@@ -3069,8 +3079,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   messageId: normalized.messageId,
                   transportKind: request.identity.transportKind,
                 };
-                const finish =
-                  request.trigger.unprompted === true ? undefined : deps.onWorkStarted?.("captain-turn");
+                const finish = options.runtimeProvider?.heartbeat?.begin(
+                  request.trigger.unprompted === true ? "wake" : undefined,
+                );
                 try {
                   conversations.updateRoomHandoff(child.conversationId, {
                     state: "running",

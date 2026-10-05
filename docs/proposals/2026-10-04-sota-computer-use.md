@@ -78,7 +78,8 @@ and live screen streaming to the app. This is a whole desktop, not just a browse
 
 Public Clankie owns that contract and runner. `clankie-ops` owns provisioning,
 isolation, persistence, model provisioning, metering and plan policy. Use the
-existing [included-usage forwarder](../../apps/clankie/src/hosted-model-forwarder.ts).
+included-usage forwarder in private `clankie-ops/apps/body`, composed through
+the public [runtime-provider boundary](../adr/0183-the-harness-is-public-the-hosted-service-is-private.md#amendment-optional-managed-runtime-composition-2026-10-05-vuh-1664).
 Read-only inspection of the ops proxy finds OpenAI Responses behind pinned model
 aliases, client tools (top-level functions), inline images and no stored-response
 continuation. Code execution fits that contract; native `computer` tools are

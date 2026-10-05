@@ -1,6 +1,5 @@
 import type { BodyLeaseRouter } from "../body-lease-router.ts";
 import type { FleetShellRun, HerdrFleet, HerdrFleetRun } from "../herdr-fleet.ts";
-import type { HostedWorkStarted } from "../hosted-work.ts";
 import type { PiSeatModel } from "./herdr-watch.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
 import type { ExecutionConnections } from "../herdr-session.ts";
@@ -64,20 +63,18 @@ export interface CaptainDeps {
     owner: import("./conversation-owner.ts").ConversationOwner,
   ) => boolean;
   readonly bodyLeases?: BodyLeaseRouter;
-  /** Actual work lifetime, separate from presence and model telemetry. */
-  readonly onWorkStarted?: HostedWorkStarted;
-  /** Called once per settled turn with its bounded metrics (hosted body telemetry). */
+  /** Called once per settled turn with its bounded metrics. */
   readonly onTurnSettled?: (metrics: CaptainTurnSettledMetrics) => void;
   /** Execution is optional; checked again when a terminal tool is called. */
   readonly herdrAvailable?: () => boolean;
-  /** A hosted body's model for the pi workers it hires (VUH-1373); absent, pi keeps its own. */
+  /** An optional host-selected model for Pi workers; absent, Pi keeps its own. */
   readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
   /**
    * Harnesses on this machine that can drive the owner's apps and browser
    * (ADR 0199). Absent on a hosted body, which has no owner desktop.
    */
   readonly computerUseHarnesses?: () => Promise<readonly ComputerUseHarness[]>;
-  /** A hosted body's hire limit (VUH-1388); absent, hires are not counted. */
+  /** Optional host capacity; absent, hires are not counted. */
   readonly hireCapacity?: () => Promise<{ readonly live: number; readonly limit: number } | undefined>;
   readonly runtimes?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange"> &
     Partial<Pick<ExecutionConnections, "namedLocal" | "runNamed">>;
