@@ -14,14 +14,16 @@ export interface LocalFleetIdentity {
   /** Synchronous link revocation only; never substitutes for async process admission. */
   current?(): boolean;
   projectProof?(): Promise<ProjectProcessProof | undefined>;
+  /** Full fresh socket, ancestry and native-session admission, not a bare project observation. */
+  admittedProjectProof?(): Promise<ProjectProcessProof | undefined>;
 }
 
 /**
  * Bind each request to its local listener socket. Seat routes are admitted here;
  * the MCP route receives a candidate identity that only WorkerMcp may consume,
- * after its own fresh validate(). This avoids doing the same expensive OS proof
- * twice before an MCP request reaches authentication. No proof is cached, and
- * provider dispatch still validates again after asynchronous discovery.
+ * after its own fresh validate(). Native peer routes likewise consume a full
+ * socket-bound project proof instead of repeating broad fleet proof around it.
+ * No proof is cached; later authority checks observe the kernel again.
  */
 export class LocalFleetLink {
   private readonly identities = new WeakMap<Request, LocalFleetIdentity>();
@@ -66,8 +68,18 @@ export class LocalFleetLink {
         validate: async () => current() && (await this.options.prove(env.incoming.socket, pane)) && current(),
         projectProof: async () =>
           this.open ? this.options.projectProof?.(env.incoming.socket, pane) : undefined,
+        admittedProjectProof: async () => {
+          if (!current()) return undefined;
+          const proof = await this.options.projectProof?.(env.incoming.socket, pane);
+          return current() ? proof : undefined;
+        },
       };
-      if (path !== "/v1/fleet/mcp" && !(await identity.validate()))
+      // These routes authenticate the candidate with admittedProjectProof before
+      // reading peers, sending or reconciling. Other seat routes still require
+      // broad fleet admission here; a missing project prover never bypasses it.
+      const nativePeer =
+        this.options.projectProof !== undefined && /\/peer(?:s|-messages)(?:\/[^/]+)?$/u.test(path);
+      if (path !== "/v1/fleet/mcp" && !nativePeer && !(await identity.validate()))
         return Response.json({ error: "local_process_membership_required" }, { status: 403 });
       this.identities.set(request, identity);
       try {

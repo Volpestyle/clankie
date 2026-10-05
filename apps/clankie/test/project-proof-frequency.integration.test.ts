@@ -23,6 +23,9 @@ import { WorkerMcp } from "../src/worker-mcp.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 import { frequencyBaseline } from "./helpers/project-native-proof/frequency-baseline.ts";
 import { frequencySpawns } from "./helpers/project-native-proof/frequency-spawns.ts";
+import { peerSeatAuthority } from "../src/app/peer-seat-authority.ts";
+import { PeerSeatMessages } from "../src/captain/peer-seat-messages.ts";
+import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 
 const checkout = fileURLToPath(new URL("../../../", import.meta.url));
 const fixtures = fileURLToPath(new URL("./helpers/project-native-proof/", import.meta.url));
@@ -47,6 +50,7 @@ interface BridgeReply {
 const nativeIt = it.skipIf(process.platform !== "darwin" || process.env.PROJECT_PROOF_FREQUENCY_TEST !== "1");
 const durationSeconds = Number(process.env.PROJECT_PROOF_FREQUENCY_SECONDS ?? 60);
 const churnEnabled = process.env.PROJECT_PROOF_CHURN === "1";
+const legacyPeers = process.env.PROJECT_PROOF_LEGACY_PEERS === "1";
 
 nativeIt(
   "measures ten real worker bridges through restored native private-seat proof",
@@ -56,6 +60,8 @@ nativeIt(
       throw new Error("Unknown benchmark variant");
     if (!Number.isInteger(durationSeconds) || durationSeconds < 60 || durationSeconds > 300)
       throw new Error("Benchmark duration must be 60–300 seconds");
+    if (legacyPeers && variant !== "current")
+      throw new Error("Legacy peer benchmark requires current sources");
     const evidenceRoot =
       churnEnabled || variant === "a1ceae9d"
         ? ".local/project-proof/churn/benchmark"
@@ -102,8 +108,9 @@ nativeIt(
         .map((line) => JSON.parse(line) as CpuSnapshot);
     const node = await realpath(process.execPath);
     const keeper = join(fixtures, "foreground-keeper.mjs");
-    const bridgeScript =
-      variant === "current"
+    const bridgeScript = legacyPeers
+      ? join(checkout, ".local/project-proof/legacy-worker/bin/fleet-mcp.mjs")
+      : variant === "current"
         ? join(checkout, "integrations/claude-plugin/worker/bin/fleet-mcp.mjs")
         : join(
             preserved,
@@ -232,7 +239,7 @@ nativeIt(
       const settings = new SettingsStore(join(herdr.root, "settings.json"));
       await settings.update((value) => ({
         ...value,
-        fleet: { ...value.fleet, tools: "connected", peerMessages: "off" },
+        fleet: { ...value.fleet, tools: "connected", peerMessages: legacyPeers ? "on" : "off" },
         mcp: { ...value.mcp, servers: [] },
       }));
       host = createMcpHost({ settings, credentials, curated: [], logger: { info() {}, warn() {} } });
@@ -257,11 +264,35 @@ nativeIt(
           return project(socket, pane);
         },
       });
+      const runner = createHerdrWatchRunner(undefined, async (args) =>
+        JSON.stringify(await herdr.cli(...args)),
+      );
+      const peers = new PeerSeatMessages({
+        path: join(herdr.root, "peer-receipts.json"),
+        enabled: async () => (await settings.load()).fleet.peerMessages === "on",
+        sender: (pane) => runner.get(pane),
+        recipient: (seat) => runner.resolveTerminal(seat),
+        seats: () => runner.list!(),
+        deliver: async () => {
+          throw new Error("Benchmark never sends peer messages");
+        },
+        record: () => {
+          throw new Error("Benchmark never records peer messages");
+        },
+      });
       const boundary = local.fetch(async (request) => {
         const identity = local!.identity(request);
         if (!identity) return Response.json({ error: "missing_identity" }, { status: 403 });
         const url = new URL(request.url);
         if (url.pathname === "/v1/fleet/mcp") return worker!.handleLocalFleet(request, identity);
+        if (legacyPeers && url.pathname.endsWith("/peers")) {
+          const authority = await peerSeatAuthority(identity, identity.pane);
+          if (!authority) return Response.json({ error: "native_peer_sender_required" }, { status: 403 });
+          const seats = await peers.list(authority);
+          return seats
+            ? Response.json(seats)
+            : Response.json({ error: "peer_messaging_unavailable" }, { status: 403 });
+        }
         // Same extra local validation as registerSeatRoutes.fleetSeatPane; only an empty in-memory mailbox is supplied.
         if (!(await identity.validate()))
           return Response.json({ error: "local_pane_required" }, { status: 403 });
@@ -397,6 +428,7 @@ nativeIt(
       );
       summary = {
         variant,
+        legacyPeers,
         churnEnabled,
         churnPid: churn?.pid,
         churnEvents,
@@ -420,10 +452,19 @@ nativeIt(
         roster,
         effects: 0,
         coverage:
-          "10 ordinary foreground fixtures +10 restored private parents spawning actual shipped fleet-mcp bridges; no installed TUI or provider; real empty McpHost; in-memory empty event mailbox",
+          "10 ordinary foreground fixtures +10 restored private parents spawning shipped fleet-mcp bridges; no installed TUI or provider; real empty McpHost; in-memory empty event mailbox; legacy-peer mode uses production peer authority and PeerSeatMessages through native Herdr reads",
       };
       expect(live.every((status) => !!status.bridgePid)).toBe(true);
       expect(live.every((status) => status.catalogReady)).toBe(true);
+      if (legacyPeers) {
+        for (const status of [...startup, ...live]) {
+          expect(status.tools).toContain("list_fleet_seats");
+          expect(status.tools).toContain("message_peer");
+        }
+        expect(
+          intervalRequests.some((request) => request.path.endsWith("/peers") && request.status === 200),
+        ).toBe(true);
+      }
       expect(afterCounts.privateRegistry - beforeCounts.privateRegistry).toBeGreaterThan(0);
       expect(afterCounts.restoredOccupant - beforeCounts.restoredOccupant).toBeGreaterThan(0);
       expect(intervalRequests.length).toBeGreaterThan(0);

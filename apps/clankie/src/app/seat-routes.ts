@@ -26,7 +26,6 @@ import {
 } from "@clankie/protocol";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { PeerSeatAuthority } from "../captain/peer-seat-messages.ts";
 import { CAPTAIN_PROMPT_SECTIONS, type CaptainPromptSection } from "../captain/port.ts";
@@ -34,6 +33,7 @@ import { INBOUND_REQUEST_DEADLINE_MS } from "../captain/inbound-seat-receipts.ts
 import { createLaneMcpEndpoint } from "../lane-mcp.ts";
 import { readJson } from "./http-auth.ts";
 import { type ClankieAppDependencies } from "./types.ts";
+import { peerSeatAuthority as resolvePeerSeatAuthority } from "./peer-seat-authority.ts";
 /**
  * A headless read of a lane's prompt (VUH-1086). The lane defaults to the one
  * the bearer speaks for; sections default to what the pi session starts with.
@@ -233,30 +233,12 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
   };
 
   /** Peer sender attribution requires a native process proof, never an operator or fleet bearer. */
-  const peerSeatAuthority = async (context: Context): Promise<PeerSeatAuthority | undefined> => {
-    const identity =
+  const peerSeatAuthority = (context: Context): Promise<PeerSeatAuthority | undefined> =>
+    resolvePeerSeatAuthority(
       ctx.dependencies.localFleet?.identity(context.req.raw) ??
-      ctx.dependencies.fleetLinks?.identity?.(context.req.raw);
-    if (!identity || identity.pane !== context.req.param("paneId") || !(await identity.validate()))
-      return undefined;
-    const proof = await identity.projectProof?.();
-    if (
-      !proof ||
-      proof.nativeSessionPending ||
-      proof.pane !== identity.pane ||
-      proof.fleet !== (identity.fleet ?? "default") ||
-      !(await identity.validate())
-    )
-      return undefined;
-    return {
-      proof,
-      validate: async () => {
-        if (!(await identity.validate())) return false;
-        const fresh = await identity.projectProof?.();
-        return isDeepStrictEqual(fresh, proof) && (await identity.validate());
-      },
-    };
-  };
+        ctx.dependencies.fleetLinks?.identity?.(context.req.raw),
+      context.req.param("paneId"),
+    );
   ctx.app.get(FLEET_PEER_SEATS_PATH, async (context) => {
     context.header("cache-control", "no-store");
     const authority = await peerSeatAuthority(context);
