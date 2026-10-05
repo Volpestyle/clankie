@@ -40,6 +40,8 @@ export const ComputerLeaseSchema = z
     bodyId: id,
     conversationId: id,
     leaseId: EnvironmentLeaseV2Schema.shape.leaseId,
+    /** Host owner opt-in, fixed at acquisition; omitted for existing non-Windows adapters. */
+    allowInput: z.boolean().optional(),
     issuedAt: EnvironmentLeaseV2Schema.shape.issuedAt,
     heartbeatAt: EnvironmentLeaseV2Schema.shape.heartbeatAt,
     expiresAt: EnvironmentLeaseV2Schema.shape.expiresAt,

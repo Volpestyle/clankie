@@ -9,6 +9,7 @@ import {
   type ComputerTarget,
 } from "@clankie/interactive-environment";
 import type { ComputerAdapter, ComputerObservation } from "./computer-body.ts";
+import { WindowsPersonActivityGuard, type WindowsLastInputReader } from "./computer-windows-person.ts";
 
 const Window = z.object({
   app: z.string().min(1).max(256),
@@ -102,26 +103,75 @@ function actionClient(client: WindowsComputerObservationClient): client is Windo
   );
 }
 
+const prohibitedApps = new Set([
+  "cmd",
+  "powershell",
+  "pwsh",
+  "windowsterminal",
+  "conhost",
+  "regedit",
+  "taskmgr",
+  "searchhost",
+  "startmenuexperiencehost",
+]);
+function assertAllowedTarget(window: NativeWindow): void {
+  const app = window.app.normalize("NFKC").trim().toLowerCase();
+  const basename = app.replaceAll("\\", "/").split("/").at(-1)!.replace(/^"|"$/gu, "");
+  const stem = basename.replace(/\.exe$/u, "");
+  if (
+    prohibitedApps.has(stem) ||
+    /(?:^|[.:!_])(?:windowsterminal|searchhost|startmenuexperiencehost)(?:[.:!_]|$)/u.test(app)
+  )
+    throw new Error("Windows target app is prohibited for computer input and capture");
+  if (stem === "explorer" && /^run$/iu.test(window.title?.trim() ?? ""))
+    throw new Error("Windows Explorer Run window is prohibited");
+}
+
+function allowedKeys(keys: string): boolean {
+  if (!/^[A-Za-z0-9_]+(?:\s*\+\s*[A-Za-z0-9_]+)*$/u.test(keys)) return false;
+  const tokens = keys
+    .toLowerCase()
+    .split("+")
+    .map((key) => key.trim().replace(/_(?:l|r)$/u, ""));
+  if (tokens.some((key) => /^(?:meta|windows?|win|cmd|command|super|os|lwin|rwin)$/u.test(key))) return false;
+  const normalized = tokens.map((key) => (key === "ctrl" ? "control" : key === "esc" ? "escape" : key));
+  if (normalized.includes("control") && normalized.includes("escape")) return false;
+  if (normalized.includes("alt") && (normalized.includes("f4") || normalized.includes("tab"))) return false;
+  return true;
+}
+
 /** Native app grants and turn stops remain with Codex. One primitive consumes one
  * observation; only a fresh, exact post-action observation proves its named effect.
  * Unsupported/read-only clients retain the observation-only contract.
  */
 export class WindowsComputerAdapter implements ComputerAdapter {
   readonly bodyId: string;
+  readonly allowInput: boolean;
   private readonly client: WindowsComputerObservationClient;
   private readonly snapshots = new Set<string>();
   private latest: NativeReference | undefined;
   private fenced = false;
+  private readonly person: WindowsPersonActivityGuard | undefined;
 
-  constructor(client: WindowsComputerObservationClient, machineId: string) {
+  constructor(
+    client: WindowsComputerObservationClient,
+    machineId: string,
+    options: { allowInput?: boolean; readLastInput?: WindowsLastInputReader } = {},
+  ) {
     if (client.target !== "windows" || !/^[a-z][a-z0-9-]{0,63}$/u.test(machineId))
       throw new Error("An identified Windows native computer-use host is required");
     this.bodyId = `windows:${machineId}:console`;
     this.client = client;
+    this.allowInput = options.allowInput === true;
+    if (this.allowInput) {
+      if (options.readLastInput === undefined)
+        throw new Error("Windows input requires a host last-input reader");
+      this.person = new WindowsPersonActivityGuard(options.readLastInput);
+    }
   }
 
   get inputReady(): boolean {
-    return !this.fenced && actionClient(this.client);
+    return this.allowInput && !this.fenced && actionClient(this.client);
   }
 
   private ensureOpen() {
@@ -132,26 +182,14 @@ export class WindowsComputerAdapter implements ComputerAdapter {
     this.ensureOpen();
     try {
       return await call();
-    } catch (error) {
-      // Interrupted turns permanently retire this host. A new turn/host cannot
-      // resurrect its native references or resend a possibly admitted action.
-      const code =
-        typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-          ? error.code
-          : "";
-      const message = error instanceof Error ? error.message : String(error);
-      const stopped =
-        /^(?:USER_STOPPED|USER_INTERRUPTED|TURN_ENDED)$/iu.test(code) ||
-        /turn[ _-]*(?:has[ _-]*)?ended|user[ _-]*(?:has[ _-]*)?stopped[ _-]*computer[ _-]*use|computer[ _-]*use[ _-]*(?:was[ _-]*)?stopped/iu.test(
-          message,
-        );
-      if (stopped) {
-        this.fenced = true;
-        this.latest = undefined;
-      }
+    } catch {
+      // There is no proved native turn-lifecycle signal here. Fence every error,
+      // including opaque failures after a turn ended, without parsing diagnostics.
+      this.fenced = true;
+      this.latest = undefined;
       // Provider diagnostics can contain literal input or UI text. Receipts and
       // the persistent journal retain only this bounded semantic reason.
-      throw new Error(stopped ? "Windows Computer Use was stopped" : "Windows native operation failed");
+      throw new Error("Windows native operation failed; this host is fenced");
     }
   }
 
@@ -204,6 +242,7 @@ export class WindowsComputerAdapter implements ComputerAdapter {
       .flatMap((app) => app.windows)
       .find((candidate) => candidate.app === target.appId && String(candidate.id) === target.windowId);
     if (window === undefined) throw new Error("Target is absent from the current native window inventory");
+    assertAllowedTarget(window);
     const { state, shot, png, width, height } = await this.observe(window, guard);
     const bounds = { x: shot.originX, y: shot.originY, width: shot.width, height: shot.height };
     const reference: NativeReference = {
@@ -244,6 +283,7 @@ export class WindowsComputerAdapter implements ComputerAdapter {
     await guard();
     if (state.window.app !== window.app || state.window.id !== window.id)
       throw new Error("Native capture changed its exact window binding");
+    assertAllowedTarget(state.window);
     const shot = state.screenshots[0]!;
     if (this.snapshots.has(shot.id)) throw new Error("Native screenshot reference was reused");
     const prefix = "data:image/png;base64,";
@@ -278,6 +318,7 @@ export class WindowsComputerAdapter implements ComputerAdapter {
       this.ensureOpen();
       await guard();
       const client = this.client;
+      if (!this.allowInput) throw new Error("Windows input requires explicit owner allowInput opt-in");
       if (!actionClient(client))
         return {
           outcome: "failed" as const,
@@ -287,6 +328,8 @@ export class WindowsComputerAdapter implements ComputerAdapter {
       if (ref === undefined || ref !== observation.reference || !observation.inputReady)
         throw new Error("Windows input requires a fresh, unused native observation");
       if (!input.foreground) throw new Error("Windows input requires explicit foreground authorization");
+      assertAllowedTarget(ref.window);
+      await this.personQuiet();
       const expected = input.expect;
       if (expected === undefined)
         throw new Error("Windows input requires a specific observable postcondition");
@@ -325,15 +368,7 @@ export class WindowsComputerAdapter implements ComputerAdapter {
           break;
         }
         case "key":
-          if (
-            !/^[A-Za-z0-9_]+(?:\s*\+\s*[A-Za-z0-9_]+)*$/u.test(input.keys) ||
-            input.keys
-              .split("+")
-              .some((key) =>
-                /^(?:(?:meta|windows?|win|cmd|command|super|os)(?:_[lr])?|[lr]win)$/iu.test(key.trim()),
-              )
-          )
-            throw new Error("Unsupported Windows key chord");
+          if (!allowedKeys(input.keys)) throw new Error("Unsupported Windows key chord");
           primitive = () => client.press_key({ window: ref.window, key: input.keys });
           break;
         case "type":
@@ -401,13 +436,31 @@ export class WindowsComputerAdapter implements ComputerAdapter {
         if (focus.accessibility?.[expected.field] !== ref.accessibility[expected.field])
           throw new Error("Windows typing effect source changed since this observation");
       }
+      const current = (await this.apps(guard))
+        .flatMap((app) => app.windows)
+        .find((window) => window.app === ref.window.app && window.id === ref.window.id);
+      if (current === undefined) throw new Error("Windows target disappeared before input");
+      assertAllowedTarget(current);
+      assertAllowedTarget(ref.window);
+      await guard();
+      await this.personQuiet();
+      // The OS query can wait for a helper process. Recheck owner authority and
+      // lease revocation after that wait, before admitting any native effect.
       await guard();
       this.ensureOpen();
+      if (Date.parse(screenshot.expiresAt) <= Date.now())
+        throw new Error("Windows screenshot expired before dispatch");
       // Consume before native dispatch, including a rejected or lost RPC. The
       // caller must inspect/reconcile this request, never resend its input.
       this.latest = undefined;
       dispatched = true;
       await this.native(primitive);
+      try {
+        await this.person!.recordDispatchFinished();
+      } catch {
+        this.fenced = true;
+        throw new Error("Windows last-input state unavailable after dispatch; this host is fenced");
+      }
       const after = await this.observe(ref.window, guard);
       const shot = after.shot;
       if (
@@ -433,6 +486,16 @@ export class WindowsComputerAdapter implements ComputerAdapter {
             ? "Windows native observation failed validation"
             : (error instanceof Error ? error.message : "Windows input proof failed").slice(0, 4096),
       };
+    }
+  }
+
+  private async personQuiet(): Promise<void> {
+    try {
+      await this.person!.assertQuiet();
+    } catch {
+      this.fenced = true;
+      this.latest = undefined;
+      throw new Error("Windows person activity or last-input state prevents input; this host is fenced");
     }
   }
 

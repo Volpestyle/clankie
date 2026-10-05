@@ -3986,7 +3986,10 @@ proof.
 The service registers a macOS Peekaboo adapter. A native Windows Codex
 `node_repl` can explicitly attach the Windows computer host; the
 same command targets it through `CLANKIE_CONTROL_PLANE_URL` (loopback or an SSH
-forward). An observation-only client stays read-only. The full native client
+forward). Every attachment defaults to read-only, even with the full `sky`
+client. An owner explicitly sets `allowInput: true` on the native host before
+acquiring a new input lease. Lease and status record `allowInput`; status also
+reports current `inputReady`. With that opt-in the full native client
 supports coordinate click, type, key, scroll and drag, one primitive per capture.
 Windows input requires `foreground: true` and `expect: {"field":"document_text","equals":"EXPECTED_RESULT"}`
 (or `tree`, `focused_element`, `selected_text`): the observed field must change
@@ -3995,6 +3998,10 @@ to that exact value in a fresh same-window observation. Read the capture's
 Scroll also requires `at` in image pixels; its `amount` is a native logical-pixel
 delta. Typing requires verified focus; clear-and-type and guessed element IDs
 refuse. Dispatch or a changed PNG alone cannot confirm an effect. Windows
+input rechecks host Win32 person activity before each dispatch, requires a two-second
+quiet margin and refuses shell/system targets and system-switching shortcuts.
+Any native error retires the host. Release remains gated on James's W8 live
+stop evidence; fixtures do not prove native interrupt behavior. Windows
 setup is in [desktop control](desktop-control.md#windows-observation-host).
 A host without an attached adapter returns `computer_body_unavailable`.
 The attached native harness supplies its own app grants and turn stops; no second

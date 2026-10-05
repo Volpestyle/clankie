@@ -24,7 +24,7 @@ const replies = [
   {
     name: "signed out",
     state: { installed: true, signedIn: false, enabled: true, disabled: false, plugin: true },
-    surfaces: ["desktop"],
+    surfaces: [],
     card: "pc/codex: not signed in: the owner runs `codex login`",
   },
   {

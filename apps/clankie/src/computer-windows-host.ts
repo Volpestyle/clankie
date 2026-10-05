@@ -6,13 +6,16 @@ import { BodyLeaseStore } from "./body-leases.ts";
 import { ComputerBody } from "./computer-body.ts";
 import { registerComputerRoutes } from "./computer-http.ts";
 import { WindowsComputerAdapter, type WindowsComputerObservationClient } from "./computer-windows.ts";
+import { createWindowsLastInputReader, type WindowsLastInputReader } from "./computer-windows-person.ts";
 
 /** Native node_repl entry point. No model, app launch, helper process or input is started. */
-interface WindowsComputerHostOptions {
+export interface WindowsComputerHostOptions {
   sky: WindowsComputerObservationClient;
   machineId: string;
   conversationId: string;
   directory: string;
+  /** Owner explicitly opts this attachment into input; a full sky client alone never does. */
+  allowInput?: boolean;
   /** Existing Clankie service, on this PC or through an authenticated SSH forward. */
   authorityURL: string;
 }
@@ -27,7 +30,10 @@ export class WindowsComputerHost {
   private readonly store: BodyLeaseStore;
   private readonly adapter: WindowsComputerAdapter;
   private open = true;
-  constructor(options: WindowsComputerHostOptions) {
+  constructor(
+    options: WindowsComputerHostOptions,
+    dependencies: { readLastInput?: WindowsLastInputReader } = {},
+  ) {
     const authority = new URL("/v1/computer/authority", options.authorityURL);
     if (
       authority.protocol !== "http:" ||
@@ -37,7 +43,11 @@ export class WindowsComputerHost {
     )
       throw new Error("Computer authority must use a loopback Clankie service or SSH forward");
     const conversationId = z.string().min(1).max(256).parse(options.conversationId);
-    const adapter = new WindowsComputerAdapter(options.sky, options.machineId);
+    const allowInput = options.allowInput === undefined ? false : z.boolean().parse(options.allowInput);
+    const adapter = new WindowsComputerAdapter(options.sky, options.machineId, {
+      allowInput,
+      ...(allowInput ? { readLastInput: dependencies.readLastInput ?? createWindowsLastInputReader() } : {}),
+    });
     const store = new BodyLeaseStore(join(options.directory, "lease"));
     const body = new ComputerBody(adapter, store, join(options.directory, "journal"));
     this.bodyId = adapter.bodyId;
@@ -83,6 +93,9 @@ export class WindowsComputerHost {
   get inputReady(): boolean {
     return this.open && this.adapter.inputReady;
   }
+  get allowInput(): boolean {
+    return this.adapter.allowInput;
+  }
   close() {
     this.open = false;
     this.store.close();
@@ -109,6 +122,7 @@ export async function startWindowsComputerHost(options: WindowsComputerHostOptio
       bodyId: host.bodyId,
       conversationId: host.conversationId,
       url: `http://127.0.0.1:${address.port}`,
+      allowInput: host.allowInput,
       get inputReady() {
         return host.inputReady;
       },

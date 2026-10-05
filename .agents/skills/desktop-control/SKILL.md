@@ -44,8 +44,10 @@ and the machine (`windows:pc:console`, for example). Use an SSH loopback forward
 when leading from another machine. Setup and limits:
 [Windows observation host](../../../docs/desktop-control.md#windows-observation-host).
 
-The full native client supports click, literal type, key, scroll and drag; an
-observation-only client remains read-only. Inspect the exact-window PNG and raw
+Every attachment defaults to read-only, even with the full `sky` client. An owner
+must deliberately pass `allowInput: true` in a clear driving window before
+acquiring a new input lease; lease and status record this choice. An explicitly
+enabled full client supports click, literal type, key, scroll and drag. Inspect the exact-window PNG and raw
 `accessibility` fields before choosing one primitive. Every Windows input
 requires explicit `foreground: true` and `expect: {field, equals}` for an intended
 changed native UIA field (`tree`, `focused_element`, `document_text` or
@@ -56,12 +58,16 @@ refuse. Scroll requires an explicit image-pixel `at` point.
 
 A configured harness in `browser harnesses` does not prove app grants, a free
 driving window, or live input readiness. Arrange the driving window with the
-person; never overlap their use or another driver. Native turn-ended/user-stopped
-errors, revocation and uncertain receipts stop continuation; recovery requires
+person; never overlap their use or another driver. Host Win32 person-activity
+checks run before each dispatch; wait two seconds between primitives. A new
+input stamp, failed query or session mismatch fences the attachment. Every
+native error, revocation and uncertain receipt stops continuation; recovery requires
 independent native stop proof. Keep ADR 0127's sign-ins, codes, CAPTCHAs, payments,
 account changes and destructive steps with the person. Respect the installed
 Windows plugin's app/shortcut denies. Do not bypass native grants or fall back
-to `C:\desk`. Live Windows verification remains James's manual release fixture.
+to `C:\desk`. The adapter denies shell/system apps, Explorer Run, Windows-key
+aliases, Ctrl+Escape, Ctrl+Shift+Escape, Alt+F4 and Alt+Tab. Input release remains
+gated on James's W8 live stop evidence in the manual release fixture.
 
 ## Discover the target
 
