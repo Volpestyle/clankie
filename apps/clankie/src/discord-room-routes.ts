@@ -60,6 +60,26 @@ export interface DiscordRoomRoutesOptions {
 export function discordSettingsRevision(settings: ClankieSettings["discord"]): string {
   return createHash("sha256").update(JSON.stringify(settings)).digest("hex");
 }
+const SNOWFLAKE = /^\d{5,}$/u;
+
+/**
+ * The room as a device lists it: the place alone, `#channel · server` or the
+ * person in a DM. The kind travels as the room's lane, and a room whose names
+ * the host has not heard yet has no title rather than raw Discord IDs. Stored
+ * titles keep their full form for the captain and the TUI.
+ */
+export function discordRoomDisplayTitle(title: string): string | undefined {
+  const match = /^Discord (?:text|voice|DM) · (.+)$/su.exec(title);
+  if (match === null) return title;
+  const place = match[1]!.trim();
+  const split = place.lastIndexOf(" / ");
+  if (split < 0) return /^\d+(?::\d+)?$/u.test(place) ? undefined : place;
+  const server = place.slice(0, split).trim();
+  const channel = place.slice(split + 3).trim();
+  if (SNOWFLAKE.test(channel.replace(/^#/u, ""))) return undefined;
+  return SNOWFLAKE.test(server) ? channel : `${channel} · ${server}`;
+}
+
 export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono {
   const app = new Hono();
   const setup = async (settings: ClankieSettings["discord"]) => {
@@ -113,7 +133,9 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
               .filter((room) => room.scope.kind === "room")
               .map((room) => ({
                 ...options.observations.status(room.conversationId),
-                title: room.title,
+                ...(discordRoomDisplayTitle(room.title) === undefined
+                  ? {}
+                  : { title: discordRoomDisplayTitle(room.title) }),
                 ...(room.scope.kind === "room"
                   ? { lane: room.scope.lane, targetId: room.scope.targetId }
                   : {}),

@@ -63,6 +63,8 @@ export const OperatorPresenceSnapshotSchema = z
     since: z.string().datetime().nullable(),
     /** Live registered seats, including seats waiting between turns. */
     activeSeats: z.number().int().nonnegative(),
+    /** Running native children of the local Clankie captain; absent when unknown. */
+    nativeSubagents: z.number().int().nonnegative().optional(),
     pendingOwnerItem: OperatorPresenceOwnerItemSchema.optional(),
     expression: DesktopExpressionSchema.optional(),
   })

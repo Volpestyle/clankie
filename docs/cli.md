@@ -3579,7 +3579,12 @@ when it answers. The operator `presence` read accepts a cursor and `waitMs` up
 to 30000 ms; callers with the current cursor wait for a projected change. Mood
 priority is needs_you, thinking, in_voice, playing, leading, idle. Thinking
 includes background Discord captain turns. `activeSeats` counts all live
-registered fleet seats, including those waiting between turns. The oldest
+registered fleet seats, including those waiting between turns. Optional
+`nativeSubagents` counts only running native children of the live local Clankie
+captain session, never workers or their children. It is absent when the parent
+or transcript is unavailable, and zero when a readable parent has no running
+children. Child and parent-session changes wake the presence poll independently
+of fleet-seat changes. The oldest
 unanswered owner preference appears as `pendingOwnerItem`, with the conversation
 and question IDs needed to open it. `since` is a source start timestamp, or null
 when that source has no known start. An unreachable service has no mood; clients
