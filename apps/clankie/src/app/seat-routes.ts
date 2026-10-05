@@ -30,6 +30,7 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { PeerSeatAuthority } from "../captain/peer-seat-messages.ts";
 import { CAPTAIN_PROMPT_SECTIONS, type CaptainPromptSection } from "../captain/port.ts";
+import { INBOUND_REQUEST_DEADLINE_MS } from "../captain/inbound-seat-receipts.ts";
 import { createLaneMcpEndpoint } from "../lane-mcp.ts";
 import { readJson } from "./http-auth.ts";
 import { type ClankieAppDependencies } from "./types.ts";
@@ -351,7 +352,15 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     );
   });
 
-  ctx.app.post(FLEET_SEAT_MESSAGES_PATH, bodyLimit({ maxSize: 128 * 1024 }), async (context) => {
+  const limitInboundBody = bodyLimit({ maxSize: 128 * 1024 });
+  ctx.app.post(FLEET_SEAT_MESSAGES_PATH, async (context) => {
+    const request = {
+      deadlineAt: Date.now() + INBOUND_REQUEST_DEADLINE_MS,
+      signal: context.req.raw.signal,
+    };
+    // Include body/authentication waits in the original budget, retaining the
+    // transport signal even when the body limiter reconstructs a chunked request.
+    await limitInboundBody(context, async () => {});
     const pane = await fleetSeatPane(context);
     if ("denial" in pane) return pane.denial;
     const parsed = FleetSeatMessageSchema.safeParse(await context.req.json().catch(() => undefined));
@@ -362,6 +371,7 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       pane.paneId,
       parsed.data.text,
       parsed.data.delivery,
+      request,
     );
     if (typeof received !== "boolean") return context.json(FleetSeatMessageReceiptSchema.parse(received));
     return received

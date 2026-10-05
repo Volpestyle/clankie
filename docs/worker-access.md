@@ -313,6 +313,16 @@ Inbound message claims remain exclusive through timeouts and lost accepted
 responses. A definitely refused connection before POST delivery releases only
 the matching claim. An exact authenticated unknown-delivery response releases
 it only after persisting a terminal ID fence against a delayed original POST.
+For an exact pending pane delivery without conversation acceptance, lookup can
+settle absence after service replacement or the host's 20-second request deadline.
+The service records the attempt owner and deadline, seals its ID and clears only
+its matching pane fence in one write. Live same-instance requests remain unresolved;
+expired, cancelled or shutdown requests cannot subsequently accept the message.
+Accepted history remains authoritative, and corrupt or mismatched evidence stays
+uncertain. Replacement recovery relies on the service's exclusive process lock.
+After shutdown the old instance cannot write receipt fences. If an accepted
+original still needs pane cleanup, it retains uncertainty until the replacement's
+exact lookup clears that pane, keeping the worker's next message from getting stuck.
 The current invocation never sends a replacement; a subsequent invocation can
 send a new message. Authentication failures expose a generic refusal, while
 authenticated downstream failures retain their actual reason.

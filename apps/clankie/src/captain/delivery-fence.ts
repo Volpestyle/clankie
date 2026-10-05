@@ -17,6 +17,11 @@ export const ReceiptSchema = z
     seatId: z.string().optional(),
     /** A terminal inbound lookup refusal; this original ID may never dispatch. */
     notSent: z.literal(true).optional(),
+    /** Host-owned admission attempt; never accepted from a worker's request. */
+    inboundAttempt: z
+      .object({ instanceId: z.string().min(1), deadlineAt: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
     /** Only explicit stable deliveries keep a confirmed receipt after settlement. */
     completed: z
       .object({
@@ -134,6 +139,36 @@ export class DeliveryFence {
       this.save();
     } catch (error) {
       this.records.set(key, previous);
+      throw error;
+    }
+    return true;
+  }
+
+  /** Seal proven inbound absence and release its exact pane in one durable write. */
+  public sealInboundAbsence(
+    paneId: string,
+    receipt: { messageId: string; paneId: string; sessionId: string; fingerprint: string },
+  ): boolean {
+    if (this.unreadable || receipt.paneId !== paneId) return false;
+    const idKey = `id:${receipt.messageId}`;
+    const pane = this.records.get(paneId);
+    const id = this.records.get(idKey);
+    const matches = (value: UncertainReceipt) =>
+      !value.completed &&
+      value.messageId === receipt.messageId &&
+      value.paneId === receipt.paneId &&
+      value.sessionId === receipt.sessionId &&
+      value.fingerprint === receipt.fingerprint;
+    // An ID without its pending pane can be lost acceptance proof, not absence.
+    if ((pane && !matches(pane)) || (id && (!pane || !matches(id)))) return false;
+    this.records.set(idKey, { ...receipt, notSent: true });
+    this.records.delete(paneId);
+    try {
+      this.save();
+    } catch (error) {
+      if (id) this.records.set(idKey, id);
+      else this.records.delete(idKey);
+      if (pane) this.records.set(paneId, pane);
       throw error;
     }
     return true;

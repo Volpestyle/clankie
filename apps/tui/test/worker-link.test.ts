@@ -607,8 +607,8 @@ async function receiptService() {
     mismatchLookup: (value: boolean) => {
       mismatchLookup = value;
     },
-    setPending: () => {
-      beforeAcceptance = true;
+    setPending: (value = true) => {
+      beforeAcceptance = value;
     },
     setDenied: (value: boolean) => {
       denyLookup = value;
@@ -1000,22 +1000,54 @@ it.each(["fleet", "seat"] as const)(
   },
 );
 it.each(["fleet", "seat"] as const)(
-  "%s keeps pre-acceptance uncertainty across replacement and refuses a different payload",
+  "%s seals a pre-acceptance original after replacement without POSTing until a deliberate fresh invocation",
   async (mode) => {
     const service = await receiptService();
     service.setPending();
     const home = await linkedHome(service.url, true);
     const first = rawReceiptBridge(mode, home, service.url);
     await first.init();
-    expect((await first.message()).deliveryStage).toBe("uncertain");
+    const lost = (await first.message()) as {
+      received: boolean;
+      deliveryStage: string;
+      deliveryId: string;
+      binding: string;
+      fingerprint: string;
+    };
+    expect(lost).toMatchObject({
+      received: false,
+      deliveryStage: "uncertain",
+      binding: "a".repeat(64),
+      fingerprint: createHash("sha256").update("original").digest("hex"),
+    });
     first.child.kill();
     await once(first.child, "exit");
     await service.restart();
     const replacement = rawReceiptBridge(mode, home, service.url);
     await replacement.init();
-    expect((await replacement.message("replacement")).deliveryStage).toBe("uncertain");
+    expect(await replacement.message("replacement")).toMatchObject({
+      received: false,
+      deliveryStage: "unavailable",
+      definitive: "not_sent",
+      deliveryId: lost.deliveryId,
+      binding: lost.binding,
+      fingerprint: lost.fingerprint,
+    });
     expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(1);
     expect(service.runner).not.toHaveBeenCalled();
+    service.setPending(false);
+    service.setDrop(false);
+    const fresh = await replacement.message("deliberate fresh report");
+    expect(fresh).toMatchObject({ received: true, deliveryStage: "stored" });
+    expect(fresh.deliveryId).not.toBe(lost.deliveryId);
+    expect(service.seen.filter((r) => r.method === "POST")).toHaveLength(2);
+    expect(service.runner).toHaveBeenCalledTimes(1);
+    expect(service.runner).toHaveBeenCalledWith(
+      "global-default",
+      "Agent output: deliberate fresh report",
+      expect.any(Function),
+      expect.any(Object),
+    );
   },
 );
 it("a legacy response without an exact receipt never clears the raw bridge's pending claim", async () => {

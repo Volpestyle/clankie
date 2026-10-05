@@ -14,6 +14,7 @@ import type { ConversationOwner, ConversationAuthority, WorkerWriteAuthority } f
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import type { PeerSeatAuthority } from "./peer-seat-messages.ts";
+import type { InboundSeatRequest } from "./inbound-seat-receipts.ts";
 import type {
   DeliveryStage,
   EvaluatorCommand,
@@ -292,6 +293,8 @@ export interface CaptainPort {
     paneId: string,
     text: string,
     delivery?: FleetSeatMessageDelivery,
+    /** Host request budget/cancellation, never worker-supplied authority. */
+    request?: InboundSeatRequest,
   ): Promise<boolean | FleetSeatMessageReceipt>;
   listFleetPeerSeats(authority: PeerSeatAuthority): Promise<FleetPeerSeats | undefined>;
   sendFleetPeerMessage(authority: PeerSeatAuthority, input: FleetPeerMessage): Promise<FleetPeerReceipt>;
