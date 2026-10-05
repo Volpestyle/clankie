@@ -21,6 +21,20 @@ export async function workerSkills(
   cwd?: string,
 ): Promise<{ args: readonly string[]; env?: Readonly<Record<string, string>> }> {
   const catalog = bundledSkills(repoRoot, settings);
+  if (harness === "grok") {
+    // The interactive leader cannot load a CLI plugin directory. Supply the
+    // selected skill paths through its native per-launch rules instead.
+    return {
+      args: [
+        "--rules",
+        "Available Clankie skills (read the relevant SKILL.md before using it):\n" +
+          catalog
+            .filter((skill) => skill.included)
+            .map((skill) => `${skill.name}: ${join(skill.path, "SKILL.md")}`)
+            .join("\n"),
+      ],
+    };
+  }
   if (harness === "claude") {
     const plugin = await projectSkillPlugin(
       join(repoRoot, "integrations", "worker-skills"),

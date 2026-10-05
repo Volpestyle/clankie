@@ -70,8 +70,10 @@ flowchart TD
   Tools["hire_agent / message_seat / herdr_watch"] --> Adapter["Registered harness adapter"]
   Adapter --> Claude["Claude worker channel"]
   Adapter --> Codex["Codex app-server"]
+  Adapter --> Grok["Grok TUI leader IPC + ACP"]
   Claude --> Session["Bound native session in Herdr"]
   Codex --> Session
+  Grok --> Session
   Session -->|"receipts and turn events"| Tools
 ```
 
@@ -79,8 +81,9 @@ flowchart TD
 | ----------- | ---------------------------------------------------- | --------------------------------------------------------- |
 | Claude Code | Native worker-plugin channel and turn hooks          | Implemented; requires the owner's channel consent         |
 | Codex       | App-server shared with the native TUI's bound thread | Implemented; starts or steers a turn                      |
-| Pi          | Native extension follow-up or steering messages      | Researched; not implemented in this local hire path       |
+| Pi          | Process-bound native extension follow-up messages    | Implemented locally; original visible session required    |
 | OpenCode    | Injected SDK in the process-bound native worker TUI  | Implemented locally; pinned to OpenCode 1.18.18           |
+| Grok Build  | Leader IPC/ACP on the exact interactive TUI session  | Implemented locally on macOS; pinned to Grok 1.0.46       |
 | Prime Agent | Daemon-backed messages to the active session         | Researched for PrimeIntellect's CLI; not implemented here |
 
 Transcript discovery and an available native CLI
@@ -105,6 +108,17 @@ owner switches the TUI to another thread, this connection does not follow UI
 focus. Report unavailable control without falling back to terminal input.
 See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md)
 for the boundary between task records, native terminals and harness delivery.
+
+The Grok Build operator seat uses `clankie seat --harness grok` (or
+`clankie grok`). It starts the visible TUI with a private leader socket, loads
+the selected service conversation's persona/memory and operator MCP tools, and
+provides selected skills as readable paths. Briefs, messages and service wakes
+use the same native session; no ACP headless process or terminal typing is used.
+Native process birth, socket, TUI session and pane proofs are checked independently.
+Owner permission prompts remain native. Worker saved-history resume and adopting
+a controller after restart are unsupported; unsupported versions/platforms refuse.
+See [the CLI guide](../../docs/cli.md#grok-build-worker-and-operator-seats) and
+[ADR 0224](../../docs/adr/0224-grok-build-shares-the-visible-native-session.md).
 
 The OpenCode **operator** seat is available separately through
 `clankie seat --harness opencode`. Its plugin uses the native injected SDK client

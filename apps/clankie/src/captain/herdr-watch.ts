@@ -1881,7 +1881,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
         : this.runner.runInPane === undefined
           ? "pane_run_unavailable"
           : "adapter_unavailable";
-    if ((brief !== undefined || input.harness === "opencode") && adapter === undefined) {
+    if (
+      (brief !== undefined || input.harness === "opencode" || input.harness === "grok") &&
+      adapter === undefined
+    ) {
       const detail = `No structured harness adapter is available (${unavailableReason}); no seat was started and no terminal input was sent.`;
       return {
         outcome: "failed",
@@ -1898,12 +1901,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
       prepared === undefined &&
       remote === undefined &&
       this.skillBundle !== undefined &&
-      ["claude", "pi", "codex"].includes(input.harness);
+      ["claude", "pi", "codex", "grok"].includes(input.harness);
     if (input.skills !== undefined && !canApplySkills && prepared === undefined) {
       return {
         outcome: "failed",
         reason: "harness_unavailable",
-        detail: "Skill overrides require a local Claude, Pi or Codex hire.",
+        detail: "Skill overrides require a local Claude, Pi, Codex or Grok hire.",
       };
     }
     const configuredSkills =

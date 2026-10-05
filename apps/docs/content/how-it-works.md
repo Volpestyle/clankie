@@ -49,6 +49,13 @@ delivery, and continuation limits are documented separately.
 Each fresh native launch gets its own workspace chat, including simultaneous
 launches in the same directory. Resume keeps that chat; an explicit conversation
 ID selects an existing one. Transcripts and wake channels follow the selected chat.
+
+`clankie grok` provides another operator seat on macOS with Grok Build 1.0.46
+and an existing sign-in. Its visible native session carries the service persona,
+memory, operator tools and selected skill paths through leader IPC/ACP.
+`--dry-run` reviews the launch; `--conversation ID` selects a chat and `--resume`
+retains the original profile/session/chat after a confirmed exit. It does not
+accept `--plugin-dir`. Native permission prompts remain owner decisions.
 The selected chat can also be a Discord room. While the seat's channel is live,
 worker reports, room turns, wakes and watches reach that seat; new inputs return
 to the built-in agent after it leaves. Each channel or DM remains a separate
@@ -91,9 +98,11 @@ to watch and use. Clankie sends assignments through each supported harness's
 message connection, without typing into your draft. If delivery is unavailable
 or uncertain, he reports that outcome.
 
-Native local message adapters currently cover Claude Code and Codex. Pi,
-OpenCode, and Prime Agent have been researched but are not integrated into this
-hire path. Remote Claude and Codex hires use the fleet link and native channels. See the [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
+Native local message adapters cover Claude Code, Codex, Pi, OpenCode and
+Grok Build. Grok uses its interactive TUI's private leader IPC/ACP on macOS,
+pinned to 1.0.46; native sign-in/permission gaps refuse without terminal input.
+Prime Agent remains researched without a local hire adapter. Remote Claude and
+Codex hires use the fleet link and native channels. See the [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
 for the message flow and current limits.
 
 The app presents those agents in Messages and, where execution seats exist,

@@ -25,7 +25,7 @@ import { operatorHarness } from "./harness-command.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const SEAT_USAGE =
-  "Usage: clankie claude|codex|opencode [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
+  "Usage: clankie claude|codex|opencode|grok [--resume] [--conversation ID] [--plugin-dir PATH] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -62,7 +62,7 @@ export interface SeatPlan {
   readonly command: string;
   readonly account?: { readonly label: string; readonly home: string };
   readonly args: readonly string[];
-  readonly plugin: { readonly source: "plugin-dir"; readonly path: string };
+  readonly plugin: { readonly source: "plugin-dir" | "skill-paths"; readonly path: string };
   readonly skills: ReturnType<typeof bundledSkills>;
   /** Whether wakes and escalations can reach this session as channel events. */
   readonly channel: boolean;
@@ -113,7 +113,7 @@ export interface SeatCommandOptions {
 }
 
 interface SeatFlags {
-  readonly harness?: "claude" | "codex" | "opencode";
+  readonly harness?: "claude" | "codex" | "opencode" | "grok";
   readonly conversationId?: string;
   readonly resume: boolean;
   readonly dryRun: boolean;
@@ -122,7 +122,8 @@ interface SeatFlags {
 
 export function parseSeatArgs(args: readonly string[], command?: string): SeatFlags {
   const selected = operatorHarness(command);
-  const usage = command === undefined ? SEAT_USAGE : SEAT_USAGE.replace("claude|codex|opencode", command);
+  const usage =
+    command === undefined ? SEAT_USAGE : SEAT_USAGE.replace("claude|codex|opencode|grok", command);
   if (command !== undefined && selected === undefined) throw new Error(usage);
   let harness: SeatFlags["harness"] = selected;
   let conversationId: string | undefined;
@@ -133,7 +134,8 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
     const arg = args[index];
     if (arg === "--harness") {
       const value = args[++index];
-      if (value !== "claude" && value !== "codex" && value !== "opencode") throw new Error(usage);
+      if (value !== "claude" && value !== "codex" && value !== "opencode" && value !== "grok")
+        throw new Error(usage);
       if (selected !== undefined && value !== selected) throw new Error(usage);
       harness = value;
     } else if (arg === "--resume") resume = true;
@@ -256,11 +258,15 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   if (named !== undefined) {
     const harness = operatorHarness(named);
     if (harness === undefined || (flags.harness !== undefined && flags.harness !== harness))
-      throw new Error(SEAT_USAGE.replace("claude|codex|opencode", named));
+      throw new Error(SEAT_USAGE.replace("claude|codex|opencode|grok", named));
     flags = { ...flags, harness };
   }
   if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
     throw new Error(SEAT_USAGE);
+  if (flags.harness === "grok") {
+    const { planGrokSeat } = await import("./grok-seat.ts");
+    return planGrokSeat(flags, options);
+  }
   if (flags.harness === "opencode") {
     const { planOpenCodeSeat } = await import("./opencode-seat.ts");
     return planOpenCodeSeat(flags, options);
@@ -408,6 +414,10 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const flags = parseSeatArgs(args, options.harnessCommand ?? options.claudeCommand);
   if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
     throw new Error(SEAT_USAGE);
+  if (flags.harness === "grok") {
+    const { runGrokSeat } = await import("./grok-seat.ts");
+    return runGrokSeat(flags, options);
+  }
   if (flags.harness === "opencode") {
     const { runOpenCodeSeat } = await import("./opencode-seat.ts");
     return runOpenCodeSeat(flags, options);

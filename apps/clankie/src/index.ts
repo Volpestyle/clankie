@@ -108,6 +108,7 @@ import { createEmailPort } from "./email.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LocalFleetLink } from "./local-fleet-link.ts";
 import { createProjectProcessObserver } from "./project-process-proof.ts";
+import { createGrokNativeHost } from "./captain/grok-native-host.ts";
 import { createOpenCodeNativeHost } from "./captain/opencode-native-host.ts";
 import { createProjectWorkspaceResolver } from "./project-membership.ts";
 import {
@@ -696,6 +697,10 @@ const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
   },
   warn: (message) => logger.warn({ event: "local_codex_seats.unreadable" }, message),
 });
+const grokNative = createGrokNativeHost({
+  binding: localFleetBinding,
+  processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
+});
 const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-room-observations.json"));
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
@@ -970,6 +975,7 @@ const captain = createCaptain(
       remoteCodexSeats.register(launch, proofFleetLinks?.lifetime(launch.fleet) ?? (() => false)),
     localCodexSocket: () => herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
+    grokNative,
     openCodeNative: createOpenCodeNativeHost({
       binding: localFleetBinding,
       processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
@@ -1037,14 +1043,17 @@ const localFleet = new LocalFleetLink({
   projectProof: localProjectProof({
     binding: localFleetBinding,
     herdrBinary: "herdr",
-    privateSeat: async (chain, pane, binding) => localCodexSeats.allows(chain, pane, binding),
+    privateSeat: async (chain, pane, binding) =>
+      (await localCodexSeats.allows(chain, pane, binding)) || grokNative.allows(chain, pane, binding),
     privateProjectSeat: async (chain, pane, binding, proof) =>
-      localCodexSeats.allows(chain, pane, binding, proof.nativeOccupantId),
+      (await localCodexSeats.allows(chain, pane, binding, proof.nativeOccupantId)) ||
+      grokNative.allows(chain, pane, binding, proof.nativeOccupantId),
   }),
   prove: localFleetProof({
     binding: localFleetBinding,
     herdrBinary: "herdr",
-    privateSeat: async (chain, pane, binding) => localCodexSeats.allows(chain, pane, binding),
+    privateSeat: async (chain, pane, binding) =>
+      (await localCodexSeats.allows(chain, pane, binding)) || grokNative.allows(chain, pane, binding),
   }),
 });
 const workerMcp = new WorkerMcp({
