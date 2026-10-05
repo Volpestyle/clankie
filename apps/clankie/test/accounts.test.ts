@@ -4,7 +4,12 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FileCredentialStore, LINEAR_OAUTH_ISSUER } from "@clankie/credential-broker";
+import {
+  FileCredentialStore,
+  LINEAR_OAUTH_ISSUER,
+  LINEAR_API_AUTHORIZE_ENDPOINT,
+  resolveProviderBearer,
+} from "@clankie/credential-broker";
 import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS, type DeviceGrantSet } from "@clankie/protocol";
 import { writeConvention } from "@clankie/work-items";
 import { bodyTelemetryFromEnv } from "@clankie/observability/body-telemetry";
@@ -17,7 +22,7 @@ import {
 } from "../src/accounts.ts";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
-import { createWorkItemsService, WorkRequestError } from "../src/work-items.ts";
+import { createWorkItemsService } from "../src/work-items.ts";
 
 const logs = vi.hoisted(() => [] as unknown[]);
 vi.mock("@clankie/observability", async (original) => ({
@@ -49,7 +54,7 @@ interface Seen {
  * the token endpoint answers on each poll; it echoes secrets in its error text
  * to prove none of it is forwarded.
  */
-async function fakeProviders(device: string[] = ["authorization_pending", "token"]) {
+async function fakeProviders(device: string[] = ["authorization_pending", "token"], revokeStatus = 204) {
   const seen: Seen[] = [];
   const issues: Record<string, unknown>[] = [];
   const server: Server = createServer((request, response) => {
@@ -81,7 +86,7 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
           ? json(200, { login: "octo-owner" })
           : json(401, { message: "Bad credentials" });
       if (request.method === "DELETE" && url.pathname.startsWith("/applications/")) {
-        response.writeHead(204);
+        response.writeHead(revokeStatus);
         return response.end();
       }
       if (url.pathname === "/repos/owner/repo/issues") {
@@ -100,17 +105,33 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
         return json(200, issues);
       }
       const issuePath = /^\/repos\/owner\/repo\/issues\/(\d+)$/u.exec(url.pathname);
-      if (request.method === "GET" && issuePath) {
+      if ((request.method === "GET" || request.method === "PATCH") && issuePath) {
         if (request.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { message: TOKEN });
         const issue = issues.find((entry) => entry.number === Number(issuePath[1]));
+        if (issue && request.method === "PATCH") Object.assign(issue, JSON.parse(body));
         return issue ? json(200, issue) : json(404, { message: "Not Found" });
       }
-      // Linear's MCP authorization server, reached through the rewriting fetch below.
+      // Registered API OAuth and the separately retained legacy MCP revoke lane.
       if (route === "POST /linear/register") return json(201, { client_id: "dcr-client" });
-      if (route === "POST /linear/token")
-        return new URLSearchParams(body).get("code") === "good-code"
-          ? json(200, { access_token: LINEAR_ACCESS, refresh_token: LINEAR_REFRESH, expires_in: 3600 })
+      if (route === "POST /linear-api/oauth/token")
+        return new URLSearchParams(body).get("code") === "good-code" ||
+          new URLSearchParams(body).get("grant_type") === "refresh_token"
+          ? json(200, {
+              access_token: LINEAR_ACCESS,
+              refresh_token: LINEAR_REFRESH,
+              expires_in: 3600,
+              token_type: "Bearer",
+              scope: "read,write",
+            })
           : json(400, { error: "invalid_grant", error_description: `echo ${LINEAR_ACCESS}` });
+      if (route === "POST /linear-api/graphql")
+        return json(200, {
+          data: {
+            viewer: { id: "app-user", name: "Clankie", app: true },
+            organization: { id: "workspace", name: "Personal" },
+          },
+        });
+      if (route === "POST /linear-api/oauth/revoke") return json(200, {});
       if (route === "GET /linear/.well-known/oauth-authorization-server")
         return json(200, { revocation_endpoint: `${LINEAR_OAUTH_ISSUER}/revoke` });
       if (route === "POST /linear/revoke") return json(200, {});
@@ -123,7 +144,9 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
   // Linear's endpoints are constants in the broker; route them to the fake.
   const routed: typeof fetch = (input, init) =>
     fetch(
-      String(input instanceof Request ? input.url : input).replace(LINEAR_OAUTH_ISSUER, `${origin}/linear`),
+      String(input instanceof Request ? input.url : input)
+        .replace(LINEAR_OAUTH_ISSUER, `${origin}/linear`)
+        .replace("https://api.linear.app", `${origin}/linear-api`),
       init,
     );
   return {
@@ -143,10 +166,12 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-async function setup(options: { device?: string[]; apps?: Partial<OauthApps>; secret?: boolean } = {}) {
+async function setup(
+  options: { device?: string[]; apps?: Partial<OauthApps>; secret?: boolean; revokeStatus?: number } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "accounts-"));
   cleanups.push(() => rm(dir, { recursive: true, force: true }));
-  const providers = await fakeProviders(options.device);
+  const providers = await fakeProviders(options.device, options.revokeStatus);
   cleanups.push(providers.close);
   const store = new FileCredentialStore(join(dir, "credentials.json"));
   if (options.secret === true)
@@ -154,7 +179,7 @@ async function setup(options: { device?: string[]; apps?: Partial<OauthApps>; se
   let clock = Date.parse("2026-09-26T12:00:00Z");
   const apps: OauthApps = {
     github: { clientId: "Ov23liFakeClient" },
-    linear: { redirectUri: "https://clankie.bot/connect/linear" },
+    linear: { clientId: "registered-client", redirectUri: "https://clankie.bot/connect/linear" },
     ...options.apps,
   };
   const accounts = createAccounts({
@@ -364,14 +389,42 @@ describe("GitHub device flow", () => {
   });
 });
 
+it.each([404, 422, 429])("does not claim GitHub revocation for HTTP %i", async (revokeStatus) => {
+  const { json, store, providers } = await setup({ device: ["token"], secret: true, revokeStatus });
+  const flowId = (await json("/v1/accounts/github/start", {})).body.flowId;
+  await json("/v1/accounts/github/poll", { flowId });
+  expect((await json("/v1/accounts/disconnect", { provider: "github" })).body).toMatchObject({
+    ok: true,
+    revoked: false,
+    manageUrl: expect.any(String),
+  });
+  expect(providers.seen.some((entry) => entry.method === "DELETE")).toBe(true);
+  expect(await store.get("github")).toBeUndefined();
+});
+it("refuses a revocation secret belonging to another registered GitHub app", async () => {
+  const { json, store, providers } = await setup({ device: ["token"], secret: true });
+  await store.set(GITHUB_OAUTH_APP_PROVIDER_ID, {
+    type: "api",
+    key: CLIENT_SECRET,
+    metadata: { clientId: "different-app" },
+  });
+  const flowId = (await json("/v1/accounts/github/start", {})).body.flowId;
+  await json("/v1/accounts/github/poll", { flowId });
+  expect((await json("/v1/accounts/disconnect", { provider: "github" })).body.revoked).toBe(false);
+  expect(providers.seen.some((entry) => entry.method === "DELETE")).toBe(false);
+});
+
 describe("Linear OAuth with PKCE", () => {
   it("keeps the verifier on the body, exchanges once, and revokes on disconnect", async () => {
     const { json, store, providers } = await setup();
     const start = await json("/v1/accounts/linear/start", {});
     expect(start.body).toMatchObject({ ok: true, redirectUri: "https://clankie.bot/connect/linear" });
     const authorize = new URL(start.body.authorizeUrl as string);
-    expect(authorize.origin + authorize.pathname).toBe(`${LINEAR_OAUTH_ISSUER}/authorize`);
-    expect(authorize.searchParams.get("client_id")).toBe("dcr-client");
+    expect(authorize.origin + authorize.pathname).toBe(LINEAR_API_AUTHORIZE_ENDPOINT);
+    expect(authorize.searchParams.get("actor")).toBe("app");
+    expect(authorize.searchParams.get("scope")).toBe("read,write");
+    expect(providers.seen.some((entry) => entry.path.includes("register"))).toBe(false);
+    expect(authorize.searchParams.get("client_id")).toBe("registered-client");
     expect(authorize.searchParams.get("state")).toBe(start.body.flowId);
     expect(authorize.searchParams.get("code_challenge_method")).toBe("S256");
 
@@ -382,15 +435,26 @@ describe("Linear OAuth with PKCE", () => {
         provider: "linear",
         status: "connected",
         scopes: ["read", "write"],
-        manageUrl: "https://linear.app/settings/account/security",
+        account: "Clankie",
+        actor: "app",
+        workspace: "Personal",
+        connectedAt: expect.any(String),
+        manageUrl: "https://linear.app/settings/api",
       },
     });
     const exchange = new URLSearchParams(
-      providers.seen.find((entry) => entry.path === "/linear/token")!.body,
+      providers.seen.find((entry) => entry.path === "/linear-api/oauth/token")!.body,
     );
     expect(exchange.get("code_verifier")).toMatch(/^[A-Za-z0-9_-]{43,128}$/u);
     expect(JSON.stringify(start.body)).not.toContain(exchange.get("code_verifier")!);
-    expect(await store.get("linear")).toMatchObject({ type: "oauth", access: LINEAR_ACCESS });
+    expect(await store.get("linear-api")).toMatchObject({
+      type: "oauth",
+      linearAuth: "api",
+      access: LINEAR_ACCESS,
+      metadata: { scopes: "read,write" },
+      account: { actor: "app" },
+    });
+    expect(await store.get("linear")).toBeUndefined();
     // The redirect cannot be replayed.
     expect((await json("/v1/accounts/linear/complete", { state, code: "good-code" })).body).toEqual({
       ok: false,
@@ -401,12 +465,14 @@ describe("Linear OAuth with PKCE", () => {
       ok: true,
       revoked: true,
     });
-    const revoke = new URLSearchParams(providers.seen.find((entry) => entry.path === "/linear/revoke")!.body);
+    const revoke = new URLSearchParams(
+      providers.seen.find((entry) => entry.path === "/linear-api/oauth/revoke")!.body,
+    );
     expect(Object.fromEntries(revoke)).toEqual({
       token: LINEAR_REFRESH,
       token_type_hint: "refresh_token",
-      client_id: "dcr-client",
     });
+    expect(await store.get("linear-api")).toBeUndefined();
     expect(await store.get("linear")).toBeUndefined();
   });
 
@@ -422,6 +488,57 @@ describe("Linear OAuth with PKCE", () => {
       ok: false,
       error: "unconfigured",
     });
+  });
+});
+
+describe("registered Linear broker boundaries", () => {
+  it("cancels unexchanged flows without claiming a provider grant was revoked", async () => {
+    const { json, store, providers } = await setup();
+    const state = (await json("/v1/accounts/linear/start", {})).body.flowId;
+    expect((await json("/v1/accounts/disconnect", { provider: "linear" })).body).toMatchObject({
+      ok: true,
+      revoked: false,
+    });
+    expect((await json("/v1/accounts/linear/complete", { state, code: "good-code" })).body.error).toBe(
+      "unknown_flow",
+    );
+    expect(
+      providers.seen.some((entry) => entry.path.includes("revoke") || entry.path.includes("token")),
+    ).toBe(false);
+    expect(await store.get("linear-api")).toBeUndefined();
+  });
+
+  it("refreshes only the API audience and deletes both Linear lanes and pending flows", async () => {
+    const { json, store, providers } = await setup();
+    const state = (await json("/v1/accounts/linear/start", {})).body.flowId;
+    await json("/v1/accounts/linear/complete", { state, code: "good-code" });
+    const api = await store.get("linear-api");
+    if (api?.type !== "oauth") throw new Error("Expected API credential");
+    await store.set("linear-api", { ...api, expires: Date.now() - 1 });
+    await store.set("linear", { type: "api", key: "legacy-personal-api-key" });
+    expect(await resolveProviderBearer("linear-api", store, Date.now(), { fetch: providers.fetch })).toBe(
+      LINEAR_ACCESS,
+    );
+    expect(
+      providers.seen
+        .filter((entry) => entry.path === "/linear-api/oauth/token")
+        .map((entry) => new URLSearchParams(entry.body).get("grant_type")),
+    ).toEqual(["authorization_code", "refresh_token"]);
+    expect(await resolveProviderBearer("linear", store)).toBe("legacy-personal-api-key");
+    const older = (await json("/v1/accounts/linear/start", {})).body.flowId;
+    expect((await json("/v1/accounts/disconnect", { provider: "linear" })).body).toMatchObject({
+      ok: true,
+      revoked: false,
+      manageUrl: expect.any(String),
+    });
+    expect(await store.get("linear-api")).toBeUndefined();
+    expect(await store.get("linear")).toBeUndefined();
+    expect((await json("/v1/accounts/linear/complete", { state: older, code: "good-code" })).body.error).toBe(
+      "unknown_flow",
+    );
+    // An API token mistakenly written to the legacy id fails closed before any network.
+    await store.set("linear", api);
+    await expect(resolveProviderBearer("linear", store)).rejects.toThrow("cannot authenticate MCP");
   });
 });
 
@@ -535,9 +652,9 @@ describe("work tracker on a hosted body", () => {
     const failure = await service
       .handle({ action: "list", repo: "workspace" }, false)
       .catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(WorkRequestError);
+    expect(failure).toBeInstanceOf(Error);
     expect(failure).toMatchObject({
-      code: "backend_unavailable",
+      name: "BackendUnavailableError",
       message: "This repo tracks work in GitHub issues (owner/repo); connect GitHub to Clankie to use it",
     });
     expect(gh).not.toHaveBeenCalled();

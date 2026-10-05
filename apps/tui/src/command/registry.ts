@@ -233,11 +233,13 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["accounts"],
     lines: [
-      "  accounts [list] | connect github | disconnect github|linear   Owner's GitHub and Linear connections (JSON)",
+      "  accounts [list] | connect github|linear | complete linear --json-stdin | disconnect github|linear   Body account connections (JSON)",
+      "  accounts start github | poll github --flow-id ID   Start and check GitHub device authorization separately",
       "  accounts connect linear-app --client-id ID --secret-stdin   Connect a workspace-owned Clankie app",
       "  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom",
       "  accounts claude [list | add HOME --label LABEL | remove LABEL]   Register existing local Claude profiles",
       "  accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]",
+      "  accounts apps github-secret --client-id ID --secret-stdin   Body-only developer revocation secret",
     ],
   },
   {

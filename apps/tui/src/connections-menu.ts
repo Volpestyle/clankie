@@ -8,6 +8,15 @@ import { machinesSection, runMachinesMenu } from "./machines-menu.ts";
  */
 import type { ClankieFaceShell } from "./shell/shell.ts";
 import type { MenuOption, SetupFlow } from "./shell/setup-flow.ts";
+import {
+  AccountsResponseSchema,
+  AccountGithubStartResultSchema,
+  AccountGithubPollResultSchema,
+  AccountLinearStartResultSchema,
+  AccountDisconnectResultSchema,
+  AccountLinearCompleteResultSchema,
+} from "@clankie/protocol/accounts";
+import { parseLinearAccountCallback, validateLinearAccountStart } from "@clankie/api-client/accounts";
 
 type Json = Record<string, unknown>;
 type Run = (args: readonly string[]) => Promise<unknown>;
@@ -16,6 +25,7 @@ export interface ConnectionsMenuServices {
   readonly machines: Run;
   readonly runtime: Run;
   readonly agents: Run;
+  readonly accounts?: (args: readonly string[], input?: string) => Promise<unknown>;
   /** Injected for tests; how often a reply wait re-checks its run. */
   readonly now?: () => number;
 }
@@ -147,14 +157,113 @@ export async function runConnectionsMenu(
           ...services,
           openSessions: (id) => hostSessions(shell, services, { id }),
         });
-      else if (choice === "accounts") await accountsSection(flow, record(inventory.accounts));
-      else shell.insertCommandResult("/connections json", JSON.stringify(inventory, null, 2), "success");
+      else if (choice === "accounts") {
+        if (services.accounts) await providerAccountsSection(flow, services.accounts);
+        else await accountsSection(flow, record(inventory.accounts));
+      } else shell.insertCommandResult("/connections json", JSON.stringify(inventory, null, 2), "success");
     }
   } catch (error) {
     // Closing the flow resets the status line, so a fatal error goes to the chat.
     shell.insertCommandResult("/connections", message(error), "error");
   } finally {
     flow.end();
+  }
+}
+
+async function providerAccountsSection(
+  flow: SetupFlow,
+  run: NonNullable<ConnectionsMenuServices["accounts"]>,
+): Promise<void> {
+  for (;;) {
+    const parsed = AccountsResponseSchema.safeParse(await run([]));
+    if (!parsed.success) throw new Error("Account connections unavailable");
+    const choice = await flow.readSelect({
+      message: "Account connections",
+      options: parsed.data.connections.map((connection) => ({
+        value: connection.provider,
+        label: connection.provider === "github" ? "GitHub" : "Linear",
+        hint: `${connection.status.replaceAll("_", " ")}${connection.account ? ` · ${connection.account}` : ""}`,
+        description: connection.scopes.length
+          ? `Granted scopes: ${connection.scopes.join(", ")}`
+          : "No granted scopes",
+      })),
+      allowBack: true,
+    });
+    const connection = parsed.data.connections.find((item) => item.provider === choice);
+    if (!connection) return;
+    if (connection.status === "unconfigured") {
+      flow.renderLine("The OAuth application has not been configured for this Clankie.", "info");
+      continue;
+    }
+    const action = await flow.readSelect({
+      message: connection.provider === "github" ? "GitHub" : "Linear",
+      options: [
+        {
+          value: connection.status === "connected" ? "disconnect" : "connect",
+          label: connection.status === "connected" ? "Disconnect and revoke" : "Connect",
+        },
+      ],
+      allowBack: true,
+    });
+    if (!action) continue;
+    try {
+      if (action === "disconnect") {
+        const result = AccountDisconnectResultSchema.safeParse(
+          await run(["disconnect", connection.provider]),
+        );
+        if (!result.success || !result.data.ok) throw new Error("Account disconnect unavailable");
+        flow.renderLine(
+          result.data.revoked
+            ? "Disconnected and revoked."
+            : "Disconnected on this Clankie. Revoke the remaining grant at the provider.",
+          result.data.revoked ? "success" : "info",
+        );
+        if (!result.data.revoked && result.data.manageUrl) flow.renderLine(result.data.manageUrl, "info");
+      } else if (connection.provider === "github") {
+        const start = AccountGithubStartResultSchema.safeParse(await run(["start", "github"]));
+        if (!start.success || !start.data.ok) throw new Error("GitHub connection unavailable");
+        flow.renderLine(`Open ${start.data.verificationUri} and enter ${start.data.userCode}`, "info");
+        for (;;) {
+          const check = await flow.readSelect({
+            message: "Authorize GitHub in your browser, then check the connection",
+            options: [{ value: "check", label: "Check connection" }],
+            allowBack: true,
+          });
+          if (!check) break;
+          const result = AccountGithubPollResultSchema.safeParse(
+            await run(["poll", "github", "--flow-id", start.data.flowId]),
+          );
+          if (!result.success || !result.data.ok) throw new Error("GitHub authorization did not complete");
+          if (result.data.status === "connected") {
+            flow.renderLine("GitHub connected.", "success");
+            break;
+          }
+          flow.renderLine(`Still waiting; check again after ${result.data.interval} seconds.`, "info");
+        }
+      } else {
+        const start = AccountLinearStartResultSchema.safeParse(await run(["connect", "linear"]));
+        if (!start.success || !start.data.ok) throw new Error("Linear connection unavailable");
+        validateLinearAccountStart(start.data);
+        flow.renderLine(`Open ${start.data.authorizeUrl}`, "info");
+        const callback = await flow.readSecret({
+          message: "Paste the Open Clankie callback link after authorization",
+          allowBack: true,
+        });
+        if (!callback) continue;
+        const input = parseLinearAccountCallback(callback, start.data);
+        if ("error" in input) throw new Error("Linear authorization did not complete");
+        const result = AccountLinearCompleteResultSchema.safeParse(
+          await run(["complete", "linear", "--json-stdin"], JSON.stringify(input)),
+        );
+        if (!result.success || !result.data.ok) throw new Error("Linear connection unavailable");
+        flow.renderLine("Linear connected.", "success");
+      }
+    } catch {
+      flow.renderLine(
+        "Account authorization did not complete. Start a fresh connection to try again.",
+        "error",
+      );
+    }
   }
 }
 

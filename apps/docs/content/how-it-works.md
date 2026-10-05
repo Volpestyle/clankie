@@ -158,6 +158,14 @@ requests reach the configured provider or runtime, so running Clankie locally
 does not automatically make every model request local. See [credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md)
 for the exact stores and exceptions.
 
+GitHub and Linear account Connections use the body's credential broker too.
+The app and account page show identity and granted permissions and can disconnect
+and revoke access. GitHub authorization starts with a user code; Linear uses a
+browser return and PKCE. Provider tokens remain on the body, while device
+requests travel through the encrypted gateway. These flows require configured
+developer OAuth applications; hosted provisioning supplies their public client
+configuration. See [account connections](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0232-hosted-connections-use-the-body-broker.md).
+
 The public gateway routes encrypted device exchanges to the host. The host
 issues pairing offers and device grants and enforces them on requests. The
 gateway cannot decrypt those device payloads; it can see routing metadata,

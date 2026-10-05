@@ -29,7 +29,7 @@ import {
 } from "@clankie/protocol/accounts";
 import type { AccountsPort } from "./accounts.ts";
 
-/** Write-only like model keys (ADR 0196): no request, token or provider-error logging, ever. */
+/** Like model keys (ADR 0232): no request, token or provider-error logging, ever. */
 export function createAccountRoutes(
   accounts: AccountsPort | undefined,
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
@@ -105,10 +105,17 @@ export function createAccountRoutes(
       return context.json({ ok: false, error: "unavailable" }, 503);
     }
   });
-  const post = (path: string, handle: (body: unknown) => Promise<{ ok: boolean }>) =>
+  const post = (
+    path: string,
+    handle: (body: unknown, guard: () => Promise<void>) => Promise<{ ok: boolean }>,
+  ) =>
     app.post(path, async (context) => {
       try {
-        const safe = await handle(await context.req.json().catch(() => ({})));
+        const guard = async () => {
+          if ((await authorize(context.req.raw)) !== true) throw new Error("Account owner authority changed");
+        };
+        const safe = await handle(await context.req.json().catch(() => ({})), guard);
+        await guard();
         return context.json(safe, safe.ok ? 200 : 400);
       } catch {
         // Broker and provider failures may carry a token. Never forward or log them.
@@ -119,33 +126,33 @@ export function createAccountRoutes(
   post(ACCOUNT_GITHUB_START_PATH, async () =>
     AccountGithubStartResultSchema.parse(await accounts!.startGithub()),
   );
-  post(ACCOUNT_GITHUB_POLL_PATH, async (body) => {
+  post(ACCOUNT_GITHUB_POLL_PATH, async (body, guard) => {
     const parsed = AccountGithubPollRequestSchema.safeParse(body);
     return parsed.success
-      ? AccountGithubPollResultSchema.parse(await accounts!.pollGithub(parsed.data.flowId))
+      ? AccountGithubPollResultSchema.parse(await accounts!.pollGithub(parsed.data.flowId, guard))
       : malformed;
   });
   post(ACCOUNT_LINEAR_START_PATH, async () =>
     AccountLinearStartResultSchema.parse(await accounts!.startLinear()),
   );
-  post(ACCOUNT_LINEAR_COMPLETE_PATH, async (body) => {
+  post(ACCOUNT_LINEAR_COMPLETE_PATH, async (body, guard) => {
     const parsed = AccountLinearCompleteRequestSchema.safeParse(body);
     return parsed.success
       ? AccountLinearCompleteResultSchema.parse(
-          await accounts!.completeLinear(parsed.data.state, parsed.data.code),
+          await accounts!.completeLinear(parsed.data.state, parsed.data.code, guard),
         )
       : malformed;
   });
-  post(ACCOUNT_LINEAR_APP_PATH, async (body) => {
+  post(ACCOUNT_LINEAR_APP_PATH, async (body, guard) => {
     const parsed = AccountLinearAppRequestSchema.safeParse(body);
     return parsed.success
-      ? AccountLinearCompleteResultSchema.parse(await accounts!.connectLinearApp(parsed.data))
+      ? AccountLinearCompleteResultSchema.parse(await accounts!.connectLinearApp(parsed.data, guard))
       : malformed;
   });
-  post(ACCOUNT_DISCONNECT_PATH, async (body) => {
+  post(ACCOUNT_DISCONNECT_PATH, async (body, guard) => {
     const parsed = AccountDisconnectRequestSchema.safeParse(body);
     return parsed.success
-      ? AccountDisconnectResultSchema.parse(await accounts!.disconnect(parsed.data.provider))
+      ? AccountDisconnectResultSchema.parse(await accounts!.disconnect(parsed.data.provider, guard))
       : malformed;
   });
   return app;

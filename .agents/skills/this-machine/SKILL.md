@@ -110,6 +110,7 @@ index). Configure through the headless CLI:
 | Job                                   | Command                                                                                                |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | This install                          | `clankie doctor --json` (JSON; exit 0; `ok` means the card was produced)                               |
+| GitHub / Linear account connections   | `clankie accounts list`, `clankie accounts connect github                                              | linear`, `clankie accounts disconnect github | linear`; `/connections` in the console |
 | Can he take a turn                    | `clankie doctor --json` → `captain` (`ready`, or `no_model` / `no_credential`)                         |
 | Start at login                        | `clankie autostart status`, `clankie autostart enable`                                                 |
 | Are processes up                      | `clankie status` (JSON; `clankie health` is an alias)                                                  |

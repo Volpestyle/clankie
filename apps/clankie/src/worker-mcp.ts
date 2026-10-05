@@ -13,6 +13,8 @@ import {
   ProviderAccountSchema,
   type CredentialStore,
   verifyLinearApiAccount,
+  verifyLinearApiOauthAccount,
+  LINEAR_API_PROVIDER_ID,
   verifyLinearAppAccount,
   resolveProviderBearer,
 } from "@clankie/credential-broker";
@@ -182,26 +184,31 @@ export class WorkerMcp {
   }
 
   async linearAccount(verify = false) {
+    const provider = (await this.options.credentials.get(LINEAR_API_PROVIDER_ID))
+      ? LINEAR_API_PROVIDER_ID
+      : "linear";
     if (verify) {
       const update = this.options.credentials.update;
       if (update === undefined) throw new Error("Credential store cannot verify accounts atomically");
       // Persist rotated refresh tokens even if the subsequent identity read fails.
-      await resolveProviderBearer("linear", this.options.credentials);
-      const result = await update.call(this.options.credentials, "linear", async (current) => {
+      await resolveProviderBearer(provider, this.options.credentials);
+      const result = await update.call(this.options.credentials, provider, async (current) => {
         if (current.type === "wellknown") throw new Error("Unsupported Linear credential type");
         const account =
           current.type === "api"
             ? await verifyLinearApiAccount(current.key)
-            : current.linearAuth === "app"
-              ? await verifyLinearAppAccount(current.access)
-              : await verifyLinearMcpAccount(current);
+            : current.linearAuth === "api"
+              ? await verifyLinearApiOauthAccount(current.access, fetch, [current.refresh])
+              : current.linearAuth === "app"
+                ? await verifyLinearAppAccount(current.access)
+                : await verifyLinearMcpAccount(current);
         if (current.account?.userId === account.userId && current.account.workspaceId === account.workspaceId)
           account.connectionId = current.account.connectionId;
         return { ...current, account };
       });
       if (result === undefined) throw new Error("Linear is not connected");
     }
-    const current = await this.options.credentials.get("linear");
+    const current = await this.options.credentials.get(provider);
     if (current === undefined) return { status: "disconnected" as const };
     if (!("account" in current) || current.account === undefined)
       return { status: "unverified" as const, type: current.type };

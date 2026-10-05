@@ -133,6 +133,7 @@ import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { retireLinearNotifications } from "./linear-notifications.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
+import { createLinearApiTracker } from "./linear-api-tracker.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -149,6 +150,7 @@ import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts"
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import { loadGatewayEncryptionKey } from "./gateway-encryption.ts";
 import {
+  applyHostedAccountApps,
   applyHostedModelPolicy,
   configureHostedModels,
   hostedWorkerLimit,
@@ -239,6 +241,7 @@ await ensureOperatorCredential({ env: process.env, store: operatorCredentialStor
 const discordBodyInLoadout =
   serviceInLoadout("discord-bridge", process.env) || serviceInLoadout("discord-user-session", process.env);
 const hostedBootstrap = readHostedBodyBootstrap(process.env);
+if (hostedBootstrap !== undefined) await applyHostedAccountApps(hostedBootstrap, settingsStore);
 const hostedBody =
   hostedBootstrap === undefined
     ? undefined
@@ -552,6 +555,7 @@ const boundApp = (): ClankieApp => {
 // activity without hiding another writer's changes to the same issue (ADR 0168).
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
 const mcpHost = createMcpHost({
+  linearApiTracker: createLinearApiTracker({ credentials: operatorCredentialStore }),
   localTracker: createLocalTracker({ directory: join(stateRoot, "tracker") }),
   trackerIdentity: join(stateRoot, "tracker"),
   trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
