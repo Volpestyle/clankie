@@ -401,12 +401,17 @@ export interface OperatorConversationEventSink {
   pending?(prompts: readonly PendingOperatorPrompt[]): void;
   event(event: OperatorConversationStreamEvent): void;
   recovery(recovery: OperatorConversationRecovery): void;
+  /** A history restore showed only the newest turns; older ones remain retained. */
+  olderHistory?(): void;
   /**
    * The message being typed changed, or `undefined` once it settles into a
    * durable `message` event. Volatile: nothing here is ever replayed.
    */
   live(draft: OperatorConversationLiveDraft | undefined): void;
 }
+
+/** Turns a freshly opened conversation shows before its live tail. */
+const RECENT_HISTORY_TURNS = 20;
 
 interface ObservedPromptRuns {
   readonly sink: OperatorConversationEventSink;
@@ -454,10 +459,39 @@ export class OperatorConversationPromptSession {
     return await this.restoreConversation(conversationId, sink);
   }
 
-  /** Rebuilds an empty transcript from the conversation's retained beginning. */
+  /**
+   * Rebuilds an empty transcript from the newest turns, not the whole log: an
+   * agent opened mid-run lands on what it is doing now. The live tail then
+   * resumes from that window's newest event.
+   */
   public async restoreHistory(sink: OperatorConversationEventSink): Promise<boolean> {
     const conversationId = this.requiredConversationId();
-    return await this.restoreConversation(conversationId, sink, true);
+    const active = this.restores.get(conversationId);
+    if (active !== undefined) return await active;
+    const run = this.restoreRecentHistory(conversationId, sink).finally(() => {
+      this.restores.delete(conversationId);
+    });
+    this.restores.set(conversationId, run);
+    return await run;
+  }
+
+  private async restoreRecentHistory(
+    conversationId: string,
+    sink: OperatorConversationEventSink,
+  ): Promise<boolean> {
+    const page = await this.client.replay({
+      schemaVersion: 1,
+      conversationId,
+      surfaceClientId: this.tails.surfaceClientId,
+      direction: "backward",
+      turnLimit: RECENT_HISTORY_TURNS,
+    });
+    // An unknown or reset conversation has no window; the forward path owns recovery.
+    if (page.status === "recover") return await this.restoreConversationNow(conversationId, sink, true);
+    if (page.hasOlder === true) sink.olderHistory?.();
+    for (const event of page.events) sink.event(event);
+    await this.tails.writeCursor(conversationId, page.nextCursor);
+    return true;
   }
 
   /** Keep the selected conversation live while the console is otherwise idle. */
@@ -505,8 +539,10 @@ export class OperatorConversationPromptSession {
       for (const event of page.events) {
         sink.event(event);
         cursor = event.cursor;
-        await this.tails.writeCursor(conversationId, event.cursor);
       }
+      // One durable write per page: a crash re-renders at most this page.
+      if (cursor !== undefined && page.events.length > 0)
+        await this.tails.writeCursor(conversationId, cursor);
       if (!page.hasMore) return true;
       cursor = page.nextCursor;
     }

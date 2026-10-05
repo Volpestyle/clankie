@@ -173,6 +173,8 @@ const laneTrace = new CaptainLaneTraceController({
 const voiceTranscripts = createDiscordVoiceTranscriptClient(captainRouteClient);
 const conversationSelection = new OperatorConversationSelection(conversationClient);
 let currentContextUsage: OperatorConversationContextUsage | undefined;
+/** A harness seated in the selected conversation takes its turns instead of pi (ADR 0152). */
+let currentDriver: import("@clankie/protocol").OperatorConversation["driver"];
 /** Footer badge while the developer evaluator is on; see refreshEvaluatorStatus. */
 let evaluatorStatus: readonly string[] = [];
 const conversationDrafts = new Map<string, string>();
@@ -229,6 +231,7 @@ try {
   currentConversationTitle =
     selected.scope.kind === "room" ? `${selected.title} · read-only` : selected.title;
   currentContextUsage = selected.contextUsage;
+  currentDriver = selected.driver;
   currentWorkspace = conversationWorkspace(selected) ?? repoRoot;
 } catch (error) {
   // The service may not be ready yet; surface it and keep the console usable
@@ -357,6 +360,7 @@ async function selectConversation(conversationId: string) {
   currentConversationTitle =
     conversation.scope.kind === "room" ? `${conversation.title} · read-only` : conversation.title;
   currentContextUsage = conversation.contextUsage;
+  currentDriver = conversation.driver;
   currentWorkspace = conversationWorkspace(conversation) ?? repoRoot;
   // The console's own shell escape, path completion, and footer follow the
   // captain into the directory his session now works in.
@@ -516,9 +520,14 @@ const shell = new ClankieFaceShell({
   onOpenLiveAgent: async ({ seat, name }) => {
     const parent = expandedAgent?.parent ?? conversationSelection.conversationId;
     if (!parent) throw new Error("No conversation is selected");
-    const current = (await conversationClient.roster()).find(
-      (item) => item.seatId === seat.seatId && item.personaId === seat.personaId,
-    );
+    // The followed fleet already names the seat's thread; only a seat without
+    // one needs a fresh roster read before its thread is created.
+    const current =
+      seat.conversationId !== undefined
+        ? seat
+        : (await conversationClient.roster()).find(
+            (item) => item.seatId === seat.seatId && item.personaId === seat.personaId,
+          );
     if (!current) throw new Error("That agent is no longer seated");
     const conversationId =
       current.conversationId ??
@@ -553,7 +562,8 @@ const shell = new ClankieFaceShell({
   // Routine body and fleet details live in /status; the dock keeps working context.
   footerData: () => ({
     contextUsage: currentContextUsage,
-    model: currentModelDisplay,
+    // The configured pi model says nothing about a turn a seated harness takes.
+    model: currentDriver === undefined ? currentModelDisplay : `${currentDriver.harness ?? "harness"} seat`,
     title: currentConversationTitle,
   }),
   statusExtras: () => [
@@ -742,7 +752,26 @@ if (seatEnv !== undefined && seatPaneId !== undefined) {
   }).catch(() => undefined);
 }
 void reportSeatPresence("idle", "Clankie TUI");
+let driverRefresh: Promise<void> | undefined;
+/** A seat sitting down or leaving is a herdr change, so the fleet cursor is the cue to re-read it. */
+function refreshConversationDriver(): void {
+  const conversationId = conversationSelection.conversationId;
+  if (conversationId === undefined || driverRefresh !== undefined) return;
+  driverRefresh = conversationClient
+    .get(conversationId)
+    .then((conversation) => {
+      if (conversation === undefined || conversationSelection.conversationId !== conversationId) return;
+      if (JSON.stringify(conversation.driver) === JSON.stringify(currentDriver)) return;
+      currentDriver = conversation.driver;
+      shell.refreshStatusView();
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      driverRefresh = undefined;
+    });
+}
 herdrRoster.start(() => {
+  refreshConversationDriver();
   shell.requestRender();
 });
 presence.start(() => {

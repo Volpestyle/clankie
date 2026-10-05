@@ -19,6 +19,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import {
   Container,
   Editor,
+  isKeyRelease,
   Key,
   Loader,
   Markdown,
@@ -374,7 +375,9 @@ export class ClankieFaceShell {
         maxVisibleRows: () => this.maxCommandTypeaheadRows(),
       },
     );
-    this.liveAgents = new LiveAgentStrip(() => this.options.liveAgents?.() ?? [], this.theme);
+    this.liveAgents = new LiveAgentStrip(() => this.options.liveAgents?.() ?? [], this.theme, {
+      maxRows: () => Math.max(3, Math.floor(this.tui.terminal.rows * 0.5)),
+    });
     this.footer = new ClankieFooterComponent(this.theme.ansi, () => ({
       cwd: this.cwdValue,
       extras: this.footerExtras(),
@@ -968,6 +971,8 @@ export class ClankieFaceShell {
     if (this.liveAgentOverlay?.isFocused() === true) return undefined;
     if (!this.setupFlow.isWaitingForInput() && !this.tui.hasOverlay()) {
       if (this.agentNavigationBusy) return { consume: true };
+      const agentList = this.routeAgentListInput(data);
+      if (agentList !== undefined) return agentList;
       if (matchesKey(data, Key.ctrl("g")) && this.liveAgents.selected()) {
         this.openLiveAgents();
         return { consume: true };
@@ -1086,6 +1091,34 @@ export class ClankieFaceShell {
         this.agentNavigationBusy = false;
         this.tui.requestRender();
       });
+  }
+
+  /**
+   * The dock's inline list: ↓ from an empty prompt with no completion open
+   * expands it, so history and multi-line editing keep their arrows. A key
+   * release never moves it (see typeaheadSelectionDelta).
+   */
+  private routeAgentListInput(data: string): { consume?: boolean; data?: string } | undefined {
+    if (!this.liveAgents.focused) {
+      if (
+        isKeyRelease(data) ||
+        !matchesKey(data, Key.down) ||
+        this.editor.getText() !== "" ||
+        this.editor.isShowingAutocomplete() ||
+        !this.liveAgents.focus()
+      )
+        return undefined;
+      this.tui.requestRender();
+      return { consume: true };
+    }
+    if (isKeyRelease(data)) return { consume: true };
+    const result = this.liveAgents.handleInput(data);
+    this.tui.requestRender();
+    if (result === "pass") return undefined;
+    const agent = this.liveAgents.selected();
+    if (result === "open" && agent !== undefined && this.options.onOpenLiveAgent)
+      this.navigateAgent(() => this.options.onOpenLiveAgent!(agent));
+    return { consume: true };
   }
 
   private openLiveAgents(): void {
