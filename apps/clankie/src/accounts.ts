@@ -64,6 +64,8 @@ export interface AccountsPort {
 }
 
 export interface AccountsOptions {
+  /** Derived from the active hosted body runtime; developer OAuth secrets are self-hosted only. */
+  readonly hosted?: boolean;
   readonly store: CredentialStore;
   /** Read for every request, so a client ID set with the CLI applies without a restart. */
   readonly apps: () => Promise<OauthApps>;
@@ -226,7 +228,7 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
     apps: OauthApps,
     secret: ProviderCredential | undefined,
   ) => {
-    if (credential?.type !== "api") return false;
+    if (options.hosted || credential?.type !== "api") return false;
     const clientId = credential.metadata?.clientId ?? apps.github.clientId;
     if (
       clientId === undefined ||
@@ -235,7 +237,7 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
     )
       return false;
     try {
-      const response = await call(`${githubApi}/applications/${encodeURIComponent(clientId)}/grant`, {
+      const response = await call(`${githubApi}/applications/${encodeURIComponent(clientId)}/token`, {
         method: "DELETE",
         headers: {
           accept: "application/vnd.github+json",
@@ -480,7 +482,7 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
         githubFlows.clear();
         await guard?.();
         let credential = await store.get(GITHUB_PROVIDER_ID);
-        const secret = await store.get(GITHUB_OAUTH_APP_PROVIDER_ID);
+        const secret = options.hosted ? undefined : await store.get(GITHUB_OAUTH_APP_PROVIDER_ID);
         let revoked = false;
         await store.delete(GITHUB_PROVIDER_ID, async (current) => {
           credential = current;

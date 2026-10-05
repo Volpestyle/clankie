@@ -24,7 +24,7 @@ may read or write; `clankie work` and the device API remain compatibility caller
 The wire shapes live in `@clankie/protocol/work-items`.
 
 The canonical tracker surface is the Linear-shaped subset in `tracker-tools.ts`
-([ADR 0231](../../docs/adr/0231-one-tracker-tool-surface.md)). `createLocalTracker`
+([ADR 0226](../../docs/adr/0226-one-tracker-tool-surface.md)). `createLocalTracker`
 provides that catalog and `call(name, args)` over a durable `tracker.json`, with
 atomic locked writes, stable UUIDs and human identifiers. The service exposes
 these as `linear_*` through the same MCP host and fleet directory used by

@@ -200,7 +200,7 @@ async function providerAccountsSection(
       options: [
         {
           value: connection.status === "connected" ? "disconnect" : "connect",
-          label: connection.status === "connected" ? "Disconnect and revoke" : "Connect",
+          label: connection.status === "connected" ? "Disconnect" : "Connect",
         },
       ],
       allowBack: true,

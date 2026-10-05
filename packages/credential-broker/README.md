@@ -162,9 +162,13 @@ Hosted account connections store GitHub device-flow credentials under `github`
 and registered Linear API OAuth under `linear-api`. The latter uses S256 PKCE,
 verified app/workspace identity, actual granted scopes and locked refresh. It
 must never be used as the MCP-audience `linear` credential. Broker-only
-`github-oauth-app` holds the developer app's revocation secret; public client
-configuration lives in settings/bootstrap. Disconnect revokes provider grants,
-clears pending flows and deletes local credentials. See
+`github-oauth-app` may hold only an owner-run self-hosted body's own OAuth app
+secret. Hosted bodies never receive Clankie's shared developer secret; their
+GitHub disconnect deletes local access and returns a permission-management URL.
+Self-hosted GitHub revocation affects only the stored token, never the app's
+whole grant. Public client configuration lives in settings/bootstrap.
+Disconnect clears pending flows and deletes local credentials, reporting actual
+provider revocation separately. See
 [ADR 0232](../../docs/adr/0232-hosted-connections-use-the-body-broker.md).
 
 API and OAuth records optionally carry a verified provider account: connection

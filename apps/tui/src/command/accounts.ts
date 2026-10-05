@@ -17,6 +17,7 @@ import {
 } from "@clankie/credential-broker";
 import { OauthAppsSettingsSchema, SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { commandHost } from "./io.ts";
+import { isHostedModelEnvironment } from "@clankie/model-provider";
 
 const ACCOUNTS_USAGE =
   "Usage: clankie accounts [list] | connect github|linear | start github | poll github --flow-id ID | complete linear --json-stdin | connect linear-app --client-id ID --secret-stdin | disconnect github|linear | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] | apps github-secret --client-id ID --secret-stdin";
@@ -140,6 +141,10 @@ export async function runAccountsCommand(
       args[2] === "--client-id" &&
       args[4] === "--secret-stdin"
     ) {
+      if (isHostedModelEnvironment(env))
+        throw new Error(
+          "GitHub application secrets are only supported for an owner-run self-hosted OAuth app",
+        );
       if (!/^[A-Za-z0-9._-]{1,128}$/u.test(args[3] ?? "")) throw new Error("Invalid GitHub application ID");
       if (!(await resolveOperatorCredential({ env })))
         throw new Error("OAuth application configuration requires operator access");

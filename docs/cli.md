@@ -868,11 +868,16 @@ Changing the active app identity requires new worker grants. Setup and scope:
 (`oauthApps` in `settings.json`); they apply without a restart.
 `CLANKIE_GITHUB_OAUTH_CLIENT_ID`, `CLANKIE_LINEAR_OAUTH_CLIENT_ID` and
 `CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them, which is how a hosted body
-is configured. GitHub revocation needs the OAuth app's client secret as the
-broker entry `github-oauth-app`. Explicit developer provisioning on the body uses
+is configured. An owner-run self-hosted body may revoke its own GitHub token
+using its own OAuth app's secret as broker entry `github-oauth-app`.
+Explicit owner provisioning on that self-hosted body uses
 `accounts apps github-secret --client-id ID --secret-stdin`; it stores the secret
-only in the broker and returns a closed outcome. It requires operator access and
-cannot configure a remote hosted body from its account page. Hosted public app
+only in the broker and returns a closed outcome. It requires operator access
+and refuses hosted bodies. Clankie's shared developer secret is never delivered
+to customer bodies. Hosted GitHub disconnect removes local access and returns
+the GitHub permission-management URL with `revoked: false`. Self-hosted
+revocation deletes only the selected token, preserving other body tokens.
+Hosted public app
 IDs and the exact gateway `/account/connections/callback` arrive through body
 bootstrap; developer secrets are excluded. Provider app registration and terms
 acceptance remain owner actions.
@@ -912,7 +917,7 @@ issues (through the owner's `gh` login), its own one-file-per-item Markdown
 directory, or `.clankie/work/` when it has none. Every command runs against the
 git repo containing the current directory, or `--repo PATH`, and prints JSON.
 It is a compatibility CLI over the same Linear-shaped tracker tools Clankie and
-workers discover as `linear_*` ([ADR 0231](adr/0231-one-tracker-tool-surface.md)).
+workers discover as `linear_*` ([ADR 0226](adr/0226-one-tracker-tool-surface.md)).
 Issue reads and searches, patch edits, labels, relations, comments and replies,
 projects and project status updates use the same input shapes with connected
 Linear or durable local storage. `clankie doctor` reports the active backend and

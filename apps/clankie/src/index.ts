@@ -1207,6 +1207,7 @@ const clankie = await createClankieApp({
   localFleet,
   ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
   accounts: createAccounts({
+    hosted: hostedBody !== undefined,
     store: operatorCredentialStore,
     apps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env),
   }),

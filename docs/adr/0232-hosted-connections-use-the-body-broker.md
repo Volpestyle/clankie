@@ -32,15 +32,24 @@ the returned scopes and verified login. OAuth scope `repo` supports private-repo
 issue read/write. A future GitHub App can reduce permission breadth; that change
 is outside this delivery.
 
-Disconnect revokes the app grant using its broker-only developer secret
-`github-oauth-app`, then deletes the customer credential. Only a successful
-revocation is reported as revoked. If the secret is absent or revocation fails,
-the body deletes its credential and returns the provider's grant-management
-page. The UI explains the remaining action. The developer secret never travels
-through fleet bootstrap or the account page.
+Hosted bodies never receive Clankie's shared GitHub developer secret: a
+customer with Take Control can read that body's broker. Hosted disconnect
+deletes only its local credential, reports `revoked: false`, and returns the
+GitHub permission-management page. The UI explains the remaining action.
+Removing the whole GitHub app authorization there is a customer action that
+can affect their other connected bodies; Clankie never does it automatically.
+
+An owner-run self-hosted body may hold its own OAuth app secret under
+`github-oauth-app`. It revokes only its stored token with
+`DELETE /applications/{client_id}/token` and the token body, preserving other
+tokens for the same GitHub user and app. Only HTTP 204 is reported as revoked.
+The whole-app `/grant` endpoint is never used. If the owner's secret is absent
+or token revocation fails, the body deletes its local credential and returns
+the provider permission-management page. The shared developer secret is never
+provisioned to hosted bodies, bootstrap, fleet storage or customer portals.
 
 Provider references: [GitHub device authorization](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps),
-[grant revocation](https://docs.github.com/en/rest/apps/oauth-applications#delete-an-app-authorization).
+[token revocation](https://docs.github.com/en/rest/apps/oauth-applications#delete-an-app-token).
 
 ### Linear
 
@@ -84,7 +93,7 @@ Registered API OAuth uses broker entry `linear-api` and the GraphQL API. Existin
 `linear` credentials belong to the separately configured MCP/app connection;
 an API token must never be sent to the MCP audience. The body's in-process API
 tracker implements the canonical surface from
-[ADR 0226](0231-one-tracker-tool-surface.md), retaining repository, account,
+[ADR 0226](0226-one-tracker-tool-surface.md), retaining repository, account,
 write and fleet grant fences. API outage refuses rather than selecting another
 backend. Disconnect clears both Linear credential lanes and pending flows so a
 hidden legacy connection cannot reappear after the customer disconnects.
@@ -102,7 +111,8 @@ bodies through strict bootstrap `accounts` configuration, mapped to body
 `oauthApps`. Without configured apps, connections show unavailable. Broker
 secrets and customer tokens cannot be accepted in bootstrap or fleet settings.
 Locally, `clankie accounts apps` configures public values; a developer GitHub
-revocation secret enters the body broker only through explicit stdin setup.
+revocation secret enters only an owner-run self-hosted body's broker through
+explicit stdin setup for its own OAuth app; hosted bodies refuse that setup.
 `/connections` and `clankie accounts` expose the same lifecycle.
 
 Tests use local provider fixtures, real encrypted transport and isolated broker

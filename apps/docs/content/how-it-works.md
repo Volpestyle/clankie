@@ -159,8 +159,10 @@ does not automatically make every model request local. See [credentials](https:/
 for the exact stores and exceptions.
 
 GitHub and Linear account Connections use the body's credential broker too.
-The app and account page show identity and granted permissions and can disconnect
-and revoke access. GitHub authorization starts with a user code; Linear uses a
+The app and account page show identity and granted permissions and can disconnect.
+The result reports confirmed provider revocation or a permission-review link.
+Hosted GitHub disconnect removes local access; Clankie's shared developer
+secret never enters a customer body. GitHub authorization starts with a user code; Linear uses a
 browser return and PKCE. Provider tokens remain on the body, while device
 requests travel through the encrypted gateway. These flows require configured
 developer OAuth applications; hosted provisioning supplies their public client

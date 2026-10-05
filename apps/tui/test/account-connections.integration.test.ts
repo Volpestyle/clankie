@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -100,4 +100,31 @@ it("stores the developer GitHub revocation secret only in the body broker, bound
       stdin: Readable.from([secret]),
     }),
   ).rejects.toThrow("OAuth application configuration is managed by the hosted service");
+});
+
+it("refuses GitHub app secret provisioning in a hosted body before consuming stdin or accessing the broker", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "hosted-github-secret-refused-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  const bootstrap = join(directory, "bootstrap.json");
+  await writeFile(bootstrap, JSON.stringify({ accountId: "fixture-account", hostId: "fixture-host" }));
+  const credentials = new FileCredentialStore(join(directory, "broker.json"));
+  let consumed = 0;
+  const stdin = new Readable({
+    read() {
+      consumed++;
+      this.push("fixture-secret-must-never-enter-hosted-body");
+      this.push(null);
+    },
+  });
+  await expect(
+    runAccountsCommand(["apps", "github-secret", "--client-id", "fixture-app", "--secret-stdin"], {
+      env: { CLANKIE_HOSTED_BOOTSTRAP_FILE: bootstrap, CLANKIE_OPERATOR_TOKEN: "fixture-owner" },
+      credentials,
+      stdin,
+    }),
+  ).rejects.toThrow("owner-run self-hosted OAuth app");
+  expect(consumed).toBe(0);
+  expect(await credentials.get("github-oauth-app")).toBeUndefined();
+  expect(await readdir(directory)).toEqual(["bootstrap.json"]);
+  stdin.destroy();
 });
