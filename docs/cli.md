@@ -834,34 +834,58 @@ The owner-authorized API offers `GET /v1/accounts/codex` and
 Local transcript discovery, `clankie agents`, resumed sessions and follow-up
 queue delivery use the account's home; seat-sync uses the hook's transcript path.
 
-### `accounts [list]` / `accounts connect github` / `accounts disconnect PROVIDER` / `accounts apps`
+### `accounts [list]` / `accounts connect github|linear` / `accounts disconnect PROVIDER` / `accounts apps`
 
 The owner's own GitHub and Linear accounts, linked to this body
-([ADR 0196](adr/0196-account-connections-keep-tokens-on-the-body.md)). The
+([ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md)). The
 service runs each flow and keeps the token in the credential broker (`github`,
-`linear`); nothing here prints a token. `accounts` lists each provider's
+`linear-api` for registered Linear API OAuth); nothing here prints a token. `accounts` lists each provider's
 `status` (`connected`, `not_connected`, `unconfigured`), account, scopes and
 where to manage it. `accounts connect github` prints the code to type at
 GitHub on stderr, polls at GitHub's interval, and returns the connection.
+`accounts start github` and `accounts poll github --flow-id ID` expose the same
+flow as separate steps for interactive clients.
 `accounts disconnect github|linear` revokes at the provider when it can and
 always deletes the local token; `revoked: false` comes with the `manageUrl`
-to revoke by hand. Linear connects from `/connect linear` on a Mac, or from the
-app through `/v1/accounts/linear/start` and `/complete`.
+to revoke by hand. Disconnecting Linear clears its API and legacy MCP/app lanes
+and pending flows. The app's Connections settings and the account page use the
+same encrypted lifecycle. `/connections` exposes account identity, granted
+scopes, connect and disconnect beside machines in the console.
+
+`accounts connect linear` returns the registered app's authorize URL, single-use
+state and expiry. The body retains the S256 verifier and exchanges the callback
+code. `accounts complete linear --json-stdin` consumes `{state,code}` from stdin;
+codes do not belong in argv or logs. The console accepts the Open Clankie
+callback link through a masked prompt. The separately configured Mac
+`/connect linear` MCP connection remains available.
 
 For worker names and portraits, use a workspace-owned app:
 `accounts connect linear-app --client-id ID --secret-stdin`. The secret enters
 through stdin and is verified and stored by the service, never returned.
 `/connect linear` also offers **Connect a Clankie app**. `accounts list` reports
-the verified `actor` and `workspace`. This replaces the one Linear connection
-and requires new worker grants. Setup and scope: [worker posts](linear-worker-posts.md).
+the verified `actor` and `workspace`. This updates the legacy MCP/app lane;
+the registered API connection remains separate and takes precedence when present.
+Changing the active app identity requires new worker grants. Setup and scope:
+[worker posts](linear-worker-posts.md).
 
 `accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID]
 [--linear-redirect-uri URL]` reads or writes the public OAuth client settings
 (`oauthApps` in `settings.json`); they apply without a restart.
 `CLANKIE_GITHUB_OAUTH_CLIENT_ID`, `CLANKIE_LINEAR_OAUTH_CLIENT_ID` and
 `CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them, which is how a hosted body
-is configured. GitHub revocation needs the OAuth app's client secret as the
-broker entry `github-oauth-app`.
+is configured. An owner-run self-hosted body may revoke its own GitHub token
+using its own OAuth app's secret as broker entry `github-oauth-app`.
+Explicit owner provisioning on that self-hosted body uses
+`accounts apps github-secret --client-id ID --secret-stdin`; it stores the secret
+only in the broker and returns a closed outcome. It requires operator access
+and refuses hosted bodies. Clankie's shared developer secret is never delivered
+to customer bodies. Hosted GitHub disconnect removes local access and returns
+the GitHub permission-management URL with `revoked: false`. Self-hosted
+revocation deletes only the selected token, preserving other body tokens.
+Hosted public app
+IDs and the exact gateway `/account/connections/callback` arrive through body
+bootstrap; developer secrets are excluded. Provider app registration and terms
+acceptance remain owner actions.
 
 ### `voice [status]` / `voice model set MODEL_ID` / `voice model clear`
 

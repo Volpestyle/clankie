@@ -18,6 +18,8 @@ import { runCodexAccountsCommand } from "./command/codex-accounts.ts";
 import { runRuntimeCommand } from "./command/runtime.ts";
 import { runLinearCommand } from "./command/linear.ts";
 import { runAgentsCommand, splitQuotedArguments } from "./command/agents.ts";
+import { runAccountsCommand } from "./command/accounts.ts";
+import { Readable } from "node:stream";
 import {
   runConnectionsMenu,
   runMachineConnectionsMenu,
@@ -215,6 +217,8 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     machines: (args) => runMachinesCommand(args),
     runtime: (args) => runRuntimeCommand(args),
     agents: (args) => runAgentsCommand(args),
+    accounts: (args, input) =>
+      runAccountsCommand(args, input === undefined ? {} : { stdin: Readable.from([input]) }),
   });
 
   const statusHelpers = (shell: ClankieFaceShell) => {

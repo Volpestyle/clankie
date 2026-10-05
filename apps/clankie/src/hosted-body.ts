@@ -10,6 +10,7 @@ import {
 } from "@clankie/protocol/public-gateway";
 import { HostedCreditsSchema, type HostedCredits } from "@clankie/protocol/hosted-credits";
 import type { CredentialStore } from "@clankie/credential-broker";
+import { SettingsStore } from "@clankie/settings";
 import {
   loadConfig,
   parseModelRef,
@@ -43,6 +44,23 @@ const BootstrapSchema = z
       .optional(),
     /** The plan's limit on hired agents running at once (VUH-1388); absent, two per vCPU. */
     maxHiredWorkers: z.number().int().min(1).max(64).optional(),
+    /** Public developer-app IDs only; customer/provider secrets are broker-only. */
+    accounts: z
+      .object({
+        github: z
+          .object({ clientId: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/u) })
+          .strict()
+          .optional(),
+        linear: z
+          .object({
+            clientId: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/u),
+            redirectUri: z.url(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     /**
      * The plan's task-based model routing. Absent leaves the body's own
      * routing untouched; present, it is written over the body's routing
@@ -57,8 +75,34 @@ const BootstrapSchema = z
       .strict()
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((bootstrap, context) => {
+    if (
+      bootstrap.accounts?.linear &&
+      bootstrap.accounts.linear.redirectUri !== `${bootstrap.gatewayOrigin}/account/connections/callback`
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["accounts", "linear", "redirectUri"],
+        message: "must be the gateway account callback",
+      });
+  });
 export type HostedBodyBootstrap = z.infer<typeof BootstrapSchema>;
+
+/** Public client configuration reaches the body, never a customer token. */
+export async function applyHostedAccountApps(
+  bootstrap: Pick<HostedBodyBootstrap, "accounts">,
+  settings: Pick<SettingsStore, "update">,
+): Promise<void> {
+  if (bootstrap.accounts === undefined) return;
+  await settings.update((current) => ({
+    ...current,
+    oauthApps: {
+      github: bootstrap.accounts?.github ?? {},
+      linear: bootstrap.accounts?.linear ?? {},
+    },
+  }));
+}
 
 /** Applies the plan's routing (see `modelRouting`) to the body's model config. */
 export async function applyHostedModelRouting(

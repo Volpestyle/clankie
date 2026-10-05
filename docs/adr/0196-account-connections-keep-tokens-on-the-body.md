@@ -1,7 +1,9 @@
 # ADR 0196: Account connections keep tokens on the body
 
-Status: proposed (2026-09-26; the OAuth app registrations, the hosted client
-secret and the Linear redirect are James's). Tracks
+Status: superseded for Hosted Connections by
+[ADR 0232](0232-hosted-connections-use-the-body-broker.md) (2026-10-05).
+The initial API scaffolding remains; the MCP OAuth proposal below is historical.
+Provider app registrations remain James's. Tracks
 [VUH-1383](https://linear.app/vuhlp/issue/VUH-1383). Amends ADR 0191's
 "no new GitHub credentials" for bodies without a `gh` login.
 

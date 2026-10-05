@@ -40,6 +40,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   LINEAR_MCP_RESOURCE,
+  LINEAR_API_PROVIDER_ID,
   ProviderAccountSchema,
   linearOauthNeedsRefresh,
   providerCredentialBearer,
@@ -77,6 +78,7 @@ class DispatchRefused extends Error {}
  */
 const FAILURE_COOLDOWN_MS = 60_000;
 const LOCAL_TRACKER_COMMAND = "clankie:local-tracker";
+const API_TRACKER_COMMAND = "clankie:linear-api-tracker";
 
 interface TrackerBackendStatus {
   readonly backend: "linear" | "local";
@@ -203,6 +205,8 @@ const CURATED_MCP_SERVERS: readonly McpServerSettings[] = [
 export interface McpHostOptions {
   /** The durable fallback. Connected transport failures never select this backend. */
   readonly localTracker?: TrackerToolBackend;
+  /** Registered GraphQL OAuth, with a separate broker audience from MCP. */
+  readonly linearApiTracker?: TrackerToolBackend;
   readonly trackerIdentity?: string;
   /** Read-only lookup in already registered stores; never enrolls a repository. */
   readonly trackerRepoForCall?: (name: string, args: Record<string, unknown>) => Promise<string | undefined>;
@@ -293,7 +297,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   let closed = false;
   const isLocalTracker = (server: McpServerSettings) =>
     server.id === "linear" && server.command === LOCAL_TRACKER_COMMAND;
-  const trackerCatalog = options.localTracker?.catalog() ?? [];
+  const isApiTracker = (server: McpServerSettings) =>
+    server.id === "linear" && server.command === API_TRACKER_COMMAND;
+  const trackerCatalog = (options.localTracker ?? options.linearApiTracker)?.catalog() ?? [];
   const trackerNames = new Set(trackerCatalog.map((tool) => tool.name));
   const localBinding = createHash("sha256")
     .update(JSON.stringify(["local-tracker", options.trackerIdentity ?? "service-tracker"]))
@@ -350,6 +356,21 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             },
           ]),
     ].filter((server) => server.enabled);
+    const linear = servers.find((server) => server.id === "linear");
+    if (linear && options.linearApiTracker && (await options.credentials.get(LINEAR_API_PROVIDER_ID))) {
+      servers = servers.map((server) =>
+        server.id !== "linear"
+          ? server
+          : {
+              ...server,
+              transport: "stdio" as const,
+              command: API_TRACKER_COMMAND,
+              args: [],
+              url: undefined,
+              credential: LINEAR_API_PROVIDER_ID,
+            },
+      );
+    }
     if (options.localTracker) {
       const linear = servers.find((server) => server.id === "linear");
       const connected =
@@ -389,8 +410,15 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   async function credentialFingerprint(server: McpServerSettings, refresh = false): Promise<string> {
     if (server.credential === undefined) return "none";
     let stored = await options.credentials.get(server.credential);
+    if (stored?.type === "oauth" && stored.linearAuth === "api" && !isApiTracker(server))
+      throw new Error("Registered Linear API credentials cannot authenticate MCP");
     if (refresh && stored?.type === "oauth" && linearOauthNeedsRefresh(stored)) {
-      await resolveProviderBearer(server.credential, options.credentials);
+      await resolveProviderBearer(
+        server.credential,
+        options.credentials,
+        Date.now(),
+        options.linearFetch ? { fetch: options.linearFetch } : {},
+      );
       stored = await options.credentials.get(server.credential);
     }
     if (stored === undefined) {
@@ -463,7 +491,15 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       listTools: async () => trackerCatalog,
       callTool: async (name, args) => {
         try {
-          return { content: JSON.stringify(await options.localTracker!.call(name, args)), isError: false };
+          return {
+            content: JSON.stringify(
+              await (isApiTracker(server) ? options.linearApiTracker! : options.localTracker!).call(
+                name,
+                args,
+              ),
+            ),
+            isError: false,
+          };
         } catch (error) {
           return {
             content: JSON.stringify({
@@ -477,7 +513,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       close: async () => undefined,
     };
     const attempt = (
-      isLocalTracker(server)
+      isLocalTracker(server) || isApiTracker(server)
         ? Promise.resolve(localConnection)
         : connectImpl(server, options.credentials, state.credential)
     )
@@ -522,8 +558,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     state.nativeToolNames = new Set(listed.map((tool) => tool.name));
     // The canonical subset retains identical schemas even when the owner connects
     // Linear mid-session. The rest of Linear's native catalog remains discoverable.
-    const exposed =
-      server.id === "linear" && options.localTracker
+    const exposed = isApiTracker(server)
+      ? options.linearApiTracker!.catalog()
+      : server.id === "linear" && (options.localTracker || options.linearApiTracker)
         ? [...listed.filter((tool) => !trackerNames.has(tool.name)), ...trackerCatalog]
         : listed;
     const projected = exposed
@@ -573,12 +610,12 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       );
     }
     const credential =
-      server.id === "linear" && server.credential === "linear"
-        ? await options.credentials.get("linear")
+      server.id === "linear" && server.credential !== undefined
+        ? await options.credentials.get(server.credential)
         : undefined;
     if (
       credential?.type === "oauth" &&
-      credential.linearAuth === "app" &&
+      (credential.linearAuth === "app" || credential.linearAuth === "api") &&
       credential.account?.actor === "app" &&
       options.linearAuthor
     ) {
@@ -680,7 +717,8 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         } catch {
           // One unreachable server must not cost him the others. The failure is
           // already logged; the tools simply are not offered this session.
-          if (server.id === "linear" && options.localTracker) collected.push(...canonicalTrackerCatalog());
+          if (server.id === "linear" && (options.localTracker || options.linearApiTracker))
+            collected.push(...canonicalTrackerCatalog());
         }
       }
       return collected;
@@ -769,7 +807,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       }
       let state: ServerState | undefined;
       let dispatched = false;
-      const deferredDispatch = repositoryCall || isLocalTracker(server);
+      const deferredDispatch = repositoryCall || isLocalTracker(server) || isApiTracker(server);
       try {
         state = await stateFor(server);
         const client = repositoryCall ? undefined : await connection(server, state, now);
@@ -784,8 +822,8 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           throw new Error("Delegated account binding changed; a new grant is required");
         await assertCurrent(server, state);
         const workerPost =
-          server.id === "linear" && server.credential === "linear" && isLinearWorkerTool(input.tool);
-        const credential = workerPost ? await options.credentials.get("linear") : undefined;
+          server.id === "linear" && server.credential !== undefined && isLinearWorkerTool(input.tool);
+        const credential = workerPost ? await options.credentials.get(server.credential!) : undefined;
         const source = admittedSource;
         // Attribution is optional: losing an owning conversation does not revoke
         // independently admitted connected-account tools.
@@ -886,45 +924,65 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               ),
               isError: false,
             }
-          : isLocalTracker(server)
-            ? {
-                content: JSON.stringify(
-                  await options.localTracker!.call(input.tool, input.arguments, publication),
-                ),
-                isError: false,
-              }
-            : workerPost
-              ? await publishLinearWorker({
-                  tool: input.tool,
-                  args: input.arguments,
-                  credential,
-                  author: options.linearAuthor ?? (async () => undefined),
-                  beforeWrite: async () => {
-                    await refreshAttribution();
-                    const current = await input.fence?.();
+          : isApiTracker(server) && !workerPost
+            ? upstreamTool === "list_issues"
+              ? await callPrioritySortedLinearIssues(
+                  input.arguments,
+                  async (args) => {
                     await assertCurrent(server, state!);
                     current?.();
+                    return {
+                      content: JSON.stringify(
+                        await options.linearApiTracker!.call("list_issues", args, publication),
+                      ),
+                      isError: false,
+                    };
                   },
-                  ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
-                })
-              : await dispatchFence.run(assertDispatch, () =>
-                  !isLocalTracker(server) &&
-                  options.localTracker &&
-                  server.id === "linear" &&
-                  upstreamTool === "list_issues"
-                    ? callPrioritySortedLinearIssues(
-                        input.arguments,
-                        async (args) => {
-                          await assertCurrent(server, state!);
-                          current?.();
-                          return client!.callTool(upstreamTool, args, input.timeoutMs);
-                        },
-                        connectedAccount?.binding ?? state!.credential,
-                      )
-                    : input.timeoutMs === undefined
-                      ? client!.callTool(upstreamTool, input.arguments)
-                      : client!.callTool(upstreamTool, input.arguments, input.timeoutMs),
-                );
+                  connectedAccount?.binding ?? state!.credential,
+                )
+              : {
+                  content: JSON.stringify(
+                    await options.linearApiTracker!.call(input.tool, input.arguments, publication),
+                  ),
+                  isError: false,
+                }
+            : isLocalTracker(server)
+              ? {
+                  content: JSON.stringify(
+                    await options.localTracker!.call(input.tool, input.arguments, publication),
+                  ),
+                  isError: false,
+                }
+              : workerPost
+                ? await publishLinearWorker({
+                    tool: input.tool,
+                    args: input.arguments,
+                    credential,
+                    author: options.linearAuthor ?? (async () => undefined),
+                    beforeWrite: async () => {
+                      await publication.beforeWrite();
+                      publication.onDispatch();
+                    },
+                    ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
+                  })
+                : await dispatchFence.run(assertDispatch, () =>
+                    !isLocalTracker(server) &&
+                    options.localTracker &&
+                    server.id === "linear" &&
+                    upstreamTool === "list_issues"
+                      ? callPrioritySortedLinearIssues(
+                          input.arguments,
+                          async (args) => {
+                            await assertCurrent(server, state!);
+                            current?.();
+                            return client!.callTool(upstreamTool, args, input.timeoutMs);
+                          },
+                          connectedAccount?.binding ?? state!.credential,
+                        )
+                      : input.timeoutMs === undefined
+                        ? client!.callTool(upstreamTool, input.arguments)
+                        : client!.callTool(upstreamTool, input.arguments, input.timeoutMs),
+                  );
         if (!result.isError && !confirmed) input.onSettled?.();
         options.logger.info(
           {
@@ -1150,6 +1208,8 @@ async function createTransport(
     if (stored.type === "oauth" && stored.expires !== 0 && stored.expires <= Date.now()) {
       throw new Error(`${server.id} credential expired; reconnect to refresh`);
     }
+    if (stored?.type === "oauth" && stored.linearAuth === "api")
+      throw new Error("Registered Linear API credentials cannot authenticate MCP");
     const bearer = providerCredentialBearer(stored);
     if (bearer === undefined) throw new Error(`${server.id} has no usable stored credential`);
     return bearer;

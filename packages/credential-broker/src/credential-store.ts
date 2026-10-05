@@ -47,8 +47,10 @@ export const ProviderCredentialSchema = z.discriminatedUnion("type", [
     clientId: z.string().optional(),
     /** Dynamic-registration client secret, when the AS issued one. */
     clientSecret: z.string().optional(),
-    /** Linear app tokens use client credentials at api.linear.app, not MCP OAuth. */
-    linearAuth: z.literal("app").optional(),
+    /** API-audience app/user tokens never authenticate the legacy MCP audience. */
+    linearAuth: z.enum(["app", "api"]).optional(),
+    /** Broker-only connection metadata, including actual provider-granted scopes. */
+    metadata: z.record(z.string(), z.string()).optional(),
     account: ProviderAccountSchema.optional(),
   }),
   z.object({
@@ -90,7 +92,8 @@ export function redactCredential(credential: ProviderCredential): RedactedCreden
 export interface CredentialStore {
   get(providerId: string): Promise<ProviderCredential | undefined>;
   set(providerId: string, credential: ProviderCredential): Promise<void>;
-  delete(providerId: string): Promise<boolean>;
+  /** Revoke the exact current credential under the mutation lock before deleting it; callback must not call this store again. */
+  delete(providerId: string, beforeDelete?: (current: ProviderCredential) => Promise<void>): Promise<boolean>;
   list(): Promise<Record<string, RedactedCredential>>;
   /**
    * Transform an existing entry under the same cross-process lock as set/delete.
@@ -190,11 +193,17 @@ export class FileCredentialStore implements CredentialStore {
     });
   }
 
-  public delete(providerId: string): Promise<boolean> {
+  public delete(
+    providerId: string,
+    beforeDelete?: (current: ProviderCredential) => Promise<void>,
+  ): Promise<boolean> {
     const id = normalizeProviderId(providerId);
     return this.enqueue(async (assertHeld) => {
       const { credentials } = await this.load();
-      if (!(id in credentials)) return false;
+      const current = credentials[id];
+      if (current === undefined) return false;
+      await beforeDelete?.(current);
+      assertHeld();
       delete credentials[id];
       assertHeld();
       await this.persist(credentials);
@@ -390,11 +399,16 @@ export class KeychainCredentialStore implements CredentialStore {
     }
   }
 
-  public delete(providerId: string): Promise<boolean> {
+  public delete(
+    providerId: string,
+    beforeDelete?: (current: ProviderCredential) => Promise<void>,
+  ): Promise<boolean> {
     const id = normalizeProviderId(providerId);
     return this.enqueue(async (assertHeld) => {
       const previous = await this.read(id);
       if (previous === undefined) return false;
+      if (beforeDelete) await beforeDelete(ProviderCredentialSchema.parse(JSON.parse(previous)));
+      assertHeld();
       const index = await this.readIndex();
       assertHeld();
       if (!(await this.deleteDirect(id))) return false;

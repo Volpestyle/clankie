@@ -8,6 +8,16 @@ assignees, or mentionable Linear users. Regular updates use the app identity.
 
 ## Connect the application
 
+Hosted Connections uses the registered S256 PKCE app-actor flow in
+[ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md). The app or
+account page handles customer consent; the body verifies the app/workspace
+and keeps rotating credentials under `linear-api`. Tracker reads, writes and
+worker appearances use the in-process GraphQL adapter. The API credential is
+never forwarded to the separate MCP connection.
+
+The following client-credentials setup remains available for a workspace that
+owns its own app and uses the legacy `linear` lane:
+
 In the intended Linear workspace, create an OAuth application in Settings → API
 and enable **client credentials tokens**. Name it Clankie and use its portrait.
 Linear also requires a redirect URI when creating the app; a loopback URI such
@@ -25,11 +35,12 @@ Paired remote devices need Take Control and the encrypted gateway envelope.
 Clankie verifies `viewer.app`, the actual provider actor and workspace before
 saving. `clankie accounts` reports that app and workspace. Credentials stay in
 the broker; renewal verifies the same actor and workspace. A failed connection
-leaves the previous one intact. Connecting replaces the existing `linear`
-connection, invalidating old worker grants; issue new grants explicitly.
+leaves the previous one intact. Connecting updates the existing `linear` lane;
+an active `linear-api` connection takes precedence. Changing the active app
+identity invalidates old worker grants; issue new grants explicitly.
 
 The ordinary user OAuth/API-key paths remain available. They cannot publish
-worker appearances. Disconnecting deletes the credential locally and attempts
+worker appearances. Disconnecting removes both Linear lanes and attempts
 provider token revocation; remove the application in Linear to retire its client
 credentials too.
 
