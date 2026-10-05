@@ -64,10 +64,7 @@ export async function remoteOpenCodeAssets(repoRoot: string, stateDir: string) {
 }
 
 /** Only service-authored files are staged, in an owned private directory on that machine. */
-export function remoteOpenCodeBootstrap(
-  originId: string,
-  assets: Awaited<ReturnType<typeof remoteOpenCodeAssets>>,
-) {
+function remoteOpenCodeBootstrap(originId: string, assets: Awaited<ReturnType<typeof remoteOpenCodeAssets>>) {
   if (!/^[a-f0-9]{32}$/u.test(originId) || !/^[a-f0-9]{64}$/u.test(assets.hash))
     throw new Error("Invalid native asset identity");
   const script = [
@@ -100,7 +97,7 @@ export function remoteOpenCodeBootstrap(
 }
 
 /** One SSH process and one helper generation; dropped replies never reconnect or replay. */
-export class RemoteOpenCodeRpc {
+class RemoteOpenCodeRpc {
   private readonly pending = new Map<
     string,
     { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
