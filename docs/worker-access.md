@@ -169,7 +169,10 @@ records this contract.
 catalog. A query returns at most 20 qualified names with one-line descriptions.
 An omitted query returns the first bounded page. `names` selects at most 10 full
 input schemas, with descriptions; unavailable names are omitted. It never emits
-an unbounded catalog grouped by server. Discover the schema before dispatch:
+an unbounded catalog grouped by server. Its own description names the servers
+connected right now (`Connected now: linear`), and the worker plugin's standing
+instructions point at it, so a harness that loads it as a deferred tool still knows
+Linear and the other connected accounts are reachable. Discover the schema before dispatch:
 
 ```json
 { "query": "linear get issue" }

@@ -160,6 +160,8 @@ async function fixture(admission: Admission = "bearer") {
 it("searches bounded names and schemas across verified servers, excluding worker publishing and unverified accounts", async () => {
   const f = await fixture();
   try {
+    const listed = (await (await f.rpc("tools/list")).json()).result.tools;
+    expect(listed[0].description).toMatch(/Connected now: .*linear/u);
     const search = await f.call("clankie_tools", {});
     const lines = search.content[0].text.split("\n");
     expect(lines).toHaveLength(20);
@@ -217,6 +219,7 @@ it("keeps the two-tool catalog when no account verifies, with no callable upstre
     await f.credentials.set("linear", { type: "api", key: "SECRET-fixture" });
     const listed = (await (await f.rpc("tools/list")).json()).result.tools;
     expect(listed.map((tool: { name: string }) => tool.name)).toEqual(["clankie_tools", "clankie_call"]);
+    expect(listed[0].description).not.toContain("Connected now");
     expect((await f.call("clankie_tools", { query: "read" })).content[0].text).toBe("");
     expect((await f.call("clankie_call", { name: "linear_read_0", arguments: {} })).isError).toBe(true);
     expect(f.calls).not.toHaveBeenCalled();
