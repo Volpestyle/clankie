@@ -235,7 +235,10 @@ credential holder.
 - `/board`, `/board focus`, and `/board close` manage the herdr-lead companion
   board. A seated turn receives the current agent census.
 - `/connect` configures Linear and email and can open Discord setup; use direct
-  `/discord` for the complete lab-user opt-in flow and either body's non-secret ids
+  `/discord` for the shared setup sentences and gateway-backed permission checks.
+  **Send a test post…** explicitly posts to one selected text room; setup reads
+  and picker edits never post. The CLI is `clankie discord setup test-post --channel NAME`.
+  It also opens the complete lab-user opt-in flow and either body's non-secret ids
   ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
 - `/setup` is where a new owner starts, and the console opens it on its own
   while Clankie cannot take a turn: how he should think (subscription, API key,

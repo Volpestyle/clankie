@@ -230,7 +230,7 @@ export interface HerdrWatchPort {
 }
 
 type HireAuthority = ConversationAuthority & { readonly intentId?: string };
-type AdoptHire = (result: Extract<HerdrSeatSpawnResult, { outcome: "spawned" }>) => void;
+type AdoptHire = (result: Extract<HerdrSeatSpawnResult, { outcome: "spawned" }>, projectId?: string) => void;
 
 type InternalWake = (
   conversationId: string,
@@ -1500,7 +1500,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         }
         const recovered = spawnedSeat(agent, agent.paneId, agent.name ?? agent.terminalId, input, undefined);
         await this.observeHireIdentity(receiptKey, agent, input, authority);
-        adopt?.(recovered);
+        adopt?.(recovered, this.projectContexts.get(input)?.projectId);
         this.hireReceipts.reconcile(receiptKey, pending.messageId);
         return { ...recovered, deliveryStage: hireDeliveryStage(recovered, brief !== undefined) };
       }
@@ -1555,7 +1555,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           this.hireOwners.owner(result.seat.paneId, result.seat.seatId, result.seat.occupantId)!,
         );
       }
-      if (result.outcome === "spawned") adopt?.(result);
+      if (result.outcome === "spawned") adopt?.(result, this.projectContexts.get(input)?.projectId);
       if (
         result.outcome === "spawned" ||
         !["start_unconfirmed", "delivery_unconfirmed"].includes(result.reason)

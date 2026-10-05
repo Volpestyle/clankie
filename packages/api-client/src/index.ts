@@ -14,6 +14,9 @@ import {
   DISCORD_DIRECTORY_PATH,
   DiscordDirectoryRequestSchema,
   DiscordDirectorySnapshotSchema,
+  DISCORD_SETUP_TEST_POST_PATH,
+  DiscordSetupTestPostRequestSchema,
+  DiscordSetupTestPostResultSchema,
 } from "@clankie/protocol";
 import {
   DISCORD_VOICE_OUTPUT_GUARD_PATH,
@@ -415,6 +418,16 @@ export class ClankieApiClient {
     return parseProtocolResponse(
       DiscordSettingsSnapshotSchema,
       await this.request(DISCORD_SETTINGS_PATH, { headers: this.operatorHeaders() }),
+    );
+  }
+  public async discordSetupTestPost(input: unknown) {
+    return parseProtocolResponse(
+      DiscordSetupTestPostResultSchema,
+      await this.request(DISCORD_SETUP_TEST_POST_PATH, {
+        method: "POST",
+        headers: this.operatorHeaders(),
+        body: JSON.stringify(DiscordSetupTestPostRequestSchema.parse(input)),
+      }),
     );
   }
   public async discordDirectory(input: unknown = {}) {

@@ -8,7 +8,7 @@ import type { CaptainDeps } from "../src/captain/deps.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import * as census from "../src/captain/herdr-census.ts";
 
-it("a hire names the persona's role, and set_persona_role reassigns or clears it (ADR 0208)", async () => {
+it("a hire names the persona's role and a later write refuses without confirmed current membership", async () => {
   const root = mkdtempSync(join(tmpdir(), "captain-persona-role-"));
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   vi.spyOn(HerdrWatchStore.prototype, "trackSeat").mockImplementation(() => {});
@@ -51,28 +51,26 @@ it("a hire names the persona's role, and set_persona_role reassigns or clears it
     const personaId = hired.result.seat.personaId;
     const personas = await captain.serveOperatorConversation({ schemaVersion: 1, op: "personas" });
     expect(personas).toMatchObject({ personas: [{ personaId, role: "designer" }] });
-    expect(
-      await captain.serveOperatorConversation({
+    await expect(
+      captain.serveOperatorConversation({
         schemaVersion: 1,
         op: "set_persona_role",
         personaId,
         role: "  Sound   Designer ",
       }),
-    ).toMatchObject({ op: "set_persona_role", persona: { personaId, role: "Sound Designer" } });
+    ).rejects.toThrow("not a confirmed current member");
     expect(await captain.serveOperatorConversation({ schemaVersion: 1, op: "roles" })).toMatchObject({
       op: "roles",
-      roles: expect.arrayContaining([
-        { role: "designer", builtIn: true, count: 0 },
-        { role: "Sound Designer", builtIn: false, count: 1 },
-      ]),
+      roles: expect.arrayContaining([{ role: "designer", builtIn: true, count: 1 }]),
     });
-    const cleared = await captain.serveOperatorConversation({
-      schemaVersion: 1,
-      op: "set_persona_role",
-      personaId,
-      role: null,
-    });
-    expect(cleared.op === "set_persona_role" ? cleared.persona : undefined).not.toHaveProperty("role");
+    await expect(
+      captain.serveOperatorConversation({
+        schemaVersion: 1,
+        op: "set_persona_role",
+        personaId,
+        role: null,
+      }),
+    ).rejects.toThrow("not a confirmed current member");
     await expect(
       captain.serveOperatorConversation({
         schemaVersion: 1,

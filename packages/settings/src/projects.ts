@@ -82,23 +82,32 @@ export function setDefaultProjectRole(
   personaId: string,
   role: string | null,
 ): ProjectsSettings {
+  return setProjectRole(settings, personaId, role, DEFAULT_PROJECT_ID);
+}
+
+/** Associate a character with a role in one project; native membership is validated by the host. */
+export function setProjectRole(
+  settings: ProjectsSettings,
+  personaId: string,
+  role: string | null,
+  projectId = DEFAULT_PROJECT_ID,
+): ProjectsSettings {
   const next = structuredClone(settings);
-  let project = next.projects.find((p) => p.id === DEFAULT_PROJECT_ID);
+  let project = next.projects.find((p) => p.id === projectId);
   if (!project) {
+    if (projectId !== DEFAULT_PROJECT_ID) throw new Error(`Unknown project ${projectId}`);
     project = ProjectSchema.parse({ id: DEFAULT_PROJECT_ID, name: "Default" });
     next.projects.push(project);
   }
   const parsed = role === null ? null : OperatorAgentRoleSchema.parse(role);
-  next.assignments = next.assignments.filter(
-    (a) => a.projectId !== DEFAULT_PROJECT_ID || a.personaId !== personaId,
-  );
+  next.assignments = next.assignments.filter((a) => a.projectId !== projectId || a.personaId !== personaId);
   if (parsed !== null) {
     if (projectRolePolicy(project, parsed) === undefined) {
       // Extending an inherited list must retain its roles and existing assignments.
       if (project.roles.length === 0) project.roles.push(...OPERATOR_AGENT_ROLES.map((role) => ({ role })));
       project.roles.push({ role: parsed });
     }
-    next.assignments.push({ projectId: DEFAULT_PROJECT_ID, personaId, role: parsed });
+    next.assignments.push({ projectId, personaId, role: parsed });
   }
   return ProjectsSettingsSchema.parse(next);
 }

@@ -127,6 +127,10 @@ export class DiscordUserGateway {
     return this.directory.read(query, connected);
   }
 
+  public readPermissions(query: import("@clankie/protocol").DiscordPermissionsRequest, connected: boolean) {
+    return this.directory.readPermissions(query, connected);
+  }
+
   /** Discord voice session id for this user, once they have joined a channel. */
   public get voiceSessionId(): string | undefined {
     return this.selfVoiceSessionId;

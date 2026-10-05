@@ -140,13 +140,23 @@ The canonical native result remains `spawned` with its exact started seat. Optio
 recording the intent itself failed. Neither claims a completed role change. Fully
 persisted success is unchanged; role failure never becomes a generic hire failure.
 
-The legacy setter now updates the default-project association. Existing app
+The existing `set_persona_role` setter accepts optional `projectId`; omission
+updates the default-project association. Both forms require a current native
+seat and confirmed hire membership in that project, read through the same
+host `FleetProjectMembership` producer. Unknown, offline and other-project
+characters are refused. Settings generation, current authenticated authority
+and the exact host-bound persona/seat/occupant are checked synchronously before
+accepting a durable role intent; the journal retains the admitted operation's
+existing crash recovery. Native hire adoption records its actual selected
+project in that journal. The membership display reads the current canonical
+association for its bound persona, so a reassignment or clear does not resurrect
+the launch role held in the separate native hire ledger. Existing app
 `persona.role` remains a temporary **host-derived read projection** of that explicit
 default context, not an identity field on disk. New consumers pass a selected
 project to read the role; absent context does not choose an arbitrary association.
 A character assigned only in another project therefore has no default wire role.
-Project assignment requests require the current project-section SHA revision;
-controllers must validate the selected project/persona and owner authority under
+Revision-bearing project settings requests require the current project-section SHA revision;
+controllers validate the selected project/persona and owner authority under
 the existing SettingsStore final guard. No caller-supplied path becomes approved
 merely by schema parsing.
 

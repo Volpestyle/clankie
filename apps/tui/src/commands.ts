@@ -426,7 +426,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       description: "Live agents, and past ones that kept a thread",
       takesArgument: true,
       argumentHint:
-        '[contacts | roles | role NAME "ROLE"|none | rename NAME "NEW NAME" | legacy session commands; see /sessions]',
+        '[contacts | roles | role NAME "ROLE"|none [--project PROJECT] | rename NAME "NEW NAME" | legacy session commands; see /sessions]',
       async run(argument, shell): Promise<void> {
         if (argument.trim() === "roles") {
           await runProjectRolesMenu(shell);

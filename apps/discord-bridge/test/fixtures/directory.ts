@@ -77,6 +77,7 @@ export function botCache(additionalGuild = false) {
   return {
     client,
     guild,
+    raw,
     disconnect: () => {
       connected = false;
     },

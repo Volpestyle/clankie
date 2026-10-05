@@ -301,6 +301,8 @@ export { tryHandleVoiceOutputControl, type VoiceOutputControlPort } from "./voic
 export { voiceRoomEvidence } from "./voice-room-evidence.ts";
 export { discordDirectoryPage, discordChannelKind } from "./directory.ts";
 export { tryHandleDiscordDirectoryRequest } from "./directory-control.ts";
+export { DiscordPermissionCache } from "./permission-cache.ts";
+export { tryHandleDiscordSetupRequest, postDiscordSetupTestMessage } from "./setup-control.ts";
 export {
   createMinecraftLoginCodeDelivery,
   tryHandleMinecraftLoginCodeRequest,

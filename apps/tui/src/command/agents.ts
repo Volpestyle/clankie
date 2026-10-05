@@ -1,4 +1,5 @@
 import { runProjectRoleCommand } from "./project-role.ts";
+import { ProjectIdSchema } from "@clankie/protocol/projects";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
   OPERATOR_AGENT_ROLE_MAX,
@@ -17,7 +18,7 @@ import { commandHost } from "./io.ts";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
-  `       clankie agents role NAME|PERSONA_ID ROLE|none   (${OPERATOR_AGENT_ROLES.join(", ")}, or "a custom role")\n` +
+  `       clankie agents role NAME|PERSONA_ID ROLE|none [--project PROJECT]   (${OPERATOR_AGENT_ROLES.join(", ")}, or "a custom role")\n` +
   "       clankie agents role ROLE --project PROJECT [--harness KIND] [--model NAME] [--effort LEVEL] [--subagent-model NAME] [--subagent-effort LEVEL] [--delegation native-first|panes] [--account LABEL] [--placement new-tab|split]\n" +
   "       clankie agents roles\n" +
   "       clankie agents rename NAME|PERSONA_ID NEW_NAME\n" +
@@ -75,11 +76,21 @@ export async function runAgentsCommand(
     operatorCredentialStore?: CredentialStore;
   } = {},
 ): Promise<unknown> {
-  if (args[0] === "role" && args.includes("--project")) return runProjectRoleCommand(args.slice(1), options);
+  const firstFlag = args.findIndex((arg) => arg.startsWith("--"));
+  const roleArguments = args.slice(1, firstFlag < 0 ? args.length : firstFlag);
+  if (args[0] === "role" && roleArguments.length === 1 && args.includes("--project"))
+    return runProjectRoleCommand(args.slice(1), options);
+  const roleFlags =
+    args[0] === "role"
+      ? flags(firstFlag < 0 ? [] : args.slice(firstFlag), ["--project"])
+      : new Map<string, string>();
+  const projectId = roleFlags.has("--project")
+    ? ProjectIdSchema.parse(roleFlags.get("--project"))
+    : undefined;
   if (
     (args[0] === "contacts" && args.length === 1) ||
     (args[0] === "roles" && args.length === 1) ||
-    (args[0] === "role" && args.length >= 3) ||
+    (args[0] === "role" && roleArguments.length >= 2) ||
     (args[0] === "rename" && args.length === 3)
   ) {
     const token = await resolveCaptainRouteToken({ env: options.env ?? process.env });
@@ -100,8 +111,9 @@ export async function runAgentsCommand(
         name: OperatorAgentNameSchema.parse(args[2]),
       });
     return client.setPersonaRole!(
-      resolvePersona(personas, args.slice(1, -1).join(" ")),
-      parseRole(args.at(-1)!),
+      resolvePersona(personas, roleArguments.slice(0, -1).join(" ")),
+      parseRole(roleArguments.at(-1)!),
+      projectId,
     );
   }
   let path: string,

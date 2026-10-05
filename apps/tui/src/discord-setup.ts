@@ -16,12 +16,11 @@ import type { ClankieFaceShell } from "./shell/shell.ts";
 import type { SetupFlow } from "./shell/setup-flow.ts";
 
 const plain = (text: string) => stripVTControlCharacters(text).replace(/[\r\n\t]/gu, " ");
+const checkText = (check: DiscordSetupView["sentences"][number]["checks"][number]) =>
+  `${check.status === "passed" ? "✓" : check.status === "failed" ? "needs" : "not checked"} ${plain(check.label)}`;
 function formatDiscordSetup(view: DiscordSetupView): string {
   return view.sentences
-    .map(
-      (sentence) =>
-        `${plain(sentence.text)}\n${sentence.checks.map((check) => `${check.status === "passed" ? "✓" : "not checked"} ${plain(check.label)}`).join(" · ")}`,
-    )
+    .map((sentence) => `${plain(sentence.text)}\n${sentence.checks.map(checkText).join(" · ")}`)
     .join("\n\n");
 }
 export async function showDiscordSetup(shell: ClankieFaceShell, api: DiscordSetupApi) {
@@ -140,15 +139,57 @@ export async function runDiscordSetup(
             value: sentence.id,
             label: plain(sentence.text),
             description: plain(sentence.help),
-            hint: sentence.checks
-              .map((check) => `${check.status === "passed" ? "✓" : "not checked"} ${plain(check.label)}`)
-              .join(" · "),
+            hint: sentence.checks.map(checkText).join(" · "),
           })),
+          ...(view.snapshot.setup?.testPostAvailable
+            ? [
+                {
+                  value: "test-post",
+                  label: "Send a test post…",
+                  description: "Choose one room, then explicitly send a setup message.",
+                },
+              ]
+            : []),
           { value: "advanced", label: "Advanced" },
           { value: "done", label: "Done" },
         ],
       });
       if (!choice || choice === "done") return;
+      if (choice === "test-post") {
+        const rooms = view.directories
+          .filter((directory) => directory.kind === "channels")
+          .flatMap((directory) => directory.entries)
+          .filter((entry) => ["text", "announcement"].includes(entry.kind));
+        const roomId = await flow.readSelect({
+          message: "Send a Discord setup test post to which room?",
+          allowBack: true,
+          options: rooms.map((room) => ({
+            value: room.id,
+            label: plain(discordDirectoryEntryLabel(view, room)),
+          })),
+        });
+        const room = rooms.find((item) => item.id === roomId);
+        if (!room) continue;
+        try {
+          const result = await client.testPost(view, room);
+          shell.insertCommandResult(
+            "/discord",
+            result.outcome === "posted"
+              ? `Test post sent to ${plain(discordDirectoryEntryLabel(view, room))}.`
+              : result.outcome === "unconfirmed"
+                ? "Test post delivery is unconfirmed. Inspect the room before trying again."
+                : "Test post unavailable. Recheck the connection and Send Messages permission.",
+            result.outcome === "posted" ? "success" : "error",
+          );
+        } catch (error) {
+          shell.insertCommandResult(
+            "/discord",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+        }
+        continue;
+      }
       if (choice === "advanced") {
         await advanced();
         continue;

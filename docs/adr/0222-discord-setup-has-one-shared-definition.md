@@ -23,9 +23,15 @@ its own device for the computer Clankie can use.
 Only the computer-access sentence offers machine grants. Server/room presets
 must not change `systemActorUserIds`, `systemActorGuildIds` or
 `systemActorChannelIds`. This foundation supplies display/check definitions;
-rendering belongs to the shared client projection. Active permission/test-post
-checks are deferred to VUH-1642; surfaces show evidence-backed directory checks
-and label the rest “not checked”. A real test post needs explicit owner action.
+rendering belongs to the shared client projection. VUH-1642 adds optional
+`setup.checks` from the active body's raw gateway evidence. Allowed, denied and
+unknown permission results remain distinct across surfaces; missing cache data
+never passes. Team creation is guild-scoped, while posting and webhook checks
+need actual selected-room evidence to account for channel overwrites.
+The explicit test-post API/CLI/TUI action requires settings-level owner
+authority, the current revision, verified Send Messages and the exact account.
+Reads and picker writes never post. A missing native receipt is unconfirmed
+and cannot trigger an automatic retry. Computer authority remains unchecked.
 Existing settings writes keep strict input validation, authenticated operator
 authority and the revision fence. Additive response metadata is optional and
 read through the tolerant response parser (ADR 0016); an integration regression

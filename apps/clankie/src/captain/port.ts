@@ -131,6 +131,8 @@ export interface LaneToolBank {
 export interface CaptainPort {
   /** A live native operator bridge can answer independently of the fallback model. */
   operatorSeatReady?(): boolean;
+  /** Current host-bound persona for the exact native seat and occupant. */
+  personaForFleetOccupant(seatId: string, occupantId: string): string | undefined;
   projectHireMembershipCandidate(fleet: string, pane: string): ProjectHireMembershipCandidate;
   confirmedProjectHireAssignment(
     fleet: string,
@@ -328,6 +330,7 @@ export interface LaneObservation {
 /** Test stand-in so the app layer can be exercised without a model. */
 export function createStubCaptain(overrides: Partial<CaptainPort> = {}): CaptainPort {
   return {
+    personaForFleetOccupant: () => undefined,
     projectHireMembershipCandidate: () => ({ state: "none" }),
     confirmedProjectHireAssignment: () => ({ state: "invalid" }),
     lookupProjectHire: async () => ({ state: "none" }),

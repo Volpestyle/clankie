@@ -6,7 +6,11 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
 import { ClankieApiClient } from "@clankie/api-client";
-import { tryHandleDiscordDirectoryRequest } from "@clankie/discord-presence-core";
+import {
+  tryHandleDiscordDirectoryRequest,
+  tryHandleDiscordSetupRequest,
+} from "@clankie/discord-presence-core";
+import { readDiscordBodyPermissions } from "../../clankie/src/discord-setup-body.ts";
 import { SettingsStore } from "@clankie/settings";
 import { DiscordUserGateway } from "../src/gateway.ts";
 import { readDiscordBodyDirectory } from "../../clankie/src/discord-directory.ts";
@@ -129,6 +133,16 @@ async function fixture() {
   await created;
   const body = createServer((request, response) => {
     if (
+      tryHandleDiscordSetupRequest(request, response, {
+        token: "fixture-user-bridge",
+        read: (query) => gateway.readPermissions(query, connected),
+        post: async () => {
+          throw new Error("This read-only gateway fixture must never post");
+        },
+      })
+    )
+      return;
+    if (
       !tryHandleDiscordDirectoryRequest(request, response, {
         token: "fixture-user-bridge",
         read: (query) => gateway.readDirectory(query, connected),
@@ -179,6 +193,15 @@ async function fixture() {
     gateway,
     settings,
     app,
+    permissions: (channelId: string) =>
+      readDiscordBodyPermissions(
+        { channelId },
+        {
+          body: "user_session",
+          env: { CLANKIE_USER_SESSION_CONTROL_PORT: String(bodyAddress.port) },
+          token: "fixture-user-bridge",
+        },
+      ),
     async send(type: string, data: unknown) {
       const received = packet(type);
       socket!.send(JSON.stringify({ op: 0, t: type, d: data }));
@@ -207,6 +230,34 @@ it("real gateway dispatches reach the API with account-visible servers, channels
     reason: "people_not_fully_loaded",
     entries: [{ name: "Clankie" }, { name: "James" }],
   });
+});
+it("the user account's actual gateway packets drive permission evidence across body HTTP", async () => {
+  const f = await fixture();
+  expect((await f.permissions("20001")).permissions.send_messages).toBe("failed");
+  await f.send("GUILD_ROLE_UPDATE", {
+    guild_id: "10001",
+    role: { id: "10002", name: "Builders", permissions: "536872960" },
+  });
+  await f.send("GUILD_UPDATE", { id: "10001", mfa_level: 0 });
+  expect((await f.permissions("20002")).permissions).toMatchObject({
+    view_channel: "passed",
+    send_messages: "passed",
+    manage_webhooks: "passed",
+  });
+  await f.send("CHANNEL_UPDATE", {
+    guild_id: "10001",
+    id: "20002",
+    permission_overwrites: [{ id: "30001", type: 1, allow: "0", deny: "536872960" }],
+  });
+  expect((await f.permissions("20002")).permissions).toMatchObject({
+    send_messages: "failed",
+    manage_webhooks: "failed",
+  });
+  expect((await f.permissions("20005")).permissions.send_messages).toBe("not_checked");
+  await f.send("GUILD_UPDATE", { id: "10001", mfa_level: 1 });
+  expect((await f.permissions("20001")).permissions.manage_webhooks).toBe("not_checked");
+  await f.send("READY", { user: { id: "30009", username: "New account" }, guilds: [], session_id: "new" });
+  expect((await f.permissions("20001")).permissions.send_messages).toBe("not_checked");
 });
 it("live membership changes and a fresh READY remove stale account visibility", async () => {
   const f = await fixture();

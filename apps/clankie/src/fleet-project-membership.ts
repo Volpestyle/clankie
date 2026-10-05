@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { projectsRevision, resolveProjectMembership } from "@clankie/settings";
+import { projectRoleForPersona, projectsRevision, resolveProjectMembership } from "@clankie/settings";
 import {
   ReadFleetProjectMembershipSchema,
   FleetProjectMembershipSnapshotSchema,
@@ -28,6 +28,7 @@ interface Receipt {
   binding: HerdrBinding | undefined;
   candidates: { pane: string; value: Candidate }[];
   proofs: Map<string, ProjectProcessProof>;
+  personas: Map<string, string | undefined>;
 }
 interface Batch {
   controller: AbortController;
@@ -42,7 +43,8 @@ export interface FleetProjectMembershipOptions {
   binding(): Promise<HerdrBinding | undefined>;
   roster(binding: HerdrBinding, signal: AbortSignal): Promise<readonly HerdrCensusAgent[]>;
   observe(pane: string, binding: HerdrBinding, signal: AbortSignal): Promise<ProjectProcessProof | undefined>;
-  hires: Pick<CaptainPort, "projectHireMembershipCandidate" | "confirmedProjectHireAssignment">;
+  hires: Pick<CaptainPort, "projectHireMembershipCandidate" | "confirmedProjectHireAssignment"> &
+    Partial<Pick<CaptainPort, "personaForFleetOccupant">>;
   /** Deterministic deadline fixture; production uses five seconds for all native work. */
   deadlineMs?: number;
 }
@@ -116,6 +118,7 @@ export class FleetProjectMembership {
     const signal = controller.signal;
     const candidates: Receipt["candidates"] = [];
     const proofs: Receipt["proofs"] = new Map();
+    const personas: Receipt["personas"] = new Map();
     const rows = input.seats.map((seat) => ({ ...seat, membership: unknown("observation_unavailable") }));
     try {
       signal.throwIfAborted();
@@ -199,11 +202,21 @@ export class FleetProjectMembership {
                 return;
               }
               proofs.set(agent.paneId, proof);
+              const personaId = this.options.hires.personaForFleetOccupant?.(row.seatId, row.occupantId);
+              personas.set(row.seatId, personaId);
+              // Identity is host-bound only after native membership has been proven.
+              // A cleared canonical role must not resurrect the immutable hire profile.
+              const role =
+                this.options.hires.personaForFleetOccupant === undefined
+                  ? membership.role
+                  : personaId === undefined
+                    ? undefined
+                    : projectRoleForPersona(settings, personaId, membership.projectId);
               row.membership = {
                 outcome: "member",
                 source: "hire",
                 projectId: membership.projectId,
-                ...(membership.role === undefined ? {} : { role: membership.role }),
+                ...(role === undefined ? {} : { role }),
               };
             } catch {
               row.membership = unknown(signal.aborted ? "timeout" : "observation_unavailable");
@@ -239,6 +252,7 @@ export class FleetProjectMembership {
       binding,
       candidates,
       proofs,
+      personas,
       result: FleetProjectMembershipSnapshotSchema.parse({
         schemaVersion: 1,
         projectsRevision: projectsRevision(settings),
@@ -376,6 +390,15 @@ export class FleetProjectMembership {
         receipt.candidates.some(
           ({ pane, value: candidate }) =>
             !isDeepStrictEqual(this.options.hires.projectHireMembershipCandidate("default", pane), candidate),
+        )
+      )
+        throw new FleetMembershipReadError("changed");
+      if (
+        receipt.result.seats.some(
+          (row) =>
+            row.membership.outcome === "member" &&
+            this.options.hires.personaForFleetOccupant?.(row.seatId, row.occupantId) !==
+              receipt.personas.get(row.seatId),
         )
       )
         throw new FleetMembershipReadError("changed");

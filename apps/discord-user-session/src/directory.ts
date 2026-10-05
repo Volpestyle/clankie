@@ -1,8 +1,14 @@
-import { discordChannelKind, discordDirectoryPage } from "@clankie/discord-presence-core";
+import {
+  discordChannelKind,
+  discordDirectoryPage,
+  DiscordPermissionCache,
+} from "@clankie/discord-presence-core";
 import type {
   DiscordDirectoryEntry,
   DiscordDirectoryRequest,
   DiscordDirectorySnapshot,
+  DiscordPermissionsRequest,
+  DiscordPermissionsSnapshot,
 } from "@clankie/protocol";
 
 type Row = Record<string, unknown>;
@@ -26,11 +32,13 @@ const ADMINISTRATOR = 1n << 3n;
 
 /** Only retains directory fields already delivered to this connected account. */
 export class DiscordUserDirectory {
+  private readonly permissions = new DiscordPermissionCache();
   private selfId: string | undefined;
   private guildsKnown = false;
   private readonly guilds = new Map<string, GuildView>();
 
   public observe(packet: { t: string; d: Row }): void {
+    this.permissions.observe(packet);
     const data = packet.d;
     if (packet.t === "READY") {
       this.guilds.clear();
@@ -75,6 +83,10 @@ export class DiscordUserDirectory {
     else if (packet.t === "GUILD_MEMBER_REMOVE") guild.people.delete(id(row(data.user)?.id) ?? "");
     else if (packet.t === "MESSAGE_CREATE")
       this.rememberPerson(guild, { ...row(data.member), user: data.author });
+  }
+
+  public readPermissions(query: DiscordPermissionsRequest, connected: boolean): DiscordPermissionsSnapshot {
+    return this.permissions.read(query, "user_session", connected);
   }
 
   public read(query: DiscordDirectoryRequest, connected: boolean): DiscordDirectorySnapshot {

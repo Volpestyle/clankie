@@ -17,10 +17,12 @@ import {
   SettingsStore,
   migratePersonaRoles,
   setDefaultProjectRole,
+  setProjectRole,
   projectRoleForPersona,
   projectsRevision,
 } from "@clankie/settings";
 import { OperatorAgentRoleSchema } from "@clankie/protocol";
+import { DEFAULT_PROJECT_ID, ProjectIdSchema } from "@clankie/protocol/projects";
 import {
   defaultOperatorAgentAppearance,
   OPERATOR_AGENT_ROLES,
@@ -80,6 +82,7 @@ const PendingRoleSchema = z
     id: z.string().uuid(),
     personaId: OperatorAgentPersonaIdSchema,
     role: OperatorAgentRoleSchema.nullable(),
+    projectId: ProjectIdSchema.optional(),
   })
   .strict();
 const PendingRolesSchema = z.array(PendingRoleSchema).max(10_000);
@@ -203,10 +206,10 @@ export class PersonaStore {
     }
   }
 
-  private queueProjectRole(personaId: string, role: string | null): string {
+  private queueProjectRole(personaId: string, role: string | null, projectId = DEFAULT_PROJECT_ID): string {
     if (this.closed || !this.journalLock) throw new Error("Project role journal is not owned");
     const id = randomUUID();
-    const next = PendingRolesSchema.parse([...this.pending, { id, personaId, role }]);
+    const next = PendingRolesSchema.parse([...this.pending, { id, personaId, role, projectId }]);
     durableJson(this.pendingPath, next);
     this.pending = next;
     return id;
@@ -228,7 +231,7 @@ export class PersonaStore {
         const projects = pending
           .filter((entry) => !completed.has(entry.id))
           .reduce(
-            (value, entry) => setDefaultProjectRole(value, entry.personaId, entry.role),
+            (value, entry) => setProjectRole(value, entry.personaId, entry.role, entry.projectId),
             current.projects,
           );
         return {
@@ -268,13 +271,33 @@ export class PersonaStore {
     return this.pending.some((entry) => entry.id === operationId);
   }
 
-  public async setProjectRole(input: SetOperatorAgentPersonaRole): Promise<OperatorAgentPersona> {
+  public async setProjectRole(
+    input: SetOperatorAgentPersonaRole,
+    admit?: () => void,
+    projects?: Parameters<typeof projectRoleForPersona>[0],
+  ): Promise<OperatorAgentPersona> {
     if (!this.projectStore) throw new Error("Project role migration has not completed");
     const parsed = SetOperatorAgentPersonaRoleSchema.parse(input);
     if (!this.records.has(parsed.personaId)) throw new Error(`Unknown agent ${parsed.personaId}`);
-    this.queueProjectRole(parsed.personaId, parsed.role);
+    const current = projects ?? (await this.projectStore.load()).projects;
+    setProjectRole(current, parsed.personaId, parsed.role, parsed.projectId);
+    // The host admits the exact current member synchronously before durable intent.
+    admit?.();
+    this.queueProjectRole(parsed.personaId, parsed.role, parsed.projectId);
     await this.flushProjectRoles();
-    return this.records.get(parsed.personaId)!;
+    const { role: _defaultRole, ...persona } = this.records.get(parsed.personaId)!;
+    const role = projectRoleForPersona(
+      (await this.projectStore.load()).projects,
+      parsed.personaId,
+      parsed.projectId,
+    );
+    return { ...persona, ...(role === undefined ? {} : { role }) };
+  }
+
+  /** Exact native session binding, independent of names and roster prose. */
+  public personaForOccupant(occupantId: string): string | undefined {
+    const matches = [...this.bindings.values()].filter((binding) => binding.occupantId === occupantId);
+    return matches.length === 1 ? matches[0]!.personaId : undefined;
   }
 
   public async close(): Promise<void> {
@@ -320,6 +343,7 @@ export class PersonaStore {
     name: string,
     role?: OperatorAgentRole,
     onRoleWrite?: (status: PersonaRoleWrite) => void,
+    projectId = DEFAULT_PROJECT_ID,
   ): OperatorFleetSeat {
     const previousRecords = new Map(this.records);
     const previousBindings = new Map(this.bindings);
@@ -345,7 +369,10 @@ export class PersonaStore {
       if (this.projectStore && role !== undefined) {
         let status: PersonaRoleWrite;
         try {
-          status = { outcome: "pending", operationId: this.queueProjectRole(seat.personaId, role) };
+          status = {
+            outcome: "pending",
+            operationId: this.queueProjectRole(seat.personaId, role, projectId),
+          };
         } catch {
           status = { outcome: "unsaved" };
         }
@@ -460,6 +487,8 @@ export class PersonaStore {
   public setRole(input: SetOperatorAgentPersonaRole): OperatorAgentPersona {
     if (this.projectStore) throw new Error("Use the project role setter after migration");
     const parsed = SetOperatorAgentPersonaRoleSchema.parse(input);
+    if (parsed.projectId !== undefined && parsed.projectId !== DEFAULT_PROJECT_ID)
+      throw new Error("Project roles require the project settings store");
     const current = this.records.get(parsed.personaId);
     if (current === undefined) throw new Error(`Unknown agent ${parsed.personaId}`);
     const { role: _role, ...rest } = current;

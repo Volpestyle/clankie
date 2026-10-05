@@ -2,6 +2,7 @@ import { z } from "zod";
 import { DiscordSettingsSchema } from "./discord-settings.ts";
 import type { DiscordSettings } from "./discord-settings.ts";
 import { DiscordDirectoryEntrySchema, type DiscordDirectoryEntry } from "./discord-directory.ts";
+import { DiscordPermissionStatusSchema } from "./discord-permissions.ts";
 export type DiscordField = {
   key: keyof DiscordSettings;
   label: string;
@@ -332,6 +333,20 @@ export const DiscordSetupSnapshotSchema = z
     definition: DiscordSetupDefinitionSchema,
     /** Supplied by the host, never inferred from the screen opening these settings. */
     machineName: z.string().min(1).max(256),
+    /** Computed only from the connected account's gateway evidence. Older hosts omit it. */
+    checks: z
+      .array(
+        z
+          .object({
+            sentenceId: z.enum(["talk", "team"]),
+            kind: z.enum(["view_channel", "send_messages", "manage_channels", "manage_webhooks"]),
+            status: DiscordPermissionStatusSchema,
+          })
+          .strict(),
+      )
+      .optional(),
+    /** A surface must explicitly select a room and invoke the authenticated POST. */
+    testPostAvailable: z.boolean().optional(),
   })
   .strict();
 export type DiscordSetupSnapshot = z.infer<typeof DiscordSetupSnapshotSchema>;

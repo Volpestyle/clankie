@@ -12,11 +12,18 @@ import {
   DiscordDirectoryRequestSchema,
   type DiscordDirectoryRequest,
   type DiscordDirectorySnapshot,
+  type DiscordPermissionsRequest,
+  type DiscordPermissionsSnapshot,
+  type DiscordBodyTestPostRequest,
+  type DiscordSetupTestPostResult,
+  DiscordSetupTestPostRequestSchema,
+  DISCORD_SETUP_TEST_POST_PATH,
 } from "@clankie/protocol";
 import type { ClankieSettings } from "@clankie/settings";
 import { resolveDiscordSettings } from "@clankie/settings";
 import type { CaptainPort } from "./captain/port.ts";
 import type { DiscordRoomObservations } from "./discord-room-observations.ts";
+import { discordSetupChecks } from "./discord-setup.ts";
 
 export type RoomAccess = "observe" | "guidance" | "settings";
 export interface RoomAuthorization {
@@ -26,6 +33,14 @@ export interface RoomAuthorization {
 export interface DiscordRoomRoutesOptions {
   /** Host name, or “his cloud computer” for a hosted runtime. */
   machineName?: string;
+  permissions?(
+    query: DiscordPermissionsRequest,
+    body: DiscordDirectorySnapshot["body"],
+  ): Promise<DiscordPermissionsSnapshot>;
+  testPost?(
+    query: DiscordBodyTestPostRequest,
+    body: DiscordDirectorySnapshot["body"],
+  ): Promise<DiscordSetupTestPostResult>;
   directory?(
     query: DiscordDirectoryRequest,
     body: DiscordDirectorySnapshot["body"],
@@ -47,6 +62,26 @@ export function discordSettingsRevision(settings: ClankieSettings["discord"]): s
 }
 export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono {
   const app = new Hono();
+  const setup = async (settings: ClankieSettings["discord"]) => {
+    const body = resolveDiscordSettings(settings, options.environment ?? {}).settings.activeBody;
+    return options.machineName
+      ? {
+          setup: {
+            definition: DISCORD_SETUP_DEFINITION,
+            machineName: options.machineName,
+            ...(options.permissions
+              ? {
+                  checks: await discordSetupChecks(
+                    resolveDiscordSettings(settings, options.environment ?? {}).settings,
+                    (query) => options.permissions!(query, body),
+                  ),
+                }
+              : {}),
+            ...(options.testPost ? { testPostAvailable: true } : {}),
+          },
+        }
+      : {};
+  };
   // Mounted at the service root: scope middleware to this module's own paths so
   // its body limit never reaches unrelated routes (seat transcripts, uploads).
   app.use("/v1/discord/*", bodyLimit({ maxSize: 32 * 1024 }));
@@ -117,14 +152,17 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
     const authority = await options.authorize(context.req.raw, "observe");
     if (!authority) return context.json({ error: "room_observe_required" }, 403);
     const settings = (await options.settings.load()).discord;
+    const metadata = await setup(settings);
+    if (
+      discordSettingsRevision((await options.settings.load()).discord) !== discordSettingsRevision(settings)
+    )
+      return context.json({ error: "settings_revision_conflict" }, 409);
     await authority.guard();
     if (!authority.current()) return context.json({ error: "room_observe_required" }, 403);
     return context.json({
       settings,
       revision: discordSettingsRevision(settings),
-      ...(options.machineName
-        ? { setup: { definition: DISCORD_SETUP_DEFINITION, machineName: options.machineName } }
-        : {}),
+      ...metadata,
     });
   });
   app.get(DISCORD_DIRECTORY_PATH, async (context) => {
@@ -182,15 +220,62 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
         if (!authority.current()) throw new Error("operator_revoked");
       },
     );
+    const metadata = await setup(updated.discord);
+    if (
+      discordSettingsRevision((await options.settings.load()).discord) !==
+      discordSettingsRevision(updated.discord)
+    )
+      return context.json({ error: "settings_revision_conflict" }, 409);
     await authority.guard();
     if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
     return context.json({
       settings: updated.discord,
       revision: discordSettingsRevision(updated.discord),
-      ...(options.machineName
-        ? { setup: { definition: DISCORD_SETUP_DEFINITION, machineName: options.machineName } }
-        : {}),
+      ...metadata,
     });
+  });
+  app.post(DISCORD_SETUP_TEST_POST_PATH, async (context) => {
+    const authority = await options.authorize(context.req.raw, "settings");
+    if (!authority) return context.json({ error: "operator_required" }, 403);
+    const parsed = DiscordSetupTestPostRequestSchema.safeParse(await context.req.json());
+    if (!parsed.success) return context.json({ error: "invalid_discord_test_post" }, 400);
+    if (!options.permissions || !options.testPost)
+      return context.json({ outcome: "unavailable", reason: "runtime_unavailable" });
+    const query = parsed.data;
+    const current = (await options.settings.load()).discord;
+    if (discordSettingsRevision(current) !== query.expectedRevision)
+      return context.json({ error: "settings_revision_conflict" }, 409);
+    const body = resolveDiscordSettings(current, options.environment ?? {}).settings.activeBody;
+    const permissions = await options.permissions(
+      { guildId: query.guildId, channelId: query.channelId },
+      body,
+    );
+    if (
+      !permissions.actorId ||
+      permissions.body !== body ||
+      permissions.guildId !== query.guildId ||
+      permissions.channelId !== query.channelId ||
+      permissions.permissions.send_messages !== "passed"
+    )
+      return context.json({ outcome: "unavailable", reason: "permissions_not_verified" });
+    await authority.guard();
+    if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
+    const fresh = (await options.settings.load()).discord;
+    if (
+      discordSettingsRevision(fresh) !== query.expectedRevision ||
+      resolveDiscordSettings(fresh, options.environment ?? {}).settings.activeBody !== body
+    )
+      return context.json({ error: "settings_revision_conflict" }, 409);
+    await authority.guard();
+    if (!authority.current() || context.req.raw.signal.aborted)
+      return context.json({ error: "operator_revoked" }, 403);
+    // Only this explicit, authenticated POST reaches the native mutation.
+    return context.json(
+      await options.testPost(
+        { guildId: query.guildId, channelId: query.channelId, actorId: permissions.actorId },
+        body,
+      ),
+    );
   });
   return app;
 }

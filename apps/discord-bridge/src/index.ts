@@ -26,7 +26,12 @@ import {
   mentionsDiscordBot,
 } from "./text-inbox.ts";
 import { createServer } from "node:http";
-import { tryHandleDiscordDirectoryRequest } from "@clankie/discord-presence-core";
+import {
+  tryHandleDiscordDirectoryRequest,
+  tryHandleDiscordSetupRequest,
+  postDiscordSetupTestMessage,
+} from "@clankie/discord-presence-core";
+import { observeBotSetupPermissions } from "./setup-permissions.ts";
 import { readBotDiscordDirectory } from "./directory.ts";
 import {
   ChannelType,
@@ -303,6 +308,7 @@ const client = new Client({
   ],
   partials: textIngressEnabled ? [Partials.Channel] : [],
 });
+const setupPermissions = observeBotSetupPermissions(client);
 let shuttingDown = false;
 // Validated at startup like the rest of the env: truncation is always
 // configured, never defaulted to unbounded (ADR 0057, mission T6).
@@ -1855,6 +1861,14 @@ const deliverMinecraftLoginCode = createMinecraftLoginCodeDelivery({
 });
 const musicServer = createServer((request, response) => {
   const url = request.url ?? "/";
+  if (
+    tryHandleDiscordSetupRequest(request, response, {
+      token: bridgeToken,
+      read: (query) => setupPermissions.read(query, "bot", !shuttingDown && client.isReady()),
+      post: (query) => postDiscordSetupTestMessage(query, { authorization: `Bot ${token}` }),
+    })
+  )
+    return;
   if (
     tryHandleDiscordDirectoryRequest(request, response, {
       token: bridgeToken,

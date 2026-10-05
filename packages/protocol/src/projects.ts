@@ -364,7 +364,7 @@ export interface FleetMembershipReport {
   panes: FleetPaneMembership[];
 }
 
-/** Optional owner-read display projection. Never control, admission or tool authority. */
+/** Host-verified owner display and semantic role context; never hire, control or tool authority. */
 export const FLEET_PROJECT_MEMBERSHIP_PATH = "/v1/operator/fleet-membership/read";
 const FleetMembershipSeatSchema = z
   .object({
@@ -405,6 +405,7 @@ export const FleetProjectMembershipSnapshotSchema = z
                 outcome: z.literal("member"),
                 source: z.literal("hire"),
                 projectId: ProjectIdSchema,
+                /** Current saved project role of the host-bound persona, if known. */
                 role: OperatorAgentRoleSchema.optional(),
               })
               .strict(),

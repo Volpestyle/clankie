@@ -40,6 +40,16 @@ seat drives its selected conversation; selecting `global-default` does not selec
 other rooms. Missing or uncertain native control needs inspection of the original
 receipt, never a second dispatch path. See [native operations](reference/operations.md).
 
+## A subagent is often the better hire
+
+Before hiring a pane, consider your harness's own native subagent. It starts in
+seconds, already shares your context, and returns its result to you with no
+brief, handoff or report to harvest. Use one for bounded research, a code search,
+a review of a delta, a focused check, or a slice you will integrate yourself.
+Hire a pane when the work needs its own lifetime beyond this turn, its own
+worktree, a different harness, model or account, or long parallel work the owner
+should be able to watch. Workers follow the same rule inside their own panes.
+
 ## Decide by default
 
 An authorized push carries its decisions. Decide reversible, in-scope calls

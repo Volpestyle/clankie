@@ -11,7 +11,8 @@ import type { ClankieApiClient } from "./index.ts";
 export type DiscordSetupApi = Pick<
   ClankieApiClient,
   "discordSettings" | "discordDirectory" | "updateDiscordSettings"
->;
+> &
+  Partial<Pick<ClankieApiClient, "discordSetupTestPost">>;
 export type DiscordSetupPicker = Extract<DiscordSetupSentence["parts"][number], { kind: "picker" }>;
 export type DiscordAccessChoice = "deny" | "owner_only" | "allowlist" | "guild_members";
 export interface DiscordPickerSelection {
@@ -27,7 +28,7 @@ export interface DiscordSetupView {
     id: DiscordSetupSentence["id"];
     text: string;
     help: string;
-    checks: { kind: string; label: string; status: "passed" | "not_checked" }[];
+    checks: { kind: string; label: string; status: "passed" | "failed" | "not_checked" }[];
   }[];
 }
 
@@ -153,6 +154,11 @@ function pickerText(view: DiscordSetupView, part: DiscordSetupPicker): string {
 function render(view: DiscordSetupView): DiscordSetupView {
   const { snapshot } = view;
   const setup = snapshot.setup!;
+  const hostChecks = view.directories.some(
+    (directory) => directory.state === "disconnected" || directory.state === "unavailable",
+  )
+    ? setup.checks?.map((check) => ({ ...check, status: "not_checked" as const }))
+    : setup.checks;
   view.sentences = setup.definition.sentences.map((sentence) => ({
     id: sentence.id,
     text: sentence.parts
@@ -169,7 +175,8 @@ function render(view: DiscordSetupView): DiscordSetupView {
       kind,
       label: discordSetupLabel(snapshot, kind),
       status:
-        (kind === "account" &&
+        hostChecks?.find((check) => check.sentenceId === sentence.id && check.kind === kind)?.status ??
+        ((kind === "account" &&
           view.directories.some(
             (directory) => directory.kind === "servers" && directory.state === "connected",
           )) ||
@@ -183,7 +190,7 @@ function render(view: DiscordSetupView): DiscordSetupView {
               ),
           ))
           ? "passed"
-          : "not_checked",
+          : "not_checked"),
     })),
   }));
   return view;
@@ -198,6 +205,22 @@ export class DiscordSetupClient {
   /** The same host-bound value used in a sentence and its inline picker button. */
   pickerText(view: DiscordSetupView, part: DiscordSetupPicker): string {
     return pickerText(view, part);
+  }
+  /** Called only by an explicit owner action; never from read or picker application. */
+  async testPost(view: DiscordSetupView, room: DiscordDirectoryEntry) {
+    if (!view.snapshot.setup?.testPostAvailable || !this.api.discordSetupTestPost)
+      throw new Error("This host does not offer a Discord setup test post.");
+    if (
+      !room.guildId ||
+      !["text", "announcement"].includes(room.kind) ||
+      !entries(view, "channels").some((entry) => entry.id === room.id && entry.guildId === room.guildId)
+    )
+      throw new Error("Choose an available text room from the connected account.");
+    return this.api.discordSetupTestPost({
+      guildId: room.guildId,
+      channelId: room.id,
+      expectedRevision: view.snapshot.revision,
+    });
   }
   private async directory(
     query: Pick<DiscordDirectoryRequest, "kind" | "guildId">,

@@ -84,6 +84,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/discord/room-voice",
       "/v1/discord/settings",
       "/v1/conversation-heads",
+      "/v1/discord/setup/test-post",
       "/v1/operator/persona",
       "/v1/model-keys/set",
       "/v1/model-keys/validate",
