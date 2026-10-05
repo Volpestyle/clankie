@@ -277,7 +277,7 @@ const passing: Record<string, Partial<SeatObservation>> = {
     discord: [{ method: "POST", path: "/captain-action", body: { text: "Standup moves to 3pm today" } }],
   },
   "seat-where-things-live": {
-    answer: { answer: "The person-memory command; recall_episodes searches older notes." },
+    answer: { answer: "The person-memory command; memory search finds older notes." },
   },
   "seat-baseline": { result: "OK" },
 };
