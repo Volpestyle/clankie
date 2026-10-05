@@ -29,8 +29,10 @@ test.each(["normal close", "failure after publish", "failure during publish"])(
       prove: async () => false,
     });
     const productionFile = join(productionState, "links", "default-local.json");
-    const productionRead = production.fetch(async () =>
-      Response.json({ source: "production", issue: "fixture" }),
+    const productionRead = production.fetch(async (request) =>
+      (await production.identity(request)?.validate())
+        ? Response.json({ source: "production", issue: "fixture" })
+        : Response.json({ error: "local_process_membership_required" }, { status: 403 }),
     );
     const readNative = async () => {
       const link = readLink(binding.socketPath, { CLANKIE_STATE: productionState });

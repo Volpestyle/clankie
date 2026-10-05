@@ -160,6 +160,9 @@ const FLEET_TOOLS = [
 const uuid = z.string().uuid();
 const KEY_ID = "clankie_worker_mcp_signing";
 const WORKER_REQUEST_TIMEOUT_MS = 30_000;
+// The local listener delegates MCP admission to this boundary. Preserve its
+// public refusal without exposing process, account or credential details.
+class LocalFleetAdmissionError extends Error {}
 async function beforeWorkerDeadline<T>(
   signal: AbortSignal,
   name: string,
@@ -719,7 +722,8 @@ export class WorkerMcp {
     return this.fleetRequest(
       request,
       async () => {
-        if (!(await identity.validate())) throw new Error("Local fleet membership unavailable");
+        if (!(await identity.validate()))
+          throw new LocalFleetAdmissionError("Local fleet membership unavailable");
         const fleet = identity.fleet ?? "default";
         return this.fleetAuthorization(
           fleet,
@@ -863,7 +867,9 @@ export class WorkerMcp {
     let authority: WorkerAuthorization;
     try {
       authority = await authenticate(token);
-    } catch {
+    } catch (error) {
+      if (error instanceof LocalFleetAdmissionError)
+        return Response.json({ error: "local_process_membership_required" }, { status: 403 });
       return Response.json(
         { error: "worker_grant_unavailable", reason: "Worker access unavailable" },
         { status: 403 },
