@@ -2,7 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { createDiscordRoomRoutes, discordRoomDisplayTitle, discordSettingsRevision } from "../src/discord-room-routes.ts";
+import {
+  createDiscordRoomRoutes,
+  discordRoomDisplayTitle,
+  discordSettingsRevision,
+} from "../src/discord-room-routes.ts";
 import { DiscordRoomObservations } from "../src/discord-room-observations.ts";
 import { SettingsStore, emptySettings } from "@clankie/settings";
 const roots: string[] = [];
@@ -116,7 +120,9 @@ it("lists a room by its place, never by raw Discord IDs", () => {
   expect(discordRoomDisplayTitle("Discord text · Friends / #general")).toBe("#general · Friends");
   expect(discordRoomDisplayTitle("Discord voice · Friends / Lobby")).toBe("Lobby · Friends");
   expect(discordRoomDisplayTitle("Discord DM · James")).toBe("James");
-  expect(discordRoomDisplayTitle("Discord text · 866430493889134672 / #house-hunting")).toBe("#house-hunting");
+  expect(discordRoomDisplayTitle("Discord text · 866430493889134672 / #house-hunting")).toBe(
+    "#house-hunting",
+  );
   expect(discordRoomDisplayTitle("Discord text · 866430493889134672:866430493889134675")).toBeUndefined();
   expect(discordRoomDisplayTitle("Discord text · Friends / #866430493889134675")).toBeUndefined();
   expect(discordRoomDisplayTitle("Planning room")).toBe("Planning room");
