@@ -4566,7 +4566,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) {
       const device = await authenticateDevice(context.req.raw);
-      if (device === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+      if (device === "unavailable") {
+        // A rejected operator bearer must not become an unavailable device
+        // login merely because this host has no device signing key. Shape only
+        // selects the failure: it never authenticates a device or grants access.
+        const deviceCandidate = /^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(
+          context.req.header("authorization") ?? "",
+        );
+        return deviceCandidate
+          ? context.json({ error: "device_authentication_unavailable" }, 503)
+          : context.json({ error: "authentication_required" }, 401);
+      }
       if ("denied" in device) return context.json({ error: "authentication_required" }, 401);
     }
     const now = clock();
