@@ -2880,6 +2880,8 @@ most 200 entries (default 100); pass the returned `nextCursor` as `--after`.
 failed read from a complete empty list. People and channel/thread coverage may
 be partial. No account is connected or configured by this command. Requires
 operator authentication. See [the directory contract](discord-rooms.md#discord-directory-for-settings-pickers).
+Hosted bodies obtain this view from the managed provider, restricted to their
+bound server and current installation, without a local Discord control port.
 
 ### `discord definition`
 
@@ -2935,6 +2937,11 @@ than overwriting someone else's changes. Hosted consoles and CLI use their
 existing encrypted transport. Raw local fields and credentials are not written
 through a hosted connection. Body settings retain their existing restart
 requirement; a save does not claim the running gateway has applied it.
+Managed edge policy synchronization is reported in `managedPolicy`: a saved
+body revision can be pending while the edge retries. Only `synced` identifies
+the revision the edge acknowledged. The hosted dashboard edits the same role
+model using a Discord-only signed owner bridge; disconnect/reinstall revokes
+that account connection grant and refuses later admissions.
 
 The explicit diagnostic `clankie discord setup test-post --channel general`
 remains available. It requires settings-level operator authority, a current

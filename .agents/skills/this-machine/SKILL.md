@@ -164,6 +164,11 @@ refuses server deletion and ownership transfer. This role never grants machine
 tools. Participant projection posts use the given channel under Advanced;
 Admin project mirrors may be channels or forums. `discord_tracking_project`
 lets Clankie choose that representation before the first event.
+Hosted directory pages come from the managed provider and are restricted to the
+bound server/current installation. Inspect `managedPolicy` before claiming a
+saved policy reached the edge; pending or unavailable is not an acknowledgement.
+The account dashboard uses a Discord-only owner permit. Disconnect/reinstall
+revokes that connection grant; it does not create a terminal or paired-device grant.
 
 ## Authority
 

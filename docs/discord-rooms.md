@@ -53,8 +53,12 @@ consumer remains compatible. Paired requests keep their original device bearer
 through the relay and recheck grants after awaited work.
 
 `GET/POST /v1/discord/settings` reads or revision-fences the complete non-secret
-Discord settings object. Writes require actual operator authority. The hosted
-operator bridge still requires `mintedBy=hosted-account-operator` and
+Discord settings object. Writes require actual operator authority or the narrow
+Discord-only hosted owner permit. The latter binds the exact encrypted request,
+tenant, installation and current account connection grant; the body checks that
+grant live before admission. Discord disconnect/reinstall revokes old permits,
+without creating a paired device or general operator authority. The hosted
+paired operator bridge still requires `mintedBy=hosted-account-operator` and
 `terminalControl`; `steer` does not grant settings access. The canonical schema
 lives in protocol and is reexported by settings. All canonical fields are editable under
 TUI `/discord` → **Advanced** and existing `clankie discord set/clear`.
@@ -67,6 +71,12 @@ Admin grants full control of a dedicated server, with server deletion and
 ownership transfer refused at the adapter. Machine grants remain separate.
 [ADR 0227](adr/0227-discord-connects-a-server-with-a-role.md) supersedes the
 four-sentence setup.
+Managed hosts also return optional `managedPolicy` status: `synced`, `pending`,
+`conflict`, `unavailable` or `disconnected`. A saved revision is distinct from
+the revision acknowledged by the edge. Conflicts reread the edge fence and retry
+the body's current policy; the persisted settings are reconciled after restart.
+`managedPolicy.revision` fingerprints the effective policy, including environment
+overrides; `revision` on the settings snapshot still fences the stored owner edit.
 
 The role-correct invitation requests Administrator for Admin and normal member
 text/thread/voice permissions for Participant. Optional `setup.checks` reports
@@ -130,7 +140,12 @@ refreshing is appropriate after membership or permissions change.
 read the same authenticated API. Use `roles` or `people` for those pickers.
 The active official-bot or user-session body supplies its own gateway view over
 its existing loopback control server using its brokered bridge bearer. The API
-reuses room Observe authorization, retains the original paired bearer through
+uses the authenticated managed provider instead on hosted bodies, scoped to
+the customer's bound tenant/server and current installation. Changing `guildId`
+cannot read another tenant's cache, and replacing the installation invalidates
+the old body's reads. The hosted dashboard uses its narrow owner permit for the
+same schema and pagination.
+The ordinary paired API reuses room Observe authorization, retains the original paired bearer through
 the relay, and rechecks authority and active body before returning data.
 
 `state` distinguishes `connected`, `disconnected`, `partial`, and `unavailable`;

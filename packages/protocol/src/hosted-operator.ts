@@ -1,8 +1,10 @@
 export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
 import { OperatorConversationServiceRequestSchema } from "./index.ts";
+import { hostedDiscordAllows } from "./hosted-discord.ts";
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
 export function hostedOperatorAllows(method: string, path: string, body?: string): boolean {
+  if (hostedDiscordAllows(method, path)) return true;
   if (path === "/operator/v1/dispatch" && method === "POST") {
     let value: unknown;
     try {

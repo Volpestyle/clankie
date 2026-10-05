@@ -59,6 +59,37 @@ flowchart LR
   Tracked[Verified tracked-project events] --> Adapter
 ```
 
+## Managed directory and owner settings
+
+VUH-1647 and VUH-1689 connect the same role model to a managed Discord provider.
+Directory requests use the body's authenticated hosted connection rather than
+a local Discord control port. The provider scopes every page to the current
+installation and the customer's bound server. Native Discord permissions still
+filter visible channels and private threads; incomplete caches remain partial,
+and unknown permissions remain unchecked. A server or installation outside that
+scope cannot become visible by changing the directory query.
+
+The body projects its revision-fenced policy to the provider. Participant has
+no second channel allowlist; Discord permissions decide admission in its bound
+server. Admin requires a dedicated bound server and verified Administrator.
+The provider rechecks the current connection, installation, policy and channel
+permissions before ingress and outbound effects. A conflicting projection
+causes the body to reread the provider fence and retry its current policy;
+disconnect/reinstall invalidates the old connection generation. Pending or
+unavailable synchronization is reported separately from a successful save.
+
+The hosted dashboard uses purpose-specific, request-bound, short-lived owner
+permits. Settings and directory payloads are encrypted to the body; Discord
+credentials stay with the managed provider. The body verifies the permit and
+checks the live account connection grant before admitting the request. This
+grant is the customer's Discord connection: disconnect or reinstall revokes
+old permits. An already admitted request may finish; subsequent admissions
+fail closed. This is separate from Cognito session/logout revocation. No device
+record, terminal capability or broader operator bearer is created by the page.
+
+These changes are code candidates. Local integration evidence does not imply
+a deployed provider, a changed Discord application, or a real Discord post.
+
 ## Consequences
 
 VUH-1624, VUH-1627, VUH-1628 and VUH-1629 were canceled into VUH-1622.

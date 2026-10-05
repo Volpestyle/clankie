@@ -39,6 +39,7 @@ import {
   type DomainEvent,
 } from "@clankie/protocol";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
+import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
 import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/public-gateway";
 import { PersonaSettingsSchema, SettingsStore } from "@clankie/settings";
 import { Hono, type Context } from "hono";
@@ -354,6 +355,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   storedEvents.length = 0;
 
   const app = new Hono();
+  let managedDiscordClosed = false;
+  let managedDiscordSyncRunning = false;
+  const syncManagedDiscord = async () => {
+    if (managedDiscordClosed || managedDiscordSyncRunning || dependencies.managedDiscord === undefined)
+      return;
+    managedDiscordSyncRunning = true;
+    try {
+      await dependencies.managedDiscord.sync();
+    } finally {
+      managedDiscordSyncRunning = false;
+    }
+  };
+  void syncManagedDiscord();
+  const managedDiscordTimer =
+    dependencies.managedDiscord === undefined
+      ? undefined
+      : setInterval(() => void syncManagedDiscord(), 5000);
+  managedDiscordTimer?.unref();
+  const discordWebRequests = new WeakMap<Request, RoomAuthorization>();
 
   /** Device session token → trusted identity; grants come from the projection, never the token. */
   const authenticateDevice = async (
@@ -416,6 +436,32 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       },
     };
   app.post(HOSTED_OPERATOR_PATH, bodyLimit({ maxSize: 2 * 1024 * 1024 }), async (context) => {
+    if (dependencies.hostedDiscordOperator !== undefined && !context.req.header("authorization")) {
+      const parsed = HostedDiscordEnvelopeSchema.safeParse(await readJson(context.req.raw));
+      if (!parsed.success) return context.json({ error: "unauthorized" }, 401);
+      return dependencies.hostedDiscordOperator.accept(parsed.data, async (request) => {
+        const inner = new Request(`http://control${request.path}`, {
+          method: request.method,
+          headers: {
+            "content-type": "application/json",
+            ...(request.body === undefined
+              ? {}
+              : { "content-length": String(Buffer.byteLength(request.body)) }),
+          },
+          signal: context.req.raw.signal,
+          ...(request.body === undefined ? {} : { body: request.body }),
+        });
+        discordWebRequests.set(inner, {
+          guard: request.guard,
+          current: () => !inner.signal.aborted && request.current(),
+        });
+        try {
+          return await app.fetch(inner);
+        } finally {
+          discordWebRequests.delete(inner);
+        }
+      });
+    }
     const identity = await authenticateDevice(context.req.raw);
     if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
     if ("denied" in identity) return deviceDenialResponse(context, identity);
@@ -429,7 +475,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const parsed = z
       .object({
         method: z.enum(["GET", "POST"]),
-        path: z.string().regex(/^(?:\/health|\/operator\/v1\/dispatch|\/v1\/[A-Za-z0-9_/-]+)$/u),
+        path: z.string().max(2048),
         body: z
           .string()
           .max(1024 * 1024)
@@ -508,6 +554,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     request: Request,
     access: RoomAccess,
   ): Promise<RoomAuthorization | undefined> => {
+    const web = discordWebRequests.get(request);
+    if (web !== undefined) return access !== "guidance" && web.current() ? web : undefined;
     const hostedOriginal = hostedOriginalRequests.get(request);
     const original = hostedOriginal ?? request;
     if (hostedOriginal === undefined) {
@@ -557,6 +605,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         ...(dependencies.discordDirectory ? { directory: dependencies.discordDirectory } : {}),
         ...(dependencies.discordPermissions ? { permissions: dependencies.discordPermissions } : {}),
         ...(dependencies.discordTestPost ? { testPost: dependencies.discordTestPost } : {}),
+        ...(dependencies.managedDiscord ? { policy: dependencies.managedDiscord } : {}),
         authorize: authorizeRoom,
         captain: dependencies.captain,
         observations: dependencies.roomObservations,
@@ -2143,6 +2192,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: () => {
+      managedDiscordClosed = true;
+      if (managedDiscordTimer !== undefined) clearInterval(managedDiscordTimer);
       stopBodyRequests();
       securityClosed = true;
       if (securityRetryTimer !== undefined) clearInterval(securityRetryTimer);

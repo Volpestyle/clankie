@@ -41,9 +41,11 @@ import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
 import type { HostedBodyClient } from "../hosted-body.ts";
 import type { HostedDeviceSecurity } from "../hosted-device-security.ts";
+import type { HostedDiscordOperator } from "../hosted-discord.ts";
 import type { HostedPairing } from "../hosted-pairing.ts";
 import { type LinearActivityEvent, type LinearWriteReceipts } from "../linear-webhook.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
+import type { ManagedDiscord } from "../managed-discord.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { MinecraftService } from "../minecraft.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
@@ -139,6 +141,8 @@ export interface ClankieAppDependencies {
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;
   hostedPairing?: HostedPairing;
+  hostedDiscordOperator?: HostedDiscordOperator;
+  managedDiscord?: ManagedDiscord;
   onHostedPairing?: () => void;
   hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
   /** The fleet's AI credit balance for the owner's app (VUH-1403); absent on a self-hosted body. */

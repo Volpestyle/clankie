@@ -139,6 +139,7 @@ import { DeliveredFileStore } from "./delivered-files.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { readDiscordBodyDirectory } from "./discord-directory.ts";
+import { ManagedDiscord } from "./managed-discord.ts";
 import { readDiscordBodyPermissions, postDiscordBodyTest } from "./discord-setup-body.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
 import { createFileMemory, defaultMemoryDir } from "./memory.ts";
@@ -253,6 +254,15 @@ const hostedPairing =
         join(stateRoot, "hosted-pair-tickets.json"),
       );
 await accountDiagnostics.refresh();
+const managedDiscord =
+  hostedBody === undefined
+    ? undefined
+    : new ManagedDiscord({
+        client: hostedBody,
+        settings: settingsStore,
+        statePath: join(stateRoot, "managed-discord-policy.json"),
+        environment: captainDiscordEnvironment,
+      });
 if (hostedBody !== undefined) {
   const timer = setInterval(() => void accountDiagnostics.refresh(), 60_000);
   timer.unref();
@@ -627,14 +637,16 @@ const discordTracking = new DiscordTracking({
   serverPermissions: async (serverId) => {
     const current = await settingsStore.load();
     const body = resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings.activeBody;
-    return readDiscordBodyPermissions(
-      { guildId: serverId },
-      {
-        body,
-        env: process.env,
-        token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-      },
-    );
+    return managedDiscord
+      ? managedDiscord.permissions({ guildId: serverId }, body)
+      : readDiscordBodyPermissions(
+          { guildId: serverId },
+          {
+            body,
+            env: process.env,
+            token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+          },
+        );
   },
   serverAction: async (action) => {
     const current = await settingsStore.load();
@@ -1132,23 +1144,32 @@ const workerMcp = new WorkerMcp({
 
 const clankie = await createClankieApp({
   discordPermissions: (query, body) =>
-    readDiscordBodyPermissions(query, {
-      body,
-      env: process.env,
-      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-    }),
-  discordTestPost: (query, body) =>
-    postDiscordBodyTest(query, {
-      body,
-      env: process.env,
-      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-    }),
+    managedDiscord
+      ? managedDiscord.permissions(query, body)
+      : readDiscordBodyPermissions(query, {
+          body,
+          env: process.env,
+          token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+        }),
+  ...(hostedBody === undefined
+    ? {
+        discordTestPost: (query, body) =>
+          postDiscordBodyTest(query, {
+            body,
+            env: process.env,
+            token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+          }),
+      }
+    : {}),
   discordDirectory: (query, body) =>
-    readDiscordBodyDirectory(query, {
-      body,
-      env: process.env,
-      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-    }),
+    managedDiscord
+      ? managedDiscord.directory(query, body)
+      : readDiscordBodyDirectory(query, {
+          body,
+          env: process.env,
+          token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+        }),
+  ...(managedDiscord === undefined ? {} : { managedDiscord }),
   fleetProjectMembership,
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
@@ -1201,7 +1222,9 @@ const clankie = await createClankieApp({
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   localFleet,
-  ...(hostedDiscord === undefined ? {} : { discordIngress: hostedDiscord.ingress }),
+  ...(hostedDiscord === undefined
+    ? {}
+    : { discordIngress: hostedDiscord.ingress, hostedDiscordOperator: hostedDiscord.operator }),
   accounts: createAccounts({
     store: operatorCredentialStore,
     apps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env),
