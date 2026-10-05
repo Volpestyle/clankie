@@ -11,7 +11,7 @@ import { commandHost } from "./io.ts";
 import { runMinecraftHostCommand } from "./minecraft-host.ts";
 
 const USAGE =
-  "Usage: clankie minecraft host status|configure [JSON]|start|stop|restart|backup|admin JSON|approve USERNAME|tunnel claim | configure [PROFILE HOST --version VERSION [--port PORT] [--username NAME] [--name LABEL] [--allow-public] | remove PROFILE | allow-public HOST [PORT] | revoke-public HOST [PORT]] | status | profiles | join PROFILE | leave | cancel [ACTION] | pause | resume | observe | action JSON | action-status ACTION | chat TEXT | follow PLAYER [DISTANCE] | goto X Y Z [TOLERANCE] | dig X Y Z | place X Y Z ITEM | craft ITEM COUNT";
+  "Usage: clankie minecraft host status|configure [JSON]|start|stop|restart|backup|admin JSON|approve USERNAME|tunnel claim|status|complete | configure [PROFILE HOST --version VERSION [--port PORT] [--username NAME] [--name LABEL] [--allow-public] | remove PROFILE | allow-public HOST [PORT] | revoke-public HOST [PORT]] | status | profiles | join PROFILE | leave | cancel [ACTION] | pause | resume | observe | action JSON | action-status ACTION | chat TEXT | follow PLAYER [DISTANCE] | goto X Y Z [TOLERANCE] | dig X Y Z | place X Y Z ITEM | craft ITEM COUNT";
 
 async function configure(args: readonly string[], store: SettingsStore): Promise<Record<string, unknown>> {
   if (args.length === 0) return { minecraft: (await store.load()).minecraft };

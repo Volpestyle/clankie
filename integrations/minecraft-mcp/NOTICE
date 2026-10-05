@@ -11,3 +11,12 @@ continuous follow, and browser screenshot viewing are owned by Clankie.
 The browser viewer uses prismarine-viewer 1.33.0 (MIT),
 gitHead 7102f49e287cab116802bc61ad03d05e2ad395db, and its distributed assets.
 Its package contains its own LICENSE and bundled dependency attribution.
+
+The managed Paper host downloads ViaVersion 5.12.0 (GPL-3.0-or-later), separately
+from this Apache-licensed integration. Upstream release:
+https://github.com/ViaVersion/ViaVersion/releases/tag/5.12.0
+License: https://github.com/ViaVersion/ViaVersion/blob/5.12.0/LICENSE
+Pinned SHA-256: 72c40a6a702d67f226fc9a0d8ad82aba1483fdabe2e6159bcdddb2dc070750b0
+ViaVersion translates newer Java clients through 26.3 to the 1.21.4 server;
+it does not upgrade server content or the bot/viewer protocol. No ViaBackwards
+is included. Downloads retain upstream licensing and are not relicensed here.

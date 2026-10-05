@@ -134,7 +134,9 @@ does not assert they were rebuilt.
 
 `hosting.ts` owns local Paper lifecycle, pinned plugin provisioning, loopback RCON,
 backups and auth. `tunnel.ts` owns pinned playit provisioning, broker-backed claim,
-mandatory PROXY V2, its supervised process and configuration checks. `main.ts`
+mandatory PROXY V2, its supervised process and configuration checks. Claim start
+returns `preparing`; its retained build job publishes the approval URL through
+claim status, and completion exchanges credentials directly into the broker. `main.ts`
 projects those operations through the same private MCP connection as the motor.
 The AWS provider implements the same `MinecraftHostingPort` for one configured
 EC2 instance. It uses a scoped broker credential, bounded custom SSM management,
@@ -147,6 +149,8 @@ No server or tunnel starts merely because the MCP connection opens. Clankie's co
 retains authority, Discord bindings/invites, audit, profiles and play ownership.
 
 The local default is Java 21, Paper 1.21.4 build 232 and game/RCON ports 25684/25685.
+Pinned ViaVersion 5.12.0 admits newer clients through 26.3 without changing the
+bot/viewer protocol. Host status and invites list supported clients.
 Hosting data/settings are integration-owned under the supplied `--data-dir`.
 Empty-server timeout defaults to 15 minutes; maximum requested-run uptime to six
 hours, including crash restarts. Shutdown saves/backs up and stops the tunnel.
@@ -156,9 +160,21 @@ Java plugin downloads are separate upstream programs and retain their own licens
 [Paper](https://github.com/PaperMC/Paper),
 [FastLogin MIT](https://github.com/TuxCoding/FastLogin/blob/main/LICENSE),
 [ProtocolLib GPL-2.0](https://github.com/dmulloy2/ProtocolLib/blob/master/License.txt),
-and [AuthMe GPL-3.0](https://github.com/AuthMe/AuthMeReloaded/blob/master/LICENSE).
+[AuthMe GPL-3.0](https://github.com/AuthMe/AuthMeReloaded/blob/master/LICENSE),
+and [ViaVersion GPL-3.0-or-later](https://github.com/ViaVersion/ViaVersion/blob/5.12.0/LICENSE).
 Pinned URLs/checksums live in `HOST_ARTIFACTS`; the Apache service license does not
 relicense downloaded plugins. Playit's pinned official source is
 [BSD-2-Clause](https://github.com/playit-cloud/playit-agent/blob/3adf0fd4fb72c866511890eabb766732734f3cda/LICENSE.txt).
 The Mac installer verifies its source archive and compiles with `--locked`.
 No plugin or playit binary is bundled into the release archive.
+
+The isolated compatibility check downloads the pinned real stack into a temporary
+world and broker, authenticates 26.3/1.21.11 friends and the 1.21.4 bot, and
+checks the premium encryption gate. Run it explicitly:
+
+```sh
+MINECRAFT_VIAVERSION_INTEGRATION=1 pnpm exec vitest run --config vitest.config.ts integrations/minecraft-mcp/test/hosting-viaversion.integration.test.ts
+```
+
+It stops and removes its fixture. A graphical vanilla client, positive premium
+session and public tunnel/Discord acceptance remain separate live checks.

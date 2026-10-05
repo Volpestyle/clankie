@@ -90,6 +90,7 @@ export class AwsEc2Host implements MinecraftHostingPort {
       phase: "stopped",
       authReady: false,
       version: "1.21.4",
+      supportedClientVersions: ["1.21.4"],
       gamePort: port,
       botUsername: "ClankieLocal26",
       eulaApprovedAt: "2026-10-04",

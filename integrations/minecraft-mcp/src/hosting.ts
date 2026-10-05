@@ -56,6 +56,11 @@ const PAPER = {
 const HOST_ARTIFACTS = [
   PAPER,
   {
+    file: "plugins/ViaVersion.jar",
+    sha256: "72c40a6a702d67f226fc9a0d8ad82aba1483fdabe2e6159bcdddb2dc070750b0",
+    url: "https://github.com/ViaVersion/ViaVersion/releases/download/5.12.0/ViaVersion-5.12.0.jar",
+  },
+  {
     file: "plugins/FastLoginBukkit.jar",
     sha256: "f758d0c3be28990860d334c9ce79b2f342c998f7d2fb4c423d41f1479a58671a",
     url: "https://github.com/TuxCoding/FastLogin/releases/download/1.12-kick-toggle/FastLoginBukkit.jar",
@@ -74,10 +79,27 @@ const HOST_ARTIFACTS = [
 const BOT_PROVIDER = "clankie_minecraft_host_bot";
 const RCON_PROVIDER = "clankie_minecraft_host_rcon";
 const BOT = "ClankieLocal26";
+/** Stable protocols declared by pinned ViaVersion 5.12.0, at/after the Paper protocol. */
+const HOST_SUPPORTED_CLIENT_VERSIONS = [
+  "1.21.4",
+  "1.21.5",
+  "1.21.6",
+  "1.21.7",
+  "1.21.8",
+  "1.21.9",
+  "1.21.10",
+  "1.21.11",
+  "26.1",
+  "26.1.1",
+  "26.1.2",
+  "26.2",
+  "26.3",
+] as const;
 export type HostStatus = {
   phase: "stopped" | "starting" | "running" | "stopping" | "backoff" | "failed";
   authReady: boolean;
   version: "1.21.4";
+  supportedClientVersions: string[];
   gamePort: number;
   botUsername: string;
   publicAddress?: string;
@@ -207,6 +229,7 @@ export class MinecraftHost implements MinecraftHostingPort {
       phase: "stopped",
       authReady: false,
       version: "1.21.4",
+      supportedClientVersions: [...HOST_SUPPORTED_CLIENT_VERSIONS],
       gamePort,
       botUsername: BOT,
       eulaApprovedAt: "2026-10-04",
@@ -461,7 +484,7 @@ export class MinecraftHost implements MinecraftHostingPort {
       });
       await done;
       const plugins = await this.command("plugins");
-      for (const name of ["AuthMe", "ProtocolLib", "FastLogin"])
+      for (const name of ["AuthMe", "ProtocolLib", "FastLogin", "ViaVersion"])
         if (!plugins.includes(`§a${name}`)) throw new Error("Minecraft auth plugin readiness failed");
       await this.command(`authme register ${BOT} ${this.botPassword}`);
       const botRegistered = await this.command(`authme changepassword ${BOT} ${this.botPassword}`);

@@ -13,6 +13,10 @@ function fixture() {
     authorize: async () => true,
   };
   const client = {
+    configuration: vi.fn(async () => ({ outcome: "ok" })),
+    configure: vi.fn(async () => ({ outcome: "ok" })),
+    claimStatus: vi.fn(async () => ({ outcome: "ok" })),
+    completeClaim: vi.fn(async () => ({ outcome: "ok" })),
     status: vi.fn(async () => ({ outcome: "ok" })),
     lifecycle: vi.fn(async () => ({ outcome: "ok" })),
     admin: vi.fn(async () => ({ outcome: "ok" })),

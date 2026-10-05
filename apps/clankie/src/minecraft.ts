@@ -23,6 +23,7 @@ import {
   type MinecraftStatus,
 } from "@clankie/protocol";
 import { z } from "zod";
+import { MinecraftSettingsSchema, type SettingsStore } from "@clankie/settings";
 import type { BodyConversationIdentity } from "./body-lease-router.ts";
 import type { BodyLeaseStore, BodyOwnerRoute } from "./body-leases.ts";
 import {
@@ -83,6 +84,10 @@ export class MinecraftService {
     path: string;
     now?: () => number;
     onDisconnect?: (session: MinecraftSessionRef) => void;
+    configuration?: {
+      settings: Pick<SettingsStore, "load" | "update">;
+      guard(identity: BodyConversationIdentity | undefined): Promise<() => void>;
+    };
   };
   public constructor(options: MinecraftService["options"]) {
     this.options = options;
@@ -102,6 +107,31 @@ export class MinecraftService {
   public async profiles() {
     return this.options.port.profiles();
   }
+  public async configuration(identity?: BodyConversationIdentity) {
+    const port = this.options.configuration;
+    if (!port) throw new MinecraftServiceError("minecraft_configuration_unavailable");
+    const current = await port.guard(identity);
+    const settings = await port.settings.load();
+    current();
+    return settings.minecraft;
+  }
+
+  public async configure(input: unknown, identity?: BodyConversationIdentity) {
+    const port = this.options.configuration;
+    if (!port) throw new MinecraftServiceError("minecraft_configuration_unavailable");
+    const current = await port.guard(identity);
+    const settings = MinecraftSettingsSchema.parse(input);
+    current();
+    const updated = await port.settings.update(
+      (existing) => ({ ...existing, minecraft: settings }),
+      async () => {
+        (await port.guard(identity))();
+      },
+    );
+    current();
+    return updated.minecraft;
+  }
+
   public ownsPlay(): boolean {
     return this.unavailable || (this.record !== null && !this.record.finished);
   }

@@ -1,3 +1,4 @@
+import type { MinecraftTunnelClaimStatus } from "@clankie/protocol";
 import { createHash, randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -106,7 +107,7 @@ async function command(binary: string, args: string[], cwd: string): Promise<voi
     });
   });
 }
-async function installedPlayit(dataDir: string): Promise<string> {
+export async function installedPlayit(dataDir: string): Promise<string> {
   if (process.platform !== "darwin") throw new Error("playit-platform-not-supported");
   const root = join(dataDir, `playit-${PLAYIT_PIN.commit}`);
   const binary = join(root, `playit-agent-${PLAYIT_PIN.commit}`, "target/release/playit-cli");
@@ -149,7 +150,6 @@ async function installPlayit(dataDir: string): Promise<string> {
     throw new Error("playit-source-checksum-mismatch");
   }
   await writeFile(join(root, "source.tar.gz"), archive, { mode: 0o600 });
-  await rm(source, { recursive: true, force: true });
   await command("tar", ["-xzf", join(root, "source.tar.gz"), "-C", root], root);
   await command("cargo", ["build", "--release", "--locked", "-p", "playit-cli"], source);
   const digest = createHash("sha256")
@@ -166,6 +166,9 @@ export class MinecraftTunnel {
   private state: TunnelStatus = { phase: "stopped" };
   private child: ChildProcess | undefined;
   private claim: { code: string; expiresAt: number } | undefined;
+  private claimPreparation: Promise<void> | undefined;
+  private claimError: MinecraftTunnelClaimStatus["error"];
+  private claimPhase: MinecraftTunnelClaimStatus["phase"] = "idle";
   private retry: ReturnType<typeof setTimeout> | undefined;
   private desired = false;
   private monitor: ReturnType<typeof setInterval> | undefined;
@@ -187,12 +190,43 @@ export class MinecraftTunnel {
   status(): TunnelStatus {
     return { ...this.state };
   }
-  async prepareClaim(): Promise<{ claimUrl: string; expiresAt: string }> {
+  claimStatus(): MinecraftTunnelClaimStatus {
+    if (this.claim && this.now() >= this.claim.expiresAt) {
+      this.claim = undefined;
+      this.claimPhase = "expired";
+    }
+    return {
+      phase: this.claimPhase,
+      claimed: this.claimPhase === "claimed",
+      ...(this.claimError ? { error: this.claimError } : {}),
+      ...(this.claim
+        ? {
+            claimUrl: `https://playit.gg/claim/${this.claim.code}`,
+            expiresAt: new Date(this.claim.expiresAt).toISOString(),
+          }
+        : {}),
+    };
+  }
+  async prepareClaim(): Promise<MinecraftTunnelClaimStatus> {
+    const current = this.claimStatus();
+    if (this.claimPreparation || current.phase === "pending" || current.phase === "claimed") return current;
+    this.claimPhase = "preparing";
+    this.claimError = undefined;
+    // Keep compilation outside the request lifetime: MCP/API callers can return
+    // immediately and observe this same job after their request has completed.
+    this.claimPreparation = this.prepareClaimOnce().finally(() => {
+      this.claimPreparation = undefined;
+    });
+    return this.claimStatus();
+  }
+  private async prepareClaimOnce(): Promise<void> {
     // Source compilation belongs to explicit setup, never service or game startup.
     try {
       await (this.options.install ?? installPlayit)(this.options.dataDir);
     } catch {
-      throw new Error("playit-install-failed");
+      this.claimPhase = "failed";
+      this.claimError = "playit-install-failed";
+      return;
     }
     const code = randomBytes(5).toString("hex");
     const expiresAt = this.now() + 10 * 60_000;
@@ -203,17 +237,17 @@ export class MinecraftTunnel {
         version: `playit ${PLAYIT_PIN.version}`,
       });
     } catch {
-      throw new Error("playit-claim-unavailable");
+      this.claimPhase = "failed";
+      this.claimError = "playit-claim-unavailable";
+      return;
     }
     this.claim = { code, expiresAt };
-    return { claimUrl: `https://playit.gg/claim/${code}`, expiresAt: new Date(expiresAt).toISOString() };
+    this.claimPhase = "pending";
   }
-  /** Poll from the CLI. Only the transient claim URL may leave this class. */
-  async completeClaim(): Promise<{ claimed: boolean }> {
-    if (!this.claim || this.now() >= this.claim.expiresAt) {
-      this.claim = undefined;
-      throw new Error("playit-claim-expired");
-    }
+  /** One nonblocking poll. Only the transient claim URL may leave this class. */
+  async completeClaim(): Promise<MinecraftTunnelClaimStatus> {
+    const current = this.claimStatus();
+    if (!this.claim) return current;
     try {
       const status = await this.request("/claim/setup", {
         code: this.claim.code,
@@ -222,16 +256,19 @@ export class MinecraftTunnel {
       });
       if (status === "UserRejected") {
         this.claim = undefined;
-        throw new Error();
+        this.claimPhase = "rejected";
+        return this.claimStatus();
       }
-      if (status !== "UserAccepted") return { claimed: false };
+      if (status !== "UserAccepted") return this.claimStatus();
       const result = z
         .object({ secret_key: z.string().regex(/^[a-fA-F0-9]{32,512}$/) })
         .parse(await this.request("/claim/exchange", { code: this.claim.code }));
       await this.options.credentials.set(result.secret_key);
       this.claim = undefined;
-      this.state = { phase: "stopped" };
-      return { claimed: true };
+      this.claimPhase = "claimed";
+      // Claiming credentials must not conceal an already running tunnel.
+      if (this.state.phase === "blocked-on-claim") this.state = { phase: "stopped" };
+      return this.claimStatus();
     } catch {
       throw new Error("playit-claim-unavailable");
     }

@@ -145,6 +145,11 @@ describe("Minecraft host core receipts and authority", () => {
       expect(await f.service.admin({ operation: "time", value: "day" }, f.friend)).toMatchObject({
         outcome: "refused",
       });
+      const dispatched = f.call.mock.calls.length;
+      expect(await f.service.claim(f.friend)).toMatchObject({ outcome: "refused" });
+      expect(await f.service.claimStatus(f.friend)).toMatchObject({ outcome: "refused" });
+      expect(await f.service.completeClaim(f.friend)).toMatchObject({ outcome: "refused" });
+      expect(f.call).toHaveBeenCalledTimes(dispatched);
       await f.service.admin({ operation: "whitelist_remove", username: "Friend" }, f.owner);
       expect(await f.service.lifecycle("start", f.friend)).toMatchObject({ outcome: "refused" });
     } finally {
@@ -213,6 +218,20 @@ describe("Minecraft host core receipts and authority", () => {
       expect(JSON.stringify(visible)).not.toContain("DO_NOT_RETURN");
       expect(visible[0]).toEqual(status);
       expect(visible[1]).toMatchObject({ outcome: "completed" });
+      f.reply.mockResolvedValueOnce({ phase: "preparing", claimed: false });
+      expect(await f.service.claim(f.owner)).toEqual({ phase: "preparing", claimed: false });
+      f.reply.mockResolvedValueOnce({ phase: "preparing", claimed: false });
+      expect(await f.service.completeClaim(f.owner)).toEqual({
+        phase: "preparing",
+        claimed: false,
+        outcome: "pending",
+      });
+      f.reply.mockResolvedValueOnce({ phase: "claimed", claimed: true });
+      expect(await f.service.completeClaim(f.owner)).toEqual({
+        phase: "claimed",
+        claimed: true,
+        outcome: "completed",
+      });
       expect(readFileSync(f.auditPath, "utf8")).not.toContain("DO_NOT_RETURN");
     } finally {
       f.cleanup();

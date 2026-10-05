@@ -13,6 +13,22 @@ the motor independently through Paper RCON; ordinary CI never starts a world.
 
 ## Host Clankie's own server
 
+Ask Clankie to **set up a Minecraft server for you** in Discord. Choose this
+computer, an existing AWS instance, or a server you already own; tell him who
+will play and which room should receive the invite. An owner/admin approves
+setup and friend enrollment. On this computer, Clankie supplies the playit claim
+link for browser approval and completes it without anyone opening a terminal.
+AWS needs the provisioning described below; choosing it does not create an
+instance. Friends request enrollment under their own Discord identities, then
+join through the premium or one-time-code path below.
+
+Hosting stays **off by default**: ask to play, then let the empty-server and
+maximum-uptime controls stop it. Local play uses the computer's electricity and
+network. AWS estimates must use the selected instance's current regional rate:
+a played hour plus 15 empty minutes is **1.25 instance-hours**, before boot time,
+public IPv4/transfer/CPU-credit charges and ongoing EBS/snapshot storage. The
+roughly $10/month alert is not a hard cap. No live hourly cost is established here.
+
 The Minecraft integration owns a pinned Paper **1.21.4 build 232** server, Java
 process, private RCON, world backups and playit agent. Clankie's service owns
 Discord authority, username bindings, auditing, destination policy and the one
@@ -20,8 +36,7 @@ play lease. The integration's hosting port separates the local Mac provider
 from the optional AWS EC2 provider. Neither starts a server during catalog or
 status reads.
 
-Hosting is **off by default**. Ask Clankie to start a world when you want to play,
-or use the operator CLI/TUI:
+The operator CLI/TUI is the manual path:
 
 ```sh
 clankie minecraft host configure
@@ -122,15 +137,20 @@ cost measurements belong in the operator's private provisioning record.
 
 ### Public tunnel and invites
 
-Run this once to provision the pinned playit agent and claim it in your personal
-playit account:
+Clankie can start a claim and send the owner its browser approval link. The
+manual equivalent provisions the pinned playit agent and begins a claim:
 
 ```sh
 clankie minecraft host tunnel claim
+clankie minecraft host tunnel status  # Repeat while preparing; pending includes the URL.
+# Approve that URL in your browser, then:
+clankie minecraft host tunnel complete
 ```
 
-The command displays a claim URL and waits for your browser approval, then stores
-the permanent agent key in the broker. On macOS, playit has no official binary
+Claim returns quickly with `preparing`; its background build survives the request.
+Status reports its phase and the approval URL when ready; complete polls
+once and stores the permanent agent key in the broker after browser approval.
+Pending needs another completion poll; expired/rejected claims need resolving. On macOS, playit has no official binary
 asset for the selected version: setup compiles pinned **0.17.1** source with its
 locked Cargo dependencies, so Cargo is required. Future starts use the verified
 cached executable. No router forwarding is needed. Public address and genuine
@@ -154,7 +174,8 @@ Nonpremium friends ask in Discord using their Minecraft name. Clankie records
 the authenticated requester, and a designated owner/admin approves that recorded
 request. He DMs a random one-time code; enter **`/login <code>`** after joining.
 The code expires after five minutes and rotates after authenticated login.
-Request a fresh code in Discord for later joins. In-game self-registration and
+For later joins, request a fresh code in Discord; an owner/admin approves the
+renewal request. In-game self-registration and
 IP/session remembered login are disabled. A failed or uncertain DM never exposes
 the code publicly or silently reissues it; disabled DMs need resolving first.
 
@@ -176,13 +197,35 @@ a restricted source after a brief unauthenticated spawn; its movement/chat and
 inventory restrictions stay enabled. His ordinary game-chat tools never carry
 the login password. Playing still requires the existing shared play lease.
 
-The pinned plugin stack is FastLogin, ProtocolLib **5.4.0**, and AuthMe **5.6.0**.
+The pinned plugin stack is FastLogin, ProtocolLib **5.4.0**, AuthMe **5.6.0**
+and ViaVersion **5.12.0**. Supported Java clients are 1.21.4–1.21.11 and
+26.1–26.3 (including the supported patch versions listed in status). Invites
+state that list; the server, bot and viewer remain on 1.21.4. Older clients need
+additional translation and are not advertised.
 Plugin startup or provisioning failures keep auth readiness false. FastLogin's
 lookup-error defaults alone are insufficient; the persisted premium marker,
 disabled in-game registration and mandatory original-IP forwarding are part of
 the hosted boundary. Local tests established these paths; a premium human join,
 actual public source-IP forwarding and Discord code delivery still need live
 acceptance. Local subsystem tests do not prove those external paths.
+
+## Join a server you already own
+
+Ask Clankie to add an approved profile using its address, port, Java version and
+a non-premium bot username. Public destinations require explicit approval;
+Clankie cannot use an online-mode-only server without a premium account.
+Existing external profiles support offline protocol login, with no external
+AuthMe password flow. Keep a plain offline server private: a whitelist alone
+does not prevent impersonating a whitelisted name.
+
+For the same easy hybrid login as Clankie's hosted world, use the managed local
+or AWS backend. Its first start installs the pinned plugins and generates the
+whitelist, premium-verification, restricted bot login and proxy configuration;
+follow the hosting and friend enrollment steps above. Merely installing AuthMe,
+FastLogin and ProtocolLib on another server does not connect Discord codes or
+Clankie's broker login. Back up an existing world before an owner-approved
+migration; automatic world import and arbitrary external hybrid-server
+onboarding are not implemented.
 
 ## Configure and join
 

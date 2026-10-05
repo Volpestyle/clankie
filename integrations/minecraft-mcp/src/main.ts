@@ -108,6 +108,8 @@ const withHost = <T>(operation: () => Promise<T>): Promise<T> => {
   return pending;
 };
 const configureHost = async (raw: unknown) => {
+  if (tunnel?.claimStatus().phase === "preparing")
+    throw new Error("Wait for Minecraft tunnel claim preparation before changing host settings");
   const { backend: requested, ...patch } = HostConfigurationPatchSchema.parse(raw);
   const next = requested ?? backend;
   const changing = JSON.stringify(next) !== JSON.stringify(backend);
@@ -351,6 +353,14 @@ server.registerTool(
   "host_claim",
   { description: "Prepare one owner playit account claim.", inputSchema: z.strictObject({}) },
   async () => withHost(async () => result(await (await currentTunnel()).prepareClaim())),
+);
+server.registerTool(
+  "host_claim_status",
+  {
+    description: "Read transient playit claim status without polling or credentials.",
+    inputSchema: z.strictObject({}),
+  },
+  async () => withHost(async () => result((await currentTunnel()).claimStatus())),
 );
 server.registerTool(
   "host_claim_complete",

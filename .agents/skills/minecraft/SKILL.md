@@ -1,21 +1,111 @@
 ---
 name: minecraft
-description: Join an approved Minecraft Java world, play through Clankie's service-owned body, inspect action evidence, and stop or leave safely.
+description: Set up an on-demand Minecraft Java server with friends, or join an approved world through Clankie's service-owned body.
 ---
 
 # Minecraft
 
-The shipped body supports approved offline Java profiles on local/private worlds.
-Microsoft authentication and live friend/Discord acceptance remain deferred;
-a configured viewer or offline conformance result does not establish them.
+Clankie can host an on-demand Paper Java world with hybrid authentication, or
+join an approved external world as a non-premium bot. He needs no Microsoft
+account. Premium human joins, public connectivity and Discord code delivery
+need live acceptance; local conformance and a configured viewer do not prove them.
 
 Use the `minecraft_*` tools in the owning conversation. Clankie's existing mind
 chooses the actions; the service-owned MCP motor supplies navigation and physics.
 Workers need their own bot identities, never a raw MCP bypass to Clankie's body. Call `minecraft_join`
 without a profile id to list approved profile names, then select one. Endpoint and account configuration are
-operator-owned. The CLI equivalent is `clankie minecraft`, and `/minecraft`
+owner-approved. The CLI equivalent is `clankie minecraft`, and `/minecraft`
 exposes it in the console. Setup and limitations live in
 [`docs/minecraft.md`](../../../docs/minecraft.md).
+
+## Set up a world with its owner
+
+A request to set up a Minecraft server is a conversational front door to the
+existing tools. Establish the hosting choice, who will play, their Java version
+and usernames, and where the invite belongs. Use the existing owner/individual
+machine-operator authority for setup and administration. Friends can request
+enrollment and, once approved, start play; they cannot configure hosts, claim
+tunnels, provision AWS resources or raise limits. Tool checks enforce this.
+
+- **This computer:** read `minecraft_host_configuration` and host status; while
+  stopped, use `minecraft_host_configure` with
+  `settings: {backend: {kind: "local"}}`. Java 21 and, on macOS, Cargo for the
+  pinned playit build must be available. `minecraft_host_claim` starts the claim
+  without a terminal and returns `preparing` while the pinned agent builds in the
+  background. Poll `minecraft_host_claim_status` for `pending` and the account
+  claim URL. Give that URL to the
+  owner in the requesting conversation; they approve it in their browser. Read
+  `minecraft_host_claim_status` and use `minecraft_host_claim_complete` to poll
+  once and store the agent secret in the broker. Pending is not completion;
+  resolve expired/rejected claims before starting. No router changes are needed.
+- **AWS:** use an already provisioned instance and scoped broker credential.
+  While stopped, select `settings: {backend: {kind: "aws-ec2", accountId,
+instanceId, region}}` with owner-supplied identifiers. Required groundwork is
+  an SSM-managed guest, trusted source-IP proxy, private Paper/RCON, independent
+  idle/uptime shutdown, EC2 stop fallback and the roughly $10/month budget alert.
+  The checkout helpers in `integrations/minecraft-mcp/scripts/aws/` prepare an
+  existing instance; they do not create one. Guided provisioning is VUH-1643,
+  still pending. Explain missing prerequisites and use the existing operator
+  workflow; do not promise that choosing AWS provisions it.
+- **An existing server:** obtain the owner's host, port, supported Java version
+  and a non-premium bot username. Read `minecraft_configuration`, then use
+  `minecraft_configure` to submit the full settings with the new offline profile
+  and any specifically approved public endpoint, preserving all existing
+  profiles/allowlist entries. Profiles carry `id`, `name`, `host`, `port`,
+  `version`, `username`, `auth: "offline"`. Public SRV redirects also need the
+  resolved target/port approved. Join the resulting profile with `minecraft_join`.
+  An online-mode-only server cannot admit this bot. External profiles do not
+  support supplying an AuthMe password; do not send one through game chat.
+  Installing hybrid plugins on an arbitrary server alone does not connect our
+  Discord enrollment, broker login or host controls. Offer the managed hybrid
+  setup below, or an owner-approved private offline server, explaining this gap.
+
+### Managed hybrid setup and friends
+
+On the selected managed local/AWS backend, the first requested start provisions
+the pinned Paper 1.21.4 build 232 and FastLogin, ProtocolLib 5.4.0, AuthMe 5.6.0
+and ViaVersion 5.12.0. Clients from 1.21.4 through 26.3 may join; the bot and
+viewer stay on 1.21.4. Use the status-supported client list in invites.
+Do not disable online-mode on a public existing server as a shortcut. Our managed
+setup sets offline-mode **with** whitelist, forced premium classification, no
+in-game registration/remembered IP sessions, restricted bot login, trusted
+original-IP forwarding and loopback-only Paper/RCON. Those settings belong to
+the manager, not a copied plugin recipe; server/plugin readiness gates invites.
+An existing world needs a separate owner-approved backup/migration before any
+manager replaces its configuration; there is no automatic world import command.
+
+1. Start on the owner's play request with `minecraft_host_lifecycle` and inspect
+   `minecraft_host_status` until running and auth-ready. Enrollment approval
+   needs the running authentication stack. A claim URL or starting phase is
+   not a playable address.
+2. Have each friend ask in Discord with their actual Minecraft username.
+   `minecraft_host_request_enrollment` captures **that turn's** authenticated
+   Discord identity; never fabricate a request for someone named by the owner.
+   The owner/admin uses `minecraft_host_approve_enrollment` on that stored name.
+   Approval handles classification and whitelist admission together.
+3. Premium names are verified through Mojang and use their normal Java launcher
+   with no login code. Non-premium names must not collide with premium names;
+   approved friends receive a private five-minute one-time code and enter
+   `/login <code>` after joining. For later joins, they make a new enrollment
+   request and an owner/admin approves it to issue a fresh code.
+   Resolve disabled DMs or uncertain delivery; never repost codes in a room.
+4. Use `minecraft_host_invite` in the requested Discord channel for the current
+   ready public address/version and login guidance. Join yourself through
+   `clankie-hosted` when ready; bot login stays internal. Check actual join
+   evidence before claiming anyone successfully connected.
+
+Hosting stays off by default, stops after about 15 empty minutes and has a
+maximum-uptime watchdog. A connected bot counts as a player, so leave when play
+is over. For local play, explain electricity/network costs without claiming
+a measured amount. For AWS, quote the current selected region/instance rate
+before estimating: one played hour can include boot time and up to 15 idle
+minutes of compute/public IPv4, plus transfer or CPU credits and the share of
+EBS/snapshots that continues while stopped. For example, 60 played minutes plus
+15 idle minutes consumes 1.25 instance-hours before boot time. Spot prices can
+change and interruption is possible. The $10 alert is not a cap. Do not increase
+limits or keep an idle server running to preserve an invite.
+
+## Host operations
 
 Your own hosted server uses `minecraft_host_*` tools through the same service-owned
 connection. Hosting is off by default: start on a request to play, then use the
@@ -26,7 +116,7 @@ administration require the configured owner or an individually designated machin
 operator, not a guild-wide machine grant.
 Use status to check auth and host readiness. Local hosting additionally needs a
 ready playit tunnel; AWS uses its current instance address, which may change on
-start. A claim is a local-host operator setup step;
+start. A claim is a local-host owner/admin setup step;
 never manufacture or publish an address. `minecraft_host_invite` posts the safe
 address/version only in the requesting Discord channel.
 

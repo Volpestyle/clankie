@@ -109,6 +109,9 @@ vi.mock("../src/aws-host.ts", () => ({
 }));
 vi.mock("../src/tunnel.ts", () => ({
   MinecraftTunnel: class {
+    claimStatus() {
+      return { phase: "idle", claimed: false };
+    }
     status() {
       return { phase: "stopped" };
     }

@@ -88,6 +88,9 @@ export function createMinecraftRoutes(options: MinecraftRouteOptions): Hono {
       case "claim":
         result = await options.host.claim(identity);
         break;
+      case "claim_status":
+        result = await options.host.claimStatus(identity);
+        break;
       case "claim_complete":
         result = await options.host.completeClaim(identity);
         break;

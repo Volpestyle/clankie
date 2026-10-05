@@ -2744,7 +2744,7 @@ paths:
       tags: [Operator]
       operationId: commandMinecraftHost
       summary: Configure, start, administer or back up Clankie's own Minecraft server
-      description: Integration-owned on-demand Paper host and broker-backed playit claim. Hosting is off by default, idle-stops after at most 15 minutes, and has a maximum uptime watchdog. x-clankie-conversation-id selects an existing operator conversation. Typed administration has no op, raw RCON or secret arguments. Enrollment approval uses a previously verified Discord requester; operator arguments cannot select a Discord subject.
+      description: Integration-owned on-demand Paper host and broker-backed playit claim. claim starts background agent preparation and returns preparing immediately; claim_status reads preparation progress and returns the official approval URL when pending and claim_complete polls once and stores an approved secret only in the broker. Tunnel claiming requires owner/admin authority. Hosting is off by default, idle-stops after at most 15 minutes, and has a maximum uptime watchdog. x-clankie-conversation-id selects an existing operator conversation. Typed administration has no op, raw RCON or secret arguments. Enrollment approval uses a previously verified Discord requester; operator arguments cannot select a Discord subject.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -2768,6 +2768,7 @@ paths:
                         backup,
                         admin,
                         claim,
+                        claim_status,
                         claim_complete,
                         request_enrollment,
                         approve_enrollment,

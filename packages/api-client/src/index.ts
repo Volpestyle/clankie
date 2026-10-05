@@ -1,4 +1,9 @@
-import { parseProtocolResponse, safeParseProtocolResponse } from "@clankie/protocol";
+import {
+  MinecraftHostCommandSchema,
+  type MinecraftHostCommand,
+  parseProtocolResponse,
+  safeParseProtocolResponse,
+} from "@clankie/protocol";
 export * from "./discord-setup.ts";
 import {
   ISSUE_METRICS_PATH,
@@ -200,6 +205,22 @@ export class ClankieApiClient {
         },
       ),
     );
+  }
+
+  /** Runs a typed hosting action; tunnel claim returns its URL without waiting for owner approval. */
+  public async commandMinecraftHost(
+    input: MinecraftHostCommand,
+    conversationId?: string,
+  ): Promise<Record<string, unknown>> {
+    const command = MinecraftHostCommandSchema.parse(input);
+    return this.request("/v1/minecraft/host", {
+      method: "POST",
+      headers: {
+        ...this.operatorHeaders(),
+        ...(conversationId ? { "x-clankie-conversation-id": conversationId } : {}),
+      },
+      body: JSON.stringify(command),
+    });
   }
 
   public async getHealth(): Promise<ControlPlaneHealth> {

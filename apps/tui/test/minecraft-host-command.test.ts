@@ -53,7 +53,7 @@ it("sends AWS backend selection through the authenticated host configuration API
   }
 });
 
-it("keeps claim approval on the official site and completes it using the operator credential", async () => {
+it("returns the official claim URL immediately and polls only on an explicit completion command", async () => {
   const dir = await mkdtemp(join(tmpdir(), "minecraft-host-cli-"));
   try {
     const store = new FileCredentialStore(join(dir, "auth.json"));
@@ -72,6 +72,10 @@ it("keeps claim approval on the official site and completes it using the operato
       conversationId: "operator-host",
     };
     await expect(runMinecraftHostCommand(["tunnel", "claim"], options)).resolves.toEqual({
+      claimUrl: "https://playit.gg/claim/test",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await expect(runMinecraftHostCommand(["tunnel", "complete"], options)).resolves.toEqual({
       outcome: "completed",
     });
     expect(onClaimUrl).toHaveBeenCalledWith("https://playit.gg/claim/test");
@@ -91,5 +95,69 @@ it("keeps claim approval on the official site and completes it using the operato
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("crosses the real HTTP, command-schema and broker boundary without a TTY or automatic polling", async () => {
+  const { createServer } = await import("node:http");
+  const { MinecraftHostCommandSchema, MinecraftTunnelClaimStatusSchema } = await import("@clankie/protocol");
+  const directory = await mkdtemp(join(tmpdir(), "minecraft-claim-http-"));
+  const store = new FileCredentialStore(join(directory, "auth.json"));
+  const key = mintOperatorToken();
+  await store.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key });
+  const requests: string[] = [];
+  const server = createServer(async (request, response) => {
+    if (request.url !== "/v1/minecraft/host" || request.headers.authorization !== `Bearer ${key}`) {
+      response.writeHead(403).end();
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const command = MinecraftHostCommandSchema.parse(JSON.parse(Buffer.concat(chunks).toString()));
+    requests.push(command.action);
+    response.setHeader("content-type", "application/json");
+    const claimUrl = "https://playit.gg/claim/abcdef1234";
+    const expiresAt = new Date(Date.now() + 600_000).toISOString();
+    response.end(
+      JSON.stringify(
+        command.action === "claim"
+          ? MinecraftTunnelClaimStatusSchema.parse({ phase: "preparing", claimed: false })
+          : MinecraftTunnelClaimStatusSchema.parse({
+              phase: command.action === "claim_complete" ? "claimed" : "pending",
+              claimed: command.action === "claim_complete",
+              ...(command.action === "claim_status" ? { claimUrl, expiresAt } : {}),
+            }),
+      ),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("HTTP listener unavailable");
+    const options = {
+      env: {},
+      operatorCredentialStore: store,
+      host: `http://127.0.0.1:${address.port}`,
+      onClaimUrl: () => {},
+    };
+    expect(await runMinecraftHostCommand(["tunnel", "claim"], options)).toEqual({
+      phase: "preparing",
+      claimed: false,
+    });
+    expect(requests).toEqual(["claim"]);
+    expect(await runMinecraftHostCommand(["tunnel", "status"], options)).toMatchObject({
+      phase: "pending",
+      claimed: false,
+    });
+    expect(await runMinecraftHostCommand(["tunnel", "complete"], options)).toEqual({
+      phase: "claimed",
+      claimed: true,
+    });
+    expect(requests).toEqual(["claim", "claim_status", "claim_complete"]);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
   }
 });

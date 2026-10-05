@@ -1,5 +1,6 @@
 import {
   MinecraftHostAdminCommandSchema,
+  MinecraftHostSettingsSchema,
   MinecraftHostUsernameSchema,
   type MinecraftHostAdminCommand,
 } from "@clankie/protocol";
@@ -11,6 +12,10 @@ import type { TurnContext } from "./tools.ts";
 
 /** Core owns identity binding and audit; integration owns server administration. */
 export interface MinecraftHostToolPort {
+  configuration(identity: BodyConversationIdentity | undefined): Promise<unknown>;
+  configure(settings: unknown, identity: BodyConversationIdentity | undefined): Promise<unknown>;
+  claimStatus(identity: BodyConversationIdentity | undefined): Promise<unknown>;
+  completeClaim(identity: BodyConversationIdentity | undefined): Promise<unknown>;
   status(identity: BodyConversationIdentity | undefined): Promise<unknown>;
   lifecycle(
     operation: "start" | "stop" | "restart",
@@ -49,6 +54,25 @@ export function minecraftHostTools(client: MinecraftHostToolPort, turn: TurnCont
     }
   };
   return [
+    defineTool({
+      name: "minecraft_host_configuration",
+      label: "Minecraft host configuration",
+      description:
+        "Read the hosting backend and bounded settings for an authenticated owner or individual machine operator. No credentials are returned.",
+      parameters: Type.Object({}),
+      execute: async () => call((identity) => client.configuration(identity)),
+    }),
+    defineTool({
+      name: "minecraft_host_configure",
+      label: "Configure Minecraft hosting",
+      description:
+        "Configure your stopped server for an authenticated owner or individual machine operator: local or an existing AWS EC2 backend, resource limits, ports and backups. Idle stop and maximum uptime remain bounded. This selects existing AWS infrastructure; it does not provision resources.",
+      parameters: Type.Object({ settings: z.toJSONSchema(MinecraftHostSettingsSchema.partial()) as TSchema }),
+      execute: async (_id, input) =>
+        call((identity) =>
+          client.configure(MinecraftHostSettingsSchema.partial().parse(input.settings), identity),
+        ),
+    }),
     defineTool({
       name: "minecraft_host_invite",
       label: "Invite to Minecraft",
@@ -101,9 +125,25 @@ export function minecraftHostTools(client: MinecraftHostToolPort, turn: TurnCont
       name: "minecraft_host_claim",
       label: "Claim Minecraft tunnel",
       description:
-        "Ask for the playit account claim step for your own server, for an authenticated owner or individual machine operator. Credentials remain in the broker.",
+        "Begin a non-interactive playit account claim for an authenticated owner or individual machine operator. Returns immediately with preparing while the agent installs in the background. Poll minecraft_host_claim_status until pending with an official approval URL to share privately with the owner, then poll minecraft_host_claim_complete after approval. Repeated starts reuse the same job. Credentials remain in the broker.",
       parameters: Type.Object({}),
       execute: async () => call((identity) => client.claim(identity)),
+    }),
+    defineTool({
+      name: "minecraft_host_claim_status",
+      label: "Minecraft tunnel claim status",
+      description:
+        "Read the tunnel account claim phase for an authenticated owner or individual machine operator. Reports preparing until the background install finishes, then pending with the approval URL; terminal phases include failed/expired/rejected/claimed. Does not exchange credentials.",
+      parameters: Type.Object({}),
+      execute: async () => call((identity) => client.claimStatus(identity)),
+    }),
+    defineTool({
+      name: "minecraft_host_claim_complete",
+      label: "Complete Minecraft tunnel claim",
+      description:
+        "Poll the owner's playit approval once for an authenticated owner or individual machine operator. Returns preparing during installation or pending until approved, then exchanges the secret directly into the broker. No terminal or credentials in chat are needed.",
+      parameters: Type.Object({}),
+      execute: async () => call((identity) => client.completeClaim(identity)),
     }),
     defineTool({
       name: "minecraft_host_request_enrollment",

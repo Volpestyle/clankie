@@ -82,6 +82,11 @@ const Status = z.object({
   phase: z.literal("running"),
   authReady: z.literal(true),
   version: z.string().regex(/^\d+\.\d+(?:\.\d+)?$/u),
+  supportedClientVersions: z
+    .array(z.string().regex(/^\d+\.\d+(?:\.\d+)?$/u))
+    .min(1)
+    .max(64)
+    .optional(),
   tunnel: z.object({
     publicAddress: z
       .string()
@@ -140,7 +145,7 @@ export function createMinecraftHostInvite(options: {
         guildId: captured.guildId!,
         channelId: captured.channelId,
         messageId: captured.messageId,
-        text: `Minecraft Java ${status.data.version} — connect to \`${status.data.tunnel.publicAddress}\`. Ask me to whitelist your Minecraft name.\nPremium: use your usual launcher; no login setup. Nonpremium: ask me here; I’ll DM a one-time code to enter with /login <code>.`,
+        text: `Minecraft Java — supported clients: ${(status.data.supportedClientVersions ?? [status.data.version]).join(", ")} (server ${status.data.version}). Connect to \`${status.data.tunnel.publicAddress}\`. Ask me to whitelist your Minecraft name.\nPremium: use your usual launcher; no login setup. Nonpremium: ask me here; I’ll DM a one-time code to enter with /login <code>.`,
       },
       guard,
     );
