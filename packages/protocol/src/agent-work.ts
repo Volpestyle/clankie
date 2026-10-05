@@ -2,6 +2,7 @@ import { z } from "zod";
 
 /** A native goal is independent of whether a model turn is running. */
 export const OperatorGoalStatusSchema = z.enum([
+  "proposed",
   "active",
   "paused",
   "blocked",

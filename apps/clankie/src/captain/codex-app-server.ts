@@ -19,6 +19,16 @@ type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as RecordValue) : {};
 
+function herdrStartupTimedOut(error: unknown): boolean {
+  const text = String(error);
+  try {
+    const failure = record(record(JSON.parse(text.slice(text.indexOf("{")))).error);
+    return failure.code === "timeout" && failure.message === "timed out waiting for agent startup";
+  } catch {
+    return false;
+  }
+}
+
 export interface CodexSeatEvent {
   method: string;
   params: RecordValue;
@@ -131,8 +141,11 @@ export class CodexAppServerClient {
     socket.on("close", () => this.fail(new Error("Codex app-server disconnected")));
   }
 
-  async initialize(): Promise<void> {
-    await this.request("initialize", { clientInfo: { name: "clankie", title: "Clankie", version: "0.2.1" } });
+  async initialize(experimentalApi = false): Promise<void> {
+    await this.request("initialize", {
+      clientInfo: { name: "clankie", title: "Clankie", version: "0.2.1" },
+      ...(experimentalApi ? { capabilities: { experimentalApi: true } } : {}),
+    });
     this.socket.send(JSON.stringify({ method: "initialized", params: {} }));
   }
 
@@ -543,6 +556,7 @@ export async function startCodexAppServerSeat(options: {
       if (!socket) await new Promise((resolve) => setTimeout(resolve, 50));
     }
     let activeTurn: string | undefined;
+    let turnObservation = 0;
     let threadId: string | undefined;
     const observe = (event: CodexSeatEvent) => {
       if (options.policy && !closed && !policyFailed) {
@@ -554,6 +568,7 @@ export async function startCodexAppServerSeat(options: {
       }
       if (event.params.threadId === threadId) {
         const turn = record(event.params.turn);
+        if (event.method === "turn/started" || event.method === "turn/completed") turnObservation++;
         if (event.method === "turn/started" && typeof turn.id === "string") activeTurn = turn.id;
         if (event.method === "turn/completed" && turn.id === activeTurn) activeTurn = undefined;
       }
@@ -567,7 +582,7 @@ export async function startCodexAppServerSeat(options: {
       options.onEvent?.(event);
     };
     client = new CodexAppServerClient(socket, observe);
-    await client.initialize();
+    await client.initialize(true);
     if (catalogConfig && server.catalogSignalPath) {
       stopCatalogWatch = watchCodexCatalog({
         signalPath: server.catalogSignalPath,
@@ -624,13 +639,37 @@ export async function startCodexAppServerSeat(options: {
     } catch (error) {
       // Herdr keeps a launched native agent alive when a startup dialog blocks it.
       // Only that typed result establishes a live view; other launch errors fail.
-      if (!options.onThreadPending || !/agent_not_ready/u.test(String(error))) throw error;
+      // Herdr's bounded readiness wait may expire while a large saved thread
+      // restores. The timeout does not mean the native process failed: keep its
+      // dedicated server and prove the exact loaded thread below. Closing it
+      // here strands the TUI in an automatic reconnect loop.
+      if (
+        !options.onThreadPending ||
+        (!/agent_not_ready/u.test(String(error)) && !(options.resumeThreadId && herdrStartupTimedOut(error)))
+      )
+        throw error;
     }
     const threadDeadline = Date.now() + (options.threadStartTimeoutMs ?? 15_000);
     let pendingReported = false;
     while (!threadId) {
       options.signal?.throwIfAborted();
-      const loaded = record(await client.request("thread/loaded/list", {}));
+      let loaded: RecordValue;
+      try {
+        loaded = record(await client.request("thread/loaded/list", {}, 2_000));
+      } catch (error) {
+        // This is a read-only query. A busy restore may delay it, and repeating
+        // the observation cannot duplicate a brief or start a second writer.
+        if (!options.resumeThreadId || !String(error).includes("thread/loaded/list timed out;")) throw error;
+        if (!pendingReported && Date.now() >= threadDeadline) {
+          if (!options.onThreadPending) throw new Error("Codex TUI did not restore its thread");
+          pendingReported = true;
+          options.onThreadPending();
+        }
+        options.signal?.throwIfAborted();
+        const failure = server.failure();
+        if (failure) throw failure;
+        continue;
+      }
       const ids = Array.isArray(loaded.data) ? loaded.data : [];
       if (ids.length > 1 || loaded.nextCursor != null)
         throw new Error("Codex seat has more than one initial native thread");
@@ -672,6 +711,11 @@ export async function startCodexAppServerSeat(options: {
       }
     }
     let subscribed = false;
+    let metadataOnly = true;
+    const historyUnsupported = (error: unknown) =>
+      /unknown field.*excludeTurns|excludeTurns.*(?:experimentalApi|unsupported)|thread\/turns\/list.*(?:unknown|unsupported)|unknown (?:method|variant).*thread\/turns\/list|method not found/iu.test(
+        String(error),
+      );
     const subscribe = async (waitForRollout = true) => {
       if (subscribed) return;
       // The TUI owns the initial subscription. Its new thread becomes
@@ -679,12 +723,24 @@ export async function startCodexAppServerSeat(options: {
       // as an observer without replaying input. Hydrate the last turn in
       // case it completed before the subscription was established.
       const deadline = Date.now() + 5_000;
+      const observedBefore = turnObservation;
       let resumed: RecordValue;
       for (;;) {
         try {
-          resumed = record(await client!.request("thread/resume", { threadId }));
+          resumed = record(
+            await client!.request(
+              "thread/resume",
+              { threadId, ...(metadataOnly ? { excludeTurns: true } : {}) },
+              options.resumeThreadId ? 120_000 : 30_000,
+            ),
+          );
           break;
         } catch (error) {
+          // A rejected subscription never replays model input.
+          if (metadataOnly && historyUnsupported(error)) {
+            metadataOnly = false;
+            continue;
+          }
           // Codex reports a not-yet-persisted rollout as either "no rollout
           // found" or, since 0.159, a present-but-empty rollout file.
           if (!/no rollout found|rollout at .* is empty/u.test(String(error))) throw error;
@@ -694,9 +750,34 @@ export async function startCodexAppServerSeat(options: {
         }
       }
       subscribed = true;
-      const turns = record(resumed.thread).turns;
-      const turn = Array.isArray(turns) ? record(turns.at(-1)) : {};
-      if (typeof turn.id === "string")
+      let turn: RecordValue;
+      if (metadataOnly) {
+        try {
+          // Observe one summarized newest turn rather than reconstructing and
+          // transmitting a whole large rollout merely to subscribe to events.
+          const latest = record(
+            await client!.request("thread/turns/list", {
+              threadId,
+              limit: 1,
+              sortDirection: "desc",
+              itemsView: "summary",
+            }),
+          );
+          turn = Array.isArray(latest.data) ? record(latest.data[0]) : {};
+        } catch (error) {
+          if (!historyUnsupported(error)) throw error;
+          metadataOnly = false;
+          const legacy = record(
+            await client!.request("thread/resume", { threadId }, options.resumeThreadId ? 120_000 : 30_000),
+          );
+          const turns = record(legacy.thread).turns;
+          turn = Array.isArray(turns) ? record(turns.at(-1)) : {};
+        }
+      } else {
+        const turns = record(resumed.thread).turns;
+        turn = Array.isArray(turns) ? record(turns.at(-1)) : {};
+      }
+      if (turnObservation === observedBefore && typeof turn.id === "string")
         observe({
           method: turn.status === "inProgress" ? "turn/started" : "turn/completed",
           params: { threadId, turn },

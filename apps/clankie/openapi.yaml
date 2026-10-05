@@ -931,20 +931,30 @@ paths:
         "404": { description: Unknown repo or work item }
         "409": { description: The repo needs its convention decided, or its recorded backend is unavailable }
         "502": { description: The backend refused or failed the request }
-  /v1/linear/work:
+  /v1/linear/target:
     get:
       tags: [Operator]
-      operationId: listLinearWorkOwners
-      summary: Read persisted organization and issue ownership
+      operationId: inspectLinearWakeTarget
+      summary: Inspect the ordinary chat selected for Linear activity
       security: [{ operatorBearer: [] }]
       responses:
-        "200": { description: Owners in an owners array }
+        "200":
+          description: Current live wake target
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, wakeConversationId]
+                properties:
+                  schemaVersion: { const: 1 }
+                  wakeConversationId: { type: string, default: global-default }
         "401": { description: Operator authentication required }
+        "503": { description: Operator authentication unavailable }
     put:
       tags: [Operator]
-      operationId: bindLinearWorkOwner
-      summary: Bind an exact Linear issue to an authorized conversation
-      description: Requires current operator authority over the selected runnable conversation. Selecting an attachable room grants no Discord or machine authority. Ownership routes future qualifying events; it does not replay passive history.
+      operationId: setLinearWakeTarget
+      summary: Select an existing ordinary global chat without restarting
+      description: Sets linearWebhook.wakeConversationId, default global-default. The target must be an existing ordinary global chat; its attached native operator seat may drive it. Changing the target applies to new activity without moving or replaying history. Selecting a target grants no additional authority.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -953,109 +963,29 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [organizationId, issueId, conversationId]
+              required: [conversationId]
               properties:
-                organizationId: { type: string, format: uuid }
-                issueId: { type: string, format: uuid }
-                conversationId: { type: string, pattern: "^[a-zA-Z0-9_-]+$", maxLength: 256 }
+                conversationId: { type: string, pattern: "^[a-zA-Z0-9_-]{1,256}$" }
       responses:
-        "200": { description: The persisted binding in bound }
-        "400": { description: Invalid issue or conversation binding }
+        "200":
+          description: Persisted live wake target
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, wakeConversationId]
+                properties:
+                  schemaVersion: { const: 1 }
+                  wakeConversationId: { type: string }
+        "400": { description: Invalid target }
         "401": { description: Operator authentication required }
-        "409": { description: Source conversation authority is unavailable or was revoked }
-        "503": { description: Operator authentication unavailable }
-    delete:
-      tags: [Operator]
-      operationId: unbindLinearWorkOwner
-      summary: Remove an exact organization and issue binding
-      security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [organizationId, issueId]
-              properties:
-                organizationId: { type: string, format: uuid }
-                issueId: { type: string, format: uuid }
-      responses:
-        "200": { description: Whether a binding was removed in unbound }
-        "400": { description: Invalid organization and issue pair }
-        "401": { description: Operator authentication required }
-        "503": { description: Operator authentication unavailable }
-  /v1/linear/inbox:
-    get:
-      tags: [Operator]
-      operationId: readLinearInbox
-      summary: Read a bounded page without consuming it
-      security: [{ operatorBearer: [] }]
-      parameters:
-        - {
-            name: conversationId,
-            in: query,
-            schema: { type: string },
-            description: Optional owner filter; omitted reads the whole inbox,
-          }
-        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
-        - { name: before, in: query, schema: { type: string, pattern: "^[0-9]{12}$" } }
-        - { name: headlines, in: query, schema: { type: boolean } }
-      responses:
-        "200": { description: Items, unread count, continuation and acknowledgment cursor }
-        "400": { description: Invalid cursor or limit }
-        "401": { description: Operator authentication required }
-        "404": { description: Unknown owner conversation }
-    post:
-      tags: [Operator]
-      operationId: acknowledgeLinearInbox
-      summary: Acknowledge only events already offered under the selected owner
-      security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [ackCursor]
-              properties:
-                ackCursor: { type: string, pattern: "^[0-9]{12}$" }
-                conversationId: { type: string }
-      responses:
-        "200": { description: Acknowledged cursor }
-        "400": { description: Invalid acknowledgment }
-        "401": { description: Operator authentication required }
-        "409": { description: Cursor was not offered for this owner }
-  /v1/linear/inbox/handoff:
-    post:
-      tags: [Operator]
-      operationId: handoffLinearActivity
-      summary: Hand one retained inbox event to its current issue owner
-      description: The service resolves the persisted issue owner from the retained event. The caller cannot choose a destination or change passive wake rules. An accepted or uncertain handoff is never dispatched again.
-      security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [cursor]
-              properties:
-                cursor: { type: string, pattern: "^[0-9]{12}$" }
-      responses:
-        "200": { description: Accepted cursor in handedOff }
-        "400": { description: Invalid retained event cursor }
-        "401": { description: Operator authentication required }
-        "409":
-          { description: Event or authorized current owner is unavailable, or handoff was already attempted }
-        "503": { description: Operator authentication unavailable }
+        "409": { description: Target is not an available ordinary global chat }
+        "503": { description: Settings or operator authentication unavailable }
   /v1/linear/wake:
     get:
       tags: [Operator]
       operationId: inspectLinearWakeRules
-      summary: Inspect actor and notification type wake rules
+      summary: Inspect actor and activity type wake rules
       security: [{ operatorBearer: [] }]
       responses:
         "200":
@@ -1074,7 +1004,7 @@ paths:
       tags: [Operator]
       operationId: setLinearWakeRules
       summary: Replace wake rules without restarting
-      description: Missing fields take defaults. Defaults select configured owner user IDs only and exclude issueSubscribed. Unknown or ambiguous authors never wake. Actor selectors are ORed; exclusions always win. Empty notificationTypes allows all types. Rules apply to new notification decisions and never replay collected history or change inbox collection. The follow switch still gates wakes.
+      description: Missing fields take defaults. Defaults select signed comments and mentions by the owner user email volpestyle@gmail.com and exclude issueSubscribed. Owner IDs may also be configured. Unknown or ambiguous authors and own writes never wake. Actor selectors are ORed; exclusions always win. Empty notificationTypes allows all types. Rules apply to new signed webhook activity without replaying history. The follow switch still gates wakes; passive activity remains visible in the selected ordinary chat.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -1099,7 +1029,7 @@ paths:
     get:
       tags: [Operator]
       operationId: inspectLinearFollowing
-      summary: Inspect notification following and required webhook readiness
+      summary: Inspect Linear activity following and required webhook readiness
       security: [{ operatorBearer: [] }]
       responses:
         "200":
@@ -1110,14 +1040,14 @@ paths:
             reason,
             missingWebhook,
             detail,
-            canonical inbox conversation; wakeRouting is work-owner and wakeConversationId is the inbox fallback,
+            configured ordinary chat in wakeConversationId,
           }
         "401": { description: Operator authentication required }
     put:
       tags: [Operator]
       operationId: setLinearFollowing
-      summary: Enable or disable rule-matched turns from the bot notification inbox
-      description: Enabling requires a stored webhook URL and signing secret. It resumes previously accepted pending wakes, never passive backlog. Disabling leaves inbox delivery enabled. Status distinguishes the requested following switch from active readiness, with linear_webhook_required and missingWebhook when setup is removed. There is no periodic poll.
+      summary: Enable or disable rule-matched turns from signed Linear webhooks
+      description: Enabling requires a stored webhook URL and signing secret. It never promotes passive backlog. Disabling suppresses new and queued wakes while leaving ordinary chat history delivery enabled. Status distinguishes the requested following switch from active readiness, with linear_webhook_required and missingWebhook when setup is removed. Bursts coalesce into one wake for the selected ordinary global chat. There is no notification poll.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -1138,7 +1068,7 @@ paths:
             reason,
             missingWebhook,
             detail,
-            canonical inbox conversation; wakeRouting is work-owner and wakeConversationId is the inbox fallback,
+            configured ordinary chat in wakeConversationId,
           }
         "400": { description: Invalid request }
         "401": { description: Operator authentication required }
@@ -1842,7 +1772,18 @@ paths:
       description: |
         One route, discriminated `op`: `list`, `roster`, `get`, `create`,
         `fork`, `close`, `send`, `cancel`, `replay`, `subagent_replay`, `tail`, `autonomy`,
-        `terminal_tail`. The TUI and relay both speak this. Seat scopes
+        `terminal_tail`, `readopt_seat`, `worker_reports`, and
+        `acknowledge_worker_reports`. Worker ownership/report operations require
+        current operator authority and an exact conversationId. Re-adoption
+        proves the original owner and same native thread. Worker reads return
+        complete bounded unread payloads and ackDeliveryIds without acknowledging;
+        only fully offered IDs may be marked read. Roster/fleet report summaries
+        survive disappeared panes, and delivery receipts never establish reading.
+        The TUI and relay both speak this.
+        The `autonomy` command `set_goal` activates an owner-authored goal;
+        `accept_goal` confirms an inactive model proposal. Service goals default
+        to a finite 1,000,000-token budget and refuse activation for native heads.
+        Seat scopes
         identify Herdr direct-send/projection threads. `cancel` interrupts one
         accepted run: the captain aborts the live model turn and the durable
         log settles that run as `cancelled`. `fork` clones the current Pi leaf
@@ -2324,8 +2265,8 @@ paths:
       summary: The memory card that lane's next run injects
       description: |
         Plain text, for a per-turn hook. Filtered by lane the same way the pi
-        session's own injection is: operator-private episodes reach only the
-        operator lane. Empty when the lane has recalled nothing yet. The lane
+        session's own injection is: operator-private notes reach only the
+        operator lane. An empty store still returns a labeled card. The lane
         must be the bearer's own.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       parameters:
@@ -2759,7 +2700,10 @@ paths:
     get:
       tags: [Memory, Operator]
       operationId: getOperatorMemoryCatalog
-      summary: Browse every captain episode and Discord person fact
+      summary: Browse every memory note and Discord person fact
+      description: >-
+        Notes persist until forgotten. Catalog retention fields remain legacy
+        compatibility metadata and no longer impose a count quota.
       security: [{ operatorBearer: [] }]
       responses:
         "200":
@@ -2885,12 +2829,12 @@ paths:
     get:
       tags: [Memory, Captain]
       operationId: getCaptainEpisodes
-      summary: Recall episodes for a lane
+      summary: Recall memory notes for a lane
       security: [{ captainBearer: [] }]
       description: >-
         Without `query`, the bounded recent card. With one, on-demand search over
-        everything retained, filtered by what that lane may see. Both branches
-        answer with a rendered card and never with episode records, so no caller
+        every persistent note, filtered by what that lane may see. Both branches
+        answer with a rendered card and never with note records, so no caller
         reads another memory's provenance ids.
       parameters:
         - in: query
@@ -2915,7 +2859,7 @@ paths:
     post:
       tags: [Memory, Captain]
       operationId: postCaptainEpisode
-      summary: Record a self-authored episode
+      summary: Record a self-authored memory note
       description: >-
         Recording only ever adds. An id the store already holds is a conflict, not
         an update; a byte-identical retry returns the original. Editing an existing
@@ -2924,6 +2868,8 @@ paths:
         The trusted authenticator must also supply an exact admitted episodeSource.
         A generic bearer alone is refused. The host stamps sourceConversationId
         and provenance; request-supplied source identifiers confer no authority.
+        Notes persist until forgotten. The optional retained field is legacy
+        compatibility metadata and does not control lifetime or a count quota.
       security: [{ captainBearer: [] }]
       requestBody:
         required: true
@@ -2936,7 +2882,6 @@ paths:
               targetId: self
               summary: Tried the HTTP API from Yaak.
               visibility: operator_private
-              retained: false
               provenance:
                 characterId: clankie
                 sessionId: captain
@@ -2950,14 +2895,17 @@ paths:
           description: Missing exact host source binding, or lane/target does not match that source
         "409":
           description: >-
-            Retained memory is full, or the episode id already exists. Nothing was
-            changed in either case.
+            The note id already exists with different content. Nothing was changed.
 
   /v1/memory/captain-episodes/{lane}/{episodeId}:
     patch:
       tags: [Memory, Operator]
       operationId: patchCaptainEpisode
-      summary: Edit one episode's note, visibility, or retention
+      summary: Edit one memory note or its visibility
+      description: >-
+        Explicit operator management can edit notes across source conversations.
+        The retained field remains accepted as legacy compatibility metadata;
+        every note persists until forgotten regardless of its value.
       security: [{ operatorBearer: [] }]
       parameters:
         - in: path
@@ -2977,18 +2925,17 @@ paths:
             example:
               summary: Corrected note about what happened.
               visibility: operator_private
-              retained: true
       responses:
         "200":
-          description: Updated episode
+          description: Updated note
         "404":
-          description: Episode not found
+          description: Note not found
         "409":
-          description: Retained memory is full; nothing was changed
+          description: Legacy capacity refusal; persistent notes no longer use retention quotas
     delete:
       tags: [Memory, Operator]
       operationId: deleteCaptainEpisode
-      summary: Forget one captain episode
+      summary: Forget one memory note
       security: [{ operatorBearer: [] }]
       parameters:
         - in: path
@@ -3828,13 +3775,19 @@ components:
           type: array
           maxItems: 100
           default: []
-          description: Explicit owner human IDs in Linear; never inferred from app credentials or display names
+          description: Explicit owner human IDs in Linear, alongside ownerUserEmails; never inferred from app credentials or display names
           items: { type: string, minLength: 1, maxLength: 256 }
+        ownerUserEmails:
+          type: array
+          maxItems: 100
+          default: [volpestyle@gmail.com]
+          description: Owner human emails matched only against verified signed user actors
+          items: { type: string, format: email, maxLength: 320 }
         actors:
           type: array
           maxItems: 4
           default: [owner]
-          description: owner is a configured human; human is any signed user except self or workers; self is the connected account and attributed workers; users selects userIds
+          description: owner is a configured human by signed ID or email; human is any signed user except self or workers; self selects the connected account and attributed workers; users selects userIds. Own-write suppression remains in force.
           items: { enum: [owner, human, self, users] }
         userIds:
           type: array
@@ -3844,7 +3797,18 @@ components:
         notificationTypes:
           type: array
           maxItems: 100
-          default: []
+          default:
+            [
+              issueNewComment,
+              issueCommentMention,
+              issueMention,
+              projectUpdateNewComment,
+              projectUpdateMention,
+              initiativeUpdateNewComment,
+              initiativeUpdateMention,
+              documentNewComment,
+              documentMention,
+            ]
           items: { type: string, minLength: 1, maxLength: 128 }
         excludedNotificationTypes:
           type: array

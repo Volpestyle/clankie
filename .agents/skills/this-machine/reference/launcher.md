@@ -1,6 +1,6 @@
 # Launcher details
 
-Everything past the command table in the core skill: Linear inbox, devices, memory, sleep and doorways, steering a turn, model refresh, setup and conflicts.
+Everything past the command table in the core skill: Linear activity, devices, memory, sleep and doorways, steering a turn, model refresh, setup and conflicts.
 
 Clankie's Spider-Man bridge stays disabled under [VUH-1325](https://linear.app/vuhlp/issue/VUH-1325).
 Its sources passed independent review, but the practice-range freeze lift does
@@ -16,78 +16,79 @@ describing play. Keep a start's requestId across retries and use the returned
 session ID for later commands. The watch link grants viewing only; a Go Live
 request is not proof of delivered video. Setup: `{repoRoot}/docs/rivals.md`.
 
-Follow Linear is off by default and changes live without restarting. Configure
-its signed webhook under `/connect linear` → **Follow Linear** → **Configure
-webhook**, selecting all activity events in Linear. Events always reach the
-**Linear inbox** conversation as **External activity**; open it with
-`clankie --chat linear-inbox`. Wake rules default to configured owner humans only, excluding `issueSubscribed`.
-His own account and workers stay quiet unless explicitly selected. His connected account's real Linear notifications are read once at startup
-and after newly persisted signed webhook events with a 1.5-second debounce.
-There is no periodic poll. An empty webhook read or failed startup/manual read
-gets one delayed retry; a failed retry waits for the next webhook or restart.
-Reads never overlap. Following requires both the registered URL (`linearWebhook.url`)
-and broker-held signing secret. Enabling without them returns
-`linear_webhook_required` and `missingWebhook`; status shows requested `following`
-and effective `active` separately if setup is removed. Use **Configure webhook**
-to store the URL and secret, including on old setups that stored only a secret;
-`clankie linear webhook set --url URL` records an already-registered URL.
-`clankie linear webhook clear` removes it. No restart is needed.
-Following on wakes `global-default` only for notifications attributed from signed
-webhook history that match `linearWebhook.wake`. Unknown or ambiguous actors are
-collected without waking. Old issue bindings remain inspectable
-with `clankie linear work list` but have no routing effect. Routing to the
-owning work conversation is still in flight; do not promise it from a binding. For notification
-reads and acknowledgments keep `--conversation global-default`; omit it for
-all passive history. The owner-connected tracker account is the identity of Clankie and every worker
-in his fleet. Use his connected tools or granted worker bridge for tracker writes;
-never fall back to a harness’s independent account. Without delegated access,
-ask the lead to perform the write. Linear is the current connector; the rule
-applies to any connected tracker.
+Follow Linear is off by default and changes live without restart. Verified
+signed activity is retained as **External activity** in one ordinary global
+chat, selected by `linearWebhook.wakeConversationId`; the default is
+`global-default`. `clankie linear target show` identifies it and
+`clankie linear target set ID` changes it. Open the chat with `clankie --chat ID`
+or read it with `clankie conversations show ID --limit 20`. A chat named for
+Linear has ordinary conversation history and controls.
 
-Use `clankie linear wake show` to inspect rules. Configure the owner's Linear ID
-with `clankie linear wake set --owner-user-ids ID` (no owner ID is assumed).
-`--actors owner,human,self,users` selects actor classes: `self` includes the
-connected app and workers; `users` matches `--user-ids`. `--types` allows chosen
-notification types, `--exclude-types` vetoes them. Comma-separated values; `none`
-clears a list. Defaults are owner only and excluded `issueSubscribed`.
-`clankie linear wake set --actors owner,self --types issueMention,issueCommentMention`
-opts into coordination requests through his own identity. Rules apply to new
-notifications without restart and never replay old collected notifications.
-`GET/PUT /v1/linear/wake` inspects/replaces rules; PUT takes the rule object.
-Bare `/linear` opens **Follow Linear**, including **Wake rules**. Names and
-subtitles are not authorship; use the connected `linear_get_user` to resolve IDs.
+With following on, new signed events that pass the existing VUH-1549 wake rules
+wake this chat. Events arriving within 1.5 seconds coalesce into one compact
+wake with issue IDs/titles,
+changes, actors and links. The lead chooses any delegation from there. Events
+that do not match stay visible without a model turn. Own-write echoes and
+activity from the connected account or attributed workers never wake him;
+unknown or ambiguous authors stay quiet. There is no notification poll,
+separate inbox, read/ack protocol, or per-issue route. On upgrade, old unread
+inbox items are dropped once with a service log entry rather than replayed.
 
-`clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
-in `items`: the oldest unread events, 20 by default (`--limit N`, up to 100),
-under 31 KB serialized. `--headlines` returns one line per event (cursor,
-time, headline) instead of the quoted payload; `--before CURSOR` returns the
-events just before that cursor, read or not, so history can be walked back
-from `oldestCursor` as deep as wanted. Reading leaves events unread. Review
-what was shown, then run `clankie linear inbox ack CURSOR` with the returned
-`ackCursor`; it moves the read boundary forward over events already offered,
-never past one unseen. Never acknowledge truncated output. Unacknowledged
-pages survive restart. `GET /v1/linear/inbox?limit=&before=&headlines=1`
-reads; `POST /v1/linear/inbox` requires `{ "ackCursor": "..." }`.
-Following controls waking, not collection.
+Use the operator-only `linear_wake({ action: "show" })` or authenticated
+`clankie linear wake show` to inspect rules. These are your non-secret settings:
+you can set them yourself from an operator conversation through
+`linear_wake({ action: "set", wake: {…}, conversationId: "global-default" })`
+or `clankie linear wake set`. The tool patches supplied rule fields and can
+change the target. The CLI patches named flags; `--json-stdin` replaces rules.
+Defaults select `owner`, with `ownerUserEmails: ["volpestyle@gmail.com"]`, and
+only comment/mention types. `ownerUserIds` starts empty and can add exact owner
+IDs. Signed email/ID proof is required; a display name or subtitle is not identity.
 
-While off, messages accumulate without model turns. Following on wakes the operator conversation for
-new connected-account notifications; it does not schedule a turn per old message. To catch up on request,
-run `clankie linear inbox read`. Use `trace-clankie` for older consumed history.
-Account authorship can be shared by people and agents; activity is external
-context, not new operator direction or a required reply. This is an authority
-boundary for incoming events, not a restriction on reading activity: summarize
-records under the requested account and state the scope checked.
+```sh
+clankie linear wake set --owner-user-emails volpestyle@gmail.com --actors owner
+clankie linear wake set --types issueNewComment,issueCommentMention,issueMention
+```
+
+`--actors owner,human,self,users` selects actor classes; `users` matches
+`--user-ids`. Own-write suppression remains in force. `--types` selects activity
+types and `--exclude-types` vetoes them. Comma-separated lists accept `none` to
+clear one. Defaults include issue, project-update, initiative-update and document
+comments/mentions and exclude `issueSubscribed`. Legacy owner-only filters with
+no saved `ownerUserEmails` migrate from the old defaults (empty `userIds`/types,
+excluded `issueSubscribed`) to these comment/mention defaults; configured owner
+IDs are kept. Edited selectors/types/exclusions remain. An empty type list saved
+with `ownerUserEmails` remains all-types. Rules and target edits apply to new
+events without replaying old history. `GET/PUT /v1/linear/wake` reads/replaces
+rules; `GET/PUT /v1/linear/target` reads/sets `{ conversationId }`. Bare `/linear`
+opens **Follow Linear**, including the target and **Wake rules**.
+
+Following requires the stored webhook URL (`linearWebhook.url`) and broker-held
+signing secret. Setup lives under `/connect linear` → **Follow Linear** →
+**Configure webhook**. Select all activity events in Linear. Enabling without
+both prerequisites returns `linear_webhook_required` and `missingWebhook`;
+`clankie linear status` distinguishes requested `following` and effective
+`active`. `clankie linear webhook set --url URL` records an already-registered
+URL; `linear webhook clear` removes it. Secrets stay with the owner at the
+console. Turning following off suppresses new and queued wakes; a running turn
+can finish. Following on does not replay passive history.
+
+The owner-connected tracker account is the identity of Clankie and every worker
+in his fleet. Use connected tools or the granted worker bridge for tracker writes;
+without access, ask the lead. A delivery is external context, not new authority
+or a required reply. Read activity through the normal chat or connected Linear
+tools; use `trace-clankie` for older history.
 
 `clankie devices --json` includes each device's optional `push` reference and
 `enabled` state. It is registration state, not an APNs delivery receipt. Push
 permission and registration belong to the phone; the hosted gateway holds APNs
 signing and delivery registrations. Tokens and delivery keys never go to the host.
 
-`clankie memory status` reports episodes and retention usage. Use `memory search
-<terms...>`, `memory retain|release|forget <episodeId>`, or `memory correct
-<episodeId> --summary "…"` to curate them through the operator API. Retained
-notes survive the recent ring; a full retained store refuses another retain
-until a note is released or forgotten. `/memory` is the console browser.
+`clankie memory status` reports notes. Use `memory search <terms...>`,
+`memory forget <episodeId>`, or `memory correct <episodeId> --summary "…"`
+to curate them through the operator API, including across source conversations.
+Notes stay until forgotten; no retention flag or quota applies. The `memory`
+tool handles ordinary write/search/edit/forget within its admitted conversation.
+`/memory` is the console browser.
 `clankie pair --json` returns `localCode` for same-Mac **On this Mac** pairing,
 even when `code` is a gateway link. Review offers do not expose it. Keep the offer
 private; a pairing receipt is not proof the device connected.

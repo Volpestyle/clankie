@@ -75,3 +75,8 @@ remains a separate reviewed effort.
 - [0225 — Minecraft keeps playing with one driver](0225-minecraft-keeps-playing-with-one-driver.md)
 
 - [0226 — Quick actions are skills, and tidy keeps results](0226-quick-actions-are-skills-and-tidy-keeps-results.md)
+
+[ADR 0214's VUH-1678 amendment](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04)
+supersedes ADR 0218's Linear routing extension: verified rule-passing webhooks
+wake one ordinary configured chat, `global-default` by default, and retire the
+separate Linear inbox protocol. Clankie can set the non-secret target and rules.

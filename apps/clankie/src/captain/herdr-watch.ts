@@ -71,7 +71,12 @@ import {
 } from "@clankie/protocol";
 import { z } from "zod";
 import { parseHerdrForegroundProcesses, type HerdrForegroundProcess } from "./codex-seat.ts";
-import { occupantIdForHerdrSession, type ObservedFleetSeat } from "./herdr-census.ts";
+import {
+  occupantIdForHerdrSession,
+  recoverLocalCodexSession,
+  type HerdrCensusRunner,
+  type ObservedFleetSeat,
+} from "./herdr-census.ts";
 import {
   fleetSeatBriefStartsSession,
   fleetSeatCodexStartArgs,
@@ -222,6 +227,7 @@ export type HerdrWatchArmResult =
 
 export interface HerdrWatchPort {
   tidy?: import("./pane-tidy.ts").PaneTidy;
+  readoptSeat?(seatId: string, authority: ConversationAuthority): Promise<void>;
   watch(
     conversationId: string,
     target: string,
@@ -231,7 +237,11 @@ export interface HerdrWatchPort {
   ): Promise<HerdrWatchArmResult>;
 }
 
-type HireAuthority = ConversationAuthority & { readonly intentId?: string };
+type HireAuthority = ConversationAuthority & {
+  readonly intentId?: string;
+  /** Host-resolved saved thread, admitted against its existing persisted owner. */
+  readonly resumedSessionKey?: string;
+};
 type AdoptHire = (result: Extract<HerdrSeatSpawnResult, { outcome: "spawned" }>, projectId?: string) => void;
 
 type InternalWake = (
@@ -427,50 +437,87 @@ export function createHerdrWatchRunner(
   /** Where each Herdr call runs; a remote fleet passes its ssh transport (ADR 0184). */
   exec: (args: readonly string[], signal?: AbortSignal, timeoutMs?: number) => Promise<string> = execHerdr,
   createCommandTab?: (input: OpenCodeCommandTab) => Promise<string>,
+  observation: {
+    readonly localCodexRecovery?: false;
+    readonly localCodexRecordsPath?: string;
+    readonly localCodexBinding?: () => Promise<{ socketPath: string; session: string } | undefined>;
+    readonly runLocalCommand?: HerdrCensusRunner;
+  } = {},
 ): HerdrWatchRunner {
   const runHerdr = (args: readonly string[], signal?: AbortSignal, timeoutMs?: number): Promise<string> =>
     available?.() === false
       ? Promise.reject(new Error("Herdr execution is unavailable"))
       : exec(args, signal, timeoutMs);
   const createTab = createHireLayout(runHerdr, createCommandTab);
+  const recover = async (agent: HerdrAgentSnapshot): Promise<HerdrAgentSnapshot> => {
+    if (observation.localCodexRecovery === false || agent.agent !== "codex" || agent.session !== undefined)
+      return agent;
+    const binding = await observation.localCodexBinding?.();
+    if (observation.localCodexBinding && binding === undefined) return agent;
+    const session = await recoverLocalCodexSession(agent, {
+      ...(binding === undefined ? {} : { bridgeSocket: binding.socketPath, herdrSession: binding.session }),
+      ...(observation.localCodexRecordsPath === undefined
+        ? {}
+        : { localCodexRecordsPath: observation.localCodexRecordsPath }),
+      runCommand: async (command, args) =>
+        command === "herdr"
+          ? { stdout: await runHerdr(args), stderr: "" }
+          : observation.runLocalCommand
+            ? observation.runLocalCommand(command, args)
+            : runExecFile(command, args).then(({ stdout, stderr, status }) => {
+                if (status !== 0) throw new Error("Local native observation unavailable");
+                return { stdout, stderr };
+              }),
+    });
+    return session === undefined ? agent : { ...agent, session };
+  };
   return {
-    list: async () => parseHerdrPaneList(await runHerdr(["pane", "list"]), true),
-    get: async (target) => parseHerdrAgentResult(await runHerdr(["agent", "get", target])),
-    resolveTerminal: async (terminalId) =>
-      parseHerdrPaneList(await runHerdr(["pane", "list"])).find((pane) => pane.terminalId === terminalId),
-    wait: async (target, signal) => parseHerdrAgentResult(await runHerdr(["agent", "wait", target], signal)),
+    list: async () => Promise.all(parseHerdrPaneList(await runHerdr(["pane", "list"]), true).map(recover)),
+    get: async (target) => recover(parseHerdrAgentResult(await runHerdr(["agent", "get", target]))),
+    resolveTerminal: async (terminalId) => {
+      const agent = parseHerdrPaneList(await runHerdr(["pane", "list"])).find(
+        (pane) => pane.terminalId === terminalId,
+      );
+      return agent === undefined ? undefined : recover(agent);
+    },
+    wait: async (target, signal) =>
+      recover(parseHerdrAgentResult(await runHerdr(["agent", "wait", target], signal))),
     waitUntilIdle: async (target, signal) =>
-      parseHerdrAgentResult(
-        await runHerdr(
-          [
-            "agent",
-            "wait",
-            target,
-            "--until",
-            "idle",
-            "--until",
-            "working",
-            "--until",
-            "done",
-            "--timeout",
-            String(SPAWN_CHANNEL_DIALOG_WAIT_MS),
-          ],
-          signal,
+      recover(
+        parseHerdrAgentResult(
+          await runHerdr(
+            [
+              "agent",
+              "wait",
+              target,
+              "--until",
+              "idle",
+              "--until",
+              "working",
+              "--until",
+              "done",
+              "--timeout",
+              String(SPAWN_CHANNEL_DIALOG_WAIT_MS),
+            ],
+            signal,
+          ),
         ),
       ),
     waitForChange: async (target, currentStatus, signal) =>
-      parseHerdrAgentResult(
-        await runHerdr(
-          [
-            "agent",
-            "wait",
-            target,
-            ...AGENT_STATUSES.filter((status) => status !== currentStatus).flatMap((status) => [
-              "--until",
-              status,
-            ]),
-          ],
-          signal,
+      recover(
+        parseHerdrAgentResult(
+          await runHerdr(
+            [
+              "agent",
+              "wait",
+              target,
+              ...AGENT_STATUSES.filter((status) => status !== currentStatus).flatMap((status) => [
+                "--until",
+                status,
+              ]),
+            ],
+            signal,
+          ),
         ),
       ),
     transcript: async (agent) => {
@@ -1092,6 +1139,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return owner;
   }
 
+  /** Read-only provenance for holding a verified worker report while re-adoption is required. */
+  public retainedReportOwner(agent: HerdrAgentSnapshot): ConversationOwner | undefined {
+    const sessionKey = this.nativeSessionKey(agent);
+    return sessionKey === undefined
+      ? undefined
+      : this.hireOwners.retainedReportOwner(agent.paneId, agent.terminalId, sessionKey);
+  }
+
   /** Persist adoption before native delivery so an immediate report sees its new lead. */
   public async adoptSeat(seatId: string, source: ConversationAuthority): Promise<void> {
     const authority = captureConversationAuthority(source);
@@ -1122,6 +1177,125 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ? undefined
         : JSON.stringify([splitFleetQualified(latest.paneId)?.fleet ?? "local", latest.agent, sessionId]),
     );
+  }
+
+  /** Repair a legitimate reattachment only under the thread's existing owning conversation. */
+  public async readoptSeat(seatId: string, source: ConversationAuthority): Promise<void> {
+    const authority = captureConversationAuthority(source);
+    if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
+    await assertConversationAuthority(authority);
+    const agent = await this.runner.resolveTerminal(seatId);
+    if (
+      !isMessageableSeat(agent) ||
+      agent.session === undefined ||
+      agent.terminalId !== seatId ||
+      agent.status === "offline" ||
+      agent.status === "unknown"
+    )
+      throw new Error("Exact native session attribution is unavailable");
+    const sessionKey = this.nativeSessionKey(agent);
+    if (sessionKey === undefined) throw new Error("Exact native thread identity is unavailable");
+    const held = this.hireOwners.sessionOwner(sessionKey);
+    if (held === undefined || held.conversationId !== authority.owner.conversationId)
+      throw new Error("Saved session has no matching persisted hiring conversation");
+    if (this.validateOwner !== undefined && !(await this.validateOwner(held)))
+      throw new Error("Persisted hiring conversation authority is unavailable");
+    await assertConversationAuthority(authority);
+    const latest = await this.runner.resolveTerminal(seatId);
+    if (
+      latest?.session === undefined ||
+      latest.paneId !== agent.paneId ||
+      latest.terminalId !== seatId ||
+      latest.agent !== agent.agent ||
+      latest.status === "offline" ||
+      latest.status === "unknown" ||
+      this.nativeSessionKey(latest) !== sessionKey ||
+      occupantIdForHerdrSession(latest.session) !== occupantIdForHerdrSession(agent.session)
+    )
+      throw new Error("The reattached native occupant changed during admission");
+    await assertConversationAuthority(authority);
+    const rebound = this.hireOwners.readopt(
+      latest.paneId,
+      latest.terminalId,
+      occupantIdForHerdrSession(latest.session),
+      authority.owner,
+      sessionKey,
+    );
+    this.retireReboundWatches(rebound.replaced, latest);
+    this.watchHiredSeat(latest.terminalId, occupantIdForHerdrSession(latest.session), rebound.owner);
+  }
+
+  private nativeSessionKey(agent: HerdrAgentSnapshot): string | undefined {
+    const sessionId = nativeSessionId(agent);
+    return sessionId === undefined
+      ? undefined
+      : JSON.stringify([splitFleetQualified(agent.paneId)?.fleet ?? "local", agent.agent, sessionId]);
+  }
+
+  private retireReboundWatches(
+    replaced: readonly { seatId?: string | undefined; occupantId?: string | undefined }[],
+    current: HerdrAgentSnapshot,
+  ): void {
+    const occupantId = occupantIdForHerdrSession(current.session!);
+    const retired = this.state.watches.filter(
+      (watch) =>
+        watch.hired === true &&
+        (watch.terminalId !== current.terminalId || watch.occupantId !== occupantId) &&
+        replaced.some((entry) => entry.seatId === watch.terminalId && entry.occupantId === watch.occupantId),
+    );
+    if (retired.length === 0) return;
+    const retiredIds = new Set(retired.map((watch) => watch.id));
+    this.state.watches = this.state.watches.filter((watch) => !retiredIds.has(watch.id));
+    for (const watch of retired) this.controllers.get(watch.id)?.abort();
+    this.save();
+  }
+
+  private async bindHireOwner(
+    agent: HerdrAgentSnapshot,
+    input: SpawnOperatorSeat,
+    authority: HireAuthority,
+  ): Promise<void> {
+    const occupantId = occupantIdForHerdrSession(agent.session!);
+    const sessionId = nativeSessionId(agent);
+    const sessionKey =
+      sessionId === undefined
+        ? undefined
+        : JSON.stringify([input.fleet ?? "local", input.harness, sessionId]);
+    if (authority.resumedSessionKey !== undefined) {
+      if (sessionKey !== authority.resumedSessionKey)
+        throw new Error("The resumed worker reported a different native thread; ownership was not rebound");
+      await assertConversationAuthority(authority);
+      const latest = await this.runner.resolveTerminal(agent.terminalId);
+      if (
+        latest?.session === undefined ||
+        latest.paneId !== agent.paneId ||
+        latest.terminalId !== agent.terminalId ||
+        latest.agent !== input.harness ||
+        latest.status === "offline" ||
+        latest.status === "unknown" ||
+        this.nativeSessionKey(latest) !== authority.resumedSessionKey ||
+        occupantIdForHerdrSession(latest.session) !== occupantId
+      )
+        throw new Error("The resumed native occupant changed before ownership was rebound");
+      await assertConversationAuthority(authority);
+      const rebound = this.hireOwners.readopt(
+        agent.paneId,
+        agent.terminalId,
+        occupantId,
+        authority.owner,
+        authority.resumedSessionKey,
+        authority.intentId,
+      );
+      this.retireReboundWatches(rebound.replaced, agent);
+    } else
+      this.hireOwners.bind(
+        agent.paneId,
+        authority.owner,
+        agent.terminalId,
+        authority.intentId,
+        occupantId,
+        sessionKey,
+      );
   }
 
   /** The herdr status an adapter-held seat's own status reads as; undefined when no adapter holds it. */
@@ -1356,9 +1530,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (authority !== undefined) {
       const admitted = captureConversationAuthority(authority);
       if (resume !== undefined) {
-        const held = this.hireOwners.sessionOwner(
-          JSON.stringify([input.fleet ?? "local", input.harness, resume.sessionId]),
-        );
+        const resumedSessionKey = JSON.stringify([input.fleet ?? "local", input.harness, resume.sessionId]);
+        const held = this.hireOwners.sessionOwner(resumedSessionKey);
         if (held === undefined || held.conversationId !== admitted.owner.conversationId)
           return {
             outcome: "failed",
@@ -1368,6 +1541,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         authority = {
           ...admitted,
           owner: held,
+          resumedSessionKey,
           authorize: async () => (await admitted.authorize()) && (await this.validateOwner?.(held)) === true,
         };
       } else authority = admitted;
@@ -1486,16 +1660,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       ) {
         if (authority !== undefined) {
           await assertConversationAuthority(authority);
-          this.hireOwners.bind(
-            agent.paneId,
-            authority.owner,
-            agent.terminalId,
-            authority.intentId,
-            occupantIdForHerdrSession(agent.session!),
-            nativeSessionId(agent) === undefined
-              ? undefined
-              : JSON.stringify([input.fleet ?? "local", input.harness, nativeSessionId(agent)]),
-          );
+          await this.bindHireOwner(agent, input, authority);
           this.watchHiredSeat(
             agent.terminalId,
             occupantIdForHerdrSession(agent.session!),
@@ -1543,16 +1708,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         )
           throw new Error("Hired seat ownership could not be bound to its exact native session");
         await assertConversationAuthority(authority);
-        this.hireOwners.bind(
-          result.seat.paneId,
-          authority.owner,
-          result.seat.seatId,
-          authority.intentId,
-          result.seat.occupantId,
-          nativeSessionId(proof) === undefined
-            ? undefined
-            : JSON.stringify([input.fleet ?? "local", input.harness, nativeSessionId(proof)]),
-        );
+        await this.bindHireOwner(proof, input, authority);
         this.watchHiredSeat(
           result.seat.seatId,
           result.seat.occupantId,
@@ -1638,10 +1794,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const live = existingNativeSession(await inventory(input.fleet), session);
       if (live !== undefined) {
         if (authority !== undefined) {
-          const held =
-            live.session === undefined
-              ? undefined
-              : this.hireOwners.owner(live.paneId, live.terminalId, occupantIdForHerdrSession(live.session));
+          const held = this.hireOwners.sessionOwner(this.nativeSessionKey(live) ?? "");
           if (held === undefined || held.conversationId !== authority.owner.conversationId)
             throw new Error("Saved live worker has no matching persisted conversation owner");
         }
@@ -1818,17 +1971,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     // Recording the exact result is historical proof, not a new effect. Preserve
     // it even when the originating turn lost authority during native startup.
-    if (authority !== undefined)
-      this.hireOwners.bind(
-        agent.paneId,
-        authority.owner,
-        agent.terminalId,
-        authority.intentId,
-        occupantId,
-        sessionId === undefined
-          ? undefined
-          : JSON.stringify([input.fleet ?? "local", input.harness, sessionId]),
-      );
+    if (authority !== undefined) await this.bindHireOwner(agent, input, authority);
     if (receiptKey !== undefined) {
       const original = this.hireReceipts.pending(receiptKey)!;
       this.hireReceipts.update(receiptKey, original.messageId, {
@@ -3019,7 +3162,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return;
       }
       const guard = async () => {
-        if (!isDeepStrictEqual(this.watchOwner(record), owner))
+        if (
+          signal.aborted ||
+          this.closed ||
+          !this.state.watches.some((watch) => watch.id === record.id) ||
+          !isDeepStrictEqual(this.watchOwner(record), owner)
+        )
           throw new Error("The watched worker changed its leading conversation before acceptance");
       };
       // Explicit watches retain their existing wake shape. Automatic harvests refresh

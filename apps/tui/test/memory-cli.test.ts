@@ -64,7 +64,7 @@ describe("clankie memory arguments", () => {
   it("accepts the verbs it documents and refuses the rest", () => {
     expect(parseMemoryArgs([])).toEqual({ verb: "status" });
     expect(parseMemoryArgs(["search", "relay", "port"])).toEqual({ verb: "search", query: "relay port" });
-    expect(parseMemoryArgs(["retain", "kept-1"])).toEqual({ verb: "retain", episodeId: "kept-1" });
+    expect(() => parseMemoryArgs(["retain", "kept-1"])).toThrow("Usage:");
     expect(parseMemoryArgs(["correct", "kept-1", "--summary", "Actually 4321."])).toEqual({
       verb: "correct",
       episodeId: "kept-1",
@@ -89,12 +89,11 @@ describe("clankie memory arguments", () => {
 });
 
 describe("clankie memory", () => {
-  it("reports what is kept and how much room is left", async () => {
+  it("reports notes and people", async () => {
     const { calls, fetchImpl } = service();
     const result = await runMemoryCommand([], { env, fetchImpl, host: "http://127.0.0.1:4319" });
     expect(result).toMatchObject({
       ok: true,
-      retention: { retained: 1, capacity: 1_024, recentCapacity: 128 },
       people: 0,
     });
     expect(calls).toEqual(["GET /v1/memory"]);
@@ -107,13 +106,7 @@ describe("clankie memory", () => {
     expect("episodes" in result && result.episodes[0]?.episodeId).toBe("kept-1");
   });
 
-  it("retains, corrects, and forgets by id, resolving the lane from the catalog", async () => {
-    const retain = service();
-    await expect(
-      runMemoryCommand(["retain", "kept-1"], { env, fetchImpl: retain.fetchImpl }),
-    ).resolves.toMatchObject({ ok: true, episode: { retained: true } });
-    expect(retain.calls).toEqual(["GET /v1/memory", "PATCH /v1/memory/captain-episodes/operator/kept-1"]);
-
+  it("corrects and forgets by id, resolving the lane from the catalog", async () => {
     const correct = service();
     await expect(
       runMemoryCommand(["correct", "kept-1", "--summary", "Files, not a database."], {
@@ -133,7 +126,7 @@ describe("clankie memory", () => {
     const { fetchImpl } = service();
     await expect(runMemoryCommand(["forget", "nope"], { env, fetchImpl })).resolves.toEqual({
       ok: false,
-      error: "No episode with id nope.",
+      error: "No memory with id nope.",
     });
     // An empty store and no environment override: the real machine credential
     // must not leak into the assertion.

@@ -13,6 +13,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import { describe, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
+import { createCaptainMemory } from "../src/captain-memory.ts";
 import { createFileMemory } from "../src/memory.ts";
 import { VOICE_SELF_TOOL_MAX_CHARACTERS } from "../src/voice-self-tools.ts";
 import { buildLaneToolBank } from "../src/captain/lane-tools.ts";
@@ -275,9 +276,11 @@ function bankDeps(): CaptainDeps {
       getLiveSession: () => Promise.reject(new Error("unused")),
     },
     memory: {
-      appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
-      recallEpisodeCard: () => Promise.resolve(""),
-      searchEpisodeCard: () => Promise.resolve(""),
+      writeMemory: () => Promise.resolve({ id: "fixture", text: "fixture" }),
+      editMemory: () => Promise.resolve(undefined),
+      forgetMemory: () => Promise.resolve(false),
+      recallMemoryCard: () => Promise.resolve(""),
+      searchMemory: () => Promise.resolve(""),
     },
   } as unknown as CaptainDeps;
 }
@@ -304,7 +307,7 @@ describe("a lane's tool bank", () => {
       expect(social.has(name), `a social lane should not hold ${name}`).toBe(false);
     }
     // The rest of the bank is the same bank in both lanes.
-    expect(social.has("remember_episode")).toBe(true);
+    expect(social.has("memory")).toBe(true);
   });
 
   it("says what a call attached, and refuses arguments the schema rejects", async () => {
@@ -331,7 +334,6 @@ describe("a lane's tool bank", () => {
 
 it("binds native tools, project doctrine and channel delivery to selected service conversations", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-seat-context-"));
-  let webhookReady = true;
   const ownerSettings = new SettingsStore(join(root, "settings.json"));
   await ownerSettings.update((settings) => ({
     ...settings,
@@ -345,7 +347,6 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       stateDir: root,
       workingDirectory: root,
       settings: ownerSettings,
-      linearFollowing: async () => webhookReady,
     },
   );
   try {
@@ -377,44 +378,12 @@ it("binds native tools, project doctrine and channel delivery to selected servic
     }
     const a = projects[0]!.conversationId,
       b = projects[1]!.conversationId;
-    await ownerSettings.update((settings) => ({
-      ...settings,
-      linearWebhook: { ...settings.linearWebhook, following: true },
-    }));
-    const owner = {
-      organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",
-      issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
-      conversationId: a,
-    };
-    expect(captain.recordLinearWorkOwner(owner, { conversationId: a })).toBe(true);
-    const activity = {
-      eventId: "a".repeat(64),
-      notification: true,
-      deliveryId: "linear-operator-notification",
-      type: "Notification" as const,
-      action: "issueNewComment" as const,
-      actorName: "Human",
-      actorEmail: undefined,
-      actorId: "human",
-      organizationId: owner.organizationId,
-      issueId: owner.issueId,
-      createdAt: new Date().toISOString(),
-      url: undefined,
-      updatedFrom: undefined,
-      data: { id: "comment", issueId: owner.issueId, body: "Check the existing work" },
-    };
-    const linearWake = captain.pollSeatEvents(1000, undefined, a);
-    expect(captain.receiveLinearActivity(activity, true)).toBe(true);
-    expect(await linearWake).toMatchObject([
-      { conversationId: a, kind: "wake", content: expect.stringContaining(`--conversation ${a}`) },
-    ]);
-    await captain.pollSeatEvents(0, undefined, a);
+    const wake = captain.pollSeatEvents(1000, undefined, a);
+    expect(await captain.wakeConversation({ conversationId: a }, "Check the existing work")).toBe(true);
+    const [event] = await wake;
+    expect(event).toMatchObject({ conversationId: a, kind: "watch", content: "Check the existing work" });
+    await captain.acknowledgeSeatEvent(event!.id, a);
     expect(await captain.pollSeatEvents(0, undefined, a)).toEqual([]);
-    expect(captain.receiveLinearActivity(activity, true)).toBe(false);
-    webhookReady = false;
-    const blockedWake = captain.pollSeatEvents(100, undefined, a);
-    expect(captain.receiveLinearActivity({ ...activity, eventId: "b".repeat(64) }, true)).toBe(true);
-    expect(await blockedWake).toEqual([]);
     expect(await captain.pollSeatEvents(0, undefined, b)).toEqual([]);
     expect(await captain.pollSeatEvents(0)).toEqual([]);
     expect(captain.seatContext("missing-project")).toBeUndefined();
@@ -537,11 +506,18 @@ it("serves every real Captain schema with MCP's object root without losing union
     expect(union).toBeDefined();
     expect(union.inputSchema.anyOf).toEqual(originals.get(union.name)!.anyOf);
     expect((union.inputSchema.anyOf as unknown[]).length).toBeGreaterThan(1);
-    const valid = await client.callTool({ name: "recall_episodes", arguments: { query: "fixture" } });
+    const valid = await client.callTool({
+      name: "memory",
+      arguments: { action: "search", query: "fixture" },
+    });
     expect(valid.isError).not.toBe(true);
     expect(valid.content).toMatchObject([{ type: "text" }]);
-    expect(JSON.parse((valid.content as Array<{ text: string }>)[0]!.text)).toEqual({ found: 0, card: "" });
-    const invalid = await client.callTool({ name: "recall_episodes", arguments: { query: 42 } });
+    expect(JSON.parse((valid.content as Array<{ text: string }>)[0]!.text)).toEqual({
+      action: "search",
+      found: 0,
+      card: "",
+    });
+    const invalid = await client.callTool({ name: "memory", arguments: { action: "search", query: 42 } });
     expect(invalid.isError).toBe(true);
     expect(JSON.stringify(invalid.content)).toContain("Invalid arguments");
     const invalidUnion = await client.callTool({ name: union.name, arguments: {} });
@@ -794,7 +770,6 @@ it("serves realtime voice its own recall_episodes, get_self_state and remember_e
   for (const index of [2, 3, 4, 5, 6, 7]) {
     episode(index, "discord_presence", "shareable", `minecraft night ${String(index)}`);
   }
-  const appended: Record<string, unknown>[] = [];
   const captain = createCaptain(
     {
       ...bankDeps(),
@@ -806,18 +781,7 @@ it("serves realtime voice its own recall_episodes, get_self_state and remember_e
         listRecentVoiceSpeech: () => Promise.resolve({ currentStay: null, recent: [] }),
       },
       media: { finishedRenders: () => Promise.resolve([]) },
-      memory: {
-        // The production adapter (index.ts) applies the lane default when no
-        // visibility is passed; this records what the voice path hands it.
-        appendEpisode: (input: Record<string, unknown>) => {
-          appended.push(input);
-          return Promise.resolve({ corrected: false, retained: false });
-        },
-        recallEpisodeCard: (lane: CaptainSessionLaneV2) =>
-          Promise.resolve(memory.episodeRecallCard({ lane })),
-        searchEpisodeCard: (lane: CaptainSessionLaneV2, query: string) =>
-          Promise.resolve(memory.searchEpisodeCard({ lane, query })),
-      },
+      memory: createCaptainMemory(memory),
     } as unknown as CaptainDeps,
     {
       repoRoot: root,
@@ -872,18 +836,40 @@ it("serves realtime voice its own recall_episodes, get_self_state and remember_e
       await call("remember_episode", {
         summary: "Got the server back up with James.",
         visibility: "operator_private",
+        retain: true,
+        action: "edit",
+        id: "ep-00000000-0000-4000-8000-000000000001",
+        lane: "operator",
+        sourceConversationId: "global-default",
+        targetId: "global-default",
       })
     ).json()) as { text: string; isError: boolean };
     expect(kept.isError).toBe(false);
     expect(kept.text).toContain('"remembered": true');
-    expect(appended).toHaveLength(1);
-    expect(appended[0]).toMatchObject({
+    const rooms = await captain.serveOperatorConversation({
+      op: "list",
+      schemaVersion: 1,
+      scope: { kind: "room", lane: "discord_voice", targetId: "866430493889134672:866430493889134676" },
+    });
+    expect(rooms.op).toBe("list");
+    if (rooms.op !== "list") throw new Error("Expected room conversations");
+    expect(rooms.conversations).toHaveLength(1);
+    const written = memory.catalog().captainEpisodes.filter((note) => note.lane === "discord_voice");
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({
       lane: "discord_voice",
       targetId: "866430493889134672:866430493889134676",
+      sourceConversationId: rooms.conversations[0]!.conversationId,
       summary: "Got the server back up with James.",
+      visibility: "shareable",
     });
-    // The voice never picks visibility; the lane default (shareable) applies.
-    expect(appended[0]).not.toHaveProperty("visibility");
+    expect(kept.text).not.toMatch(/memory-|866430493889134672|room-discord_voice/u);
+    expect(memory.catalog().captainEpisodes.find((note) => note.episodeId.endsWith("1"))?.summary).toBe(
+      "minecraft CONSOLE_PRIVATE plan",
+    );
+    expect((await (await call("recall_episodes", { query: "" })).json()).isError).toBe(true);
+    const invalid = await (await call("remember_episode", { summary: 123 })).json();
+    expect(invalid.isError).toBe(true);
   } finally {
     app.close();
     await captain.close();

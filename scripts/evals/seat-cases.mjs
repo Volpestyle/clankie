@@ -180,9 +180,11 @@ export const seatCases = [
   {
     id: "seat-where-things-live",
     prompt: `Where do durable facts about people come from for you, and what do you use to search memories older than what you currently see? ${ANSWER}`,
-    rubric: ["Names the person-memory command", "Names recall_episodes"],
+    rubric: ["Names the person-memory command", "Names memory search"],
     grade: (obs) =>
-      /person-memory/.test(text(obs.answer?.answer)) && /recall_episodes/.test(text(obs.answer?.answer)),
+      /person-memory/.test(text(obs.answer?.answer)) &&
+      /\bmemory\b/i.test(text(obs.answer?.answer)) &&
+      /\bsearch\b/i.test(text(obs.answer?.answer)),
   },
   {
     id: "seat-baseline",

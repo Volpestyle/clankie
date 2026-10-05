@@ -1,8 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AutonomyStore } from "../src/captain/autonomy.ts";
+import { AutonomyStore, DEFAULT_GOAL_TOKEN_BUDGET } from "../src/captain/autonomy.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
 import { captainTools } from "../src/captain/tools.ts";
@@ -92,7 +92,7 @@ describe("captain autonomy", () => {
     expect(autonomy.getGoal("global-default")).toMatchObject({
       objective: "Verify the release",
       tokenBudget: 200,
-      status: "active",
+      status: "proposed",
     });
     const autonomousCreate = captainTools(
       deps,
@@ -103,9 +103,18 @@ describe("captain autonomy", () => {
       autonomy,
     ).find((tool) => tool.name === "create_goal");
     if (autonomousCreate === undefined) throw new Error("autonomous create_goal is missing");
-    await expect(
-      autonomousCreate.execute("call-2", { objective: "Self-activate" }, undefined, undefined, {} as never),
-    ).rejects.toThrow(/may propose goals, not create them/u);
+    await autonomousCreate.execute(
+      "call-2",
+      { objective: "Self-proposed work" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(autonomy.getGoal("another-conversation")).toMatchObject({
+      objective: "Self-proposed work",
+      status: "proposed",
+      tokenBudget: DEFAULT_GOAL_TOKEN_BUDGET,
+    });
     autonomy.close();
   });
 
@@ -227,6 +236,233 @@ describe("captain autonomy", () => {
       error: "state_unreadable",
     });
     failClosed.close();
+  });
+
+  it("keeps a proposal inert across restart, then admits only owner-accepted work within its durable budget", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-goal-proposal-"));
+    roots.push(root);
+    const path = join(root, "autonomy.json");
+    const proposed = new AutonomyStore(path);
+    proposed.proposeGoal("global-default", "Verify the release", 100);
+    proposed.finishTurn("global-default", 40);
+    proposed.close();
+
+    const store = new AutonomyStore(path);
+    const runs: string[] = [];
+    let release!: () => void;
+    const running = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    store.start(async (_conversationId, prompt) => {
+      runs.push(prompt);
+      await running;
+    });
+    try {
+      expect(store.getGoal("global-default")).toMatchObject({ status: "proposed", tokensUsed: 0 });
+      expect(runs).toEqual([]);
+      expect(() => store.command("global-default", { action: "set_goal_status", status: "active" })).toThrow(
+        /Accept the proposed goal/u,
+      );
+      expect(() => store.command("global-default", { action: "set_goal_status", status: "paused" })).toThrow(
+        /Accept the proposed goal/u,
+      );
+      expect(store.getGoal("global-default")?.status).toBe("proposed");
+
+      store.command("global-default", { action: "accept_goal" });
+      expect(runs).toHaveLength(1);
+      expect(runs[0]).toContain("Verify the release");
+      const goal = store.getGoal("global-default")!;
+      expect(store.recordUsage("global-default", 60, goal)?.status).toBe("active");
+      expect(runs).toHaveLength(1);
+      const duringTurn = new AutonomyStore(path);
+      expect(duringTurn.getGoal("global-default")).toMatchObject({ status: "active", tokensUsed: 60 });
+      duringTurn.close();
+
+      expect(store.recordUsage("global-default", 40, goal)?.status).toBe("budget_limited");
+      store.finishTurn("global-default", 0, goal);
+      release();
+      await running;
+      await Promise.resolve();
+      expect(runs).toHaveLength(1);
+      expect(() => store.command("global-default", { action: "set_goal_status", status: "active" })).toThrow(
+        /exhausted its token budget/u,
+      );
+      const persisted = JSON.parse(await readFile(path, "utf8"));
+      expect(persisted.conversations["global-default"].goal).toMatchObject({
+        status: "budget_limited",
+        tokensUsed: 100,
+        tokenBudget: 100,
+      });
+    } finally {
+      release();
+      store.close();
+    }
+  });
+
+  it("bounds omitted and legacy budgets before restart can admit another goal turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-goal-budget-migration-"));
+    roots.push(root);
+    const path = join(root, "autonomy.json");
+    const now = new Date().toISOString();
+    const legacyGoal = (tokensUsed: number, tokenBudget?: number) => ({
+      objective: "Continue legacy work",
+      status: "active",
+      tokensUsed,
+      ...(tokenBudget === undefined ? {} : { tokenBudget }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await writeFile(
+      path,
+      JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        conversations: {
+          remaining: { goal: legacyGoal(DEFAULT_GOAL_TOKEN_BUDGET - 50) },
+          runaway: { goal: legacyGoal(107_000_000) },
+          explicit: { goal: legacyGoal(200, 200) },
+        },
+      }),
+    );
+    const store = new AutonomyStore(path);
+    const runs: string[] = [];
+    store.start(async (conversationId) => {
+      runs.push(conversationId);
+      const goal = store.getGoal(conversationId)!;
+      store.recordUsage(conversationId, 50, goal);
+      store.finishTurn(conversationId, 0, goal);
+    });
+    try {
+      await Promise.resolve();
+      expect(runs).toEqual(["remaining"]);
+      expect(store.getGoal("remaining")).toMatchObject({
+        tokenBudget: DEFAULT_GOAL_TOKEN_BUDGET,
+        tokensUsed: DEFAULT_GOAL_TOKEN_BUDGET,
+        status: "budget_limited",
+      });
+      expect(store.getGoal("runaway")).toMatchObject({
+        tokenBudget: DEFAULT_GOAL_TOKEN_BUDGET,
+        tokensUsed: 107_000_000,
+        status: "budget_limited",
+      });
+      expect(store.getGoal("explicit")).toMatchObject({ tokenBudget: 200, status: "budget_limited" });
+      const proposed = store.proposeGoal("new-proposal", "Inspect a release");
+      const created = store.createGoal("new-owner-goal", "Ship the verified release");
+      expect(proposed.tokenBudget).toBe(DEFAULT_GOAL_TOKEN_BUDGET);
+      expect(created.tokenBudget).toBe(DEFAULT_GOAL_TOKEN_BUDGET);
+      expect(() => store.createGoal("invalid", "Unlimited work", Infinity)).toThrow();
+      expect(() => store.createGoal("invalid", "Fractional budget", 1.5)).toThrow();
+      expect(store.getGoal("invalid")).toBeUndefined();
+    } finally {
+      store.close();
+    }
+    const restarted = new AutonomyStore(path);
+    const admissions: string[] = [];
+    restarted.start(async (conversationId) => {
+      admissions.push(conversationId);
+      restarted.pauseGoal(conversationId);
+    });
+    expect(admissions).toEqual(["new-owner-goal"]);
+    expect(restarted.getGoal("runaway")?.status).toBe("budget_limited");
+    restarted.close();
+  });
+
+  it("never bills a replacement goal for the previous turn or loses unsafe usage on restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-goal-usage-"));
+    roots.push(root);
+    const path = join(root, "autonomy.json");
+    const store = new AutonomyStore(path);
+    const previous = store.createGoal("global-default", "Verify the previous release", 200);
+    store.recordUsage("global-default", 50, previous);
+    store.updateGoal("global-default", "complete");
+    expect(store.recordUsage("global-default", 200, previous)?.status).toBe("complete");
+    const blocked = store.createGoal("blocked", "Recover a missing dependency", 100);
+    store.updateGoal("blocked", "blocked");
+    expect(store.recordUsage("blocked", 200, blocked)?.status).toBe("blocked");
+    const replacement = store.createGoal("global-default", "Verify the next release", 200);
+    expect(store.recordUsage("global-default", 100, previous)).toBeUndefined();
+    store.finishTurn("global-default", 100, previous);
+    expect(replacement.tokensUsed).toBe(0);
+    expect(store.recordUsage("global-default", NaN, replacement)?.status).toBe("usage_limited");
+    store.close();
+
+    const restarted = new AutonomyStore(path);
+    expect(restarted.getGoal("global-default")).toMatchObject({
+      objective: "Verify the next release",
+      tokensUsed: 0,
+      tokenBudget: 200,
+      status: "usage_limited",
+    });
+    const admissions: string[] = [];
+    restarted.start(async (conversationId) => {
+      admissions.push(conversationId);
+    });
+    expect(admissions).toEqual([]);
+    expect(restarted.getGoal("blocked")).toMatchObject({ status: "blocked", tokensUsed: 200 });
+    restarted.close();
+  });
+
+  it("pins a waiting continuation to its original goal and admits a replacement after stale work is refused", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-goal-queued-identity-"));
+    roots.push(root);
+    const path = join(root, "autonomy.json");
+    const store = new AutonomyStore(path);
+    let release!: () => void;
+    const admission = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let replacementSettled!: () => void;
+    const replacementRun = new Promise<void>((resolve) => {
+      replacementSettled = resolve;
+    });
+    const attempted: string[] = [];
+    const executed: string[] = [];
+    store.start(async (conversationId, prompt, origin, expectedGoal) => {
+      expect(origin).toBe("goal");
+      if (expectedGoal === undefined) throw new Error("Goal identity missing");
+      attempted.push(expectedGoal.objective);
+      await admission;
+      if (store.getGoal(conversationId) !== expectedGoal) {
+        expect(store.recordUsage(conversationId, 100, expectedGoal)).toBeUndefined();
+        expect(store.pauseGoal(conversationId, expectedGoal)).toBeUndefined();
+        throw new Error("Stale goal continuation refused");
+      }
+      executed.push(prompt);
+      store.recordUsage(conversationId, 50, expectedGoal);
+      store.updateGoal(conversationId, "complete");
+      store.finishTurn(conversationId, 0, expectedGoal);
+      replacementSettled();
+    });
+    try {
+      store.command("global-default", {
+        action: "set_goal",
+        objective: "Original goal",
+        tokenBudget: 100,
+      });
+      store.command("global-default", { action: "clear_goal" });
+      store.command("global-default", {
+        action: "set_goal",
+        objective: "Replacement goal",
+        tokenBudget: 200,
+      });
+      expect(attempted).toEqual(["Original goal"]);
+      release();
+      await replacementRun;
+      expect(attempted).toEqual(["Original goal", "Replacement goal"]);
+      expect(executed).toHaveLength(1);
+      expect(executed[0]).toContain("Replacement goal");
+      const restarted = new AutonomyStore(path);
+      expect(restarted.getGoal("global-default")).toMatchObject({
+        objective: "Replacement goal",
+        status: "complete",
+        tokenBudget: 200,
+        tokensUsed: 50,
+      });
+      restarted.close();
+    } finally {
+      release();
+      store.close();
+    }
   });
 
   it("keeps a per-goal decision journal that survives restarts", async () => {

@@ -488,7 +488,7 @@ function collectRemediations(input: {
   const remediations: string[] = [];
   if (input.linear.wakeWarning !== null) {
     remediations.push(
-      `${input.linear.wakeWarning} Set owner IDs with \`clankie linear wake set --owner-user-ids IDS\`.`,
+      `${input.linear.wakeWarning} Set owner IDs or emails with \`clankie linear wake set --owner-user-emails EMAILS\`.`,
     );
   }
   if (input.model === null) {

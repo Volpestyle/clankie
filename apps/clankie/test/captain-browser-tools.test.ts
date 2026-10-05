@@ -46,7 +46,7 @@ describe("captain browser tools", () => {
 
   it("registers the full catalog but activates uncommon tools only after search", async () => {
     const tools = new Map<string, ToolDefinition>();
-    let active = ["remember_episode"];
+    let active = ["memory"];
     let start: (() => void) | undefined;
     const api = {
       registerTool(tool: ToolDefinition) {
@@ -82,7 +82,7 @@ describe("captain browser tools", () => {
     start?.();
 
     expect([...tools]).toHaveLength(3);
-    expect(active).toEqual(["remember_episode", "browser_tool_search", "browser_browser_use_open"]);
+    expect(active).toEqual(["memory", "browser_tool_search", "browser_browser_use_open"]);
     const search = tools.get("browser_tool_search");
     if (search === undefined) throw new Error("browser_tool_search is missing");
     await search.execute("call-1", { query: "console errors" }, undefined, undefined, {} as never);

@@ -12,9 +12,10 @@ owner persona, his tools over MCP, the newest memory card on every turn, and
 his skills. The service keeps running his body, Discord, voice, and play.
 
 Running Claude Code as a worker in Clankie's Herdr fleet does not require
-replacing the lead with this seat. Linear notifications follow the connected account's inbox into the operator
-conversation's bound Claude seat as a wake; with no bound seat, Pi handles
-the turn. Goal continuations remain with their service Pi loop.
+replacing the lead with this seat. Eligible signed Linear webhooks wake one
+configured ordinary global chat, `global-default` by default. Its bound Claude
+seat receives the wake through the existing channel; with no bound seat, Pi
+handles the turn in that chat. Goal continuations remain with their service Pi loop.
 
 Like the [herdr plugin](../herdr-plugin/README.md), this carries only what a
 plugin can uniquely declare. Everything else lives in the service and the
@@ -287,9 +288,11 @@ not only the separate fleet mailbox (`clankie mcp --seat`).
 The seat denies every inherited Linear MCP connector (any server on Linear's
 host or named for it, in user, local or project scope, plus the claude.ai Linear
 connector), whose identity may differ from the owner-connected account. That connected tracker identity is
-Clankie’s and his whole swarm’s identity. Tracker writes use Clankie’s connected
-tools or a granted worker bridge; a worker lacking access asks the lead to write. Follow Linear wakes the operator conversation
-from that account's actual notifications; stored issue bindings do not route wakes.
+Clankie’s and his whole fleet’s identity. Tracker writes use Clankie’s connected
+tools or a granted worker bridge; a worker lacking access asks the lead to write.
+Eligible signed Linear activity wakes one ordinary configured chat, `global-default`
+by default, through its existing native seat channel when attached. The lead
+chooses any delegation. Wake rules and the target are non-secret settings.
 
 ### Persona image folders
 

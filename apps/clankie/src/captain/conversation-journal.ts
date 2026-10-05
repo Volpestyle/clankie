@@ -62,7 +62,7 @@ export class ConversationJournal {
   /**
    * The whole retained journal, oldest first. `strict` makes an unreadable file
    * or a corrupt line throw instead of reading as absent — for a journal whose
-   * loss would silently drop state (the Linear inbox).
+   * loss would silently drop state.
    */
   public read(conversationId: string, strict = false): readonly OperatorConversationStreamEvent[] {
     const path = this.path(conversationId);

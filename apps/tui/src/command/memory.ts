@@ -1,5 +1,5 @@
 /**
- * `clankie memory` — the operator's own hands on Clankie's episodes (VUH-1104).
+ * `clankie memory` — the operator's own hands on Clankie's notes (VUH-1104).
  *
  * Everything here goes through the operator memory catalog and the per-episode
  * routes, so the CLI sees exactly what the console does, private notes included.
@@ -14,7 +14,6 @@ import { commandHost, type Writable } from "./io.ts";
 const MEMORY_USAGE = [
   "Usage: clankie memory [status]",
   "       clankie memory search <terms...>",
-  "       clankie memory retain <episodeId> | release <episodeId>",
   "       clankie memory correct <episodeId> --summary TEXT",
   "       clankie memory forget <episodeId>",
 ].join("\n");
@@ -35,7 +34,6 @@ export interface MemoryCliCommandOptions {
 export type MemoryCliResult =
   | {
       readonly ok: true;
-      readonly retention: OperatorMemoryCatalog["retention"];
       readonly episodes: readonly CaptainEpisode[];
       readonly people: number;
     }
@@ -52,7 +50,7 @@ export type MemoryCliResult =
 type MemoryCliArgs =
   | { readonly verb: "status" }
   | { readonly verb: "search"; readonly query: string }
-  | { readonly verb: "retain" | "release" | "forget"; readonly episodeId: string }
+  | { readonly verb: "forget"; readonly episodeId: string }
   | { readonly verb: "correct"; readonly episodeId: string; readonly summary: string };
 
 export function parseMemoryArgs(args: readonly string[]): MemoryCliArgs {
@@ -66,7 +64,7 @@ export function parseMemoryArgs(args: readonly string[]): MemoryCliArgs {
     if (query.length === 0) throw new Error(MEMORY_USAGE);
     return { verb: "search", query };
   }
-  if (verb === "retain" || verb === "release" || verb === "forget") {
+  if (verb === "forget") {
     const [episodeId, ...extra] = rest;
     if (episodeId === undefined || extra.length > 0) throw new Error(MEMORY_USAGE);
     return { verb, episodeId };
@@ -106,7 +104,7 @@ export function matchEpisodes(episodes: readonly CaptainEpisode[], query: string
 
 function locate(catalog: OperatorMemoryCatalog, episodeId: string): CaptainEpisode {
   const episode = catalog.captainEpisodes.find((candidate) => candidate.episodeId === episodeId);
-  if (episode === undefined) throw new Error(`No episode with id ${episodeId}.`);
+  if (episode === undefined) throw new Error(`No memory with id ${episodeId}.`);
   return episode;
 }
 
@@ -133,7 +131,6 @@ export async function runMemoryCommand(
     if (parsed.verb === "status") {
       return {
         ok: true,
-        retention: catalog.retention,
         episodes: newestFirst(catalog.captainEpisodes).slice(0, MEMORY_CLI_LIMIT),
         people: catalog.discordPeople.length,
       };
@@ -149,13 +146,10 @@ export async function runMemoryCommand(
     }
     const episode = locate(catalog, parsed.episodeId);
     if (parsed.verb === "forget") {
-      // One record per memory, so this is the whole memory: there is no second
-      // retained copy left behind for recall to find.
       await client.deleteCaptainEpisode(episode.lane, episode.episodeId);
       return { ok: true, forgotten: episode.episodeId, lane: episode.lane };
     }
-    const edit =
-      parsed.verb === "correct" ? { summary: parsed.summary } : { retained: parsed.verb === "retain" };
+    const edit = { summary: parsed.summary };
     const updated = await client.updateCaptainEpisode(episode.lane, episode.episodeId, edit);
     return { ok: true, episode: updated };
   } catch (error) {

@@ -128,9 +128,9 @@ import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { refreshLinkedHarnesses } from "../../tui/src/harness-refresh.ts";
 import { WorkerPluginNotices } from "./worker-plugin-notices.ts";
-import { LinearWriteReceipts, linearWriteIssue } from "./linear-webhook.ts";
+import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
-import { LinearNotifications } from "./linear-notifications.ts";
+import { retireLinearNotifications } from "./linear-notifications.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
@@ -140,7 +140,8 @@ import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { readDiscordBodyDirectory } from "./discord-directory.ts";
 import { readDiscordBodyPermissions, postDiscordBodyTest } from "./discord-setup-body.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
-import { MemoryCapacityError, createFileMemory, defaultMemoryDir } from "./memory.ts";
+import { createFileMemory, defaultMemoryDir } from "./memory.ts";
+import { createCaptainMemory } from "./captain-memory.ts";
 import { createWorldPlayExecution } from "./play-execution-world.ts";
 import { PlayHost, type EmbodimentClientPort, type PlayExecution } from "./play-host.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
@@ -461,21 +462,6 @@ if (deviceSessionKey === undefined) {
 
 const memory = createFileMemory({ dataDir: defaultMemoryDir(process.env) });
 
-/**
- * A full durable shelf is a thing to tell him about, not a crash. Every other
- * failure still throws — only capacity is an answer rather than a fault.
- */
-function capacityAware<T>(
-  write: () => T,
-): { value: T; refusal?: undefined } | { value?: undefined; refusal: string } {
-  try {
-    return { value: write() };
-  } catch (error) {
-    if (error instanceof MemoryCapacityError) return { refusal: error.message };
-    throw error;
-  }
-}
-
 // Media he makes lands under the root the Discord attachment resolver already
 // serves (ADR 0085). The root is derived, never merely read, so the bridge
 // that serves the bytes back resolves the same directory this wrote them to.
@@ -585,10 +571,6 @@ const mcpHost = createMcpHost({
   observeCall: (call) => {
     const now = new Date();
     linearWrites.record(call, now);
-    const issue = linearWriteIssue(call);
-    if (issue && call.owner) captain.recordLinearWorkOwner(issue, call.owner, now.getTime());
-    else if (issue && call.recipient?.kind === "native")
-      captain.recordLinearNativeWorkOwner(issue, call.recipient, now.getTime());
   },
   linearAuthor: async (personaId) => {
     const result = await captain.serveOperatorConversation({ op: "personas", schemaVersion: 1 });
@@ -960,72 +942,7 @@ const captain = createCaptain(
       listVoiceHistory: (limit = 5) => Promise.resolve(boundApp().voiceHistory(limit)),
       listRecentVoiceSpeech: (limit = 12) => boundApp().recentVoiceSpeech(limit),
     },
-    memory: {
-      appendEpisode: (input) => {
-        // A correction supersedes the note he named, if that note is one this
-        // lane can see. Naming an unreachable id is not a silent no-op: the new
-        // memory is still written, and the tool says it corrected nothing.
-        const corrects = input.corrects;
-        if (corrects !== undefined) {
-          const corrected = capacityAware(() =>
-            memory.correctEpisode({
-              lane: input.lane,
-              sourceConversationId: input.sourceConversationId,
-              episodeId: corrects,
-              summary: input.summary,
-              ...(input.retained === undefined ? {} : { retained: input.retained }),
-            }),
-          );
-          if (corrected.refusal !== undefined) {
-            return Promise.resolve({
-              corrected: false,
-              retained: false,
-              retentionRefused: corrected.refusal,
-            });
-          }
-          if (corrected.value !== undefined) {
-            return Promise.resolve({ corrected: true, retained: corrected.value.retained });
-          }
-        }
-        const write = (retained: boolean) =>
-          memory.recordEpisode({
-            schemaVersion: 1,
-            episodeId: `ep-${crypto.randomUUID()}`,
-            sourceConversationId: input.sourceConversationId,
-            lane: input.lane,
-            targetId: input.targetId,
-            summary: input.summary,
-            // What he remembers at the console stays at the console; the
-            // shareable/private gate in recall is only real if writes honor it.
-            visibility: input.visibility ?? (input.lane === "operator" ? "operator_private" : "shareable"),
-            retained,
-            provenance: {
-              characterId: "clankie",
-              sessionId: "captain",
-              selfAuthored: true,
-              rawTranscript: false,
-            },
-            occurredAt: new Date().toISOString(),
-          });
-        // A full shelf refuses the keeping, not the remembering: the note still
-        // lands in the recent window and he is told it was not kept.
-        const attempt = capacityAware(() => write(input.retained ?? false));
-        if (attempt.refusal === undefined) {
-          return Promise.resolve({ corrected: false, retained: attempt.value.retained });
-        }
-        write(false);
-        return Promise.resolve({ corrected: false, retained: false, retentionRefused: attempt.refusal });
-      },
-      recallEpisodeCard: (lane) => Promise.resolve(memory.episodeRecallCard({ lane })),
-      searchEpisodeCard: (lane, query) => Promise.resolve(memory.searchEpisodeCard({ lane, query })),
-      recallDiscordPerson: (identity, options) => {
-        const card = memory.recallDiscordPersonCard(identity, {
-          channelId: options.channelId,
-          query: options.query,
-        });
-        return card.length === 0 ? undefined : card;
-      },
-    },
+    memory: createCaptainMemory(memory),
     resolveDiscordAttachments: createDiscordAttachmentResolver(),
   },
   {
@@ -1084,18 +1001,7 @@ async function linearFollowing(): Promise<boolean> {
 }
 
 const linearAttribution = new LinearAttributionJournal(join(stateRoot, "linear-attribution.json"));
-const linearNotifications = new LinearNotifications({
-  path: join(stateRoot, "linear-notifications.json"),
-  host: mcpHost,
-  following: linearFollowing,
-  wakeRules: async () => (await settingsStore.load()).linearWebhook.wake,
-  attribute: (notification, organizationId) => linearAttribution.attribute(notification, organizationId),
-  resolveIssue: (notification, organizationId) => linearAttribution.issue(notification, organizationId),
-  resolveReplyRecipient: (notification, organizationId) =>
-    linearAttribution.replyRecipient(notification, organizationId),
-  receive: (activity, following) => captain.receiveLinearActivity(activity, following),
-  onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
-});
+retireLinearNotifications(join(stateRoot, "linear-notifications.json"), (message) => logger.info(message));
 // VUH-1527: each ssh fleet reaches the seat routes, and only those, through its link.
 fleetProjectMembership = new FleetProjectMembership({
   settings: async () => (await settingsStore.load()).projects,
@@ -1360,25 +1266,9 @@ const clankie = await createClankieApp({
       return credential?.type === "api" ? credential.key : undefined;
     },
     writes: linearWrites,
-    recordActivity: (activity) => {
-      linearAttribution.record(activity);
-      if (activity.issueId && activity.organizationId && activity.conversationOwner)
-        captain.recordLinearWorkOwner(
-          { issueId: activity.issueId, organizationId: activity.organizationId },
-          activity.conversationOwner,
-          activity.conversationOwnerRecordedAt,
-          true,
-        );
-      else if (activity.issueId && activity.organizationId && activity.writeRecipient?.kind === "native")
-        captain.recordLinearNativeWorkOwner(
-          { issueId: activity.issueId, organizationId: activity.organizationId },
-          activity.writeRecipient,
-          activity.writeRecipientRecordedAt,
-          true,
-        );
-    },
-    requestNotificationPoll: () => linearNotifications.requestPoll(),
-    // Unverified identity leaves webhook history passive.
+    recordActivity: (activity) => linearAttribution.record(activity),
+    issueContext: (activity) => linearAttribution.issueContext(activity, mcpHost),
+    // Verified own-account identity suppresses its activity independently of rules.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
   },
 });
@@ -1450,8 +1340,6 @@ const stopHostedWork =
         available: herdr.available,
       });
 hostedHeartbeat?.start();
-if (await linearFollowing()) captain.resumeLinearActivity();
-linearNotifications.start();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
 // "client" is the embodiment manager itself — the loopback died with the split.
@@ -1562,7 +1450,6 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   hostedDiscord?.close();
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
-    await linearNotifications.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
     await browserHost?.close().catch(() => undefined);

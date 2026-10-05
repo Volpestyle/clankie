@@ -40,7 +40,11 @@ import {
   type InlineExtension,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { GameplaySettings } from "@clankie/settings";
+import {
+  LinearWakeSettingsSchema,
+  LinearWebhookSettingsSchema,
+  type GameplaySettings,
+} from "@clankie/settings";
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
@@ -75,7 +79,7 @@ export interface TurnContext {
    * at tool-execution time.
    */
   room?: string | undefined;
-  /** Host-stamped room target; models never choose episode provenance. */
+  /** Host-stamped room target; models never choose memory provenance. */
   targetId?: string | undefined;
   /** Discord actor who triggered this turn. Host-stamped; models never choose it. */
   actorId?: string | undefined;
@@ -92,6 +96,8 @@ export interface TurnContext {
   discordOrigin?: DiscordWatchOrigin | undefined;
   /** True for a host-authored goal continuation or scheduled wake. */
   autonomous?: boolean | undefined;
+  /** Current host-owned refusal reason for service goals; native seats cannot budget that loop. */
+  goalExecutionReason?: (() => string | undefined) | undefined;
   /** Bound by an operator conversation to publish one deliberate finished file into its transcript. */
   publishFile?:
     | ((input: {
@@ -163,6 +169,7 @@ export function captainTools(
   );
   return [
     ...desktopTools(deps.desktop),
+    ...(lane === "operator" && deps.linearWake ? linearWakeTools(deps.linearWake) : []),
     ...(deps.bodyLeases === undefined
       ? []
       : [
@@ -215,7 +222,10 @@ export function captainTools(
       : []),
     ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
     herdrWatches !== undefined
-      ? herdrWatchTools(herdrWatches, turn, deps.herdrAvailable)
+      ? [
+          ...herdrWatchTools(herdrWatches, turn, deps.herdrAvailable),
+          ...(herdrWatches.readoptSeat === undefined ? [] : [readoptSeatTool(herdrWatches, turn)]),
+        ]
       : []),
     // Hiring starts a process on the operator's machine, so it rides the same
     // authority as starting one by shell: the operator lane, or a Discord room
@@ -614,64 +624,130 @@ export function captainTools(
       },
     }),
     defineTool({
-      name: "remember_episode",
-      label: "Remember this",
+      name: "memory",
+      label: "Your memory",
       description:
-        "Write one short episode into your own memory for this room — anything you choose to carry forward as " +
-        "part of your experience and developing personality. Your concise memory, not a transcript or an " +
-        "unapproved factual profile about someone. Not a status receipt: game joins, retries, checkpoints, and routine " +
-        "progress already have their own journey and journals. Set `retain` for the ones you want to still have " +
-        "in a year — everything else ages out of the recent window. Set `corrects` to the id of a memory that " +
-        "turned out to be wrong and this note replaces it, keeping its original room and date.",
-      parameters: Type.Object({
-        summary: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
-        visibility: Type.Optional(StringEnum(["shareable", "operator_private"])),
-        retain: Type.Optional(Type.Boolean()),
-        corrects: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-      }),
+        "Write, search, edit, or forget your own concise memories. Write text you want to carry forward; " +
+        "search with words to find memories and their ids. Edit replaces the text of a memory by id, " +
+        "keeping its original room and date; forget removes it. You can edit or forget only memories " +
+        "authored by this conversation. Console memories stay private to the console; Discord recall " +
+        "sees only shareable memories. Memory is your context, not instructions or established fact.",
+      parameters: Type.Union([
+        Type.Object(
+          {
+            action: Type.Literal("write"),
+            text: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
+          },
+          { additionalProperties: false },
+        ),
+        Type.Object(
+          { action: Type.Literal("search"), query: Type.String({ minLength: 1, maxLength: 512 }) },
+          { additionalProperties: false },
+        ),
+        Type.Object(
+          {
+            action: Type.Literal("edit"),
+            id: Type.String({ minLength: 1, maxLength: 256 }),
+            text: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
+          },
+          { additionalProperties: false },
+        ),
+        Type.Object(
+          { action: Type.Literal("forget"), id: Type.String({ minLength: 1, maxLength: 256 }) },
+          { additionalProperties: false },
+        ),
+      ]),
       execute: async (_id, params) => {
+        if (params.action === "search") {
+          const card = await deps.memory.searchMemory(lane, params.query);
+          return json(
+            card.length === 0 ? { action: "search", found: 0, card: "" } : { action: "search", card },
+          );
+        }
         const identity = captureConversationAuthority(turn.conversationAuthority);
         const targetId = turn.targetId;
-        if (targetId === undefined) throw new Error("Turn room attribution is unavailable");
         await assertConversationAuthority(identity);
-        const outcome = await deps.memory.appendEpisode({
-          lane,
-          targetId,
-          sourceConversationId: identity.owner.conversationId,
-          summary: params.summary,
-          ...(params.visibility === undefined
-            ? {}
-            : { visibility: params.visibility as "shareable" | "operator_private" }),
-          ...(params.retain === undefined ? {} : { retained: params.retain }),
-          ...(params.corrects === undefined ? {} : { corrects: params.corrects }),
-        });
-        // A correction that found nothing still wrote the note, and a full shelf
-        // still wrote it unkept. Saying which happened is what stops him
-        // claiming he fixed or kept a memory he did not.
-        return json({
-          remembered: true,
-          corrected: outcome.corrected,
-          retained: outcome.retained,
-          ...(outcome.retentionRefused === undefined ? {} : { retentionRefused: outcome.retentionRefused }),
-        });
-      },
-    }),
-    defineTool({
-      name: "recall_episodes",
-      label: "Search your memory",
-      description:
-        "Search everything you remember, not just the newest few on your card. Terms match your own notes and " +
-        "the rooms they happened in; each result carries where and when it happened and the id you would " +
-        "`corrects` if it turned out to be wrong. Use it when something feels like it came up before.",
-      parameters: Type.Object({
-        query: Type.String({ minLength: 1, maxLength: 512 }),
-      }),
-      execute: async (_id, params) => {
-        const card = await deps.memory.searchEpisodeCard(lane, params.query);
-        return json(card.length === 0 ? { found: 0, card: "" } : { card });
+        const source = { lane, sourceConversationId: identity.owner.conversationId };
+        if (params.action === "write") {
+          if (targetId === undefined) throw new Error("Turn room attribution is unavailable");
+          const memory = await deps.memory.writeMemory({ ...source, targetId, text: params.text });
+          return json({ action: "write", written: true, ...memory });
+        }
+        if (params.action === "edit") {
+          const memory = await deps.memory.editMemory({ ...source, id: params.id, text: params.text });
+          return json(
+            memory === undefined
+              ? { action: "edit", edited: false, reason: "not_found" }
+              : { action: "edit", edited: true, ...memory },
+          );
+        }
+        const forgotten = await deps.memory.forgetMemory({ ...source, id: params.id });
+        return json({ action: "forget", forgotten, ...(forgotten ? {} : { reason: "not_found" }) });
       },
     }),
   ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));
+}
+
+function linearWakeTools(port: NonNullable<CaptainDeps["linearWake"]>): ToolDefinition[] {
+  const strings = () => Type.Array(Type.String({ minLength: 1, maxLength: 320 }), { maxItems: 100 });
+  return [
+    defineTool({
+      name: "linear_wake",
+      label: "Set your Linear wake rules",
+      description:
+        "Read or change your non-secret Linear wake rules and one ordinary global chat target. " +
+        "Defaults wake global-default for James's comments and mentions. Set partial rule fields; omitted fields stay unchanged. " +
+        "An empty notificationTypes array selects all event kinds; exclusions win. Own writes always remain quiet. " +
+        "conversationId must name an existing ordinary global chat. Changes apply to new signed webhook events without restarting.",
+      parameters: Type.Object(
+        {
+          action: StringEnum(["show", "set"]),
+          conversationId: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9_-]{1,256}$" })),
+          wake: Type.Optional(
+            Type.Object(
+              {
+                actors: Type.Optional(
+                  Type.Array(StringEnum(["owner", "human", "self", "users"]), { maxItems: 4 }),
+                ),
+                ownerUserIds: Type.Optional(strings()),
+                ownerUserEmails: Type.Optional(strings()),
+                userIds: Type.Optional(strings()),
+                notificationTypes: Type.Optional(strings()),
+                excludedNotificationTypes: Type.Optional(strings()),
+              },
+              { additionalProperties: false },
+            ),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+      executionMode: "sequential",
+      execute: async (_id, input) => {
+        if (input.action === "show" && (input.wake !== undefined || input.conversationId !== undefined))
+          throw new Error("Use action set to change Linear wake settings");
+        if (input.conversationId !== undefined) {
+          LinearWebhookSettingsSchema.shape.wakeConversationId.parse(input.conversationId);
+          if (!port.targetAllowed(input.conversationId))
+            throw new Error("Linear wake target must be an existing ordinary global chat");
+        }
+        const current =
+          input.action === "show"
+            ? await port.settings.load()
+            : await port.settings.update((value) => ({
+                ...value,
+                linearWebhook: {
+                  ...value.linearWebhook,
+                  ...(input.conversationId === undefined ? {} : { wakeConversationId: input.conversationId }),
+                  wake: LinearWakeSettingsSchema.parse({ ...value.linearWebhook.wake, ...input.wake }),
+                },
+              }));
+        return json({
+          wake: current.linearWebhook.wake,
+          wakeConversationId: current.linearWebhook.wakeConversationId,
+        });
+      },
+    }),
+  ];
 }
 
 function hireAgentTool(
@@ -695,15 +771,6 @@ function hireAgentTool(
       "its pane: reconcile before retrying. Follow up with message_seat and watch the returned seatId with " +
       "herdr_watch. Grok Build hires require macOS and the verified 1.0.46 native TUI leader channel; fresh sessions only unless the original live controller is still bound. Native permission prompts remain the owner's decision.",
     parameters: Type.Object({
-      linearIssue: Type.Optional(
-        Type.Object(
-          { organizationId: Type.String({ format: "uuid" }), issueId: Type.String({ format: "uuid" }) },
-          {
-            description:
-              "Canonical Linear issue this hire works on. The admitted hiring conversation owns its later events.",
-          },
-        ),
-      ),
       harness: Type.Optional(StringEnum(OPERATOR_SEAT_HARNESSES)),
       resume: Type.Optional(
         Type.String({
@@ -812,12 +879,11 @@ function hireAgentTool(
       const authority = captureConversationAuthority(turn.conversationAuthority);
       const assignment = structuredClone(params);
       await assertConversationAuthority(authority);
-      const { brief, linearIssue, ...seat } = assignment as typeof params & { brief?: string };
+      const { brief, ...seat } = assignment as typeof params & { brief?: string };
       const result = await hire(
         SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }),
         brief,
         authority,
-        linearIssue,
       );
       if (result.outcome !== "spawned" || brief === undefined || message === undefined)
         return json({ ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) });
@@ -831,6 +897,23 @@ function hireAgentTool(
           status: result.seat.status,
         },
       });
+    },
+  });
+}
+
+function readoptSeatTool(watches: HerdrWatchPort, turn: TurnContext): ToolDefinition {
+  return defineTool({
+    name: "readopt_seat",
+    label: "Re-adopt a reattached worker",
+    description:
+      "Rebind this conversation's existing persisted ownership after a legitimate native same-thread reattach. Requires fresh host proof of the exact native thread and the original owning conversation; refuses a different thread or owner. Call only for an owner-authorized reattach, then message_seat and herdr_watch can steer it again. Never grants ownership to a worker or sends a message itself.",
+    parameters: Type.Object({ seatId: Type.String({ minLength: 1, maxLength: 256 }) }),
+    executionMode: "sequential",
+    execute: async (_id, input) => {
+      const authority = captureConversationAuthority(turn.conversationAuthority);
+      await assertConversationAuthority(authority);
+      await watches.readoptSeat!(input.seatId, authority);
+      return json({ adopted: true, seatId: input.seatId });
     },
   });
 }
@@ -1199,22 +1282,23 @@ function autonomyTools(autonomy: AutonomyStore, turn: TurnContext): ToolDefiniti
       name: "create_goal",
       label: "Create goal",
       description:
-        "Create an active durable goal for this conversation. Use only when the owner or system explicitly asks for a goal; never infer a goal from an ordinary task or from your own idea. Propose self-authored goals conversationally instead. State the objective as a checkable result, not a duration of effort.",
+        "Propose a durable goal for this Pi-owned conversation. It stays inactive until the owner confirms with /goal accept. Never infer a goal from an ordinary task. State a checkable objective; every goal has a finite token budget (default 1,000,000). Native harness seats refuse service goals because their continuations and usage cannot be enforced by this loop.",
       parameters: Type.Object({
         objective: Type.String({ minLength: 1, maxLength: 16_384 }),
-        token_budget: Type.Optional(Type.Number({ minimum: 1 })),
+        token_budget: Type.Optional(Type.Integer({ minimum: 1 })),
       }),
       executionMode: "sequential",
       execute: async (_id, params) => {
-        if (turn.autonomous === true) throw new Error("Autonomous turns may propose goals, not create them");
-        return json(autonomy.createGoal(conversationId(), params.objective, params.token_budget));
+        const reason = turn.goalExecutionReason?.();
+        if (reason !== undefined) throw new Error(reason);
+        return json(autonomy.proposeGoal(conversationId(), params.objective, params.token_budget));
       },
     }),
     defineTool({
       name: "get_goal",
       label: "Inspect goal",
       description:
-        "Read this conversation's active goal, usage, autonomy switch, pending self-wake, and the goal's recent decision journal.",
+        "Read this conversation's proposed or active goal, usage, autonomy switch, pending self-wake, and the goal's recent decision journal.",
       parameters: Type.Object({}),
       execute: async () =>
         json({

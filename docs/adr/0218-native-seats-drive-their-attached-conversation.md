@@ -117,6 +117,13 @@ with an `owner_removed` reason; it does not enable implicit parent adoption.
 
 ## Extension — Linear work ownership, 2026-10-04
 
+Superseded later that day by
+[ADR 0214's VUH-1678 decision](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04):
+Linear activity has one configured ordinary chat, default `global-default`, and
+the lead delegates from there. This extension's issue-owner routing and inbox
+handoff are historical; native seat conversation admission elsewhere in this ADR
+remains unchanged.
+
 James selected issue-owned routing in
 [VUH-1611](https://linear.app/vuhlp/issue/VUH-1611). A successful Linear issue or
 comment write from an admitted conversation, an issue-scoped native hire, or an
@@ -197,6 +204,38 @@ status update `d9b90f52-0b0e-463d-a1e9-9457d250592c`, comment `0707b479`:
 fleet. After landing, reconcile any existing manual relay before checking this
 exact reply. Older writes for which the host retained no author receipt cannot
 acquire guessed ownership from the current roster.
+
+## Reattachments and retained worker results (VUH-1657, VUH-1615)
+
+A local private Codex seat may reattach with `--remote` without emitting Herdr's
+session hook. Admission joins its foreground socket/thread to the retained
+controller record, exact server PID lifetime and socket ownership. Census,
+native steering and private-seat admission use the same proof. Unknown or
+ambiguous occupants remain unbound. A native startup timeout during a large
+same-thread resume does not terminate a proven launched view's dedicated server;
+read-only restore observation continues without a second writer or brief.
+
+Explicit re-adoption belongs to the original owning conversation. It refreshes
+native proof and rebinds only an already owned same thread. A resumed hire does
+the same under admitted hiring authority. A changed occupant cannot inherit
+control through ordinary messaging or watching. Same-thread report provenance
+may retain output before re-adoption, but grants neither control nor dispatch.
+
+The host retains observed launcher edges by fleet and native child/parent thread,
+independently of Herdr's resettable pane metadata. Recovery needs one exact live
+child and parent; an observed ancestry change invalidates the old edge. Legacy
+launches with no retained provenance keep the visible `no_parent` fallback.
+
+Worker reports use the existing conversation acceptance journal as their durable
+inbox. Their original payload, target and delivery ID survive trimming, reset,
+service replacement and disappearing panes. The host persists an attempting mark
+before invoking a receiver. Definitely queued/pre-handoff refusals can recover
+under refreshed recipient authority; interrupted attempts and legacy records
+remain uncertain and readable. Recovery cannot change recipients or replay an
+uncertain native effect. Native receipts describe transport only. Reading offers
+complete bounded payloads; only a recipient's explicit acknowledgment of offered
+IDs clears unread state. Roster and console expose pending/uncertain results and
+unread delivered results even after the worker leaves.
 
 ## Consequences and verification
 

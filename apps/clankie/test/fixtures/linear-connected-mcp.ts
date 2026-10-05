@@ -18,14 +18,7 @@ import { buildLaneToolBank } from "../../src/captain/lane-tools.ts";
 import { LaneLog } from "../../src/captain/lane-log.ts";
 import { SeatOutbox } from "../../src/captain/seat-outbox.ts";
 import type { CaptainDeps } from "../../src/captain/deps.ts";
-import type { ConversationOwner } from "../../src/captain/conversation-owner.ts";
 import type { LaneUpstreamTransportEvent } from "../../../tui/src/command/mcp.ts";
-
-type AttributionCall = Parameters<NonNullable<Parameters<typeof createMcpHost>[0]["observeCall"]>>[0] & {
-  arguments: Record<string, unknown>;
-  owner?: ConversationOwner;
-};
-type IssueIdentity = { organizationId: string; issueId: string };
 
 function gate() {
   let release!: () => void;
@@ -210,18 +203,6 @@ export async function createConnectedLinearFixture(
     authorize: async () => conversations.conversation(conversationId) !== undefined,
   };
   const linearWrites = new linearWebhook.LinearWriteReceipts(join(root, "linear-writes.json"));
-  // Runtime603 has the production work-owner observer; older checkouts explicitly lack it.
-  const issueFromWrite = (
-    linearWebhook as unknown as { linearWriteIssue?: (call: AttributionCall) => IssueIdentity | undefined }
-  ).linearWriteIssue;
-  const ownerStore = conversations as ConversationStore & {
-    bindLinearWorkOwner?: (
-      binding: IssueIdentity & { conversationId: string },
-      owner: ConversationOwner,
-      at: number,
-    ) => boolean;
-  };
-  const attributionAvailable = issueFromWrite !== undefined && ownerStore.bindLinearWorkOwner !== undefined;
   const logs: Record<string, unknown>[] = [];
   const host = createMcpHost({
     credentials,
@@ -237,14 +218,6 @@ export async function createConnectedLinearFixture(
     observeCall: (call) => {
       const now = new Date();
       linearWrites.record(call, now);
-      const attributed = call as AttributionCall;
-      const target = issueFromWrite?.(attributed);
-      if (target && attributed.owner)
-        ownerStore.bindLinearWorkOwner?.(
-          { ...target, conversationId: attributed.owner.conversationId },
-          attributed.owner,
-          now.getTime(),
-        );
       if (call.tool === options.heldWrite?.tool) options.heldWrite.observed.release();
     },
   });
@@ -344,7 +317,6 @@ export async function createConnectedLinearFixture(
     issueIdentifier,
     organizationId,
     conversationId,
-    attributionAvailable,
     channelReady: pollStarted.promise,
     wake: () =>
       outbox.deliver({
@@ -381,8 +353,6 @@ export async function createConnectedLinearFixture(
               returned: Record<string, unknown>;
             },
         ),
-    owners: async () =>
-      JSON.parse(await readFile(join(conversationsPath, "linear-work.json"), "utf8")) as unknown,
     revisions: async () => {
       try {
         return JSON.parse(await readFile(join(root, "linear-writes.json"), "utf8")) as unknown[];

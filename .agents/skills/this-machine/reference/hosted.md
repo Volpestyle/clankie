@@ -8,11 +8,14 @@ In the hosted coding image, `/opt/clankie` is the immutable install, `/workspace
 is persistent project storage, and `/state` holds the owner home/settings/broker.
 Use the existing CLI and skill roots. Compose owns process restarts; replacing a
 container ends live workers, so reconcile persisted intents before reassigning.
-The gateway is only a portal. An absent model login, provider account, personal
-SSH setup or media binary requires configuration; it is not supplied by hosting.
+The gateway is only a portal. Managed bodies configure their included model
+automatically; a funded first conversation requires no model login, API key,
+Mac installation, or infrastructure setup. At the AI-credit limit, direct the
+owner to their account for a pack or top-up. Optional personal SSH access or
+media tools depend on the managed service's offering.
 
-For a hosted body without a terminal, the paired app uses the owner model-key
-API (`docs/model-keys.md` under the service root): GET `/v1/model-keys` lists the
+Optional provider-key management uses the owner model-key API
+(`docs/model-keys.md` under the service root): GET `/v1/model-keys` lists the
 same providers/models as `/model`; POST `/set`, `/validate`, `/select`, `/remove`
 under that path manage broker API keys and the captain selection. The device
 must accept **Take Control** (`terminalControl`) at pairing. Supervise cannot
@@ -21,6 +24,9 @@ encrypted envelope. Keys are write-only: never ask for one in chat or put one in
 shell arguments, logs or telemetry. The stored key is validated with a bounded
 provider call that may incur a small charge; selection applies on the next
 captain turn without a restart. The same API works on a self-hosted Mac.
+These endpoints do not establish that the shipped app has an add-provider
+screen: check the current client before sending the owner there. They are
+never a prerequisite for a managed first reply.
 
 The same devices link the owner's GitHub and Linear accounts through
 `/v1/accounts` (ADR 0196; `clankie accounts` on the CLI): a GitHub device flow

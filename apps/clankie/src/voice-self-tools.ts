@@ -1,9 +1,9 @@
 /**
  * The realtime voice's direct line to three of Clankie's own tools —
  * `recall_episodes`, `get_self_state`, `remember_episode` — by the same names
- * and through the same captain tool bank (`CaptainPort.voiceSelfTool`), in the
- * `discord_voice` lane. Visibility is the lane's: recall sees shareable notes
- * only, and a voice-written episode takes the lane default.
+ * through `CaptainPort.voiceSelfTool`, in the `discord_voice` lane. The captain
+ * maps recall/write to its one authored memory tool. Visibility is the lane's:
+ * recall sees shareable notes only, and a voice-written note is shareable.
  *
  * What comes back here is read by a speaking model, so it is bounded and
  * recall is compacted to the newest few notes without ids or room snowflakes.
@@ -87,6 +87,18 @@ export async function runVoiceSelfTool(
     arguments: args,
   });
   const text = resultText(result);
+  if (request.tool === "remember_episode" && result.isError !== true) {
+    // The memory facade returns an id/text; the speaking model needs only the
+    // existing acknowledgment, without a room id or legacy retention claim.
+    try {
+      const written: unknown = JSON.parse(text);
+      if (written !== null && typeof written === "object" && "written" in written) {
+        return { text: JSON.stringify({ remembered: written.written === true }, null, 2), isError: false };
+      }
+    } catch {
+      // Preserve bounded tool output if a future adapter returns another shape.
+    }
+  }
   if (result.isError === true || request.tool !== "recall_episodes") {
     return { text: bound(text), isError: result.isError === true };
   }

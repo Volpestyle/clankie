@@ -3,6 +3,13 @@
 Status: accepted (James, 2026-09-08, operator conversation). Amended by
 [ADR 0191](0191-a-reply-to-his-post-goes-to-whoever-owns-the-work.md) (headlines name a comment's parent; replies to his posts are routed).
 
+Amended 2026-10-04 by
+[ADR 0214's VUH-1678 decision](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04):
+signed rule-passing webhooks wake one configured ordinary chat, default
+`global-default`. The inbox protocol, notification polling and per-work wake
+routing described below are historical. Default rules select James's signed
+comments and mentions; own-write suppression remains.
+
 ## Amendment — work ownership, 2026-10-04
 
 [ADR 0218's Linear extension](0218-native-seats-drive-their-attached-conversation.md)

@@ -538,6 +538,7 @@ const shell: ClankieFaceShell = new ClankieFaceShell({
   onLoadOlderHistory: () => conversationPrompt.loadOlderHistory(conversationShellSink()),
   onHerdrJump: jumpToFleetAgent,
   liveAgents: () => herdrRoster.snapshot().liveAgents ?? [],
+  workerReports: () => herdrRoster.snapshot().workerReports ?? [],
   expandedAgent: () => expandedAgent?.name,
   expandedAgentSeatId: () => expandedAgent?.seatId,
   onOpenLiveAgent: async ({ seat, name }) => {

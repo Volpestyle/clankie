@@ -4,9 +4,9 @@ import type {
   WorkerReportRouting,
 } from "@clankie/protocol";
 import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
-import type { ConversationRunner, ConversationStore } from "./conversations.ts";
+import type { ConversationRunner, ConversationStore, InboundReportRecipient } from "./conversations.ts";
 
-/** A guard around conversation acceptance, never a replay queue. */
+/** Admission fence; the conversation retains report delivery and explicit read state. */
 export class InboundSeatReceipts {
   private readonly fence: DeliveryFence;
   private readonly conversations: Pick<ConversationStore, "inboundAcceptance" | "submitInbound">;
@@ -98,6 +98,8 @@ export class InboundSeatReceipts {
     /** An admitted room route keeps its authority and existing reply mouth. */
     runner?: ConversationRunner,
     workerReportRouting?: WorkerReportRouting,
+    /** Host-captured original destination; used only after renewed authority checks. */
+    recipient?: InboundReportRecipient,
   ): FleetSeatMessageReceipt {
     const fingerprint = deliveryFingerprint(text);
     const previous = this.reconcile(paneId, delivery, fingerprint);
@@ -129,6 +131,7 @@ export class InboundSeatReceipts {
           paneId,
           text,
           ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
+          ...(recipient === undefined ? {} : { recipient }),
         },
         conversationId,
         runner,

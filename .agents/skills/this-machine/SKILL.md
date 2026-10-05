@@ -126,7 +126,8 @@ index). Configure through the headless CLI:
 | Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`                     |
 | Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`                               |
 | Persona images                        | `clankie persona images set <folder>`, `status`, `clear` (restart applies)                             |
-| Linear wake rules                     | `clankie linear wake show`, `clankie linear wake set --owner-user-ids ID --actors owner`               |
+| Linear wake rules                     | `linear_wake` (operator only); `clankie linear wake show`, `… set --owner-user-emails EMAIL`           |
+| Linear wake chat                      | `clankie linear target show`, `clankie linear target set global-default`                               |
 | Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`                       |
 | Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                                |
 | Discord picker directory              | `clankie discord directory [servers                                                                    | channels | roles | people] --server ID` (omit server for servers; inspect state/reason before claiming coverage) |
@@ -151,7 +152,7 @@ index). Configure through the headless CLI:
 | Play session                          | `clankie play status` / `clankie play stop`                                                            |
 | Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                   |
 
-Everything else about the launcher (Linear inbox, devices, memory, sleep,
+Everything else about the launcher (Linear activity, devices, memory, sleep,
 steering a turn, model refresh, setup and conflicts) is in
 [launcher details](reference/launcher.md).
 
@@ -171,9 +172,25 @@ Finish active turns and close side conversations first. An externally bound
 root must end its seat first; resetting service storage cannot reset that
 harness's context. Full contract: `{repoRoot}/docs/cli.md`.
 
+## Memory
+
+Use `memory` for selected notes: `action: write` takes `text`, `search` takes `query`,
+`edit` takes `id` and `text`, and `forget` takes `id`. Notes stay until forgotten;
+no retention flag is needed. Search when the bounded automatic card does not
+show what you need. An edit or forget requires the note's own source
+conversation; reading a shared note does not give another conversation control
+over it. Console notes remain private to the operator lane; Discord notes are
+shareable. The host supplies source and visibility.
+
+`/memory` and `clankie memory` are explicit operator management across
+conversations. They remain the way to manage older notes without a source
+conversation. Person facts still come from your person's `/person-memory`,
+not this tool. See `{repoRoot}/docs/memory.md` for the storage and authority
+contract.
+
 ## Read next, only for the question at hand
 
-- [Launcher details](reference/launcher.md): Linear inbox, devices, memory,
+- [Launcher details](reference/launcher.md): Linear activity, devices, memory,
   sleep and doorways, `clankie send`, model refresh, `/setup`, conflicts.
 - [Fleet, hires and agent history](reference/fleet.md): `hire_agent` outcomes,
   skill selection, Codex accounts, worker locations, agent conversations.
@@ -195,6 +212,15 @@ a new session does not inherit it. Keep transient actions in `clankie stance`
 notes. Local Codex `/goal` state appears automatically, including paused,
 blocked, budget/usage limits and completion. Remote or unsupported native goal
 stores remain unknown. Goal state and busy/idle turn status are independent.
+
+Service goals require a Pi-owned conversation. Pi's `create_goal` stores an
+inactive proposal for the owner to confirm with `/goal accept`; only owner
+commands activate it. Native harness MCP seats refuse service `create_goal`
+with `native_goal_unsupported`, since the service cannot enforce their goal
+continuations or usage. Every service goal has a finite token budget (default
+1,000,000; owner override `/goal --tokens <n> <objective>`), including restored
+goals. A refused native goal is a boundary to explain, not a cue to start a
+second lead through another conversation.
 
 ## Presence and desktop body
 
@@ -239,6 +265,14 @@ An absent marketplace needs `claude plugin marketplace add
 symlinks; use `CLAUDE_CONFIG_DIR` for an alias profile. Verify the fresh native
 catalog lists `message_clankie`, `clankie_tools`, and `clankie_call`, then make a
 bounded connected-tool read.
+
+Doctor's `linkedSession.nativeBindings` distinguishes observed, recovered and
+missing session proof. Local Codex `--remote … resume THREAD` reattachments are
+recovered only from the exact retained seat server/socket/thread lifetime.
+After an owner-authorized same-thread reattach, `clankie agents readopt SEAT
+--conversation ID` repairs the existing owning conversation's occupant binding.
+Unread worker output is available through `clankie agents reports --conversation ID`;
+reading leaves it unread until the lead acknowledges the fully offered IDs.
 
 The roster's `harnessBridge` flags the same process facts; `Ctrl+G` in the
 console reveals the selected pane's full fix. `live-process` verifies process

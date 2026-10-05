@@ -444,6 +444,52 @@ describe("authenticated operator conversation relay", () => {
     expect(await response.json()).toEqual({ error: "steer_grant_required" });
   });
 
+  it.each([
+    { op: "readopt_seat", schemaVersion: 1, conversationId: "global-default", seatId: "term-worker" },
+    { op: "worker_reports", schemaVersion: 1, conversationId: "global-default" },
+    {
+      op: "acknowledge_worker_reports",
+      schemaVersion: 1,
+      conversationId: "global-default",
+      deliveryIds: ["00000000-0000-4000-8000-000000000001"],
+    },
+  ])("refuses a chat-only paired device's $op without forwarding captain authority", async (command) => {
+    const serviceRequest = OperatorConversationServiceRequestSchema.parse(command);
+    let captainForwards = 0;
+    let deviceChecks = 0;
+    const upstream = createServer((request, response) => {
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/v1/devices/self" && request.headers.authorization === `Bearer ${TOKEN}`) {
+        deviceChecks += 1;
+        response.end(
+          JSON.stringify({
+            ...activeDevice,
+            grants: { chat: true, steer: false, terminalObserve: false, terminalControl: false },
+          }),
+        );
+        return;
+      }
+      captainForwards += 1;
+      response.statusCode = 503;
+      response.end(JSON.stringify({ error: "unexpected_captain_forward" }));
+    });
+    servers.push(upstream);
+    upstream.listen(0, "127.0.0.1");
+    await once(upstream, "listening");
+    const address = upstream.address();
+    if (address === null || typeof address === "string") throw new Error("test captain did not bind TCP");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const relay = await startRelay({
+      authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl }),
+      dispatch: createCaptainConversationDispatch({ baseUrl, bearerToken: CAPTAIN_TOKEN }),
+    });
+    const response = await post(relay.url, "/operator/v1/dispatch", serviceRequest);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "steer_grant_required" });
+    expect(deviceChecks).toBeGreaterThanOrEqual(2);
+    expect(captainForwards).toBe(0);
+  });
+
   it("requires the steer grant to reset conversation context", async () => {
     const relay = await startRelay({
       authorizeDevice: {

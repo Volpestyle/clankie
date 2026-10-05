@@ -189,9 +189,10 @@ credential holder.
   thread while both stay alive; Ctrl+C discards the fork and restores the main
   transcript. The footer names the open side conversation from either side.
 - `/goal` shows the selected conversation's durable goal. `/goal <objective>`
-  starts one; `--tokens <n>` gives it a hard model-token budget, and
-  `pause|resume|clear` remain owner controls. Clankie proposes goals in chat;
-  proposals do not activate themselves.
+  starts one with a 1,000,000 model-token budget; `--tokens <n>` overrides it.
+  `/goal accept` activates Clankie's inactive proposal, and `pause|resume|clear`
+  remain owner controls. Native harness heads refuse service goals because the
+  service cannot enforce their continuation or usage budget.
 - `/autonomy on|off` controls autonomous goal continuations and scheduled
   self-wakes globally. `/autonomy clear` removes the selected conversation's
   pending wake without changing its goal.

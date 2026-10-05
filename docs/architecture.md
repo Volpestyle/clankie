@@ -320,19 +320,22 @@ environment for authenticated requests.
 
 ### Goals and autonomous continuation
 
-The service also keeps `autonomy.json`: one owner-approved goal and one
+The service also keeps `autonomy.json`: one proposed or owner-approved goal and one
 replaceable self-wake per operator conversation, plus a global enable switch.
 An unreadable file fails closed and surfaces `state_unreadable` to operator
 clients instead of silently re-enabling autonomous work.
-An active goal queues host-authored continuation turns through the same
+An active goal in a Pi-owned conversation queues host-authored continuation turns through the same
 conversation chain as operator messages, so every tool call and reply stays in
 the existing Pi session and public event log. A human message that arrives
 while that run is streaming steers it by default; in-flight tool calls still
 finish. Explicit `delivery: "steer"` also joins a human-started Pi turn, while
 `delivery: "queue"` waits for a separate turn on the conversation FIFO
 ([ADR 0091](adr/0091-a-mid-turn-message-steers-the-turn.md)). A
-token budget moves a goal to `budget_limited`; `/goal` owns activation,
-pause/resume, and clearing, while `/autonomy off` stops new continuations and
+finite token budget (default 1,000,000) moves a goal to `budget_limited` before
+another provider request; failed turns retain recorded usage. Model calls persist
+inactive proposals, confirmed only by `/goal accept`. Native harness seats refuse
+service goals, and a queued goal pauses on discovering a native head.
+`/goal` owns activation, pause/resume, and clearing, while `/autonomy off` stops new continuations and
 wakes. A due wake queues one turn with Clankie's recorded reason and may be
 replaced by another. Neither path changes the conversation's tool set or
 authority ([ADR 0130](adr/0130-goals-and-self-wakes-share-the-operator-thread.md)).
@@ -363,12 +366,14 @@ Operator input can invoke an exact loaded skill as `/name task` or
 skill command and enables expansion for that prompt only. Discord input and
 ordinary operator prompts keep expansion disabled.
 
-Before each Pi run, a hidden host extension reads the newest bounded episode
+Before each Pi run, a hidden host extension reads a bounded memory
 card into the system prompt. The host supplies the destination lane, filters
 operator-private notes out of ambient lanes, and refreshes recall without
 persisting duplicate cards in the conversation. Discord turns also receive the
 newest visible person facts for their authenticated guild/user identity. The
-bounded recent and retained episodes and per-person fact files live under
+selected notes persist until forgotten. The `memory` tool writes, searches,
+edits, and forgets them within the admitted conversation's authority. Notes
+and per-person fact files live under
 `~/.clankie/memory/`; the TUI's `/memory` command browses, edits, and forgets
 that same store through operator-only routes. [`docs/memory.md`](memory.md) is
 the full picture — what each store holds, who may read it, and what bounds it.

@@ -30,8 +30,10 @@ of silently re-enabling autonomy.
 
 ```mermaid
 flowchart LR
-  Idea[Clankie notices useful work] --> Proposal[ordinary conversation proposal]
-  Proposal -->|owner activates /goal| Goal[durable active goal]
+  Idea[Clankie notices useful work] --> Proposal[inactive proposed goal]
+  Proposal -->|owner confirms /goal accept| Goal[durable active goal]
+  Owner[owner sets /goal objective] --> Goal
+  Harness[native harness seat] --> Refused[service goals refused]
   Goal --> Queue[operator conversation queue]
   Wake[self-scheduled wake becomes due] --> Queue
   Human[operator message] --> Queue
@@ -44,13 +46,44 @@ flowchart LR
   Off -. stops wake timer .-> Wake
 ```
 
-`create_goal`, `get_goal`, and `update_goal` follow Codex's behavioral split:
-the owner or system activates a goal, while the model may only finish it or
-mark it blocked. Autonomous turns cannot create a goal. Completion remains a
-model audit against the fixed objective and concrete evidence; it is not a
-second model pretending to be an independent verifier. A model-token budget is
-optional and hard: reaching it moves the goal to `budget_limited` before
-another continuation is admitted.
+`create_goal` persists an inactive `proposed` goal. Only the owner's
+`/goal accept` (API `accept_goal`) confirms it; `/goal <objective>` (API
+`set_goal`) creates an active goal directly. Resume cannot accept a proposal.
+The model can finish or block an active goal. Completion remains a model audit
+against the fixed objective and concrete evidence; it is not a second model
+pretending to be an independent verifier.
+
+Activation must remain an explicit owner action. The dispatch endpoint currently
+accepts the same captain bearer that the owner TUI uses for autonomy `set_goal`
+and `accept_goal`; it does not distinguish a human command from a shell-capable
+turn using that credential. Such a turn can therefore activate or accept a goal
+through the API itself. [VUH-1676](https://linear.app/vuhlp/issue/VUH-1676)
+separates model-tool proposals from activation and enforces budgets and native
+seat refusal, but does not redesign this authentication boundary. A follow-up
+must bind activation to an owner-authenticated action independently of the
+machine execution credential before exclusive human confirmation is enforced.
+
+Every service goal has a finite model-token budget, defaulting to 1,000,000.
+The owner can override it with `/goal --tokens <positive integer> <objective>`.
+Legacy goals without a budget receive the same default, retaining their recorded
+usage; exhausted goals become `budget_limited` before admission. Usage is saved
+as each provider response settles, including failed turns, retries and compaction.
+An error or aborted response reporting zero tokens records zero usage, preserving
+Pi's retries and the next owner turn. Zero usage on a successful response, or
+negative, fractional or non-finite usage, remains unaccountable and stops the run.
+Background cache warming is disabled during goal work because it bypasses that
+accounting path. Reaching the budget
+stops the run before another provider request or continuation. A request already
+in flight can exceed the remaining budget; it is accounted before further work.
+An autonomous response without usable token accounting stops as `usage_limited`.
+
+Native harness MCP seats refuse `create_goal` with `native_goal_unsupported`.
+Owner activation and resume also refuse while a native seat owns the conversation.
+Restored or queued service goals pause when a native head is discovered, instead
+of falling through to a second Pi lead. The native goal store remains separate:
+local Codex goals can be observed, while Claude has no service goal bridge.
+Routing service continuations as native wakes would repeatedly enqueue them on
+delivery acknowledgment without a goal settlement or usage accounting contract.
 
 `schedule_wake(at, reason)` is available in operator turns. At the due time the
 service queues one host-framed turn in that conversation. The reason is context
@@ -73,8 +106,7 @@ does not abort a tool call already running.
 - A general planner, proposal database, policy engine, and multi-job scheduler
   add structure before there is evidence Clankie needs it.
 - Letting Clankie activate his own goals removes the deliberate owner boundary;
-  conversational proposals preserve personality without silently creating an
-  endless job.
+  inactive proposals preserve personality without silently creating an endless job.
 - A separate autonomous agent or transcript would split identity, ordering,
   steering, and audit history from the operator thread.
 
@@ -85,5 +117,5 @@ does not abort a tool call already running.
 - The console may be closed while the service continues; reconnecting tails the
   same durable events.
 - There is deliberately no recurring calendar grammar, multiple pending wakes,
-  proposal registry, or independent completion judge. Those become justified
+  separate proposal registry, or independent completion judge. Those become justified
   only when one replaceable wake and one active goal stop being enough.

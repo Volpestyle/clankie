@@ -49,9 +49,7 @@ describe("tools that need a Discord body", () => {
       const offered = names({}, lane);
       expect(offered.filter((name) => DISCORD_BODY_TOOLS.includes(name))).toEqual([]);
       // The rest of his reach is untouched.
-      expect(offered).toEqual(
-        expect.arrayContaining(["generate_image", "get_self_state", "remember_episode"]),
-      );
+      expect(offered).toEqual(expect.arrayContaining(["generate_image", "get_self_state", "memory"]));
     }
   });
 

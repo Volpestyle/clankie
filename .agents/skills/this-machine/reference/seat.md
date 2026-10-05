@@ -77,19 +77,11 @@ that flag creates its own chat rooted at the launch directory. Owner preferences
 and project instructions follow that conversation. Fresh Codex seats also get
 separate chats; their resume record remains independent of Claude's.
 
-Eligible Linear notifications use that channel in the conversation that owns the
-issue. Successful conversation writes, `hire_agent` with canonical `linearIssue`,
-and `clankie linear work bind --organization UUID --issue UUID --conversation ID`
-establish ownership. `linear work list` reads it. Unowned/removed owners route to
-`linear-inbox`; its `linear inbox handoff CURSOR` uses the current issue owner and
-preserves the original wake decision. Read durable memory/work items/roster, not
-other conversations' transcripts. Follow and attribution rules still gate wakes;
-room ownership retains its original actor/route grants.
-Replies to project/initiative status updates use the retained author of that exact
-update. They can reach a native lead on a remote fleet through its existing channel,
-with the original seat/occupant proof refreshed before dispatch. `linear work list`
-also shows host-stamped native owners. Missing author proof stays in the inbox;
-never infer it from the current pane name or replay uncertain delivery.
+Eligible signed Linear activity uses the existing seat channel of one configured
+ordinary global chat, `global-default` by default. The lead receives the compact
+wake and chooses any delegation. `clankie linear target show` identifies the
+chat; `linear target set ID` changes it. Follow and the VUH-1549 actor/type rules
+still gate wakes. No per-issue owner route or inbox handoff is involved.
 The launched Claude seat projects its settled transcript into the selected
 conversation even outside Herdr or with `--plugin-dir`. `clankie seat-sync` is the
 plugin hook; do not change its session binding to copy a transcript between rooms.

@@ -1,3 +1,4 @@
+import type { WorkerReportSummary } from "@clankie/protocol";
 import {
   Key,
   matchesKey,
@@ -72,7 +73,13 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
   const paintHarness = harness === "claude" ? theme.ansi.yellow : theme.ansi.blue;
   return [
     paintHarness(harness),
-    statusText(seat.status, clean(seat.status), theme),
+    seat.workerReports?.some(
+      (report) => report.state === "pending" || report.state === "uncertain" || report.state === "attempting",
+    )
+      ? theme.ansi.red(`${seat.status === "done" ? "done, " : ""}report not delivered`)
+      : seat.workerReports?.length
+        ? theme.ansi.yellow("report unread")
+        : statusText(seat.status, clean(seat.status), theme),
     // This Mac is the default; only a seat on another machine names where it is.
     seat.fleet === undefined ? undefined : theme.ansi.dim(clean(seat.machine ?? seat.fleet)),
     bridgeWarning(agent, theme),
@@ -83,7 +90,12 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
 
 /** Blocked or broken first, then running, then finished; idle seats only count. */
 function attentionRank(agent: LiveAgent, theme: AgentTheme): number {
-  if (agent.seat.status === "blocked" || bridgeWarning(agent, theme) !== undefined) return 0;
+  if (
+    agent.seat.workerReports?.length ||
+    agent.seat.status === "blocked" ||
+    bridgeWarning(agent, theme) !== undefined
+  )
+    return 0;
   switch (agent.seat.status) {
     case "working":
       return 1;
@@ -123,15 +135,20 @@ export class LiveAgentStrip implements Component {
   private readonly agents: () => readonly LiveAgent[];
   private readonly theme: AgentTheme;
   private readonly maxRows: () => number;
+  private readonly reports: () => readonly WorkerReportSummary[];
 
   constructor(
     agents: () => readonly LiveAgent[],
     theme: AgentTheme,
-    options: { readonly maxRows?: () => number } = {},
+    options: {
+      readonly maxRows?: () => number;
+      readonly reports?: () => readonly WorkerReportSummary[];
+    } = {},
   ) {
     this.agents = agents;
     this.theme = theme;
     this.maxRows = options.maxRows ?? (() => 12);
+    this.reports = options.reports ?? (() => []);
   }
 
   private ordered(): LiveAgent[] {
@@ -199,9 +216,21 @@ export class LiveAgentStrip implements Component {
 
   render(width: number): string[] {
     const agents = this.ordered();
+    const reports = this.reports();
+    const reportRows = [...new Set(reports.map((report) => report.paneId))].slice(0, 3).map((pane) => {
+      const pending = reports.some((report) => report.paneId === pane && report.state !== "delivered");
+      return this.theme.ansi.yellow(`${clean(pane)} · ${pending ? "report not delivered" : "report unread"}`);
+    });
+    const reportNotice = reports.length
+      ? [
+          this.theme.ansi.bold(`Worker reports · ${reports.length} unread`),
+          ...reportRows,
+          this.theme.ansi.dim("/agents reports --conversation ID · read, then acknowledge"),
+        ]
+      : [];
     if (agents.length === 0) {
       this.expanded = false;
-      return [];
+      return reportNotice.map((line) => truncateToWidth(line, Math.max(1, width), "…"));
     }
     const counts = new Map<LiveAgent["seat"]["status"], number>();
     for (const { seat } of agents) counts.set(seat.status, (counts.get(seat.status) ?? 0) + 1);
@@ -215,6 +244,7 @@ export class LiveAgentStrip implements Component {
       return [
         `${ansi.bold(`Agents · ${agents.length}`)}${ansi.dim(" · ↓ list · ctrl+g")}${ansi.dim(" · ")}${summary.join(ansi.dim(" · "))}`,
         ...attention.slice(0, COLLAPSED_ROWS).map((agent) => this.row(agent, "")),
+        ...reportNotice,
       ].map(fit);
     }
     const selected = this.selected();

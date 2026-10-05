@@ -109,6 +109,127 @@ describe("Codex app-server protocol", () => {
   });
 });
 
+it.each(["metadata", "legacy-field", "legacy-method"])(
+  "keeps the same server alive after Herdr's resume readiness timeout and subscribes with %s",
+  async (compatibility) => {
+    const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+    await once(server, "listening");
+    const address = server.address();
+    if (typeof address !== "object" || address === null) throw new Error("Missing test address");
+    let peer: WebSocket | undefined;
+    let closed = 0;
+    let pending = 0;
+    let loaded = false;
+    const methods: string[] = [];
+    const subscriptions: Array<Record<string, unknown>> = [];
+    server.on("connection", (socket) => {
+      peer = socket;
+      socket.on("message", (bytes) => {
+        const request = JSON.parse(String(bytes)) as {
+          id?: number;
+          method: string;
+          params: Record<string, unknown>;
+        };
+        methods.push(request.method);
+        if (request.id === undefined) return;
+        if (request.method === "initialize")
+          expect(request.params.capabilities).toEqual({ experimentalApi: true });
+        if (request.method === "thread/resume") {
+          subscriptions.push(request.params);
+          if (compatibility === "legacy-field" && request.params.excludeTurns === true) {
+            socket.send(
+              JSON.stringify({
+                id: request.id,
+                error: { code: -32602, message: "unknown field `excludeTurns`" },
+              }),
+            );
+            return;
+          }
+        }
+        if (request.method === "thread/turns/list") {
+          expect(request.params).toEqual({
+            threadId: "saved-thread",
+            limit: 1,
+            sortDirection: "desc",
+            itemsView: "summary",
+          });
+          if (compatibility === "legacy-method") {
+            socket.send(
+              JSON.stringify({ id: request.id, error: { code: -32601, message: "method not found" } }),
+            );
+            return;
+          }
+        }
+        const result =
+          request.method === "thread/loaded/list"
+            ? { data: loaded ? ["saved-thread"] : [] }
+            : request.method === "thread/read"
+              ? { thread: { id: "saved-thread" } }
+              : request.method === "thread/resume"
+                ? { thread: { turns: [] } }
+                : request.method === "thread/turns/list"
+                  ? { data: [] }
+                  : request.method === "turn/start"
+                    ? { turn: { id: "brief-turn" } }
+                    : {};
+        socket.send(JSON.stringify({ id: request.id, result }));
+      });
+    });
+    cleanups.push(() => {
+      peer?.terminate();
+      server.close();
+    });
+    const { startCodexAppServerSeat } = await import("../src/captain/codex-app-server.ts");
+    const starting = startCodexAppServerSeat({
+      cwd: "/fixture",
+      resumeThreadId: "saved-thread",
+      threadStartTimeoutMs: 10,
+      onThreadPending: () => {
+        pending++;
+      },
+      server: async () => ({
+        endpoint: "unix:///fixture/socket",
+        connect: async () => {
+          const socket = new WebSocket(`ws://127.0.0.1:${String(address.port)}`);
+          await once(socket, "open");
+          return socket;
+        },
+        failure: () => undefined,
+        output: () => "",
+        close: async () => {
+          closed++;
+        },
+      }),
+      startView: async (args) => {
+        expect(args.slice(-2)).toEqual(["resume", "saved-thread"]);
+        throw new Error(
+          JSON.stringify({
+            error: { code: "timeout", message: "timed out waiting for agent startup" },
+            id: "cli:agent:start",
+          }),
+        );
+      },
+    });
+    await vi.waitFor(() => expect(pending).toBe(1));
+    expect(closed).toBe(0);
+    expect(methods).not.toContain("turn/start");
+    loaded = true;
+    const seat = await starting;
+    expect(seat.threadId).toBe("saved-thread");
+    expect(await seat.send("continue the original assignment")).toEqual({
+      turnId: "brief-turn",
+      state: "started",
+    });
+    expect(methods.filter((method) => method === "turn/start")).toHaveLength(1);
+    expect(subscriptions[0]).toEqual({ threadId: "saved-thread", excludeTurns: true });
+    expect(subscriptions.length).toBe(compatibility === "metadata" ? 1 : 2);
+    if (compatibility !== "metadata") expect(subscriptions[1]).toEqual({ threadId: "saved-thread" });
+    expect(closed).toBe(0);
+    await seat.close();
+    expect(closed).toBe(1);
+  },
+);
+
 // The provider and native TUI are replaced by one local protocol fixture. No
 // native process, credentials, account probe or model request leaves this test.
 describe("trusted native seat policy", () => {

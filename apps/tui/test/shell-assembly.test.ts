@@ -616,10 +616,12 @@ describe("shell assembly", () => {
     const shell = { insertCommandResult() {} } as unknown as ClankieFaceShell;
 
     await built.find((command) => command.name === "goal")!.run("--tokens 5000 inspect the release", shell);
+    await built.find((command) => command.name === "goal")!.run("accept", shell);
     await built.find((command) => command.name === "autonomy")!.run("off", shell);
 
     expect(commands).toEqual([
       { action: "set_goal", objective: "inspect the release", tokenBudget: 5000 },
+      { action: "accept_goal" },
       { action: "set_enabled", enabled: false },
     ]);
   });
