@@ -45,7 +45,8 @@ function fakeConnection(tools: readonly string[]): McpConnection & { calls: stri
   const calls: string[] = [];
   return {
     calls,
-    listTools: async () => tools.map((name) => ({ name, description: `does ${name}`, inputSchema: {} })),
+    listTools: async () =>
+      tools.map((name) => ({ name, description: `does ${name}`, inputSchema: { type: "object" } })),
     callTool: async (name) => {
       calls.push(name);
       return { content: `ran ${name}`, isError: false };
@@ -565,4 +566,56 @@ describe("mcp host", () => {
       await host.close();
     }
   });
+});
+
+it("strict client contract: a rejected third-party entry leaves real stdio healthy tools available", async () => {
+  const require = createRequire(import.meta.url);
+  const rejected = [
+    { name: "bad_root", inputSchema: { type: "string" } },
+    { name: "bad_properties", inputSchema: { type: "object", properties: { value: false } } },
+    { name: "bad_required", inputSchema: { type: "object", required: [1] } },
+    {
+      name: "bad_codex_items",
+      inputSchema: { type: "object", properties: { values: { type: "array", items: [] } } },
+    },
+    { name: "bad_output", inputSchema: { type: "object" }, outputSchema: { type: "array" } },
+  ];
+  const source = `
+    import { Server } from ${JSON.stringify(require.resolve("@modelcontextprotocol/sdk/server/index.js"))};
+    import { StdioServerTransport } from ${JSON.stringify(require.resolve("@modelcontextprotocol/sdk/server/stdio.js"))};
+    import { CallToolRequestSchema, ListToolsRequestSchema } from ${JSON.stringify(require.resolve("@modelcontextprotocol/sdk/types.js"))};
+    const server = new Server({ name: "provider-fixture", version: "1" }, { capabilities: { tools: {} } });
+    server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [
+      { name: "healthy", inputSchema: { type: "object", properties: {} } },
+      ...${JSON.stringify(rejected)},
+    ] }));
+    server.setRequestHandler(CallToolRequestSchema, () => ({ content: [{ type: "text", text: "healthy result" }] }));
+    await server.connect(new StdioServerTransport());
+  `;
+  const warnings: Record<string, unknown>[] = [];
+  const host = createMcpHost({
+    credentials: credentialStore(),
+    curated: [],
+    logger: {
+      info() {},
+      warn(context) {
+        warnings.push(context);
+      },
+    },
+    settings: settingsStore([
+      server({ id: "provider", command: process.execPath, args: ["--input-type=module", "-e", source] }),
+    ]),
+  });
+  try {
+    expect((await host.catalog("operator")).map((tool) => tool.qualifiedName)).toEqual(["provider_healthy"]);
+    const reasons = warnings.filter((entry) => entry.event === "mcp.host.tool_rejected");
+    expect(reasons.map((entry) => entry.tool)).toEqual(rejected.map((tool) => tool.name));
+    for (const entry of reasons)
+      expect(entry.reason, String(entry.tool)).toEqual(expect.stringContaining(String(entry.tool)));
+    expect(
+      await host.call({ lane: "operator", server: "provider", tool: "healthy", arguments: {} }),
+    ).toMatchObject({ outcome: "ok", content: "healthy result" });
+  } finally {
+    await host.close();
+  }
 });

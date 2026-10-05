@@ -40,6 +40,9 @@ jobs:
           pnpm exec oxfmt --check .
           pnpm exec oxlint --deny-warnings .
           node scripts/check-retired-claims.mjs
+      - name: Strict native MCP catalog contracts
+        if: github.event_name != 'workflow_dispatch'
+        run: pnpm mcp:check
       - run: pnpm check
         if: github.event_name == 'workflow_dispatch'
       - run: pnpm --filter @clankie/vox build

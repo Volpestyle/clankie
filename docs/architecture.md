@@ -215,7 +215,12 @@ authored registry the pi session is built from, wrapped once at runtime and
 scoped by the bearer's lane, so a Codex pane with the same entry is the same
 seat. A connected service lists only its `initialTools`; the rest of its catalog
 is reached through `mcp_tool_search` and `mcp_tool_call`, so a harness does not
-carry every tracker schema on each request. Per-turn hook commands
+carry every tracker schema on each request. All lane and fleet wire catalogs are
+checked by `pnpm mcp:check` in the fast push/PR gate, using Claude Code's strict
+MCP SDK contract and Codex's input-schema conversion shape. Failures identify
+the tool and field. Connected catalogs validate each tool before admission;
+`mcp.host.tool_rejected` records the provider, tool and reason, leaving healthy
+tools available even when a provider returns one incompatible entry. Per-turn hook commands
 (`memory-card`, `seat-sync`, `seat-hook`) skip the launcher's import graph. A herdr pane named `clankie` is his head: the census binds it to his own
 persona rather than a fleet contact and projects its transcript into the
 conversation the app pins. While a seat is bound, self-wakes, herdr completion

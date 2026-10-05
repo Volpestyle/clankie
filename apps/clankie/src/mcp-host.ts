@@ -53,6 +53,7 @@ import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
 import { compactLinearWrite } from "./linear-write-receipt.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
+import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -416,7 +417,15 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     const listed = await client.listTools();
     await assertCurrent(server, state);
     const projected = listed
-      .filter((tool) => typeof tool.name === "string" && tool.name.length > 0)
+      .filter((tool) => {
+        const reason = mcpToolSchemaError(tool);
+        if (reason === undefined) return true;
+        options.logger.warn(
+          { event: "mcp.host.tool_rejected", server: server.id, tool: tool.name, reason },
+          "mcp tool omitted: incompatible with native clients",
+        );
+        return false;
+      })
       .map((tool) => ({
         server: server.id,
         name: tool.name,
@@ -425,10 +434,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           typeof tool.description === "string" && tool.description.length > 0
             ? tool.description.slice(0, MAX_DESCRIPTION_CHARACTERS)
             : tool.name,
-        inputSchema:
-          tool.inputSchema !== null && typeof tool.inputSchema === "object"
-            ? (tool.inputSchema as Record<string, unknown>)
-            : { type: "object" },
+        inputSchema: tool.inputSchema as Record<string, unknown>,
         // No `initialTools` means all of them: right for a small server, and
         // the reason a large one should name the handful worth carrying.
         initial: initial.size === 0 || initial.has(tool.name),
@@ -812,10 +818,21 @@ async function connectServer(
       const seenCursors = new Set<string>();
       let cursor: string | undefined;
       do {
-        const page = await client.listTools(cursor === undefined ? {} : { cursor }, {
-          timeout: REQUEST_TIMEOUT_MS,
-        });
-        collected.push(...page.tools);
+        // Validate the envelope here, then each tool in toolsFor. The SDK's
+        // listTools validates the entire array and would lose every healthy
+        // tool when just one provider entry has a rejected schema.
+        const page = await client.request(
+          { method: "tools/list", params: cursor === undefined ? {} : { cursor } },
+          z.object({ tools: z.array(z.unknown()), nextCursor: z.string().optional() }),
+          { timeout: REQUEST_TIMEOUT_MS },
+        );
+        collected.push(
+          ...page.tools.map((tool) =>
+            typeof tool === "object" && tool !== null
+              ? (tool as { name: string; description?: string | undefined; inputSchema?: unknown })
+              : { name: "<unnamed>", inputSchema: tool },
+          ),
+        );
         const next =
           typeof page.nextCursor === "string" && page.nextCursor.length > 0 ? page.nextCursor : undefined;
         if (next !== undefined && seenCursors.has(next)) throw new Error("mcp_catalog_cursor_repeated");

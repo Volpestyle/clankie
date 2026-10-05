@@ -236,3 +236,8 @@ session; a child result
 or roster status alone does not prove the parent's deliverable is complete.
 For an unavailable native route, report the exact refusal and observed catalog.
 A healthy remote link or successful host probe is not native tool acceptance.
+Connected tools with incompatible client schemas are omitted individually;
+`mcp.host.tool_rejected` logs the provider, tool and rejected field. An absent
+tool can be a schema rejection even when the rest of that server is healthy.
+For repository changes, `pnpm mcp:check` checks every lane and the fleet bridge
+against the strict native client contracts and identifies the offending tool.

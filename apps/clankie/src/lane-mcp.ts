@@ -21,6 +21,7 @@ import {
   type CaptainSessionLaneV2,
 } from "@clankie/protocol";
 import type { CaptainPort, LaneTool } from "./captain/port.ts";
+import { assertMcpToolsList } from "./mcp-tool-schema.ts";
 import { SeatCallReceipts } from "./seat-call-receipts.ts";
 
 /** How long an untouched session survives. Swept lazily, on the next request. */
@@ -111,18 +112,22 @@ export function createLaneMcpEndpoint({
       { name: "clankie", version: "0.2.0" },
       { capabilities: { tools: {} }, instructions: instructionsFor(lane) },
     );
-    server.setRequestHandler(ListToolsRequestSchema, () => ({
-      tools: [
-        ...bank.tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          // MCP requires an explicit object root. TypeBox unions of object
-          // variants omit it; retain their combinators and argument validation.
-          inputSchema: { ...tool.inputSchema, type: "object" as const },
-        })),
-        ...(lane === "operator" ? [reconciliationTool] : []),
-      ],
-    }));
+    server.setRequestHandler(ListToolsRequestSchema, () => {
+      const result = {
+        tools: [
+          ...bank.tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            // TypeBox's union of objects omits its root type. Only those
+            // unions are adapted; an invalid authored root must stay visible.
+            inputSchema: objectUnionRoot(tool.inputSchema),
+          })),
+          ...(lane === "operator" ? [reconciliationTool] : []),
+        ],
+      };
+      assertMcpToolsList(result, `${lane} lane`);
+      return result;
+    });
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (request.params.name === RECONCILE_SEAT_CALL && lane === "operator") {
         const args = request.params.arguments ?? {};
@@ -273,4 +278,17 @@ export function createLaneMcpEndpoint({
       await Promise.all([...sessions].map(([id, session]) => dispose(id, session)));
     },
   };
+}
+
+function objectUnionRoot(schema: Record<string, unknown>): { type: "object" } {
+  const variants = schema.anyOf ?? schema.oneOf;
+  if (
+    schema.type === undefined &&
+    Array.isArray(variants) &&
+    variants.length > 0 &&
+    variants.every((variant) => typeof variant === "object" && variant !== null && variant.type === "object")
+  ) {
+    return { ...schema, type: "object" };
+  }
+  return schema as { type: "object" };
 }

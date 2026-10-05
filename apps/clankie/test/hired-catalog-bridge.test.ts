@@ -5,12 +5,14 @@ import { createServer } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { assertMcpToolsList } from "../src/mcp-tool-schema.ts";
 import { expect, it } from "vitest";
 
 async function bridge(
   expected: string | undefined,
   catalog: (cursor?: string) => unknown | undefined,
   linked = true,
+  peers = false,
 ) {
   const home = await mkdtemp(join(tmpdir(), "hired-catalog-bridge-"));
   let calls = 0;
@@ -18,6 +20,18 @@ async function bridge(
     let bytes = "";
     request.on("data", (chunk) => (bytes += String(chunk)));
     request.on("end", () => {
+      if (peers && request.url?.endsWith("/peers")) {
+        response.setHeader("content-type", "application/json");
+        response.end(
+          JSON.stringify({
+            schemaVersion: 1,
+            fleet: "pc",
+            sender: { seatId: "term-fixture", paneId: "w1:p1", binding: "a".repeat(64) },
+            seats: [],
+          }),
+        );
+        return;
+      }
       if (request.url !== "/v1/fleet/mcp") {
         response.writeHead(404);
         response.end("{}");
@@ -207,3 +221,25 @@ it("bounds denied and incomplete-page startup with MCP errors, while no expectat
     await Promise.all(rows.map((f) => f.close()));
   }
 }, 30_000);
+
+it("strict client contract: fleet stdio tools/list includes mailbox, peers and connected tools", async () => {
+  const f = await bridge(
+    undefined,
+    () => ({ tools: [tool("clankie_tools"), tool("clankie_call")] }),
+    true,
+    true,
+  );
+  try {
+    const listed = await f.client.listTools();
+    assertMcpToolsList(listed, "fleet stdio bridge");
+    expect(listed.tools.map((tool) => tool.name)).toEqual([
+      "message_clankie",
+      "clankie_tools",
+      "clankie_call",
+      "list_fleet_seats",
+      "message_peer",
+    ]);
+  } finally {
+    await f.close();
+  }
+});

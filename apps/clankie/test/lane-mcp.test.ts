@@ -1,3 +1,5 @@
+import { CaptainSessionLaneV2Schema } from "@clankie/protocol";
+import { assertMcpToolsList } from "../src/mcp-tool-schema.ts";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -693,5 +695,56 @@ it("keeps Clankie's raw Minecraft motor out of direct and deferred lane MCP call
         }),
       })
     ).json();
+  }
+});
+
+// Catalog boundary check: real authored registries, real HTTP MCP endpoint,
+// raw JSON result so a client parser cannot hide the offending tool name.
+it.each(CaptainSessionLaneV2Schema.options)("strict client contract: %s lane tools/list", async (lane) => {
+  const bank = await buildLaneToolBank(
+    bankDeps(),
+    {},
+    {} as LaneLog,
+    lane,
+    { pokeagentMmoEnabled: true },
+    {} as AutonomyStore,
+    {} as HerdrWatchPort,
+    async () => {
+      throw new Error("catalog check must never hire");
+    },
+    async () => {
+      throw new Error("catalog check must never message");
+    },
+  );
+  const { createLaneMcpEndpoint } = await import("../src/lane-mcp.ts");
+  const endpoint = createLaneMcpEndpoint({ captain: { laneToolBank: async () => bank } });
+  const request = (body: unknown, session?: string) =>
+    endpoint.handle(
+      new Request("http://localhost/v1/mcp", {
+        method: "POST",
+        headers: { ...MCP_HEADERS, ...(session ? { "mcp-session-id": session } : {}) },
+        body: JSON.stringify(body),
+      }),
+      lane,
+    );
+  try {
+    const opened = await request({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "contract-check", version: "1" },
+      },
+    });
+    const session = opened.headers.get("mcp-session-id")!;
+    await request({ jsonrpc: "2.0", method: "notifications/initialized" }, session);
+    const listed = await (await request({ jsonrpc: "2.0", id: 2, method: "tools/list" }, session)).json();
+    if (listed.error) throw new Error(`${lane}: ${listed.error.message}`);
+    assertMcpToolsList(listed.result, `${lane} lane wire catalog`);
+    expect(listed.result.tools.length).toBe(bank.tools.length + (lane === "operator" ? 1 : 0));
+  } finally {
+    await endpoint.close();
   }
 });

@@ -1,3 +1,4 @@
+import { assertMcpToolsList } from "../src/mcp-tool-schema.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -321,6 +322,20 @@ it("retains the host account-binding fence after the standing account snapshot",
     expect((await f.call("clankie_call", { name: "linear_read_0", arguments: {} })).isError).toBe(true);
     expect(f.calls).not.toHaveBeenCalled();
     spy.mockRestore();
+  } finally {
+    await f.close();
+  }
+});
+
+it("strict client contract: connected fleet HTTP tools/list", async () => {
+  const f = await fixture();
+  try {
+    const listed = await (await f.rpc("tools/list")).json();
+    assertMcpToolsList(listed.result, "fleet HTTP endpoint");
+    expect(listed.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "clankie_tools",
+      "clankie_call",
+    ]);
   } finally {
     await f.close();
   }
