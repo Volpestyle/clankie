@@ -75,7 +75,9 @@ function row(pane: string, terminal: string, parent?: string): NativeRow {
 }
 
 /** Raw Herdr and kernel observations are the only substituted dependencies. */
-async function fixture(options: { remote?: boolean; parent?: boolean; parentAdapter?: boolean } = {}) {
+async function fixture(
+  options: { remote?: boolean; parent?: boolean; parentAdapter?: boolean; nonApiCaptain?: boolean } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "worker-parent-routing-"));
   roots.push(root);
   const local = [row(WORKER, "term_aaa", options.parent === false ? undefined : PARENT)];
@@ -223,6 +225,14 @@ async function fixture(options: { remote?: boolean; parent?: boolean; parentAdap
         request.headers.get("authorization") === "Bearer operator"
           ? { operatorId: "fixture-owner", steerSourceLane: "tui" }
           : undefined,
+      ...(options.nonApiCaptain
+        ? {
+            authenticateCaptain: async (request: Request) =>
+              request.headers.get("authorization") === "Bearer discord-text"
+                ? { captainId: "fixture-captain", steerSourceLane: "discord_text" as const }
+                : undefined,
+          }
+        : {}),
     });
     const socket = { destroyed: false } as Socket;
     const localFetch = link.fetch((request) => app.app.fetch(request));
@@ -1119,4 +1129,19 @@ it("offers retained results through authenticated operator dispatch and only ack
   expect(unauthenticated.status).toBe(503);
   expect(await unauthenticated.json()).toMatchObject({ error: "captain_execution_unavailable" });
   attached.stop.abort();
+});
+
+it.each([
+  { op: "readopt_seat", seatId: "term_aaa" },
+  { op: "worker_reports" },
+  { op: "acknowledge_worker_reports", deliveryIds: [randomUUID()] },
+])("refuses non-api captain authority for $op", async (request) => {
+  const f = await fixture({ parent: false, nonApiCaptain: true });
+  const response = await f.service.app.app.request("/operator/v1/dispatch", {
+    method: "POST",
+    headers: { authorization: "Bearer discord-text", "content-type": "application/json" },
+    body: JSON.stringify({ schemaVersion: 1, conversationId: "global-default", ...request }),
+  });
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "operator_authority_required" });
 });

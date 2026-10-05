@@ -1,14 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import type { ObservedFleet, ObservedFleetSeat, ObservedHeadSeat } from "./herdr-census.ts";
@@ -35,9 +26,13 @@ export class HerdrParentEdges {
   private readonly path: string;
   constructor(path: string) {
     this.path = path;
-    this.state = existsSync(path)
-      ? StateSchema.parse(JSON.parse(readFileSync(path, "utf8")))
-      : { schemaVersion: 1, edges: [] };
+    this.state = { schemaVersion: 1, edges: [] };
+    try {
+      this.state = StateSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+    } catch {
+      // Lost provenance denies historical ancestry without blocking current
+      // native observations. Keep the file until a valid observation replaces it.
+    }
   }
   private identity(seat: ObservedFleetSeat | ObservedHeadSeat): string | undefined {
     if (!seat.session) return undefined;
