@@ -19,6 +19,9 @@ import { hostedOperatorAllows } from "../../../packages/protocol/src/hosted-oper
 import {
   DISCORD_DIRECTORY_PATH,
   DiscordDirectorySnapshotSchema,
+  DISCORD_SETUP_TEST_POST_PATH,
+  DiscordSetupTestPostRequestSchema,
+  DiscordSetupTestPostResultSchema,
   safeParseProtocolResponse,
 } from "../../../packages/protocol/src/index.ts";
 import { createHash } from "node:crypto";
@@ -88,10 +91,12 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       path === DISCORD_ROOM_GUIDANCE_PATH ||
       path === DISCORD_SETTINGS_PATH ||
       path === DISCORD_DIRECTORY_PATH ||
+      path === DISCORD_SETUP_TEST_POST_PATH ||
       path === DISCORD_ROOM_VOICE_PATH ||
       path === DISCORD_VOICE_TRANSCRIPTS_PATH;
     if (roomRoute) {
-      const method = path === DISCORD_ROOM_GUIDANCE_PATH ? "POST" : "GET";
+      const method =
+        path === DISCORD_ROOM_GUIDANCE_PATH || path === DISCORD_SETUP_TEST_POST_PATH ? "POST" : "GET";
       if (request.method !== method) {
         writeJson(response, 405, { error: "method_not_allowed" });
         return true;
@@ -101,7 +106,12 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         writeAuthDenial(response, "invalid");
         return true;
       }
-      const grant = path === DISCORD_ROOM_GUIDANCE_PATH ? "steer" : "terminalObserve";
+      const grant =
+        path === DISCORD_SETUP_TEST_POST_PATH
+          ? "terminalControl"
+          : path === DISCORD_ROOM_GUIDANCE_PATH
+            ? "steer"
+            : "terminalObserve";
       if (!(await authorizeGrant(options, token, response, grant))) return true;
       if (!options.roomRequest) {
         writeJson(response, 503, { error: "room_route_unavailable" });
@@ -109,9 +119,16 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       }
       let body: string | undefined;
       if (method === "POST") {
-        const parsed = DiscordRoomGuidanceRequestSchema.safeParse(await readJson(request));
+        const parsed = (
+          path === DISCORD_SETUP_TEST_POST_PATH
+            ? DiscordSetupTestPostRequestSchema
+            : DiscordRoomGuidanceRequestSchema
+        ).safeParse(await readJson(request));
         if (!parsed.success) {
-          writeJson(response, 400, { error: "invalid_room_guidance" });
+          writeJson(response, 400, {
+            error:
+              path === DISCORD_SETUP_TEST_POST_PATH ? "invalid_discord_test_post" : "invalid_room_guidance",
+          });
           return true;
         }
         body = JSON.stringify(parsed.data);
@@ -126,17 +143,19 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         return true;
       }
       const schema =
-        path === DISCORD_ROOMS_PATH
-          ? DiscordRoomsSnapshotSchema
-          : path === DISCORD_ROOM_GUIDANCE_PATH
-            ? DiscordRoomGuidanceSchema
-            : path === DISCORD_ROOM_VOICE_PATH
-              ? DiscordRoomVoiceStatusSchema
-              : path === DISCORD_VOICE_TRANSCRIPTS_PATH
-                ? DiscordVoiceTranscriptPageSchema
-                : path === DISCORD_DIRECTORY_PATH
-                  ? DiscordDirectorySnapshotSchema
-                  : DiscordSettingsSnapshotSchema;
+        path === DISCORD_SETUP_TEST_POST_PATH
+          ? DiscordSetupTestPostResultSchema
+          : path === DISCORD_ROOMS_PATH
+            ? DiscordRoomsSnapshotSchema
+            : path === DISCORD_ROOM_GUIDANCE_PATH
+              ? DiscordRoomGuidanceSchema
+              : path === DISCORD_ROOM_VOICE_PATH
+                ? DiscordRoomVoiceStatusSchema
+                : path === DISCORD_VOICE_TRANSCRIPTS_PATH
+                  ? DiscordVoiceTranscriptPageSchema
+                  : path === DISCORD_DIRECTORY_PATH
+                    ? DiscordDirectorySnapshotSchema
+                    : DiscordSettingsSnapshotSchema;
       const parsed = safeParseProtocolResponse<unknown>(schema, data);
       writeJson(
         response,

@@ -11,7 +11,7 @@ import {
 } from "@clankie/api-client";
 
 const USAGE =
-  "Use discord setup [choices home|talk|computer|team], or discord setup home --server NAME; talk --channel NAME [...]; computer --access nobody|me|people|servers [--person NAME | --server NAME ...]; team [--visible on|off] [--server NAME].";
+  "Use discord setup [choices home|talk|computer|team], or discord setup home --server NAME; talk --channel NAME [...]; computer --access nobody|me|people|servers [--person NAME | --server NAME ...]; team [--visible on|off] [--server NAME]; test-post --channel NAME.";
 export async function runDiscordSetupCommand(args: readonly string[], api: DiscordSetupApi) {
   const { values, positionals } = parseArgs({
     args: [...args],
@@ -27,6 +27,19 @@ export async function runDiscordSetupCommand(args: readonly string[], api: Disco
   const client = new DiscordSetupClient(api);
   let view = await client.read();
   if (!args.length) return view;
+  if (positionals[0] === "test-post") {
+    if (
+      positionals.length !== 1 ||
+      values.channel?.length !== 1 ||
+      Object.keys(values).some((key) => key !== "channel")
+    )
+      throw new Error(USAGE);
+    const rooms = view.directories
+      .filter((directory) => directory.kind === "channels")
+      .flatMap((directory) => directory.entries)
+      .filter((entry) => ["text", "announcement"].includes(entry.kind));
+    return client.testPost(view, discordPickByName(view, rooms, values.channel[0]!));
+  }
   const listing = positionals[0] === "choices";
   const id = positionals[listing ? 1 : 0];
   const sentence = view.snapshot.setup!.definition.sentences.find((item) => item.id === id);

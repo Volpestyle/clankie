@@ -2774,10 +2774,12 @@ Read the same four filled sentences and check results as TUI `/discord`, using
 the host’s wording and computer name. Server, room and people names come from
 the connected account’s directory. Lists can be partial; missing names remain
 unavailable. Account connection and selected-room visibility use directory
-evidence. Send Messages, Manage Channels, Manage Webhooks, computer authority
-and test posts remain **not checked** until the shared active-check work lands
-([VUH-1642](https://linear.app/vuhlp/issue/VUH-1642)). Reading or changing setup
-never posts to Discord.
+evidence. Send Messages, Manage Channels and Manage Webhooks use the connected
+gateway's own guild, self-member roles and channel overwrites. Proven denials
+say **needs**; missing/incomplete evidence says **not checked**. Team room
+creation uses guild permissions; team posting/webhook checks need selected
+room evidence in that server. Computer authority and an unperformed test post
+remain unchecked. Reading or changing setup never posts to Discord.
 
 ```sh
 clankie discord setup choices home
@@ -2790,6 +2792,7 @@ clankie discord setup computer --access servers --server Studio
 clankie discord setup computer --access nobody
 clankie discord setup team --server Studio --visible on
 clankie discord setup team --visible off
+clankie discord setup test-post --channel general
 ```
 
 `choices home|talk|computer|team` returns names and numbered choices such as
@@ -2801,6 +2804,15 @@ never changes machine grants. `me` requires the owner configured under
 Advanced. Picking people replaces server grants; picking servers grants every
 admitted human in those servers and replaces individual grants. `nobody`
 clears all three machine-grant lists.
+
+`test-post --channel NAME` explicitly sends one fixed setup message with mentions
+disabled. It requires settings-level owner authority and a current settings
+revision, and rechecks the connected account and Send Messages permission.
+The TUI offers **Send a test post…** with the same room picker. A `posted`
+result carries the native message ID; `unconfirmed` means inspect the room
+before trying again. Neither transport retries a missing receipt. Ordinary
+paired Observe/Steer grants do not authorize this write; hosted owner sessions
+use their existing operator bridge.
 
 Each sentence saves through the authenticated host API in one revision-fenced
 write. A stale edit fails rather than overwriting someone else’s change.

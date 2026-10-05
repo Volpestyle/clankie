@@ -131,6 +131,7 @@ import { DeliveredFileStore } from "./delivered-files.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { readDiscordBodyDirectory } from "./discord-directory.ts";
+import { readDiscordBodyPermissions, postDiscordBodyTest } from "./discord-setup-body.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
 import { MemoryCapacityError, createFileMemory, defaultMemoryDir } from "./memory.ts";
 import { createWorldPlayExecution } from "./play-execution-world.ts";
@@ -1090,6 +1091,18 @@ const workerMcp = new WorkerMcp({
 });
 
 const clankie = await createClankieApp({
+  discordPermissions: (query, body) =>
+    readDiscordBodyPermissions(query, {
+      body,
+      env: process.env,
+      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+    }),
+  discordTestPost: (query, body) =>
+    postDiscordBodyTest(query, {
+      body,
+      env: process.env,
+      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+    }),
   discordDirectory: (query, body) =>
     readDiscordBodyDirectory(query, {
       body,

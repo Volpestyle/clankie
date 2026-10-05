@@ -131,6 +131,7 @@ index). Configure through the headless CLI:
 | Shared Discord settings definition    | `clankie discord definition` (host wording, picker/check kinds, Advanced fields; no credentials)       |
 | Discord sentence setup                | `clankie discord setup`, `… choices SENTENCE`, `… SENTENCE` with named choices (see `docs/cli.md`)     |
 | Non-secret Discord setup              | `clankie discord status`, `clankie discord set --active-body bot …`                                    |
+| Explicit Discord test post            | `clankie discord setup test-post --channel NAME` only when the owner asks to post; no automatic probe  |
 | Desktop expressions / quiet hours     | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`    |
 | Minecraft profiles and play           | `clankie minecraft configure`, `profiles`, `status`, `join PROFILE`, `leave`; load `minecraft`         |
 | Fleet connected tools / peer messages | `clankie fleet status`, `clankie fleet set --tools off`, `clankie fleet set --peer-messages off`       |

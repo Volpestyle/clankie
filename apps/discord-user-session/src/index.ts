@@ -65,7 +65,11 @@ import {
 } from "@clankie/settings";
 import { createVoxClient, VOX_IPC_PROTOCOL_VERSION } from "@clankie/vox-client";
 import { createServer } from "node:http";
-import { tryHandleDiscordDirectoryRequest } from "@clankie/discord-presence-core";
+import {
+  tryHandleDiscordDirectoryRequest,
+  tryHandleDiscordSetupRequest,
+  postDiscordSetupTestMessage,
+} from "@clankie/discord-presence-core";
 import { DiscordUserGateway } from "./gateway.ts";
 import { userSessionHealth, type UserSessionGatewayStatus } from "./health.ts";
 import { assertUserSessionAdmissible } from "./readiness.ts";
@@ -1001,6 +1005,14 @@ const server = createServer((request, response) => {
     tryHandleDiscordDirectoryRequest(request, response, {
       token: bridgeToken,
       read: (query) => gateway.readDirectory(query, gatewayStatus === "ready"),
+    })
+  )
+    return;
+  if (
+    tryHandleDiscordSetupRequest(request, response, {
+      token: bridgeToken,
+      read: (query) => gateway.readPermissions(query, gatewayStatus === "ready"),
+      post: (query) => postDiscordSetupTestMessage(query, { authorization: admission.userToken }),
     })
   )
     return;

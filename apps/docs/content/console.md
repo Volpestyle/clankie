@@ -80,6 +80,13 @@ Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token bounda
 
 {{TUI_README_OPERATOR_BEHAVIOR}}
 
+`/discord` shows the same four setup sentences as the app and dashboard.
+Permission checks use his connected account's gateway data: a proven denial
+says **needs**, and missing evidence says **not checked**. **Send a test post…**
+is an explicit owner action for one text room. Opening setup or changing a
+picker never posts. The CLI equivalent is `clankie discord setup test-post
+--channel general`.
+
 ## Follow Linear
 
 Connecting an account and following its notifications are separate choices.

@@ -30,6 +30,7 @@ const DISCORD_USAGE = [
   "       clankie discord definition",
   "       clankie discord setup [choices home|talk|computer|team] [--server NAME | --channel NAME | --access nobody|me|people|servers | --visible on|off]",
   "       clankie discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]",
+  "       clankie discord setup test-post --channel NAME",
   "       clankie discord guide CONVERSATION_ID TEXT|--clear",
   "       clankie discord transcripts [--cursor CURSOR] [--limit N]",
   "       clankie discord set --field value [--field value ...]",

@@ -41,6 +41,38 @@ tags:
 security: []
 
 paths:
+  /v1/discord/setup/test-post:
+    post:
+      tags: [Discord]
+      operationId: discordSetupTestPost
+      summary: Explicitly send one owner-requested setup message to a text room
+      description: >-
+        Settings-level operator authority is required; Observe or Steer cannot post.
+        The current settings revision, connected account and Send Messages evidence
+        are checked before dispatch. Reads, setup opening and picker edits never
+        call this operation. Missing native receipts are unconfirmed and never retried.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [guildId, channelId, expectedRevision]
+              properties:
+                guildId: { type: string, pattern: '^\d{5,32}$' }
+                channelId: { type: string, pattern: '^\d{5,32}$' }
+                expectedRevision: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: posted with messageId, unavailable with reason, or unconfirmed with post_receipt_unavailable
+        "400":
+          description: Invalid request
+        "403":
+          description: Operator authority required or revoked
+        "409":
+          description: Settings or active account configuration changed
   /v1/discord/ingress:
     post:
       tags: [Discord]

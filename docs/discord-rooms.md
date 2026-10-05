@@ -63,8 +63,14 @@ kinds, help, check kinds, Advanced groups and choice labels from protocol's
 `discord-setup.ts`. `machineName` comes from the host (its name when self-hosted,
 “his cloud computer” when hosted). It does not depend on the device opening
 settings. `clankie discord definition` reads the same metadata with operator
-authentication. Check kinds describe which checks a surface should present;
-this foundation does not claim that an invite, permission check or test post ran.
+authentication. Optional `setup.checks` reports `passed`, `failed` or
+`not_checked` for View Channel, Send Messages, Manage Channels and Manage
+Webhooks. Both bodies compute from their own connected gateway's guild,
+self-member roles and channel overwrites; setup reads never fetch account
+credentials or call Discord's write API. Missing/malformed role or overwrite
+data, disconnected gateways and unsupported thread evidence stay `not_checked`.
+Owner/administrator bypass, role-overwrite union, member overrides and active
+timeouts follow [Discord's permission rules](https://docs.discord.com/developers/topics/permissions).
 The TUI and `clankie discord setup` render the returned definition through
 `DiscordSetupClient` from `@clankie/api-client`. Optional picker bindings define
 server scopes, room kinds and enablement; surfaces do not maintain their own
@@ -72,9 +78,22 @@ field mappings. Names or numbered choices replace ID entry outside Advanced.
 Each sentence writes atomically through the existing revision fence. Selecting
 a social server or rooms preserves all computer grants; choosing computer
 access explicitly replaces its grants. The independent team visibility picker
-can retain its server even when the directory is disconnected. Only account
-connection and selected-room visibility have directory-backed check results;
-the rest say “not checked” pending VUH-1642. Nothing posts automatically.
+can retain its server even when the directory is disconnected. Team room
+creation checks Manage Channels at guild scope. Team posting and webhooks use
+selected rooms in that server; a guild role alone cannot prove room overwrites.
+Without such room evidence those checks stay `not_checked`. Computer authority
+and an unperformed test post remain unchecked. Nothing posts automatically.
+
+TUI **Send a test post…** asks for one text room. The equivalent CLI is
+`clankie discord setup test-post --channel general`. This is an explicit owner
+mutation, `POST /v1/discord/setup/test-post`, with `guildId`, `channelId` and
+`expectedRevision`. It uses settings-level operator authority, not Observe or
+Steer, and rechecks configuration, current permission evidence and account
+identity before dispatch. The gateway checks the expected account again.
+The fixed setup message disables mentions. A native receipt returns `posted`
+and a message ID; missing receipts return `unconfirmed`, with no automatic
+retry. Inspect the room before deliberately trying again. Reading settings,
+listing pickers and saving a sentence cannot invoke this mutation.
 Clients read responses through `parseProtocolResponse`; strict settings writes
 retain `expectedRevision` and never accept display metadata or unknown fields.
 Computer access remains a separate explicit choice, never a server/room preset.
