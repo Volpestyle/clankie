@@ -1,18 +1,11 @@
-/**
- * `/setup`: the one place a new owner starts, and the place anyone comes back
- * to for the rest.
- *
- * Only one thing is required before Clankie can take a turn — a model and
- * something to sign it in — so an unready install goes straight to that and
- * nothing else. Once he can think, `/setup` is a checklist of his optional
- * rooms, each showing its current state and opening the command that already
- * owns it. The last entry hands the walkthrough to Clankie himself: he reads
- * the install card and can set every non-secret setting through his launcher.
- */
+/** `/setup` chains the existing model, phone and integration commands, then hands hiring to Clankie. */
+import { setTimeout as delay } from "node:timers/promises";
+import type { DeviceListItem, OperatorAgentPersona } from "@clankie/protocol";
 import type { CaptainReadiness } from "@clankie/model-provider";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import type { AutostartCommandResult } from "./command/autostart.ts";
 import { readCaptainReadiness, runThinkingSetup, type ProviderServices } from "./provider-commands.ts";
+import { resolveWorkspacePath } from "./session/workspace.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export interface SetupCommandServices {
@@ -20,6 +13,10 @@ export interface SetupCommandServices {
   /** Whether this console reaches his service with a conversation to talk in. */
   readonly canTalk: () => boolean;
   readonly doctor: () => Promise<InstallDoctorReport>;
+  readonly devices: (signal: AbortSignal) => Promise<readonly DeviceListItem[]>;
+  readonly agents: () => Promise<readonly OperatorAgentPersona[]>;
+  readonly workspace: () => string;
+  readonly pair: (shell: ClankieFaceShell) => Promise<number>;
   readonly autostart: (verb: "status" | "enable") => Promise<AutostartCommandResult>;
   /** Every console command, read when an entry opens one, so `/setup` never duplicates a wizard. */
   readonly commands: () => readonly FaceShellCommand[];
@@ -37,21 +34,27 @@ export function buildSetupCommands(services: SetupCommandServices): FaceShellCom
     {
       name: "setup",
       aliases: ["onboard"],
-      description: "Get Clankie thinking, then set up his other rooms",
-      takesArgument: false,
-      async run(_argument, shell): Promise<void> {
+      description: "Model sign-in, phone pairing, then your first agent",
+      argumentHint: "[rooms]",
+      takesArgument: true,
+      async run(argument, shell): Promise<void> {
+        if (argument.trim() && argument.trim() !== "rooms") {
+          shell.insertCommandResult("/setup", "Usage: /setup [rooms]", "error");
+          return;
+        }
         const readiness = await readCaptainReadiness(services.provider);
         if (!readiness.ready) {
           await runFirstSetup(shell, services);
           return;
         }
-        await runSetupChecklist(shell, services, readiness);
+        if (argument.trim() === "rooms") await runSetupChecklist(shell, services, readiness);
+        else await runGuidedSetup(shell, services, readiness);
       },
     },
   ];
 }
 
-/** The required step, then a handoff to Clankie. Also what a fresh console opens on its own. */
+/** A fresh console starts here, then stays in the same guided path. */
 export async function runFirstSetup(shell: ClankieFaceShell, services: SetupCommandServices): Promise<void> {
   const readiness = await runThinkingSetup(shell, services.provider, {
     restartCaptain: services.restartCaptain,
@@ -80,15 +83,218 @@ export async function runFirstSetup(shell: ClankieFaceShell, services: SetupComm
     );
     return;
   }
-  shell.insertMarkdown(
-    [
-      "**Clankie is ready**",
-      "",
-      `He thinks with \`${readiness.model}\`. That's all he needs; everything else is optional.`,
-      "Say hi — the draft below asks him to walk you through the rest. `/setup` lists it too.",
-    ].join("\n"),
-  );
-  shell.setDraft(WALKTHROUGH_DRAFT);
+  await runGuidedSetup(shell, services, readiness);
+}
+
+/** No persisted wizard state: every return reads the actual credentials, devices and roster. */
+async function runGuidedSetup(
+  shell: ClankieFaceShell,
+  services: SetupCommandServices,
+  readiness: Extract<CaptainReadiness, { ready: true }>,
+): Promise<void> {
+  shell.insertCommandResult("/setup", `1 of 3 · Clankie thinks with ${readiness.model}.`, "success");
+  if (!services.canTalk()) {
+    shell.insertCommandResult(
+      "/setup",
+      "Clankie is not reachable yet. Run `clankie restart`, then return to /setup.",
+      "error",
+    );
+    return;
+  }
+  if (!(await setupPhone(shell, services))) return;
+
+  const flow = shell.setupFlow;
+  flow.begin("setup · connections");
+  let connect: string | undefined;
+  try {
+    connect = await flow.readSelect({
+      message: "Optional: give Clankie access to your services",
+      options: [
+        { value: "skip", label: "Continue to my first agent", hint: "connect services anytime" },
+        { value: "connect", label: "Connect Linear, email or Discord", hint: "opens /connect" },
+      ],
+    });
+  } finally {
+    flow.end();
+  }
+  if (connect === undefined) return;
+  if (connect === "connect") await openSetupCommand(shell, services, "connect");
+
+  const existing = (await services.agents()).find((agent) => agent.activeSeatId !== undefined);
+  if (existing) {
+    shell.insertCommandResult(
+      "/setup",
+      `3 of 3 · ${existing.name} already has a live agent seat. /agents opens the team; /setup rooms has the other settings.`,
+      "success",
+    );
+    return;
+  }
+  flow.begin("setup · first agent");
+  let workspace: string | undefined;
+  let task: string | undefined;
+  let action: string | undefined;
+  let request = "";
+  try {
+    workspace = await flow.readText({
+      message: "3 of 3 · Which folder should your first agent work in?",
+      defaultValue: services.workspace(),
+      validate: (value) => {
+        try {
+          resolveWorkspacePath(value, services.workspace());
+          return undefined;
+        } catch {
+          return "Choose an existing folder on this Mac, or Escape to stop.";
+        }
+      },
+    });
+    if (workspace === undefined) return;
+    workspace = resolveWorkspacePath(workspace, services.workspace());
+    task = await flow.readText({
+      message: "3 of 3 · What should your first agent do?",
+      defaultValue: "Explore this folder and report what is here. Do not change files.",
+      validate: (value) => (value.trim() ? undefined : "Give the agent a task, or Escape to stop."),
+    });
+    if (task === undefined) return;
+    request = `Please help me hire my first native agent in your Herdr workspace for ${JSON.stringify(workspace)}. Task: ${task.trim()}\nChoose a suitable installed harness and lead the agent through its normal native channel. If a harness or its sign-in needs setup, walk me through it here. Tell me who was hired and how I can reach them.`;
+    action = await flow.readSelect({
+      message: `Ask Clankie to hire an agent in ${workspace}?`,
+      options: [
+        { value: "send", label: "Send the hire request", description: task.trim() },
+        { value: "draft", label: "Edit the request first", hint: "puts it in the composer" },
+        { value: "later", label: "Do this later" },
+      ],
+    });
+  } finally {
+    flow.end();
+  }
+  if (action === "draft") {
+    shell.setDraft(request);
+    shell.insertCommandResult(
+      "/setup",
+      "Review the request below, then press Enter. Clankie will handle the hire; /agents shows live seats.",
+      "success",
+    );
+  } else if (action === "send") {
+    await shell.submitUserPrompt(request);
+    const hired = (await services.agents()).find((agent) => agent.activeSeatId !== undefined);
+    shell.insertCommandResult(
+      "/setup",
+      hired
+        ? `3 of 3 · ${hired.name} has a live agent seat. /agents opens the team; /setup rooms has the other settings.`
+        : "No live agent seat is observed yet. Continue with Clankie above to finish the hire; /agents shows the team. Return to /setup anytime.",
+      hired ? "success" : "error",
+    );
+  }
+}
+
+async function openSetupCommand(
+  shell: ClankieFaceShell,
+  services: SetupCommandServices,
+  name: string,
+): Promise<void> {
+  const command = services.commands().find((candidate) => candidate.name === name);
+  if (!command) throw new Error(`/${name} is unavailable in this console.`);
+  await command.run("", shell);
+}
+
+async function setupPhone(shell: ClankieFaceShell, services: SetupCommandServices): Promise<boolean> {
+  const flow = shell.setupFlow;
+  for (;;) {
+    const devices = await services.devices(AbortSignal.timeout(5_000));
+    const phone = devices.find(
+      (device) =>
+        device.status === "active" &&
+        (device.platform === "ios" || device.platform === "android") &&
+        device.grants.chat,
+    );
+    if (phone) {
+      shell.insertCommandResult("/setup", `2 of 3 · ${phone.name} is paired and active.`, "success");
+      return true;
+    }
+    const report = await services.doctor();
+    const needsSignIn = report.doorway.state !== "connected";
+    flow.begin("setup · phone");
+    let action: string | undefined;
+    try {
+      action = await flow.readSelect({
+        message: "2 of 3 · Pair your phone or iPad",
+        options: [
+          {
+            value: "pair",
+            label: needsSignIn ? "Sign this Mac in, then pair my phone" : "Pair my phone",
+            hint: "Clankie app → scan QR",
+            description:
+              "Get the app at clankie.bot/#app, then open it on your phone. This uses /remote-access and /pair.",
+          },
+          { value: "skip", label: "Do this later", hint: "continue to the first agent" },
+        ],
+      });
+    } finally {
+      flow.end();
+    }
+    if (action === undefined) return false;
+    if (action === "skip") {
+      shell.insertCommandResult(
+        "/setup",
+        "Phone pairing skipped. Return to /setup or /pair when you have the app.",
+        "success",
+      );
+      return true;
+    }
+    if (needsSignIn) {
+      await openSetupCommand(shell, services, "remote-access");
+      if ((await services.doctor()).doorway.state !== "connected") {
+        shell.insertCommandResult(
+          "/setup",
+          "Phone access is not connected yet. Choose sign-in again, or pair later.",
+          "error",
+        );
+        continue;
+      }
+    }
+    if ((await services.pair(shell)) !== 0) continue;
+    // Keep the QR visible instead of covering it with another modal. /cancel
+    // stops waiting; neither a minted offer nor a pending device counts as paired.
+    flow.begin("setup · waiting for phone");
+    flow.setStatus("Scan the QR in the Clankie app. Waiting for an active phone… /cancel to stop");
+    const interrupt = flow.waitForInterrupt();
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]);
+    void interrupt.promise.then(() => controller.abort());
+    try {
+      while (!signal.aborted) {
+        const paired = (await services.devices(signal)).find(
+          (device) =>
+            device.status === "active" &&
+            (device.platform === "ios" || device.platform === "android") &&
+            device.grants.chat,
+        );
+        if (paired) {
+          shell.insertCommandResult("/setup", `2 of 3 · ${paired.name} is paired and active.`, "success");
+          return true;
+        }
+        await delay(2_000, undefined, { signal });
+      }
+    } catch (error) {
+      if (!signal.aborted)
+        shell.insertCommandResult(
+          "/setup",
+          `Pairing check failed: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        );
+    } finally {
+      controller.abort();
+      interrupt.dispose();
+      flow.setStatus(undefined);
+      flow.end();
+    }
+    shell.insertCommandResult(
+      "/setup",
+      "No active phone was confirmed. Return to /setup to check or try pairing again.",
+      "error",
+    );
+    return false;
+  }
 }
 
 function notReadyLine(readiness: Extract<CaptainReadiness, { ready: false }>): string {

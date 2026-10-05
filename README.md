@@ -27,8 +27,8 @@ Clankie wherever you are.
 The [Mac quick start](https://docs.clankie.bot/get-started/#diy-start-on-your-mac)
 installs a self-contained bundle on **Apple silicon, macOS 14 or newer**. Choose
 local mode, connect a supported model subscription, API key, or local runtime,
-and start talking. `/setup` guides the required model choice and lists the
-optional connections. No app account or Discord setup is required to use him locally.
+and start talking. `/setup` continues through phone pairing, optional connections,
+and a first-agent request to Clankie. `/setup rooms` lists the other settings. No app account or Discord setup is required to use him locally.
 
 - [Install and pair the app](https://docs.clankie.bot/get-started/) — the complete onboarding path
 - [Run from source](CONTRIBUTING.md) — development setup and checks

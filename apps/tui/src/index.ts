@@ -44,7 +44,8 @@ import { buildPersonaCommands } from "./persona-commands.ts";
 import { buildFleetCommands } from "./fleet-commands.ts";
 import { buildVoiceCommands } from "./voice-commands.ts";
 import { buildMemoryCommands } from "./memory-commands.ts";
-import { buildPairCommands } from "./pair-commands.ts";
+import { buildPairCommands, runConsolePair } from "./pair-commands.ts";
+import { listDevices } from "../bin/devices.ts";
 import { buildDevicesCommands } from "./devices-commands.ts";
 import { buildGatewayCommands } from "./gateway-commands.ts";
 import {
@@ -441,6 +442,14 @@ const setupServices: SetupCommandServices = {
   provider: services,
   canTalk: () => conversationSelection.conversationId !== undefined,
   doctor: () => doctorCommand({ repoRoot, env: process.env }),
+  devices: (signal) =>
+    listDevices({ controlPlaneUrl: serviceUrl, operatorToken: operatorCredential?.token, signal }),
+  agents: async () => {
+    if (!conversationClient.fleet) throw new Error("Agent directory is unavailable");
+    return (await conversationClient.fleet()).personas;
+  },
+  workspace: () => currentWorkspace,
+  pair: (shell) => runConsolePair("", shell, { repoRoot, env: process.env, host: serviceUrl }),
   autostart: (verb) => runAutostartCommand([verb], { env: process.env }),
   commands: () => commands,
   restartCaptain,

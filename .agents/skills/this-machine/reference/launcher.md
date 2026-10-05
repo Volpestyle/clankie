@@ -155,10 +155,14 @@ back to observed behavior. `{"outcome":"unseated"}` means this pane holds no
 fleet seat — normal in a plain shell, not an error.
 
 `/setup` is the console's front door: while he cannot take a turn it asks how
-he should think and which model, and afterwards it lists every optional room
-with its state. When someone asks you to walk them through setup, read
-`doctor`, set the non-secret rooms here, and name the console command for the
-secret ones.
+he should think and which model, then chains `/remote-access`, `/pair`, optional
+`/connect`, and a first-agent request through his normal conversation. Pairing
+is complete only when the devices API reports an active phone with chat access.
+`/setup rooms` lists the other settings. When someone asks you to walk them
+through setup or hire their first agent, read `clankie doctor --json`, guide any
+missing native harness or sign-in here, and hire through the normal native
+channel. Use `/agents` to show the team; a draft/request is not a completed hire.
+Set non-secret rooms here and name the console command for secret ones.
 
 The person at the console can still use slash commands (`/setup`, `/auth`, `/provider`,
 `/model`, `/effort`, `/image-model`, `/video-model`, `/games`, `/discord`,

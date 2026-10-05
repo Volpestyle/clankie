@@ -51,6 +51,7 @@ export async function createQaService() {
   const baseUrl = `http://127.0.0.1:${address.port}`;
   return {
     baseUrl,
+    operatorToken,
     eventLogPath,
     now: () => now,
     advance: (milliseconds: number) => {

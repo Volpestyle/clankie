@@ -196,7 +196,7 @@ credential holder.
   the skill picker. The transcript records a compact `skill loaded` receipt.
 - `/activity` shows the current goal, commentary, intent, observed outcome, and
   the loopback watch URL without controlling the body.
-- `/skills` opens the working-skill picker (also in `/setup`). Opinionated skills
+- `/skills` opens the working-skill picker (also in `/setup rooms`). Opinionated skills
   default on; product/tool skills always stay on. `/skills opinionated off` and
   `/skills exclude NAME` apply to new sessions and local hires.
 - `/accounts codex list` shows local Codex homes and observed quota headroom.
@@ -243,9 +243,13 @@ credential holder.
   ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
 - `/setup` is where a new owner starts, and the console opens it on its own
   while Clankie cannot take a turn: how he should think (subscription, API key,
-  local model, or a provider already signed in), then which model. Once he is
-  ready it lists his optional rooms with their state and opens the owning
-  command, or drafts a message asking Clankie to walk you through them
+  local model, or a provider already signed in), then which model. It continues
+  to phone sign-in and pairing through `/remote-access` and `/pair`, offers
+  `/connect`, then asks for the first agent's folder and task. Send the reviewed
+  request to Clankie or edit it in the composer; he owns the native hire.
+  Pairing completes only when an active phone with chat access is observed.
+  Escape or `/cancel` pauses the flow; `/setup` reads the actual state on return.
+  `/setup rooms` lists all optional rooms and opens their existing commands
   ([ADR 0190](../../docs/adr/0190-setup-asks-one-question-then-clankie-takes-over.md)).
 - `/auth` writes provider keys and OAuth credentials to the credential broker.
   `/auth status` may also report compatibility provider environment fallbacks;

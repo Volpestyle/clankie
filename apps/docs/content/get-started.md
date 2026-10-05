@@ -47,9 +47,17 @@ service and opens the terminal console. `/setup` asks how he should think:
 connect a supported subscription, API key, or local provider, then choose a
 model. Sign-ins and keys go into the credential broker.
 
-Once he can answer, say hello. `/setup` lists optional features and can hand
-the walkthrough to Clankie. You can add those later; an app account, Discord,
-and worker agents are not required for a local conversation.
+Stay in `/setup`: it next signs this Mac in for phone access and opens the
+pairing QR. Open the app from the [official app link](https://clankie.bot/#app),
+scan the QR and accept access. Setup waits until your phone is active, then
+lets you connect services through `/connect` and give your first agent a folder
+and a task. Review and send the request to Clankie; he handles the native hire
+and any harness sign-in. `/agents` opens the team once a live seat is observed.
+
+Each optional step can be skipped, and Escape or `/cancel` stops the flow.
+Return to `/setup` to continue from the actual device and agent state.
+`/setup rooms` lists the other settings. An app account, Discord and worker
+agents are not required for a local conversation.
 
 The software is free to run. Your model providers and other connected services
 may charge for use. See [installation details](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md)
@@ -58,6 +66,9 @@ for checksums, version pinning, and the installed layout. Developers can
 experienced operators can use the [Linux deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md).
 
 ## Bring your Mac's Clankie into the app
+
+The guided `/setup` path handles sign-in and pairing. For individual steps or
+a direct route:
 
 1. Choose a route to your Mac. For account-based remote access, open
    `/remote-access` and sign in with the emailed code. For a direct connection

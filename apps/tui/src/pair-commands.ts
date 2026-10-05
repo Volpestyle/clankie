@@ -34,20 +34,30 @@ export function buildPairCommands(services: PairCommandServices): FaceShellComma
       argumentHint: "[--review --days N]",
       takesArgument: true,
       async run(argument: string, shell: ClankieFaceShell): Promise<void> {
-        const stdout = buffer();
-        const stderr = buffer();
-        const exit = await runPairCommand(
-          argument
-            .trim()
-            .split(/\s+/u)
-            .filter((word) => word.length > 0),
-          { ...services, stdout, stderr },
-        );
-        // Startup progress ("Starting App relay…") precedes the offer it made
-        // possible, and on failure it is the whole story.
-        const body = `${stderr.text()}\n${stdout.text()}`.trim();
-        shell.insertCommandResult("/pair", body, exit === 0 ? "success" : "error");
+        await runConsolePair(argument, shell, services);
       },
     },
   ];
+}
+
+/** Shared with /setup so a failed mint returns to its retry step immediately. */
+export async function runConsolePair(
+  argument: string,
+  shell: ClankieFaceShell,
+  services: PairCommandServices,
+): Promise<number> {
+  const stdout = buffer();
+  const stderr = buffer();
+  const exit = await runPairCommand(
+    argument
+      .trim()
+      .split(/\s+/u)
+      .filter((word) => word.length > 0),
+    { ...services, stdout, stderr },
+  );
+  // Startup progress ("Starting App relay…") precedes the offer it made
+  // possible, and on failure it is the whole story.
+  const body = `${stderr.text()}\n${stdout.text()}`.trim();
+  shell.insertCommandResult("/pair", body, exit === 0 ? "success" : "error");
+  return exit;
 }

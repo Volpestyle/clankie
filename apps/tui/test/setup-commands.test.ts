@@ -160,6 +160,10 @@ async function fixture(options: {
       provider,
       canTalk: () => options.canTalk ?? true,
       doctor: async () => report,
+      devices: async () => [],
+      agents: async () => [],
+      workspace: () => root,
+      pair: async () => 1,
       autostart: async (verb) => {
         autostartCalls.push(verb);
         return {
@@ -227,7 +231,7 @@ describe("/setup", () => {
     const { services } = await fixture({ model: "openai/gpt-5.5" });
     const view = testShell([undefined]);
 
-    await setup(services).run("", view.shell);
+    await setup(services).run("rooms", view.shell);
 
     expect(view.selects.map((select) => select.message)).toEqual(["How should Clankie think?"]);
     expect(view.markdown.join("\n")).toContain("nothing signs in to openai");
@@ -238,7 +242,7 @@ describe("/setup", () => {
     const { services, opened } = await fixture({ model: "openai/gpt-5.5", credentials: ["openai"] });
     const view = testShell(["persona"]);
 
-    await setup(services).run("", view.shell);
+    await setup(services).run("rooms", view.shell);
 
     const options = view.selects[0]?.options ?? [];
     expect(options.find((option) => option.value === "think")?.hint).toBe("✓ openai/gpt-5.5");
@@ -250,12 +254,12 @@ describe("/setup", () => {
   it("enables autostart in place and hands the walkthrough to Clankie as an editable draft", async () => {
     const { services, autostartCalls } = await fixture({ model: "openai/gpt-5.5", credentials: ["openai"] });
     const autostart = testShell(["autostart"]);
-    await setup(services).run("", autostart.shell);
+    await setup(services).run("rooms", autostart.shell);
     expect(autostartCalls).toEqual(["status", "enable"]);
     expect(autostart.results.join("\n")).toContain("starts when you log in");
 
     const ask = testShell(["ask"]);
-    await setup(services).run("", ask.shell);
+    await setup(services).run("rooms", ask.shell);
     expect(ask.drafts).toEqual([WALKTHROUGH_DRAFT]);
   });
 
@@ -280,7 +284,7 @@ describe("/setup", () => {
     });
     const view = testShell(["ask"]);
 
-    await setup(services).run("", view.shell);
+    await setup(services).run("rooms", view.shell);
 
     expect(view.drafts).toEqual([]);
     expect(view.results.join("\n")).toContain("can't reach Clankie's service");

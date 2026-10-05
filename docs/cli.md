@@ -1541,8 +1541,9 @@ Native worker harnesses are chosen per hire. `/runtime` with no argument opens
 Machines, as does `/sessions`; saved transcripts open inside each machine. Both retain their arguments,
 and `/connections json` prints the raw inventory.
 
-Onboarding asks only how he thinks. Once ready, `/setup` offers the workspace
-choice only when doctor finds installed Herdr with running sessions. His own
+Onboarding starts with how he thinks, then guides phone pairing and a first
+agent request. `/setup rooms` offers the Herdr workspace choice only when
+doctor finds installed Herdr with running sessions. His own
 workspace is recommended; leading your session lets him see and message every
 pane in it. `/herdr` default workspace changes still offer Restart now / Later.
 
@@ -2322,7 +2323,7 @@ clankie skills include reflect
 `skills.opinionated` defaults to `true`; `skills.exclude` defaults to `[]`.
 Product/tool and repo-authored skills always stay on; excluding one is refused.
 `include` removes an exclusion and leaves the class switch unchanged. The console
-has the same controls in `/skills` and `/setup` → Working skills.
+has the same controls in `/skills` and `/setup rooms` → Working skills.
 
 Changes apply to new service sessions, local hires and Claude seats; existing
 context is not erased. Reset a service conversation or start a fresh seat after
@@ -3036,8 +3037,13 @@ Unknown names fail closed without signalling any process.
 These carry secrets, external consent, or live session chrome, so entry stays
 interactive in the console. The capability exists — only the flag does not:
 
-- `/setup` — first-run sign-in and model choice, then a checklist that opens
-  the other wizards; `doctor`'s `captain` field is its headless readiness
+- `/setup` — first-run sign-in and model choice → phone sign-in and `/pair` →
+  optional `/connect` → first agent's folder/task and a reviewed request through
+  Clankie's normal conversation. An active phone with chat access is required
+  to mark pairing complete; a minted QR is only an offer. `/setup rooms` opens
+  the other settings checklist. Escape or `/cancel` stops the current step;
+  re-entry reads live device/roster state. `doctor --json`'s `captain` field is
+  its headless model readiness
 - `/auth` and `/connect` secret entry — provider keys, OAuth, Linear (MCP token
   and webhook signing secret), and email
 - `/discord` secret entry and lab-user ToS opt-in — Discord tokens never become flags

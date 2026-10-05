@@ -249,7 +249,7 @@ explicit doctor reads probe again.
 The console's `/machines` lists discovered machines and their Herdr sessions
 before asking for typed names. Named connections apply live. Its session details
 manage workspace grants and capacity; choose native harnesses per hire. The
-`/herdr` default workspace choice still requires a restart. `/setup` offers that
+`/herdr` default workspace choice still requires a restart. `/setup rooms` offers that
 choice only after doctor finds installed Herdr with running sessions, explaining
 that leading the owner's session means seeing and messaging every pane.
 

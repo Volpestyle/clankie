@@ -57,3 +57,21 @@ Existing settings files that store the value keep it.
   definite missing model or sign-in and checks again without re-pairing. A live
   native operator bridge reports ready without requiring the fallback model;
   its outbox already owns that chat delivery.
+
+## Guided continuation (VUH-1656, 2026-10-04)
+
+The model/sign-in step remains shared with the provider commands. First setup
+now stays in `/setup` for phone sign-in and pairing, optional `/connect`, then
+a first agent's folder/task and a reviewed request to Clankie's conversation.
+The owning commands still perform every sign-in and pairing operation. The
+phone step waits with the QR visible and marks completion only for an active
+iOS/Android device with chat access; pending, revoked and Mac devices do not
+satisfy it. Escape or `/cancel` stops the current step. Re-entry reads live
+credentials, devices and roster rather than recording wizard completion flags.
+
+`/setup rooms` retains the optional-settings checklist. Hiring stays with
+Clankie: setup can send an owner-reviewed normal prompt or leave it editable,
+and reports a live seat only when the roster actually has one. A fresh native
+harness install and sign-in, when needed, are part of that conversation.
+`clankie doctor --json` is the full install card; its default output is now the
+first repair or `ready`. Clean-account verification remains a separate owner run.
