@@ -716,6 +716,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly projectHires: ProjectHires;
   private readonly fleetHireTools: (() => Promise<readonly string[]>) | undefined;
   private readonly projectPolicy: ProjectHirePolicy | undefined;
+  private projectPolicyQueue = Promise.resolve();
   private readonly hireDefaultPolicies = new WeakMap<SpawnOperatorSeat, string>();
   private readonly projectAllocations = new WeakMap<SpawnOperatorSeat, string>();
   private readonly activeProjectHires = new Set<string>();
@@ -1409,6 +1410,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     resume?: SavedAgentSession,
     authority?: HireAuthority,
     adopt?: AdoptHire,
+    flushAdoption?: () => Promise<void>,
   ): Promise<HerdrSeatSpawnResult> {
     const defaults = (await this.hireDefaults?.()) ?? {};
     let input = { ...inputRequest, ...effectiveHireProfile(inputRequest, {}, defaults) };
@@ -1420,7 +1422,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
         detail: "Native-first hiring requires a verified project and stable deliverable key.",
       };
     if (!this.projectPolicy)
-      return this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt).then((result) =>
+      return this.spawnAdmittedSeat(
+        input,
+        subjectOverride,
+        brief,
+        resume,
+        authority,
+        adopt,
+        flushAdoption,
+      ).then((result) =>
         result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result,
       );
     let allocation: string | undefined;
@@ -1443,9 +1453,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw new Error(
             "An earlier hire in this workspace is still being checked. Resolve it before hiring again.",
           );
-        return this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt).then(
-          (result) =>
-            result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result,
+        return this.spawnAdmittedSeat(
+          input,
+          subjectOverride,
+          brief,
+          resume,
+          authority,
+          adopt,
+          flushAdoption,
+        ).then((result) =>
+          result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result,
         );
       }
       let live: HerdrAgentSnapshot | undefined;
@@ -1499,7 +1516,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (reused) this.projectLiveReuse.add(input);
       if (reserved.reused) this.projectRecoveryOnly.add(input);
       this.activeProjectHires.add(allocation);
-      const result = await this.spawnAdmittedSeat(input, subjectOverride, brief, resume, authority, adopt);
+      const result = await this.spawnAdmittedSeat(
+        input,
+        subjectOverride,
+        brief,
+        resume,
+        authority,
+        adopt,
+        flushAdoption,
+      );
       if (result.outcome === "spawned") this.projectHires.confirmed(allocation);
       else this.projectHires.failed(allocation);
       return result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(input) } : result;
@@ -1520,12 +1545,26 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const id = this.projectAllocations.get(input);
     const context = this.projectContexts.get(input);
     if (!id || !context || !this.projectPolicy) return;
-    const settings = await this.projectPolicy.settings();
-    const project = await this.projectPolicy.project(input, settings, context.authority);
-    const latest = await this.projectPolicy.settings();
-    if (project !== context.projectId || projectsRevision(settings) !== projectsRevision(latest))
-      throw new Error("The project's settings or workspace changed. Check the project before hiring again.");
-    this.projectHires.launch(id, latest);
+    const policy = this.projectPolicy;
+    await this.runProjectPolicy(async () => {
+      const settings = await policy.settings();
+      const project = await policy.project(input, settings, context.authority);
+      const latest = await policy.settings();
+      if (project !== context.projectId || projectsRevision(settings) !== projectsRevision(latest))
+        throw new Error(
+          "The project's settings or workspace changed. Check the project before hiring again.",
+        );
+      this.projectHires.launch(id, latest);
+    });
+  }
+
+  private runProjectPolicy(action: () => Promise<void>): Promise<void> {
+    // An already-running watch can probe during live-controller reuse. Keep
+    // our own adoption writes outside these before/after policy snapshots;
+    // external policy changes still fail the unchanged revision fence.
+    const result = this.projectPolicyQueue.then(action, action);
+    this.projectPolicyQueue = result.catch(() => {});
+    return result;
   }
 
   private async expectedHireTools(input: SpawnOperatorSeat): Promise<readonly string[]> {
@@ -1551,6 +1590,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     resume?: SavedAgentSession,
     authority?: HireAuthority,
     adopt?: AdoptHire,
+    flushAdoption?: () => Promise<void>,
   ): Promise<HerdrSeatSpawnResult> {
     try {
       input = await this.resolveHireModels(input);
@@ -1587,7 +1627,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       authority = { ...authority, intentId: this.hireOwners.intent(authority.owner) };
     }
     if (resume === undefined)
-      return this.performSpawnSeat(input, subjectOverride, brief, resume, authority, adopt);
+      return this.performSpawnSeat(input, subjectOverride, brief, resume, authority, adopt, flushAdoption);
     // Serialize starts only inside the existing hire path. Herdr remains the
     // durable owner of the seat; there is no parallel run/lock store.
     const key = JSON.stringify([
@@ -1602,7 +1642,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.resumeStarts.set(key, current);
     await previous;
     try {
-      return await this.performSpawnSeat(input, subjectOverride, brief, resume, authority, adopt);
+      return await this.performSpawnSeat(
+        input,
+        subjectOverride,
+        brief,
+        resume,
+        authority,
+        adopt,
+        flushAdoption,
+      );
     } finally {
       release();
       if (this.resumeStarts.get(key) === current) this.resumeStarts.delete(key);
@@ -1616,6 +1664,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     resume?: SavedAgentSession,
     authority?: HireAuthority,
     adopt?: AdoptHire,
+    flushAdoption?: () => Promise<void>,
   ): Promise<HerdrSeatSpawnResult> {
     if (authority !== undefined) await assertConversationAuthority(authority);
     if (input.resume !== undefined && resume === undefined)
@@ -1697,19 +1746,25 @@ export class HerdrWatchStore implements HerdrWatchPort {
         pending.fingerprint === deliveryFingerprint(brief ?? "") &&
         agent !== undefined
       ) {
+        let watch: HerdrWatchRecord | undefined;
         if (authority !== undefined) {
           await assertConversationAuthority(authority);
           await this.bindHireOwner(agent, input, authority);
-          this.watchHiredSeat(
+          watch = this.watchHiredSeat(
             agent.terminalId,
             occupantIdForHerdrSession(agent.session!),
             this.hireOwners.owner(agent.paneId, agent.terminalId, occupantIdForHerdrSession(agent.session!))!,
+            false,
           );
         }
         const recovered = spawnedSeat(agent, agent.paneId, agent.name ?? agent.terminalId, input, undefined);
         await this.observeHireIdentity(receiptKey, agent, input, authority);
         adopt?.(recovered, this.projectContexts.get(input)?.projectId);
         this.hireReceipts.reconcile(receiptKey, pending.messageId);
+        // Adoption and the exact delivery receipt commit synchronously above.
+        // Its own metadata flush must precede a watch's project policy probes.
+        if (flushAdoption) await this.runProjectPolicy(flushAdoption).catch(() => {});
+        if (watch) this.launch(watch);
         return { ...recovered, deliveryStage: hireDeliveryStage(recovered, brief !== undefined) };
       }
       return {
@@ -1732,6 +1787,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     });
     this.activeHires.add(receiptKey);
     let result: HerdrSeatSpawnResult;
+    let watch: HerdrWatchRecord | undefined;
     try {
       result =
         resume === undefined
@@ -1748,10 +1804,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw new Error("Hired seat ownership could not be bound to its exact native session");
         await assertConversationAuthority(authority);
         await this.bindHireOwner(proof, input, authority);
-        this.watchHiredSeat(
+        watch = this.watchHiredSeat(
           result.seat.seatId,
           result.seat.occupantId,
           this.hireOwners.owner(result.seat.paneId, result.seat.seatId, result.seat.occupantId)!,
+          false,
         );
       }
       if (result.outcome === "spawned") adopt?.(result, this.projectContexts.get(input)?.projectId);
@@ -1760,6 +1817,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
         !["start_unconfirmed", "delivery_unconfirmed"].includes(result.reason)
       )
         this.hireReceipts.reconcile(receiptKey, receipt.messageId);
+      if (result.outcome === "spawned") {
+        // A failed association write stays pending; the native seat already exists.
+        if (flushAdoption) await this.runProjectPolicy(flushAdoption).catch(() => {});
+        if (watch) this.launch(watch);
+      }
     } catch (error) {
       result = { outcome: "failed", reason: "start_unconfirmed", detail: String(error) };
     } finally {
@@ -2816,14 +2878,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.seatControllers.size === 0) this.stopSummaryWatch();
   }
 
-  private watchHiredSeat(seatId: string, occupantId: string, owner: ConversationOwner): void {
+  private watchHiredSeat(
+    seatId: string,
+    occupantId: string,
+    owner: ConversationOwner,
+    start = true,
+  ): HerdrWatchRecord {
     if (this.stateUnreadable) throw new Error("Herdr watcher state is unreadable");
-    if (
-      this.state.watches.some(
-        (watch) => watch.hired === true && watch.terminalId === seatId && watch.occupantId === occupantId,
-      )
-    )
-      return;
+    const existing = this.state.watches.find(
+      (watch) => watch.hired === true && watch.terminalId === seatId && watch.occupantId === occupantId,
+    );
+    if (existing) return existing;
     const record: HerdrWatchRecord = {
       id: randomUUID(),
       conversationId: owner.conversationId,
@@ -2837,7 +2902,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     };
     this.state.watches.push(record);
     this.save();
-    this.launch(record);
+    if (start) this.launch(record);
+    return record;
   }
 
   public async watch(

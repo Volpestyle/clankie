@@ -440,7 +440,7 @@ test("a hire without an explicit brief delivers resolved working preferences thr
 });
 
 test("native prepared hire survives real census/roster reconciliation and exits only its original TUI", async () => {
-  const f = await fixture();
+  const f = await fixture(true);
   const expected = f.hired.seat;
   expect(f.pane.name).toBeDefined();
   expect(f.pane.label).toBe("Oriana Vale · tester");
