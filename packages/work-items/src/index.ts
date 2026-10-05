@@ -2,6 +2,8 @@ export * from "./backend.ts";
 export * from "./convention.ts";
 export * from "./format.ts";
 export * from "./tracker.ts";
+export * from "./tracker-tools.ts";
+export * from "./tracker-local.ts";
 export { createFilesBackend } from "./backends/files.ts";
 export {
   createGithubBackend,

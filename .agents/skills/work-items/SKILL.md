@@ -33,13 +33,25 @@ from inside the repo (or pass `--repo PATH`); output is JSON.
 Statuses: `todo`, `in_progress`, `in_review`, `done`, `canceled`. Items carry
 the backend's `labels` (Linear, GitHub, or Markdown `labels:` front matter);
 label an item with a role name (`designer`, `builder`, …) to put it on that
-role's station in the owner's world. Criterion numbers are 1-based. Clankie himself has the same contract as the `work_items`
-and `work_item_write` tools.
+role's station in the owner's world. Criterion numbers are 1-based.
+Clankie and workers use the same `linear_*` tracker tools, discovered through
+`mcp_tool_search` or `clankie_tools` and called through the corresponding tool
+directory. Their issue, comment, project and status-update shapes work with
+owner-connected Linear or durable local storage. A `repo` selects an existing
+repository convention; GitHub and Markdown are adapters to that same surface.
+`clankie work` remains a compatibility CLI. `clankie doctor` reports the active
+backend and why it was selected. Follow `linear-orient` and `linear-issues` for
+the shared read/write shapes on either backend; a local identity is visibly local.
+
+Priority is `0` (none), `1` (Urgent), `2` (High), `3` (Medium), `4` (Low).
+Issue writes accept `priority`; `clankie work create` and `update` accept
+`--priority 0..4`. Open-work lists sort Urgent through Low, then unprioritized,
+before limiting or paginating. Local identifiers remain stable across restart.
 
 When the owner's Linear convention uses an existing repo label, record it with
 `clankie work init --backend linear --linear-team KEY --linear-project NAME
 --linear-label LABEL` (the project is optional), or `linearLabel` on
-`work_item_write` action `init`. This saves `linear.label` in the convention.
+the compatibility HTTP init request. This saves `linear.label` in the convention.
 The board then includes only issues with that label; `list --label designer`
 intersects it with the role, status and owner filters. New items carry the saved
 label. Omitting the saved label keeps the existing team/project-wide board;
@@ -130,7 +142,11 @@ repository or the worker-posts section of the CLI reference.
 
 ## When the backend is unavailable
 
-`backend_unavailable` names the recorded convention: Linear or GitHub is not
-connected to Clankie (`clankie accounts`), or the configured GitHub CLI route is signed out. Report that to
-your lead. Do not fall back to
-files, which would fork the record.
+When Linear is not connected, the same tools select durable local storage.
+Read `clankie doctor` for the active backend and reason; local records do not
+automatically migrate when Linear is connected. A failed connected Linear call
+stays a failure and never writes locally. GitHub connection failures still name
+the recorded convention with `backend_unavailable`; report them to your lead.
+Do not create another queue to compensate for an uncertain write. Explicit
+export/import identity mapping is designed in ADR 0226; migration is not yet
+implemented.

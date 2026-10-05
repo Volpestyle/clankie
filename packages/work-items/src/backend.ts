@@ -7,18 +7,31 @@ import {
   type WorkEvidence,
   type WorkItem,
   type WorkItemStatus,
+  type WorkItemPriority,
 } from "@clankie/protocol/work-items";
 
 export interface WorkItemDraft {
   readonly title: string;
   readonly summary?: string;
+  /** Exact tracker body, used by the canonical tool surface. */
+  readonly description?: string;
   readonly owner?: string;
   readonly criteria?: readonly string[];
   readonly dependsOn?: readonly string[];
   readonly status?: WorkItemStatus;
+  readonly priority?: WorkItemPriority;
+  readonly labels?: readonly string[];
+  readonly parent?: string;
 }
 
 export interface WorkItemPatch {
+  /** Exact tracker body; unlike the display summary, it retains every authored section. */
+  readonly description?: string;
+  readonly priority?: WorkItemPriority;
+  readonly summary?: string;
+  readonly parent?: string | null;
+  readonly labels?: readonly string[];
+  readonly evidence?: readonly WorkEvidence[];
   readonly status?: WorkItemStatus;
   /** `null` clears the owner. */
   readonly owner?: string | null;
@@ -47,7 +60,7 @@ export interface WorkListFilter {
 
 /** Hooks at the backend's publish boundary, after read/patch preparation. */
 export interface WorkWriteCallbacks {
-  readonly beforeWrite?: () => void;
+  readonly beforeWrite?: (() => void) | (() => Promise<void>);
   readonly onDispatch?: () => void;
   readonly effectConfirmed?: () => void;
 }
@@ -56,12 +69,18 @@ export interface WorkWriteCallbacks {
 export function patchLabels(existing: readonly string[], patch: WorkItemPatch): string[] {
   const key = (name: string) => name.trim().toLowerCase();
   const removed = new Set((patch.removeLabels ?? []).map(key));
-  const next = existing.filter((name) => !removed.has(key(name)));
+  const next = [...(patch.labels ?? existing)].filter((name) => !removed.has(key(name)));
   for (const name of patch.addLabels ?? []) {
     const normalized = key(name);
     if (!removed.has(normalized) && !next.some((entry) => key(entry) === normalized)) next.push(name.trim());
   }
   return next;
+}
+
+/** Stable sorting keeps a backend's existing order for equal priorities. */
+export function sortWorkItems(items: readonly WorkItem[]): WorkItem[] {
+  const rank = (item: WorkItem) => (item.priority === undefined || item.priority === 0 ? 5 : item.priority);
+  return [...items].sort((left, right) => rank(left) - rank(right));
 }
 
 export function patchDependsOn(existing: readonly string[], patch: WorkItemPatch): string[] {
@@ -74,6 +93,8 @@ export function patchDependsOn(existing: readonly string[], patch: WorkItemPatch
 /** One storage for work items. Every method speaks the ADR 0191 shape. */
 export interface WorkBackend {
   readonly kind: WorkBackendKind;
+  /** Raw canonical issue data retains provider labels and description beyond display bounds. */
+  readonly readIssue?: (id: string) => Promise<Record<string, unknown> | undefined>;
   list(filter?: WorkListFilter): Promise<WorkItem[]>;
   get(id: string): Promise<WorkItem | undefined>;
   create(draft: WorkItemDraft): Promise<WorkItem>;

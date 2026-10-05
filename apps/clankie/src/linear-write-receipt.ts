@@ -7,9 +7,13 @@
  */
 const ISSUE_FIELDS = [
   "id",
+  "identifier",
+  "uuid",
+  "name",
   "title",
   "url",
   "status",
+  "state",
   "priority",
   "assignee",
   "project",

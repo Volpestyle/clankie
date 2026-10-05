@@ -1,4 +1,4 @@
-# ADR 0226: Quick actions are skills, and tidy keeps results
+# ADR 0228: Quick actions are skills, and tidy keeps results
 
 Status: proposed for review (2026-10-04; VUH-1660).
 

@@ -7,9 +7,6 @@ import type { SettingsStore } from "@clankie/settings";
 import { WorkConventionSchema } from "@clankie/protocol/work-items";
 import { readConvention } from "@clankie/work-items";
 import { workRequest } from "../../tui/src/command/work.ts";
-import { captainTools } from "../src/captain/tools.ts";
-import type { CaptainDeps } from "../src/captain/deps.ts";
-import type { LaneLog } from "../src/captain/lane-log.ts";
 import { createMcpHost, type McpHost } from "../src/mcp-host.ts";
 import { createWorkItemsService, WorkRequestSchema } from "../src/work-items.ts";
 
@@ -298,27 +295,20 @@ it("applies the label to a discovered Linear convention and refuses a discovered
   expect(await readConvention(f.broad)).toBeUndefined();
 });
 
-it("forwards the agent init label through service validation into the same saved board", async () => {
+it("forwards the compatibility CLI init label through service validation into the same saved board", async () => {
   const f = await fixture();
-  const deps = { workItems: f.service, embodiment: {} } as unknown as CaptainDeps;
-  const tool = captainTools(deps, {}, {} as LaneLog, "operator").find(
-    (entry) => entry.name === "work_item_write",
-  )!;
-  const result = await tool.execute(
-    "scope-init",
-    {
-      action: "init",
-      repo: f.repo,
-      backend: "linear",
-      linearTeam: "VUH",
-      linearProject: "Shared project",
-      linearLabel: "repo-a",
-    },
-    undefined,
-    undefined,
-    {} as never,
-  );
-  expect(result.details).not.toHaveProperty("error");
+  const result = await f.cli([
+    "init",
+    "--backend",
+    "linear",
+    "--linear-team",
+    "VUH",
+    "--linear-project",
+    "Shared project",
+    "--linear-label",
+    "repo-a",
+  ]);
+  expect(result).toHaveProperty("convention.linear.label", "repo-a");
   expect(await readConvention(f.repo)).toHaveProperty("linear.label", "repo-a");
   expect(await f.cli(["list"])).toHaveProperty("items.length", 64);
 });

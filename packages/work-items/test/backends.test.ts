@@ -2,6 +2,7 @@ import { mkdtemp, readFile, readdir, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { WorkItemPriority } from "@clankie/protocol/work-items";
 import { createFilesBackend } from "../src/backends/files.ts";
 import { createGithubBackend, githubRestApi, type GhRunner } from "../src/backends/github.ts";
 import { createLinearBackend, descriptionPatch, pickLinearState } from "../src/backends/linear.ts";
@@ -76,6 +77,25 @@ describe("the files backend", () => {
     const done = await backend.update("T-12", { status: "done" });
     expect(done.status).toBe("done");
     expect(await readFile(join(root, "docs/tasks/T-12-cache-warmup.md"), "utf8")).toContain("status: done");
+    await writeFile(
+      join(root, "docs/tasks/T-13-urgent.md"),
+      "---\nid: T-13\ntitle: Urgent task\npriority: 1\n---\n\nKeep visible.\n",
+    );
+    const malformedPath = join(root, "docs/tasks/T-14-authored.md");
+    const malformed = "---\nid: T-14\ntitle: Authored task\npriority: hgh\n---\n\nKeep this text.\n";
+    await writeFile(malformedPath, malformed);
+    expect((await backend.list({ status: ["todo"] })).map(({ id, priority }) => ({ id, priority }))).toEqual([
+      { id: "T-13", priority: 1 },
+      { id: "T-14", priority: 0 },
+    ]);
+    expect(await backend.get("T-14")).toMatchObject({ priority: 0 });
+    const files = await readdir(join(root, "docs/tasks"));
+    await expect(
+      backend.create({ title: "Rejected priority", priority: 5 as WorkItemPriority }),
+    ).rejects.toThrow();
+    await expect(backend.update("T-14", { priority: 5 as WorkItemPriority })).rejects.toThrow();
+    expect(await readFile(malformedPath, "utf8")).toBe(malformed);
+    expect(await readdir(join(root, "docs/tasks"))).toEqual(files);
   });
 
   it("refuses a directory outside the repo", () => {

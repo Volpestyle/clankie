@@ -6,6 +6,7 @@ import type { Server as HttpServer, ServerResponse } from "node:http";
 import { serve } from "@hono/node-server";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
+import { createLocalTracker } from "@clankie/work-items";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -76,6 +77,8 @@ export async function createConnectedLinearFixture(
   options: {
     channel?: boolean;
     heldWrite?: ReturnType<typeof heldProviderWrite>;
+    /** Captured Linear issue shapes, exposed through the real SDK transport. */
+    priorityPages?: Record<string, unknown>[][];
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-connected-linear-"));
@@ -85,6 +88,7 @@ export async function createConnectedLinearFixture(
   const issueIdentifier = "VUH-FIXTURE";
   const organizationId = randomUUID();
   const effectsPath = join(root, "provider-effects.jsonl");
+  await appendFile(effectsPath, "");
   let providerSessions = 0;
   let laneSessions = 0;
   let issue = {
@@ -143,7 +147,28 @@ export async function createConnectedLinearFixture(
       name: "list_issues",
       description: "Read the issue state held by the controlled provider.",
       inputSchema: { type: "object", properties: {} },
-      call: async () => ({ content: [{ type: "text", text: JSON.stringify({ issues: [issue] }) }] }),
+      call: async (args) => {
+        if (Array.isArray(args.fields) && args.fields.includes("identifier"))
+          throw new Error("Linear list_issues fields does not accept identifier; use id or uuid");
+        const index = typeof args.cursor === "string" ? Number(args.cursor) : 0;
+        const pages = options.priorityPages;
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                pages === undefined
+                  ? { issues: [issue] }
+                  : {
+                      issues: pages[index],
+                      hasNextPage: index + 1 < pages.length,
+                      ...(index + 1 < pages.length ? { cursor: String(index + 1) } : {}),
+                    },
+              ),
+            },
+          ],
+        };
+      },
     },
   ];
   const providerService = await createClankieApp({
@@ -205,6 +230,9 @@ export async function createConnectedLinearFixture(
   const linearWrites = new linearWebhook.LinearWriteReceipts(join(root, "linear-writes.json"));
   const logs: Record<string, unknown>[] = [];
   const host = createMcpHost({
+    ...(options.priorityPages === undefined
+      ? {}
+      : { localTracker: createLocalTracker({ directory: join(root, "local-tracker") }) }),
     credentials,
     settings,
     logger: {
@@ -345,6 +373,7 @@ export async function createConnectedLinearFixture(
       (await readFile(effectsPath, "utf8"))
         .trim()
         .split("\n")
+        .filter(Boolean)
         .map(
           (line) =>
             JSON.parse(line) as {

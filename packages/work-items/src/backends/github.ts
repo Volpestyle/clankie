@@ -1,10 +1,16 @@
-import { WorkItemSchema, type WorkItem, type WorkItemStatus } from "@clankie/protocol/work-items";
+import {
+  WorkItemSchema,
+  type WorkItem,
+  type WorkItemStatus,
+  type WorkItemPriority,
+} from "@clankie/protocol/work-items";
 import {
   matchesFilter,
   patchCriteria,
   patchDependsOn,
   patchLabels,
   touchesCriteria,
+  sortWorkItems,
   WorkItemNotFoundError,
   workItemLabels,
   type WorkBackend,
@@ -97,6 +103,7 @@ export function githubRestApi(options: {
 }
 
 interface Issue {
+  readonly id?: number;
   readonly number: number;
   readonly title: string;
   readonly body: string | null;
@@ -117,6 +124,21 @@ const STATUS_LABELS: Partial<Record<WorkItemStatus, string>> = {
   in_progress: "status: in progress",
   in_review: "status: in review",
 };
+
+const PRIORITY_LABELS = [
+  "",
+  "priority: urgent",
+  "priority: high",
+  "priority: medium",
+  "priority: low",
+] as const;
+const priorityLabel = (name: string) =>
+  PRIORITY_LABELS.slice(1).some((label) => label === name.toLowerCase());
+function priorityOf(issue: Issue): WorkItemPriority {
+  for (const priority of [1, 2, 3, 4] as const)
+    if (labelNames(issue).some((name) => name.toLowerCase() === PRIORITY_LABELS[priority])) return priority;
+  return 0;
+}
 
 function labelNames(issue: Issue): string[] {
   return issue.labels
@@ -153,7 +175,7 @@ export function createGithubBackend(
   const api = async (method: string, path: string, body?: unknown) => {
     const mutation = method !== "GET";
     if (mutation) {
-      options.beforeWrite?.();
+      await options.beforeWrite?.();
       options.onDispatch?.();
     }
     const result = await github.request(method, path, body);
@@ -168,6 +190,7 @@ export function createGithubBackend(
       ...(parent === undefined ? {} : { parent }),
       title: issue.title.slice(0, 200),
       status: statusOf(issue),
+      priority: priorityOf(issue),
       ...(parsed.owner === undefined ? {} : { owner: parsed.owner }),
       dependsOn: parsed.dependsOn,
       summary: parsed.summary,
@@ -176,7 +199,11 @@ export function createGithubBackend(
       location: issue.html_url,
       ...(issue.updated_at === undefined ? {} : { updatedAt: issue.updated_at }),
       // The status labels this backend writes are its status, not the item's labels.
-      ...workItemLabels(labelNames(issue).filter((name) => !Object.values(STATUS_LABELS).includes(name))),
+      ...workItemLabels(
+        labelNames(issue).filter(
+          (name) => !Object.values(STATUS_LABELS).includes(name) && !priorityLabel(name),
+        ),
+      ),
     });
   };
 
@@ -230,12 +257,38 @@ export function createGithubBackend(
 
   return {
     kind: "github",
+    async readIssue(id) {
+      try {
+        const issue = await fetchIssue(id);
+        const item = await readItem(issue);
+        return {
+          ...item,
+          identifier: item.id,
+          description: issue.body ?? "",
+          labels: labelNames(issue).filter(
+            (name) => !Object.values(STATUS_LABELS).includes(name) && !priorityLabel(name),
+          ),
+          url: item.location,
+        };
+      } catch (error) {
+        if (error instanceof WorkItemNotFoundError) return undefined;
+        throw error;
+      }
+    },
     async list(filter) {
       const pages = (await github.list(`${base}?state=all&per_page=100`)) as Issue[];
+      const { label, ...itemFilter } = filter ?? {};
       const matching = pages.filter(
-        (issue) => issue.pull_request === undefined && matchesFilter(toItem(issue), filter),
+        (issue) =>
+          issue.pull_request === undefined &&
+          matchesFilter(toItem(issue), itemFilter) &&
+          (label === undefined ||
+            labelNames(issue).some((name) => name.trim().toLowerCase() === label.trim().toLowerCase())),
       );
-      return Promise.all(matching.slice(0, filter?.limit ?? matching.length).map(readItem));
+      matching.sort((left, right) => (priorityOf(left) || 5) - (priorityOf(right) || 5));
+      return sortWorkItems(
+        await Promise.all(matching.slice(0, filter?.limit ?? matching.length).map(readItem)),
+      );
     },
     async get(id) {
       try {
@@ -246,20 +299,32 @@ export function createGithubBackend(
       }
     },
     async create(draft) {
-      const body = patchBody(draft.summary ?? "", {
-        criteria: (draft.criteria ?? []).map((text) => ({ text, done: false })),
-        ...(draft.owner === undefined ? {} : { owner: draft.owner }),
-        ...(draft.dependsOn === undefined ? {} : { dependsOn: draft.dependsOn }),
-      });
+      const body =
+        draft.description ??
+        patchBody(draft.summary ?? "", {
+          criteria: (draft.criteria ?? []).map((text) => ({ text, done: false })),
+          ...(draft.owner === undefined ? {} : { owner: draft.owner }),
+          ...(draft.dependsOn === undefined ? {} : { dependsOn: draft.dependsOn }),
+        });
       const status = draft.status ?? "todo";
       const label = STATUS_LABELS[status];
+      const labels = [
+        ...(draft.labels ?? []),
+        ...(label === undefined ? [] : [label]),
+        ...(draft.priority === undefined || draft.priority === 0 ? [] : [PRIORITY_LABELS[draft.priority]]),
+      ];
       let issue = (await api("POST", base, {
         title: draft.title,
         body,
-        ...(label === undefined ? {} : { labels: [label] }),
+        ...(labels.length === 0 ? {} : { labels }),
       })) as Issue;
       if (status === "done" || status === "canceled")
         issue = (await api("PATCH", `${base}/${String(issue.number)}`, statusFields(issue, status))) as Issue;
+      if (draft.parent !== undefined) {
+        const parent = await fetchIssue(draft.parent);
+        if (!Number.isSafeInteger(issue.id)) throw new Error("GitHub returned an invalid issue id");
+        await api("POST", `${base}/${String(parent.number)}/sub_issues`, { sub_issue_id: issue.id });
+      }
       return readItem(issue);
     },
     async update(id, patch: WorkItemPatch) {
@@ -267,28 +332,65 @@ export function createGithubBackend(
       const current = toItem(issue);
       if (
         options.scopedWrites &&
-        [...(patch.addLabels ?? []), ...(patch.removeLabels ?? [])].some(
-          (name) => labelStatus(name) !== undefined,
+        [...(patch.labels ?? []), ...(patch.addLabels ?? []), ...(patch.removeLabels ?? [])].some(
+          (name) => labelStatus(name) !== undefined || priorityLabel(name),
         )
       )
-        throw new Error("Role labels cannot change GitHub status labels");
+        throw new Error("Role labels cannot change GitHub status labels or priority labels");
       const dependsChanged = patch.dependsOn !== undefined || patch.addDependsOn !== undefined;
-      const labelsChanged = patch.addLabels !== undefined || patch.removeLabels !== undefined;
-      const labels = patchLabels(labelNames(issue), patch);
-      const bodyChanged = touchesCriteria(patch) || patch.owner !== undefined || dependsChanged;
+      const labelsChanged =
+        patch.priority !== undefined ||
+        patch.labels !== undefined ||
+        patch.addLabels !== undefined ||
+        patch.removeLabels !== undefined;
+      let labels = patchLabels(labelNames(issue), patch);
+      // Generic label replacement cannot silently clear the native status/priority projection.
+      if (patch.labels !== undefined)
+        labels = [
+          ...labels.filter((name) => !priorityLabel(name) && !Object.values(STATUS_LABELS).includes(name)),
+          ...labelNames(issue).filter(
+            (name) => priorityLabel(name) || Object.values(STATUS_LABELS).includes(name),
+          ),
+        ];
+      if (patch.priority !== undefined) {
+        labels = labels.filter((name) => !priorityLabel(name));
+        if (patch.priority !== 0) labels.push(PRIORITY_LABELS[patch.priority]);
+      }
+      const bodyChanged =
+        patch.summary !== undefined ||
+        patch.evidence !== undefined ||
+        touchesCriteria(patch) ||
+        patch.owner !== undefined ||
+        dependsChanged;
       const body = bodyChanged
-        ? patchBody(issue.body ?? "", {
+        ? patchBody(patch.description ?? patch.summary ?? issue.body ?? "", {
+            ...(patch.summary === undefined
+              ? {}
+              : { criteria: current.criteria, evidence: current.evidence }),
             ...(touchesCriteria(patch) ? { criteria: patchCriteria(current.criteria, patch) } : {}),
+            ...(patch.evidence === undefined ? {} : { evidence: patch.evidence }),
             ...(patch.owner === undefined ? {} : { owner: patch.owner }),
             ...(dependsChanged ? { dependsOn: patchDependsOn(current.dependsOn, patch) } : {}),
           })
-        : undefined;
+        : patch.description;
       const updated = (await api("PATCH", `${base}/${String(issue.number)}`, {
         ...(patch.title === undefined ? {} : { title: patch.title }),
         ...(body === undefined ? {} : { body }),
         ...(labelsChanged ? { labels } : {}),
         ...(patch.status === undefined ? {} : statusFields({ ...issue, labels }, patch.status)),
       })) as Issue;
+      if (patch.parent !== undefined) {
+        if (!Number.isSafeInteger(issue.id)) throw new Error("GitHub returned an invalid issue id");
+        const existing = await readItem(issue);
+        if (existing.parent !== undefined && existing.parent !== patch.parent) {
+          const parent = await fetchIssue(existing.parent);
+          await api("DELETE", `${base}/${String(parent.number)}/sub_issues`, { sub_issue_id: issue.id });
+        }
+        if (patch.parent !== null && existing.parent !== patch.parent) {
+          const parent = await fetchIssue(patch.parent);
+          await api("POST", `${base}/${String(parent.number)}/sub_issues`, { sub_issue_id: issue.id });
+        }
+      }
       return readItem(updated);
     },
     async attach(id, evidence) {

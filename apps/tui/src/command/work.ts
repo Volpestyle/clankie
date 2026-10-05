@@ -8,13 +8,14 @@ import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
+import { WorkItemPrioritySchema } from "@clankie/protocol/work-items";
 import { commandHost } from "./io.ts";
 
 const WORK_USAGE = [
   "Usage: clankie work [status|discover] | repos | init [--backend default|markdown|github|linear] [--directory D]",
   "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--note TEXT]",
-  "  | list [--status S,S] [--owner O] [--label L] | show ID | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S]",
-  "  | update ID [--status S] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
+  "  | list [--status S,S] [--owner O] [--label L] | show ID | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S] [--priority 0..4|none|urgent|high|medium|low]",
+  "  | update ID [--status S] [--priority P] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
   "  | write ID --owner O|--no-owner|--add-label L|--remove-label L|--add-blocker ID [--request-id UUID] | receipt ID --request-id UUID",
   "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
@@ -75,6 +76,15 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
   if (parsed.flags.has("--linear-label") && verb !== "init")
     throw new Error("--linear-label only applies to init");
   const status = one(parsed, "--status");
+  const rawPriority = one(parsed, "--priority");
+  const priority =
+    rawPriority === undefined
+      ? undefined
+      : WorkItemPrioritySchema.parse(
+          /^\d+$/u.test(rawPriority)
+            ? Number(rawPriority)
+            : ["none", "urgent", "high", "medium", "low"].indexOf(rawPriority.toLowerCase()),
+        );
   switch (verb) {
     case "status":
     case "discover":
@@ -118,6 +128,7 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
         ...(one(parsed, "--owner") === undefined ? {} : { owner: one(parsed, "--owner") }),
         ...(many(parsed, "--criterion").length === 0 ? {} : { criteria: many(parsed, "--criterion") }),
         ...(status === undefined ? {} : { status }),
+        ...(priority === undefined ? {} : { priority }),
       };
     case "update":
     case "close": {
@@ -127,6 +138,7 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
         action: "update",
         repo,
         id: rest[0],
+        ...(priority === undefined ? {} : { priority }),
         ...(closing
           ? { status: one(parsed, "--canceled") === "true" ? "canceled" : "done" }
           : status === undefined

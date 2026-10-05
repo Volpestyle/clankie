@@ -5,6 +5,7 @@ import {
   patchDependsOn,
   patchLabels,
   touchesCriteria,
+  sortWorkItems,
   WorkItemNotFoundError,
   WorkItemScopeError,
   workItemLabels,
@@ -23,6 +24,40 @@ import { parseBody, patchBody, renderEvidence } from "../format.ts";
 /** Calls one Linear MCP tool and resolves its parsed JSON result. */
 export type LinearToolCall = (tool: string, args: Record<string, unknown>) => Promise<unknown>;
 
+export function linearResourceId(value: unknown): string | undefined {
+  const uuid = (entry: unknown) =>
+    typeof entry === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(entry)
+      ? entry.toLowerCase()
+      : undefined;
+  if (value === null || typeof value !== "object") return undefined;
+  const resource = value as { id?: unknown; uuid?: unknown };
+  if (resource.uuid !== undefined && uuid(resource.uuid) === undefined) return undefined;
+  const ids = [uuid(resource.id), uuid(resource.uuid)].filter((id) => id !== undefined);
+  return ids.length > 0 && ids.every((id) => id === ids[0]) ? ids[0] : undefined;
+}
+
+/** Both legacy owner writes and canonical delegated writes prove the same native membership. */
+export async function assertLinearIssueScope(
+  issue: unknown,
+  options: { team: string; project?: string | undefined; call: LinearToolCall },
+): Promise<void> {
+  const [team, project] = await Promise.all([
+    options.call("get_team", { query: options.team }),
+    options.project === undefined ? undefined : options.call("get_project", { query: options.project }),
+  ]);
+  const value = issue as { teamId?: unknown; projectId?: unknown } | null;
+  const teamId = linearResourceId(team);
+  const projectId = linearResourceId(project);
+  if (
+    teamId === undefined ||
+    linearResourceId({ id: value?.teamId }) !== teamId ||
+    (options.project !== undefined &&
+      (projectId === undefined || linearResourceId({ id: value?.projectId }) !== projectId))
+  )
+    throw new WorkItemScopeError();
+}
+
 interface LinearIssue {
   readonly id: string;
   readonly identifier?: string;
@@ -30,7 +65,11 @@ interface LinearIssue {
   /** A nested parent from a GraphQL-shaped issue read. */
   readonly parent?: { readonly identifier?: string; readonly id?: string } | null;
   readonly title: string;
+  readonly priority?: number | { readonly value?: number };
+  readonly state?: string;
   readonly description?: string | null;
+  readonly owner?: string;
+  readonly dependsOn?: string[];
   readonly status?: string | { readonly name?: string; readonly type?: string };
   readonly statusType?: string;
   readonly url?: string;
@@ -56,7 +95,17 @@ interface LinearStatus {
   readonly type: string;
 }
 
-const FIELDS = ["title", "description", "status", "statusType", "url", "updatedAt", "labels", "parentId"];
+const FIELDS = [
+  "title",
+  "description",
+  "status",
+  "statusType",
+  "priority",
+  "url",
+  "updatedAt",
+  "labels",
+  "parentId",
+];
 const PAGE_SIZE = 50;
 
 class LinearPaginationError extends Error {
@@ -68,7 +117,7 @@ class LinearPaginationError extends Error {
 }
 
 function statusName(issue: LinearIssue): string {
-  return typeof issue.status === "string" ? issue.status : (issue.status?.name ?? "");
+  return typeof issue.status === "string" ? issue.status : (issue.status?.name ?? issue.state ?? "");
 }
 
 function statusType(issue: LinearIssue): string {
@@ -83,6 +132,10 @@ export function linearStatusOf(type: string, name: string): WorkItemStatus {
   if (type === "completed") return "done";
   if (type === "canceled" || type === "duplicate") return "canceled";
   if (type === "started") return /review/iu.test(name) ? "in_review" : "in_progress";
+  if (/^done|completed|closed$/iu.test(name)) return "done";
+  if (/^cancel/iu.test(name)) return "canceled";
+  if (/review/iu.test(name)) return "in_review";
+  if (/in[ _-]progress|started|doing/iu.test(name)) return "in_progress";
   return "todo";
 }
 
@@ -153,6 +206,8 @@ export function createLinearBackend(
     readonly label?: string;
     readonly call: LinearToolCall;
     readonly scopedWrites?: boolean;
+    /** Native repo adapters expose the old work owner as their canonical assignee. */
+    readonly workOwnerAsAssignee?: boolean;
   } & WorkWriteCallbacks,
 ): WorkBackend {
   let statuses: Promise<LinearStatus[]> | undefined;
@@ -170,8 +225,11 @@ export function createLinearBackend(
       ...(parent == null ? {} : { parent }),
       title: issue.title.slice(0, 200),
       status: linearStatusOf(statusType(issue), statusName(issue)),
-      ...(parsed.owner === undefined ? {} : { owner: parsed.owner }),
-      dependsOn: parsed.dependsOn,
+      priority: typeof issue.priority === "number" ? issue.priority : (issue.priority?.value ?? 0),
+      ...(parsed.owner === undefined && issue.owner === undefined
+        ? {}
+        : { owner: issue.owner ?? parsed.owner }),
+      dependsOn: issue.dependsOn ?? parsed.dependsOn,
       summary: parsed.summary,
       criteria: parsed.criteria,
       evidence: parsed.evidence,
@@ -194,7 +252,7 @@ export function createLinearBackend(
   };
 
   const save = async (args: Record<string, unknown>): Promise<LinearIssue> => {
-    options.beforeWrite?.();
+    await options.beforeWrite?.();
     options.onDispatch?.();
     const saved = await options.call("save_issue", args);
     options.effectConfirmed?.();
@@ -203,30 +261,7 @@ export function createLinearBackend(
 
   const assertScope = async (issue: LinearIssue) => {
     if (!options.scopedWrites) return;
-    const [team, project] = await Promise.all([
-      options.call("get_team", { query: options.team }),
-      options.project === undefined ? undefined : options.call("get_project", { query: options.project }),
-    ]);
-    const uuid = (value: unknown) =>
-      typeof value === "string" &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value)
-        ? value.toLowerCase()
-        : undefined;
-    const identity = (value: unknown) => {
-      if (value === null || typeof value !== "object") return undefined;
-      const resource = value as { id?: unknown; uuid?: unknown };
-      if (resource.uuid !== undefined && uuid(resource.uuid) === undefined) return undefined;
-      const ids = [uuid(resource.id), uuid(resource.uuid)].filter((id) => id !== undefined);
-      return ids.length > 0 && ids.every((id) => id === ids[0]) ? ids[0] : undefined;
-    };
-    const teamId = identity(team);
-    const projectId = identity(project);
-    if (
-      teamId === undefined ||
-      uuid(issue.teamId) !== teamId ||
-      (options.project !== undefined && (projectId === undefined || uuid(issue.projectId) !== projectId))
-    )
-      throw new WorkItemScopeError();
+    await assertLinearIssueScope(issue, options);
   };
 
   const saveDescription = async (issue: LinearIssue, next: string, extra: Record<string, unknown> = {}) => {
@@ -241,6 +276,14 @@ export function createLinearBackend(
 
   return {
     kind: "linear",
+    async readIssue(id) {
+      try {
+        return { ...(await fetchIssue(id)) };
+      } catch (error) {
+        if (error instanceof WorkItemNotFoundError) return undefined;
+        throw error;
+      }
+    },
     async list(filter) {
       const limit = Math.min(filter?.limit ?? 100, 250);
       const { label, ...itemFilter } = filter ?? {};
@@ -269,7 +312,7 @@ export function createLinearBackend(
             continue;
           const item = toItem(issue);
           if (matchesFilter(item, itemFilter)) items.push(item);
-          if (items.length === limit) return items;
+          if (items.length === limit) return sortWorkItems(items);
         }
         if (Array.isArray(result) || result.hasNextPage !== true) break;
         if (typeof result.cursor !== "string" || result.cursor.length === 0 || cursors.has(result.cursor))
@@ -277,7 +320,7 @@ export function createLinearBackend(
         cursor = result.cursor;
         cursors.add(cursor);
       }
-      return items;
+      return sortWorkItems(items).slice(0, limit);
     },
     async get(id) {
       try {
@@ -288,17 +331,24 @@ export function createLinearBackend(
       }
     },
     async create(draft) {
-      const description = patchBody(draft.summary ?? "", {
-        criteria: (draft.criteria ?? []).map((text) => ({ text, done: false })),
-        ...(draft.owner === undefined ? {} : { owner: draft.owner }),
-        ...(draft.dependsOn === undefined ? {} : { dependsOn: draft.dependsOn }),
-      });
+      const description =
+        draft.description ??
+        patchBody(draft.summary ?? "", {
+          criteria: (draft.criteria ?? []).map((text) => ({ text, done: false })),
+          ...(draft.owner === undefined ? {} : { owner: draft.owner }),
+          ...(draft.dependsOn === undefined ? {} : { dependsOn: draft.dependsOn }),
+        });
       const created = await save({
         team: options.team,
         ...(options.project === undefined ? {} : { project: options.project }),
-        ...(options.label === undefined ? {} : { labels: [options.label] }),
+        ...(draft.labels === undefined && options.label === undefined
+          ? {}
+          : { labels: [...(draft.labels ?? []), ...(options.label === undefined ? [] : [options.label])] }),
         title: draft.title,
+        priority: draft.priority ?? 0,
+        ...(draft.parent === undefined ? {} : { parentId: draft.parent }),
         description,
+        ...(!options.workOwnerAsAssignee || draft.owner === undefined ? {} : { assignee: draft.owner }),
         ...(draft.status === undefined ? {} : { state: pickLinearState(await teamStatuses(), draft.status) }),
       });
       return toItem(await fetchIssue(created.identifier ?? created.id));
@@ -308,11 +358,27 @@ export function createLinearBackend(
       await assertScope(issue);
       const current = toItem(issue);
       const dependsChanged = patch.dependsOn !== undefined || patch.addDependsOn !== undefined;
-      const bodyChanged = touchesCriteria(patch) || patch.owner !== undefined || dependsChanged;
+      const bodyChanged =
+        patch.summary !== undefined ||
+        patch.evidence !== undefined ||
+        touchesCriteria(patch) ||
+        patch.owner !== undefined ||
+        dependsChanged;
       const extra = {
         ...(patch.title === undefined ? {} : { title: patch.title }),
+        ...(!options.workOwnerAsAssignee || patch.owner === undefined ? {} : { assignee: patch.owner }),
+        ...(!options.workOwnerAsAssignee || !dependsChanged
+          ? {}
+          : {
+              blockedBy: patchDependsOn(current.dependsOn, patch),
+              removeBlockedBy: current.dependsOn.filter(
+                (entry) => !patchDependsOn(current.dependsOn, patch).includes(entry),
+              ),
+            }),
+        ...(patch.priority === undefined ? {} : { priority: patch.priority }),
+        ...(patch.parent === undefined ? {} : { parentId: patch.parent }),
         ...(patch.status === undefined ? {} : { state: pickLinearState(await teamStatuses(), patch.status) }),
-        ...(patch.addLabels === undefined && patch.removeLabels === undefined
+        ...(patch.labels === undefined && patch.addLabels === undefined && patch.removeLabels === undefined
           ? {}
           : {
               labels: patchLabels(
@@ -321,12 +387,18 @@ export function createLinearBackend(
               ),
             }),
       };
-      if (bodyChanged) {
-        const next = patchBody(issue.description ?? "", {
-          ...(touchesCriteria(patch) ? { criteria: patchCriteria(current.criteria, patch) } : {}),
-          ...(patch.owner === undefined ? {} : { owner: patch.owner }),
-          ...(dependsChanged ? { dependsOn: patchDependsOn(current.dependsOn, patch) } : {}),
-        });
+      if (bodyChanged || patch.description !== undefined) {
+        const next = bodyChanged
+          ? patchBody(patch.description ?? patch.summary ?? issue.description ?? "", {
+              ...(patch.summary === undefined
+                ? {}
+                : { criteria: current.criteria, evidence: current.evidence }),
+              ...(touchesCriteria(patch) ? { criteria: patchCriteria(current.criteria, patch) } : {}),
+              ...(patch.evidence === undefined ? {} : { evidence: patch.evidence }),
+              ...(patch.owner === undefined ? {} : { owner: patch.owner }),
+              ...(dependsChanged ? { dependsOn: patchDependsOn(current.dependsOn, patch) } : {}),
+            })
+          : patch.description!;
         await saveDescription(issue, next, extra);
       } else if (Object.keys(extra).length > 0) {
         await save({ id: issue.identifier ?? issue.id, ...extra });

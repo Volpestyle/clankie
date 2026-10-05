@@ -90,12 +90,36 @@ describe("the work-items service", () => {
     expect(existsSync(join(ambiguous.repo, ".clankie/work"))).toBe(false);
   });
 
-  it("names the recorded backend when it cannot be reached rather than falling back to files", async () => {
-    const { service, repo } = await fixture();
-    await service.handle({ action: "init", repo, backend: "linear", linearTeam: "VUH" }, true);
-    await expect(service.handle({ action: "list", repo }, true)).rejects.toMatchObject({
-      code: "backend_unavailable",
-      message: expect.stringMatching(/Linear \(VUH\)/u),
+  it("persists a Linear-shaped local fallback in the saved repo scope when Linear is disconnected", async () => {
+    const { service, repo, stateDirectory, workspace } = await fixture();
+    await service.handle(
+      {
+        action: "init",
+        repo,
+        backend: "linear",
+        linearTeam: "VUH",
+        linearProject: "Clankie",
+        linearLabel: "repo-board",
+      },
+      true,
+    );
+    const created = await service.handle(
+      { action: "create", repo, title: "Offline task", priority: 2 },
+      true,
+    );
+    expect(created).toMatchObject({ item: { id: "LOCAL-VUH-1", priority: 2, labels: ["repo-board"] } });
+    if (!("item" in created)) throw new Error("Expected an issue");
+    const reopened = createWorkItemsService({
+      stateDirectory,
+      workspace: () => workspace,
+      run: noGit,
+      clock,
+    });
+    expect(await reopened.handle({ action: "show", repo, id: created.item.id }, true)).toMatchObject({
+      item: { id: created.item.id, title: "Offline task", priority: 2 },
+    });
+    expect(await reopened.handle({ action: "list", repo }, true)).toMatchObject({
+      items: [{ id: created.item.id }],
     });
     expect(existsSync(join(repo, ".clankie/work"))).toBe(false);
   });
