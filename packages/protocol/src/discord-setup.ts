@@ -14,6 +14,21 @@ export type DiscordField = {
 };
 export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly DiscordField[] }[] = [
   {
+    title: "Server setup",
+    fields: [
+      { key: "serverId", label: "Connected server ID", kind: "text" },
+      { key: "role", label: "Clankie’s role", kind: "choice", choices: ["participant", "admin"] },
+      { key: "fleetEnabled", label: "Fleet in Discord", kind: "boolean" },
+      { key: "fleetChannelId", label: "Participant fleet channel ID", kind: "text" },
+      {
+        key: "trackingLevel",
+        label: "Project tracking",
+        kind: "choice",
+        choices: ["off", "project_updates", "project_activity", "all_issues"],
+      },
+    ],
+  },
+  {
     title: "Identity and access",
     fields: [
       { key: "applicationId", label: "Application ID", kind: "text" },
@@ -140,6 +155,25 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
 ];
 
 export const DISCORD_CHOICE_LABELS: Readonly<Record<string, string>> = {
+  participant: "Participant",
+  admin: "Admin · dedicated server",
+  on: "on",
+  off: "off",
+  project_updates: "project updates only",
+  project_activity: "project activity",
+  all_issues: "every issue notification",
+  administrator: "Administrator",
+  read_message_history: "Read Message History",
+  send_messages_in_threads: "Send Messages in Threads",
+  connect: "Connect",
+  speak: "Speak",
+  add_reactions: "Add Reactions",
+  embed_links: "Embed Links",
+  attach_files: "Attach Files",
+  use_vad: "Use Voice Activity",
+  use_application_commands: "Use Application Commands",
+  create_public_threads: "Create Public Threads",
+  fleet_channel: "Participant fleet channel",
   deny: "Nobody",
   owner_only: "Only me",
   allowlist: "Selected people",
@@ -170,7 +204,15 @@ export const DISCORD_CHOICE_LABELS: Readonly<Record<string, string>> = {
 const SettingKey = z.enum(
   Object.keys(DiscordSettingsSchema.shape) as [keyof DiscordSettings, ...Array<keyof DiscordSettings>],
 );
-const PickerKind = z.enum(["server", "channels", "computer_access", "team_visibility"]);
+const PickerKind = z.enum([
+  "server",
+  "role",
+  "fleet",
+  "tracking",
+  "channels",
+  "computer_access",
+  "team_visibility",
+]);
 const SentencePart = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("text"), text: z.string() }).strict(),
   z
@@ -179,6 +221,7 @@ const SentencePart = z.discriminatedUnion("kind", [
       picker: PickerKind,
       fields: z.array(SettingKey),
       placeholder: z.string(),
+      choices: z.array(z.string()).optional(),
       /** Settings that scope a room/person picker to the selected social servers. */
       serverFields: z.array(SettingKey).optional(),
       /** Additive bindings: surfaces apply these instead of maintaining field mappings. */
@@ -199,7 +242,7 @@ const SentencePart = z.discriminatedUnion("kind", [
 ]);
 export const DiscordSetupSentenceSchema = z
   .object({
-    id: z.enum(["home", "talk", "computer", "team"]),
+    id: z.enum(["connect", "fleet", "tracking", "home", "talk", "computer", "team"]),
     parts: z.array(SentencePart),
     help: z.string(),
     checks: z.array(
@@ -211,6 +254,18 @@ export const DiscordSetupSentenceSchema = z
         "manage_channels",
         "manage_webhooks",
         "test_post",
+        "administrator",
+        "read_message_history",
+        "send_messages_in_threads",
+        "connect",
+        "speak",
+        "fleet_channel",
+        "add_reactions",
+        "embed_links",
+        "attach_files",
+        "use_vad",
+        "use_application_commands",
+        "create_public_threads",
       ]),
     ),
     /** Only this sentence may offer a computer-access choice. Presets cannot grant it. */
@@ -222,86 +277,68 @@ export type DiscordSetupSentence = z.infer<typeof DiscordSetupSentenceSchema>;
 /** Node-free display definition shared by the app, console and hosted dashboard. */
 export const DISCORD_SETUP_SENTENCES: readonly DiscordSetupSentence[] = [
   {
-    id: "home",
+    id: "connect",
     parts: [
-      { kind: "text", text: "Clankie lives in " },
+      { kind: "text", text: "Connect " },
+      { kind: "picker", picker: "server", fields: ["serverId"], placeholder: "server" },
+      { kind: "text", text: " with Clankie as " },
       {
         kind: "picker",
-        picker: "server",
-        fields: ["guildId", "ingressGuildIds", "presenceGuildIds", "voiceGuildIds", "userSessionGuildIds"],
-        placeholder: "server",
+        picker: "role",
+        fields: ["role"],
+        choices: ["participant", "admin"],
+        placeholder: "Participant / Admin",
       },
       { kind: "text", text: "." },
     ],
-    help: "Choose a server his connected Discord account can see.",
-    checks: ["account"],
+    help: "Participant follows Discord’s channel permissions. Admin gives Clankie full rein in a dedicated server; he never deletes the server or transfers ownership.",
+    checks: [
+      "account",
+      "view_channel",
+      "send_messages",
+      "read_message_history",
+      "send_messages_in_threads",
+      "connect",
+      "speak",
+      "add_reactions",
+      "embed_links",
+      "attach_files",
+      "use_vad",
+      "use_application_commands",
+      "create_public_threads",
+    ],
   },
   {
-    id: "talk",
+    id: "fleet",
     parts: [
-      { kind: "text", text: "He talks with " },
+      { kind: "text", text: "Fleet in Discord is " },
       {
         kind: "picker",
-        picker: "channels",
-        fields: [
-          "ingressChannelIds",
-          "presenceChannelIds",
-          "voiceChannelIds",
-          "userSessionChannelIds",
-          "userSessionVoiceChannelIds",
-        ],
-        placeholder: "#general, #dev",
-        serverFields: ["ingressGuildIds", "presenceGuildIds", "voiceGuildIds", "userSessionGuildIds"],
-        enables: [
-          { field: "textIngressEnabled" },
-          { field: "voiceEnabled", kinds: ["voice", "stage"] },
-          { field: "userSessionVoiceEnabled", kinds: ["voice", "stage"] },
-        ],
+        picker: "fleet",
+        fields: ["fleetEnabled"],
+        choices: ["on", "off"],
+        placeholder: "on / off",
       },
       { kind: "text", text: "." },
     ],
-    help: "Choose the rooms where people can talk with Clankie. Computer access is a separate choice.",
-    checks: ["view_channel", "send_messages", "test_post"],
+    help: "Admin creates fleet channels. Participant posts fleet messages only in the existing fleet channel given in Advanced. Turning this off keeps room connections.",
+    checks: [],
   },
   {
-    id: "computer",
+    id: "tracking",
     parts: [
+      { kind: "text", text: "Project tracking is " },
       {
         kind: "picker",
-        picker: "computer_access",
-        fields: ["systemActorUserIds", "systemActorGuildIds", "systemActorChannelIds"],
-        placeholder: "Only me",
-        serverFields: ["guildId", "ingressGuildIds", "userSessionGuildIds"],
-        accessFields: {
-          people: "systemActorUserIds",
-          servers: "systemActorGuildIds",
-          channels: "systemActorChannelIds",
-        },
+        picker: "tracking",
+        fields: ["trackingLevel"],
+        choices: ["off", "project_updates", "project_activity", "all_issues"],
+        placeholder: "off / project updates / project activity / every issue",
       },
-      { kind: "text", text: " can ask him to use " },
-      { kind: "machine" },
       { kind: "text", text: "." },
     ],
-    help: "Choose explicitly who may ask Clankie to use his computer. Changing his server or rooms never grants access.",
-    checks: ["computer_access"],
-    explicitComputerAccess: true,
-  },
-  {
-    id: "team",
-    parts: [
-      { kind: "text", text: "The team’s rooms " },
-      {
-        kind: "picker",
-        picker: "team_visibility",
-        fields: ["teamVisible"],
-        placeholder: "show up / stay hidden",
-      },
-      { kind: "text", text: " in " },
-      { kind: "picker", picker: "server", fields: ["swarmGuildId"], placeholder: "server" },
-      { kind: "text", text: "." },
-    ],
-    help: "Choose the managed server for the team. Hiding keeps that choice and its room connections; showing restores them.",
-    checks: ["manage_channels", "manage_webhooks", "send_messages", "test_post"],
+    help: "Project updates adds published updates. Project activity also includes status changes, milestones, and new or finished issues. Every issue notification includes all issue activity. Admin mirrors tracked projects as channels or forums, with one post per issue.",
+    checks: [],
   },
 ];
 const DiscordFieldSchema = z
@@ -316,18 +353,56 @@ const DiscordFieldSchema = z
   .strict();
 export const DiscordSetupDefinitionSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.union([z.literal(1), z.literal(2)]),
     sentences: z.array(DiscordSetupSentenceSchema),
     advancedGroups: z.array(z.object({ title: z.string(), fields: z.array(DiscordFieldSchema) }).strict()),
     choiceLabels: z.record(z.string(), z.string()),
   })
   .strict();
 export const DISCORD_SETUP_DEFINITION = DiscordSetupDefinitionSchema.parse({
-  schemaVersion: 1,
+  schemaVersion: 2,
   sentences: DISCORD_SETUP_SENTENCES,
   advancedGroups: DISCORD_SETTING_GROUPS,
   choiceLabels: DISCORD_CHOICE_LABELS,
 });
+/** Role-correct requirements; these check the invite grants, not a picked room. */
+export function discordSetupDefinition(
+  settings: DiscordSettings,
+): z.infer<typeof DiscordSetupDefinitionSchema> {
+  return {
+    ...DISCORD_SETUP_DEFINITION,
+    sentences: DISCORD_SETUP_DEFINITION.sentences.map((sentence) =>
+      sentence.id === "connect" && settings.role === "admin"
+        ? { ...sentence, checks: ["account", "administrator"] }
+        : sentence.id === "fleet" && settings.fleetEnabled && settings.role === "participant"
+          ? { ...sentence, checks: ["fleet_channel", "send_messages"] }
+          : sentence,
+    ),
+  };
+}
+
+// Discord’s documented permission bits. No server-management bits in a member invitation.
+export const DISCORD_PARTICIPANT_INVITE_PERMISSIONS = String(
+  [6n, 10n, 11n, 14n, 15n, 16n, 20n, 21n, 25n, 31n, 35n, 38n].reduce(
+    (permissions, bit) => permissions | (1n << bit),
+    0n,
+  ),
+);
+export const DISCORD_ADMIN_INVITE_PERMISSIONS = "8";
+export function discordRoleInviteUrl(
+  applicationId: string,
+  role: DiscordSettings["role"],
+  serverId?: string,
+): string {
+  const query = new URLSearchParams({
+    client_id: applicationId,
+    permissions: role === "admin" ? DISCORD_ADMIN_INVITE_PERMISSIONS : DISCORD_PARTICIPANT_INVITE_PERMISSIONS,
+    scope: "bot applications.commands",
+    ...(serverId ? { guild_id: serverId } : {}),
+  });
+  return `https://discord.com/oauth2/authorize?${query.toString()}`;
+}
+
 export const DiscordSetupSnapshotSchema = z
   .object({
     definition: DiscordSetupDefinitionSchema,
@@ -338,8 +413,25 @@ export const DiscordSetupSnapshotSchema = z
       .array(
         z
           .object({
-            sentenceId: z.enum(["talk", "team"]),
-            kind: z.enum(["view_channel", "send_messages", "manage_channels", "manage_webhooks"]),
+            sentenceId: z.enum(["connect", "fleet", "tracking", "talk", "team"]),
+            kind: z.enum([
+              "view_channel",
+              "send_messages",
+              "manage_channels",
+              "manage_webhooks",
+              "administrator",
+              "read_message_history",
+              "send_messages_in_threads",
+              "connect",
+              "speak",
+              "fleet_channel",
+              "add_reactions",
+              "embed_links",
+              "attach_files",
+              "use_vad",
+              "use_application_commands",
+              "create_public_threads",
+            ]),
             status: DiscordPermissionStatusSchema,
           })
           .strict(),
@@ -347,6 +439,14 @@ export const DiscordSetupSnapshotSchema = z
       .optional(),
     /** A surface must explicitly select a room and invoke the authenticated POST. */
     testPostAvailable: z.boolean().optional(),
+    invite: z
+      .object({
+        role: DiscordSettingsSchema.shape.role,
+        permissions: z.string().regex(/^\d+$/u),
+        url: z.string().url(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type DiscordSetupSnapshot = z.infer<typeof DiscordSetupSnapshotSchema>;

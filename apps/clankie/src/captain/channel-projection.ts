@@ -8,6 +8,7 @@
 // be a fleet's worth of violations for a fleet.
 
 import { planDiscordWebhookPost } from "@clankie/discord-presence-core";
+import type { DiscordSettings } from "@clankie/protocol";
 import type { ChannelProjection } from "./conversations.ts";
 
 const DISCORD_API = "https://discord.com/api/v10";
@@ -24,16 +25,102 @@ export function createChannelProjection(
     readonly rooms?: ChannelProjection["rooms"];
     /** Which guild the managed server is, so a pasted webhook can be held to it. */
     readonly swarmGuildId?: ChannelProjection["swarmGuildId"];
+    /** Fresh owner settings gate existing credentials as well as provisioning. */
+    readonly fleetSettings?: () => Promise<DiscordSettings>;
+    readonly participantPost?: (channelId: string, content: string) => Promise<void>;
   } = {},
 ): ChannelProjection {
   const fetchImpl = options.fetch ?? fetch;
+  let latestSettings: DiscordSettings | undefined;
+  const fleetSettings = async () => {
+    latestSettings = await options.fleetSettings!();
+    return latestSettings;
+  };
+  const requireAdmin = async (guildId?: string, requireFleet = true) => {
+    if (options.fleetSettings === undefined) return;
+    const settings = await fleetSettings();
+    if (
+      settings.serverId === undefined ||
+      settings.role !== "admin" ||
+      (requireFleet && (!settings.fleetEnabled || settings.teamVisible === false)) ||
+      (guildId !== undefined && settings.serverId !== guildId)
+    )
+      throw new Error("Discord fleet display requires Admin in the connected server and fleet enabled.");
+  };
   return {
-    post: post(fetchImpl),
-    resolve: resolve(fetchImpl),
-    remove: remove(fetchImpl),
-    ...(options.provision === undefined ? {} : { provision: options.provision }),
-    ...(options.rooms === undefined ? {} : { rooms: options.rooms }),
-    ...(options.swarmGuildId === undefined ? {} : { swarmGuildId: options.swarmGuildId }),
+    post: async (input) => {
+      await requireAdmin(input.guildId);
+      await post(fetchImpl)(input);
+    },
+    resolve: async (input) => {
+      await requireAdmin();
+      return resolve(fetchImpl)(input);
+    },
+    remove: async (input) => {
+      await requireAdmin(undefined, false);
+      if (options.fleetSettings !== undefined) {
+        const target = await resolve(fetchImpl)(input);
+        await requireAdmin(target.guildId, false);
+      }
+      await remove(fetchImpl)(input);
+    },
+    ...(options.provision === undefined
+      ? {}
+      : {
+          provision: async (input) => {
+            await requireAdmin();
+            return options.provision!(input);
+          },
+        }),
+    ...(options.rooms === undefined
+      ? {}
+      : {
+          rooms: async () => {
+            await requireAdmin();
+            return options.rooms!();
+          },
+        }),
+    swarmGuildId: () =>
+      latestSettings === undefined
+        ? options.swarmGuildId?.()
+        : latestSettings.role === "admin"
+          ? latestSettings.serverId
+          : undefined,
+    ...(options.fleetSettings === undefined
+      ? {}
+      : {
+          currentGuildId: async () => {
+            await requireAdmin();
+            return latestSettings?.serverId;
+          },
+          autoProvision: async () => {
+            const settings = await fleetSettings();
+            return !!(
+              options.provision &&
+              settings.serverId &&
+              settings.role === "admin" &&
+              settings.fleetEnabled &&
+              settings.teamVisible !== false
+            );
+          },
+          participantPost: async (input) => {
+            const settings = await fleetSettings();
+            if (settings.role !== "participant") return false;
+            if (
+              settings.serverId &&
+              settings.fleetEnabled &&
+              settings.teamVisible !== false &&
+              settings.fleetChannelId &&
+              options.participantPost
+            ) {
+              await options.participantPost(
+                settings.fleetChannelId,
+                bounded(`**${input.username}**\n${input.content}`, CONTENT_MAX),
+              );
+            }
+            return true;
+          },
+        }),
   };
 }
 

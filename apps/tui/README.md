@@ -241,12 +241,12 @@ credential holder.
   starts, preserving active workers and their matching CLI.
 - `/board`, `/board focus`, and `/board close` manage the herdr-lead companion
   board. A seated turn receives the current agent census.
-- `/connect` configures Linear and email and can open Discord setup; use direct
-  `/discord` for the shared setup sentences and gateway-backed permission checks.
-  **Send a test post…** explicitly posts to one selected text room; setup reads
-  and picker edits never post. The CLI is `clankie discord setup test-post --channel NAME`.
-  It also opens the complete lab-user opt-in flow and either body's non-secret ids
-  ([ADR 0093](../../docs/adr/0093-owner-authored-service-connections.md)).
+- `/connect` configures Linear and email and can open Discord setup. `/discord`
+  connects a server with Participant or Admin, fleet display on/off and a
+  tracking level. Its invitation requests the role's permissions and its checks
+  flag missing grants. Channel and role IDs, body diagnostics and machine grants
+  stay under **Advanced**. Normal setup has no channel or Discord-role pickers.
+  The explicit diagnostic CLI is `clankie discord setup test-post --channel NAME`.
 - `/setup` is where a new owner starts, and the console opens it on its own
   while Clankie cannot take a turn: how he should think (subscription, API key,
   local model, or a provider already signed in), then which model. It continues

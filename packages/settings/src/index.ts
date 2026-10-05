@@ -76,6 +76,7 @@ export {
   parseDiscordActiveBody,
   resolveDiscordActiveBody,
   resolveDiscordSettings,
+  readDiscordServerSettings,
   type DiscordActiveBody,
   type ResolvedDiscordSettings,
 } from "./discord-resolve.ts";

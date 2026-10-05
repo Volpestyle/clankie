@@ -4,8 +4,23 @@ import { z } from "zod";
 const SnowflakeSchema = z.string().regex(/^\d{5,32}$/u, "must be a numeric Discord id");
 const SnowflakeListSchema = z.array(SnowflakeSchema).max(64).default([]);
 
+export const DiscordRoleSchema = z.enum(["participant", "admin"]);
+export const DiscordTrackingLevelSchema = z.enum([
+  "off",
+  "project_updates",
+  "project_activity",
+  "all_issues",
+]);
+
 export const DiscordSettingsSchema = z
   .object({
+    /** One connected server. Discord permissions decide the rooms Clankie can inhabit. */
+    serverId: SnowflakeSchema.optional(),
+    role: DiscordRoleSchema.default("participant"),
+    fleetEnabled: z.boolean().default(false),
+    /** Participant fleet messages use this existing room; raw IDs stay in Advanced. */
+    fleetChannelId: SnowflakeSchema.optional(),
+    trackingLevel: DiscordTrackingLevelSchema.default("off"),
     applicationId: SnowflakeSchema.optional(),
     /** The command and live-proof server. Not where the fleet gets rooms. */
     guildId: SnowflakeSchema.optional(),
@@ -134,3 +149,47 @@ export const DiscordSettingsSchema = z
   })
   .strict();
 export type DiscordSettings = z.infer<typeof DiscordSettingsSchema>;
+
+/** Project the server role model into the existing body configuration without granting machine access. */
+export function discordServerSettings(
+  settings: DiscordSettings,
+  previous?: DiscordSettings,
+): DiscordSettings {
+  if (!settings.serverId)
+    return previous?.serverId
+      ? {
+          ...settings,
+          guildId: undefined,
+          swarmGuildId: undefined,
+          teamVisible: false,
+          textIngressEnabled: false,
+          ingressGuildIds: [],
+          ingressChannelIds: [],
+          presenceGuildIds: [],
+          presenceChannelIds: [],
+          voiceEnabled: false,
+          voiceGuildIds: [],
+          voiceChannelIds: [],
+          voiceChannelId: undefined,
+          userSessionGuildIds: [],
+        }
+      : settings;
+  return {
+    ...settings,
+    guildId: settings.serverId,
+    swarmGuildId: settings.role === "admin" ? settings.serverId : undefined,
+    teamVisible: settings.fleetEnabled,
+    textIngressEnabled: true,
+    ingressGuildIds: [settings.serverId],
+    ingressChannelIds: [],
+    presenceGuildIds: [settings.serverId],
+    presenceChannelIds: [],
+    voiceEnabled: true,
+    voiceGuildIds: [settings.serverId],
+    voiceChannelIds: [],
+    voiceChannelId: undefined,
+    voiceJoinPolicy: "guild_members",
+    userSessionGuildIds: [settings.serverId],
+    // The lab body’s recorded opt-in is a separate trust ceiling, retained in Advanced.
+  };
+}

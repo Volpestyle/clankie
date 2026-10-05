@@ -31,6 +31,12 @@ export function admitCaptainDiscordAction(input: {
   admittedChannelIds: ReadonlySet<string>;
   ownsProgressMessage: (id: string) => boolean;
 }): CaptainDiscordActionAdmission {
+  if (input.action.action === "server_action") {
+    return {
+      kind: "refuse",
+      result: { ok: false, message: "Server actions belong to the credential-owning body." },
+    };
+  }
   if (input.action.action === "typing") {
     // Each body lights its own in-flight delivery before admission — there is
     // no channel to authorize, only a delivery it already holds.
@@ -91,6 +97,9 @@ export async function executePlannedCaptainDiscordAction(input: {
   };
   progressMessageIds: Set<string>;
 }): Promise<DiscordCaptainActionResult> {
+  if (input.call.action === "server_action") {
+    return { ok: false, message: "Server actions belong to the credential-owning body." };
+  }
   const health = await input.presencePort.getHealth();
   let action: { messageId?: string | undefined };
   try {
@@ -143,6 +152,7 @@ export async function executePlannedCaptainDiscordAction(input: {
 export function planNonWatchCaptainDiscordAction(
   input: DiscordCaptainActionInput,
 ): CaptainDiscordActionPlan | undefined {
+  if (input.action === "server_action") return undefined;
   const { action, channelId, messageId } = input;
   switch (action) {
     case "react":

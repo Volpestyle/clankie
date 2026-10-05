@@ -1,6 +1,7 @@
 import { createDefaultCredentialStore, DiscordBotCredentialProvider } from "@clankie/credential-broker";
 import {
   parseDiscordIdSet,
+  executeDiscordServerAction,
   planDiscordChannelCreate,
   planDiscordForumPostCreate,
   planDiscordGuildChannels,
@@ -14,9 +15,11 @@ import type {
   DiscordGuildRoom,
   DiscordGuildRoomTarget,
   DiscordPresenceWrite,
+  DiscordServerAction,
+  DiscordServerActionResult,
 } from "@clankie/protocol";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
-import { discordAttachmentRoot, discordManagedGuildId } from "@clankie/settings";
+import { discordAttachmentRoot, discordManagedGuildId, readDiscordServerSettings } from "@clankie/settings";
 import type { REST } from "discord.js";
 import { createFilesystemAttachmentResolver } from "./attachment-resolver.ts";
 import { DiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
@@ -25,7 +28,11 @@ import { DiscordBotPresenceRuntime } from "./bot-presence-runtime.ts";
  * Trusted service load target (CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).
  * Loads the official bot token through the credential broker; never from env.
  */
-export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
+export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJS.ProcessEnv } = {}): {
+  serverAction(
+    input: DiscordServerAction,
+    origin?: { source: "operator" | "discord"; sourceGuildId?: string | undefined },
+  ): Promise<DiscordServerActionResult>;
   execute(
     write: DiscordPresenceWrite,
     session: DiscordPresenceSessionRecord,
@@ -55,6 +62,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
       "DISCORD_BOT_TOKEN must not be set for the presence runtime. Store discord_bot in the credential broker.",
     );
   }
+  const env = options.env ?? process.env;
   const store = createDefaultCredentialStore();
   const provider = new DiscordBotCredentialProvider({
     store,
@@ -92,6 +100,42 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
     return options.rest ?? new DiscordREST({ version: "10" }).setToken(botToken);
   };
   return {
+    async serverAction(input, origin) {
+      const authority = await readDiscordServerSettings(env);
+      // Validate role and route before resolving the credential or dispatching.
+      let rest: REST | undefined;
+      return executeDiscordServerAction(
+        input,
+        authority,
+        async (action) => {
+          rest ??= await guildRest(authority.serverId!);
+          if (action.method !== "GET") {
+            // Membership reads and credential resolution can yield while the
+            // owner revokes this action. Recheck immediately before dispatch.
+            const current = await readDiscordServerSettings(env);
+            if (
+              (
+                [
+                  "serverId",
+                  "role",
+                  "fleetEnabled",
+                  "fleetChannelId",
+                  "trackingLevel",
+                  "teamVisible",
+                ] as const
+              ).some((field) => current[field] !== authority[field])
+            )
+              throw new Error("discord_server_authority_changed");
+          }
+
+          return rest[action.method.toLowerCase() as "get" | "post" | "patch" | "put" | "delete"](
+            action.path as `/${string}`,
+            action.body === undefined ? undefined : { body: action.body },
+          );
+        },
+        origin,
+      );
+    },
     /**
      * Which server is the managed server, so a pasted webhook can be held to it.
      * Not a secret — a guild id names a place, it does not open one — but it is
@@ -105,7 +149,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
      * the one server Clankie controls.
      */
     async listRooms() {
-      const guildId = provisionGuildId();
+      const guildId = await provisionGuildId(env);
       const rest = await guildRest(guildId);
       return readDiscordGuildRooms(await rest.get(planDiscordGuildChannels(guildId).path as `/${string}`));
     },
@@ -118,7 +162,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
      * room in a merely-inhabited guild cannot be reached through the swarm one.
      */
     async provisionChannel(input) {
-      const guildId = provisionGuildId();
+      const guildId = await provisionGuildId(env);
       const rest = await guildRest(guildId);
       let channelId: string;
       let threadId: string | undefined;
@@ -192,8 +236,14 @@ export function createDiscordPresenceRuntime(options: { rest?: REST } = {}): {
  * presence, and voice list without ever becoming somewhere his agents can be
  * given a channel. Unset means no room is provisioned at all.
  */
-function provisionGuildId(): string {
-  const swarm = discordManagedGuildId();
+async function provisionGuildId(env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  const authority = await readDiscordServerSettings(env);
+  if (authority.serverId !== undefined) {
+    if (authority.role !== "admin") throw new Error("discord_channel_provision_requires_admin");
+    if (!authority.fleetEnabled) throw new Error("discord_fleet_disabled");
+    return authority.serverId;
+  }
+  const swarm = discordManagedGuildId(env);
   if (!swarm) throw new Error("discord_swarm_guild_unset");
   return swarm;
 }

@@ -217,6 +217,42 @@ paths:
         "403": { description: Operator required or revoked }
         "400": { description: Invalid update request }
         "503": { description: Runtime updater unavailable }
+  /v1/discord/settings:
+    get:
+      tags: [Discord]
+      operationId: discordSettings
+      summary: Read the server role, fleet and tracking setup with Advanced settings
+      description: >-
+        Operator-authorized non-secret settings, their revision and the shared
+        setup definition. Normal setup connects a server with participant or
+        admin, fleetEnabled and trackingLevel (off, project_updates,
+        project_activity, all_issues). Raw IDs and machine grants stay under
+        Advanced. The role-correct invitation and gateway checks are read-only.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: settings, revision and optional setup definition, role invite and permission checks
+        "403":
+          description: Operator authority required
+    post:
+      tags: [Discord]
+      operationId: discordSettingsUpdate
+      summary: Save revision-fenced non-secret Discord settings
+      description: >-
+        Requires settings and expectedRevision. Connecting a server projects its
+        ingress, presence and voice scope while preserving machine grants and
+        lab opt-in. Stale writes are refused. Saving never posts to Discord.
+        Admin actions refuse server deletion and ownership transfer at the body.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Saved settings, new revision and setup metadata
+        "400":
+          description: Invalid or unknown settings
+        "403":
+          description: Operator authority required or revoked
+        "409":
+          description: Settings revision changed
   /v1/discord/setup/test-post:
     post:
       tags: [Discord]

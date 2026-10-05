@@ -1,8 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import {
   DiscordCaptainActionInputSchema,
   DiscordCaptainActionResultSchema,
+  type DiscordServerAction,
+  type DiscordServerActionResult,
   type DiscordCaptainActionInput,
   type DiscordCaptainActionResult,
 } from "@clankie/protocol";
@@ -14,8 +16,29 @@ export function createDiscordCaptainActionClient(
   receipts?: DiscordTurnReceipts,
 ): {
   execute(input: DiscordCaptainActionInput, guard?: () => Promise<void>): Promise<DiscordCaptainActionResult>;
+  serverAction(input: DiscordServerAction): Promise<DiscordServerActionResult>;
 } {
   return {
+    serverAction: async (input) => {
+      try {
+        const response = await postToDiscordActiveBody(
+          "/captain-action",
+          DiscordCaptainActionInputSchema.parse({
+            ...input,
+            action: "server_action",
+            callId: randomUUID(),
+            source: "operator",
+          }),
+          env,
+          fetchImpl,
+        );
+        if (!response.ok) return unavailable();
+        const parsed = DiscordCaptainActionResultSchema.safeParse(await response.json());
+        return parsed.success ? parsed.data : unavailable();
+      } catch {
+        return unavailable();
+      }
+    },
     execute: async (input, guard) => {
       try {
         if (guard !== undefined) {
