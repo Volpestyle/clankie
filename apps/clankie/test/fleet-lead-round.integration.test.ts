@@ -560,6 +560,9 @@ it("a held fleet refresh cannot recreate efficiency persistence after Captain cl
   const f = await fixture();
   await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
   expect(existsSync(join(f.root, "seat-efficiency.json"))).toBe(true);
+  // Let the documented one-second read projection expire before holding a
+  // new native census; otherwise this roster read correctly reuses the cache.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
   const held = f.holdNextCensus();
   const refresh = f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
   try {

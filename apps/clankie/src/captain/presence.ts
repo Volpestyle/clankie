@@ -93,7 +93,7 @@ export async function captainNativeSubagents(
   if (head?.session === undefined) return undefined;
   try {
     if (head.harness === "claude") return readClaudeSubagents(head.session)?.running;
-    if (head.harness === "codex") return readCodexSubagents(head.session)?.running;
+    if (head.harness === "codex") return (await readCodexSubagents(head.session))?.running;
     if (head.harness === "opencode" && head.session.kind === "id")
       return (await readOpenCode?.(`local:${head.session.value}`))?.running;
   } catch {
