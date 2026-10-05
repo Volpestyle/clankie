@@ -122,11 +122,12 @@ describe("discord invite URL", () => {
     const url = discordBotInviteUrl("123456789012345678");
     expect(url).toContain("client_id=123456789012345678");
     expect(url).toContain(`permissions=${String(DISCORD_BOT_INVITE_PERMISSIONS)}`);
-    expect(url).toContain("scope=bot%20applications.commands");
+    expect(new URL(url).searchParams.get("scope")).toBe("bot applications.commands");
     // Use Application Commands is 2^31; JS `1 << 31` is negative, so the
     // constant must be written as a number, not a shift.
     expect(DISCORD_BOT_INVITE_PERMISSIONS).toBeGreaterThan(0);
-    expect(DISCORD_BOT_INVITE_PERMISSIONS).toBe(2_721_172_560);
+    expect(DISCORD_BOT_INVITE_PERMISSIONS).toBe(311_421_946_944);
+    expect(BigInt(DISCORD_BOT_INVITE_PERMISSIONS) & 8n).toBe(0n);
   });
 });
 
