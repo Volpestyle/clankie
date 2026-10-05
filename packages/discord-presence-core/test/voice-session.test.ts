@@ -417,6 +417,7 @@ interface HarnessOptions {
   readonly captain?: (request: DiscordPresenceChannelTurnRequest) => Promise<CaptainChannelTurnResult>;
   readonly roomNames?: (guildId: string, channelId: string) => { guildName?: string; channelName?: string };
   readonly lookAtScreen?: () => Promise<import("../src/voice-session.ts").LookAtScreenResult>;
+  readonly selfTool?: (call: import("../src/voice-session.ts").VoiceSelfToolCall) => Promise<string>;
   readonly speakerTranscriptionGate?: Promise<void>;
   readonly conversationGate?: Promise<void>;
   readonly occupants?: readonly {
@@ -482,6 +483,7 @@ function buildHarness(options: HarnessOptions = {}) {
       });
     },
     ...(options.lookAtScreen === undefined ? {} : { lookAtScreen: options.lookAtScreen }),
+    ...(options.selfTool === undefined ? {} : { selfTool: options.selfTool }),
     floor: {
       names: ["clankie"],
       replyPolicy: "addressed",
@@ -2513,6 +2515,56 @@ describe("ability path", () => {
       callId: "look_1",
       output: expect.stringContaining("looking at your own screen"),
     });
+  });
+
+  it("runs recall_episodes, get_self_state and remember_episode through the service, not the captain", async () => {
+    const calls: import("../src/voice-session.ts").VoiceSelfToolCall[] = [];
+    const harness = await engagedHarness({
+      selfTool: (call) => {
+        calls.push(call);
+        return Promise.resolve(`${call.name} answered`);
+      },
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall({
+      callId: "recall_1",
+      name: "recall_episodes",
+      argumentsJson: '{"query":"minecraft"}',
+    });
+    conversation.input.onFunctionCall({ callId: "self_1", name: "get_self_state", argumentsJson: "{}" });
+    conversation.input.onFunctionCall({
+      callId: "keep_1",
+      name: "remember_episode",
+      argumentsJson: '{"summary":"James and I got the server back up."}',
+    });
+    conversation.input.onFunctionCall({ callId: "bad_1", name: "recall_episodes", argumentsJson: "[1]" });
+    await flush();
+    expect(harness.submitCalls).toHaveLength(0);
+    expect(calls.map((call) => [call.name, call.arguments])).toEqual([
+      ["recall_episodes", { query: "minecraft" }],
+      ["get_self_state", {}],
+      ["remember_episode", { summary: "James and I got the server back up." }],
+    ]);
+    expect(calls.every((call) => call.guildId.length > 0 && call.channelId.length > 0)).toBe(true);
+    expect(conversation.functionResults.map((result) => [result.callId, result.output])).toEqual([
+      ["recall_1", "recall_episodes answered"],
+      ["self_1", "get_self_state answered"],
+      ["keep_1", "remember_episode answered"],
+      ["bad_1", "recall_episodes needs a JSON object of arguments."],
+    ]);
+  });
+
+  it("says a self tool is unreachable rather than guessing when the service is absent or fails", async () => {
+    const absent = await engagedHarness();
+    absent.conversation().input.onFunctionCall({ callId: "s1", name: "get_self_state", argumentsJson: "{}" });
+    await flush();
+    expect(at(absent.conversation().functionResults, 0).output).toContain("ask_clankie can reach it");
+    const failing = await engagedHarness({ selfTool: () => Promise.reject(new Error("down")) });
+    failing
+      .conversation()
+      .input.onFunctionCall({ callId: "s2", name: "get_self_state", argumentsJson: "{}" });
+    await flush();
+    expect(at(failing.conversation().functionResults, 0).output).toContain("didn't answer");
   });
 
   it("look_at_screen says so when he is not playing", async () => {

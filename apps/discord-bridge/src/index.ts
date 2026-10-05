@@ -58,6 +58,7 @@ import {
   createAdvertisedDiscordPresencePort,
   createVoiceBriefingProvider,
   createVoiceLookAtScreenProvider,
+  createVoiceSelfToolProvider,
   createVoiceRealtimePorts,
   discordVoiceTranscriptLogPath,
   DiscordBridgeReceiptStore,
@@ -389,6 +390,7 @@ const voiceSession =
         }),
         briefing: createVoiceBriefingProvider(voiceApi),
         lookAtScreen: createVoiceLookAtScreenProvider(voiceApi),
+        selfTool: createVoiceSelfToolProvider(voiceApi),
         floor: {
           // Persona owns who he is and when he speaks; the bridge only carries it.
           names: characterNames(storedSettings.persona),

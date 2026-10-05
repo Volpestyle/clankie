@@ -11,6 +11,8 @@ import { createCaptain } from "../src/captain/captain.ts";
 import { describe, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
+import { createFileMemory } from "../src/memory.ts";
+import { VOICE_SELF_TOOL_MAX_CHARACTERS } from "../src/voice-self-tools.ts";
 import { buildLaneToolBank } from "../src/captain/lane-tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { AutonomyStore } from "../src/captain/autonomy.ts";
@@ -693,5 +695,122 @@ it("keeps Clankie's raw Minecraft motor out of direct and deferred lane MCP call
         }),
       })
     ).json();
+  }
+});
+
+it("serves realtime voice its own recall_episodes, get_self_state and remember_episode in the discord_voice lane", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-voice-self-"));
+  const memory = createFileMemory({ dataDir: join(root, "memory") });
+  const episode = (index: number, lane: CaptainSessionLaneV2, visibility: string, summary: string) =>
+    memory.recordEpisode({
+      schemaVersion: 1,
+      episodeId: `ep-00000000-0000-4000-8000-00000000000${String(index)}`,
+      sourceConversationId: "global-default",
+      lane,
+      targetId: lane === "operator" ? "global-default" : "866430493889134672:866430493889134675",
+      summary,
+      visibility,
+      retained: false,
+      provenance: { characterId: "clankie", sessionId: "captain", selfAuthored: true, rawTranscript: false },
+      occurredAt: `2026-10-0${String(index)}T03:00:00.000Z`,
+    });
+  episode(1, "operator", "operator_private", "minecraft CONSOLE_PRIVATE plan");
+  for (const index of [2, 3, 4, 5, 6, 7]) {
+    episode(index, "discord_presence", "shareable", `minecraft night ${String(index)}`);
+  }
+  const appended: Record<string, unknown>[] = [];
+  const captain = createCaptain(
+    {
+      ...bankDeps(),
+      herdrAvailable: () => false,
+      embodiment: { getLiveSession: () => Promise.resolve(undefined) },
+      presence: {
+        listSessions: () => Promise.resolve([]),
+        listVoiceHistory: () => Promise.resolve([]),
+        listRecentVoiceSpeech: () => Promise.resolve({ currentStay: null, recent: [] }),
+      },
+      media: { finishedRenders: () => Promise.resolve([]) },
+      memory: {
+        // The production adapter (index.ts) applies the lane default when no
+        // visibility is passed; this records what the voice path hands it.
+        appendEpisode: (input: Record<string, unknown>) => {
+          appended.push(input);
+          return Promise.resolve({ corrected: false, retained: false });
+        },
+        recallEpisodeCard: (lane: CaptainSessionLaneV2) =>
+          Promise.resolve(memory.episodeRecallCard({ lane })),
+        searchEpisodeCard: (lane: CaptainSessionLaneV2, query: string) =>
+          Promise.resolve(memory.searchEpisodeCard({ lane, query })),
+      },
+    } as unknown as CaptainDeps,
+    {
+      repoRoot: root,
+      stateDir: root,
+      workingDirectory: root,
+      settings: new SettingsStore(join(root, "settings.json")),
+    },
+  );
+  const app = await createClankieApp({
+    captain,
+    authenticateCaptain: async (request) =>
+      request.headers.get("authorization") === "Bearer voice"
+        ? { captainId: "captain-clankie", steerSourceLane: "discord_voice" as const }
+        : request.headers.get("authorization") === "Bearer text"
+          ? { captainId: "captain-clankie", steerSourceLane: "discord_text" as const }
+          : undefined,
+  });
+  const call = (tool: string, args: Record<string, unknown>, bearer = "voice") =>
+    app.app.request("/v1/discord/voice-self-tool", {
+      method: "POST",
+      headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        guildId: "866430493889134672",
+        channelId: "866430493889134676",
+        speakerId: "830574404453793842",
+        tool,
+        arguments: args,
+      }),
+    });
+  try {
+    expect((await call("get_self_state", {}, "text")).status).toBe(403);
+
+    const recall = await call("recall_episodes", { query: "minecraft" });
+    expect(recall.status).toBe(200);
+    const recalled = (await recall.json()) as { text: string; isError: boolean };
+    expect(recalled.isError).toBe(false);
+    // Shareable only, newest few, no ids or snowflakes for a speaking model.
+    expect(recalled.text).not.toContain("CONSOLE_PRIVATE");
+    expect(recalled.text.match(/^- /gmu)).toHaveLength(5);
+    expect(recalled.text).toContain("minecraft night 7");
+    expect(recalled.text).not.toContain("minecraft night 2");
+    expect(recalled.text).toMatch(/^- 2026-10-0\d, Discord text: minecraft night \d$/mu);
+    expect(recalled.text).not.toMatch(/ep-|866430493889134672|global-default/u);
+
+    const self = (await (await call("get_self_state", {})).json()) as { text: string; isError: boolean };
+    expect(self.isError).toBe(false);
+    expect(self.text).toContain("presenceSessions");
+    expect(self.text.length).toBeLessThanOrEqual(VOICE_SELF_TOOL_MAX_CHARACTERS);
+
+    const kept = (await (
+      await call("remember_episode", {
+        summary: "Got the server back up with James.",
+        visibility: "operator_private",
+      })
+    ).json()) as { text: string; isError: boolean };
+    expect(kept.isError).toBe(false);
+    expect(kept.text).toContain('"remembered": true');
+    expect(appended).toHaveLength(1);
+    expect(appended[0]).toMatchObject({
+      lane: "discord_voice",
+      targetId: "866430493889134672:866430493889134676",
+      summary: "Got the server back up with James.",
+    });
+    // The voice never picks visibility; the lane default (shareable) applies.
+    expect(appended[0]).not.toHaveProperty("visibility");
+  } finally {
+    app.close();
+    await captain.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });

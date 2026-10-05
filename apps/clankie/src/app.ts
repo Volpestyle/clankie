@@ -237,6 +237,7 @@ import {
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
+import { runVoiceSelfTool, VoiceSelfToolRequestSchema } from "./voice-self-tools.ts";
 import {
   readVoiceAwareness,
   renderVoiceAwareness,
@@ -2138,6 +2139,30 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       briefing,
       refreshedAt: now.toISOString(),
     });
+  });
+
+  /**
+   * The realtime voice's own self tools (recall_episodes, get_self_state,
+   * remember_episode), run from the captain's discord_voice tool bank for the
+   * room the body is in. Only the discord_voice body bearer may call it.
+   */
+  app.post("/v1/discord/voice-self-tool", async (context) => {
+    const captain = await authenticateCaptain(context.req.raw, dependencies);
+    if (captain === "unavailable") {
+      return context.json({ error: "captain_authentication_unavailable" }, 503);
+    }
+    if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
+    if (captain.steerSourceLane !== "discord_voice") {
+      return context.json({ error: "discord_voice_authority_required" }, 403);
+    }
+    const parsed = VoiceSelfToolRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_discord_voice_self_tool" }, 400);
+    try {
+      const result = await runVoiceSelfTool(dependencies.captain, parsed.data);
+      return context.json({ schemaVersion: 1 as const, ...result });
+    } catch {
+      return context.json({ error: "voice_self_tool_unavailable" }, 503);
+    }
   });
 
   app.post(DISCORD_ROOM_EVIDENCE_PATH, async (context) => {

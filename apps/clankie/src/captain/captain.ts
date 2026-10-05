@@ -195,7 +195,7 @@ import { createCaptainModelRuntime, type CaptainModelRuntime, type RoutedSelecti
 import { captainRoutingExtension } from "./routing.ts";
 import { captainRequestExtension, promptCacheSalt } from "./request-budget.ts";
 import type { CaptainPort, CaptainPromptSection, HireSeat, MessageSeat, PromptHarness } from "./port.ts";
-import { buildLaneToolBank, laneAuthoredTools } from "./lane-tools.ts";
+import { buildLaneToolBank, laneAuthoredTools, laneAuthoredToolsNamed } from "./lane-tools.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
 import { renderComputerUseReach, type ComputerUseHarness } from "../computer-use-harnesses.ts";
@@ -4620,6 +4620,32 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     voiceLaneInstructions(): string {
       // The same Identity every lane starts from, then the one voice register.
       return composeVoiceLaneInstructions(captainInstructions());
+    },
+
+    async voiceSelfTool({ guildId, channelId, speakerId, name, arguments: args }) {
+      // The voice room's own attribution, stamped by the host exactly as a
+      // discord_voice captain turn stamps it; the model chooses none of it.
+      // The caller is the authenticated discord_voice body, which can already
+      // reach these tools through an ask_clankie handoff, so this grants
+      // nothing new — it only skips the full captain round trip.
+      const targetId = `${guildId}:${channelId}`;
+      const conversationId = conversations.roomConversation("discord_voice", targetId);
+      const capture: TurnContext = {
+        shell: false,
+        room: roomKey("discord_voice", targetId),
+        targetId,
+        guildId,
+        channelId,
+        ...(speakerId === undefined ? {} : { actorId: speakerId }),
+        conversationAuthority: {
+          owner: { conversationId },
+          current: () => true,
+          authorize: async () => true,
+        },
+      };
+      const [tool] = laneAuthoredToolsNamed(desktopDeps, capture, laneLog, "discord_voice", [name]);
+      if (tool === undefined) throw new Error(`${name} is not in the discord_voice tool bank`);
+      return tool.call(args);
     },
 
     seatContext,

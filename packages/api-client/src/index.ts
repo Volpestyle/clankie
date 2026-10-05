@@ -149,9 +149,26 @@ export interface DiscordVoiceBriefingRequest {
   readonly consentedUserIds: readonly string[];
 }
 
+/** One of the voice's own self tools, run in the service's discord_voice lane. */
+export interface DiscordVoiceSelfToolRequest {
+  readonly schemaVersion: 1;
+  readonly guildId: string;
+  readonly channelId: string;
+  readonly speakerId?: string;
+  readonly tool: "recall_episodes" | "get_self_state" | "remember_episode";
+  readonly arguments: Record<string, unknown>;
+}
+
+export interface DiscordVoiceSelfToolResult {
+  readonly schemaVersion: 1;
+  /** Bounded text for the voice model to read. */
+  readonly text: string;
+  readonly isError: boolean;
+}
+
 export interface DiscordVoiceBriefing {
   readonly schemaVersion: 1;
-  /** Persona + lane + realtime surface rules, composed service-side; ≤ 8000 chars. */
+  /** Identity + persona + voice register + surface rules + "what you're up to", service-side; ≤ 12000 chars. */
   readonly instructions: string;
   /** Bounded self-state, shareable episodes, and approved person memory; ≤ 8000 chars. */
   readonly briefing: string;
@@ -543,6 +560,24 @@ export class ClankieApiClient {
       throw new Error("Clankie API returned a malformed Discord voice briefing");
     }
     return briefing;
+  }
+
+  public async callDiscordVoiceSelfTool(
+    input: DiscordVoiceSelfToolRequest,
+  ): Promise<DiscordVoiceSelfToolResult> {
+    const result = await this.request<DiscordVoiceSelfToolResult>("/v1/discord/voice-self-tool", {
+      method: "POST",
+      headers: this.captainHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (
+      result.schemaVersion !== 1 ||
+      typeof result.text !== "string" ||
+      typeof result.isError !== "boolean"
+    ) {
+      throw new Error("Clankie API returned a malformed voice self-tool result");
+    }
+    return result;
   }
 
   public fetchPlayStill(): Promise<PlayStillRead> {

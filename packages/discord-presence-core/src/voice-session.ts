@@ -55,6 +55,7 @@ import {
   MUSIC_SKIP_TOOL_NAME,
   MUSIC_STOP_TOOL_NAME,
   YOUTUBE_SEARCH_TOOL_NAME,
+  SELF_TOOL_NAMES,
   MAX_REALTIME_AUDIO_APPEND_BYTES,
   MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
   MAX_REALTIME_TEXT_ITEM_CHARACTERS,
@@ -365,6 +366,15 @@ export interface DiscordVoiceBriefing {
   readonly briefing: string;
 }
 
+/** One self-tool call for the service's discord_voice lane (recall_episodes, get_self_state, remember_episode). */
+export interface VoiceSelfToolCall {
+  readonly guildId: string;
+  readonly channelId: string;
+  readonly speakerId?: string;
+  readonly name: (typeof SELF_TOOL_NAMES)[number];
+  readonly arguments: Record<string, unknown>;
+}
+
 export type LookAtScreenResult =
   | { readonly outcome: "not_playing" }
   | { readonly outcome: "pending" }
@@ -387,6 +397,8 @@ export interface DiscordVoiceSessionOptions {
    * not-playing result is spoken as "I cannot see the screen."
    */
   readonly lookAtScreen?: () => Promise<LookAtScreenResult>;
+  /** His own memory/self tools, answered by the service; absent says they are unavailable. */
+  readonly selfTool?: (call: VoiceSelfToolCall) => Promise<string>;
   readonly realtime: DiscordVoiceRealtimePorts;
   /** Fetched at engage time so the wake carries current state, not join-time state. */
   readonly briefing: (request: DiscordVoiceBriefingRequest) => Promise<DiscordVoiceBriefing>;
@@ -2533,6 +2545,13 @@ export class DiscordVoiceSession {
         .catch(() => this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "handler_failed"));
       return;
     }
+    if (this.isSelfTool(call.name)) {
+      const generation = this.sessionGeneration;
+      this.turnQueue = this.turnQueue
+        .then(() => this.handleSelfTool(call, exchange, generation, guildId, channelId))
+        .catch(() => this.emitRealtimeTool(call, exchange, "failed", guildId, channelId, "handler_failed"));
+      return;
+    }
     if (call.name === LOOK_AT_SCREEN_TOOL_NAME) {
       const generation = this.sessionGeneration;
       this.turnQueue = this.turnQueue
@@ -2554,7 +2573,71 @@ export class DiscordVoiceSession {
       name === ASK_CLANKIE_TOOL_NAME ||
       name === VOICE_LEAVE_TOOL_NAME ||
       name === LOOK_AT_SCREEN_TOOL_NAME ||
-      this.isMusicTool(name)
+      this.isMusicTool(name) ||
+      this.isSelfTool(name)
+    );
+  }
+
+  private isSelfTool(name: string): name is VoiceSelfToolCall["name"] {
+    return (SELF_TOOL_NAMES as readonly string[]).includes(name);
+  }
+
+  /** Same tools as the captain, run by the service in this room's discord_voice lane. */
+  private async handleSelfTool(
+    call: RealtimeFunctionCall,
+    exchange: PendingVoiceResponse | undefined,
+    generation: number,
+    guildId: string,
+    channelId: string,
+  ): Promise<void> {
+    if (generation !== this.sessionGeneration || !this.isSelfTool(call.name)) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
+    let args: Record<string, unknown> | undefined;
+    try {
+      const parsed: unknown = JSON.parse(call.argumentsJson || "{}");
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        args = parsed as Record<string, unknown>;
+      }
+    } catch {
+      args = undefined;
+    }
+    let reply: string;
+    let code: string | undefined;
+    if (args === undefined) {
+      reply = `${call.name} needs a JSON object of arguments.`;
+      code = "arguments_invalid";
+    } else if (this.options.selfTool === undefined) {
+      reply = "Your memory isn't reachable from this call right now; ask_clankie can reach it.";
+      code = "self_tool_unavailable";
+    } else {
+      const speakerId = exchange?.speakerId;
+      try {
+        reply = await this.options.selfTool({
+          guildId,
+          channelId,
+          ...(speakerId === undefined ? {} : { speakerId }),
+          name: call.name,
+          arguments: args,
+        });
+      } catch {
+        reply = "Your memory didn't answer just now; ask_clankie can try.";
+        code = "self_tool_failed";
+      }
+    }
+    if (generation !== this.sessionGeneration) {
+      this.emitRealtimeTool(call, exchange, "dropped", guildId, channelId, "stale_session");
+      return;
+    }
+    const submitted = this.submitLocalFunctionResult(call.callId, reply, exchange, guildId, channelId);
+    this.emitRealtimeTool(
+      call,
+      exchange,
+      code !== undefined ? "failed" : submitted ? "completed" : "dropped",
+      guildId,
+      channelId,
+      code ?? (submitted ? undefined : "result_not_submitted"),
     );
   }
 

@@ -91,6 +91,24 @@ export async function buildLaneToolBank(
   return { lane, tools };
 }
 
+/**
+ * Named authored tools from a lane's own bank, callable outside a pi run: the
+ * realtime voice reaches `recall_episodes`, `get_self_state` and
+ * `remember_episode` through this, so they are the same tool code, schema
+ * validation and lane visibility the captain uses, never a voice-only copy.
+ */
+export function laneAuthoredToolsNamed(
+  deps: CaptainDeps,
+  turn: TurnContext,
+  laneLog: LaneLog,
+  lane: CaptainSessionLaneV2,
+  names: readonly string[],
+): LaneTool[] {
+  return laneAuthoredTools(deps, turn, laneLog, lane)
+    .filter((tool) => names.includes(tool.name))
+    .map((tool) => authoredLaneTool(tool, turn));
+}
+
 const MAX_SEARCH_RESULTS = 20;
 const MAX_SCHEMA_NAMES = 10;
 

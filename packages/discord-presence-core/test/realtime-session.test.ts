@@ -191,11 +191,21 @@ describe("realtime conversation session", () => {
       "music_resume",
       "music_stop",
       "music_now",
+      "recall_episodes",
+      "get_self_state",
+      "remember_episode",
     ]);
     expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain(
       "you choose to remember",
     );
-    expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain("your own route");
+    expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain(
+      "Think something through or act with your full tools",
+    );
+    expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).not.toContain("captain mind");
+    // The voice never chooses console-private visibility; the lane default applies.
+    expect(JSON.stringify(tools?.find((tool) => tool.name === "remember_episode"))).not.toContain(
+      "visibility",
+    );
     expect(tools?.find((tool) => tool.name === "ask_clankie")?.description).toContain(
       "web browsing and research",
     );

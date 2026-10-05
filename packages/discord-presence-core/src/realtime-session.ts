@@ -147,9 +147,9 @@ const ASK_CLANKIE_TOOL = {
   type: "function",
   name: ASK_CLANKIE_TOOL_NAME,
   description:
-    "Use your captain mind to act or to look something up. This is your own route to Clankie's " +
-    "complete tools and memory, not another assistant; capabilities reached through it are your " +
-    "capabilities. Use this for anything beyond conversation — web browsing and research, actions, " +
+    "Think something through or act with your full tools. This is still you — your complete " +
+    "tools and memory, not another mind or assistant; what you reach through it is yours. " +
+    "Use this for anything beyond conversation — web browsing and research, actions, " +
     "files, the shell and the herdr agent fleet on the operator's machine, text channels you cannot see from here, " +
     "the story of this playthrough, facts the briefing does not cover, or something from the " +
     "conversation you choose to remember as part of your own experience. Do not wait for someone to ask you to remember it. " +
@@ -261,6 +261,57 @@ const MUSIC_TOOLS = [
   MUSIC_STOP_TOOL,
   MUSIC_NOW_TOOL,
 ] as const;
+
+// --- Self tools: the captain's own recall_episodes / get_self_state /
+// remember_episode, same names, run by the service in the discord_voice lane.
+const RECALL_EPISODES_TOOL_NAME = "recall_episodes";
+const GET_SELF_STATE_TOOL_NAME = "get_self_state";
+const REMEMBER_EPISODE_TOOL_NAME = "remember_episode";
+export const SELF_TOOL_NAMES = [
+  RECALL_EPISODES_TOOL_NAME,
+  GET_SELF_STATE_TOOL_NAME,
+  REMEMBER_EPISODE_TOOL_NAME,
+] as const;
+const SELF_TOOLS = [
+  {
+    type: "function",
+    name: RECALL_EPISODES_TOOL_NAME,
+    description:
+      "Search your own memory — everything you kept, not just the briefing. Use it when someone asks about " +
+      "your past or something feels like it came up before, instead of guessing. Returns your newest matching notes.",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string", description: "What to look for in your notes." } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: GET_SELF_STATE_TOOL_NAME,
+    description:
+      "Check on yourself right now: live play, Discord presence, recent voice stays. Read it before answering " +
+      "a question about what you are doing, instead of guessing.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    type: "function",
+    name: REMEMBER_EPISODE_TOOL_NAME,
+    description:
+      "Write one short episode into your own memory: something from this call you choose to carry forward. " +
+      "Your concise memory, not a transcript or a profile of someone. Set retain for ones you want in a year.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: { type: "string", description: "Your memory of it, in a sentence or two." },
+        retain: { type: "boolean" },
+      },
+      required: ["summary"],
+      additionalProperties: false,
+    },
+  },
+] as const;
+// --- end self tools.
 
 /** Minimal transport seam. Production wraps a WebSocket; tests inject a fake. */
 export interface RealtimeSocket {
@@ -822,7 +873,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
               // becoming a second, conflicting floor owner.
               turn_detection: null,
               audio: { output: { format: REALTIME_PCM_FORMAT } },
-              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS, ...SELF_TOOLS],
             }
           : {
               type: "realtime",
@@ -857,7 +908,7 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
                     }
                   : {}),
               },
-              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS],
+              tools: [ASK_CLANKIE_TOOL, VOICE_LEAVE_TOOL, LOOK_AT_SCREEN_TOOL, ...MUSIC_TOOLS, ...SELF_TOOLS],
               tool_choice: "auto",
               truncation: {
                 type: "retention_ratio",

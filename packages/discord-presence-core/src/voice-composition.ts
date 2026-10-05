@@ -18,6 +18,7 @@ import type {
   DiscordVoiceBriefing,
   DiscordVoiceBriefingRequest,
   LookAtScreenResult,
+  VoiceSelfToolCall,
   VoiceConversationOpenInput,
   VoiceConversationPort,
   VoiceTranscriptionHandlers,
@@ -388,6 +389,34 @@ export function createVoiceBriefingProvider(
       consentedUserIds: request.consentedUserIds,
     });
     return { instructions: briefing.instructions, briefing: briefing.briefing };
+  };
+}
+
+export interface VoiceSelfToolApiPort {
+  callDiscordVoiceSelfTool(input: {
+    readonly schemaVersion: 1;
+    readonly guildId: string;
+    readonly channelId: string;
+    readonly speakerId?: string;
+    readonly tool: VoiceSelfToolCall["name"];
+    readonly arguments: Record<string, unknown>;
+  }): Promise<{ readonly text: string; readonly isError: boolean }>;
+}
+
+/** The voice's recall_episodes / get_self_state / remember_episode, answered by the service. */
+export function createVoiceSelfToolProvider(
+  api: VoiceSelfToolApiPort,
+): (call: VoiceSelfToolCall) => Promise<string> {
+  return async (call) => {
+    const result = await api.callDiscordVoiceSelfTool({
+      schemaVersion: 1,
+      guildId: call.guildId,
+      channelId: call.channelId,
+      ...(call.speakerId === undefined ? {} : { speakerId: call.speakerId }),
+      tool: call.name,
+      arguments: call.arguments,
+    });
+    return result.isError ? `That didn't work: ${result.text}` : result.text;
   };
 }
 

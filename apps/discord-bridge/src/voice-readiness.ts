@@ -493,7 +493,7 @@ export interface VoiceWakeTransitionProbeOptions {
 
 const WAKE_PROBE_TIMEOUT_MS = 20_000;
 const WAKE_PROBE_INSTRUCTIONS =
-  "You are Clankie. Use ask_clankie as your own captain mind for every action or lookup outside this conversation.";
+  "You are Clankie. Use ask_clankie to think something through or act with your full tools for every action or lookup outside this conversation.";
 const WAKE_PROBE_ITEM =
   "Readiness probe: use your web browsing ability to look up the current weather in Chicago. Do not answer from memory.";
 

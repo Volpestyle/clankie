@@ -216,6 +216,13 @@ knew nothing about his current work.
   truncated, rather than the seeded briefing that a long call drops first. It
   is a snapshot from when the session opened; `ask_clankie` covers anything
   newer. Console episodes stay `operator_private`.
+- The voice holds three of his own tools directly, by the captain's names:
+  `recall_episodes`, `get_self_state`, `remember_episode`. The bridge posts
+  them to `/v1/discord/voice-self-tool` (discord_voice bearer only), which
+  runs the same authored tools from the `discord_voice` lane bank for that
+  room. Recall sees shareable notes only and is compacted to the newest five
+  without ids; a voice-written episode never names a visibility, so the lane
+  default (shareable) applies. Results are capped at 2000 characters.
 
 ### Room membership is context, departure is his decision (2026-09-28)
 
