@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { readClaudeSubagents, readCodexSubagents } from "@clankie/agent-transcript";
+import type { ObservedHeadSeat } from "./herdr-census.ts";
 import type { OperatorPresenceSnapshot } from "@clankie/protocol/presence";
 
 export interface PresenceSources {
@@ -9,6 +11,7 @@ export interface PresenceSources {
   playingSince?: string;
   playing: boolean;
   activeSeats: number;
+  nativeSubagents?: number;
   pendingOwnerItem?: OperatorPresenceSnapshot["pendingOwnerItem"];
 }
 
@@ -36,6 +39,7 @@ export function projectPresence(sources: PresenceSources): OperatorPresenceSnaps
     detail,
     since,
     activeSeats,
+    ...(sources.nativeSubagents === undefined ? {} : { nativeSubagents: sources.nativeSubagents }),
     ...(pendingOwnerItem === undefined ? {} : { pendingOwnerItem }),
     ...(sources.expression === undefined ? {} : { expression: sources.expression }),
   };
@@ -79,4 +83,21 @@ export async function captainIsThinking(
     }),
   );
   return active.some(Boolean);
+}
+
+/** Read only the live local captain parent, never a worker or cached fleet count. */
+export async function captainNativeSubagents(
+  head: Pick<ObservedHeadSeat, "harness" | "session"> | undefined,
+  readOpenCode?: (ref: string) => Promise<{ running: number } | undefined>,
+): Promise<number | undefined> {
+  if (head?.session === undefined) return undefined;
+  try {
+    if (head.harness === "claude") return readClaudeSubagents(head.session)?.running;
+    if (head.harness === "codex") return readCodexSubagents(head.session)?.running;
+    if (head.harness === "opencode" && head.session.kind === "id")
+      return (await readOpenCode?.(`local:${head.session.value}`))?.running;
+  } catch {
+    // Unreadable parent data is unknown, never an invented zero.
+  }
+  return undefined;
 }

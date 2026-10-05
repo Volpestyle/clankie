@@ -5,7 +5,7 @@ import { readIssueMetrics } from "./issue-metrics.ts";
 import { FleetMembershipReadError, type FleetProjectMembership } from "../fleet-project-membership.ts";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
 import { DesktopExpressions } from "./desktop.ts";
-import { projectPresence, pollPresence, captainIsThinking } from "./presence.ts";
+import { projectPresence, pollPresence, captainIsThinking, captainNativeSubagents } from "./presence.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { projectOnboarding } from "./project-onboarding.ts";
 import {
@@ -2741,11 +2741,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let seatWork = "";
   let captainGoals = "";
   /** Admission reads this fresh census; cached roster/bridge cards confer no authority. */
-  async function observeFleet() {
+  async function observeFleet(localOnly = false) {
     const binding = await deps.runtimes?.configuredBinding("default");
     return readFleet({
       ...(options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner, summaries: {} } : {}),
-      fleets: await censusFleets(),
+      fleets: localOnly ? [] : await censusFleets(),
       localAvailable: deps.herdrAvailable?.() !== false,
       ...(binding ? { herdrSession: binding.session, bridgeSocket: binding.socketPath } : {}),
     });
@@ -4249,6 +4249,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               deps.presence.listSessions(),
               deps.embodiment.getLiveSession(),
             ]);
+            // Native children can change without a worker roster change. Re-observe
+            // the captain parent on every sample rather than retaining its session.
+            const { head } = await observeFleet(true);
+            const nativeSubagents = await captainNativeSubagents(head, deps.agentSessions?.subagents);
             const thinking = await captainIsThinking(sessions.values());
             const inVoice = voice.some(
               (session) => session.gatewayConnected && session.voiceGuildIds.length > 0,
@@ -4262,6 +4266,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 (play !== undefined && ["running", "stopping"].includes(play.state)),
               ...(play === undefined ? {} : { playingSince: play.requestedAt }),
               activeSeats,
+              ...(nativeSubagents === undefined ? {} : { nativeSubagents }),
               pendingOwnerItem: conversations.pendingPresenceOwnerItem(),
             });
           },
