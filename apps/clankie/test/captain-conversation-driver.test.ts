@@ -503,7 +503,7 @@ it("a definite native refusal resumes the project service runner once", async ()
   expect(await captain.pollSeatEvents(0, undefined, id)).toEqual([]);
 });
 
-it("a followed owned Linear notification reaches the attached project exactly once across a provider retry", async () => {
+it("a Linear event reaches the selected ordinary chat driver exactly once across a provider retry", async () => {
   const { captain, id, root } = await fixture();
   await new SettingsStore(join(root, "settings.json")).update((value) => ({
     ...value,
@@ -511,8 +511,15 @@ it("a followed owned Linear notification reaches the attached project exactly on
   }));
   const organizationId = randomUUID();
   const issueId = randomUUID();
-  expect(captain.recordLinearWorkOwner({ organizationId, issueId }, { conversationId: id })).toBe(true);
-  const poll = captain.pollSeatEvents(10000, undefined, id);
+  const created = await captain.serveOperatorConversation({
+    op: "create",
+    schemaVersion: 1,
+    scope: { kind: "global" },
+    title: "Linear",
+  });
+  if (created.op !== "create") throw new Error("Create failed");
+  const target = created.conversation.conversationId;
+  const poll = captain.pollSeatEvents(10000, undefined, target);
   const activity = {
     eventId: "1".repeat(64),
     notification: true,
@@ -528,16 +535,16 @@ it("a followed owned Linear notification reaches the attached project exactly on
     data: { title: "Review the issue" },
     updatedFrom: undefined,
   };
-  expect(captain.receiveLinearActivity(activity, true)).toBe(true);
+  expect(captain.receiveLinearActivity(activity, true, target)).toBe(true);
   const [event] = await poll;
   expect(event).toMatchObject({
     kind: "wake",
-    conversationId: id,
+    conversationId: target,
     content: expect.stringContaining("Review the issue"),
   });
   expect(fake.prompts).toEqual([]);
-  await captain.acknowledgeSeatEvent(event!.id, id);
-  expect(captain.receiveLinearActivity(activity, true)).toBe(false);
+  await captain.acknowledgeSeatEvent(event!.id, target);
+  expect(captain.receiveLinearActivity(activity, true, target)).toBe(false);
   expect(await captain.pollSeatEvents(0, undefined, id)).toEqual([]);
   expect(fake.prompts).toEqual([]);
 });

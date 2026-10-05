@@ -124,7 +124,8 @@ index). Configure through the headless CLI:
 | Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`                     |
 | Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`                               |
 | Persona images                        | `clankie persona images set <folder>`, `status`, `clear` (restart applies)                             |
-| Linear wake rules                     | `clankie linear wake show`, `clankie linear wake set --owner-user-ids ID --actors owner`               |
+| Linear wake rules                     | `linear_wake`; `clankie linear wake show`, `… set --owner-user-emails EMAIL --actors owner`            |
+| Linear wake chat                      | `clankie linear target show`, `clankie linear target set global-default`                               |
 | Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`                       |
 | Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                                |
 | Discord picker directory              | `clankie discord directory [servers                                                                    | channels | roles | people] --server ID` (omit server for servers; inspect state/reason before claiming coverage) |
@@ -149,7 +150,7 @@ index). Configure through the headless CLI:
 | Play session                          | `clankie play status` / `clankie play stop`                                                            |
 | Spider-Man gameplay skill             | `clankie rivals status`; `/rivals connect URL` and `/auth rivals-agent` configure it                   |
 
-Everything else about the launcher (Linear inbox, devices, memory, sleep,
+Everything else about the launcher (Linear activity, devices, memory, sleep,
 steering a turn, model refresh, setup and conflicts) is in
 [launcher details](reference/launcher.md).
 
@@ -171,7 +172,7 @@ harness's context. Full contract: `{repoRoot}/docs/cli.md`.
 
 ## Read next, only for the question at hand
 
-- [Launcher details](reference/launcher.md): Linear inbox, devices, memory,
+- [Launcher details](reference/launcher.md): Linear activity, devices, memory,
   sleep and doorways, `clankie send`, model refresh, `/setup`, conflicts.
 - [Fleet, hires and agent history](reference/fleet.md): `hire_agent` outcomes,
   skill selection, Codex accounts, worker locations, agent conversations.

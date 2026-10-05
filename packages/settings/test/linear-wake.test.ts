@@ -43,7 +43,11 @@ it("limits notification types, exclusions win, and self subscriptions require ex
     ),
   ).toBe(false);
   expect(
-    match({ actors: ["self"], excludedNotificationTypes: [] }, { id: "bot", type: "app" }, "issueSubscribed"),
+    match(
+      { actors: ["self"], notificationTypes: [], excludedNotificationTypes: [] },
+      { id: "bot", type: "app" },
+      "issueSubscribed",
+    ),
   ).toBe(true);
   expect(match({ actors: [] })).toBe(false);
 });

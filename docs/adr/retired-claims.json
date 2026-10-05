@@ -25,6 +25,16 @@
       "pattern": "headless (worker|stream worker)s?",
       "adr": "0203",
       "now": "Every hired worker runs its harness's native TUI in a Herdr pane."
+    },
+    {
+      "pattern": "\\blinear inbox (read|ack|handoff)\\b",
+      "adr": "0214 (VUH-1678 amendment)",
+      "now": "Signed Linear activity appears in one ordinary configured chat; use normal conversation history without a read/ack/handoff protocol."
+    },
+    {
+      "pattern": "\\blinear work (bind|unbind)\\b",
+      "adr": "0214 (VUH-1678 amendment)",
+      "now": "One wake target setting selects an ordinary global chat; the lead chooses any work delegation."
     }
   ]
 }

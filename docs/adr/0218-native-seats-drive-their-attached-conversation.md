@@ -117,6 +117,13 @@ with an `owner_removed` reason; it does not enable implicit parent adoption.
 
 ## Extension — Linear work ownership, 2026-10-04
 
+Superseded later that day by
+[ADR 0214's VUH-1678 decision](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04):
+Linear activity has one configured ordinary chat, default `global-default`, and
+the lead delegates from there. This extension's issue-owner routing and inbox
+handoff are historical; native seat conversation admission elsewhere in this ADR
+remains unchanged.
+
 James selected issue-owned routing in
 [VUH-1611](https://linear.app/vuhlp/issue/VUH-1611). A successful Linear issue or
 comment write from an admitted conversation, an issue-scoped native hire, or an

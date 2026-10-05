@@ -327,7 +327,6 @@ describe("a lane's tool bank", () => {
 
 it("binds native tools, project doctrine and channel delivery to selected service conversations", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-seat-context-"));
-  let webhookReady = true;
   const ownerSettings = new SettingsStore(join(root, "settings.json"));
   await ownerSettings.update((settings) => ({
     ...settings,
@@ -341,7 +340,6 @@ it("binds native tools, project doctrine and channel delivery to selected servic
       stateDir: root,
       workingDirectory: root,
       settings: ownerSettings,
-      linearFollowing: async () => webhookReady,
     },
   );
   try {
@@ -373,44 +371,12 @@ it("binds native tools, project doctrine and channel delivery to selected servic
     }
     const a = projects[0]!.conversationId,
       b = projects[1]!.conversationId;
-    await ownerSettings.update((settings) => ({
-      ...settings,
-      linearWebhook: { ...settings.linearWebhook, following: true },
-    }));
-    const owner = {
-      organizationId: "96d2a27b-950b-4a8a-afae-8776605c0ef1",
-      issueId: "593644be-7b60-4a77-9b58-7b0dc20be894",
-      conversationId: a,
-    };
-    expect(captain.recordLinearWorkOwner(owner, { conversationId: a })).toBe(true);
-    const activity = {
-      eventId: "a".repeat(64),
-      notification: true,
-      deliveryId: "linear-operator-notification",
-      type: "Notification" as const,
-      action: "issueNewComment" as const,
-      actorName: "Human",
-      actorEmail: undefined,
-      actorId: "human",
-      organizationId: owner.organizationId,
-      issueId: owner.issueId,
-      createdAt: new Date().toISOString(),
-      url: undefined,
-      updatedFrom: undefined,
-      data: { id: "comment", issueId: owner.issueId, body: "Check the existing work" },
-    };
-    const linearWake = captain.pollSeatEvents(1000, undefined, a);
-    expect(captain.receiveLinearActivity(activity, true)).toBe(true);
-    expect(await linearWake).toMatchObject([
-      { conversationId: a, kind: "wake", content: expect.stringContaining(`--conversation ${a}`) },
-    ]);
-    await captain.pollSeatEvents(0, undefined, a);
+    const wake = captain.pollSeatEvents(1000, undefined, a);
+    expect(await captain.wakeConversation({ conversationId: a }, "Check the existing work")).toBe(true);
+    const [event] = await wake;
+    expect(event).toMatchObject({ conversationId: a, kind: "watch", content: "Check the existing work" });
+    await captain.acknowledgeSeatEvent(event!.id, a);
     expect(await captain.pollSeatEvents(0, undefined, a)).toEqual([]);
-    expect(captain.receiveLinearActivity(activity, true)).toBe(false);
-    webhookReady = false;
-    const blockedWake = captain.pollSeatEvents(100, undefined, a);
-    expect(captain.receiveLinearActivity({ ...activity, eventId: "b".repeat(64) }, true)).toBe(true);
-    expect(await blockedWake).toEqual([]);
     expect(await captain.pollSeatEvents(0, undefined, b)).toEqual([]);
     expect(await captain.pollSeatEvents(0)).toEqual([]);
     expect(captain.seatContext("missing-project")).toBeUndefined();

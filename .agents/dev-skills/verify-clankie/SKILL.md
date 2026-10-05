@@ -211,8 +211,8 @@ report can therefore coexist with a broken mouth.
 
 A checkout diagnostic, off by default and not a user feature: while on it spends
 model turns assessing live traffic, and the console footer shows `evaluator on`.
-Its reports have caught integration faults the eval suites cannot (Linear inbox
-context growth, seat MCP sessions lost on restart).
+Its reports have caught integration faults the eval suites cannot (the former
+Linear inbox's context growth, seat MCP sessions lost on restart).
 
 `clankie evaluator enable --harness codex` (or `claude`) enables independent
 assessments of Clankie’s own Pi turns and native head-seat replies in a dedicated

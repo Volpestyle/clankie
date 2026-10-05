@@ -207,13 +207,21 @@ describe("Linear follow setup", () => {
   it("edits every wake rule under Follow Linear without changing following, and cancels atomically", async () => {
     const h = harness({
       selections: ["follow", "wake"],
-      texts: ["owner,self,users", "james", "teammate", "issueMention", "issueSubscribed"],
+      texts: [
+        "owner,self,users",
+        "james",
+        "volpestyle@gmail.com",
+        "teammate",
+        "issueMention",
+        "issueSubscribed",
+      ],
       stored: { linear: { type: "oauth" } },
     });
     await h.connect.run("linear", h.shell);
     expect(h.settings().linearWebhook.wake).toEqual({
       actors: ["owner", "self", "users"],
       ownerUserIds: ["james"],
+      ownerUserEmails: ["volpestyle@gmail.com"],
       userIds: ["teammate"],
       notificationTypes: ["issueMention"],
       excludedNotificationTypes: ["issueSubscribed"],

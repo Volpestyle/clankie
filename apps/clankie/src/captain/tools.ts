@@ -40,7 +40,11 @@ import {
   type InlineExtension,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { GameplaySettings } from "@clankie/settings";
+import {
+  LinearWakeSettingsSchema,
+  LinearWebhookSettingsSchema,
+  type GameplaySettings,
+} from "@clankie/settings";
 import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
@@ -163,6 +167,9 @@ export function captainTools(
   );
   return [
     ...desktopTools(deps.desktop),
+    ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) && deps.linearWake
+      ? linearWakeTools(deps.linearWake)
+      : []),
     ...(deps.bodyLeases === undefined
       ? []
       : [
@@ -674,6 +681,68 @@ export function captainTools(
   ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));
 }
 
+function linearWakeTools(port: NonNullable<CaptainDeps["linearWake"]>): ToolDefinition[] {
+  const strings = () => Type.Array(Type.String({ minLength: 1, maxLength: 320 }), { maxItems: 100 });
+  return [
+    defineTool({
+      name: "linear_wake",
+      label: "Set your Linear wake rules",
+      description:
+        "Read or change your non-secret Linear wake rules and one ordinary global chat target. " +
+        "Defaults wake global-default for James's comments and mentions. Set partial rule fields; omitted fields stay unchanged. " +
+        "An empty notificationTypes array selects all event kinds; exclusions win. Own writes always remain quiet. " +
+        "conversationId must name an existing ordinary global chat. Changes apply to new signed webhook events without restarting.",
+      parameters: Type.Object(
+        {
+          action: StringEnum(["show", "set"]),
+          conversationId: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9_-]{1,256}$" })),
+          wake: Type.Optional(
+            Type.Object(
+              {
+                actors: Type.Optional(
+                  Type.Array(StringEnum(["owner", "human", "self", "users"]), { maxItems: 4 }),
+                ),
+                ownerUserIds: Type.Optional(strings()),
+                ownerUserEmails: Type.Optional(strings()),
+                userIds: Type.Optional(strings()),
+                notificationTypes: Type.Optional(strings()),
+                excludedNotificationTypes: Type.Optional(strings()),
+              },
+              { additionalProperties: false },
+            ),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+      executionMode: "sequential",
+      execute: async (_id, input) => {
+        if (input.action === "show" && (input.wake !== undefined || input.conversationId !== undefined))
+          throw new Error("Use action set to change Linear wake settings");
+        if (input.conversationId !== undefined) {
+          LinearWebhookSettingsSchema.shape.wakeConversationId.parse(input.conversationId);
+          if (!port.targetAllowed(input.conversationId))
+            throw new Error("Linear wake target must be an existing ordinary global chat");
+        }
+        const current =
+          input.action === "show"
+            ? await port.settings.load()
+            : await port.settings.update((value) => ({
+                ...value,
+                linearWebhook: {
+                  ...value.linearWebhook,
+                  ...(input.conversationId === undefined ? {} : { wakeConversationId: input.conversationId }),
+                  wake: LinearWakeSettingsSchema.parse({ ...value.linearWebhook.wake, ...input.wake }),
+                },
+              }));
+        return json({
+          wake: current.linearWebhook.wake,
+          wakeConversationId: current.linearWebhook.wakeConversationId,
+        });
+      },
+    }),
+  ];
+}
+
 function hireAgentTool(
   hire: HireSeat,
   turn: TurnContext,
@@ -695,15 +764,6 @@ function hireAgentTool(
       "its pane: reconcile before retrying. Follow up with message_seat and watch the returned seatId with " +
       "herdr_watch. Grok Build hires require macOS and the verified 1.0.46 native TUI leader channel; fresh sessions only unless the original live controller is still bound. Native permission prompts remain the owner's decision.",
     parameters: Type.Object({
-      linearIssue: Type.Optional(
-        Type.Object(
-          { organizationId: Type.String({ format: "uuid" }), issueId: Type.String({ format: "uuid" }) },
-          {
-            description:
-              "Canonical Linear issue this hire works on. The admitted hiring conversation owns its later events.",
-          },
-        ),
-      ),
       harness: Type.Optional(StringEnum(OPERATOR_SEAT_HARNESSES)),
       resume: Type.Optional(
         Type.String({
@@ -812,12 +872,11 @@ function hireAgentTool(
       const authority = captureConversationAuthority(turn.conversationAuthority);
       const assignment = structuredClone(params);
       await assertConversationAuthority(authority);
-      const { brief, linearIssue, ...seat } = assignment as typeof params & { brief?: string };
+      const { brief, ...seat } = assignment as typeof params & { brief?: string };
       const result = await hire(
         SpawnOperatorSeatSchema.parse({ schemaVersion: 1, ...seat }),
         brief,
         authority,
-        linearIssue,
       );
       if (result.outcome !== "spawned" || brief === undefined || message === undefined)
         return json({ ...result, deliveryStage: hireDeliveryStage(result, brief !== undefined) });

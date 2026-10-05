@@ -342,9 +342,9 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     {
       name: "linear",
       aliases: [],
-      description: "Configure Linear following, issue ownership and activity handoffs",
+      description: "Configure Linear webhook wakes, rules and chat target",
       takesArgument: true,
-      argumentHint: "[status|follow on/off|wake show/set|inbox read/ack/handoff|work list/bind/unbind]",
+      argumentHint: "[status|follow on/off|wake show/set|target show/set]",
       async run(argument, shell): Promise<void> {
         if (!argument.trim()) {
           if (!context.linearFollowMenu) throw new Error("Linear settings menu is unavailable");

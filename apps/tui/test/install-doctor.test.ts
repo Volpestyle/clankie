@@ -31,7 +31,12 @@ describe("install doctor", () => {
     const settings = new SettingsStore(join(root, "settings.json"));
     await settings.update((current) => ({
       ...current,
-      linearWebhook: { ...current.linearWebhook, following: true, url: "https://example.com/linear" },
+      linearWebhook: {
+        ...current.linearWebhook,
+        following: true,
+        url: "https://example.com/linear",
+        wake: { ...current.linearWebhook.wake, ownerUserEmails: [] },
+      },
     }));
     const report = await inspectInstall({
       repoRoot: root,
@@ -47,7 +52,7 @@ describe("install doctor", () => {
       webhookConfigured: false,
       reason: "linear_webhook_required",
       missingWebhook: ["secret"],
-      wakeWarning: "following is on, but no owner IDs, so owner comments never wake.",
+      wakeWarning: "following is on, but no owner IDs or emails, so owner comments never wake.",
     });
   });
 
@@ -70,6 +75,7 @@ describe("install doctor", () => {
           ...current.linearWebhook.wake,
           actors: [...input.actors],
           ownerUserIds: [...input.ownerUserIds],
+          ownerUserEmails: [],
         },
       },
     }));
@@ -85,7 +91,7 @@ describe("install doctor", () => {
       execFileImpl: missing,
       fetchImpl: offline,
     });
-    const warning = "following is on, but no owner IDs, so owner comments never wake.";
+    const warning = "following is on, but no owner IDs or emails, so owner comments never wake.";
     const diagnostic = input.warning
       ? `${warning}${input.otherActors ? " Other selected actor rules may still wake." : ""}`
       : null;
@@ -98,7 +104,7 @@ describe("install doctor", () => {
     expect(report.remediations.some((entry) => entry.includes(warning))).toBe(input.warning);
     if (input.warning) {
       expect(report.remediations).toContain(
-        `${diagnostic} Set owner IDs with \`clankie linear wake set --owner-user-ids IDS\`.`,
+        `${diagnostic} Set owner IDs or emails with \`clankie linear wake set --owner-user-emails EMAILS\`.`,
       );
     }
     expect(await settings.load()).toEqual(before);

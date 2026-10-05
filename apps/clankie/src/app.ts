@@ -64,18 +64,14 @@ import { bodyLimit } from "hono/body-limit";
 import { ExecutionConnectSchema, type ExecutionConnections, HerdrUnavailableError } from "./herdr-session.ts";
 import { WorkerGrantRequestSchema, type WorkerMcp } from "./worker-mcp.ts";
 import { EVALUATOR_PATH, EvaluatorCommandSchema } from "@clankie/protocol";
-import {
-  ConversationRefusedError,
-  ConversationResetError,
-  LINEAR_INBOX_CONVERSATION_ID,
-} from "./captain/conversations.ts";
+import { ConversationRefusedError, ConversationResetError } from "./captain/conversations.ts";
 import { HERDR_BINDING_PATH, HERDR_SOCKET_HEADER, type HerdrBinding } from "@clankie/protocol";
 /**
  * The Clankie service's HTTP surface. Local capabilities are wired in-process.
  * Discord presence, the captain seam, memory, embodiment (play), browser,
  * media, and device pairing live here.
  */
-import { linearFollowStatus, LinearWakeSettingsSchema } from "@clankie/settings";
+import { linearFollowStatus, linearWakeMatches, LinearWakeSettingsSchema } from "@clankie/settings";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { hostname } from "node:os";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
@@ -230,9 +226,9 @@ import { createLaneMcpEndpoint } from "./lane-mcp.ts";
 import {
   type LinearActivityEvent,
   type LinearWriteReceipts,
-  LinearWorkOwnerSchema,
   classifyLinearDelivery,
   linearReplyTo,
+  linearActivityWakeTypes,
 } from "./linear-webhook.ts";
 import type { MediaGeneratorPort } from "./media-generation.ts";
 import { MemoryCapacityError, MemoryConflictError, type MemoryStores } from "./memory.ts";
@@ -560,10 +556,10 @@ export interface ClankieAppDependencies {
     secret(): Promise<string | undefined>;
     writes?: LinearWriteReceipts;
     recordActivity?(activity: LinearActivityEvent): void;
-    /** Refresh the recipient inbox after a verified event is persisted. */
-    requestNotificationPoll?(): void;
     /** His own verified Linear identity; activity it authors is kept without a wake. */
     ownAccount?(): Promise<{ userId: string; workspaceId: string } | undefined>;
+    /** Bounded read of missing issue context through the verified connected account. */
+    issueContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["issueContext"]>;
   };
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;
@@ -3909,67 +3905,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     return context.json({ session });
   });
 
-  app.on(["GET", "POST"], "/v1/linear/inbox", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (operator === undefined) return context.json({ error: "operator_authentication_required" }, 401);
-    if (context.req.method === "POST") {
-      const body = await readJson(context.req.raw);
-      if (
-        body === null ||
-        typeof body !== "object" ||
-        Array.isArray(body) ||
-        Object.keys(body).some((key) => !["ackCursor", "conversationId"].includes(key)) ||
-        ("conversationId" in body && typeof body.conversationId !== "string") ||
-        !("ackCursor" in body) ||
-        typeof body.ackCursor !== "string"
-      )
-        return context.json({ error: "ack_cursor_required" }, 400);
-      if (
-        !dependencies.captain.acknowledgeLinearInbox(
-          body.ackCursor,
-          "conversationId" in body ? (body.conversationId as string) : undefined,
-        )
-      ) {
-        return context.json({ error: "cursor_not_offered" }, 409);
-      }
-      return context.json({ schemaVersion: 1, acknowledged: body.ackCursor });
-    }
-    const query = context.req.query();
-    if (query.conversationId !== undefined && !dependencies.captain.seatContext(query.conversationId))
-      return context.json({ error: "unknown_captain_conversation" }, 404);
-    const limit = query.limit === undefined ? undefined : Number.parseInt(query.limit, 10);
-    if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= 100))
-      return context.json({ error: "limit_out_of_range" }, 400);
-    if (query.before !== undefined && !/^\d{12}$/u.test(query.before))
-      return context.json({ error: "before_cursor_invalid" }, 400);
-    return context.json({
-      schemaVersion: 1,
-      ...dependencies.captain.readLinearInbox({
-        ...(limit === undefined ? {} : { limit }),
-        ...(query.before === undefined ? {} : { before: query.before }),
-        headlines: query.headlines === "1" || query.headlines === "true",
-        ...(query.conversationId === undefined ? {} : { conversationId: query.conversationId }),
-      }),
-    });
-  });
-
-  app.post("/v1/linear/inbox/handoff", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    const input = z
-      .object({ cursor: z.string().regex(/^\d{12}$/u) })
-      .strict()
-      .safeParse(await readJson(context.req.raw));
-    if (!input.success) return context.json({ error: "invalid_linear_handoff" }, 400);
-    if (!(await dependencies.captain.handoffLinearActivity(input.data.cursor)))
-      return context.json({ error: "linear_handoff_refused" }, 409);
-    return context.json({ schemaVersion: 1, handedOff: input.data.cursor });
-  });
-
   // Work items in the repo's own convention (ADR 0191). The operator bearer is
   // a local caller: the CLI, the captain, or a hire on this machine. It may name
   // a repo path, which registers it for the app to read later.
@@ -4016,38 +3951,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  app.on(["GET", "PUT", "DELETE"], "/v1/linear/work", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (context.req.method === "GET")
-      return context.json({ owners: dependencies.captain.linearWorkOwners() });
-    if (context.req.method === "DELETE") {
-      const input = LinearWorkOwnerSchema.pick({ organizationId: true, issueId: true }).safeParse(
-        await readJson(context.req.raw),
-      );
-      if (!input.success) return context.json({ error: "invalid_linear_work_owner" }, 400);
-      return context.json({
-        schemaVersion: 1,
-        unbound: dependencies.captain.unbindLinearWorkOwner(input.data.organizationId, input.data.issueId),
-      });
-    }
-    const binding = LinearWorkOwnerSchema.safeParse(await readJson(context.req.raw));
-    if (!binding.success) return context.json({ error: "invalid_linear_work_owner" }, 400);
-    const identity = operatorBodyIdentity(binding.data.conversationId, context.req.raw);
-    if (identity === undefined || !identity.current() || !(await identity.authorize("browser", "effect")))
-      return context.json({ error: "linear_work_owner_refused" }, 409);
-    const source = {
-      owner: { conversationId: binding.data.conversationId },
-      current: identity.current,
-      authorize: () => identity.authorize("browser", "effect"),
-    };
-    if (!(await dependencies.captain.bindLinearWorkOwner(binding.data, source)))
-      return context.json({ error: "linear_work_owner_refused" }, 409);
-    return context.json({ schemaVersion: 1, bound: binding.data });
-  });
-
   app.on(["GET", "PUT"], "/v1/linear/wake", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
@@ -4064,6 +3967,35 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       }));
     } else current = await settingsSource.load();
     return context.json({ schemaVersion: 1, wake: current.linearWebhook.wake });
+  });
+
+  app.on(["GET", "PUT"], "/v1/linear/target", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    let current;
+    if (context.req.method === "PUT") {
+      const input = z
+        .object({
+          conversationId: z
+            .string()
+            .regex(/^[a-zA-Z0-9_-]+$/u)
+            .max(256),
+        })
+        .strict()
+        .safeParse(await readJson(context.req.raw));
+      if (!input.success) return context.json({ error: "malformed" }, 400);
+      // Use the same ordinary-chat guard as the captain's settings tool.
+      if (!dependencies.captain.linearWakeTargetAllowed(input.data.conversationId))
+        return context.json({ error: "linear_wake_target_unavailable" }, 409);
+      if (!settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
+      current = await settingsSource.update((value) => ({
+        ...value,
+        linearWebhook: { ...value.linearWebhook, wakeConversationId: input.data.conversationId },
+      }));
+    } else current = await settingsSource.load();
+    return context.json({ schemaVersion: 1, wakeConversationId: current.linearWebhook.wakeConversationId });
   });
 
   // Local operator control, independent of the publicly reachable signed webhook.
@@ -4105,14 +4037,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     } else {
       current = await settingsSource.load();
     }
-    if (context.req.method === "PUT" && current.linearWebhook.following)
-      dependencies.captain.resumeLinearActivity();
     return context.json({
       schemaVersion: 1 as const,
       ...linearFollowStatus(current.linearWebhook, secretPresent),
-      conversationId: LINEAR_INBOX_CONVERSATION_ID,
-      wakeConversationId: LINEAR_INBOX_CONVERSATION_ID,
-      wakeRouting: "work-owner",
+      wakeConversationId: current.linearWebhook.wakeConversationId,
     });
   });
 
@@ -4150,22 +4078,122 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     }
     if (outcome.kind === "ignored") {
-      if (outcome.reason === "self_echo") hook.requestNotificationPoll?.();
+      const current = await settingsSource.load();
+      logger.info(
+        {
+          event: "linear.webhook",
+          eventId: outcome.activity?.eventId,
+          deliveryId: outcome.activity?.deliveryId,
+          type: outcome.activity?.type,
+          action: outcome.activity?.action,
+          issueId: outcome.activity?.issueId,
+          target: current.linearWebhook.wakeConversationId,
+          ingested: false,
+          decision: outcome.reason,
+        },
+        "linear webhook ignored",
+      );
       return context.json({ schemaVersion: 1 as const, ingested: false as const });
     }
 
-    // Persist first; following controls model turns, not inbox delivery.
-    // Wake rules apply only after the notification is attributed from signed history.
+    const current = await settingsSource.load();
     const own = await hook.ownAccount?.().catch(() => undefined);
     const replyTo = linearReplyTo(outcome.activity, own, hook.writes, clock());
-    // Workspace webhooks are history. Only the connected account's actual Linear
-    // notifications wake him (linear-notifications.ts); self-authored activity
-    // therefore remains quiet regardless of webhook order or receipt timing.
-    const ingested = dependencies.captain.receiveLinearActivity(
-      replyTo ? { ...outcome.activity, replyTo } : outcome.activity,
-      false,
+    let activity = replyTo ? { ...outcome.activity, replyTo } : outcome.activity;
+    const identityUnavailable = hook.ownAccount !== undefined && own === undefined;
+    const workspaceMismatch = own !== undefined && own.workspaceId !== activity.organizationId;
+    const signedIssue = activity.type === "Issue" ? activity.data : activity.data.issue;
+    if (
+      activity.issueId &&
+      !identityUnavailable &&
+      !workspaceMismatch &&
+      !(
+        signedIssue &&
+        typeof signedIssue === "object" &&
+        "title" in signedIssue &&
+        typeof signedIssue.title === "string"
+      )
+    ) {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const context = await Promise.race([
+        hook.issueContext?.(activity).catch(() => undefined),
+        new Promise<undefined>((resolve) => {
+          timeout = setTimeout(() => resolve(undefined), 1_000);
+        }),
+      ]).finally(() => {
+        if (timeout) clearTimeout(timeout);
+      });
+      if (context?.id.toLowerCase() === activity.issueId.toLowerCase())
+        activity = { ...activity, issueContext: context };
+    }
+    const ownActor =
+      own !== undefined && own.workspaceId === activity.organizationId && own.userId === activity.actorId;
+    const ownWorker = activity.worker !== undefined;
+    const types = linearActivityWakeTypes(activity);
+    const matches =
+      !types.some((type) => current.linearWebhook.wake.excludedNotificationTypes.includes(type)) &&
+      types.some((type) =>
+        linearWakeMatches(
+          current.linearWebhook.wake,
+          type,
+          activity.actorId
+            ? {
+                id: activity.actorId,
+                type: activity.actorType,
+                email: activity.actorEmail,
+                worker: activity.worker,
+              }
+            : undefined,
+          own !== undefined && own.workspaceId === activity.organizationId ? own.userId : "",
+        ),
+      );
+    const targetAllowed = dependencies.captain.linearWakeTargetAllowed(
+      current.linearWebhook.wakeConversationId,
     );
-    if (ingested !== false) hook.requestNotificationPoll?.();
+    const following =
+      current.linearWebhook.following &&
+      !identityUnavailable &&
+      !workspaceMismatch &&
+      !ownActor &&
+      !ownWorker &&
+      matches;
+    const ingested =
+      targetAllowed &&
+      dependencies.captain.receiveLinearActivity(
+        activity,
+        following,
+        current.linearWebhook.wakeConversationId,
+      );
+    logger.info(
+      {
+        event: "linear.webhook",
+        eventId: activity.eventId,
+        deliveryId: activity.deliveryId,
+        type: activity.type,
+        action: activity.action,
+        issueId: activity.issueId,
+        target: current.linearWebhook.wakeConversationId,
+        ingested: ingested !== false,
+        decision: !targetAllowed
+          ? "target_unavailable"
+          : ingested === false
+            ? "deduped"
+            : identityUnavailable
+              ? "identity_unavailable"
+              : workspaceMismatch
+                ? "account_workspace_mismatch"
+                : ownActor
+                  ? "own_actor"
+                  : ownWorker
+                    ? "own_worker"
+                    : !current.linearWebhook.following
+                      ? "follow_off"
+                      : matches
+                        ? "wake"
+                        : "rule_miss",
+      },
+      "linear webhook accepted",
+    );
     return context.json({ schemaVersion: 1 as const, ingested: ingested !== false });
   });
 

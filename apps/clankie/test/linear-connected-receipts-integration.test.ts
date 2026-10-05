@@ -17,9 +17,6 @@ function result(result: Awaited<ReturnType<Client["callTool"]>>) {
 it("six serial connected Linear state writes retain receipts and attribution without induced transport faults", async () => {
   const f = await createConnectedLinearFixture();
   try {
-    console.info(
-      `Connected Linear fixture work-owner attribution: ${f.attributionAvailable ? "runtime production helper + actual ConversationStore" : "unavailable on this source base; revision receipts only"}`,
-    );
     const pid = f.pid();
     expect((await f.client.listTools()).tools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining(["linear_save_issue", "linear_save_comment", "linear_list_issues"]),
@@ -41,16 +38,15 @@ it("six serial connected Linear state writes retain receipts and attribution wit
         uuid: f.issueId,
         status: "Done",
       });
-      if (f.attributionAvailable)
-        expect(await f.owners()).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              issueId: f.issueId,
-              organizationId: f.organizationId,
-              conversationId: f.conversationId,
-            }),
-          ]),
-        );
+      expect(await f.revisions()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: f.issueId,
+            organizationId: f.organizationId,
+            owner: { conversationId: f.conversationId },
+          }),
+        ]),
+      );
     }
     const comment = result(
       await f.client.callTool({
@@ -125,12 +121,12 @@ it.each(["save_issue", "save_comment"] as const)(
       expect(await f.revisions()).toHaveLength(1);
       expect(f.closed()).toBe(false);
       expect(f.pid()).toBe(pid);
-      if (f.attributionAvailable)
-        expect(await f.owners()).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ issueId: f.issueId, conversationId: f.conversationId }),
-          ]),
-        );
+      expect(await f.revisions()).toEqual([
+        expect.objectContaining({
+          organizationId: f.organizationId,
+          owner: { conversationId: f.conversationId },
+        }),
+      ]);
       expect(
         settled,
         `One provider effect; attribution completed; stdio PID unchanged and open. Host completed at caller failure: ${"hostCompletedAtCallerFailure" in settled ? String(settled.hostCompletedAtCallerFailure) : "no caller failure"}`,

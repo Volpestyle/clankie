@@ -8,12 +8,15 @@ import {
   type LinearActivityEvent,
   type LinearReplyRecipient,
 } from "./linear-webhook.ts";
+import type { McpHost } from "./mcp-host.ts";
 
 const EntrySchema = z.object({
   eventId: z.string(),
   organizationId: z.string(),
   resource: z.string(),
   issueId: z.string().uuid().optional(),
+  issueIdentifier: z.string().max(256).optional(),
+  issueTitle: z.string().max(2048).optional(),
   parent: LinearReplyRecipientSchema.pick({ parentType: true, parentId: true }).optional(),
   replyRecipient: LinearReplyRecipientSchema.optional(),
   comment: z.string().optional(),
@@ -77,7 +80,7 @@ function subject(raw: string | undefined):
   }
 }
 
-/** A bounded structured index of the signed journal, independent of truncated inbox prose.
+/** A bounded structured index of verified activity, independent of compact chat prose.
  * Only the verified webhook path records entries, including exact self echoes.
  */
 export class LinearAttributionJournal {
@@ -107,6 +110,12 @@ export class LinearAttributionJournal {
     )
       return;
     const issueId = linearActivityIssueId(activity);
+    const issue =
+      activity.type === "Issue"
+        ? activity.data
+        : typeof activity.data.issue === "object" && activity.data.issue !== null
+          ? (activity.data.issue as Record<string, unknown>)
+          : {};
     const parent =
       linearActivityUpdateParent(activity) ??
       ((activity.type === "ProjectUpdate" || activity.type === "InitiativeUpdate") &&
@@ -126,6 +135,8 @@ export class LinearAttributionJournal {
       organizationId: activity.organizationId,
       ...target,
       ...(issueId === undefined ? {} : { issueId }),
+      ...(typeof issue.identifier === "string" ? { issueIdentifier: issue.identifier.slice(0, 256) } : {}),
+      ...(typeof issue.title === "string" ? { issueTitle: issue.title.slice(0, 2048) } : {}),
       ...(parent ? { parent } : {}),
       ...(provenRecipient ? { replyRecipient: provenRecipient } : {}),
       ...(activity.type === "Comment" && typeof activity.data.id === "string"
@@ -156,6 +167,65 @@ export class LinearAttributionJournal {
     writeFileSync(this.path + ".tmp", JSON.stringify(retained), { mode: 0o600 });
     renameSync(this.path + ".tmp", this.path);
     this.entries = retained;
+  }
+
+  /** Issue titles retained from signed resource history; no model-supplied or provider-selected route. */
+  context(activity: LinearActivityEvent): LinearActivityEvent["issueContext"] {
+    const found = this.entries
+      .filter(
+        (entry) =>
+          entry.organizationId === activity.organizationId &&
+          entry.issueId === activity.issueId &&
+          entry.issueTitle !== undefined,
+      )
+      .sort((a, b) => b.at - a.at)[0];
+    return found?.issueId && found.issueTitle !== undefined
+      ? {
+          id: found.issueId,
+          title: found.issueTitle,
+          ...(found.issueIdentifier ? { identifier: found.issueIdentifier } : {}),
+        }
+      : undefined;
+  }
+
+  /** Sparse Comment deliveries carry issueId only. Read its title through the native verified connection. */
+  async issueContext(
+    activity: LinearActivityEvent,
+    host: Pick<McpHost, "call">,
+  ): Promise<LinearActivityEvent["issueContext"]> {
+    const retained = this.context(activity);
+    if (retained) return retained;
+    if (!activity.issueId) return;
+    const read = await host.call({
+      lane: "operator",
+      server: "linear",
+      tool: "get_issue",
+      arguments: { id: activity.issueId },
+      resultMode: "data",
+      timeoutMs: 1_000,
+    });
+    if (read.outcome !== "ok" || read.isError) return;
+    const parsed: unknown = JSON.parse(read.content);
+    if (!parsed || typeof parsed !== "object") return;
+    const issue = parsed as { id?: unknown; uuid?: unknown; identifier?: unknown; title?: unknown };
+    const ids = [issue.id, issue.uuid].filter((id): id is string => z.string().uuid().safeParse(id).success);
+    if (
+      !ids.length ||
+      ids.some((id) => id.toLowerCase() !== activity.issueId) ||
+      typeof issue.title !== "string"
+    )
+      return;
+    const identifier =
+      typeof issue.identifier === "string"
+        ? issue.identifier
+        : typeof issue.id === "string" && !ids.includes(issue.id)
+          ? issue.id
+          : undefined;
+    return {
+      id: activity.issueId,
+      title: issue.title.slice(0, 2048),
+      ...(identifier ? { identifier: identifier.slice(0, 256) } : {}),
+    };
   }
 
   /** Resolve an issue independently of actor timing, using only retained signed resource evidence. */

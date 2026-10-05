@@ -5,12 +5,7 @@ import type {
   ProjectHireProcessProof,
   ProjectHireMembershipCandidate,
 } from "./project-hires.ts";
-import type {
-  ConversationOwner,
-  ConversationAuthority,
-  NativeSeatRecipient,
-  WorkerWriteAuthority,
-} from "./conversation-owner.ts";
+import type { ConversationOwner, ConversationAuthority, WorkerWriteAuthority } from "./conversation-owner.ts";
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import type { PeerSeatAuthority } from "./peer-seat-messages.ts";
@@ -42,8 +37,8 @@ import type {
   OperatorSeatSpawnResult,
   SpawnOperatorSeat,
 } from "@clankie/protocol";
-import type { DurableMessageNotice, LinearInboxPage, LinearInboxReadOptions } from "./conversations.ts";
-import type { LinearActivityEvent, LinearWorkOwner, LinearWorkOwnership } from "../linear-webhook.ts";
+import type { DurableMessageNotice } from "./conversations.ts";
+import type { LinearActivityEvent } from "../linear-webhook.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
@@ -81,7 +76,6 @@ export type HireSeat = (
   seat: SpawnOperatorSeat,
   brief?: string,
   authority?: ConversationAuthority,
-  linearIssue?: Pick<LinearWorkOwner, "organizationId" | "issueId">,
 ) => Promise<OperatorSeatSpawnResult>;
 
 /**
@@ -280,40 +274,19 @@ export interface CaptainPort {
    * unsubscribe.
    */
   observeDurableMessages(listener: (notice: DurableMessageNotice) => void): () => void;
-  /** Offer a bounded page without consuming it. */
-  readLinearInbox(options?: LinearInboxReadOptions): LinearInboxPage;
-  acknowledgeLinearInbox(cursor: string, conversationId?: string): boolean;
-  linearWorkOwners(): readonly LinearWorkOwnership[];
-  bindLinearWorkOwner(binding: LinearWorkOwner, source: ConversationAuthority): Promise<boolean>;
-  unbindLinearWorkOwner(organizationId: string, issueId: string): boolean;
-  handoffLinearActivity(cursor: string): Promise<boolean>;
-  /** Host-only attribution of a settled connected write, never model-selected owner proof. */
-  recordLinearWorkOwner(
-    issue: Pick<LinearWorkOwner, "organizationId" | "issueId">,
-    owner: ConversationOwner,
-    recordedAt?: number,
-    replayed?: boolean,
-  ): boolean;
-  recordLinearNativeWorkOwner(
-    issue: Pick<LinearWorkOwner, "organizationId" | "issueId">,
-    recipient: NativeSeatRecipient,
-    recordedAt?: number,
-    replayed?: boolean,
-  ): boolean;
   fleetConversationAuthority(principalId: string): Promise<ConversationAuthority | undefined>;
   fleetWriteAuthority(
     principalId: string,
     nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>,
   ): Promise<WorkerWriteAuthority | undefined>;
-  deliverLinearNativeRecipient(
-    recipient: NativeSeatRecipient,
-    content: string,
-    eventId: string,
-    guard: () => Promise<void>,
-  ): Promise<FleetSeatDelivery>;
-  resumeLinearActivity(): void;
-  /** Store verified context in the Linear inbox and optionally queue a model turn. */
-  receiveLinearActivity(activity: LinearActivityEvent, following: boolean): boolean | void;
+  /** True for an existing ordinary global chat that may receive Linear wakes. */
+  linearWakeTargetAllowed(conversationId: string): boolean;
+  /** Append verified external context to the selected ordinary chat and optionally wake it. */
+  receiveLinearActivity(
+    activity: LinearActivityEvent,
+    following: boolean,
+    conversationId?: string,
+  ): boolean | void;
   /** Graceful shutdown: waits for in-flight turns. */
   close(): Promise<void>;
 }
@@ -402,26 +375,10 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     // A stub writes no transcripts, so it has nothing to announce. A test that
     // wants the trigger passes its own store's observer through `overrides`.
     observeDurableMessages: () => () => {},
-    readLinearInbox: () => ({
-      items: [],
-      unreadCount: 0,
-      hasMore: false,
-      oldestCursor: null,
-      ackCursor: null,
-      next: null,
-    }),
-    acknowledgeLinearInbox: () => false,
+    linearWakeTargetAllowed: (conversationId) => conversationId === "global-default",
     receiveLinearActivity: () => true,
-    linearWorkOwners: () => [],
-    bindLinearWorkOwner: async () => false,
-    unbindLinearWorkOwner: () => false,
-    handoffLinearActivity: async () => false,
-    recordLinearWorkOwner: () => false,
-    recordLinearNativeWorkOwner: () => false,
     fleetConversationAuthority: async () => undefined,
     fleetWriteAuthority: async () => undefined,
-    deliverLinearNativeRecipient: async () => ({ outcome: "offline", detail: "Native delivery unavailable" }),
-    resumeLinearActivity: () => {},
     close: async () => {},
     ...overrides,
   };

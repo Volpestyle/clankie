@@ -358,108 +358,29 @@ it.each(["before dispatch", "before reply"])(
   },
 );
 
-it("a followed Linear issue reaches its attached room and replies through the original guarded actor", async () => {
-  const { captain, settings, conversationId, owner, execute } = await fixture(true);
-  await settings.update((current) => ({
-    ...current,
-    linearWebhook: { ...current.linearWebhook, following: true },
-  }));
-  expect(
-    await captain.bindLinearWorkOwner(
-      { organizationId, issueId, conversationId },
-      { owner, current: () => true, authorize: async () => true },
-    ),
-  ).toBe(true);
-  const globalController = new AbortController();
-  const globalPoll = captain.pollSeatEvents(1000, globalController.signal);
-  const roomPoll = captain.pollSeatEvents(1000, undefined, conversationId);
-  const notice = linearNotice("Owned room notification");
-  expect(captain.receiveLinearActivity(notice, true)).toBe(true);
-  const [event] = await roomPoll;
-  expect(event).toMatchObject({ conversationId, kind: "escalation", source: "watch" });
-  expect(event?.content).toContain("Owned room notification");
-  expect(event?.content).toContain("untrusted external context");
-  expect(fake.prompts).toEqual([]);
-  expect(await captain.replySeatEvent(event!.id, "Room issue answer", conversationId)).toBe(true);
-  await vi.waitFor(() =>
-    expect(execute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "send_reply",
-        actorId: owner.discord!.actorId,
-        guildId: owner.discord!.guildId,
-        channelId: owner.discord!.channelId,
-        messageId: owner.discord!.messageId,
-        text: "Room issue answer",
-      }),
-      expect.any(Function),
-    ),
-  );
-  await vi.waitFor(async () => {
-    const replay = await captain.serveOperatorConversation({
-      schemaVersion: 1,
-      op: "replay",
-      replay: { schemaVersion: 1, conversationId, surfaceClientId: "owner" },
-    });
-    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("Expected replay");
-    expect(replay.result.events).toContainEqual(
-      expect.objectContaining({ type: "turn", phase: "completed" }),
-    );
-  });
-  expect(captain.receiveLinearActivity(notice, true)).toBe(false);
-  expect(await captain.pollSeatEvents(0, undefined, conversationId)).toEqual([]);
-  globalController.abort();
-  expect(await globalPoll).toEqual([]);
-  expect(captain.readLinearInbox({ conversationId: "global-default" }).unreadCount).toBe(0);
-  expect(execute).toHaveBeenCalledTimes(1);
-  expect(fake.prompts).toEqual([]);
-  expect((await settings.load()).linearWebhook.following).toBe(true);
-});
-
-it("following stays enabled while a revoked original room grant refuses Linear delivery without fallback", async () => {
-  const { captain, settings, conversationId, owner, execute, route } = await fixture(true);
-  await settings.update((current) => ({
-    ...current,
-    linearWebhook: { ...current.linearWebhook, following: true },
-  }));
-  expect(
-    await captain.bindLinearWorkOwner(
-      { organizationId, issueId, conversationId },
-      { owner, current: () => true, authorize: async () => true },
-    ),
-  ).toBe(true);
-  route.mockClear();
-  await settings.update((current) => ({
-    ...current,
-    discord: { ...current.discord, systemActorUserIds: [] },
-  }));
-  const error = vi.spyOn(console, "error").mockImplementation(() => {});
-  const controller = new AbortController();
-  const roomPoll = captain.pollSeatEvents(1000, controller.signal, conversationId);
-  const globalPoll = captain.pollSeatEvents(1000, controller.signal);
-  expect(captain.receiveLinearActivity(linearNotice("Revoked room notification"), true)).toBe(true);
-  await vi.waitFor(async () => {
-    const replay = await captain.serveOperatorConversation({
-      schemaVersion: 1,
-      op: "replay",
-      replay: { schemaVersion: 1, conversationId, surfaceClientId: "owner" },
-    });
-    if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("Expected replay");
-    expect(replay.result.events).toContainEqual(
-      expect.objectContaining({
-        type: "turn",
-        phase: "failed",
-        summary: expect.stringContaining("Linear room ownership authority is unavailable"),
-      }),
-    );
-  });
-  controller.abort();
-  expect(await roomPoll).toEqual([]);
-  expect(await globalPoll).toEqual([]);
-  expect(route).toHaveBeenCalledWith(owner);
-  expect(error).toHaveBeenCalled();
+it("refuses a Discord room as the configured Linear wake target", async () => {
+  const { captain, conversationId, execute } = await fixture(true);
+  expect(() =>
+    captain.receiveLinearActivity(linearNotice("Room cannot receive Linear wakes"), true, conversationId),
+  ).toThrow("Linear wake target must be an existing ordinary global chat");
   expect(execute).not.toHaveBeenCalled();
   expect(fake.prompts).toEqual([]);
-  expect(captain.readLinearInbox({ conversationId }).unreadCount).toBe(1);
-  expect(captain.readLinearInbox({ conversationId: "global-default" }).unreadCount).toBe(0);
-  expect((await settings.load()).linearWebhook.following).toBe(true);
+});
+
+it("a Linear wake reaches the lead chat through its normal native operator driver", async () => {
+  const { captain, settings, execute } = await fixture(true);
+  await settings.update((current) => ({
+    ...current,
+    linearWebhook: { ...current.linearWebhook, following: true },
+  }));
+  const poll = captain.pollSeatEvents(3000);
+  const activity = linearNotice("Lead chat notification");
+  expect(captain.receiveLinearActivity(activity, true)).toBe(true);
+  const [event] = await poll;
+  expect(event).toMatchObject({ conversationId: "global-default", kind: "wake" });
+  expect(event?.content).toContain("Lead chat notification");
+  expect(captain.receiveLinearActivity(activity, true)).toBe(false);
+  expect(fake.prompts).toEqual([]);
+  expect(execute).not.toHaveBeenCalled();
+  await captain.acknowledgeSeatEvent(event!.id, "global-default");
 });
