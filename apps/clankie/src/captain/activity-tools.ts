@@ -11,7 +11,7 @@ export function activityTools(sharing: ActivitySharing, turn: TurnContext): Tool
       name: "activity_share",
       label: "Share a Discord Activity",
       description:
-        "Share an existing source in a voice channel of your current server, or a server chosen by the operator. sourceId=play uses your live play producer; artifact:<conversationId>:<artifactId> uses a file delivered in this conversation (PNG, GIF, MP4, WAV or MP3). image takes artifactId for a delivered PNG. List shares, switch using the exact generation, or stop. A launch receipt confirms an invite, not a person opening it. Uncertain receipts must be reconciled with list, never blindly resent. No URLs, paths, new capture or desktop authority.",
+        "Share an existing source in a voice channel of your current server, or a server chosen by the operator. sourceId=play uses your live play producer; artifact:<conversationId>:<artifactId> uses a file delivered in this conversation (PNG, GIF, MP4, WAV or MP3). image takes artifactId for a delivered PNG. List shares, switch using the exact generation, or stop. Discord room sharing requires an official launch adapter; a refused outcome means nothing was shared. A launch receipt confirms an invite, not a person opening it. Uncertain receipts must be reconciled with list, never blindly resent. No URLs, paths, new capture or desktop authority.",
       parameters: Type.Object({
         action: Type.Union([
           Type.Literal("list"),
@@ -36,6 +36,12 @@ export function activityTools(sharing: ActivitySharing, turn: TurnContext): Tool
           if (authority.owner.discord?.transportKind === "user_session")
             throw new Error("activity_official_bot_required");
           const { action, sourceId, artifactId, guildId, channelId, shareId, generation, ttlMs } = input;
+          if (
+            authority.owner.discord &&
+            (action === "start" || action === "image" || action === "switch") &&
+            !sharing.hasLaunchAdapter
+          )
+            throw new Error("activity_official_bot_required");
           if (
             sourceId?.startsWith("artifact:") &&
             !sourceId.startsWith(`artifact:${authority.owner.conversationId}:`)

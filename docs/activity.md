@@ -29,6 +29,12 @@ A confirmed launch may include its Discord invite. Receipt uncertainty does not
 authorize a retry: list active metadata and reconcile before deciding another
 action. A local stream without the adapter makes no claim that Discord launched.
 
+Discord room turns refuse `start`, `image` and `switch` with
+`activity_official_bot_required` when no official launch adapter is configured.
+This includes self-hosted official bots: their OAuth/instance admission adapter
+remains outside this batch. Local owner API/CLI requests can still create and
+switch delegated shares without a Discord launch adapter.
+
 ## Official hosted viewer
 
 The locally bundled Embedded App SDK performs ready, authorize and authenticate.
@@ -42,6 +48,8 @@ This follows [Discord's supported Activity handshake](https://github.com/discord
 The initial socket admission has a short, one-use deadline. Ongoing viewing is
 bounded by the share's expiry, with audience authority revalidated at most every
 15 seconds; the initial deadline does not end an already admitted viewer.
+Permission revocation has an approximately 15-second window while verified
+audience evidence expires. Each hosted media stream is capped at 256 MiB.
 The gateway ends media on failed proof, revocation or installation replacement. Configuration,
 authentication and admission errors open no media connection. Official mode has
 no anonymous legacy fallback. The SDK uses only the viewer's ephemeral user

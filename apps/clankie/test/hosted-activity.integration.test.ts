@@ -1,6 +1,14 @@
 import { serve } from "@hono/node-server";
 import { createServer } from "node:http";
-import { createHash, generateKeyPairSync, createPublicKey, randomBytes, sign, verify } from "node:crypto";
+import {
+  createHash,
+  generateKeyPairSync,
+  createPublicKey,
+  randomBytes,
+  randomUUID,
+  sign,
+  verify,
+} from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +16,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { activityViewerDigest } from "@clankie/protocol/activity-sharing-crypto";
 import { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
 import { ActivitySharing } from "../src/activity-sharing.ts";
+import { createActivityArtifactSources } from "../src/activity-artifact-source.ts";
 import { startHostedActivityRuntime } from "../src/activity-runtime.ts";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -26,7 +35,7 @@ const PNG = Buffer.from(
   "base64",
 );
 
-async function fixture() {
+async function fixture(options: { local?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "hosted-activity-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const key = generateKeyPairSync("ed25519");
@@ -161,29 +170,41 @@ async function fixture() {
   const runtime = await startHostedActivityRuntime();
   cleanup.push(() => runtime.close());
   const files = new DeliveredFileStore(join(root, "files"));
+  const conversationId = options.local ? randomUUID() : "owner-conversation";
   await writeFile(join(root, "picture.png"), PNG);
   const artifact = await files.publish({
-    conversationId: "owner-conversation",
+    conversationId,
     sourceRoot: root,
     path: "picture.png",
   });
   const heartbeat = new HostedHeartbeat(body, { clock: () => now });
   cleanup.push(() => heartbeat.close());
+  const privateWrites: string[] = [];
   const sharing = new ActivitySharing({
     files,
     url: runtime.url,
     token: async () => runtime.token,
-    tenantId,
-    installationId,
-    authorizeDestination: (scope) => body.authorizeActivityDestination(scope),
-    launch: (session, requestId) => body.launchActivity(session, requestId),
-    stop: (session, requestId) => body.stopActivity(session, requestId),
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      if (request.method === "POST") privateWrites.push(new URL(request.url).pathname);
+      return fetch(request);
+    },
+    sources: createActivityArtifactSources({ files }),
+    ...(options.local
+      ? {}
+      : {
+          tenantId,
+          installationId,
+          authorizeDestination: (scope) => body.authorizeActivityDestination(scope),
+          launch: (session, requestId) => body.launchActivity(session, requestId),
+          stop: (session, requestId) => body.stopActivity(session, requestId),
+        }),
     onBusyChange: (active) => heartbeat.setExternal("activity-share", active),
   });
   const app = await createClankieApp({
     captain: createStubCaptain(),
     activitySharing: sharing,
-    hostedActivity: body,
+    ...(options.local ? {} : { hostedActivity: body }),
     clock: () => new Date(now),
     eventLogPath: join(root, "events.jsonl"),
     authenticateOperator: async (request) =>
@@ -235,11 +256,26 @@ async function fixture() {
     sharing,
     heartbeat,
     artifact,
+    conversationId,
     origin,
     owner,
     viewer,
     permit,
     seen,
+    privateWrites,
+    privateStatus: async () => {
+      const response = await fetch(`${runtime.url}/shares`, {
+        headers: { authorization: `Bearer ${runtime.token}` },
+      });
+      expect(response.status).toBe(200);
+      return (await response.json()).sessions as ActivitySession[];
+    },
+    delegatedViewer: (share: ActivitySession, grant: string) =>
+      fetch(`${runtime.url}/shares/${share.shareId}/viewer`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${runtime.token}`, "content-type": "application/json" },
+        body: JSON.stringify({ generation: share.generation, grant }),
+      }),
     setAllowed: (value: boolean) => {
       allowed = value;
     },
@@ -249,7 +285,7 @@ async function fixture() {
     start: async () => {
       const response = await owner({
         action: "image",
-        conversationId: "owner-conversation",
+        conversationId,
         artifactId: artifact.artifactId,
         guildId: "123",
         channelId: "456",
@@ -381,6 +417,92 @@ it("captain sharing pins artifact ownership and rejects a foreign server or stal
     channelId: "456",
   });
   expect(result.details).toHaveProperty("session");
+  expect(result.details).toMatchObject({ receipt: { outcome: "confirmed" } });
+  expect(f.seen).toContain("launch");
   current = false;
   expect((await invoke({ action: "list" })).details).toMatchObject({ outcome: "refused" });
+}, 15_000);
+
+it("official bot turns without a launch adapter refuse media mutations before private effects while local owner delegation still works", async () => {
+  const f = await fixture({ local: true });
+  const owner = { conversationId: f.conversationId };
+  const authority = {
+    current: () => true,
+    authorize: async () => true,
+  };
+  const bot = activityTools(f.sharing, {
+    conversationAuthority: {
+      ...authority,
+      owner: {
+        ...owner,
+        discord: {
+          baseSessionKey: "discord:123",
+          targetId: "456",
+          actorId: "789",
+          guildId: "123",
+          channelId: "456",
+          messageId: "987",
+          transportKind: "bot" as const,
+        },
+      },
+    },
+  })[0]!;
+  const invokeBot = (input: Record<string, unknown>) =>
+    bot.execute("call", input as never, undefined, undefined, undefined as never);
+  const sourceId = `artifact:${f.conversationId}:${f.artifact.artifactId}`;
+  expect((await invokeBot({ action: "start", sourceId, guildId: "123", channelId: "456" })).details).toEqual({
+    outcome: "refused",
+    reason: "activity_official_bot_required",
+  });
+  expect(await f.privateStatus()).toEqual([]);
+  expect(f.privateWrites).toEqual([]);
+  expect(
+    (
+      await invokeBot({
+        action: "image",
+        artifactId: f.artifact.artifactId,
+        guildId: "123",
+        channelId: "456",
+      })
+    ).details,
+  ).toEqual({ outcome: "refused", reason: "activity_official_bot_required" });
+  expect(await f.privateStatus()).toEqual([]);
+  expect(f.privateWrites).toEqual([]);
+
+  const seeded = await f.start();
+  expect(seeded.scope.tenantId).toBe("local");
+  const before = await f.privateStatus();
+  const writesBeforeSwitch = [...f.privateWrites];
+  expect(before).toEqual([seeded]);
+  expect(
+    (await invokeBot({ action: "switch", shareId: seeded.shareId, generation: 1, sourceId })).details,
+  ).toEqual({ outcome: "refused", reason: "activity_official_bot_required" });
+  expect(await f.privateStatus()).toEqual(before);
+  expect(f.privateWrites).toEqual(writesBeforeSwitch);
+  const delegated = await f.owner({ action: "grant", shareId: seeded.shareId, generation: 1 });
+  expect(delegated.status).toBe(200);
+  const grant = (await delegated.json()).grant as string;
+  const response = await f.delegatedViewer(seeded, grant);
+  expect(response.status).toBe(200);
+  const reader = response.body!.getReader();
+  let media = "";
+  while (!media.includes('"kind":"frame"')) {
+    const next = await reader.read();
+    if (next.done) throw new Error("delegated media ended before frame");
+    media += Buffer.from(next.value!).toString();
+  }
+  expect(media).toContain(PNG.toString("base64"));
+  await reader.cancel();
+  expect((await f.owner({ action: "stop", shareId: seeded.shareId, generation: 1 })).status).toBe(200);
+  const local = activityTools(f.sharing, { conversationAuthority: { ...authority, owner } })[0]!;
+  const created = await local.execute(
+    "call",
+    { action: "start", sourceId, guildId: "123", channelId: "456" } as never,
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  expect(created.details).toHaveProperty("session");
+  expect((await f.privateStatus())[0]?.source.id).toBe(sourceId);
+  expect(f.seen).toEqual([]);
 }, 15_000);

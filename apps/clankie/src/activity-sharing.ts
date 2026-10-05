@@ -89,6 +89,10 @@ export class ActivitySharing {
     });
   }
 
+  public get hasLaunchAdapter(): boolean {
+    return this.options.launch !== undefined;
+  }
+
   public request(
     input: z.infer<typeof ActivitySharingRequestSchema>,
     authorize: () => Promise<boolean>,
