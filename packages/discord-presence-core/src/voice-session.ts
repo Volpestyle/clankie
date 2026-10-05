@@ -220,7 +220,7 @@ export const UTTERANCE_REORDER_GRACE_MS = 400;
  */
 export const TURN_GATE_CAPTURE_MAX_MS = 8_000;
 export const TURN_GATE_FINAL_WAIT_MS = 2_500;
-export const TURN_GATE_MAX_WAIT_MS = 8_000;
+const TURN_GATE_MAX_WAIT_MS = 8_000;
 /** The service schema bounds person-memory projection to this many room members. */
 const MAX_BRIEFING_SPEAKERS = 25;
 /** A broken transcriber cannot retain content-free capture ids without bound. */

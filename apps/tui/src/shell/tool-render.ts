@@ -110,7 +110,7 @@ export function previewLines(
 }
 
 /** Decode native Codex parts and MCP envelopes through the app's shared helper. */
-export function formatNativeToolResult(output: string, args?: unknown): string {
+function formatNativeToolResult(output: string, args?: unknown): string {
   return formatToolOutput(output)
     .map((part) => {
       if (part.kind === "image") return "[Tool output image]";
