@@ -76,6 +76,15 @@ it("shares durable wake settings between Clankie's tool, CLI and HTTP with ordin
     expect(
       captainTools(deps, {}, {} as LaneLog, "discord_presence").some((entry) => entry.name === "linear_wake"),
     ).toBe(false);
+    // A trusted guild admits non-owner humans to shell tools, not owner settings.
+    expect(
+      captainTools(
+        deps,
+        { shell: true, actorId: "non-owner-member", guildId: "trusted-guild" },
+        {} as LaneLog,
+        "discord_presence",
+      ).some((entry) => entry.name === "linear_wake"),
+    ).toBe(false);
     await execute({
       action: "set",
       wake: { ownerUserEmails: ["volpestyle@gmail.com"], notificationTypes: ["issueNewComment"] },

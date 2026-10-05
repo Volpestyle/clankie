@@ -647,7 +647,8 @@ API is `GET /v1/linear/target` and `PUT /v1/linear/target` with
 
 Bare `/linear` opens **Follow Linear**, including **Wake rules**. Rules live in
 `linearWebhook.wake`. Clankie can inspect or change these non-secret settings
-himself through the `linear_wake` tool or CLI; following must still be active.
+himself through the operator-only `linear_wake` tool or authenticated CLI;
+following must still be active.
 
 ```sh
 clankie linear wake show
@@ -675,10 +676,16 @@ The default included types are `issueNewComment`, `issueCommentMention`,
 `initiativeUpdateNewComment`, `initiativeUpdateMention`, `documentNewComment`,
 and `documentMention`. The existing VUH-1549 rule engine classifies signed
 webhook activity using these types. A newly added Linear issue/profile/resource
-link in signed `body`, `description`, or `content` counts as a mention. Explicit
-rule lists are preserved on upgrade:
-an existing `notificationTypes: []` still allows all types rather than taking
-the narrower fresh-install default.
+link in signed `body`, `description`, or `content` counts as a mention.
+
+Legacy owner-only filters migrate to the new comment/mention defaults when
+`ownerUserEmails` is absent and the saved filters match the old defaults:
+`actors: ["owner"]`, `userIds: []`, `notificationTypes: []`, and
+`excludedNotificationTypes: ["issueSubscribed"]`. Configured `ownerUserIds` are
+preserved as identity setup. Edited selectors, included types, or exclusions
+remain unchanged. Once `ownerUserEmails` is persisted, an intentionally empty
+`notificationTypes` list remains all-types; `clankie linear wake set --types none`
+can select that behavior after upgrade.
 
 `owner` requires a signed human actor matching an owner ID or email. `human`
 requires signed user identity and excludes the connected account and workers.
@@ -686,7 +693,7 @@ requires signed user identity and excludes the connected account and workers.
 in force. Find Linear IDs through the connected `linear_get_user` tool rather
 than inferring them from a name or an app account.
 
-`linear_wake({ action: "show" })` returns the rules and target.
+The operator-only `linear_wake({ action: "show" })` returns the rules and target.
 `linear_wake({ action: "set", wake: {…}, conversationId: "global-default" })`
 patches the supplied rule fields and optionally changes the target. No secret
 or owner-console wizard is needed for these settings.

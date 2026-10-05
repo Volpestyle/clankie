@@ -167,9 +167,7 @@ export function captainTools(
   );
   return [
     ...desktopTools(deps.desktop),
-    ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) && deps.linearWake
-      ? linearWakeTools(deps.linearWake)
-      : []),
+    ...(lane === "operator" && deps.linearWake ? linearWakeTools(deps.linearWake) : []),
     ...(deps.bodyLeases === undefined
       ? []
       : [

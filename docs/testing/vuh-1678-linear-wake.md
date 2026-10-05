@@ -20,11 +20,16 @@ Expected defaults: `wakeConversationId` is `global-default`; `actors` is
 `["owner"]`; `ownerUserEmails` includes `volpestyle@gmail.com`; the included types
 are issue/project-update/initiative-update/document comments and mentions.
 `following: true` and `active: true` are needed for the wake checks. If the target,
-rules or readiness differ, record them as the test's preconditions. Explicit
-installed lists are preserved: `notificationTypes: []` allows all types, so a
-non-comment change by a matching owner can wake under that setting. Evaluate
-passive-event checks against the rules actually returned; narrower defaults do
-not overwrite explicit choices on upgrade. A blocked
+rules or readiness differ, record them as the test's preconditions. Legacy
+owner-only filters with no saved `ownerUserEmails` migrate from the old default
+empty type list to comment/mention types, preserving configured `ownerUserIds`.
+This applies only when `actors` is `["owner"]`, `userIds` and
+`notificationTypes` are empty, and `excludedNotificationTypes` is
+`["issueSubscribed"]`. Edited selectors/types/exclusions are retained. An empty
+type list saved with `ownerUserEmails` remains all-types, so a non-comment change
+by a matching owner can wake under that setting. Evaluate passive-event checks
+against the rules actually returned; an old empty list alone does not prove an
+explicit all-types choice. A blocked
 webhook prerequisite needs James's existing setup flow; do not change webhook
 configuration or accounts as part of this check. Production wakes also require
 the connected Linear account identity in the signed event's workspace. Local
@@ -109,7 +114,8 @@ with `/new`, name it Linear, obtain its ID with `clankie conversations list`, th
 use `clankie linear target set ID`. Verify with `linear target show`, repeat the
 human comment check, and restore the previous target afterward. This optional
 setting change is James's live check; it does not alter the webhook subscription.
-Clankie can change the same non-secret rules/target through `linear_wake`.
+Clankie can change the same non-secret rules/target through the operator-only
+`linear_wake` tool.
 
 On an upgraded install that had legacy state, the service logs exactly:
 

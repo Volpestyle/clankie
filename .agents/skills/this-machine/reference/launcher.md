@@ -34,8 +34,9 @@ unknown or ambiguous authors stay quiet. There is no notification poll,
 separate inbox, read/ack protocol, or per-issue route. On upgrade, old unread
 inbox items are dropped once with a service log entry rather than replayed.
 
-Use `linear_wake({ action: "show" })` or `clankie linear wake show` to inspect
-rules. These are your non-secret settings: you can set them yourself through
+Use the operator-only `linear_wake({ action: "show" })` or authenticated
+`clankie linear wake show` to inspect rules. These are your non-secret settings:
+you can set them yourself from an operator conversation through
 `linear_wake({ action: "set", wake: {…}, conversationId: "global-default" })`
 or `clankie linear wake set`. The tool patches supplied rule fields and can
 change the target. The CLI patches named flags; `--json-stdin` replaces rules.
@@ -52,8 +53,12 @@ clankie linear wake set --types issueNewComment,issueCommentMention,issueMention
 `--user-ids`. Own-write suppression remains in force. `--types` selects activity
 types and `--exclude-types` vetoes them. Comma-separated lists accept `none` to
 clear one. Defaults include issue, project-update, initiative-update and document
-comments/mentions and exclude `issueSubscribed`. Rules and target edits apply to
-new events without replaying old history. `GET/PUT /v1/linear/wake` reads/replaces
+comments/mentions and exclude `issueSubscribed`. Legacy owner-only filters with
+no saved `ownerUserEmails` migrate from the old defaults (empty `userIds`/types,
+excluded `issueSubscribed`) to these comment/mention defaults; configured owner
+IDs are kept. Edited selectors/types/exclusions remain. An empty type list saved
+with `ownerUserEmails` remains all-types. Rules and target edits apply to new
+events without replaying old history. `GET/PUT /v1/linear/wake` reads/replaces
 rules; `GET/PUT /v1/linear/target` reads/sets `{ conversationId }`. Bare `/linear`
 opens **Follow Linear**, including the target and **Wake rules**.
 

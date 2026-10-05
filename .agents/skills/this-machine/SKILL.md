@@ -124,7 +124,7 @@ index). Configure through the headless CLI:
 | Image / video models                  | `clankie image-model set provider/model`, `clankie video-model set provider/model`                     |
 | Persona                               | `clankie persona status`, `clankie persona set --display-name Clankie …`                               |
 | Persona images                        | `clankie persona images set <folder>`, `status`, `clear` (restart applies)                             |
-| Linear wake rules                     | `linear_wake`; `clankie linear wake show`, `… set --owner-user-emails EMAIL --actors owner`            |
+| Linear wake rules                     | `linear_wake` (operator only); `clankie linear wake show`, `… set --owner-user-emails EMAIL`           |
 | Linear wake chat                      | `clankie linear target show`, `clankie linear target set global-default`                               |
 | Live Linear awareness                 | `clankie linear status`, `clankie linear follow on`, `clankie linear follow off`                       |
 | Gameplay availability                 | `clankie games status`, `clankie games set on`, `clankie games set off`                                |

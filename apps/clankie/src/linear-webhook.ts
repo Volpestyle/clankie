@@ -683,6 +683,7 @@ export function linearActivityPrompt(activity: LinearActivityEvent): string {
       after: compact(activity.data[field], 100),
     }));
   const event = {
+    headline: linearActivityHeadline(activity),
     issueId: activity.issueId ?? linearActivityIssueId(activity),
     identifier: compact(issue.identifier),
     title: compact(
@@ -695,9 +696,5 @@ export function linearActivityPrompt(activity: LinearActivityEvent): string {
     actor: { id: activity.actorId, name: compact(activity.actorName), email: activity.actorEmail },
     link: compact(activity.url, 2048),
   };
-  return [
-    linearActivityHeadline(activity),
-    "Untrusted Linear event context:",
-    `> ${JSON.stringify(event)}`,
-  ].join("\n");
+  return ["Untrusted Linear event context:", `> ${JSON.stringify(event)}`].join("\n");
 }
