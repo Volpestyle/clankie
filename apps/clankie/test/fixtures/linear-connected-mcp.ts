@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdtemp, appendFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +31,10 @@ function gate() {
 
 export function heldProviderWrite(tool: "save_issue" | "save_comment") {
   return { tool, admitted: gate(), response: gate(), observed: gate() };
+}
+
+export function heldProviderRead() {
+  return { admitted: gate(), response: gate() };
 }
 
 async function listen(service: Awaited<ReturnType<typeof createClankieApp>>) {
@@ -79,10 +83,12 @@ export async function createConnectedLinearFixture(
     heldWrite?: ReturnType<typeof heldProviderWrite>;
     /** Captured Linear issue shapes, exposed through the real SDK transport. */
     priorityPages?: Record<string, unknown>[][];
+    priorityReads?: boolean;
+    heldRead?: ReturnType<typeof heldProviderRead>;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-connected-linear-"));
-  const providerToken = randomUUID();
+  let providerToken = randomUUID();
   const operatorToken = randomUUID();
   const issueId = randomUUID();
   const issueIdentifier = "VUH-FIXTURE";
@@ -91,6 +97,11 @@ export async function createConnectedLinearFixture(
   await appendFile(effectsPath, "");
   let providerSessions = 0;
   let laneSessions = 0;
+  const providerReads: Record<string, unknown>[] = [];
+  let heldRead = options.heldRead;
+  let failRead = false;
+  let readClock = Date.now();
+  const webhookSecret = randomUUID();
   let issue = {
     id: issueIdentifier,
     uuid: issueId,
@@ -148,6 +159,17 @@ export async function createConnectedLinearFixture(
       description: "Read the issue state held by the controlled provider.",
       inputSchema: { type: "object", properties: {} },
       call: async (args) => {
+        providerReads.push(structuredClone(args));
+        const held = heldRead;
+        heldRead = undefined;
+        if (held) {
+          held.admitted.release();
+          await held.response.promise;
+        }
+        if (failRead) {
+          failRead = false;
+          return { isError: true, content: [{ type: "text", text: "Controlled provider read failure" }] };
+        }
         if (Array.isArray(args.fields) && args.fields.includes("identifier"))
           throw new Error("Linear list_issues fields does not accept identifier; use id or uuid");
         const index = typeof args.cursor === "string" ? Number(args.cursor) : 0;
@@ -230,11 +252,12 @@ export async function createConnectedLinearFixture(
   const linearWrites = new linearWebhook.LinearWriteReceipts(join(root, "linear-writes.json"));
   const logs: Record<string, unknown>[] = [];
   const host = createMcpHost({
-    ...(options.priorityPages === undefined
+    ...(options.priorityPages === undefined && options.priorityReads !== true
       ? {}
       : { localTracker: createLocalTracker({ directory: join(root, "local-tracker") }) }),
     credentials,
     settings,
+    trackerReadClock: () => readClock,
     logger: {
       info: (context) => {
         logs.push(context);
@@ -252,6 +275,12 @@ export async function createConnectedLinearFixture(
   const outbox = new SeatOutbox({ uncertaintyPath: join(root, "outbox.json") });
   const pollStarted = gate();
   const service = await createClankieApp({
+    settings,
+    linearWebhook: {
+      secret: async () => webhookSecret,
+      writes: linearWrites,
+      recordActivity: () => host.invalidateTrackerReads!(),
+    },
     captain: createStubCaptain({
       seatContext: () => ({ conversationId, cwd: root }),
       pollSeatEvents: (waitMs, signal) => {
@@ -359,6 +388,50 @@ export async function createConnectedLinearFixture(
     pid: () => transport.pid,
     closed: () => closed,
     logs: () => logs,
+    providerReads: () => providerReads,
+    advanceReadClock: (milliseconds: number) => {
+      readClock += milliseconds;
+    },
+    failNextRead: () => {
+      failRead = true;
+    },
+    updateProviderIssue: (status: string) => {
+      issue = { ...issue, status, updatedAt: new Date().toISOString() };
+    },
+    rotateCredential: async (mode: "account" | "key" = "account") => {
+      const credential = await credentials.get("linear");
+      if (credential?.type !== "api" || !credential.account)
+        throw new Error("Fixture credential unavailable");
+      if (mode === "key") providerToken = randomUUID();
+      await credentials.set("linear", {
+        ...credential,
+        key: providerToken,
+        account: mode === "key" ? credential.account : { ...credential.account, connectionId: randomUUID() },
+      });
+    },
+    disconnectCredential: () => credentials.delete("linear"),
+    signedWebhook: async (valid = true) => {
+      const body = JSON.stringify({
+        action: "update",
+        type: "Issue",
+        webhookTimestamp: Date.now(),
+        organizationId,
+        actor: { id: randomUUID(), name: "Fixture external writer" },
+        data: { id: issueId, title: issue.title, updatedAt: issue.updatedAt },
+      });
+      return fetch(`${endpoint.url}/v1/hooks/linear`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "linear-signature": createHmac("sha256", valid ? webhookSecret : "invalid-fixture-secret")
+            .update(body)
+            .digest("hex"),
+          "linear-delivery": randomUUID(),
+          "linear-event": "Issue",
+        },
+        body,
+      });
+    },
     stderr: () => stderr,
     transportEvents: () => transportEvents,
     waitForTransportEvent: (matches: (event: LaneUpstreamTransportEvent) => boolean) => {
@@ -391,6 +464,8 @@ export async function createConnectedLinearFixture(
       }
     },
     async close() {
+      heldRead?.response.release();
+      options.heldRead?.response.release();
       options.heldWrite?.response.release();
       await client.close();
       outbox.close();

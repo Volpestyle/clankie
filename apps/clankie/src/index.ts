@@ -1429,6 +1429,7 @@ const clankie = await createClankieApp({
     },
     writes: linearWrites,
     recordActivity: (activity) => {
+      mcpHost.invalidateTrackerReads?.();
       linearAttribution.record(activity);
       discordTracking.record(activity);
     },
