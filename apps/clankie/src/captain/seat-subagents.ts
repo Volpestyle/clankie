@@ -15,7 +15,7 @@ export async function withSeatSubagents(
   read: (
     harness: "claude" | "codex",
     session: NonNullable<ObservedFleetSeat["session"]>,
-  ) => OperatorSeatSubagents | undefined = (harness, session) =>
+  ) => OperatorSeatSubagents | undefined | Promise<OperatorSeatSubagents | undefined> = (harness, session) =>
     harness === "claude" ? readClaudeSubagents(session) : readCodexSubagents(session),
   readOpenCode?: (
     session: NonNullable<ObservedFleetSeat["session"]>,
@@ -34,7 +34,8 @@ export async function withSeatSubagents(
         return seat;
       let subagents: OperatorSeatSubagents | undefined;
       try {
-        subagents = seat.harness === "opencode" ? await readOpenCode?.(session) : read(seat.harness, session);
+        subagents =
+          seat.harness === "opencode" ? await readOpenCode?.(session) : await read(seat.harness, session);
       } catch {
         // An unreadable transcript is an unknown count, never a failed roster.
         return seat;

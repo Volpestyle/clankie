@@ -100,6 +100,19 @@ terminal control. Count-only entries from older hosts remain display-only.
 Unknown optional response fields are discarded by the client's tolerant reader;
 known fields and requests retain strict validation.
 
+Concurrent roster readers share one refresh. Read-only callers may reuse its
+completed projection for one second while the fleet change cursor is unchanged.
+An authority-sensitive or post-mutation read forces a census started after any
+older refresh; native admission never relies on the cached roster.
+
+Codex child discovery uses asynchronous filesystem reads and a bounded cache
+per parent session. Parent rollout and discovery-directory identity, size and
+modification time invalidate it. Known child journals still detect appended
+activity and idle transitions. Unchanged sessions avoid repeated tree walks;
+an unrelated existing date folder is rechecked within two seconds of another
+read, covering a child that appears without a parent append. The cache supplies
+display observations, never child-history authority.
+
 The same native readers resolve the selected child. Claude maps the parent call
 ID through its matching `toolUseResult.agentId`, then checks the derived nested
 child journal's parent and agent IDs. A call without that recorded locator is

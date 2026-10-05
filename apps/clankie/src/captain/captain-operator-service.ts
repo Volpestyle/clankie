@@ -50,7 +50,7 @@ export interface CreateOperatorServiceContext {
   readonly settings: () => Promise<ClankieSettings>;
   readonly workingDirectory: string;
   readonly options: CaptainOptions;
-  readonly refreshFleet: () => Promise<readonly OperatorFleetSeat[]>;
+  readonly refreshFleet: (options?: { force?: boolean }) => Promise<readonly OperatorFleetSeat[]>;
   liveSeats: readonly OperatorFleetSeat[];
   readonly fleetChanges: FleetChangeClock;
   readonly sessions: Map<string, Promise<LaneSession>>;
@@ -151,7 +151,7 @@ export function createOperatorService(
         request.command.action === "accept_goal" ||
         (request.command.action === "set_goal_status" && request.command.status === "active")
       ) {
-        await ctx.refreshFleet();
+        await ctx.refreshFleet({ force: true });
         const reason = ctx.goalExecutionReason(request.conversationId);
         if (reason !== undefined) throw new ConversationRefusedError(reason);
       }
@@ -159,10 +159,12 @@ export function createOperatorService(
       // the activation boundary. A captain credential supplies no authority.
       if (requiresOwner && (!(await authority!.authorize()) || !authority!.current()))
         throw new Error("goal_owner_required");
+      const status = ctx.autonomy.command(request.conversationId, request.command);
+      if (request.command.action !== "status") ctx.fleetChanges.touch();
       return Promise.resolve({
         op: "autonomy",
         schemaVersion: 1,
-        status: ctx.autonomy.command(request.conversationId, request.command),
+        status,
       });
     }
     if (request.op === "composer_catalog") {
@@ -330,7 +332,7 @@ export function createOperatorService(
       const seat =
         seatId === undefined
           ? undefined
-          : (await ctx.refreshFleet()).find((candidate) => candidate.seatId === seatId);
+          : (await ctx.refreshFleet({ force: true })).find((candidate) => candidate.seatId === seatId);
       const occupantId =
         seat?.occupantId ?? (seatId === ctx.headSeat?.seatId ? ctx.headSeat?.occupantId : undefined);
       if (occupantId === undefined || seatId === undefined)
@@ -365,7 +367,7 @@ export function createOperatorService(
       const seat =
         seatId === undefined
           ? undefined
-          : (await ctx.refreshFleet()).find((candidate) => candidate.seatId === seatId);
+          : (await ctx.refreshFleet({ force: true })).find((candidate) => candidate.seatId === seatId);
       if (seat === undefined) {
         return {
           op: "state_stance",
@@ -433,7 +435,9 @@ export function createOperatorService(
       if (!ctx.personas.all([], () => undefined).some((persona) => persona.personaId === request.personaId))
         throw new Error(`Unknown agent ${request.personaId}`);
       const projectId = request.projectId ?? DEFAULT_PROJECT_ID;
-      const seats = (await ctx.refreshFleet()).filter((seat) => seat.personaId === request.personaId);
+      const seats = (await ctx.refreshFleet({ force: true })).filter(
+        (seat) => seat.personaId === request.personaId,
+      );
       const seat = seats.length === 1 ? seats[0] : undefined;
       const membership = ctx.options.fleetProjectMembership?.();
       if (!seat || seat.status === "offline" || !membership)

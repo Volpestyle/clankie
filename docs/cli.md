@@ -1948,6 +1948,11 @@ worktrees and commits predating admission do not establish that seat's progress.
 Native transcript snapshots are cached by file identity, size and modification
 time; unchanged branch HEADs reuse Git evidence. Discovery runs once in the
 background instead of walking transcript directories during roster refreshes.
+Concurrent roster reads share one refresh and may reuse a completed result for
+one second while its change cursor is unchanged. Codex child discovery caches
+the parent rollout and discovery-directory stats and uses asynchronous reads;
+unchanged sessions avoid another tree walk. Authority-sensitive and post-mutation
+reads force fresh observation; the display cache grants no native control.
 To change an external worker's effort, ask that worker or re-hire with a retained
 handoff; captain model settings do not change the worker.
 

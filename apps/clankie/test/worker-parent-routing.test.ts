@@ -1103,6 +1103,8 @@ it("does not resurrect a saved parent after a later actual ancestry points at an
   const f = await fixture();
   await roster(f.service);
   f.rows[0]!.parent_pane_id = "w3Z:missing";
+  // This external census change has no watch notification; let read freshness expire.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
   await roster(f.service);
   delete f.rows[0]!.parent_pane_id;
   await f.service.close();

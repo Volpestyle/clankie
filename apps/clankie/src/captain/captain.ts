@@ -2026,7 +2026,52 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   }
 
-  async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
+  const FLEET_FRESH_MS = 1000;
+  let fleetRefresh: Promise<readonly OperatorFleetSeat[]> | undefined;
+  let refreshedFleet:
+    | { seats: readonly OperatorFleetSeat[]; cursor: string; completedAt: number }
+    | undefined;
+
+  /** Share roster work, never the fresh native proofs used to authorize effects. */
+  async function refreshFleet({ force = false }: { force?: boolean } = {}): Promise<
+    readonly OperatorFleetSeat[]
+  > {
+    const preceding = fleetRefresh;
+    if (preceding !== undefined) {
+      if (!force) return preceding;
+      // A post-mutation read must start after this request, not join a census
+      // that may already have observed the old occupant. Parallel force callers
+      // waiting on the same earlier flight share its one subsequent refresh.
+      await preceding.catch(() => undefined);
+      if (fleetRefresh !== undefined) return fleetRefresh;
+    }
+    if (
+      !force &&
+      refreshedFleet !== undefined &&
+      refreshedFleet.cursor === fleetChanges.current() &&
+      performance.now() - refreshedFleet.completedAt < FLEET_FRESH_MS
+    )
+      return refreshedFleet.seats;
+    const cursor = fleetChanges.current();
+    const pending = observeFleetProjection();
+    fleetRefresh = pending;
+    try {
+      const seats = await pending;
+      // A mutation or native event during projection must not be stamped onto
+      // older seats. Initial projection changes also require one stabilizing
+      // read, which fleetSnapshot already performs against its cursor.
+      refreshedFleet =
+        cursor === fleetChanges.current() ? { seats, cursor, completedAt: performance.now() } : undefined;
+      return seats;
+    } catch (error) {
+      refreshedFleet = undefined;
+      throw error;
+    } finally {
+      if (fleetRefresh === pending) fleetRefresh = undefined;
+    }
+  }
+
+  async function observeFleetProjection(): Promise<readonly OperatorFleetSeat[]> {
     await personas.ready(settingsStore);
     const fleet = await observeFleet();
     bindHeadSeat(fleet.head);
@@ -2349,7 +2394,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         expectedGoal.status !== "active"
       )
         return;
-      await refreshFleet();
+      await refreshFleet({ force: true });
       if (refuseNativeGoal(conversationId)) return;
       if (autonomy.getGoal(conversationId) !== expectedGoal || expectedGoal.status !== "active") return;
     }
@@ -2361,14 +2406,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
 
   evaluator.start();
-  async function ledSeats(owner: ConversationOwner) {
-    const seats = await refreshFleet();
+  async function ledSeats(owner: ConversationOwner, force = false) {
+    const seats = await refreshFleet({ force });
     return seats.filter((seat) => JSON.stringify(seatLeadOwners.get(seat)?.owner) === JSON.stringify(owner));
   }
   const efficiencyActions = {
     async run(authority: ConversationAuthority, input?: FleetEfficiencyReview) {
       await assertConversationAuthority(authority);
-      const seats = await ledSeats(authority.owner);
+      // Explicit inspection/review asks for current evidence (Git and native
+      // files can change without a fleet event). Background rounds and roster
+      // polls still share the short-lived read projection.
+      const seats = await ledSeats(authority.owner, true);
       if (input) {
         const review = FleetEfficiencyReviewSchema.parse(input);
         const seat = seats.find((candidate) => candidate.seatId === review.seatId);
@@ -2378,7 +2426,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // Renew admission before the final native census. No await separates
         // its ownership check from writing this display-only review.
         await assertConversationAuthority(authority);
-        const current = (await ledSeats(authority.owner)).find(
+        const current = (await ledSeats(authority.owner, true)).find(
           (candidate) => candidate.seatId === seat.seatId && candidate.occupantId === seat.occupantId,
         );
         if (!current || !seatLeadOwners.get(current)?.admitted || !authority.current())
@@ -2387,7 +2435,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seatEfficiency.review({ occupantId: seat.occupantId, owner: authority.owner, ...finding });
         fleetChanges.touch();
       }
-      const current = await ledSeats(authority.owner);
+      const current = await ledSeats(authority.owner, input !== undefined);
       await assertConversationAuthority(authority);
       return { conversationId: authority.owner.conversationId, seats: current };
     },
@@ -2863,7 +2911,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         discord.serverId !== request.guildId
       )
         return { schemaVersion: 1 as const, state: "not_projected" as const };
-      await refreshFleet();
+      await refreshFleet({ force: true });
       const accepted = conversations.submitProjectedMessage(request.guildId, request.channelId, request.body);
       return accepted === undefined
         ? { schemaVersion: 1 as const, state: "not_projected" as const }
@@ -3027,7 +3075,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     state: "running",
                     doing: "Working on the request",
                   });
-                  await refreshFleet();
+                  await refreshFleet({ force: true });
                   const nativeCapture: TurnContext = { shell: plan.systemTools };
                   const nativeIdentity = captureDiscordBodyIdentity(
                     nativeCapture,

@@ -1,17 +1,18 @@
-import { codexAccounts } from "@clankie/settings";
+import { codexAccounts, defaultSettingsPath, SettingsStore } from "@clankie/settings";
 import { z } from "zod";
 import {
   closeSync,
-  existsSync,
   globSync,
   openSync,
   readFileSync,
   readSync,
   readdirSync,
   statSync,
+  type Stats,
 } from "node:fs";
+import { glob, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactSensitiveText } from "@clankie/observability";
 import {
@@ -309,50 +310,326 @@ function claudeConfigRoots(): string[] {
   return [...new Set(roots)];
 }
 
+const MAX_RESOLVED_TRANSCRIPTS = 64;
+// Root mtimes do not observe a new file in an existing, unrelated date folder.
+// A miss or legacy-layout lookup therefore expires even if its probes agree.
+const TRANSCRIPT_DISCOVERY_RECHECK_MS = 1_000;
+
+interface TranscriptPathLookup {
+  readonly path: string | undefined;
+  readonly fileIdentity: string | undefined;
+  readonly directories: ReadonlyMap<string, string | undefined>;
+  readonly expiresAt: number;
+}
+
+const transcriptPaths = new Map<string, TranscriptPathLookup>();
+const transcriptSearches = new Map<string, Promise<string | undefined>>();
+const transcriptDirectories = new Map<string, { stamp: string; names: string[] }>();
+const directorySearches = new Map<string, Promise<string[]>>();
+
+function remember<T>(cache: Map<string, T>, key: string, value: T): T {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size > MAX_RESOLVED_TRANSCRIPTS) cache.delete(cache.keys().next().value!);
+  return value;
+}
+
+function fileIdentity(stats: Stats): string {
+  return `${stats.dev}:${stats.ino}`;
+}
+
+function discoveryStamp(stats: Stats | undefined): string | undefined {
+  return stats === undefined
+    ? undefined
+    : `${fileIdentity(stats)}:${stats.mtimeMs}:${stats.ctimeMs}:${stats.size}`;
+}
+
+function pathStats(path: string): Stats | undefined {
+  try {
+    return statSync(path, { throwIfNoEntry: false });
+  } catch {
+    return undefined;
+  }
+}
+
+async function pathStatsAsync(path: string): Promise<Stats | undefined> {
+  return stat(path).catch(() => undefined);
+}
+
+function transcriptPathKey(agent: string, session: HerdrAgentSession): string {
+  return JSON.stringify([
+    agent,
+    session.source,
+    session.value,
+    homedir(),
+    process.env.CODEX_HOME,
+    process.env.CLAUDE_CONFIG_DIR,
+    defaultSettingsPath(),
+  ]);
+}
+
+function safeSessionId(value: string): boolean {
+  // IDs are literal filename components, never glob patterns or parent paths.
+  return /^[a-z0-9_-]{1,128}$/iu.test(value);
+}
+
+function datedCodexDirectory(root: string, id: string): string | undefined {
+  const compact = id.replaceAll("-", "");
+  if (!/^[a-f0-9]{12}/iu.test(compact)) return undefined;
+  const date = new Date(Number.parseInt(compact.slice(0, 12), 16));
+  return join(
+    root,
+    String(date.getUTCFullYear()),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  );
+}
+
+/** Watch the nearest existing ancestor too, so a missing directory can appear. */
+function watchDirectory(path: string, directories: Map<string, string | undefined>): Stats | undefined {
+  let current = path;
+  for (;;) {
+    const stats = pathStats(current);
+    directories.set(current, discoveryStamp(stats));
+    if (stats !== undefined || dirname(current) === current) return current === path ? stats : undefined;
+    current = dirname(current);
+  }
+}
+
+async function watchDirectoryAsync(
+  path: string,
+  directories: Map<string, string | undefined>,
+): Promise<Stats | undefined> {
+  let current = path;
+  for (;;) {
+    const stats = await pathStatsAsync(current);
+    directories.set(current, discoveryStamp(stats));
+    if (stats !== undefined || dirname(current) === current) return current === path ? stats : undefined;
+    current = dirname(current);
+  }
+}
+
+function directoryNames(path: string, stats: Stats): string[] {
+  const stamp = discoveryStamp(stats)!;
+  const cached = transcriptDirectories.get(path);
+  if (cached?.stamp === stamp) return remember(transcriptDirectories, path, cached).names;
+  const names = readdirSync(path);
+  return remember(transcriptDirectories, path, { stamp, names }).names;
+}
+
+async function directoryNamesAsync(path: string, stats: Stats): Promise<string[]> {
+  const stamp = discoveryStamp(stats)!;
+  const cached = transcriptDirectories.get(path);
+  if (cached?.stamp === stamp) return remember(transcriptDirectories, path, cached).names;
+  const key = JSON.stringify([path, stamp]);
+  const running = directorySearches.get(key);
+  if (running !== undefined) return running;
+  const search = readdir(path).then((names) => remember(transcriptDirectories, path, { stamp, names }).names);
+  remember(directorySearches, key, search);
+  try {
+    return await search;
+  } finally {
+    if (directorySearches.get(key) === search) directorySearches.delete(key);
+  }
+}
+
+function lookupCurrent(cached: TranscriptPathLookup): boolean {
+  if (cached.expiresAt <= Date.now()) return false;
+  for (const [path, stamp] of cached.directories) if (discoveryStamp(pathStats(path)) !== stamp) return false;
+  if (cached.path === undefined) return true;
+  const stats = pathStats(cached.path);
+  return stats?.isFile() === true && fileIdentity(stats) === cached.fileIdentity;
+}
+
+async function lookupCurrentAsync(cached: TranscriptPathLookup): Promise<boolean> {
+  if (cached.expiresAt <= Date.now()) return false;
+  const probes = await Promise.all(
+    [...cached.directories].map(
+      async ([path, stamp]) => discoveryStamp(await pathStatsAsync(path)) === stamp,
+    ),
+  );
+  if (probes.some((current) => !current)) return false;
+  if (cached.path === undefined) return true;
+  const stats = await pathStatsAsync(cached.path);
+  return stats?.isFile() === true && fileIdentity(stats) === cached.fileIdentity;
+}
+
+function uniqueTranscript(
+  paths: readonly string[],
+  directories: Map<string, string | undefined>,
+  dated: boolean,
+): TranscriptPathLookup {
+  const matches = [...new Set(paths)];
+  const path = matches.length === 1 ? matches[0] : undefined;
+  const stats = path === undefined ? undefined : pathStats(path);
+  return {
+    path: stats?.isFile() ? path : undefined,
+    fileIdentity: stats?.isFile() ? fileIdentity(stats) : undefined,
+    directories,
+    expiresAt: dated && stats?.isFile() ? Infinity : Date.now() + TRANSCRIPT_DISCOVERY_RECHECK_MS,
+  };
+}
+
+async function uniqueTranscriptAsync(
+  paths: readonly string[],
+  directories: Map<string, string | undefined>,
+  dated: boolean,
+): Promise<TranscriptPathLookup> {
+  const matches = [...new Set(paths)];
+  const path = matches.length === 1 ? matches[0] : undefined;
+  const stats = path === undefined ? undefined : await pathStatsAsync(path);
+  return {
+    path: stats?.isFile() ? path : undefined,
+    fileIdentity: stats?.isFile() ? fileIdentity(stats) : undefined,
+    directories,
+    expiresAt: dated && stats?.isFile() ? Infinity : Date.now() + TRANSCRIPT_DISCOVERY_RECHECK_MS,
+  };
+}
+
+function findTranscript(agent: string, id: string): TranscriptPathLookup {
+  const directories = new Map<string, string | undefined>();
+  const matches: string[] = [];
+  if (agent === "codex") {
+    const settingsPath = defaultSettingsPath();
+    directories.set(settingsPath, discoveryStamp(pathStats(settingsPath)));
+    const roots = [...new Set(codexAccounts().map((account) => join(account.home, "sessions")))];
+    for (const root of roots) {
+      watchDirectory(root, directories);
+      const directory = datedCodexDirectory(root, id);
+      if (directory === undefined) continue;
+      const stats = watchDirectory(directory, directories);
+      if (stats?.isDirectory())
+        matches.push(
+          ...directoryNames(directory, stats)
+            .filter((name) => name.includes(id) && name.endsWith(".jsonl"))
+            .map((name) => join(directory, name)),
+        );
+    }
+    if (matches.length > 0) return uniqueTranscript(matches, directories, true);
+    for (const root of roots) {
+      if (!pathStats(root)?.isDirectory()) continue;
+      matches.push(
+        ...globSync("**/*.jsonl", { cwd: root })
+          .filter((name) => name.split(/[\\/]/u).at(-1)!.includes(id))
+          .map((name) => join(root, name)),
+      );
+    }
+  } else {
+    watchDirectory(homedir(), directories);
+    const roots =
+      agent === "claude"
+        ? claudeConfigRoots().map((root) => join(root, "projects"))
+        : [join(homedir(), ".grok", "sessions")];
+    for (const root of roots) {
+      if (!watchDirectory(root, directories)?.isDirectory()) continue;
+      matches.push(
+        ...globSync(agent === "claude" ? `*/${id}.jsonl` : `*/${id}/chat_history.jsonl`, { cwd: root }).map(
+          (name) => join(root, name),
+        ),
+      );
+    }
+  }
+  for (const path of matches) watchDirectory(dirname(path), directories);
+  return uniqueTranscript(matches, directories, false);
+}
+
+async function findTranscriptAsync(agent: string, id: string): Promise<TranscriptPathLookup> {
+  const directories = new Map<string, string | undefined>();
+  const matches: string[] = [];
+  if (agent === "codex") {
+    const settingsPath = defaultSettingsPath();
+    directories.set(settingsPath, discoveryStamp(await pathStatsAsync(settingsPath)));
+    const accounts = codexAccounts(await new SettingsStore(settingsPath).load());
+    const roots = [...new Set(accounts.map((account) => join(account.home, "sessions")))];
+    for (const root of roots) {
+      await watchDirectoryAsync(root, directories);
+      const directory = datedCodexDirectory(root, id);
+      if (directory === undefined) continue;
+      const stats = await watchDirectoryAsync(directory, directories);
+      if (stats?.isDirectory())
+        matches.push(
+          ...(await directoryNamesAsync(directory, stats))
+            .filter((name) => name.includes(id) && name.endsWith(".jsonl"))
+            .map((name) => join(directory, name)),
+        );
+    }
+    if (matches.length > 0) return uniqueTranscriptAsync(matches, directories, true);
+    for (const root of roots) {
+      if (!(await pathStatsAsync(root))?.isDirectory()) continue;
+      for await (const name of glob("**/*.jsonl", { cwd: root }))
+        if (name.split(/[\\/]/u).at(-1)!.includes(id)) matches.push(join(root, name));
+    }
+  } else {
+    await watchDirectoryAsync(homedir(), directories);
+    const configured = process.env.CLAUDE_CONFIG_DIR?.trim();
+    const roots =
+      agent === "claude"
+        ? [
+            ...new Set([
+              ...(configured ? [configured] : []),
+              join(homedir(), ".claude"),
+              ...(await readdir(homedir()).catch(() => [] as string[]))
+                .filter((name) => name.startsWith(".claude-"))
+                .sort()
+                .map((name) => join(homedir(), name)),
+            ]),
+          ].map((root) => join(root, "projects"))
+        : [join(homedir(), ".grok", "sessions")];
+    for (const root of roots) {
+      if (!(await watchDirectoryAsync(root, directories))?.isDirectory()) continue;
+      for await (const name of glob(agent === "claude" ? `*/${id}.jsonl` : `*/${id}/chat_history.jsonl`, {
+        cwd: root,
+      }))
+        matches.push(join(root, name));
+    }
+  }
+  for (const path of matches) await watchDirectoryAsync(dirname(path), directories);
+  return uniqueTranscriptAsync(matches, directories, false);
+}
+
 /** Native lookup used by the reader and failed-delivery diagnostics. No match means no file yet. */
 export function resolveHerdrSeatTranscriptPath(
   agent: string,
   session: HerdrAgentSession,
 ): string | undefined {
   if (session.kind === "path")
-    return isAbsolute(session.value) && existsSync(session.value) ? session.value : undefined;
-  if (agent === "claude") {
-    // Claude keeps sessions under its config dir, and an owner may run more
-    // than one (CLAUDE_CONFIG_DIR, ~/.claude-<name>). Session ids are UUIDs, so
-    // searching every home cannot pick up another session.
-    for (const root of claudeConfigRoots()) {
-      const found = globSync(join(root, "projects/*", `${session.value}.jsonl`))[0];
-      if (found !== undefined) return found;
-    }
-    return undefined;
+    return isAbsolute(session.value) && pathStats(session.value)?.isFile() ? session.value : undefined;
+  if (!["codex", "claude", "grok"].includes(agent) || !safeSessionId(session.value)) return undefined;
+  const key = transcriptPathKey(agent, session);
+  const cached = transcriptPaths.get(key);
+  if (cached !== undefined && lookupCurrent(cached)) return remember(transcriptPaths, key, cached).path;
+  const found = findTranscript(agent, session.value);
+  if (!lookupCurrent(found)) return undefined;
+  return remember(transcriptPaths, key, found).path;
+}
+
+/** Fleet refreshes never block the event loop walking a native session tree. */
+export async function resolveHerdrSeatTranscriptPathAsync(
+  agent: string,
+  session: HerdrAgentSession,
+): Promise<string | undefined> {
+  if (session.kind === "path")
+    return isAbsolute(session.value) && (await pathStatsAsync(session.value))?.isFile()
+      ? session.value
+      : undefined;
+  if (!["codex", "claude", "grok"].includes(agent) || !safeSessionId(session.value)) return undefined;
+  const key = transcriptPathKey(agent, session);
+  const running = transcriptSearches.get(key);
+  if (running !== undefined) return running;
+  const search = (async () => {
+    const cached = transcriptPaths.get(key);
+    if (cached !== undefined && (await lookupCurrentAsync(cached)))
+      return remember(transcriptPaths, key, cached).path;
+    const found = await findTranscriptAsync(agent, session.value);
+    if (!(await lookupCurrentAsync(found))) return undefined;
+    return remember(transcriptPaths, key, found).path;
+  })();
+  remember(transcriptSearches, key, search);
+  try {
+    return await search;
+  } finally {
+    if (transcriptSearches.get(key) === search) transcriptSearches.delete(key);
   }
-  if (agent === "grok") {
-    return globSync(join(homedir(), ".grok/sessions/*", session.value, "chat_history.jsonl"))[0];
-  }
-  if (agent !== "codex") return undefined;
-  for (const account of codexAccounts()) {
-    const compact = session.value.replaceAll("-", "");
-    const millis = Number.parseInt(compact.slice(0, 12), 16);
-    if (Number.isFinite(millis)) {
-      const date = new Date(millis);
-      const directory = join(
-        account.home,
-        "sessions",
-        String(date.getUTCFullYear()),
-        String(date.getUTCMonth() + 1).padStart(2, "0"),
-        String(date.getUTCDate()).padStart(2, "0"),
-      );
-      const path = existsSync(directory)
-        ? readdirSync(directory).find((name) => name.includes(session.value) && name.endsWith(".jsonl"))
-        : undefined;
-      if (path !== undefined) return join(directory, path);
-    }
-    const fallback = globSync("**/*.jsonl", { cwd: join(account.home, "sessions") })
-      .map((name) => join(account.home, "sessions", name))
-      .find((path) => path.includes(session.value));
-    if (fallback) return fallback;
-  }
-  return undefined;
 }
 
 function grokSessionForProcess(processId: number | undefined): HerdrAgentSession | undefined {

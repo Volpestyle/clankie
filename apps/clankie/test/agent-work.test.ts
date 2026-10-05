@@ -105,6 +105,8 @@ it("publishes assignments and native goal changes through fleet cursors, indepen
       1700000002000,
       id,
     );
+    // External native changes become visible after the read-only freshness window.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
     const paused = await fleet();
     expect(paused.cursor).not.toBe(assigned.cursor);
     expect(paused.seats[0]).toMatchObject({ status: "idle", goal: { status: "paused" } });
@@ -141,6 +143,7 @@ it("publishes assignments and native goal changes through fleet cursors, indepen
       1700000000000,
       1700000003000,
     );
+    await new Promise((resolve) => setTimeout(resolve, 1100));
     const head = await fleet();
     expect(head.goals).toEqual([
       expect.objectContaining({
@@ -216,6 +219,7 @@ it("publishes assignments and native goal changes through fleet cursors, indepen
       },
       owner,
     );
+    expect((await fleet()).goals?.[0]?.goal.status).toBe("active");
     await captain.serveOperatorConversation({
       op: "autonomy",
       schemaVersion: 1,

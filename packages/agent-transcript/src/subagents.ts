@@ -8,6 +8,8 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
+import type { Stats } from "node:fs";
 import { dirname, join, posix, relative, isAbsolute } from "node:path";
 import { redactSensitiveText } from "@clankie/observability";
 import {
@@ -15,7 +17,11 @@ import {
   OPERATOR_SEAT_SUBAGENTS_RECENT_MAX,
   type OperatorSeatSubagents,
 } from "@clankie/protocol";
-import { resolveHerdrSeatTranscriptPath, type HerdrAgentSession } from "./index.ts";
+import {
+  resolveHerdrSeatTranscriptPath,
+  resolveHerdrSeatTranscriptPathAsync,
+  type HerdrAgentSession,
+} from "./index.ts";
 import {
   AgentSessionRequestError,
   readAgentSession,
@@ -130,10 +136,71 @@ function readJournal<T>(
   return { path: path!, state };
 }
 
+/** Codex fleet reads must never synchronously walk or read a session tree. */
+async function readJournalAsync<T>(
+  session: HerdrAgentSession,
+  cache: Map<string, SessionState<T>>,
+  create: () => T,
+  fold: (data: T, line: string) => void,
+  capacity = MAX_SESSIONS,
+  supplied?: { path: string; stats: Stats },
+): Promise<{ path: string; state: SessionState<T>; stats: Stats } | undefined> {
+  const key = `codex:${session.kind}:${session.value}`;
+  let path = supplied?.path ?? paths.get(key);
+  let stats = supplied?.stats ?? (path === undefined ? undefined : await lstat(path).catch(() => undefined));
+  if (stats === undefined) {
+    path = await resolveHerdrSeatTranscriptPathAsync("codex", session);
+    if (path === undefined) return undefined;
+    stats = await lstat(path).catch(() => undefined);
+    if (stats === undefined) return undefined;
+    paths.set(key, path);
+    if (paths.size > MAX_SESSIONS) paths.delete(paths.keys().next().value!);
+  }
+  if (!stats.isFile()) return undefined;
+  let state = cache.get(key);
+  if (
+    state === undefined ||
+    state.device !== stats.dev ||
+    state.inode !== stats.ino ||
+    stats.size < state.size ||
+    (stats.size === state.size && stats.mtimeMs !== state.mtimeMs)
+  ) {
+    state = {
+      device: stats.dev,
+      inode: stats.ino,
+      size: 0,
+      mtimeMs: 0,
+      offset: Math.max(0, stats.size - COLD_READ_BYTES),
+      data: create(),
+    };
+    if (state.offset > 0) state.offset = await nextLineStartAsync(path!, state.offset, stats.size);
+  }
+  cache.delete(key);
+  cache.set(key, state);
+  if (cache.size > capacity) cache.delete(cache.keys().next().value!);
+  while (state.offset < stats.size) {
+    const to = Math.min(stats.size, state.offset + READ_CHUNK_BYTES);
+    const buffer = await readRangeAsync(path!, state.offset, to, stats);
+    const complete = buffer.lastIndexOf(0x0a);
+    if (complete < 0) {
+      if (to === stats.size) break;
+      state.offset = await nextLineStartAsync(path!, to, stats.size);
+      continue;
+    }
+    for (const line of buffer.toString("utf8", 0, complete + 1).split("\n")) fold(state.data, line);
+    state.offset += complete + 1;
+  }
+  state.size = stats.size;
+  state.mtimeMs = stats.mtimeMs;
+  return { path: path!, state, stats };
+}
+
 /** Quiet files are a fallback, not proof of process completion. */
 const CODEX_IDLE_MS = 5 * 60 * 1000;
 const HEADER_BYTES = 64 * 1024;
 const MAX_HEADERS = 4096;
+/** A late child in an unrelated historical directory is discovered within this bound. */
+const CODEX_DISCOVERY_REFRESH_MS = 2_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 interface CodexMetadata {
@@ -163,31 +230,72 @@ const headers = new Map<
   string,
   { device: number; inode: number; size: number; mtimeMs: number; metadata: CodexMetadata }
 >();
+const codexReads = new Map<string, Promise<OperatorSeatSubagents | undefined>>();
+interface CodexDirectory {
+  readonly fingerprint: string;
+  readonly directories: readonly string[];
+  readonly files: readonly string[];
+}
+interface CodexIndex {
+  readonly directories: Map<string, CodexDirectory>;
+  readonly metadata: Map<string, CodexMetadata>;
+  readonly pending: Map<string, string>;
+  revision: number;
+  refreshing: Promise<void> | undefined;
+}
+const codexIndexes = new Map<string, CodexIndex>();
+const codexDiscoveries = new Map<
+  string,
+  {
+    index: CodexIndex;
+    parentId: string;
+    revision: number;
+    fingerprint: string;
+    checkedAt: number;
+    children: { path: string; metadata: CodexMetadata }[];
+  }
+>();
 
 /**
  * Direct children of one addressed local Codex seat, discovered from session
  * headers in that seat's own Codex home. Only matching children's tails are
  * read. Parent collection/status records settle them on this very fleet read.
  */
-export function readCodexSubagents(session: HerdrAgentSession): OperatorSeatSubagents | undefined {
-  const journal = readJournal(
-    "codex",
+export function readCodexSubagents(session: HerdrAgentSession): Promise<OperatorSeatSubagents | undefined> {
+  const key = `${session.kind}:${session.value}`;
+  const existing = codexReads.get(key);
+  if (existing !== undefined) return existing;
+  const pending = readCodexSubagentsAsync(session).finally(() => {
+    if (codexReads.get(key) === pending) codexReads.delete(key);
+  });
+  codexReads.set(key, pending);
+  return pending;
+}
+
+async function readCodexSubagentsAsync(
+  session: HerdrAgentSession,
+): Promise<OperatorSeatSubagents | undefined> {
+  const journal = await readJournalAsync(
     session,
     codexSessions,
     () => ({ order: 0, signals: new Map(), invocations: new Map(), children: new Map() }),
     foldCodexSubagentLine,
   );
   if (journal === undefined) return undefined;
-  const parent = codexMetadata(journal.path);
+  const parent = await codexMetadataAsync(journal.path, journal.stats);
   if (parent === undefined) return undefined;
-  const children = codexChildren(journal.path, parent)
+  const children = (await codexChildrenAsync(journal.path, parent, journal.stats))
     .sort((a, b) => a.metadata.startedAt - b.metadata.startedAt)
     .slice(-MAX_CALLS);
   const calls = new Map<string, SubagentCall>();
-  for (const { path, metadata } of children) {
+  for (const { path, metadata: discovered } of children) {
     try {
-      const child = readJournal(
-        "codex",
+      const stats = await lstat(path);
+      await confinedChildAsync(codexRoot(journal.path), path);
+      // Directory mtimes do not observe appends or a rewritten child header.
+      const metadata = await codexMetadataAsync(path, stats);
+      if (metadata?.parentId !== parent.id || metadata.id !== discovered.id) continue;
+      const child = await readJournalAsync(
         { source: session.source, kind: "path", value: path },
         journal.state.data.children,
         () => ({ startedAt: metadata.startedAt }),
@@ -198,6 +306,7 @@ export function readCodexSubagents(session: HerdrAgentSession): OperatorSeatSuba
             data.startedAt = Math.max(data.startedAt, codexTimestamp(entry));
         },
         MAX_CALLS,
+        { path, stats },
       );
       if (child === undefined) continue;
       const signals = [
@@ -250,6 +359,35 @@ function codexMetadata(path: string, fresh = false): CodexMetadata | undefined {
     return cached.metadata;
   }
   const prefix = readRange(path, 0, Math.min(stats.size, HEADER_BYTES));
+  const metadata = parseCodexMetadata(prefix);
+  if (metadata === undefined) return undefined;
+  rememberCodexMetadata(path, stats, metadata);
+  return metadata;
+}
+
+async function codexMetadataAsync(path: string, supplied?: Stats): Promise<CodexMetadata | undefined> {
+  const stats = supplied ?? (await lstat(path).catch(() => undefined));
+  if (stats === undefined || !stats.isFile()) return undefined;
+  const cached = headers.get(path);
+  if (
+    cached?.device === stats.dev &&
+    cached.inode === stats.ino &&
+    stats.size >= cached.size &&
+    (stats.size !== cached.size || stats.mtimeMs === cached.mtimeMs)
+  ) {
+    cached.size = stats.size;
+    cached.mtimeMs = stats.mtimeMs;
+    return cached.metadata;
+  }
+  const metadata = parseCodexMetadata(
+    await readRangeAsync(path, 0, Math.min(stats.size, HEADER_BYTES), stats),
+  );
+  if (metadata === undefined) return undefined;
+  rememberCodexMetadata(path, stats, metadata);
+  return metadata;
+}
+
+function parseCodexMetadata(prefix: Buffer): CodexMetadata | undefined {
   const newline = prefix.indexOf(0x0a);
   if (newline < 0) return undefined; // A partial header waits for its writer.
   const entry = jsonRecord(prefix.toString("utf8", 0, newline));
@@ -277,6 +415,10 @@ function codexMetadata(path: string, fresh = false): CodexMetadata | undefined {
     task: typeof task === "string" ? task : undefined,
     startedAt: codexTimestamp(entry),
   };
+  return metadata;
+}
+
+function rememberCodexMetadata(path: string, stats: Stats, metadata: CodexMetadata): void {
   headers.set(path, {
     device: stats.dev,
     inode: stats.ino,
@@ -285,7 +427,6 @@ function codexMetadata(path: string, fresh = false): CodexMetadata | undefined {
     metadata,
   });
   if (headers.size > MAX_HEADERS) headers.delete(headers.keys().next().value!);
-  return metadata;
 }
 
 function foldCodexSubagentLine(state: CodexState, line: string): void {
@@ -614,6 +755,28 @@ function readRange(path: string, from: number, to: number): Buffer {
   }
 }
 
+async function nextLineStartAsync(path: string, from: number, size: number): Promise<number> {
+  const buffer = await readRangeAsync(path, from, Math.min(size, from + READ_CHUNK_BYTES));
+  const newline = buffer.indexOf(0x0a);
+  return newline < 0 ? size : from + newline + 1;
+}
+
+async function readRangeAsync(path: string, from: number, to: number, expected?: Stats): Promise<Buffer> {
+  if (to <= from) return Buffer.alloc(0);
+  const buffer = Buffer.allocUnsafe(to - from);
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stats = await file.stat();
+    if (!stats.isFile()) throw new AgentSessionRequestError("Native transcript is not a regular file", 409);
+    if (expected !== undefined && (stats.dev !== expected.dev || stats.ino !== expected.ino))
+      throw new AgentSessionRequestError("Native transcript changed during read", 409);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, from);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await file.close();
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -750,6 +913,204 @@ function confinedChild(root: string, path: string): string {
 function codexRoot(parentPath: string): string {
   const boundary = parentPath.lastIndexOf("/sessions/");
   return boundary < 0 ? dirname(parentPath) : parentPath.slice(0, boundary + "/sessions".length);
+}
+
+async function confinedChildAsync(root: string, path: string): Promise<string> {
+  const [canonicalRoot, canonicalChild] = await Promise.all([realpath(root), realpath(path)]);
+  const rel = relative(canonicalRoot, canonicalChild);
+  if (canonicalChild !== path || !rel || rel === ".." || rel.startsWith("../") || isAbsolute(rel))
+    throw new AgentSessionRequestError("Native child source escaped its parent", 409);
+  return canonicalChild;
+}
+
+function fingerprint(stats: Stats): string {
+  return `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`;
+}
+
+/**
+ * Share one async directory-stat pass across concurrent parents in a Codex home.
+ * Unchanged directories reuse their listings and headers. Checking each known
+ * directory is necessary: adding a rollout in an old date directory does not
+ * change the sessions root's mtime. File appends are checked separately.
+ */
+async function refreshCodexIndex(root: string, index: CodexIndex): Promise<void> {
+  if (index.refreshing !== undefined) return index.refreshing;
+  const pending = (async () => {
+    const directories = new Set<string>();
+    const changed = new Set<string>();
+    const files: string[] = [];
+    let visited = 0;
+    const visit = async (path: string): Promise<void> => {
+      if (++visited > MAX_HEADERS) return;
+      const stats = await lstat(path).catch(() => undefined);
+      if (stats === undefined || !stats.isDirectory()) return;
+      const current = fingerprint(stats);
+      let cached = index.directories.get(path);
+      if (cached?.fingerprint !== current) {
+        // Never traverse a replaced directory through an ancestor symlink.
+        if ((await realpath(path).catch(() => undefined)) !== path) return;
+        const entries = await readdir(path, { withFileTypes: true }).catch(() => undefined);
+        if (entries === undefined) return;
+        cached = {
+          fingerprint: current,
+          directories: entries
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => join(path, entry.name))
+            .sort(),
+          files: entries
+            .filter((entry) => entry.isFile() && /^rollout-.*\.jsonl$/u.test(entry.name))
+            .map((entry) => join(path, entry.name)),
+        };
+        index.directories.set(path, cached);
+        changed.add(path);
+      }
+      directories.add(path);
+      files.push(...cached.files);
+      await Promise.all(cached.directories.map(visit));
+    };
+    await visit(root);
+    for (const path of index.directories.keys()) if (!directories.has(path)) index.directories.delete(path);
+    const selected = new Set(files.sort().reverse().slice(0, MAX_HEADERS));
+    for (const path of index.metadata.keys()) {
+      if (!selected.has(path)) {
+        index.metadata.delete(path);
+        index.revision += 1;
+      }
+    }
+    for (const path of index.pending.keys()) if (!selected.has(path)) index.pending.delete(path);
+    const candidates = [...selected].filter(
+      (path) => !index.metadata.has(path) || changed.has(dirname(path)),
+    );
+    // Bound simultaneous open file handles even on a cold, large native home.
+    for (let offset = 0; offset < candidates.length; offset += 16) {
+      await Promise.all(
+        candidates.slice(offset, offset + 16).map(async (path) => {
+          const stats = await lstat(path).catch(() => undefined);
+          if (stats === undefined || !stats.isFile()) {
+            if (index.metadata.delete(path)) index.revision += 1;
+            index.pending.delete(path);
+            return;
+          }
+          const current = fingerprint(stats);
+          if (index.pending.get(path) === current) return;
+          try {
+            await confinedChildAsync(root, path);
+            const metadata = await codexMetadataAsync(path, stats);
+            if (metadata === undefined) {
+              if (index.metadata.delete(path)) index.revision += 1;
+              index.pending.set(path, current);
+            } else {
+              if (index.metadata.get(path) !== metadata) index.revision += 1;
+              index.metadata.set(path, metadata);
+              index.pending.delete(path);
+            }
+          } catch {
+            if (index.metadata.delete(path)) index.revision += 1;
+            index.pending.set(path, current);
+          }
+        }),
+      );
+    }
+  })().finally(() => {
+    if (index.refreshing === pending) index.refreshing = undefined;
+  });
+  index.refreshing = pending;
+  return pending;
+}
+
+/** Check only this parent's relevant directories between bounded full discovery passes. */
+function codexRelevantDirectories(root: string, parentPath: string, children: readonly { path: string }[]) {
+  const directories = new Set([root]);
+  const add = (path: string) => {
+    let current = path;
+    while (current !== root) {
+      const rel = relative(root, current);
+      if (!rel || rel === ".." || rel.startsWith("../") || isAbsolute(rel)) return;
+      directories.add(current);
+      current = dirname(current);
+    }
+  };
+  add(dirname(parentPath));
+  for (const child of children) add(dirname(child.path));
+  const parentDate = /\/(\d{4})\/(\d{2})\/(\d{2})$/u.exec(dirname(parentPath));
+  const dates = [Date.now()];
+  if (parentDate !== null) {
+    const parsed = Date.parse(`${parentDate[1]}-${parentDate[2]}-${parentDate[3]}T00:00:00Z`);
+    if (Number.isFinite(parsed)) dates.push(parsed);
+  }
+  for (const at of dates) {
+    for (const offset of [-1, 0, 1]) {
+      const date = new Date(at + offset * 86_400_000);
+      add(
+        join(
+          root,
+          String(date.getUTCFullYear()),
+          String(date.getUTCMonth() + 1).padStart(2, "0"),
+          String(date.getUTCDate()).padStart(2, "0"),
+        ),
+      );
+    }
+  }
+  return directories;
+}
+
+async function codexChildrenAsync(parentPath: string, parent: CodexMetadata, parentStats: Stats) {
+  const canonicalParent = await realpath(parentPath);
+  const root = codexRoot(canonicalParent);
+  let index = codexIndexes.get(root);
+  if (index === undefined) {
+    index = {
+      directories: new Map(),
+      metadata: new Map(),
+      pending: new Map(),
+      revision: 0,
+      refreshing: undefined,
+    };
+    codexIndexes.set(root, index);
+    if (codexIndexes.size > MAX_SESSIONS) codexIndexes.delete(codexIndexes.keys().next().value!);
+  }
+  const cached = codexDiscoveries.get(canonicalParent);
+  const directories = codexRelevantDirectories(root, canonicalParent, cached?.children ?? []);
+  const relevant = [
+    ...directories,
+    ...[...index.pending.keys()]
+      .filter((path) => directories.has(dirname(path)))
+      .sort()
+      .reverse()
+      .slice(0, MAX_CALLS),
+  ].sort();
+  const stamps = await Promise.all(
+    relevant.map(async (path) => {
+      const stats = await lstat(path).catch(() => undefined);
+      return `${path}:${stats === undefined ? "missing" : fingerprint(stats)}`;
+    }),
+  );
+  const current = `${fingerprint(parentStats)}\n${stamps.join("\n")}`;
+  const now = Date.now();
+  const fresh =
+    cached?.index === index &&
+    cached.parentId === parent.id &&
+    cached.fingerprint === current &&
+    now >= cached.checkedAt &&
+    now - cached.checkedAt < CODEX_DISCOVERY_REFRESH_MS;
+  if (fresh && cached.revision === index.revision) return cached.children;
+  if (!fresh) await refreshCodexIndex(root, index);
+  const children = [...index.metadata.entries()]
+    .filter(([, metadata]) => metadata.parentId === parent.id)
+    .map(([path, metadata]) => ({ path, metadata }))
+    .sort((a, b) => a.metadata.startedAt - b.metadata.startedAt)
+    .slice(-MAX_CALLS);
+  codexDiscoveries.delete(canonicalParent);
+  codexDiscoveries.set(canonicalParent, {
+    index,
+    parentId: parent.id,
+    revision: index.revision,
+    fingerprint: current,
+    checkedAt: fresh ? cached.checkedAt : now,
+    children,
+  });
+  if (codexDiscoveries.size > MAX_SESSIONS) codexDiscoveries.delete(codexDiscoveries.keys().next().value!);
+  return children;
 }
 
 /** The same bounded header discovery serves roster projection and on-demand child history. */
