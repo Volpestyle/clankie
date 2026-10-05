@@ -8,14 +8,19 @@ import type { ConversationRunner, ConversationStore, InboundReportRecipient } fr
 
 /** Admission fence; the conversation retains report delivery and explicit read state. */
 export class InboundSeatReceipts {
-  private readonly fence: DeliveryFence;
+  private readonly fencePath: string;
   private readonly conversations: Pick<ConversationStore, "inboundAcceptance" | "submitInbound">;
   public constructor(
     path: string,
     conversations: Pick<ConversationStore, "inboundAcceptance" | "submitInbound">,
   ) {
-    this.fence = new DeliveryFence(path);
+    this.fencePath = path;
     this.conversations = conversations;
+  }
+
+  /** A delayed original must see terminal IDs written by a replacement service. */
+  private get fence(): DeliveryFence {
+    return new DeliveryFence(this.fencePath);
   }
 
   public reconcile(
@@ -33,6 +38,21 @@ export class InboundSeatReceipts {
     };
     try {
       const accepted = this.conversations.inboundAcceptance(delivery.id);
+      const attempted = this.fence.pending(`id:${delivery.id}`);
+      if (
+        !accepted &&
+        attempted?.notSent &&
+        attempted.messageId === delivery.id &&
+        attempted.paneId === paneId &&
+        attempted.fingerprint === fingerprint &&
+        attempted.sessionId === delivery.binding
+      )
+        return {
+          ...receipt,
+          deliveryStage: "unavailable",
+          definitive: "not_sent",
+          detail: "This original delivery was not accepted and its ID is sealed; nothing was sent.",
+        };
       if (
         !accepted ||
         accepted.paneId !== paneId ||
@@ -41,7 +61,6 @@ export class InboundSeatReceipts {
         deliveryFingerprint(accepted.text) !== fingerprint
       )
         return receipt;
-      const attempted = this.fence.pending(`id:${delivery.id}`);
       if (
         attempted &&
         (attempted.messageId !== delivery.id ||
@@ -62,6 +81,34 @@ export class InboundSeatReceipts {
       return { ...receipt, received: true, deliveryStage: "stored" };
     } catch {
       return receipt;
+    }
+  }
+
+  /** Authenticated exact lookup can prove absence only after fencing delayed original delivery. */
+  public lookup(
+    paneId: string,
+    delivery: FleetSeatMessageDelivery,
+    fingerprint: string,
+  ): FleetSeatMessageReceipt {
+    const previous = this.reconcile(paneId, delivery, fingerprint);
+    if (previous.received || previous.definitive) return previous;
+    try {
+      if (
+        this.conversations.inboundAcceptance(delivery.id) ||
+        this.fence.pending(paneId) ||
+        this.fence.pending(`id:${delivery.id}`)
+      )
+        return previous;
+      this.fence.begin(`id:${delivery.id}`, {
+        messageId: delivery.id,
+        paneId,
+        sessionId: delivery.binding,
+        fingerprint,
+        notSent: true,
+      });
+      return this.reconcile(paneId, delivery, fingerprint);
+    } catch {
+      return previous;
     }
   }
 
@@ -103,7 +150,7 @@ export class InboundSeatReceipts {
   ): FleetSeatMessageReceipt {
     const fingerprint = deliveryFingerprint(text);
     const previous = this.reconcile(paneId, delivery, fingerprint);
-    if (previous.received) return previous;
+    if (previous.received || previous.definitive) return previous;
     try {
       // An existing ID with different evidence, a corrupt record, or any pending
       // original blocks replacement. Read before begin; absent is not accepted.

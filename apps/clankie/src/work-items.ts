@@ -473,7 +473,14 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
               arguments: args,
               resultMode: "data",
               fence,
-              ...(writing ? { onDispatch, onSettled: effectConfirmed } : {}),
+              ...(writing
+                ? {
+                    onDispatch,
+                    onSettled: (settled: { isError: boolean }) => {
+                      if (!settled.isError) effectConfirmed();
+                    },
+                  }
+                : {}),
             });
             if (result.outcome !== "ok") {
               if (writing) dispatched = result.possiblyDispatched === true;
@@ -768,7 +775,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                   ...(callbacks.onDispatch === undefined ? {} : { onDispatch: callbacks.onDispatch }),
                   ...(callbacks.effectConfirmed === undefined
                     ? {}
-                    : { onSettled: callbacks.effectConfirmed }),
+                    : {
+                        onSettled: (settled: { isError: boolean }) => {
+                          if (!settled.isError) callbacks.effectConfirmed?.();
+                        },
+                      }),
                 });
                 if (result.outcome !== "ok") throw new Error(`Tracker ${tool}: ${result.detail}`);
                 if (result.isError) throw new Error(`Tracker ${tool}: ${result.content.slice(0, 500)}`);

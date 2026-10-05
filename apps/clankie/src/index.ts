@@ -1032,6 +1032,8 @@ const captain = createCaptain(
     projectHireIdentity: projectProcessObserver,
     fleetProjectMembership: () => fleetProjectMembership,
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),
+    fleetHireTools: () => workerMcp.expectedFleetToolNames(),
+    workerBridgeStatus: (fleet, pane) => workerMcp.bridgeStatus(fleet, pane),
     projectHireWorkspace: createProjectWorkspaceResolver({
       settings: async () => (await settingsStore.load()).projects,
       observe: projectProcessObserver,
@@ -1141,6 +1143,7 @@ const workerMcp = new WorkerMcp({
   pluginExpectedVersion: () => workerPluginNotices.expected(),
   projects: async () => (await settingsStore.load()).projects,
   fleetTools: async () => (await settingsStore.load()).fleet.tools,
+  fleetPeerMessages: async () => (await settingsStore.load()).fleet.peerMessages,
   fleetToolsSnapshot: async () => {
     const snapshot = await settingsStore.loadFenced();
     return { tools: snapshot.settings.fleet.tools, assertCurrent: snapshot.assertCurrent };
@@ -1283,6 +1286,7 @@ const clankie = await createClankieApp({
     const fleet = (await runtimes.fleets()).find((entry) => entry.id === id);
     if (!fleet) throw new Error("Configured ssh fleet unavailable");
     return inspectFleetMembership({
+      bridgeStatus: (fleet, pane) => workerMcp.bridgeStatus(fleet, pane),
       machine: fleet.id,
       supportedHarnesses: fleet.ssh.shell === "powershell" ? ["claude", "codex"] : [],
       connected: async () =>

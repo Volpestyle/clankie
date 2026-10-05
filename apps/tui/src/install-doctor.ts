@@ -32,7 +32,7 @@ import { inspectHarnessBridges } from "./harness-doctor.ts";
 import { commandHost } from "./command/io.ts";
 import { probeHealth, type GatewayDoorwayReport } from "./command/gateway.ts";
 import { nextStepLine } from "./next-step.ts";
-import { DeviceDirectRouteSchema } from "@clankie/protocol";
+import { DeviceDirectRouteSchema, type WorkerBridgeStatus } from "@clankie/protocol";
 import { probeHostPower, type HostPowerReport } from "@clankie/protocol/host-power";
 
 const execFileAsync = promisify(execFileCallback);
@@ -118,6 +118,15 @@ export interface InstallDoctorReport {
   readonly toolCatalogHealth?:
     | FleetToolCatalogHealthPage
     | { readonly status: "unavailable"; readonly detail: string };
+  /** Authenticated roster observations; installation alone never establishes native tool health. */
+  readonly workerTools?: {
+    readonly workers: readonly (WorkerBridgeStatus & {
+      readonly seatId: string;
+      readonly title: string;
+      readonly fleet?: string;
+    })[];
+    readonly error?: string;
+  };
   readonly harnessBridges: Awaited<ReturnType<typeof inspectHarnessBridges>>;
   /** Where another harness reaches his lane-scoped tool bank over MCP (VUH-1085). */
   readonly laneTools: { readonly url: string; readonly reachable: boolean };

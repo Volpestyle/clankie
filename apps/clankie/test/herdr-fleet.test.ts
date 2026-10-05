@@ -118,7 +118,11 @@ describe("remote Herdr transport", () => {
   });
 
   it("names the session on every posix call, quoted as one argv", () => {
-    expect(remoteHerdrCommand(box, ["pane", "send-text", "w1:p2", "it's $HOME; rm -rf /"])).toBe(
+    const command = remoteHerdrCommand(box, ["pane", "send-text", "w1:p2", "it's $HOME; rm -rf /"]);
+    expect(command).toMatch(/^exec sh -c /u);
+    // Unquote the single script argument; the inner argv remains exact.
+    const script = command.slice("exec sh -c '".length, -1).replaceAll("'\\''", "'");
+    expect(script).toContain(
       "exec herdr '--session' 'work' 'pane' 'send-text' 'w1:p2' 'it'\\''s $HOME; rm -rf /'",
     );
   });
@@ -134,14 +138,19 @@ describe("remote Herdr transport", () => {
   it("carries every call over one multiplexed ssh connection with the owner's own keys", () => {
     const args = sshArgs(pc, "/Users/me/.clankie/ssh", "cmd");
     expect(args).toEqual(
-      expect.arrayContaining([
-        "BatchMode=yes",
-        "ControlMaster=auto",
-        "ControlPath=/Users/me/.clankie/ssh/%C",
-        "ControlPersist=600",
-      ]),
+      expect.arrayContaining(["BatchMode=yes", "ControlMaster=auto", "ControlPersist=600"]),
+    );
+    expect(args.some((arg) => /^ControlPath=\/Users\/me\/\.clankie\/ssh\/[a-f0-9]{6}-%C$/u.test(arg))).toBe(
+      true,
     );
     expect(args.slice(-3)).toEqual(["--", "volpe@supedupsilly", "cmd"]);
+    // OpenSSH expands %C to 40 hex bytes and appends a 17-byte temporary
+    // suffix. macOS sockaddr_un leaves 104 bytes including its terminating NUL.
+    const longerHome = sshArgs(pc, "/Users/james-alexander/.clankie/ssh", "cmd")
+      .find((arg) => arg.startsWith("ControlPath="))!
+      .slice("ControlPath=".length)
+      .replace("%C", "a".repeat(40));
+    expect(Buffer.byteLength(longerHome) + 17 + 1).toBeLessThanOrEqual(104);
   });
 
   it("reports Herdr's own JSON error and a dead link as distinct failures", async () => {

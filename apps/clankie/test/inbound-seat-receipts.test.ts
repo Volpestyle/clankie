@@ -160,3 +160,59 @@ it("reports known pre-dispatch unavailability but never applies it to an earlier
   receipts.accept("p1", f.original, "hello", "hello");
   expect(receipts.refuse("p1", f.original, "hello").deliveryStage).toBe("uncertain");
 });
+
+it("seals a definitively unknown delivery across replacement before clearing its original claim", async () => {
+  const f = fixture();
+  const store = f.store();
+  const fingerprint = deliveryFingerprint("never accepted");
+  const oldReceipts = f.create(store);
+  const negative = f.create(store).lookup("p1", f.original, fingerprint);
+  expect(negative).toMatchObject({
+    received: false,
+    deliveryStage: "unavailable",
+    definitive: "not_sent",
+    deliveryId: f.original.id,
+    binding: f.original.binding,
+    fingerprint,
+  });
+  await store.close();
+  const restartedStore = f.store();
+  const restarted = f.create(restartedStore);
+  expect(restarted.lookup("p1", f.original, fingerprint)).toEqual(negative);
+  // A delayed POST of the old original remains fenced, even after the client
+  // cleared its claim and the service was replaced.
+  expect(restarted.accept("p1", f.original, "never accepted", "late original")).toEqual(negative);
+  expect(oldReceipts.accept("p1", f.original, "never accepted", "delayed old service")).toEqual(negative);
+  expect(f.runner).not.toHaveBeenCalled();
+  for (const [pane, binding, body] of [
+    ["p2", f.original.binding, "never accepted"],
+    ["p1", "b".repeat(64), "never accepted"],
+    ["p1", f.original.binding, "other payload"],
+  ]) {
+    expect(
+      restarted.lookup(pane!, { ...f.original, binding: binding! }, deliveryFingerprint(body!)),
+    ).toMatchObject({ deliveryStage: "uncertain" });
+  }
+  expect(restarted.accept("p1", { ...f.original, id: randomUUID() }, "follow-up", "follow-up")).toMatchObject(
+    { received: true, deliveryStage: "stored" },
+  );
+  await restartedStore.close();
+  expect(f.runner).toHaveBeenCalledTimes(1);
+});
+
+it("never declares a pending original unknown when its acceptance is still unresolved", async () => {
+  const f = fixture();
+  const store = f.store();
+  vi.spyOn(store, "submitInbound").mockImplementationOnce(() => {
+    throw new Error("lost original acceptance");
+  });
+  const receipts = f.create(store);
+  receipts.accept("p1", f.original, "hello", "hello");
+  expect(receipts.lookup("p1", f.original, deliveryFingerprint("hello"))).toMatchObject({
+    deliveryStage: "uncertain",
+  });
+  expect(
+    receipts.lookup("p1", { ...f.original, id: randomUUID() }, deliveryFingerprint("next")),
+  ).toMatchObject({ deliveryStage: "uncertain" });
+  await store.close();
+});

@@ -2,10 +2,14 @@ import {
   FLEET_TOOL_CATALOG_HEALTH_PATH,
   FleetToolCatalogHealthPageSchema,
 } from "@clankie/protocol/tool-catalog";
-import { resolveOperatorCredential } from "@clankie/credential-broker";
+import { resolveOperatorCredential, resolveCaptainCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import { runRuntimeCommand } from "./runtime.ts";
 import { readWorkingPreferences } from "./working-preferences.ts";
+import {
+  createCaptainOperatorConversationClient,
+  createCaptainRouteClient,
+} from "../session/operator-conversations.ts";
 import {
   inspectInstall,
   type ExecFileImpl,
@@ -64,7 +68,7 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
-  const report = await inspectInstall(options);
+  const [report, workerTools] = await Promise.all([inspectInstall(options), inspectWorkerTools(options)]);
   const workingPreferences = await readWorkingPreferences({
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.host === undefined ? {} : { host: options.host }),
@@ -103,14 +107,16 @@ export async function doctorCommand(
         )
       : [];
     remoteHarnesses = await Promise.all(
-      fleets.map(async (fleet: { id: string }) => {
+      fleets.map(async (fleet: { id: string; linkState?: unknown }) => {
+        const link = fleet.linkState === undefined ? {} : { linkState: fleet.linkState };
         try {
-          return await runRuntimeCommand(["harnesses", fleet.id], options);
+          return { ...(await runRuntimeCommand(["harnesses", fleet.id], options)), ...link };
         } catch (error) {
           return {
             machine: fleet.id,
             status: "unavailable",
             detail: error instanceof Error ? error.message : String(error),
+            ...link,
           };
         }
       }),
@@ -120,7 +126,41 @@ export async function doctorCommand(
       { status: "unavailable", detail: error instanceof Error ? error.message : String(error) },
     ];
   }
-  return { ...report, remoteHarnesses, toolCatalogHealth, workingPreferences };
+  return { ...report, remoteHarnesses, toolCatalogHealth, workerTools, workingPreferences };
+}
+
+async function inspectWorkerTools(
+  options: InspectInstallOptions,
+): Promise<NonNullable<InstallDoctorReport["workerTools"]>> {
+  try {
+    const credential = await resolveCaptainCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore === undefined ? {} : { store: options.credentialStore }),
+    });
+    if (!credential) throw new Error("Worker tool observations need the captain credential");
+    const client = createCaptainOperatorConversationClient(
+      createCaptainRouteClient({
+        host: commandHost(options),
+        captainToken: credential.token,
+        fetchImpl: (input, init) =>
+          (options.fetchImpl ?? fetch)(input, { ...init, signal: AbortSignal.timeout(5_000) }),
+      }),
+    );
+    const seats = await client.roster();
+    return {
+      workers: seats.map((seat) => ({
+        seatId: seat.seatId,
+        title: seat.title,
+        ...(seat.fleet === undefined ? {} : { fleet: seat.fleet }),
+        ...(seat.workerTools ?? {
+          status: "not-observed" as const,
+          reason: "No authenticated worker tool observation; native catalog is unverified.",
+        }),
+      })),
+    };
+  } catch (error) {
+    return { workers: [], error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** Inspect only the selected registered machine; no local executable/config probes. */
@@ -131,6 +171,7 @@ export async function machineDoctorCommand(
   const results = await Promise.allSettled([
     runRuntimeCommand(["harnesses", machine], options),
     runRuntimeCommand(["membership", machine], options),
+    runRuntimeCommand(["list"], options),
   ]);
   const value = (result: PromiseSettledResult<Record<string, unknown>>) =>
     result.status === "fulfilled"
@@ -139,9 +180,19 @@ export async function machineDoctorCommand(
           status: "unavailable",
           detail: result.reason instanceof Error ? result.reason.message : String(result.reason),
         };
+  const inventory = results[2]!;
+  const connection =
+    inventory.status === "fulfilled" && Array.isArray(inventory.value.connections)
+      ? inventory.value.connections.find((entry: { id?: unknown }) => entry.id === machine)
+      : undefined;
   return {
     machine,
     harnesses: results[0]!.status === "fulfilled" ? results[0]!.value.harnesses : value(results[0]!),
     membership: value(results[1]!),
+    ...(inventory.status === "rejected"
+      ? { linkState: value(inventory) }
+      : connection?.linkState === undefined
+        ? {}
+        : { linkState: connection.linkState }),
   };
 }

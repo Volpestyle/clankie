@@ -12,6 +12,7 @@ async function bridge(
   expected: string | undefined,
   catalog: (cursor?: string) => unknown | undefined,
   linked = true,
+  requestTimeoutMs?: number,
   peers = false,
 ) {
   const home = await mkdtemp(join(tmpdir(), "hired-catalog-bridge-"));
@@ -20,16 +21,21 @@ async function bridge(
     let bytes = "";
     request.on("data", (chunk) => (bytes += String(chunk)));
     request.on("end", () => {
-      if (peers && request.url?.endsWith("/peers")) {
+      if (request.url?.endsWith("/peers")) {
         response.setHeader("content-type", "application/json");
-        response.end(
-          JSON.stringify({
-            schemaVersion: 1,
-            fleet: "pc",
-            sender: { seatId: "term-fixture", paneId: "w1:p1", binding: "a".repeat(64) },
-            seats: [],
-          }),
-        );
+        if (peers)
+          response.end(
+            JSON.stringify({
+              schemaVersion: 1,
+              fleet: "pc",
+              sender: { seatId: "term-fixture", paneId: "w1:p1", binding: "a".repeat(64) },
+              seats: [],
+            }),
+          );
+        else {
+          response.writeHead(403);
+          response.end(JSON.stringify({ error: "peer_messages_disabled" }));
+        }
         return;
       }
       if (request.url !== "/v1/fleet/mcp") {
@@ -52,16 +58,21 @@ async function bridge(
           capabilities: { tools: {} },
           serverInfo: { name: "fixture", version: "1" },
         };
-      else if (rpc.method === "tools/list") result = catalog(rpc.params?.cursor);
-      else {
+      else if (rpc.method === "tools/list") {
+        const listed = catalog(rpc.params?.cursor) as Record<string, unknown> | undefined;
+        result = listed && {
+          ...listed,
+          _meta: listed._meta ?? { clankie: { tools: "connected" } },
+        };
+      } else {
         calls++;
         response.writeHead(403);
-        response.end("{}");
+        response.end(JSON.stringify({ error: "fleet_admission_pending" }));
         return;
       }
       if (result === undefined) {
         response.writeHead(403);
-        response.end("{}");
+        response.end(JSON.stringify({ error: "fleet_admission_pending" }));
         return;
       }
       response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result }));
@@ -94,7 +105,7 @@ async function bridge(
     args: [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(module)};runSeatChannel({paneId:"w1:p1",parentArgv:"codex app-server"});`,
+      `import {runSeatChannel} from ${JSON.stringify(module)};runSeatChannel({paneId:"w1:p1",parentArgv:"codex app-server",requestTimeoutMs:${String(requestTimeoutMs)}});`,
     ],
     env: {
       ...env,
@@ -173,7 +184,12 @@ it("requires all expected paginated tools before a native Connected surrogate ca
     );
     expect(f.calls()).toBe(1);
     admitted = false;
-    await expect(f.client.listTools()).rejects.toThrow("expected granted catalog");
+    expect((await f.client.listTools()).tools.map((t) => t.name)).toEqual([
+      "message_clankie",
+      "clankie_tools",
+      "clankie_call",
+    ]);
+    expect(f.calls()).toBe(1);
   } finally {
     await f.close();
   }
@@ -192,41 +208,38 @@ it.each(["{", "null", '"clankie_tools"', '[""]', "[42]"])(
   },
 );
 
-it("bounds denied and incomplete-page startup with MCP errors, while no expectation retains the generic fallback", async () => {
+it("bounds denied and incomplete-page startup with the real MCP error, including a worker without expectations", async () => {
   const rows = await Promise.all([
-    bridge('["clankie_tools"]', () => undefined),
-    bridge('["clankie_tools"]', (cursor) =>
-      cursor ? undefined : { tools: [tool("clankie_tools")], nextCursor: "denied-page" },
+    bridge('["clankie_tools"]', () => undefined, true, 500),
+    bridge(
+      '["clankie_tools"]',
+      (cursor) => (cursor ? undefined : { tools: [tool("clankie_tools")], nextCursor: "denied-page" }),
+      true,
+      500,
     ),
-    bridge(undefined, () => undefined),
+    bridge(undefined, () => undefined, true, 500),
   ]);
   const started = performance.now();
   try {
-    const results = await Promise.allSettled(rows.map((f) => f.client.listTools({}, { timeout: 25_000 })));
-    expect(performance.now() - started).toBeGreaterThanOrEqual(19_000);
-    expect(performance.now() - started).toBeLessThan(24_000);
-    expect(results[0]).toMatchObject({
-      status: "rejected",
-      reason: expect.objectContaining({ message: expect.stringContaining("expected granted catalog") }),
-    });
-    expect(results[1]).toMatchObject({
-      status: "rejected",
-      reason: expect.objectContaining({ message: expect.stringContaining("expected granted catalog") }),
-    });
-    expect(results[2]).toMatchObject({
-      status: "fulfilled",
-      value: { tools: [{ name: "message_clankie" }] },
-    });
+    const results = await Promise.allSettled(rows.map((f) => f.client.listTools({}, { timeout: 2_000 })));
+    expect(performance.now() - started).toBeGreaterThanOrEqual(450);
+    expect(performance.now() - started).toBeLessThan(1_500);
+    for (const result of results)
+      expect(result).toMatchObject({
+        status: "rejected",
+        reason: expect.objectContaining({ message: expect.stringContaining("403: fleet_admission_pending") }),
+      });
   } finally {
     await Promise.all(rows.map((f) => f.close()));
   }
-}, 30_000);
+});
 
 it("strict client contract: fleet stdio tools/list includes mailbox, peers and connected tools", async () => {
   const f = await bridge(
     undefined,
     () => ({ tools: [tool("clankie_tools"), tool("clankie_call")] }),
     true,
+    undefined,
     true,
   );
   try {

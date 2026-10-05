@@ -167,6 +167,9 @@ describe("Codex harness seat adapter", () => {
     expect(f.start.mock.calls[0]![0].config).toContain(
       'mcp_servers.clankie.env_vars=["HERDR_PANE_ID","HERDR_SOCKET_PATH","CLANKIE_STATE"]',
     );
+    expect(f.start.mock.calls[0]![0].config).toContain(
+      'mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"',
+    );
     if (result.outcome === "started") await result.control.close();
   });
 

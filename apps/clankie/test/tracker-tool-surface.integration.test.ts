@@ -111,7 +111,9 @@ async function surface(root: string, github: Pick<WorkItemsServiceOptions, "gh" 
   async function call(name: string, args: Record<string, unknown>) {
     const result = await tool("clankie_call", { name, arguments: args });
     expect(result.isError, result.content[0]?.text).not.toBe(true);
-    return JSON.parse(result.content[0]!.text);
+    const receipt = JSON.parse(result.content[0]!.text);
+    expect(receipt).toMatchObject({ outcome: "ok", receiptId: expect.any(String), isError: false });
+    return JSON.parse(receipt.content);
   }
   return {
     settings,

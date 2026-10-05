@@ -108,6 +108,8 @@ export const FleetSeatMessageReceiptSchema = z
     binding: z.string().regex(/^[a-f0-9]{64}$/u),
     fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
     detail: z.string().optional(),
+    /** Authenticated lookup sealed this ID against any delayed original POST. */
+    definitive: z.literal("not_sent").optional(),
   })
   .strict();
 export type FleetSeatMessageReceipt = z.infer<typeof FleetSeatMessageReceiptSchema>;
