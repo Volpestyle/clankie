@@ -2881,7 +2881,8 @@ describe("barge-in", () => {
     async (text) => {
       const { harness, conversation } = await playingHarness();
       const capture = harness.startCapture(ALICE);
-      capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 4));
+      // Fragment-length speech; sustained talk-over is the onset rule below.
+      capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
       await flush();
       expect(conversation.truncations).toHaveLength(0);
       harness.transcribe(ALICE, text);
@@ -2903,6 +2904,56 @@ describe("barge-in", () => {
       expect(conversation.truncations).toHaveLength(1);
     },
   );
+
+  it("yields to an engaged speaker's sustained talk-over before any transcript", async () => {
+    const { harness, conversation } = await playingHarness();
+    const playbackId = harness.vox.activePlaybackId;
+    harness.clock.now = 5_700;
+    const capture = harness.startCapture(ALICE);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+    capture.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES));
+    await flush();
+    expect(conversation.truncations).toEqual([{ itemId: "item_play", audioEndMs: 700 }]);
+    expect(harness.vox.stops).toContain(playbackId);
+    expect(harness.ofType("interrupted")).toMatchObject([{ userId: ALICE, playbackId }]);
+    // The transcript that follows is an ordinary turn, not a second interruption.
+    harness.transcribe(ALICE, "wait no I meant the other thing");
+    await flush();
+    expect(conversation.truncations).toHaveLength(1);
+  });
+
+  it("does not yield on onset to crosstalk, room tone, or a capture already open when he started", async () => {
+    const { harness, conversation } = await playingHarness();
+    await harness.consent(BOB);
+    const bob = harness.startCapture(BOB);
+    bob.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 4));
+    await flush();
+    const tone = harness.startCapture(ALICE);
+    tone.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 4, ROOM_TONE_FILL));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+    expect(harness.vox.activePlaybackId).toEqual(expect.any(String));
+  });
+
+  it("leaves speech already underway to the transcript-confirmed path", async () => {
+    const harness = await engagedHarness();
+    const conversation = harness.conversation();
+    harness.clock.now = 1_000;
+    const openMic = harness.startCapture(ALICE);
+    openMic.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES, ROOM_TONE_FILL));
+    await flush();
+    harness.clock.now = 2_000;
+    conversation.input.onAudioDelta(pcmDelta(480), "item_play");
+    await flush();
+    openMic.stream.write(monoPcm(BARGE_IN_SOURCE_BYTES * 4));
+    await flush();
+    expect(conversation.truncations).toHaveLength(0);
+    harness.transcribe(ALICE, "hold on");
+    await flush();
+    expect(conversation.truncations).toHaveLength(1);
+  });
 
   it("does not apply a delayed transcript to a different playback", async () => {
     const { harness, conversation } = await playingHarness();

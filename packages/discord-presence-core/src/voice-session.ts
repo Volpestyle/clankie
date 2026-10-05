@@ -125,6 +125,21 @@ const BARGE_IN_PCM_BYTES = Math.round(
  * a soft talker cannot interrupt him.
  */
 const BARGE_IN_SPEECH_RMS = 1_200;
+/**
+ * Sustained talk-over that yields the floor without waiting for a transcript:
+ * 700 ms of speech-level audio (the {@link BARGE_IN_SPEECH_RMS} gate) from a
+ * recently engaged speaker whose capture began after his reply became audible.
+ *
+ * The transcript-confirmed path costs the rest of their sentence, 500 ms of
+ * packet silence and finalization — 1.5–3 s of him talking over someone. This
+ * rule acts on the audio alone, so it is deliberately narrower than that path:
+ * a 350 ms loudness rule once cut him off on a short fragment (VUH-1440), and
+ * backchannels ("yeah", "mm-hm") and false starts run well under 700 ms of
+ * speech-level audio. A capture already open when he started is an open mic or
+ * someone he started over; it still waits for its transcript. Calibration
+ * knob, untested live.
+ */
+const ONSET_YIELD_PCM_BYTES = Math.round(REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES * 0.7);
 const VOICE_READY_TIMEOUT_MS = 20_000;
 const DAVE_READY_TIMEOUT_MS = 10_000;
 const PLAYBACK_TIMEOUT_MS = 2 * 60_000;
@@ -1578,6 +1593,15 @@ export class DiscordVoiceSession {
         capture.turn.overlapPlaybackId = playback.playbackId;
       }
       capture.turn.overlapSpeechBytes = (capture.turn.overlapSpeechBytes ?? 0) + pcm.byteLength;
+      if (
+        capture.turn.overlapSpeechBytes >= ONSET_YIELD_PCM_BYTES &&
+        playback.startedAtMs !== undefined &&
+        capture.turn.startedAtMs >= playback.startedAtMs &&
+        this.floor.isEngagedSpeaker(frame.userId, this.clock())
+      ) {
+        // Yield now: someone he is talking with has been talking over him.
+        this.truncatePlayback(frame.userId);
+      }
     }
     if (!capture.forwarding && rms < CAPTURE_NOISE_RMS) {
       const buffered = Buffer.concat([capture.preroll, pcm]);

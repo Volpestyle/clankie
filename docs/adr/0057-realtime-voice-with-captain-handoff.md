@@ -98,8 +98,8 @@ fragments (such as “What I”) and acknowledgements do not truncate. Short
 intentional controls (“stop”, “wait”, “hold on”) do; so do longer utterances
 with at least three words beyond acknowledgements and fillers. Direct
 re-address remains immediate on transcription. A delayed transcript cannot
-interrupt a later playback. This waits for transcription rather than guessing
-intent from loudness; tuning that latency needs a consented live test.
+interrupt a later playback. Sustained talk-over from a recently engaged speaker
+no longer waits for transcription; see the 2026-10-04 amendment below.
 
 ### Overlapping asks and the one mouth (2026-09-28)
 
@@ -196,6 +196,20 @@ it off, the session sends `response.cancel` for the response still generating
 context and releases any `response.done` it was holding for the drain. The next
 reply therefore starts immediately instead of queueing behind synthesis of
 speech nobody will hear. A cancel that races completion is ignored.
+
+He yields to sustained talk-over without waiting for its transcript: 700 ms of
+speech-level audio (the existing RMS 1200 gate) overlapping his audible reply,
+from a recently engaged speaker whose capture began after that reply became
+audible, truncates playback at once. That removes the rest of their sentence,
+500 ms of packet silence and finalization (about 1.5–3 s) from the time he talks
+over someone. The rule is narrower than the transcript path on purpose. A 350 ms
+loudness rule once cut him off on a short fragment (VUH-1440); backchannels and
+false starts stay under 700 ms of speech-level audio and keep their transcript
+judgment. Captures already open when he started (open mics, or someone he
+started over) and unengaged crosstalk still wait for a transcript. Vox has no
+TTS duck or pause command, so a softer duck-then-confirm needs a Vox change.
+Echo of his own voice from a participant on speakers without echo cancellation
+could trigger this; the threshold is untested live.
 
 ### Room membership is context, departure is his decision (2026-09-28)
 

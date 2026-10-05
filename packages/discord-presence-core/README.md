@@ -141,10 +141,15 @@ timeout discard queued audio. Vox retains its fail-closed 15-second buffer cap.
 
 New speech replaces unheard replies across the room: bursts during opening
 collapse to one opportunity, provider/TTS queues drop stale response requests,
-and queued PCM is discarded before playback. Tool results stay in context;
-in-flight work retains its actor. Explicit “stop talking” cuts playback on the
-final transcript even below the ordinary barge-in loudness gate, drops queued
-speech, and keeps late handoff results silent.
+and queued PCM is discarded before playback. A superseded or interrupted reply
+still generating gets `response.cancel`, and the external mouth closes its TTS
+context and releases its held done, so the next reply never waits on dead speech.
+Tool results stay in context; in-flight work retains its actor. Explicit “stop
+talking” cuts playback on the final transcript even below the ordinary barge-in
+loudness gate, drops queued speech, and keeps late handoff results silent. A
+recently engaged speaker who talks over him for 700 ms of speech-level audio,
+in a capture begun after his reply became audible, stops him without waiting
+for the transcript (ADR 0057, 2026-10-04).
 
 Repeated identical asks from the same person join pending work. For paraphrases,
 `ask_clankie.join_call_id` joins only that authenticated speaker's handoff;
