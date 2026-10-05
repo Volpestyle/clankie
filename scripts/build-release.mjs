@@ -26,6 +26,7 @@ import {
 } from "./release/node-runtime.mjs";
 import { buildHerdr, herdrPin, herdrSource } from "./build-herdr.mjs";
 import { bundleHerdrSkill } from "./release/herdr-skill.mjs";
+import { buildFleetProof } from "./build-fleet-proof.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const outputDir = join(repoRoot, "dist");
@@ -289,6 +290,10 @@ async function copyDynamicRuntimePackages(targetRoot, metafilePath) {
 }
 
 async function installNativeBinaries(targetRoot) {
+  const fleetProof = join(targetRoot, "libexec/local-fleet-proof");
+  await buildFleetProof(fleetProof);
+  run("codesign", ["--force", "--sign", "-", fleetProof]);
+  requireArm64(fleetProof);
   const herdr = join(targetRoot, "libexec/herdr");
   await buildHerdr(herdr);
   // Preserve upstream bytes: the offline fallback verifies the official checksum.

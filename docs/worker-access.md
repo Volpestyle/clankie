@@ -75,7 +75,17 @@ The existing transport admission is the proof:
   The link does not establish a native project assignment, grant mailbox access
   or permit peer messages.
 
-No native session, harness executable, PID lifetime, canonical cwd or project grant
+On macOS, local admission uses a bounded native `libproc` census, rather than
+`lsof` socket scans. It observes the unique client endpoint owner, its process
+birth and socket identity, and its ancestor lifetimes. Two fresh observations
+bracket the live pane and linked-session checks. An admitted connection pins
+that identity only to refuse a changed lifetime; every request still checks
+ownership and membership afresh. Shared ownership, missing observations, exit,
+PID reuse and revoked bindings fail closed. Service-owned private app-server
+registrations retain their separate live checks. See the
+[native helper](../integrations/fleet-proof/README.md) for build and verification.
+
+No additional native session, harness executable, canonical cwd or project grant
 is needed for connected tools after fleet admission. Anything running in an admitted pane,
 and anyone holding a valid remote fleet bearer, can use the verified connected
 accounts, including ordinary Linear writes as Clankie. This is the owner's accepted

@@ -4,6 +4,12 @@ import type { Socket } from "node:net";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
 import type { HerdrBinding } from "@clankie/protocol";
 import { createProjectProcessObserver, type ProjectProcessProof } from "./project-process-proof.ts";
+import {
+  fleetProcessHelper,
+  observeSocketProcess,
+  type NativeSocketOwner,
+  type NativeSocketProcess,
+} from "./local-fleet-process.ts";
 
 const exec = promisify(execFile);
 type Run = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
@@ -55,11 +61,21 @@ export interface LocalFleetProofOptions extends Pick<
   herdrBinary: string;
   run?: Run;
   platform?: string;
+  processHelper?: string;
+  /** Host observation seam; production always uses the fresh native census. */
+  observeSocket?(socket: Socket, expected?: NativeSocketOwner): Promise<NativeSocketProcess | undefined>;
+  /** Server-owned additional lifetime pin. It can refuse, never grant admission. */
+  expectedOwner?(socket: Socket): NativeSocketOwner | undefined;
 }
 
 /** macOS local proof. Unsupported platforms and disconnected sockets fail closed. */
 export function localFleetProof(options: LocalFleetProofOptions) {
   const execute = options.run ?? run;
+  const observe: NonNullable<LocalFleetProofOptions["observeSocket"]> =
+    options.observeSocket ??
+    ((socket, expected) =>
+      observeSocketProcess(socket, options.processHelper ?? fleetProcessHelper(), expected));
+  const owners = new WeakMap<Socket, NativeSocketOwner>();
   return async (socket: Socket, pane: string): Promise<boolean> => {
     if ((options.platform ?? process.platform) !== "darwin" || !/^w[\w]+:p[\w]+$/u.test(pane)) return false;
     const clientPort = socket.remotePort;
@@ -76,37 +92,42 @@ export function localFleetProof(options: LocalFleetProofOptions) {
     try {
       const binding = await options.binding();
       if (!binding) return false;
-      const owner = async () =>
-        clientPid(
-          await execute("/usr/sbin/lsof", ["-nP", "-a", `-iTCP:${serverPort}`, "-sTCP:ESTABLISHED", "-Fpn"]),
-          clientPort,
-          serverPort,
+      const initial = await observe(socket, options.expectedOwner?.(socket) ?? owners.get(socket));
+      if (!initial || !alive()) return false;
+      const chain = initial.ancestors.map((ancestor) => ancestor.pid);
+      const paneInfo = async () => {
+        const result = JSON.parse(
+          await execute(
+            options.herdrBinary,
+            ["pane", "process-info", "--pane", pane],
+            pinHerdrEnvironment({ ...process.env }, binding.socketPath),
+          ),
         );
-      const pid = await owner();
-      if (!pid || !alive()) return false;
-      const chain = ancestors(await execute("/bin/ps", ["-axo", "pid=,ppid="]), pid);
-      if (chain.length === 0) return false;
-      const result = JSON.parse(
-        await execute(
-          options.herdrBinary,
-          ["pane", "process-info", "--pane", pane],
-          pinHerdrEnvironment({ ...process.env }, binding.socketPath),
-        ),
-      );
-      const info = result?.result?.process_info;
+        return result?.result?.process_info;
+      };
+      const info = await paneInfo();
       if (info?.pane_id !== pane) return false;
       const shell = info.shell_pid;
       if (!Number.isSafeInteger(shell) || shell <= 1) return false;
       const admitted = chain.includes(shell) || (await options.privateSeat?.(chain, pane, binding)) === true;
+      if (!admitted) return false;
+      const [final, latest] = await Promise.all([observe(socket, initial.owner), paneInfo()]);
+      if (
+        !final ||
+        JSON.stringify(final) !== JSON.stringify(initial) ||
+        latest?.pane_id !== pane ||
+        latest?.shell_pid !== shell ||
+        !alive() ||
+        (!chain.includes(shell) && (await options.privateSeat?.(chain, pane, binding)) !== true)
+      )
+        return false;
       const current = await options.binding();
-      return (
-        admitted &&
-        alive() &&
-        current?.socketPath === binding.socketPath &&
-        current?.session === binding.session &&
-        (await owner()) === pid &&
-        alive()
-      );
+      if (!alive() || current?.socketPath !== binding.socketPath || current?.session !== binding.session)
+        return false;
+      // Pin only an admitted connection's identity. Every later check still
+      // observes OS ownership, ancestry, the linked pane and registry afresh.
+      owners.set(socket, initial.owner);
+      return true;
     } catch {
       return false;
     }
@@ -115,8 +136,12 @@ export function localFleetProof(options: LocalFleetProofOptions) {
 
 /** Project access additionally needs the live native foreground agent, not just its pane shell. */
 export function localProjectProof(options: LocalFleetProofOptions) {
-  const execute = options.run ?? run;
   const observe = createProjectProcessObserver(options);
+  const observeSocket: NonNullable<LocalFleetProofOptions["observeSocket"]> =
+    options.observeSocket ??
+    ((socket, expected) =>
+      observeSocketProcess(socket, options.processHelper ?? fleetProcessHelper(), expected));
+  const owners = new WeakMap<Socket, NativeSocketOwner>();
   return async (socket: Socket, pane: string): Promise<ProjectProcessProof | undefined> => {
     if ((options.platform ?? process.platform) !== "darwin" || !/^w[\w]+:p[\w]+$/u.test(pane))
       return undefined;
@@ -134,21 +159,14 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     try {
       const binding = await options.binding();
       if (!binding) return undefined;
-      const owner = async () =>
-        clientPid(
-          await execute("/usr/sbin/lsof", ["-nP", "-a", `-iTCP:${serverPort}`, "-sTCP:ESTABLISHED", "-Fpn"]),
-          clientPort,
-          serverPort,
-        );
-      const pid = await owner();
-      if (!pid) return undefined;
-      const [proof, tree] = await Promise.all([
+      const [proof, initial] = await Promise.all([
         observe("default", pane),
-        execute("/bin/ps", ["-axo", "pid=,ppid="]),
+        observeSocket(socket, options.expectedOwner?.(socket) ?? owners.get(socket)),
       ]);
-      const chain = ancestors(tree, pid);
+      const chain = initial?.ancestors.map((ancestor) => ancestor.pid) ?? [];
       if (
         !proof ||
+        !initial ||
         chain.length === 0 ||
         !alive() ||
         binding.socketPath !== proof.binding.socketPath ||
@@ -165,20 +183,16 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         !proof.nativeSessionPending &&
         (await options.privateProjectSeat?.(chain, pane, binding, proof)) === true;
       if (!direct && !privateSeat) return undefined;
-      const [finalPid, finalTree, finalProof] = await Promise.all([
-        owner(),
-        execute("/bin/ps", ["-axo", "pid=,ppid="]),
+      const [final, finalProof] = await Promise.all([
+        observeSocket(socket, initial.owner),
         observe("default", pane),
       ]);
-      const finalChain = ancestors(finalTree, pid);
-      const current = await options.binding();
+      const finalChain = final?.ancestors.map((ancestor) => ancestor.pid) ?? [];
       if (
-        finalPid !== pid ||
-        JSON.stringify(finalChain) !== JSON.stringify(chain) ||
+        !final ||
+        JSON.stringify(final) !== JSON.stringify(initial) ||
         JSON.stringify(finalProof) !== JSON.stringify(proof) ||
-        !alive() ||
-        current?.socketPath !== binding.socketPath ||
-        current?.session !== binding.session
+        !alive()
       )
         return undefined;
       if (
@@ -188,6 +202,10 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         return undefined;
       if (privateSeat && (await options.privateProjectSeat?.(finalChain, pane, binding, proof)) !== true)
         return undefined;
+      const current = await options.binding();
+      if (!alive() || current?.socketPath !== binding.socketPath || current?.session !== binding.session)
+        return undefined;
+      owners.set(socket, initial.owner);
       return privateSeat ? { ...proof, privateSeat: true } : proof;
     } catch {
       return undefined;

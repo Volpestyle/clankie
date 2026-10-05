@@ -21,6 +21,15 @@ stray program in a pane or anyone holding a valid remote fleet token. This is an
 accepted boundary, not an unimplemented project restriction. Tasks still limit
 which outward actions a worker is authorized to perform.
 
+The local macOS implementation observes the unique loopback socket owner and
+microsecond process births through a bounded native `libproc` census. Fresh
+observations bracket the current linked pane checks; an admitted connection's
+identity pin can refuse replacement but never supplies cached admission. Socket
+sharing, exit, reused PIDs, unknown ownership and changed bindings refuse access.
+This replaces slow `lsof` socket scans without changing the accepted fleet
+boundary. The release includes the helper; source startup builds it before
+serving requests. Project and private-seat checks retain their separate authority.
+
 Fleet discovery lists exactly `clankie_tools` and `clankie_call`.
 `clankie_tools` searches up to 20 qualified names/descriptions or retrieves up to
 10 selected input schemas. It never dumps every server's catalog. `clankie_call`

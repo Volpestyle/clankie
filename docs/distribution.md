@@ -48,6 +48,7 @@ browser-downloaded package.
     ├── libexec/node
     ├── bin/clankie-herdr      # attach-only viewer shortcut
     ├── libexec/herdr          # Clankie-owned native worker runtime
+    ├── libexec/local-fleet-proof # macOS kernel socket/process observer
     ├── .agents/skills/        # product and working skills
     ├── docs/cli.md            # headless command contract
     ├── apps/                  # bundled services, assets, and clankvox
@@ -63,6 +64,14 @@ An interactive console resumes the existing main conversation regardless of
 its launch directory. Tools use the selected conversation's workspace; select
 a project with `/cd PATH` or a retained conversation with `--chat ID`.
 Supervised services run from their installed release root.
+
+macOS releases include an ad-hoc signed `local-fleet-proof` helper, built against
+the system `libproc`. Local fleet admission calls it directly; installed users
+need no compiler. Source-checkout `dev` and `start` prepare its build under
+`.local/fleet-proof/` before starting the body. `pnpm fleet-proof:build` prepares
+the same artifact explicitly, reusing it only when its source, architecture,
+compiler flags and binary digest match. Missing or unsupported native observation
+refuses local admission; it never falls back to an expensive socket scan.
 
 Herdr ships as an official stable release binary, verified against the
 platform checksum in `scripts/release/herdr.json`. Its matching source archive
