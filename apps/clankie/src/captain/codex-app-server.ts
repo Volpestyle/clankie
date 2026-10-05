@@ -225,10 +225,15 @@ export class CodexAppServerClient {
         .filter(([, pending]) => pending.threadId === threadId)
         .map(([id, pending]) => [id, pending.question]),
     );
+    const latestTurnId = record(thread.turns.at(-1)).id;
     for (const value of thread.turns) {
       const turn = record(value);
       if (typeof turn.id !== "string" || !Array.isArray(turn.items)) continue;
-      for (const item of turn.items) this.observeQuestionItem({ threadId, turnId: turn.id, item }, false);
+      // A cold subscription must not reopen old completed-turn prompts. Live
+      // pending questions already in this client survive normal completion.
+      const discoverQuestions = turn.status !== "completed" || turn.id === latestTurnId;
+      for (const item of turn.items)
+        this.observeQuestionItem({ threadId, turnId: turn.id, item }, false, discoverQuestions);
       if (turn.status === "interrupted" || turn.status === "failed")
         for (const [id, pending] of this.questions)
           if (
@@ -250,10 +255,11 @@ export class CodexAppServerClient {
         });
   }
 
-  private observeQuestionItem(params: RecordValue, notify = true): void {
+  private observeQuestionItem(params: RecordValue, notify = true, discoverQuestions = true): void {
     const question = codexAsyncQuestion(params);
     if (
       question &&
+      discoverQuestions &&
       !this.questions.has(question.requestId) &&
       !this.retiredQuestions.has(JSON.stringify([params.threadId, question.requestId]))
     )
@@ -1112,8 +1118,11 @@ export async function startCodexAppServerSeat(options: {
             const record = await client!
               .request("thread/read", { threadId, includeTurns: true }, Math.max(1, deadline - Date.now()))
               .catch(() => undefined);
-            if (recordedCodexAsyncAnswer(record, threadId!, result)) {
+            const confirmation = recordedCodexAsyncAnswer(record, threadId!, result);
+            if (confirmation !== "unobserved") {
               client!.completeAsyncQuestion(threadId!, answer.requestId);
+              if (confirmation === "answered_concurrently_by_owner")
+                return { outcome: "unconfirmed", detail: "answered_concurrently_by_owner" };
               return { outcome: "answered", deliveryStage: "responded" };
             }
             await new Promise((resolve) => setTimeout(resolve, 50));

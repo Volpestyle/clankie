@@ -172,7 +172,7 @@ export function recordedCodexAsyncAnswer(
   value: unknown,
   threadId: string,
   receipt: CodexAsyncAnswerReceipt,
-): boolean {
+): "unobserved" | "accepted" | "answered_concurrently_by_owner" {
   const parsed = z
     .object({
       thread: z.object({
@@ -181,9 +181,9 @@ export function recordedCodexAsyncAnswer(
       }),
     })
     .safeParse(value);
-  if (!parsed.success) return false;
+  if (!parsed.success) return "unobserved";
   const turn = parsed.data.thread.turns.find((turn) => turn.id === receipt.turnId);
-  return (turn?.items ?? []).some((item) => {
+  const accepted = (turn?.items ?? []).some((item) => {
     const user = z
       .object({
         type: z.literal("userMessage"),
@@ -193,6 +193,20 @@ export function recordedCodexAsyncAnswer(
       .safeParse(item);
     return user.success && user.data.content.length === 1 && user.data.content[0]!.text === receipt.text;
   });
+  const answeredIds = codexAnsweredAsyncQuestionIds({
+    type: "userMessage",
+    content: [{ type: "text", text: receipt.text }],
+  });
+  for (const turn of parsed.data.thread.turns)
+    for (const item of turn.items) {
+      const user = z
+        .object({ type: z.literal("userMessage"), clientId: z.string().nullable().optional() })
+        .safeParse(item);
+      if (!user.success || user.data.clientId === receipt.clientUserMessageId) continue;
+      if (codexAnsweredAsyncQuestionIds(item).some((id) => answeredIds.includes(id)))
+        return "answered_concurrently_by_owner";
+    }
+  return accepted ? "accepted" : "unobserved";
 }
 
 /** Codex's persisted request_user_input tool output, scoped to its exact turn/call. */

@@ -2462,6 +2462,12 @@ inspect the session instead of resending. Approvals and folder-trust decisions
 remain with the owner. Hand-started Codex panes without this controller do not
 gain a prompt-answer channel.
 
+If the confirming native snapshot also records another client answering the
+same async question IDs, the result is `unconfirmed` with
+`answered_concurrently_by_owner`. It cannot be reported as a clean answer.
+Cold history reads do not re-notify unanswered async questions from older
+completed turns; the latest completed question remains discoverable.
+
 An interrupted or failed native turn releases its active-turn marker and stale
 questions. If only an idle notification arrives, Clankie reads the native thread
 to verify that the exact active turn ended before releasing dispatch. A late

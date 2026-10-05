@@ -328,3 +328,101 @@ it("keeps an async answer unconfirmed without its correlated user-message receip
     await close();
   }
 });
+
+it("reports a concurrent owner answer at native dispatch even when the lead's reply also persists", async () => {
+  const { native, pane, store, owner, wakes, fallback, close } = await hiredFixture();
+  try {
+    await native.ask("call-racing-owner");
+    await vi.waitFor(() =>
+      expect(wakes.filter(({ text }) => text.includes("call-racing-owner"))).toHaveLength(1),
+    );
+    const questionId = JSON.stringify(["request_user_input_async", "call-racing-owner", 0]);
+    const ownerClientId = native.ownerAnswerOnNextDispatch({
+      questionItemId: questionId,
+      question: "Which worktree should I use?",
+      answer: "Owner-selected worktree",
+    });
+    const answer = {
+      requestId: "call-racing-owner",
+      answers: { [questionId]: { answers: ["Lead-selected worktree"] } },
+    };
+    expect(await store.answerSeatQuestion(pane.terminal_id, answer, owner)).toMatchObject({
+      outcome: "unconfirmed",
+      detail: "answered_concurrently_by_owner",
+    });
+    const answerRpc = native.requests.filter(({ method }) => method === "turn/steer").at(-1)!;
+    expect(answerRpc.params).toMatchObject({
+      expectedTurnId: "turn-1",
+      clientUserMessageId: expect.any(String),
+    });
+    expect(answerRpc.params.clientUserMessageId).not.toBe(ownerClientId);
+    const replies = native.turns.at(-1)!.items.filter((item) => item.type === "userMessage");
+    expect(replies).toHaveLength(2);
+    expect(replies.map((item) => item.clientId)).toEqual([
+      ownerClientId,
+      answerRpc.params.clientUserMessageId,
+    ]);
+    expect(JSON.stringify(replies)).toContain("Owner-selected worktree");
+    expect(JSON.stringify(replies)).toContain("Lead-selected worktree");
+    expect(await store.answerSeatQuestion(pane.terminal_id, answer, owner)).toMatchObject({
+      outcome: "undelivered",
+    });
+    expect(
+      native.requests.filter(({ method }) => method === "turn/start" || method === "turn/steer"),
+    ).toHaveLength(2);
+    expect(native.requests.some(({ method }) => method === "turn/interrupt")).toBe(false);
+    expect(fallback).not.toHaveBeenCalled();
+    expect(native.errors).toEqual([]);
+  } finally {
+    await close();
+  }
+});
+
+it("cold native hydration skips an older completed question while keeping the latest completed question answerable", async () => {
+  const { native, pane, control, store, owner, wakes, fallback, close } = await hiredFixture({
+    historicalQuestion: { callId: "call-old-completed", title: "Old question is historical context" },
+    initialQuestion: { callId: "call-latest-completed", title: "Latest question needs an answer" },
+  });
+  try {
+    await vi.waitFor(() =>
+      expect(wakes.filter(({ text }) => text.includes("call-latest-completed"))).toHaveLength(1),
+    );
+    expect(wakes.some(({ text }) => text.includes("call-old-completed"))).toBe(false);
+    expect(native.turns.map((turn) => turn.status)).toEqual(["completed", "completed"]);
+    expect(await control.statusReason?.()).toBe("Waiting on a question (call-latest-completed)");
+    const oldId = JSON.stringify(["request_user_input_async", "call-old-completed", 0]);
+    expect(
+      await store.answerSeatQuestion(
+        pane.terminal_id,
+        {
+          requestId: "call-old-completed",
+          answers: { [oldId]: { answers: ["Stale answer must not dispatch"] } },
+        },
+        owner,
+      ),
+    ).toMatchObject({ outcome: "undelivered" });
+    expect(
+      native.requests.filter(({ method }) => method === "turn/start" || method === "turn/steer"),
+    ).toHaveLength(1);
+    const latestId = JSON.stringify(["request_user_input_async", "call-latest-completed", 0]);
+    expect(
+      await store.answerSeatQuestion(
+        pane.terminal_id,
+        {
+          requestId: "call-latest-completed",
+          answers: { [latestId]: { answers: ["Task worktree"] } },
+        },
+        owner,
+      ),
+    ).toMatchObject({ outcome: "delivered", deliveryStage: "responded" });
+    expect(native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(2);
+    expect(native.requests.some(({ method }) => method === "turn/steer" || method === "turn/interrupt")).toBe(
+      false,
+    );
+    expect(wakes.some(({ text }) => text.includes("call-old-completed"))).toBe(false);
+    expect(fallback).not.toHaveBeenCalled();
+    expect(native.errors).toEqual([]);
+  } finally {
+    await close();
+  }
+});

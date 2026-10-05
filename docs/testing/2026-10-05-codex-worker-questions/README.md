@@ -112,3 +112,22 @@ The fleet tool bridge returned HTTP 403 during this work. Issue evidence must
 be relayed through the lead if it remains unavailable. At handoff, catalog
 metadata recovered, but `linear_get_issue` still failed with a service timeout;
 no issue comment was posted through an unverified connection.
+
+## Lead review correction
+
+The async confirmation snapshot is checked for another native `userMessage`
+reply envelope with a different client ID answering the same question IDs.
+When the owner replied after the controller's guard and both messages landed,
+the lead receives `unconfirmed` with detail `answered_concurrently_by_owner`,
+rather than `answered`. The answer remains non-retryable. This detects the
+observed race; it does not create upstream first-answer arbitration.
+
+Cold hydration skips unanswered questions in older completed turns, while
+retaining the latest completed question and reconciling owner replies.
+
+Review-fix checks passed: **64/64** focused tests in the four native
+protocol/adapter/parser/integration files, including **5/5** real WebSocket
+integration cases; scoped service typecheck, changed-file lint/format, and diff
+checks passed. The race fixture injects the distinct owner reply at native RPC
+receipt after the guard and before the lead reply is accepted; both replies
+are persisted. No live TUI or model was used.

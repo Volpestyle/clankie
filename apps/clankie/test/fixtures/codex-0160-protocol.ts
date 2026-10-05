@@ -23,7 +23,10 @@ type Turn = {
  */
 export async function codex0160Protocol(
   directory: string,
-  options: { initialQuestion?: { callId: string; title: string } } = {},
+  options: {
+    initialQuestion?: { callId: string; title: string };
+    historicalQuestion?: { callId: string; title: string };
+  } = {},
 ) {
   const threadId = randomUUID();
   const rolloutPath = join(directory, `rollout-2026-10-05T12-00-00-${threadId}.jsonl`);
@@ -43,6 +46,7 @@ export async function codex0160Protocol(
   let omitUserReceipt = false;
   let subscribed = false;
   let nextRead: { entered: () => void; release: Promise<void> } | undefined;
+  let ownerReply: Record<string, unknown> | undefined;
   const turns: Turn[] = [];
   const requests: Rpc[] = [];
   const errors: Error[] = [];
@@ -76,6 +80,24 @@ export async function codex0160Protocol(
     source: "cli",
     status: active() ? { type: "active", activeFlags: [] } : { type: "idle" },
   });
+  const recordReply = (turn: Turn, request: Rpc) => {
+    if (typeof request.params.clientUserMessageId !== "string") return;
+    // The owner input races at the real RPC receipt boundary: controller
+    // guards have already run, and this reply precedes the lead's acceptance.
+    if (ownerReply !== undefined) {
+      const item = ownerReply;
+      ownerReply = undefined;
+      turn.items.push(item);
+      notify("item/completed", { threadId, turnId: turn.id, item, completedAtMs: Date.now() });
+    }
+    if (!omitUserReceipt)
+      turn.items.push({
+        type: "userMessage",
+        id: randomUUID(),
+        clientId: request.params.clientUserMessageId,
+        content: request.params.input,
+      });
+  };
   server.on("connection", (socket) => {
     peer = socket;
     socket.on("message", (bytes) => {
@@ -123,19 +145,22 @@ export async function codex0160Protocol(
             break;
           case "turn/start": {
             if (active()) throw new Error("A second turn started before native idle");
+            if (turns.length === 0 && options.historicalQuestion)
+              turns.push({
+                id: "historical-turn",
+                status: "completed",
+                items: [questionItem(options.historicalQuestion.callId, options.historicalQuestion.title)],
+              });
             const turn: Turn = { id: `turn-${turns.length + 1}`, status: "inProgress", items: [] };
             turns.push(turn);
-            if (turns.length === 1 && options.initialQuestion) {
+            if (
+              requests.filter(({ method }) => method === "turn/start").length === 1 &&
+              options.initialQuestion
+            ) {
               turn.items.push(questionItem(options.initialQuestion.callId, options.initialQuestion.title));
               turn.status = "completed";
             }
-            if (!omitUserReceipt && typeof request.params.clientUserMessageId === "string")
-              turn.items.push({
-                type: "userMessage",
-                id: randomUUID(),
-                clientId: request.params.clientUserMessageId,
-                content: request.params.input,
-              });
+            recordReply(turn, request);
             result = { turn };
             break;
           }
@@ -143,13 +168,7 @@ export async function codex0160Protocol(
             const turn = active();
             if (!turn || request.params.expectedTurnId !== turn.id)
               throw new Error("Wrong active native turn was steered");
-            if (!omitUserReceipt && typeof request.params.clientUserMessageId === "string")
-              turn.items.push({
-                type: "userMessage",
-                id: randomUUID(),
-                clientId: request.params.clientUserMessageId,
-                content: request.params.input,
-              });
+            recordReply(turn, request);
             result = { turnId: turn.id };
             break;
           }
@@ -202,6 +221,22 @@ export async function codex0160Protocol(
     },
     omitAnswerReceipt: () => {
       omitUserReceipt = true;
+    },
+    ownerAnswerOnNextDispatch(reply: { questionItemId: string; question: string; answer: string }) {
+      const clientId = randomUUID();
+      ownerReply = {
+        type: "userMessage",
+        id: randomUUID(),
+        clientId,
+        content: [
+          {
+            type: "text",
+            text: `<send_user_message_question_reply>\n${JSON.stringify([reply])}\n</send_user_message_question_reply>`,
+            text_elements: [],
+          },
+        ],
+      };
+      return clientId;
     },
     holdNextRead() {
       let entered!: () => void;
