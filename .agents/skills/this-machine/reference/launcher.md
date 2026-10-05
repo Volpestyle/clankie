@@ -83,11 +83,12 @@ records under the requested account and state the scope checked.
 permission and registration belong to the phone; the hosted gateway holds APNs
 signing and delivery registrations. Tokens and delivery keys never go to the host.
 
-`clankie memory status` reports episodes and retention usage. Use `memory search
-<terms...>`, `memory retain|release|forget <episodeId>`, or `memory correct
-<episodeId> --summary "…"` to curate them through the operator API. Retained
-notes survive the recent ring; a full retained store refuses another retain
-until a note is released or forgotten. `/memory` is the console browser.
+`clankie memory status` reports notes. Use `memory search <terms...>`,
+`memory forget <episodeId>`, or `memory correct <episodeId> --summary "…"`
+to curate them through the operator API, including across source conversations.
+Notes stay until forgotten; no retention flag or quota applies. The `memory`
+tool handles ordinary write/search/edit/forget within its admitted conversation.
+`/memory` is the console browser.
 `clankie pair --json` returns `localCode` for same-Mac **On this Mac** pairing,
 even when `code` is a gateway link. Review offers do not expose it. Keep the offer
 private; a pairing receipt is not proof the device connected.

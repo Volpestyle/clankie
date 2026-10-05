@@ -23,6 +23,7 @@ import { connectLaneUpstream } from "../../tui/src/command/mcp.ts";
 import { verifyNativeMcp } from "./verify-native-mcp.ts";
 import { readHerdrSeatTranscript, type HerdrAgentSession } from "../src/captain/herdr-transcript.ts";
 import { createFileMemory } from "../src/memory.ts";
+import { createCaptainMemory } from "../src/captain-memory.ts";
 
 assert.equal(process.env.HERDR_ENV, "1", "Run from Herdr; only the owned throwaway session is changed");
 assert.ok(process.argv[2] && process.argv[3], "Usage: verify-grok-seat OUT.json EXISTING_GROK_HOME");
@@ -161,11 +162,7 @@ try {
       embodiment: {},
       browser: { catalog: async () => ({ available: false, tools: [] }) },
       mcp,
-      memory: {
-        recallEpisodeCard: async (lane: "operator") => memory.episodeRecallCard({ lane }),
-        searchEpisodeCard: async (lane: "operator", query: string) =>
-          memory.searchEpisodeCard({ lane, query }),
-      },
+      memory: createCaptainMemory(memory),
     } as unknown as CaptainDeps,
     {
       repoRoot,

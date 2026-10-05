@@ -363,12 +363,14 @@ Operator input can invoke an exact loaded skill as `/name task` or
 skill command and enables expansion for that prompt only. Discord input and
 ordinary operator prompts keep expansion disabled.
 
-Before each Pi run, a hidden host extension reads the newest bounded episode
+Before each Pi run, a hidden host extension reads a bounded memory
 card into the system prompt. The host supplies the destination lane, filters
 operator-private notes out of ambient lanes, and refreshes recall without
 persisting duplicate cards in the conversation. Discord turns also receive the
 newest visible person facts for their authenticated guild/user identity. The
-bounded recent and retained episodes and per-person fact files live under
+selected notes persist until forgotten. The `memory` tool writes, searches,
+edits, and forgets them within the admitted conversation's authority. Notes
+and per-person fact files live under
 `~/.clankie/memory/`; the TUI's `/memory` command browses, edits, and forgets
 that same store through operator-only routes. [`docs/memory.md`](memory.md) is
 the full picture — what each store holds, who may read it, and what bounds it.

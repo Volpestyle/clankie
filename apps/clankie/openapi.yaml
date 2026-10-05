@@ -2331,8 +2331,8 @@ paths:
       summary: The memory card that lane's next run injects
       description: |
         Plain text, for a per-turn hook. Filtered by lane the same way the pi
-        session's own injection is: operator-private episodes reach only the
-        operator lane. Empty when the lane has recalled nothing yet. The lane
+        session's own injection is: operator-private notes reach only the
+        operator lane. An empty store still returns a labeled card. The lane
         must be the bearer's own.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       parameters:
@@ -2766,7 +2766,10 @@ paths:
     get:
       tags: [Memory, Operator]
       operationId: getOperatorMemoryCatalog
-      summary: Browse every captain episode and Discord person fact
+      summary: Browse every memory note and Discord person fact
+      description: >-
+        Notes persist until forgotten. Catalog retention fields remain legacy
+        compatibility metadata and no longer impose a count quota.
       security: [{ operatorBearer: [] }]
       responses:
         "200":
@@ -2892,12 +2895,12 @@ paths:
     get:
       tags: [Memory, Captain]
       operationId: getCaptainEpisodes
-      summary: Recall episodes for a lane
+      summary: Recall memory notes for a lane
       security: [{ captainBearer: [] }]
       description: >-
         Without `query`, the bounded recent card. With one, on-demand search over
-        everything retained, filtered by what that lane may see. Both branches
-        answer with a rendered card and never with episode records, so no caller
+        every persistent note, filtered by what that lane may see. Both branches
+        answer with a rendered card and never with note records, so no caller
         reads another memory's provenance ids.
       parameters:
         - in: query
@@ -2922,7 +2925,7 @@ paths:
     post:
       tags: [Memory, Captain]
       operationId: postCaptainEpisode
-      summary: Record a self-authored episode
+      summary: Record a self-authored memory note
       description: >-
         Recording only ever adds. An id the store already holds is a conflict, not
         an update; a byte-identical retry returns the original. Editing an existing
@@ -2931,6 +2934,8 @@ paths:
         The trusted authenticator must also supply an exact admitted episodeSource.
         A generic bearer alone is refused. The host stamps sourceConversationId
         and provenance; request-supplied source identifiers confer no authority.
+        Notes persist until forgotten. The optional retained field is legacy
+        compatibility metadata and does not control lifetime or a count quota.
       security: [{ captainBearer: [] }]
       requestBody:
         required: true
@@ -2943,7 +2948,6 @@ paths:
               targetId: self
               summary: Tried the HTTP API from Yaak.
               visibility: operator_private
-              retained: false
               provenance:
                 characterId: clankie
                 sessionId: captain
@@ -2957,14 +2961,17 @@ paths:
           description: Missing exact host source binding, or lane/target does not match that source
         "409":
           description: >-
-            Retained memory is full, or the episode id already exists. Nothing was
-            changed in either case.
+            The note id already exists with different content. Nothing was changed.
 
   /v1/memory/captain-episodes/{lane}/{episodeId}:
     patch:
       tags: [Memory, Operator]
       operationId: patchCaptainEpisode
-      summary: Edit one episode's note, visibility, or retention
+      summary: Edit one memory note or its visibility
+      description: >-
+        Explicit operator management can edit notes across source conversations.
+        The retained field remains accepted as legacy compatibility metadata;
+        every note persists until forgotten regardless of its value.
       security: [{ operatorBearer: [] }]
       parameters:
         - in: path
@@ -2984,18 +2991,17 @@ paths:
             example:
               summary: Corrected note about what happened.
               visibility: operator_private
-              retained: true
       responses:
         "200":
-          description: Updated episode
+          description: Updated note
         "404":
-          description: Episode not found
+          description: Note not found
         "409":
-          description: Retained memory is full; nothing was changed
+          description: Legacy capacity refusal; persistent notes no longer use retention quotas
     delete:
       tags: [Memory, Operator]
       operationId: deleteCaptainEpisode
-      summary: Forget one captain episode
+      summary: Forget one memory note
       security: [{ operatorBearer: [] }]
       parameters:
         - in: path

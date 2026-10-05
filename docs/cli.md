@@ -2247,20 +2247,17 @@ with a `CLAUDE.md` beside it. An `AGENTS.md` that stands alone is kept, since
 Claude Code never reads it. The Claude seat's hook also leaves out `fleet`: the
 lead skills read it from `clankie fleet status` when they need it.
 
-### `memory [status] | search <terms...> | retain|release|forget <episodeId> | correct <episodeId> --summary TEXT`
+### `memory [status] | search <terms...> | forget <episodeId> | correct <episodeId> --summary TEXT`
 
-Inspect and curate episodes through the operator API. Output is JSON; success
-exits 0 and failure exits 1. `status` shows retention usage and the newest 20
-episodes, including private notes. `search` matches all supplied terms against
+Inspect and curate notes through the operator API. Output is JSON; success
+exits 0 and failure exits 1. `status` shows the newest 20
+notes, including private notes. `search` matches all supplied terms against
 the note, source lane, and room, returning up to 20 newest matches and the total
 matched count. Quote a correction's summary as one shell argument.
 
-`retain` keeps an episode beyond the 128-entry recent ring; `release` returns it
-to that ring and may immediately age out an old episode. The retained store
-holds up to 1,024 episodes and refuses another retain when full. Release or
-forget an episode before retrying; existing retained notes are never evicted
-to make room. `correct` replaces the note while preserving its source and date.
-`forget` deletes the episode from both recent and retained recall. `/memory`
+Notes stay until forgotten, without a retention flag or count quota.
+`correct` replaces the note while preserving its source and date.
+`forget` deletes the note. `/memory`
 exposes the same controls in the console. See [Memory](memory.md) for lane
 privacy and migration behavior.
 
@@ -2363,7 +2360,7 @@ No transcript, tool argument, tool output, or credential appears in the output.
 
 The memory card that lane's next run injects, printed verbatim as plain text.
 The intended consumer is a per-turn hook, so a seat in another harness carries
-the same recent past his own sessions do.
+the same selected memories his own sessions do.
 
 `--hook` reads Claude hook JSON on stdin. On `UserPromptSubmit` it prints the
 whole card the first time a `session_id` asks, then only the notes that session
@@ -2374,8 +2371,8 @@ injects it again. Input without a usable `session_id` prints the card every
 time.
 
 Filtered by lane exactly as the session's own injection is: operator-private
-episodes reach only the operator lane. Empty output means the lane has recalled
-nothing yet, which is not an error.
+notes reach only the operator lane. An empty store still returns a labeled
+card. An unchanged hook turn can print nothing, which is not an error.
 
 ### `telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval SECONDS]`
 

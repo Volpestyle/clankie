@@ -1,11 +1,11 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createClankieApp, type TrustedCaptainIdentity } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
-import { MemoryCapacityError, createFileMemory } from "../src/memory.ts";
+import { createFileMemory } from "../src/memory.ts";
 
 /** `api` is the in-process captain; `discord_text` is the bridge's own bearer. */
 const captain =
@@ -198,28 +198,40 @@ describe("captain episode routes", () => {
 });
 
 /**
- * Retention (VUH-1104). A note he kept has to outlive the recent window, an
- * eviction, a restart, and a busy room — and never leak across the lane fence
- * on its way back.
+ * Legacy episode compatibility: old notes remain readable and keep their
+ * source, dates and privacy after the simpler memory tool replaces retention.
  */
-describe("durable retention", () => {
+describe("persistent memory and legacy episodes", () => {
   const episode = (overrides: Record<string, unknown>): Record<string, unknown> => ({
     ...JSON.parse(episodeBody()),
     ...overrides,
   });
 
-  it("recalls a kept episode after far more than the recent window, across a restart", async () => {
+  it("preserves legacy files on load and every note after writes past the old recent window", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-retention-"));
+    mkdirSync(join(root, "captain-episodes"), { recursive: true });
+    const legacy = {
+      ...episode({
+        episodeId: "legacy-1",
+        summary: "Decided the gateway holds no state and routes back over the socket.",
+        occurredAt: "2026-07-01T10:00:00.000Z",
+      }),
+      retained: undefined,
+      sourceConversationId: undefined,
+    };
+    const legacyFile = `${JSON.stringify(legacy)}\n`;
+    writeFileSync(join(root, "captain-episodes", "operator.jsonl"), legacyFile);
     const first = createFileMemory({ dataDir: root });
+    expect(readFileSync(join(root, "captain-episodes", "operator.jsonl"), "utf8")).toBe(legacyFile);
     first.recordEpisode(
       episode({
         episodeId: "kept-1",
-        summary: "Decided the gateway holds no state and routes back over the socket.",
+        summary: "Kept the deployment decision in a legacy episode.",
         retained: true,
-        occurredAt: "2026-07-01T10:00:00.000Z",
+        occurredAt: "2026-07-01T10:01:00.000Z",
       }),
     );
-    // 200 newer notes: more than enough to evict anything the ring still owns.
+    // Busy rooms no longer age out a note, with or without old retained metadata.
     for (let index = 0; index < 200; index += 1) {
       first.recordEpisode(
         episode({
@@ -234,24 +246,33 @@ describe("durable retention", () => {
     }
 
     const expectedIds = [
+      "legacy-1",
       "kept-1",
-      ...Array.from({ length: 128 }, (_, index) => `noise-${String(index + 72)}`),
+      ...Array.from({ length: 200 }, (_, index) => `noise-${String(index)}`),
     ];
     expect(first.catalog().captainEpisodes.map((entry) => entry.episodeId)).toEqual(expectedIds);
     // A fresh store over the same directory is the restart.
     const restarted = createFileMemory({ dataDir: root });
     const ids = restarted.catalog().captainEpisodes.map((entry) => entry.episodeId);
-    // The recent window did evict: 128 unretained survive, and the kept one is extra.
+    // Both old and new records survive a restart with their IDs intact.
     expect(ids).toEqual(expectedIds);
 
-    // Recall on demand reaches it; the automatic card still shows only the newest few.
+    // Search reaches an old note; the automatic card still bounds rendered context.
     const found = restarted.searchEpisodeCard({ lane: "operator", query: "gateway state" });
     expect(found.split("\n").filter((line) => line.startsWith("- "))).toEqual([
-      "- operator · global-default · source source-one · 2026-07-01T10:00:00.000Z · kept-1 [kept]: " +
+      "- operator · global-default · 2026-07-01T10:00:00.000Z · legacy-1: " +
         "Decided the gateway holds no state and routes back over the socket.",
     ]);
     expect(restarted.episodeRecallCard({ lane: "operator" })).not.toContain("kept-1");
     expect(restarted.episodeRecallCard({ lane: "operator" }).split("\n")).toHaveLength(11);
+    expect(restarted.episodeRecallCard({ lane: "operator", query: "gateway state" })).toContain("legacy-1");
+    expect(restarted.catalog().captainEpisodes.find((note) => note.episodeId === "legacy-1")).toMatchObject({
+      episodeId: "legacy-1",
+      targetId: "global-default",
+      occurredAt: "2026-07-01T10:00:00.000Z",
+      visibility: "operator_private",
+      retained: false,
+    });
   });
 
   it("answers with the source and date, and lets a correction supersede the stale note", async () => {
@@ -405,9 +426,9 @@ describe("durable retention", () => {
     close();
   });
 
-  it("refuses a retain at capacity and leaves every kept record untouched", async () => {
+  it("preserves retained metadata without enforcing the historical quota", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-capacity-"));
-    const capacity = new MemoryCapacityError("probe").capacity;
+    const capacity = 1024;
     // Seeded on disk rather than written one call at a time: the point is the
     // full shelf, not the thousand writes it would take to fill it.
     mkdirSync(join(root, "captain-episodes"), { recursive: true });
@@ -425,27 +446,21 @@ describe("durable retention", () => {
     const memory = createFileMemory({ dataDir: root });
     expect(memory.catalog().retention).toEqual({ retained: capacity, capacity, recentCapacity: 128 });
 
-    expect(() =>
-      memory.recordEpisode(
-        episode({ episodeId: "overflow-1", retained: true, summary: "One memory too many." }),
-      ),
-    ).toThrow(MemoryCapacityError);
+    memory.recordEpisode(
+      episode({ episodeId: "overflow-1", retained: true, summary: "A note past the former capacity." }),
+    );
     expect(() => memory.updateEpisode("operator", "kept-0", { retained: true })).not.toThrow();
 
-    // Nothing evicted, nothing renamed, and the refused note is simply absent.
+    // Nothing evicted or renamed; the old quota no longer refuses a note.
     const after = memory.catalog();
-    expect(after.retention.retained).toBe(capacity);
-    expect(after.captainEpisodes).toHaveLength(capacity);
+    expect(after.retention.retained).toBe(capacity + 1);
+    expect(after.captainEpisodes).toHaveLength(capacity + 1);
     expect(after.captainEpisodes.map((entry) => entry.episodeId)).toContain("kept-0");
-    expect(memory.searchEpisodeCard({ lane: "operator", query: "one memory too many" })).toBe("");
-
-    // Releasing one makes room, and the same write then succeeds.
+    expect(memory.searchEpisodeCard({ lane: "operator", query: "former capacity" })).toContain("overflow-1");
+    expect(memory.searchEpisodeCard({ lane: "operator", query: "former capacity" })).not.toContain("[kept]");
+    // Curation of the compatibility flag does not remove an old note.
     memory.updateEpisode("operator", "kept-0", { retained: false });
-    expect(() =>
-      memory.recordEpisode(
-        episode({ episodeId: "overflow-1", retained: true, summary: "One memory too many." }),
-      ),
-    ).not.toThrow();
+    expect(memory.catalog().captainEpisodes.map((entry) => entry.episodeId)).toContain("kept-0");
     expect(memory.catalog().retention.retained).toBe(capacity);
   });
   it("refuses a write that lands on an id the store already holds", async () => {

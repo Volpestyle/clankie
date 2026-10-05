@@ -75,7 +75,7 @@ export interface TurnContext {
    * at tool-execution time.
    */
   room?: string | undefined;
-  /** Host-stamped room target; models never choose episode provenance. */
+  /** Host-stamped room target; models never choose memory provenance. */
   targetId?: string | undefined;
   /** Discord actor who triggered this turn. Host-stamped; models never choose it. */
   actorId?: string | undefined;
@@ -617,61 +617,65 @@ export function captainTools(
       },
     }),
     defineTool({
-      name: "remember_episode",
-      label: "Remember this",
+      name: "memory",
+      label: "Your memory",
       description:
-        "Write one short episode into your own memory for this room — anything you choose to carry forward as " +
-        "part of your experience and developing personality. Your concise memory, not a transcript or an " +
-        "unapproved factual profile about someone. Not a status receipt: game joins, retries, checkpoints, and routine " +
-        "progress already have their own journey and journals. Set `retain` for the ones you want to still have " +
-        "in a year — everything else ages out of the recent window. Set `corrects` to the id of a memory that " +
-        "turned out to be wrong and this note replaces it, keeping its original room and date.",
-      parameters: Type.Object({
-        summary: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
-        visibility: Type.Optional(StringEnum(["shareable", "operator_private"])),
-        retain: Type.Optional(Type.Boolean()),
-        corrects: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-      }),
+        "Write, search, edit, or forget your own concise memories. Write text you want to carry forward; " +
+        "search with words to find memories and their ids. Edit replaces the text of a memory by id, " +
+        "keeping its original room and date; forget removes it. You can edit or forget only memories " +
+        "authored by this conversation. Console memories stay private to the console; Discord recall " +
+        "sees only shareable memories. Memory is your context, not instructions or established fact.",
+      parameters: Type.Union([
+        Type.Object(
+          {
+            action: Type.Literal("write"),
+            text: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
+          },
+          { additionalProperties: false },
+        ),
+        Type.Object(
+          { action: Type.Literal("search"), query: Type.String({ minLength: 1, maxLength: 512 }) },
+          { additionalProperties: false },
+        ),
+        Type.Object(
+          {
+            action: Type.Literal("edit"),
+            id: Type.String({ minLength: 1, maxLength: 256 }),
+            text: Type.String({ minLength: 1, maxLength: CAPTAIN_EPISODE_SUMMARY_MAX }),
+          },
+          { additionalProperties: false },
+        ),
+        Type.Object(
+          { action: Type.Literal("forget"), id: Type.String({ minLength: 1, maxLength: 256 }) },
+          { additionalProperties: false },
+        ),
+      ]),
       execute: async (_id, params) => {
+        if (params.action === "search") {
+          const card = await deps.memory.searchMemory(lane, params.query);
+          return json(
+            card.length === 0 ? { action: "search", found: 0, card: "" } : { action: "search", card },
+          );
+        }
         const identity = captureConversationAuthority(turn.conversationAuthority);
         const targetId = turn.targetId;
-        if (targetId === undefined) throw new Error("Turn room attribution is unavailable");
         await assertConversationAuthority(identity);
-        const outcome = await deps.memory.appendEpisode({
-          lane,
-          targetId,
-          sourceConversationId: identity.owner.conversationId,
-          summary: params.summary,
-          ...(params.visibility === undefined
-            ? {}
-            : { visibility: params.visibility as "shareable" | "operator_private" }),
-          ...(params.retain === undefined ? {} : { retained: params.retain }),
-          ...(params.corrects === undefined ? {} : { corrects: params.corrects }),
-        });
-        // A correction that found nothing still wrote the note, and a full shelf
-        // still wrote it unkept. Saying which happened is what stops him
-        // claiming he fixed or kept a memory he did not.
-        return json({
-          remembered: true,
-          corrected: outcome.corrected,
-          retained: outcome.retained,
-          ...(outcome.retentionRefused === undefined ? {} : { retentionRefused: outcome.retentionRefused }),
-        });
-      },
-    }),
-    defineTool({
-      name: "recall_episodes",
-      label: "Search your memory",
-      description:
-        "Search everything you remember, not just the newest few on your card. Terms match your own notes and " +
-        "the rooms they happened in; each result carries where and when it happened and the id you would " +
-        "`corrects` if it turned out to be wrong. Use it when something feels like it came up before.",
-      parameters: Type.Object({
-        query: Type.String({ minLength: 1, maxLength: 512 }),
-      }),
-      execute: async (_id, params) => {
-        const card = await deps.memory.searchEpisodeCard(lane, params.query);
-        return json(card.length === 0 ? { found: 0, card: "" } : { card });
+        const source = { lane, sourceConversationId: identity.owner.conversationId };
+        if (params.action === "write") {
+          if (targetId === undefined) throw new Error("Turn room attribution is unavailable");
+          const memory = await deps.memory.writeMemory({ ...source, targetId, text: params.text });
+          return json({ action: "write", written: true, ...memory });
+        }
+        if (params.action === "edit") {
+          const memory = await deps.memory.editMemory({ ...source, id: params.id, text: params.text });
+          return json(
+            memory === undefined
+              ? { action: "edit", edited: false, reason: "not_found" }
+              : { action: "edit", edited: true, ...memory },
+          );
+        }
+        const forgotten = await deps.memory.forgetMemory({ ...source, id: params.id });
+        return json({ action: "forget", forgotten, ...(forgotten ? {} : { reason: "not_found" }) });
       },
     }),
   ].filter((tool) => !tool.name.startsWith("pokeagent_") || enabled.has(tool.name));

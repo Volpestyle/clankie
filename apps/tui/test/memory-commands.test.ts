@@ -109,7 +109,7 @@ describe("/memory", () => {
     ).toContain("source unknown");
   });
 
-  it("edits an episode and confirms before forgetting a person fact", async () => {
+  it("edits a note and confirms before forgetting a person fact", async () => {
     const api = client();
     const command = buildMemoryCommands({ client: api })[0]!;
     const episode = shellFixture(["episodes", "0", "edit", "shareable"], ["Remember the corrected thing"]);
@@ -118,7 +118,7 @@ describe("/memory", () => {
       summary: "Remember the corrected thing",
       visibility: "shareable",
     });
-    expect(episode.lines).toContain("Saved episode.");
+    expect(episode.lines).toContain("Saved note.");
 
     const fact = shellFixture(["people", "0", "forget", "forget"]);
     await command.run("", fact.shell);
