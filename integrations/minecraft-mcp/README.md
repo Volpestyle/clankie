@@ -148,6 +148,18 @@ provides alerts rather than a spending cap. Account/resource records stay privat
 No server or tunnel starts merely because the MCP connection opens. Clankie's core
 retains authority, Discord bindings/invites, audit, profiles and play ownership.
 
+Tunnel status includes only stable public error codes; provider response bodies
+and credentials never cross the status projection into Clankie's tools. Account
+claim completion is separate from allocation: `playit-email-verification-required`
+requires the owner to verify their playit account email before retrying start.
+An interrupted allocation is reconciled against the agent's actual tunnels on
+the next start, adopting the matching owned tunnel. A filesystem lease excludes
+concurrent creates; a private allocation receipt distinguishes confirmed rejection
+from an uncertain result. Rejection permits a retry, while an uncertain result
+with no visible tunnel remains `playit-tunnel-allocation-pending`. Legacy markers
+without receipts are checked repeatedly before recovery. Ambiguous matches
+refuse startup rather than allocating duplicates.
+
 The local default is Java 21, Paper 1.21.4 build 232 and game/RCON ports 25684/25685.
 Pinned ViaVersion 5.12.0 admits newer clients through 26.3 without changing the
 bot/viewer protocol. Host status and invites list supported clients.

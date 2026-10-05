@@ -16,6 +16,7 @@ import {
   MinecraftHostUsernameSchema,
   MinecraftHostSettingsSchema,
   MinecraftTunnelClaimStatusSchema,
+  MinecraftTunnelErrorSchema,
   type MinecraftHostAdminCommand,
 } from "@clankie/protocol";
 import type { SettingsStore } from "@clankie/settings";
@@ -53,6 +54,7 @@ const SafeStatus = z.object({
         .string()
         .regex(/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/u)
         .optional(),
+      error: MinecraftTunnelErrorSchema.catch("playit-start-failed").optional(),
     })
     .optional(),
 });

@@ -90,6 +90,26 @@ export const MinecraftHostSettingsSchema = z.strictObject({
 });
 export type MinecraftHostSettings = z.infer<typeof MinecraftHostSettingsSchema>;
 
+/** Stable public diagnostics only; upstream response bodies and credentials stay private. */
+export const MinecraftTunnelErrorSchema = z.enum([
+  "playit-auth-not-ready",
+  "playit-credential-invalid",
+  "playit-tunnel-unsafe",
+  "playit-tunnel-allocation-pending",
+  "playit-platform-not-supported",
+  "playit-install-required",
+  "playit-start-failed",
+  "playit-process-error",
+  "playit-agent-exited",
+  "playit-health-unverified",
+  "playit-stop-unconfirmed",
+  "playit-api-unavailable",
+  "playit-api-invalid-response",
+  "playit-email-verification-required",
+  "playit-api-rejected",
+]);
+export type MinecraftTunnelError = z.infer<typeof MinecraftTunnelErrorSchema>;
+
 /** Transient owner claim only; permanent playit credentials never leave the broker. */
 export const MinecraftTunnelClaimStatusSchema = z.strictObject({
   phase: z.enum(["idle", "preparing", "pending", "claimed", "expired", "rejected", "failed"]),

@@ -90,7 +90,7 @@ export function minecraftHostTools(client: MinecraftHostToolPort, turn: TurnCont
       name: "minecraft_host_status",
       label: "Minecraft server status",
       description:
-        "Read your own Minecraft server's version, health, public address and backup status. No credentials are returned.",
+        "Read your own Minecraft server's version, health, public address, backup status and safe tunnel error code. A running auth-ready server also needs tunnel.phase running for a public invite. playit-email-verification-required means the owner must verify their playit account email before retrying start. No credentials are returned.",
       parameters: Type.Object({}),
       execute: async () => call((identity) => client.status(identity)),
     }),

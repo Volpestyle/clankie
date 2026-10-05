@@ -1,8 +1,13 @@
-import type { MinecraftTunnelClaimStatus } from "@clankie/protocol";
+import {
+  MinecraftTunnelErrorSchema,
+  type MinecraftTunnelClaimStatus,
+  type MinecraftTunnelError,
+} from "@clankie/protocol";
 import { createHash, randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import lockfile from "proper-lockfile";
 import { z } from "zod";
 
 export const PLAYIT_PIN = {
@@ -12,12 +17,19 @@ export const PLAYIT_PIN = {
 } as const;
 const API_BASE = "https://api.playit.gg";
 const MAX_RESPONSE_BYTES = 1_048_576;
+const TUNNEL_NAME = "Clankie Minecraft";
+const ALLOCATION_PENDING = "allocation-pending";
+const AllocationIntent = z.object({
+  agent_id: z.uuid(),
+  outcome: z.enum(["uncertain", "rejected"]),
+});
 const RunData = z.object({
   agent_id: z.uuid(),
   tunnels: z
     .array(
       z.object({
         id: z.uuid(),
+        name: z.string(),
         display_address: z.string().max(253),
         port_type: z.string(),
         port_count: z.number().int(),
@@ -27,13 +39,20 @@ const RunData = z.object({
       }),
     )
     .max(256),
+  pending: z.array(z.object({ id: z.uuid(), name: z.string() })).max(256),
+  permissions: z.object({
+    is_self_managed: z.boolean(),
+    has_premium: z.boolean(),
+    account_status: z.enum(["guest", "email-not-verified", "verified"]),
+  }),
 });
+type AgentTunnel = z.infer<typeof RunData>["tunnels"][number];
 type TunnelStatus = {
   phase: "stopped" | "blocked-on-claim" | "starting" | "running" | "backoff" | "failed";
   publicAddress?: string;
   tunnelId?: string;
   retryAt?: string;
-  error?: string;
+  error?: MinecraftTunnelError;
 };
 type TunnelOptions = {
   dataDir: string;
@@ -41,13 +60,18 @@ type TunnelOptions = {
   credentials: { get(): Promise<string | null>; set(secret: string): Promise<void> };
   authReady(): boolean | Promise<boolean>;
   api?: (path: string, request: unknown, secret?: string) => Promise<unknown>;
+  apiBase?: string;
   install?: (dataDir: string) => Promise<string>;
   launch?: (binary: string, args: string[], cwd: string) => ChildProcess;
   now?: () => number;
-  apiBase?: string;
   onClaimed?: () => Promise<void>;
 };
 
+class PlayitApiError extends Error {
+  constructor(code: MinecraftTunnelError) {
+    super(code);
+  }
+}
 /** Never include remote response bodies, credentials or child output in errors. */
 async function api(path: string, request: unknown, secret?: string, base = API_BASE): Promise<unknown> {
   try {
@@ -61,7 +85,7 @@ async function api(path: string, request: unknown, secret?: string, base = API_B
       },
       body: JSON.stringify(request),
     });
-    if (!response.ok || !response.body) throw new Error();
+    if (!response.body) throw new Error();
     const reader = response.body.getReader();
     let length = 0;
     const chunks: Uint8Array[] = [];
@@ -76,12 +100,41 @@ async function api(path: string, request: unknown, secret?: string, base = API_B
     } finally {
       await reader.cancel().catch(() => {});
     }
-    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (body.status === "fail" && body.data === "CodeExpired") throw new Error("playit-claim-expired");
-    return z.object({ status: z.literal("success"), data: z.unknown() }).parse(body).data;
+    let result: { status: "success" | "fail" | "error"; data: unknown };
+    try {
+      result = z
+        .object({ status: z.enum(["success", "fail", "error"]), data: z.unknown() })
+        .parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    } catch {
+      throw new PlayitApiError("playit-api-invalid-response");
+    }
+    if (result.status === "fail") {
+      if (result.data === "CodeExpired" && (path === "/claim/setup" || path === "/claim/exchange")) {
+        throw new Error("playit-claim-expired");
+      }
+      throw new PlayitApiError(
+        result.data === "RequiresVerifiedAccount"
+          ? "playit-email-verification-required"
+          : "playit-api-rejected",
+      );
+    }
+    if (result.status === "error") {
+      const remote = z.object({ type: z.string(), message: z.unknown() }).safeParse(result.data);
+      if (!remote.success) throw new PlayitApiError("playit-api-invalid-response");
+      throw new PlayitApiError(
+        remote.data.type === "auth" && remote.data.message === "EmailMustBeVerified"
+          ? "playit-email-verification-required"
+          : remote.data.type === "internal"
+            ? "playit-api-unavailable"
+            : "playit-api-rejected",
+      );
+    }
+    if (!response.ok) throw new PlayitApiError("playit-api-unavailable");
+    return result.data;
   } catch (error) {
+    if (error instanceof PlayitApiError) throw error;
     if (error instanceof Error && error.message === "playit-claim-expired") throw error;
-    throw new Error("playit-api-unavailable");
+    throw new PlayitApiError("playit-api-unavailable");
   }
 }
 function launch(binary: string, args: string[], cwd: string): ChildProcess {
@@ -379,14 +432,8 @@ export class MinecraftTunnel {
       return this.status();
     } catch (error) {
       if (!this.child) await rm(this.secretPath, { force: true });
-      const safe =
-        error instanceof Error &&
-        /^(playit-auth-not-ready|playit-credential-invalid|playit-tunnel-unsafe|playit-platform-not-supported|playit-install-required)$/.test(
-          error.message,
-        )
-          ? error.message
-          : "playit-start-failed";
-      this.state = { phase: "failed", error: safe };
+      const safe = MinecraftTunnelErrorSchema.safeParse(error instanceof Error ? error.message : undefined);
+      this.state = { phase: "failed", error: safe.success ? safe.data : "playit-start-failed" };
       return this.status();
     }
   }
@@ -396,29 +443,154 @@ export class MinecraftTunnel {
   ): Promise<{ tunnelId: string; publicAddress: string }> {
     const ownedPath = join(this.options.dataDir, "playit-tunnel-id");
     await mkdir(this.options.dataDir, { recursive: true, mode: 0o700 });
-    let ownedId: string | undefined;
+    let compromised = false;
+    let release: () => Promise<void>;
     try {
-      ownedId = z.uuid().parse((await readFile(ownedPath, "utf8")).trim());
+      release = await lockfile.lock(ownedPath, {
+        realpath: false,
+        stale: 60_000,
+        update: 10_000,
+        retries: 0,
+        onCompromised: () => {
+          compromised = true;
+        },
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ELOCKED") {
+        throw new Error("playit-tunnel-allocation-pending");
+      }
+      throw error;
+    }
+    const assertHeld = () => {
+      if (compromised) throw new Error("playit-tunnel-allocation-pending");
+    };
+    try {
+      const address = await this.ensureTunnelLocked(secret, allowCreate, assertHeld);
+      assertHeld();
+      return address;
+    } finally {
+      await release();
+    }
+  }
+  private async ensureTunnelLocked(
+    secret: string,
+    allowCreate: boolean,
+    assertHeld: () => void,
+  ): Promise<{ tunnelId: string; publicAddress: string }> {
+    const ownedPath = join(this.options.dataDir, "playit-tunnel-id");
+    const intentPath = `${ownedPath}.intent`;
+    let ownedId: string | undefined;
+    let allocationPending = false;
+    try {
+      const saved = (await readFile(ownedPath, "utf8")).trim();
+      if (saved === ALLOCATION_PENDING) allocationPending = true;
+      else ownedId = z.uuid().parse(saved);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("playit-tunnel-unsafe");
     }
-    let data = RunData.parse(await this.request("/v1/agents/rundata", {}, secret));
-    if (data.tunnels.some((tunnel) => tunnel.id !== ownedId && tunnel.disabled_reason === null)) {
+    let intent: z.infer<typeof AllocationIntent> | undefined;
+    try {
+      intent = AllocationIntent.parse(JSON.parse(await readFile(intentPath, "utf8")));
+      if (!ownedId) allocationPending = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("playit-tunnel-unsafe");
+    }
+    const readData = async () => {
+      const parsed = RunData.safeParse(await this.request("/v1/agents/rundata", {}, secret));
+      if (!parsed.success) throw new PlayitApiError("playit-api-invalid-response");
+      return parsed.data;
+    };
+    let data = await readData();
+    const agentId = data.agent_id;
+    if (intent && intent.agent_id !== agentId) throw new Error("playit-tunnel-unsafe");
+    const refresh = async () => {
+      const next = await readData();
+      if (next.agent_id !== agentId) throw new Error("playit-tunnel-unsafe");
+      return next;
+    };
+    const save = async (path: string, value: string) => {
+      assertHeld();
+      const next = `${path}.${randomBytes(8).toString("hex")}.new`;
+      try {
+        await writeFile(next, `${value}\n`, { mode: 0o600, flag: "wx" });
+        assertHeld();
+        await rename(next, path);
+      } finally {
+        await rm(next, { force: true });
+      }
+    };
+    if (allocationPending) {
+      // Rundata is scoped to this authenticated agent. A pending entry has no
+      // origin config, so wait for it to become inspectable rather than allocate again.
+      let emptyReads = 0;
+      for (let attempt = 0; ; attempt++) {
+        const named = data.tunnels.filter((tunnel) => tunnel.name === TUNNEL_NAME);
+        if (named.length > 1 || named.some((tunnel) => !this.matchesOrigin(tunnel))) {
+          throw new Error("playit-tunnel-unsafe");
+        }
+        if (data.pending.length > 0) {
+          if (named.length > 0 || data.pending.length !== 1 || data.pending[0]?.name !== TUNNEL_NAME) {
+            throw new Error("playit-tunnel-unsafe");
+          }
+          if (!allowCreate || attempt >= 10) throw new Error("playit-tunnel-allocation-pending");
+          await this.waitForAllocation();
+          data = await refresh();
+          continue;
+        }
+        if (named[0]) {
+          ownedId = named[0].id;
+          await save(ownedPath, ownedId);
+          assertHeld();
+          await rm(intentPath, { force: true });
+        } else {
+          if (data.tunnels.some((tunnel) => tunnel.disabled_reason === null)) {
+            throw new Error("playit-tunnel-unsafe");
+          }
+          if (!allowCreate) throw new Error("playit-tunnel-unsafe");
+          // A lost response is not proof of rejection, even when the allocation
+          // has not appeared in rundata. Only a definite rejection permits retry.
+          if (intent?.outcome === "uncertain") throw new Error("playit-tunnel-allocation-pending");
+          // Old versions wrote only the sentinel. Reconcile it repeatedly before
+          // recovering their failed create, while the filesystem lease excludes overlap.
+          if (!intent && ++emptyReads < 3) {
+            await this.waitForAllocation();
+            data = await refresh();
+            continue;
+          }
+          assertHeld();
+          await rm(ownedPath, { force: true });
+          await rm(intentPath, { force: true });
+        }
+        break;
+      }
+    }
+    if (
+      data.tunnels.some((tunnel) => tunnel.id !== ownedId && tunnel.disabled_reason === null) ||
+      data.pending.some((tunnel) => tunnel.id !== ownedId)
+    ) {
       throw new Error("playit-tunnel-unsafe");
     }
     if (!ownedId) {
       if (!allowCreate) throw new Error("playit-tunnel-unsafe");
+      if (data.permissions.account_status !== "verified") {
+        throw new PlayitApiError("playit-email-verification-required");
+      }
       // Persist uncertainty before external creation: an interrupted request must never allocate twice.
-      await writeFile(ownedPath, "allocation-pending\n", { mode: 0o600, flag: "wx" });
-      const created = z.object({ id: z.uuid() }).parse(
-        await this.request(
+      assertHeld();
+      intent = { agent_id: agentId, outcome: "uncertain" };
+      await writeFile(intentPath, `${JSON.stringify(intent)}\n`, { mode: 0o600, flag: "wx" });
+      await writeFile(ownedPath, `${ALLOCATION_PENDING}\n`, { mode: 0o600, flag: "wx" });
+      let response: unknown;
+      try {
+        assertHeld();
+        response = await this.request(
           "/v1/tunnels/create",
           {
             ports: { type: "tunnel-type", details: "minecraft-java" },
             origin: {
               type: "agent",
               data: {
-                agent_id: data.agent_id,
+                agent_id: agentId,
                 config: {
                   fields: [
                     { name: "local_ip", value: "127.0.0.1" },
@@ -430,16 +602,27 @@ export class MinecraftTunnel {
             },
             enabled: true,
             alloc: null,
-            name: "Clankie Minecraft",
+            name: TUNNEL_NAME,
             firewall_id: null,
           },
           secret,
-        ),
-      );
-      ownedId = created.id;
-      await writeFile(`${ownedPath}.new`, `${ownedId}\n`, { mode: 0o600, flag: "wx" });
-      await rename(`${ownedPath}.new`, ownedPath);
-      data = RunData.parse(await this.request("/v1/agents/rundata", {}, secret));
+        );
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.message === "playit-api-rejected" || error.message === "playit-email-verification-required")
+        ) {
+          await save(intentPath, JSON.stringify({ agent_id: agentId, outcome: "rejected" }));
+        }
+        throw error;
+      }
+      const created = z.object({ id: z.uuid() }).safeParse(response);
+      if (!created.success) throw new PlayitApiError("playit-api-invalid-response");
+      ownedId = created.data.id;
+      await save(ownedPath, ownedId);
+      assertHeld();
+      await rm(intentPath, { force: true });
+      data = await refresh();
     }
     // Allocation can be temporarily pending; retry the owned ID, never allocate twice.
     for (
@@ -447,34 +630,41 @@ export class MinecraftTunnel {
       allowCreate && !data.tunnels.some((entry) => entry.id === ownedId) && attempt < 10;
       attempt++
     ) {
-      if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
-      await new Promise<void>((resolve) => setTimeout(resolve, 1000));
-      data = RunData.parse(await this.request("/v1/agents/rundata", {}, secret));
+      await this.waitForAllocation();
+      data = await refresh();
     }
-    if (data.tunnels.some((entry) => entry.id !== ownedId && entry.disabled_reason === null)) {
-      throw new Error("playit-tunnel-unsafe");
-    }
-    const tunnel = data.tunnels.find((entry) => entry.id === ownedId);
     if (
-      !tunnel ||
-      tunnel.disabled_reason !== null ||
-      tunnel.port_type !== "tcp" ||
-      tunnel.port_count !== 1 ||
-      tunnel.tunnel_type !== "minecraft-java"
+      data.tunnels.some((entry) => entry.id !== ownedId && entry.disabled_reason === null) ||
+      data.pending.some((entry) => entry.id !== ownedId)
     ) {
       throw new Error("playit-tunnel-unsafe");
     }
-    for (const [name, expected] of [
-      ["local_ip", "127.0.0.1"],
-      ["local_port", String(this.options.originPort)],
-      ["proxy_protocol", "proxy-protocol-v2"],
-    ]) {
-      const fields = tunnel.agent_config.fields.filter((field) => field.name === name);
-      if (fields.length !== 1 || fields[0]?.value !== expected) throw new Error("playit-tunnel-unsafe");
+    const tunnel = data.tunnels.find((entry) => entry.id === ownedId);
+    if (!tunnel && data.pending.some((entry) => entry.id === ownedId)) {
+      throw new Error("playit-tunnel-allocation-pending");
+    }
+    if (!tunnel || tunnel.disabled_reason !== null || !this.matchesOrigin(tunnel)) {
+      throw new Error("playit-tunnel-unsafe");
     }
     if (!/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?$/i.test(tunnel.display_address))
       throw new Error("playit-tunnel-unsafe");
     return { tunnelId: tunnel.id, publicAddress: tunnel.display_address };
+  }
+  private matchesOrigin(tunnel: AgentTunnel): boolean {
+    if (tunnel.port_type !== "tcp" || tunnel.port_count !== 1 || tunnel.tunnel_type !== "minecraft-java")
+      return false;
+    return [
+      ["local_ip", "127.0.0.1"],
+      ["local_port", String(this.options.originPort)],
+      ["proxy_protocol", "proxy-protocol-v2"],
+    ].every(([name, expected]) => {
+      const fields = tunnel.agent_config.fields.filter((field) => field.name === name);
+      return fields.length === 1 && fields[0]?.value === expected;
+    });
+  }
+  private async waitForAllocation(): Promise<void> {
+    if (!this.desired || !(await this.options.authReady())) throw new Error("playit-auth-not-ready");
+    await new Promise<void>((resolve) => setTimeout(resolve, 1000));
   }
   private async exited(child: ChildProcess): Promise<void> {
     if (this.child !== child) return;

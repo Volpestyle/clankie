@@ -37,8 +37,16 @@ tunnels, provision AWS resources or raise limits. Tool checks enforce this.
   owner in the requesting conversation; they approve it in their browser. Read
   `minecraft_host_claim_status` for completion. The integration polls playit every
   three seconds and stores the approved agent secret in the broker automatically,
-  even after the caller exits; `minecraft_host_claim_complete` also reads status. Pending is not completion;
-  resolve expired/rejected claims before starting. No router changes are needed.
+  even after the caller exits; `minecraft_host_claim_complete` also reads status.
+  Pending is not completion; resolve expired/rejected claims before starting.
+  A claimed account still needs tunnel allocation. If host status reports
+  `playit-email-verification-required`, tell the owner to verify their playit
+  account email, then retry start. Other safe `tunnel.error` codes describe a
+  failed public connection even when Paper is running and auth-ready.
+  Interrupted allocation reconciles on the next start. A confirmed rejection
+  can retry creation; an uncertain result with no visible tunnel remains
+  `playit-tunnel-allocation-pending`. Never delete its marker or create an extra
+  tunnel to bypass it. No router changes are needed.
 - **AWS:** use an already provisioned instance and scoped broker credential.
   While stopped, select `settings: {backend: {kind: "aws-ec2", accountId,
 instanceId, region}}` with owner-supplied identifiers. Required groundwork is
