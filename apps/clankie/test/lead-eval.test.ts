@@ -257,27 +257,29 @@ it("applies a retained candidate diff to the trusted base without executing cand
   }
 }, 30_000);
 
-it("refuses grader changes, traversal and malformed candidate patches", () => {
-  const task = loadTasks().historical[2];
-  const root = scratch();
-  for (const [index, path] of [
-    "candidate.patch",
-    "../escape",
-    "vitest.config.ts",
-    "apps/clankie/test/setup.ts",
-  ].entries()) {
-    const patchPath = join(root, `patch-${index}`);
+it.each(["candidate.patch", "../escape", "vitest.config.ts", "apps/clankie/test/setup.ts"])(
+  "refuses a candidate patch targeting %s",
+  (path) => {
+    const task = loadTasks().historical[2];
+    const root = scratch();
+    const patchPath = join(root, "patch");
     writeFileSync(
       patchPath,
       `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1 @@\n+untrusted\n`,
     );
-    expect(() => prepareCandidate(task, patchPath, join(root, `grader-${index}`))).toThrow();
-  }
-  expect(existsSync(join(root, "escape"))).toBe(false);
+    expect(() => prepareCandidate(task, patchPath, join(root, "grader"))).toThrow();
+    expect(existsSync(join(root, "escape"))).toBe(false);
+  },
+  30_000,
+);
+
+it("refuses an empty candidate patch", () => {
+  const task = loadTasks().historical[2];
+  const root = scratch();
   const empty = join(root, "empty");
   writeFileSync(empty, "");
   expect(() => prepareCandidate(task, empty, join(root, "empty-grader"))).toThrow("Candidate patch");
-}, 30_000);
+});
 
 it("grades through the network-off sandbox with fixed argv and retained provenance", async () => {
   const task = loadTasks().historical[2];
