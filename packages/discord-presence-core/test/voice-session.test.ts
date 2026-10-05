@@ -336,6 +336,12 @@ class FakeConversation implements VoiceConversationPort {
     this.responseContexts.push(context);
   }
 
+  public readonly cancellations: string[] = [];
+  public cancelResponse(requestEventId: string): void {
+    this.assertOpen();
+    this.cancellations.push(requestEventId);
+  }
+
   public truncate(itemId: string, audioEndMs: number): void {
     this.assertOpen();
     this.truncations.push({ itemId, audioEndMs });
@@ -4660,6 +4666,110 @@ it.each([
     await h.session.leave("fixture_done");
   },
 );
+
+it.each(["generating", "draining"] as const)(
+  "cancels a reply superseded while %s, so the next reply is not queued behind dead speech",
+  async (phase) => {
+    const h = await joinedHarness();
+    await h.consent(ALICE);
+    await h.consent(BOB);
+    const sockets: { tts: boolean; socket: VoiceRecoverySocket }[] = [];
+    const production = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      elevenLabsApiKey: "fixture-tts",
+      config: parseVoiceRealtimeEnv({
+        CLANKIE_VOICE_TTS_PROVIDER: "elevenlabs",
+        CLANKIE_VOICE_ELEVENLABS_VOICE_ID: "fixture",
+      }),
+      timers: h.timers,
+      socketFactory: async (url) => {
+        const socket = new VoiceRecoverySocket();
+        sockets.push({ tts: url.includes("elevenlabs"), socket });
+        return socket;
+      },
+    });
+    h.ports.openConversation = production.openConversation;
+    await h.say(ALICE, "hey clankie tell me a long story");
+    const realtime = sockets.find((entry) => !entry.tts)!.socket;
+    const tts = sockets.find((entry) => entry.tts)!.socket;
+    expect(realtime.creates()).toHaveLength(1);
+    realtime.emit({ type: "response.created", response: { id: "response-A" } });
+    realtime.emit({
+      type: "response.output_text.delta",
+      response_id: "response-A",
+      item_id: "item-A",
+      delta: "Once upon a time there was a very long story. ",
+    });
+    await flush();
+    if (phase === "draining") {
+      // The model finished; only synthesis of the dead reply is outstanding.
+      realtime.emit({ type: "response.done", response: { id: "response-A", status: "completed" } });
+      await flush();
+    }
+    await h.say(BOB, "anyway what are we doing tonight");
+    const cancels = realtime.sent.filter((frame) => frame.type === "response.cancel");
+    expect(tts.sent.some((frame) => frame.context_id === "item-A" && frame.close_context === true)).toBe(
+      true,
+    );
+    if (phase === "generating") {
+      expect(cancels).toMatchObject([{ response_id: "response-A" }]);
+      expect(realtime.creates()).toHaveLength(1);
+      realtime.emit({ type: "response.done", response: { id: "response-A", status: "cancelled" } });
+      // A cancel that raced completion is benign, not a reported failure.
+      realtime.emit({
+        type: "error",
+        error: { type: "invalid_request_error", event_id: cancels[0]!.event_id },
+      });
+      await flush();
+    } else {
+      expect(cancels).toEqual([]);
+    }
+    // Bob's reply starts now, without waiting for the dead context to drain.
+    expect(realtime.creates()).toHaveLength(2);
+    tts.emit({ contextId: "item-A", audio: pcmDelta(2_400).toString("base64") });
+    await flush();
+    expect(h.vox.audio).toHaveLength(0);
+    expect(h.ofType("failed")).toEqual([]);
+    await h.session.leave("fixture_done");
+  },
+);
+
+it("cancels the rest of an interrupted reply before truncating what the room heard", async () => {
+  const h = await joinedHarness();
+  await h.consent(ALICE);
+  const sockets: VoiceRecoverySocket[] = [];
+  const production = createVoiceRealtimePorts({
+    apiKey: "fixture-realtime",
+    config: parseVoiceRealtimeEnv({}),
+    timers: h.timers,
+    socketFactory: async () => {
+      const socket = new VoiceRecoverySocket();
+      sockets.push(socket);
+      return socket;
+    },
+  });
+  h.ports.openConversation = production.openConversation;
+  await h.say(ALICE, "hey clankie tell me a long story");
+  const realtime = sockets[0]!;
+  realtime.emit({ type: "response.created", response: { id: "response-A" } });
+  realtime.emit({
+    type: "response.output_audio.delta",
+    response_id: "response-A",
+    item_id: "item-A",
+    delta: pcmDelta(2_400).toString("base64"),
+  });
+  await flush();
+  expect(h.vox.activePlaybackId).toEqual(expect.any(String));
+  await h.say(ALICE, "stop");
+  const repairs = realtime.sent
+    .filter((frame) => frame.type === "response.cancel" || frame.type === "conversation.item.truncate")
+    .map((frame) => [frame.type, frame.response_id ?? frame.item_id]);
+  expect(repairs).toEqual([
+    ["response.cancel", "response-A"],
+    ["conversation.item.truncate", "item-A"],
+  ]);
+  await h.session.leave("fixture_done");
+});
 
 it.each(["membership", "narration"] as const)(
   "binds %s abandonment through its own dispatch guard",

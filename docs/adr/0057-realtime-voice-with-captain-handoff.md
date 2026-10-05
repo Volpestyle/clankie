@@ -187,6 +187,16 @@ flowchart LR
   Result --> Fresh
 ```
 
+### Hectic rooms: cancel, yield, gate (2026-10-04)
+
+A reply the room will not hear stops costing anything. When newer speech
+supersedes it, an explicit stop discards it, output is muted, or barge-in cuts
+it off, the session sends `response.cancel` for the response still generating
+(OpenAI only; xAI support is unverified) and the external mouth closes its TTS
+context and releases any `response.done` it was holding for the drain. The next
+reply therefore starts immediately instead of queueing behind synthesis of
+speech nobody will hear. A cancel that races completion is ignored.
+
 ### Room membership is context, departure is his decision (2026-09-28)
 
 The gateway supplies participant joins and leaves, display names, and the

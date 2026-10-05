@@ -314,6 +314,8 @@ export interface VoiceConversationPort {
   createTextItem(text: string): void;
   createImageItem(pngBase64: string, mimeType?: "image/png"): void;
   createResponse(context?: string, shouldStart?: () => boolean): void;
+  /** Stops the provider generating (and an external mouth voicing) a reply nobody will hear. */
+  cancelResponse(requestEventId: string): void;
   truncate(itemId: string, audioEndMs: number): void;
   submitFunctionResult(callId: string, output: string, shouldRespond?: false | (() => boolean)): void;
   close(): void;
@@ -1329,7 +1331,10 @@ export class DiscordVoiceSession {
     if (this.outputControlUncertain) throw new Error("voice_output_uncertain");
     this.outputMuted = muted;
     if (!muted) return;
-    for (const pending of this.pendingResponses) pending.superseded = true;
+    for (const pending of this.pendingResponses) {
+      pending.superseded = true;
+      this.cancelInFlight(pending);
+    }
     for (const job of new Set([this.openPlayback, this.playingJob])) {
       if (job === undefined) continue;
       job.encodedChunks.length = 0;
@@ -1760,7 +1765,10 @@ export class DiscordVoiceSession {
     if (explicitStop) {
       this.roomResponseEpoch += 1;
       this.quietEpoch += 1;
-      for (const pending of this.pendingResponses) pending.superseded = true;
+      for (const pending of this.pendingResponses) {
+        pending.superseded = true;
+        this.cancelInFlight(pending);
+      }
       for (const handoff of this.handoffs.values()) this.timers.clearTimeout(handoff.timer);
     }
     if ((this.isPlaying() || explicitStop) && (addressed || confirmedOverlap || explicitStop)) {
@@ -1837,6 +1845,7 @@ export class DiscordVoiceSession {
       if (pending.firstAudioAtMs === undefined && !pending.superseded) {
         pending.superseded = true;
         unheardReply = true;
+        this.cancelInFlight(pending);
       }
     }
     if (unheardReply) {
@@ -3608,6 +3617,20 @@ export class DiscordVoiceSession {
     settle?.(outcome);
   }
 
+  /**
+   * Stops provider work for a reply the room will not hear. Only the request
+   * the provider is generating has an event id and is not done; queued
+   * requests are already refused by their start guard.
+   */
+  private cancelInFlight(pending: PendingVoiceResponse): void {
+    if (pending.done || pending.requestEventId === undefined) return;
+    try {
+      this.conversation?.cancelResponse(pending.requestEventId);
+    } catch {
+      // A closed provider has nothing left to generate.
+    }
+  }
+
   private isPlaying(): boolean {
     return (
       this.playingJob !== undefined &&
@@ -3641,6 +3664,11 @@ export class DiscordVoiceSession {
     // Truncation may synchronously release a held response.done and start the next request.
     job.stopping = true;
     this.settlePlayback(job, "stopped");
+    // The interrupted reply may still be generating; the rest of it is unwanted.
+    // Cancelled before the truncate below, the order the provider documents.
+    for (const pending of this.pendingResponses) {
+      if (pending === job.pending || pending.superseded) this.cancelInFlight(pending);
+    }
     if (supersededBacklog) {
       try {
         this.conversation?.createTextItem(

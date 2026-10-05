@@ -124,6 +124,9 @@ const MAX_SESSION_LIFETIME_MS = 4 * 60 * 60_000;
 export const DEFAULT_REALTIME_TRUNCATION_RETENTION_RATIO = 0.7;
 export const DEFAULT_REALTIME_POST_INSTRUCTIONS_TOKEN_LIMIT = 12_000;
 
+/** Client event ids for `response.cancel`, so their benign races are recognizable. */
+const RESPONSE_CANCEL_EVENT_PREFIX = "response-cancel-";
+
 export const ASK_CLANKIE_TOOL_NAME = "ask_clankie";
 export const VOICE_LEAVE_TOOL_NAME = "voice_leave";
 /** Read-only glance at his own live play screen. Not a controller (ADR 0099). */
@@ -768,8 +771,9 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   private currentResponseId = "";
   private currentResponseAudioBytes = 0;
   private currentResponseTextCharacters = 0;
-  private activeResponse: { eventId: string; responseId?: string } | undefined;
+  private activeResponse: { eventId: string; responseId?: string; cancelRequested?: boolean } | undefined;
   private nextResponseEventId = 0;
+  private nextCancelEventId = 0;
   private hasAbandonedResponse = false;
   private drainingResponses = false;
   private responseCallbackDepth = 0;
@@ -886,6 +890,34 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
     }, shouldStart);
   }
 
+  /**
+   * Stops the in-flight response the caller no longer wants (`response.cancel`):
+   * a reply superseded before the room heard it, or one cut off by barge-in.
+   * Queued requests are refused by their own start guard, so only the response
+   * the provider is generating needs this. The provider still ends it with
+   * `response.done` (status `cancelled`), which settles it and releases the
+   * queue exactly as a completed response does.
+   *
+   * OpenAI only: xAI's support for the event is unverified, and an unknown
+   * client event must not risk the live socket.
+   */
+  public cancelResponse(requestEventId: string): void {
+    const active = this.activeResponse;
+    if (
+      this.provider !== "openai" ||
+      !this.isOpen ||
+      active?.eventId !== requestEventId ||
+      active.cancelRequested === true
+    )
+      return;
+    active.cancelRequested = true;
+    this.sendFrame({
+      type: "response.cancel",
+      event_id: `${RESPONSE_CANCEL_EVENT_PREFIX}${String(++this.nextCancelEventId)}`,
+      ...(active.responseId === undefined ? {} : { response_id: active.responseId }),
+    });
+  }
+
   private queueResponse(start: (eventId: string) => void, shouldStart?: () => boolean): void {
     if (!this.isOpen) throw new Error("Realtime session is closed");
     this.queuedResponses.push({ start, ...(shouldStart === undefined ? {} : { shouldStart }) });
@@ -918,6 +950,9 @@ export class RealtimeConversationSession extends RealtimeSessionCore {
   protected override handleServerError(event: Record<string, unknown>): void {
     const error = asRecord(event.error);
     const clientEventId = asString(error?.event_id);
+    // A cancel can race its response's own completion, and the provider then
+    // reports that nothing was active. That outcome is the one we asked for.
+    if (clientEventId?.startsWith(RESPONSE_CANCEL_EVENT_PREFIX) === true) return;
     const active = this.activeResponse;
     const abandoned =
       active !== undefined &&

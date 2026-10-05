@@ -43,6 +43,11 @@ class FakeRealtimePort implements ExternalVoiceRealtimePort {
     this.onCreateResponse?.();
   }
 
+  public readonly cancellations: string[] = [];
+  public cancelResponse(requestEventId: string): void {
+    this.cancellations.push(requestEventId);
+  }
+
   public submitFunctionResult(callId: string, output: string): void {
     this.functionResults.push({ callId, output });
   }
