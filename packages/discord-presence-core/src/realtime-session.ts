@@ -202,8 +202,9 @@ const YOUTUBE_SEARCH_TOOL = {
   type: "function",
   name: YOUTUBE_SEARCH_TOOL_NAME,
   description:
-    "Search YouTube for a song or video to play in this call. Returns numbered results. " +
-    "Read them to the room. A reply like '1 please' or 'the second one' is music_play or music_queue " +
+    "Search YouTube for a song or video to play in this call. Returns the top numbered results. " +
+    "Name only the best one or two, briefly; never read the list aloud. " +
+    "A reply like '1 please' or 'the second one' is music_play or music_queue " +
     "with that index — do not ask_clankie and do not treat a song as a game.",
   parameters: {
     type: "object",

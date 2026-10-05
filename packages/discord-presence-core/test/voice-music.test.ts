@@ -139,6 +139,15 @@ describe("music control (model tools)", () => {
     expect(queue.snapshot().queued).toHaveLength(1);
   });
 
+  it("lists fewer results for a spoken surface while keeping every hit pickable", async () => {
+    const sink = recordingSink();
+    const queue = new VoiceMusicQueue({ sink, sinkKind: "audio", search: async () => [...hits] });
+    const offer = await queue.searchAndOffer("u1", "migos", "play", undefined, 1);
+    expect(offer).toContain("1. Migos - Bad and Boujee");
+    expect(offer).not.toContain("MotorSport");
+    await expect(queue.pick("u1", 2)).resolves.toContain("https://www.youtube.com/watch?v=bbb");
+  });
+
   it("clears pending search picks when music is stopped", async () => {
     const queue = new VoiceMusicQueue({
       sink: recordingSink(),

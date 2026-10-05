@@ -4098,6 +4098,69 @@ describe("snappy conversation absorption", () => {
     expect(harness.ofType("response")).toHaveLength(2);
   });
 
+  it("speaks a gist of a long handoff answer and leaves the rest with the captain", async () => {
+    const report = "The build is green. " + "Detail line about one subsystem. ".repeat(300);
+    const harness = await engagedHarness({
+      captain: () => Promise.resolve(settledResult("report", report)),
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall(askClankie("report", '{"request":"how is the build"}'));
+    done(conversation);
+    await flush();
+    const output = at(conversation.functionResults, 0).output;
+    expect(output).toContain("The build is green.");
+    expect(output).toContain("offer to post them in text chat");
+    expect(output.length).toBeLessThan(2_200);
+    expect(conversation.functionResponseGuards.at(-1)).toEqual(expect.any(Function));
+  });
+
+  it("offers a late handoff answer after the room moved on instead of forcing it in", async () => {
+    let resolveCaptain!: (result: CaptainChannelTurnResult) => void;
+    const harness = await engagedHarness({
+      captain: () =>
+        new Promise((resolve) => {
+          resolveCaptain = resolve;
+        }),
+    });
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall(askClankie("slow", '{"request":"check Linear"}'));
+    done(conversation);
+    await flush();
+    harness.clock.now = 40_000;
+    await harness.say(ALICE, "anyway did you see the game last night");
+    done(conversation);
+    resolveCaptain(settledResult("linear", "Found it."));
+    await flush();
+    const output = at(conversation.functionResults, 0).output;
+    expect(output).toContain("arrived after the conversation moved on");
+    expect(output).toContain("produce no output");
+    expect(output).toContain("Found it.");
+  });
+
+  it("does not let a bare stop from someone else in the room silence a pending answer", async () => {
+    let resolveCaptain!: (result: CaptainChannelTurnResult) => void;
+    const harness = await engagedHarness({
+      captain: () =>
+        new Promise((resolve) => {
+          resolveCaptain = resolve;
+        }),
+    });
+    await harness.consent(BOB);
+    const conversation = harness.conversation();
+    conversation.input.onFunctionCall(askClankie("slow", '{"request":"check Linear"}'));
+    done(conversation);
+    await flush();
+    await harness.say(BOB, "stop");
+    done(conversation);
+    resolveCaptain(settledResult("linear", "Found it."));
+    await flush();
+    expect(conversation.functionResults).toEqual([
+      { callId: "slow", output: expect.stringContaining("Found it.") },
+    ]);
+    // Delivered as a response opportunity, not retained silently.
+    expect(conversation.functionResponseGuards).toEqual([expect.any(Function)]);
+  });
+
   it("drops a queued checking beat when its result arrives before the beat starts", async () => {
     let resolveCaptain!: (result: CaptainChannelTurnResult) => void;
     const harness = await engagedHarness({

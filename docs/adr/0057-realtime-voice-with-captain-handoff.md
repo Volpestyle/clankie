@@ -169,8 +169,10 @@ he already spoke or the room moved on. That opportunity expires when work
 settles; there is no repeated filler loop.
 
 An explicit stop cuts local playback as soon as its final transcript arrives,
-without the normal loudness/overlap gate, and discards all queued speech.
-Late handoff results remain available silently. Ordinary crosstalk retains the
+without the normal loudness/overlap gate. From a recently engaged or addressing
+speaker it also discards all queued speech, and late handoff results remain
+available silently (2026-10-04: a bare stop from anyone else no longer silences
+pending answers). Ordinary crosstalk retains the
 existing deliberate barge-in rules. Transcription latency, conversational taste,
 and paraphrase joining still need James's live activation and call.
 
@@ -219,6 +221,16 @@ decides whether to speak, and addressed or name-mention turns never wait. An
 8-second-old capture (an open mic or a monologue) and a final more than 2.5 s
 overdue stop holding the room, and continuous crosstalk still yields one
 opportunity every 8 seconds.
+
+Cheap bounds keep spoken tool results short. A spoken `youtube_search` lists
+the top three hits and asks him to name one or two (every hit stays pickable by
+number). An `ask_clankie` answer enters the voice conversation as at most
+1,500 characters, cut at a sentence or word break, with a note that the captain
+has the rest and can post it in text chat on request. An answer that lands
+30 seconds or more after the ask, once the room has spoken since, is framed as
+an offer he may mention briefly or leave for them to ask about. A bare “stop”
+only silences pending answers when it comes from a recently engaged or
+addressing speaker; anyone's stop still cuts current playback.
 
 ### Room membership is context, departure is his decision (2026-09-28)
 

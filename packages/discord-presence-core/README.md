@@ -146,7 +146,8 @@ still generating gets `response.cancel`, and the external mouth closes its TTS
 context and releases its held done, so the next reply never waits on dead speech.
 Tool results stay in context; in-flight work retains its actor. Explicit “stop
 talking” cuts playback on the final transcript even below the ordinary barge-in
-loudness gate, drops queued speech, and keeps late handoff results silent. A
+loudness gate; from a recently engaged or addressing speaker it also drops queued
+speech and keeps late handoff results silent. A
 recently engaged speaker who talks over him for 700 ms of speech-level audio,
 in a capture begun after his reply became audible, stops him without waiting
 for the transcript (ADR 0057, 2026-10-04). Unaddressed speech waits for a
@@ -160,7 +161,10 @@ changed requests remain refinements. Slow work offers one brief acknowledgment
 after 1.2 seconds, canceled if the room moves on or work finishes. Voice matches
 the length to the moment: most turns are short, while stories, strong opinions,
 invested bits, and fuller answers have room. Handoff results follow the same
-proportion, with details available in text. OpenAI output is bounded to 4096
+proportion, with details available in text: at most 1,500 characters of a
+captain answer reach the voice model, and an answer arriving 30 seconds or more
+late, after the room moved on, is offered rather than forced. Spoken YouTube
+searches list three hits for him to name one or two. OpenAI output is bounded to 4096
 audio / 1024 text tokens per response, and all Discord mouths have a 45-second
 PCM ceiling. These runaway backstops leave room for deliberate 20–30 second
 riffs; live taste and transcription latency still require a call.
