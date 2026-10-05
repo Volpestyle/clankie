@@ -1,8 +1,18 @@
 import type { WorkConvention } from "@clankie/protocol/work-items";
+import { join } from "node:path";
 import type { WorkBackend, WorkWriteCallbacks } from "./backend.ts";
 import { createFilesBackend } from "./backends/files.ts";
 import { createGithubBackend, type GhRunner, type GithubApi } from "./backends/github.ts";
-import { createLinearBackend, type LinearToolCall } from "./backends/linear.ts";
+import {
+  assertLinearIssueScope,
+  createLinearBackend,
+  linearResourceId,
+  type LinearToolCall,
+} from "./backends/linear.ts";
+import { WorkItemScopeError } from "./backend.ts";
+import { createLocalTracker } from "./tracker-local.ts";
+import { createRepoTracker } from "./tracker-repo.ts";
+import { TRACKER_TOOLS, type TrackerToolBackend } from "./tracker-tools.ts";
 import {
   DEFAULT_WORK_DIRECTORY,
   discoverConvention,
@@ -20,6 +30,8 @@ export interface TrackerDeps extends WorkWriteCallbacks {
   readonly linear?: LinearToolCall;
   readonly clock?: () => Date;
   readonly scopedWrites?: boolean;
+  /** Ancillary repo state belongs in service state, or ignored `.local/` for standalone use. */
+  readonly trackerDirectory?: string;
 }
 
 /** Raised instead of guessing: the owner has to answer once (ADR 0191). */
@@ -39,7 +51,31 @@ export class BackendUnavailableError extends Error {
   }
 }
 
-export function backendFor(root: string, convention: WorkConvention, deps: TrackerDeps): WorkBackend {
+function localTrackerFor(root: string, convention: WorkConvention, deps: TrackerDeps): TrackerToolBackend {
+  const scope = convention.linear;
+  return createLocalTracker({
+    directory: deps.trackerDirectory ?? join(root, ".local", "tracker"),
+    ...(scope === undefined ? {} : { team: scope.team }),
+    ...(scope?.project === undefined ? {} : { project: scope.project }),
+    ...(scope?.label === undefined ? {} : { labels: [scope.label] }),
+    ...(deps.scopedWrites !== true || scope === undefined
+      ? {}
+      : {
+          assertIssueWrite: (issue: Readonly<Record<string, unknown>>) => {
+            const same = (left: unknown, right: string) =>
+              typeof left === "string" && left.toLowerCase() === right.toLowerCase();
+            if (
+              !same(issue.team, scope.team) ||
+              (scope.project !== undefined && !same(issue.project, scope.project))
+            )
+              throw new WorkItemScopeError();
+          },
+        }),
+    ...(deps.clock === undefined ? {} : { clock: deps.clock }),
+  });
+}
+
+function nativeBackendFor(root: string, convention: WorkConvention, deps: TrackerDeps): WorkBackend {
   const writes = {
     ...(deps.beforeWrite === undefined ? {} : { beforeWrite: deps.beforeWrite }),
     ...(deps.onDispatch === undefined ? {} : { onDispatch: deps.onDispatch }),
@@ -75,24 +111,116 @@ export function backendFor(root: string, convention: WorkConvention, deps: Track
       return createGithubBackend({ repo: convention.github.repo, gh: deps.gh, ...writes });
     case "linear":
       if (convention.linear === undefined) throw new Error("A linear convention names its team");
-      if (deps.linear === undefined)
-        throw new BackendUnavailableError(
-          `This repo tracks work in Linear (${convention.linear.team}); connect Linear to Clankie to use it`,
-        );
+      const local = deps.linear === undefined ? localTrackerFor(root, convention, deps) : undefined;
       return createLinearBackend({
         team: convention.linear.team,
         ...(convention.linear.project === undefined ? {} : { project: convention.linear.project }),
         ...(convention.linear.label === undefined ? {} : { label: convention.linear.label }),
-        call: deps.linear,
-        ...writes,
+        call: deps.linear ?? ((name, args) => local!.call(name, args, writes)),
+        ...(local === undefined
+          ? writes
+          : deps.scopedWrites === undefined
+            ? {}
+            : { scopedWrites: deps.scopedWrites }),
       });
   }
+}
+
+/** The canonical tool seam is also used by the CLI and legacy work-item callers. */
+export function trackerToolsFor(
+  root: string,
+  convention: WorkConvention,
+  deps: TrackerDeps,
+): TrackerToolBackend {
+  if (convention.backend === "linear") {
+    const local = deps.linear === undefined ? localTrackerFor(root, convention, deps) : undefined;
+    const call =
+      deps.linear ?? ((name: string, args: Record<string, unknown>) => local!.call(name, args, deps));
+    return {
+      catalog: () => TRACKER_TOOLS,
+      async call(name, args, callbacks) {
+        const scoped =
+          name === "list_issues" ||
+          name === "search_issues" ||
+          (name === "save_issue" && args.id === undefined);
+        const scope = convention.linear!;
+        if (deps.scopedWrites) {
+          for (const [field, helper, expected] of [
+            ["team", "get_team", scope.team],
+            ["project", "get_project", scope.project],
+          ] as const) {
+            if (args[field] === undefined || expected === undefined) continue;
+            if (args[field] === null) throw new WorkItemScopeError();
+            const [wanted, actual] = await Promise.all([
+              call(helper, { query: expected }),
+              call(helper, { query: args[field] }),
+            ]);
+            if (
+              linearResourceId(wanted) === undefined ||
+              linearResourceId(actual) !== linearResourceId(wanted)
+            )
+              throw new WorkItemScopeError();
+          }
+          if (name === "save_issue" && typeof args.id === "string")
+            await assertLinearIssueScope(await call("get_issue", { id: args.id }), { ...scope, call });
+          if ((name === "save_comment" || name === "create_comment") && typeof args.issueId === "string")
+            await assertLinearIssueScope(await call("get_issue", { id: args.issueId }), { ...scope, call });
+        }
+        const parameters = {
+          ...(scoped
+            ? {
+                team: convention.linear!.team,
+                ...(convention.linear!.project === undefined ? {} : { project: convention.linear!.project }),
+                ...(convention.linear!.label === undefined || name === "save_issue"
+                  ? {}
+                  : { label: convention.linear!.label }),
+              }
+            : {}),
+          ...args,
+          ...(name !== "save_issue" || args.id !== undefined || convention.linear!.label === undefined
+            ? {}
+            : {
+                labels: [
+                  ...new Set([...((args.labels as string[] | undefined) ?? []), convention.linear!.label]),
+                ],
+              }),
+        };
+        return local === undefined
+          ? call(name, parameters)
+          : local.call(name, parameters, { ...deps, ...callbacks });
+      },
+    };
+  }
+  return {
+    catalog: () => TRACKER_TOOLS,
+    call(name, args, callbacks) {
+      const currentDeps = { ...deps, ...callbacks };
+      return createRepoTracker({
+        ...currentDeps,
+        backend: nativeBackendFor(root, convention, currentDeps),
+        directory: deps.trackerDirectory ?? join(root, ".local", "tracker"),
+        ...(deps.clock === undefined ? {} : { clock: deps.clock }),
+      }).call(name, args);
+    },
+  };
+}
+
+export function backendFor(root: string, convention: WorkConvention, deps: TrackerDeps): WorkBackend {
+  if (convention.backend === "linear") return nativeBackendFor(root, convention, deps);
+  const canonical = trackerToolsFor(root, convention, deps);
+  const compatibility = createLinearBackend({
+    team: "Local",
+    workOwnerAsAssignee: true,
+    call: (name, args) => canonical.call(name, args),
+  });
+  return { ...compatibility, kind: convention.backend };
 }
 
 export interface ResolvedTracker {
   readonly convention: WorkConvention;
   readonly recorded: boolean;
   readonly backend: WorkBackend;
+  readonly tools: TrackerToolBackend;
 }
 
 /**
@@ -113,7 +241,12 @@ export async function resolveTracker(
     options.scopedWrites === undefined ? deps : { ...deps, scopedWrites: options.scopedWrites };
   const recorded = await readConvention(root);
   if (recorded !== undefined)
-    return { convention: recorded, recorded: true, backend: backendFor(root, recorded, backendDeps) };
+    return {
+      convention: recorded,
+      recorded: true,
+      backend: backendFor(root, recorded, backendDeps),
+      tools: trackerToolsFor(root, recorded, backendDeps),
+    };
   if (options.requireRecorded) throw new Error("A saved work tracker is required");
   const discovery = await discoverConvention(root, deps.run);
   if (discovery.suggestion === undefined) throw new ConventionNeededError(discovery);
@@ -126,5 +259,6 @@ export async function resolveTracker(
     convention,
     recorded: options.record === true,
     backend: backendFor(root, convention, backendDeps),
+    tools: trackerToolsFor(root, convention, backendDeps),
   };
 }

@@ -28,6 +28,17 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
       missing.length ? `missing ${missing.join(", ")}` : `${commands.length} present`
     }`,
     `  Credentials · ${report.credentials.length ? report.credentials.map((c) => c.id).join(", ") : "none"}`,
+    ...(report.tracker
+      ? [
+          `  Tracker · ${report.tracker.backend} · ${
+            report.tracker.reason === "owner_connected"
+              ? "owner-connected Linear account"
+              : report.tracker.reason === "linear_disabled"
+                ? "Linear disabled; using durable local store"
+                : "Linear disconnected; using durable local store"
+          }${report.tracker.directory ? ` · ${report.tracker.directory}` : ""}`,
+        ]
+      : []),
     `  Discord · ${report.discord.activeBody ?? "no body"}${report.discord.voiceEnabled ? " · voice" : ""}`,
     ...(report.mcpServers.length ? [`  MCP · ${report.mcpServers.join(", ")}`] : []),
   ];

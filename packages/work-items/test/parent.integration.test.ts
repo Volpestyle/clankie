@@ -54,7 +54,7 @@ it("projects the captured Linear parent into list/get responses and old-client r
   expect(WorkItemsResultSchema.parse(wire).items[0]?.parent).toBe("VUH-1588");
   expect(oldResultSchema.safeParse(wire).success).toBe(false);
   const oldRead = parseProtocolResponse(oldResultSchema, wire);
-  expect(oldRead.items).toEqual(items.map(({ parent: _parent, ...item }) => item));
+  expect(oldRead.items).toEqual(items.map(({ parent: _parent, priority: _priority, ...item }) => item));
   expect(oldResultSchema.safeParse(wire).success).toBe(false);
   expect(() =>
     parseProtocolResponse(oldResultSchema, {

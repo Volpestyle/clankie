@@ -8,6 +8,16 @@ export const WORK_ITEM_STATUSES = ["todo", "in_progress", "in_review", "done", "
 export const WorkItemStatusSchema = z.enum(WORK_ITEM_STATUSES);
 export type WorkItemStatus = z.infer<typeof WorkItemStatusSchema>;
 
+/** Linear's priority scale; zero is deliberately sorted after every explicit priority. */
+export const WorkItemPrioritySchema = z.union([
+  z.literal(0),
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+]);
+export type WorkItemPriority = z.infer<typeof WorkItemPrioritySchema>;
+
 export const WORK_BACKENDS = ["default", "markdown", "github", "linear"] as const;
 export const WorkBackendKindSchema = z.enum(WORK_BACKENDS);
 export type WorkBackendKind = z.infer<typeof WorkBackendKindSchema>;
@@ -56,6 +66,8 @@ export const WorkItemSchema = z
     parent: z.string().trim().min(1).max(256).optional(),
     title: TextSchema(WORK_ITEM_TITLE_MAX),
     status: WorkItemStatusSchema,
+    /** 0 none, 1 Urgent, 2 High, 3 Medium, 4 Low; optional for older bodies. */
+    priority: WorkItemPrioritySchema.optional(),
     owner: z.string().trim().min(1).max(128).optional(),
     dependsOn: z.array(z.string().trim().min(1).max(64)).max(50),
     summary: z.string().max(20_000),

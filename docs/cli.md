@@ -892,8 +892,13 @@ its Linear team (through the Linear account connected to Clankie), its GitHub
 issues (through the owner's `gh` login), its own one-file-per-item Markdown
 directory, or `.clankie/work/` when it has none. Every command runs against the
 git repo containing the current directory, or `--repo PATH`, and prints JSON.
-It is the same contract as Clankie's `work_items` and `work_item_write` tools,
-and every assignment brief tells a hire to use it.
+It is a compatibility CLI over the same Linear-shaped tracker tools Clankie and
+workers discover as `linear_*` ([ADR 0226](adr/0226-one-tracker-tool-surface.md)).
+Issue reads and searches, patch edits, labels, relations, comments and replies,
+projects and project status updates use the same input shapes with connected
+Linear or durable local storage. `clankie doctor` reports the active backend and
+selection reason. An explicit `repo` tool argument selects the repo's recorded
+GitHub or Markdown adapter.
 
 - `clankie work` (or `work status`, `work discover`) reports the repo's signals,
   its recorded convention if any, and a `question` when discovery found more
@@ -907,7 +912,7 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   this repo's board within its team/project and adding the label to new items.
   It requires a Linear convention with a team; blank, multiline or over-64-character
   labels are refused. Omit it to keep the team/project-wide board. The HTTP init
-  parameter and `work_item_write` init parameter are `linearLabel`.
+  parameter and the device write's init parameter are `linearLabel`.
 - `clankie work repos` lists the repos registered on this machine. A repo is
   registered the first time a local command names it; only registered repos are
   readable from a paired device.
@@ -922,9 +927,9 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
   with status/owner filters; it does not replace the scope. `show ID` remains
   a direct known-item read. Board scope does not grant or restrict tool authority.
 - `clankie work create TITLE [--summary S] [--owner NAME] [--criterion C]...
-[--status S]`.
+[--status S] [--priority 0..4]`.
 - `clankie work update ID [--status S] [--owner NAME | --no-owner] [--title T]
-[--check N]... [--uncheck N]... [--add-criterion C]...`; criterion numbers are
+[--priority 0..4] [--check N]... [--uncheck N]... [--add-criterion C]...`; criterion numbers are
   1-based and may be comma-separated.
 - `clankie work close ID [--canceled]` sets `done` (or `canceled`).
 - `clankie work attach ID --url URL --caption TEXT [--kind image|video|log|link]`
@@ -960,8 +965,12 @@ chat and execution credentials cannot authorize it. Local HTTP uses
 `{action:"write_receipt", request:...}` and the operator bearer.
 
 Statuses are `todo`, `in_progress`, `in_review`, `done` and `canceled`,
-projected onto each backend's own states. A recorded backend that cannot be
-reached answers `backend_unavailable` and never falls back to files. The HTTP
+projected onto each backend's own states. Priority is `0` (none), `1` (Urgent),
+`2` (High), `3` (Medium), `4` (Low); open work sorts Urgent through Low, with
+unprioritized work last, before limits. When Linear is disconnected the common
+surface uses local storage; a connected failure never replays a write locally.
+Local records persist across restart and do not automatically migrate on
+connection. Other unavailable repo providers answer `backend_unavailable`. The HTTP
 form is `POST /v1/work` with the operator bearer and `{ "action": ... }`.
 
 ### `operator-credential rotate [--json]`

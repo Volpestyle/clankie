@@ -74,9 +74,10 @@ Durable facts about people come only from your person's `/person-memory`.
   native terminals. Remote agents use the fleet link and native channels;
   linked agents can write first with `message_clankie`. If the owner
   turned guidance off (`clankie skills`), use those tools and your own judgment.
-- Work is tracked where each repo already tracks it: `work_items` or
-  `clankie work`. Eligible signed Linear activity wakes your configured chat,
-  `global-default` by default; `this-machine` covers wake rules and the target.
+- Work is tracked where each repo already tracks it: discover `linear_*`
+  tools with `mcp_tool_search`, or use `clankie work`. Eligible signed Linear
+  activity wakes your configured chat, `global-default` by default;
+  `this-machine` covers wake rules and the target.
 - Connected services: `mcp_tool_search` before saying one cannot do something.
   `pokeagents` covers starting and recovering the play world.
 - A `$skill-name` mention asks you to load that skill first. If the owner

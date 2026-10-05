@@ -3,6 +3,9 @@
 Status: accepted (James, 2026-09-26). Tracks [VUH-1374](https://linear.app/vuhlp/issue/VUH-1374).
 Amended for parent metadata ([VUH-1593](https://linear.app/vuhlp/issue/VUH-1593))
 and owner-authorized receipt-backed writes ([VUH-1595](https://linear.app/vuhlp/issue/VUH-1595); journal direction approved 2026-10-04).
+The tool vocabulary, priority and disconnected behavior are amended by
+[ADR 0226](0226-one-tracker-tool-surface.md); the original design below is historical
+where it differs from that decision.
 
 ## Context
 

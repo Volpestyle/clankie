@@ -74,7 +74,7 @@ remains a separate reviewed effort.
 - [0222 — Discord setup has one shared definition](0222-discord-setup-has-one-shared-definition.md)
 - [0225 — Minecraft keeps playing with one driver](0225-minecraft-keeps-playing-with-one-driver.md)
 
-- [0226 — Quick actions are skills, and tidy keeps results](0226-quick-actions-are-skills-and-tidy-keeps-results.md)
+- [0226 — One tracker tool surface](0226-one-tracker-tool-surface.md)
 
 [ADR 0214's VUH-1678 amendment](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04)
 supersedes ADR 0218's Linear routing extension: verified rule-passing webhooks
@@ -82,3 +82,4 @@ wake one ordinary configured chat, `global-default` by default, and retire the
 separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 
 - [0227 — Discord connects a server with a role](0227-discord-connects-a-server-with-a-role.md)
+- [0228 — Quick actions are skills, and tidy keeps results](0228-quick-actions-are-skills-and-tidy-keeps-results.md)

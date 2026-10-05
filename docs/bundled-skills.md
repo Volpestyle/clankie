@@ -203,5 +203,5 @@ his ordinary tools; the turn stays visible and interruptible.
 starts that skill through the console's normal conversation path. It tells
 Clankie to inspect and harvest before closing, give a one-line reason, and say
 what he closed. Saved reports and last output remain in roster history; Undo
-reopens and resumes within five minutes. See [ADR 0226](adr/0226-quick-actions-are-skills-and-tidy-keeps-results.md)
+reopens and resumes within five minutes. See [ADR 0228](adr/0228-quick-actions-are-skills-and-tidy-keeps-results.md)
 for native input evidence, refusal reasons and the remaining read/close race.
