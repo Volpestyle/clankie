@@ -382,11 +382,19 @@ it("a late API-owned read settles the same receipt with the model cap and no mut
       receiptId,
     );
     await held.started;
-    expect(await pending).toMatchObject({
-      outcome: "refused",
-      reason: "server_unavailable",
-      toolError: true,
-    });
+    const refused = await pending;
+    expect(refused).toMatchObject({ outcome: "refused", toolError: true });
+    // Both layers share the caller's deadline. Require the exact timeout
+    // contract of whichever timer settles first, never an unrelated refusal.
+    if (refused.reason === "worker_request_failed")
+      expect(refused.detail).toBe(
+        "Worker tool call timed out or was cancelled: TimeoutError: The operation was aborted due to timeout",
+      );
+    else {
+      expect(refused.reason).toBe("server_unavailable");
+      expect(refused.detail).toMatch(/^MCP linear\/get_issue timed out after ([1-9]\d{0,2})ms$/u);
+      expect(Number(refused.detail.match(/after (\d+)ms$/u)?.[1])).toBeLessThanOrEqual(500);
+    }
     held.release();
     await f.observed.promise;
     const count = f.apiProvider!.seen.length;
@@ -398,6 +406,9 @@ it("a late API-owned read settles the same receipt with the model cap and no mut
     expect(f.apiProvider!.seen.some((entry) => entry.query?.startsWith("mutation"))).toBe(false);
   } finally {
     held.release();
+    // The original API response owns its journal settlement after caller timeout.
+    // Drain it before fixture cleanup removes the receipt directory.
+    await f.observed.promise;
   }
 });
 
