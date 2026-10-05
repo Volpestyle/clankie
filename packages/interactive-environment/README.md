@@ -10,6 +10,13 @@ emulator ships here: Clankie's current game body is his own PokeAgents world
 seat. [Play](../play/README.md) owns that product path; this package owns the
 wire contracts and legacy record readers.
 
+`ActivityShare*Schema` defines a separate v2 general-media plane with scoped
+share/generation envelopes, optional game capture counters, PNG header/digest
+validation and stereo PCM capped at 200 ms. Source descriptors confer no capture
+authority. Media and bounded display text stay outside semantic events. The
+legacy rendered-surface v1 shapes remain unchanged; operational contracts and
+pending hosted admission live in the [Activity reference](../../apps/discord-activity/README.md).
+
 Semantic event data is a closed, bounded union of state-transition payloads.
 Raw ticks, chunks, packets, audio, and video are rejected from the semantic
 plane and travel only as bounded `EnvironmentTelemetryReferenceSchema` artifact

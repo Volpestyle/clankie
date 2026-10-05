@@ -69,6 +69,17 @@ video-only surface.
 
 ## Embedded Activity
 
+The [scoped general-media core](../apps/discord-activity/README.md#scoped-general-media-core)
+supports finite game/image/animation/demo streams with separate viewer and
+producer credentials. Local owners can project a delivered PNG with
+[`clankie share`](cli.md#activity-shares). It neither launches Discord nor
+verifies a Discord audience. Hosted routing, official application registration,
+server-side participant admission and live Discord proof remain pending. Hosted
+customers will not configure accounts, applications or tunnels.
+
+The existing public watch-me-play transport below remains separate. Scoped
+sources never fall back to it or publish private artifacts there.
+
 The official bot launches the supported watch-me-play Activity with
 `/clankie watch` or the captain's `discord_watch_start` tool. The Activity viewer
 holds no Discord token, emulator core, input channel, or machine authority. It

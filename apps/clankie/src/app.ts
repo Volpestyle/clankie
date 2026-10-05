@@ -5,6 +5,8 @@ import {
   FleetSeatToolCatalogSchema,
 } from "@clankie/protocol/tool-catalog";
 import { registerComputerRoutes } from "./computer-http.ts";
+import { ActivitySharingRequestSchema, type ActivitySharing } from "./activity-sharing.ts";
+import { ActivityShareRequestError } from "@clankie/rendered-surface-client";
 import { ISSUE_METRICS_PATH, IssueMetricsQuerySchema } from "@clankie/protocol";
 import type { WorkWriteAuthority } from "./work-write-target.ts";
 import type {
@@ -510,6 +512,8 @@ export interface ClankieAppDependencies {
   ) => Promise<import("@clankie/protocol/projects").FleetMembershipReport>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
   deliveredFiles?: Pick<DeliveredFileStore, "read">;
+  /** Local owner-authorized projection of delivered artifacts; hosted launch/admission is separate. */
+  activitySharing?: ActivitySharing;
   memory?: MemoryStores;
   personaImages?: PersonaImageSource;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
@@ -981,6 +985,48 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     } finally {
       hostedRequests.delete(inner);
       hostedOriginalRequests.delete(inner);
+    }
+  });
+
+  app.post("/v1/activity/shares", async (context) => {
+    const identity = await authenticateOperator(context.req.raw, dependencies);
+    if (identity === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!identity) return context.json({ error: "operator_authentication_required" }, 401);
+    if (dependencies.activitySharing === undefined)
+      return context.json({ error: "activity_sharing_unavailable" }, 503);
+    const parsed = ActivitySharingRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    try {
+      const result = await dependencies.activitySharing.request(parsed.data, async () => {
+        const current = await authenticateOperator(context.req.raw, dependencies);
+        return current !== "unavailable" && current?.operatorId === identity.operatorId;
+      });
+      context.header("cache-control", "no-store");
+      return context.json(result);
+    } catch (error) {
+      if (error instanceof ActivityShareRequestError) {
+        return context.json(
+          {
+            error: "activity_share_request_failed",
+            outcome: error.outcome,
+            operation: error.operation,
+            ...(error.shareId === undefined ? {} : { shareId: error.shareId }),
+            ...(error.generation === undefined ? {} : { generation: error.generation }),
+          },
+          error.outcome === "uncertain" ? 503 : 409,
+        );
+      }
+      const name = error instanceof Error ? error.message : "";
+      if (name === "operator_authentication_required") return context.json({ error: name }, 401);
+      if (name === "activity_share_generation_conflict") return context.json({ error: name }, 409);
+      if (name === "activity_share_gone" || name === "activity_artifact_unavailable")
+        return context.json({ error: name }, 404);
+      if (name === "activity_share_capacity") return context.json({ error: name }, 409);
+      if (name === "activity_share_busy") return context.json({ error: name }, 429);
+      if (error instanceof z.ZodError) return context.json({ error: "invalid_activity_media" }, 400);
+      logger.warn({ phase: "activity_share", action: parsed.data.action }, "activity share request failed");
+      return context.json({ error: "activity_sharing_unavailable" }, 503);
     }
   });
 
@@ -5219,6 +5265,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       captainPresence.close();
       void laneMcp.close();
       void dependencies.workerMcp?.close();
+      dependencies.activitySharing?.close();
     },
   };
 }

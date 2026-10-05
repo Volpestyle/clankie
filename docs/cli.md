@@ -80,6 +80,7 @@ Do not edit `~/.config/clankie/clankie.json`,
 
 | Task                                                   | Commands                                                |
 | ------------------------------------------------------ | ------------------------------------------------------- |
+| [Control local Activity shares](#activity-shares)      | `share list`, `share request JSON`                      |
 | [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                            |
 | [Manage service lifecycle](#service-lifecycle)         | `restart`, `down`, `autostart`, `awake`                 |
 | [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                            |
@@ -3589,3 +3590,49 @@ A host without an attached adapter returns `computer_body_unavailable`.
 Native reasoning/provider loops and hosted displays are not implemented. [Desktop control](desktop-control.md#shared-computer-body)
 explains capture freshness, coordinate mapping and the provider's recovery
 limitation.
+
+## Activity shares
+
+`clankie share [list | request JSON]` controls local Activity artifact shares
+with the owner operator bearer. `/share` exposes the same controls in the local
+console. Requests use `POST /v1/activity/shares`; output is JSON and exit status
+follows the HTTP result. This core does not launch a Discord Activity. Hosted
+launch/routing and Discord audience admission await the official app decision
+and private ops integration; hosted customers never configure a tunnel or app.
+
+First publish the PNG through the existing conversation file contract:
+
+```bash
+clankie file publish --conversation ID image.png
+# Use the returned artifactId, which is bound to exactly this conversation:
+clankie share request '{"action":"image","conversationId":"ID","artifactId":"ARTIFACT_ID","guildId":"GUILD_ID","channelId":"CHANNEL_ID"}'
+clankie share list
+clankie share request '{"action":"grant","shareId":"SHARE_ID","generation":1}'
+clankie share request '{"action":"switch","shareId":"SHARE_ID","generation":1,"conversationId":"ID","artifactId":"OTHER_ARTIFACT_ID"}'
+clankie share request '{"action":"stop","shareId":"SHARE_ID","generation":2}'
+```
+
+IDs above are placeholders; guild/channel IDs must be Discord snowflakes.
+Only an existing delivered PNG is accepted, with its exact conversation and
+stored digest. No source URL, filesystem path or capture permission is accepted
+by the share request. Tenant and installation scope are assigned by the service.
+An image request accepts optional `ttlMs` (default 30 minutes, at most two hours).
+It returns `{session}`. List returns `{sessions}`; stop returns `{stopped:true}`.
+
+A grant response is `{grant,expiresAt}`. On the configured viewer origin, open
+`/#share=SHARE_ID&grant=GRANT`; the read-only grant stays in the URL fragment.
+Treat it as delegated access, not proof of Discord membership. Never put an
+operator or producer bearer in a viewer URL. Grants expire after at most five
+minutes for admission; existing viewers last until the share ends. Source
+switch advances generation, clears old media and revokes old grants for joins,
+while current viewers follow it. Use the returned generation on later controls.
+Stop, expiry or producer loss is terminal; old grants cannot revive the share.
+
+Controls never replay automatically. A lost/invalid private response returns
+`outcome:"uncertain"`, operation and the share/generation when known. Read the
+registry before deciding a next action; an unknown start also has finite TTL.
+Local service close invalidates its producer sockets. The existing public
+watch-me-play route, self-host launcher and named tunnel retain their transport;
+private artifact shares never appear on that public stream. See the
+[Activity reference](../apps/discord-activity/README.md#scoped-general-media-core)
+for wire contracts and bounds.

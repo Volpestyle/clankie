@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RenderedSurfaceHub } from "./frame-hub.ts";
+import type { ActivityShareRegistry } from "./share-registry.ts";
 
 const CLIENT_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "client.html");
 
@@ -21,6 +22,10 @@ export interface DiscordActivityServerOptions {
   avatarDirectory?: string;
   /** Max inbound WebSocket payload. Viewers send little; this is a guard. */
   maxPayloadBytes?: number;
+  shares?: ActivityShareRegistry;
+  /** Unauthenticated sockets cannot hold an unbounded admission queue. */
+  maxPendingViewers?: number;
+  admissionTimeoutMs?: number;
 }
 
 export interface DiscordActivityServer {
@@ -31,9 +36,13 @@ export interface DiscordActivityServer {
 
 export function createDiscordActivityServer(options: DiscordActivityServerOptions): DiscordActivityServer {
   const { hub } = options;
+  const maxPendingViewers = bounded(options.maxPendingViewers ?? 64, 64);
+  const admissionTimeoutMs = bounded(options.admissionTimeoutMs ?? 5_000, 5_000);
+  let pendingViewers = 0;
+  const maxPayload = bounded(options.maxPayloadBytes ?? 16 * 1024, 16 * 1024);
   const wss = new WebSocketServer({
     noServer: true,
-    maxPayload: options.maxPayloadBytes ?? 16 * 1024,
+    maxPayload,
   });
 
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
@@ -41,7 +50,34 @@ export function createDiscordActivityServer(options: DiscordActivityServerOption
   });
 
   server.on("upgrade", (request, socket, head) => {
+    // Include rejected and closing sockets in the process-wide ceiling, not
+    // only admitted viewers and sockets still awaiting their first message.
+    if (wss.clients.size >= 8 * 64 + 64 + maxPendingViewers) {
+      socket.destroy();
+      return;
+    }
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    const share = /^\/(?:\.proxy\/)?shares\/([a-f0-9-]+)\/frames$/u.exec(path);
+    if (share !== null && options.shares !== undefined) {
+      if (pendingViewers >= maxPendingViewers) {
+        socket.destroy();
+        return;
+      }
+      pendingViewers += 1;
+      let counted = true;
+      const releasePending = () => {
+        if (!counted) return;
+        counted = false;
+        pendingViewers -= 1;
+      };
+      // An invalid WebSocket handshake may never call handleUpgrade's
+      // callback; its TCP close still releases the bounded admission slot.
+      socket.once("close", releasePending);
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        attachShareViewer(options.shares!, share[1]!, ws, admissionTimeoutMs, releasePending);
+      });
+      return;
+    }
     if (!FRAME_PATHS.has(path)) {
       socket.destroy();
       return;
@@ -60,6 +96,8 @@ export function createDiscordActivityServer(options: DiscordActivityServerOption
     },
     async close() {
       hub.stop("session_ended");
+      options.shares?.close();
+      for (const socket of wss.clients) socket.terminate();
       wss.close();
       await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
     },
@@ -77,6 +115,73 @@ function attachViewer(hub: RenderedSurfaceHub, socket: WebSocket): void {
   if (!hub.addViewer(viewer)) return;
   socket.on("close", () => hub.removeViewer(viewer));
   socket.on("error", () => hub.removeViewer(viewer));
+}
+
+function attachShareViewer(
+  shares: ActivityShareRegistry,
+  shareId: string,
+  socket: WebSocket,
+  timeoutMs: number,
+  releasePending: () => void,
+): void {
+  let pending = true;
+  const viewer = {
+    send: (payload: string) => socket.send(payload),
+    get bufferedAmount() {
+      return socket.bufferedAmount;
+    },
+    close: () => socket.close(),
+  };
+  const timer = setTimeout(() => {
+    release();
+    socket.close(4408, "admission_timeout");
+  }, timeoutMs);
+  timer.unref();
+  function release(): void {
+    if (!pending) return;
+    pending = false;
+    clearTimeout(timer);
+    releasePending();
+  }
+  socket.on("message", (raw, isBinary) => {
+    if (!pending) {
+      socket.close(4403, "viewer_is_read_only");
+      return;
+    }
+    release();
+    let body: unknown;
+    try {
+      body = JSON.parse(raw.toString());
+    } catch {
+      body = null;
+    }
+    if (
+      isBinary ||
+      body === null ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).length !== 2 ||
+      !("kind" in body) ||
+      body.kind !== "admit" ||
+      !("grant" in body) ||
+      typeof body.grant !== "string" ||
+      body.grant.length > 128 ||
+      !shares.admit(shareId, body.grant, viewer)
+    ) {
+      socket.close(4403, "admission_denied");
+    }
+  });
+  const cleanup = () => {
+    release();
+    shares.removeViewer(shareId, viewer);
+  };
+  socket.on("close", cleanup);
+  socket.on("error", cleanup);
+}
+
+function bounded(value: number, maximum: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > maximum) throw new Error("invalid_viewer_limit");
+  return value;
 }
 
 async function serveRequest(

@@ -41,6 +41,70 @@ tags:
 security: []
 
 paths:
+  /v1/activity/shares:
+    post:
+      tags: [Media]
+      operationId: controlActivityShares
+      summary: Control local owner-authorized Activity artifact shares
+      description: |
+        Projects a hash-bound delivered PNG in its exact conversation. Tenant
+        and installation scope are service-assigned. No source path/URL or new
+        capture permission is accepted. This creates no Discord launch or
+        participant authentication; hosted routing/admission remains pending.
+        Source switch advances generation and invalidates old media/grants.
+        Stop, expiry and producer loss are terminal. Controls never retry;
+        uncertainty carries operation and share/generation when known.
+        Successful responses use Cache-Control no-store. See docs/cli.md#activity-shares.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [action]
+                  properties:
+                    action: { const: list }
+                - type: object
+                  additionalProperties: false
+                  required: [action, conversationId, artifactId, guildId, channelId]
+                  properties:
+                    action: { const: image }
+                    conversationId: { type: string, minLength: 1, maxLength: 256 }
+                    artifactId: { type: string, pattern: "^[a-f0-9]{48}$" }
+                    guildId: { type: string, pattern: "^[0-9]{1,32}$" }
+                    channelId: { type: string, pattern: "^[0-9]{1,32}$" }
+                    ttlMs: { type: integer, minimum: 1, maximum: 7200000 }
+                - type: object
+                  additionalProperties: false
+                  required: [action, shareId, generation, conversationId, artifactId]
+                  properties:
+                    action: { const: switch }
+                    shareId: { type: string, format: uuid }
+                    generation: { type: integer, minimum: 1 }
+                    conversationId: { type: string, minLength: 1, maxLength: 256 }
+                    artifactId: { type: string, pattern: "^[a-f0-9]{48}$" }
+                - type: object
+                  additionalProperties: false
+                  required: [action, shareId, generation]
+                  properties:
+                    action: { type: string, enum: [stop, grant] }
+                    shareId: { type: string, format: uuid }
+                    generation: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: List returns sessions; image/switch returns session; grant returns grant and expiresAt; stop returns stopped true
+        "400": { description: Invalid request or PNG media }
+        "401": { description: Current owner operator authentication required }
+        "404": { description: Exact artifact or active share unavailable }
+        "409": { description: Stale generation, capacity or refused private control }
+        "429": { description: Local owner share request queue is at capacity }
+        "503":
+          {
+            description: Activity unavailable or possibly dispatched private control with typed uncertain outcome,
+          }
   /v1/integrate:
     post:
       tags: [Operator]

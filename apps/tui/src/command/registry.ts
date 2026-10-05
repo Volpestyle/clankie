@@ -9,6 +9,10 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["share"],
+    lines: ["  share [list | request JSON]  Control local Activity artifact shares (owner-only, JSON)"],
+  },
+  {
     nouns: ["harness"],
     lines: [
       "  harness install [--refresh-linked | --codex-source-setup SCRIPT]  Install or refresh linked native plugins",

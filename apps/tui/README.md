@@ -207,6 +207,7 @@ credential holder.
 - `/accounts codex list` shows local Codex homes and observed quota headroom.
   `/accounts codex add HOME --label LABEL` registers an owner-signed-in home;
   `/accounts codex remove LABEL` forgets it without deleting credentials.
+- `/share [list | request JSON]` controls owner-only local Activity artifact shares; see [the CLI](../../docs/cli.md#activity-shares). Hosted launch/admission remains pending.
 - `/games` opens a toggle dialog for PokeAgent play; press Enter to enable or
   disable it. `/games on|off` remains available for direct use. Restart Clankie
   to apply a change. Saves live with the world server, not here.

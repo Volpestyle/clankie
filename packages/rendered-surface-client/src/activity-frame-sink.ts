@@ -5,6 +5,7 @@ import type {
   RenderedSurfaceOverlay,
   RenderedSurfaceStatus,
 } from "@clankie/interactive-environment";
+import { ACTIVITY_SHARE_MAX_BUFFERED_BYTES } from "@clankie/interactive-environment";
 import { WebSocket } from "ws";
 
 /**
@@ -29,6 +30,8 @@ export interface ActivityFrameSinkOptions {
    */
   token: string;
   reconnectDelayMs?: number;
+  /** All envelopes share this bounded transport budget, including status. */
+  maxBufferedBytes?: number;
   /** Injected for tests; defaults to the real `ws` client. */
   connect?: (url: string, token: string) => ActivityFrameSocket;
   setTimeoutImpl?: (handler: () => void, ms: number) => unknown;
@@ -37,6 +40,7 @@ export interface ActivityFrameSinkOptions {
 /** Structural view of the producer socket so tests never open one. */
 export interface ActivityFrameSocket {
   readyState: number;
+  readonly bufferedAmount?: number;
   send(payload: string): void;
   close(): void;
   on(event: "open" | "close" | "error", listener: () => void): void;
@@ -81,6 +85,14 @@ export function createActivityFrameSink(options: ActivityFrameSinkOptions): Acti
   const connect = options.connect ?? defaultConnect;
   const schedule = options.setTimeoutImpl ?? ((handler, ms) => setTimeout(handler, ms));
   const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
+  const maxBufferedBytes = options.maxBufferedBytes ?? ACTIVITY_SHARE_MAX_BUFFERED_BYTES;
+  if (
+    !Number.isSafeInteger(maxBufferedBytes) ||
+    maxBufferedBytes <= 0 ||
+    maxBufferedBytes > ACTIVITY_SHARE_MAX_BUFFERED_BYTES
+  ) {
+    throw new RangeError("Activity frame buffer limit exceeds its bounded transport budget");
+  }
 
   let socket: ActivityFrameSocket | null = null;
   let closed = false;
@@ -93,18 +105,28 @@ export function createActivityFrameSink(options: ActivityFrameSinkOptions): Acti
     const next = connect(options.url, options.token);
     socket = next;
     next.on("open", () => {
-      if (socket !== next || latestStatus === undefined) return;
+      if (closed || socket !== next || latestStatus === undefined) return;
       try {
-        next.send(JSON.stringify({ kind: "status", status: latestStatus }));
+        const payload = JSON.stringify({ kind: "status", status: latestStatus });
+        if ((next.bufferedAmount ?? 0) + Buffer.byteLength(payload) <= maxBufferedBytes) {
+          next.send(payload);
+        }
       } catch {
         // Latest-only state stays retained for the next reconnect.
       }
     });
     next.on("close", () => {
+      if (socket !== next) return;
       socket = null;
-      if (!closed) schedule(open, reconnectDelayMs);
+      if (!closed) {
+        schedule(() => {
+          if (!closed && socket === null) open();
+        }, reconnectDelayMs);
+      }
     });
-    next.on("error", () => next.close());
+    next.on("error", () => {
+      if (socket === next) next.close();
+    });
   };
   open();
 
@@ -113,8 +135,13 @@ export function createActivityFrameSink(options: ActivityFrameSinkOptions): Acti
       dropped();
       return;
     }
+    const payload = JSON.stringify(message);
+    if ((socket.bufferedAmount ?? 0) + Buffer.byteLength(payload) > maxBufferedBytes) {
+      dropped();
+      return;
+    }
     try {
-      socket.send(JSON.stringify(message));
+      socket.send(payload);
     } catch {
       dropped();
     }
