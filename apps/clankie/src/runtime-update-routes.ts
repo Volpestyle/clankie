@@ -103,7 +103,13 @@ export function createRuntimeUpdateRoutes(options: {
     };
     try {
       await authorizeSetup("local");
-      return context.json(await options.refreshHarnesses({ authorizeSetup }));
+      const receipt = z
+        .record(z.string(), z.unknown())
+        .parse(await options.refreshHarnesses({ authorizeSetup }));
+      return context.json({
+        ...receipt,
+        ownerApproval: input.data.ownerApproved ? "claimed" : "not_claimed",
+      });
     } catch (error) {
       if (!authority.current()) return context.json({ error: "operator_revoked" }, 403);
       if (error instanceof HarnessRefreshPolicyError) return context.json({ error: error.code }, 403);

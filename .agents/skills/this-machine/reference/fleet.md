@@ -222,7 +222,11 @@ the `clankie-worker` plugin over the fleet's link, so a briefed remote Claude
 hire fails with the fix until `clankie herdr prepare NAME` has prepared
 that linked machine. Read effective `fleet.machineSetup`: `lead` permits the
 lead/workers to prepare Clankie's harness plugins and bridges through existing
-authorized access; `owner` requires the owner's approval (`--approve`). This
+authorized access; `owner` requires the owner's interactive confirmation
+(`--approve`), which a headless process cannot supply. New source setup scripts
+always need that confirmation; only exact remembered setup or the native plugin
+manager runs automatically under `lead`. Server approval receipts are caller
+claims, never proof of human presence. This
 does not grant operator CLI credentials to fleet workers. `herdr fleets` reports
 each link's state. Setup never restarts or steers existing lanes.
 

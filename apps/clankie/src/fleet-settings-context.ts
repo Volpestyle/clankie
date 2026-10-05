@@ -1,4 +1,5 @@
 import { realpath, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import {
   effectiveFleetAutonomy,
   observeLocalProjectGitWorktree,
@@ -83,8 +84,19 @@ export async function resolveFleetSettingsContext(
       : (connection?.machine ?? input.machine);
   if (machineId !== "local" && !settings.machines.some((machine) => machine.id === machineId))
     throw new Error("Machine setup target is not registered");
-  let linked =
-    (input.machine === "local" || input.machine === "default") && dependencies.herdrBinding?.() !== undefined;
+  const primary =
+    input.machine === "local" || input.machine === "default" ? dependencies.herdrBinding?.() : undefined;
+  // Named runtimes identify one exact descriptor. Machine aliases represent
+  // their registration set rather than guessing which runtime the owner meant.
+  const target = connection ?? {
+    machine: settings.machines.find((entry) => entry.id === machineId) ?? { id: machineId },
+    connections: settings.execution.connections
+      .filter((entry) => entry.machine === machineId)
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    ...(machineId === "local" ? { primary: primary ?? null } : {}),
+  };
+  const targetRevision = createHash("sha256").update(JSON.stringify(target)).digest("hex");
+  let linked = primary !== undefined;
   if (!linked && dependencies.runtimes) {
     const observed = await dependencies.runtimes.list();
     const ids = connection
@@ -118,6 +130,6 @@ export async function resolveFleetSettingsContext(
     schemaVersion: 1,
     effective: effectiveFleetAutonomy(settings.autonomy, project?.autonomy),
     ...(projectId === undefined ? {} : { projectId }),
-    machine: { id: machineId, linked },
+    machine: { id: machineId, linked, targetRevision },
   };
 }

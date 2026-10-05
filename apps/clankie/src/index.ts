@@ -1263,10 +1263,10 @@ const clankie = await createClankieApp({
       gitWorktree: projectGitWorktree,
     });
   },
-  prepareFleet: async (id: string, options) => {
-    const fleet = (await runtimes.fleets()).find((entry) => entry.id === id);
-    if (fleet === undefined)
-      throw new Error(`No ssh fleet ${id} is connected; add it with clankie herdr add first`);
+  prepareFleet: async (id: string, options, fleet) => {
+    // The route admits an exact target; resolving the ID again could substitute
+    // a different machine while operator authority is being revalidated.
+    if (fleet.id !== id) throw new Error("Machine setup target changed");
     return prepareFleet(fleet, {
       ...options,
       shell: runtimes.fleetShell(fleet),

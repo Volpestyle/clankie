@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { posix, win32 } from "node:path";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
-import { machineSetupContext } from "./machine-setup.ts";
+import { confirmMachineSetupApproval, machineSetupContext } from "./machine-setup.ts";
 
 export async function runRuntimeCommand(
   args: readonly string[],
@@ -92,11 +92,11 @@ export async function runRuntimeCommand(
       "Usage: clankie runtime prepare ID [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT] [--project PROJECT] [--approve]";
     if (!args[1]) throw new Error(usage);
     const flags = new Map<string, string>();
-    let ownerApproved = false;
+    let approvalRequested = false;
     for (let index = 2; index < args.length; index++) {
       const flag = args[index]!;
-      if (flag === "--approve" && !ownerApproved) {
-        ownerApproved = true;
+      if (flag === "--approve" && !approvalRequested) {
+        approvalRequested = true;
         continue;
       }
       if (
@@ -114,11 +114,31 @@ export async function runRuntimeCommand(
         !(posix.isAbsolute(codexSourceSetup) || win32.isAbsolute(codexSourceSetup)))
     )
       throw new Error("Codex source setup must be an absolute script path on the remote machine");
+    if (codexSourceSetup !== undefined && !approvalRequested)
+      throw new Error(
+        "New Codex source setup requires interactive owner approval; use --approve in an interactive terminal.",
+      );
     const requestedProject = flags.get("--project");
-    const context = await machineSetupContext(args[1], {
+    const contextOptions = {
       ...options,
       ...(requestedProject === undefined ? {} : { projectId: requestedProject }),
-    });
+    };
+    const context = await machineSetupContext(args[1], contextOptions);
+    let ownerApproved = false;
+    if (approvalRequested) {
+      await confirmMachineSetupApproval(
+        `Prepare harness bridges on machine ${context.machine.id} (${args[1]}) from ${context.workingDirectory}${context.projectId ? ` (project ${context.projectId})` : ""}.${codexSourceSetup ? ` Run and remember Codex source setup ${codexSourceSetup}.` : ""}`,
+      );
+      const after = await machineSetupContext(args[1], contextOptions);
+      if (
+        after.projectId !== context.projectId ||
+        after.workingDirectory !== context.workingDirectory ||
+        after.machine.id !== context.machine.id ||
+        after.machine.targetRevision !== context.machine.targetRevision
+      )
+        throw new Error("The setup workspace, project or machine changed during approval.");
+      ownerApproved = true;
+    }
     if (context.effective.machineSetup === "owner" && !ownerApproved)
       throw new Error(
         "Machine setup requires owner approval; review the proposed setup and use the owner's explicit --approve.",
@@ -131,6 +151,7 @@ export async function runRuntimeCommand(
     method = "POST";
     body = JSON.stringify({
       workingDirectory: context.workingDirectory,
+      expectedMachineRevision: context.machine.targetRevision,
       ...(context.projectId === undefined ? {} : { projectId: context.projectId }),
       ownerApproved,
       ...(codexSourceSetup === undefined ? {} : { codexSourceSetup }),

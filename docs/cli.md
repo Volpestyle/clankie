@@ -3481,7 +3481,8 @@ approval on an already-linked machine. New setup is limited to the caller's
 existing `CLAUDE_CONFIG_DIR` (otherwise `~/.claude`) and `CODEX_HOME` (otherwise
 `~/.codex`); sibling Claude account profiles are skipped. Under `owner`, use an
 interactive terminal for per-profile consent or supply the owner's explicit
-`--approve` for the selected profiles. Declining consent changes no registration.
+`--approve` and confirm in an interactive terminal for the selected profiles.
+Headless `--approve` is refused. Declining consent changes no registration.
 
 `clankie harness install --refresh-linked [--project PROJECT] [--approve]`
 maintains existing links and returns JSON receipts with a failing exit code for
@@ -3489,7 +3490,7 @@ incomplete installations. It includes remembered custom profiles and registered
 Codex account homes; enabled fleet aliases sharing one SSH destination refresh
 once. The CLI rechecks current project policy and target linkage before each
 profile or remote destination. Under `owner`, refresh requires the owner's
-explicit `--approve`; under `lead`, automatic refresh requires an already-linked
+interactive confirmation with `--approve`; under `lead`, automatic refresh requires an already-linked
 target. Unlinked profiles and existing Claude channel policy stay unchanged.
 An explicitly disabled Codex plugin reports `declined`: its native installer
 would enable it, so refreshing that profile requires a reviewed install.
@@ -3504,7 +3505,9 @@ worker version to an already-running service; unavailable notification is
 reported as `notices.state: deferred` until the updated service connects.
 The operator API exposes `POST /v1/harness-refresh` for the same maintenance,
 with a required `workingDirectory`, optional matching `projectId`, and
-`ownerApproved: true` for explicit owner approval. It checks current policy,
+`ownerApproved: true` for caller-reported owner approval. Its receipt marks this
+as `ownerApproval: "claimed"`; the server cannot verify human confirmation.
+It checks current policy,
 workspace membership, target linkage and operator authority before setup.
 It exposes
 `POST /v1/harness-plugin-version` with `{ "version": "0.6.2" }` for that announcement.
@@ -3513,7 +3516,9 @@ Codex uses the native `clankie-worker@clankie-fleet` plugin for project-scoped
 bridge tools and packaged skills. It does not load the operator-seat plugin.
 Symlinked or marked generated Codex configuration is not rewritten. Use the
 owning source/setup; `--codex-source-setup /absolute/script` runs an explicitly
-selected source setup under the effective policy and checks that the link is preserved.
+selected source setup and checks that the link is preserved. A new source setup
+always needs interactive owner consent, including under `lead`; automatic setup
+may use the native plugin manager or an exact, already-remembered source setup.
 Setup completion still needs doctor verification; no hook trust record is written.
 Successful owner-approved source setup is remembered for that exact config
 source and profile, so subsequent updates reuse it. A changed config source or a
@@ -3523,10 +3528,14 @@ select the source-owned script through the supported install/prepare command fir
 `clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT] [--project PROJECT] [--approve]`
 (also `clankie runtime prepare`) prepares the configured remote machine. Under
 `lead`, it needs an existing healthy link and no fresh approval; under `owner`,
-the owner must review the setup and authorize `--approve`. The CLI reads current
+the owner must review the setup and confirm `--approve` in an interactive
+terminal. Headless self-approval is refused. A newly selected source setup script
+requires the same owner confirmation under either policy. The CLI reads current
 policy before dispatch, and the service independently checks policy, canonical
-source workspace, project context and operator authentication again. An existing
-canonical workspace with no project uses global policy. Missing, ambiguous,
+source workspace, project context and operator authentication again. The CLI
+retains the named target revision across terminal confirmation and sends it to
+the service; changing its SSH target or session refuses dispatch until reviewed.
+An existing canonical workspace with no project uses global policy. Missing, ambiguous,
 mismatched or unverified worktree context refuses.
 It enables Claude in each discovered profile. An already enabled, installed Claude
 profile whose settings symlink points to another discovered unmanaged profile
@@ -3547,10 +3556,16 @@ through the config symlink:
 clankie herdr prepare pc --codex-source-setup 'C:\Users\volpe\dotfiles\scripts\codex-worker-setup.py'
 ```
 
-For owner mode, add `--approve` to that command after approval. The owner API
+For owner mode or a new source setup, add `--approve` and confirm interactively.
+The owner API
 requires `workingDirectory` in the JSON body of
 `POST /v1/runtime-connections/NAME/prepare`, accepts a matching `projectId`, and
-uses `ownerApproved: true` for explicit approval. It accepts the same remote
+uses `ownerApproved: true` only as a caller claim, shown as
+`ownerApproval: "claimed"` in the receipt; it cannot verify a human confirmation.
+Optional `expectedMachineRevision` binds the claim to the exact target revision
+returned by the context route; the CLI always sends it. Without it, the claim
+refers to the current named alias.
+It accepts the same remote
 script path as `codexSourceSetup`. Node (`.js`/`.mjs`),
 Python (`.py`, Python 3.11+ for the dotfiles setup), Windows PowerShell (`.ps1`),
 and directly executable source scripts run as argument vectors. The source hook

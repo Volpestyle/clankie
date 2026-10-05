@@ -7,7 +7,7 @@ import { commandHost } from "./command/io.ts";
 import type { BrowserCommandOptions } from "./command/browser.ts";
 import { createFleetShellRun, type HerdrFleet, type FleetShellRun } from "../../clankie/src/herdr-fleet.ts";
 import { prepareFleet, workerPluginDir } from "../../clankie/src/fleet-prepare.ts";
-import { installHarnessBridges } from "./harness-install.ts";
+import { automaticCodexConsent, installHarnessBridges } from "./harness-install.ts";
 import type { HarnessInstallResult } from "../../../integrations/claude-plugin/worker/bin/harness-install.mjs";
 
 export interface HarnessRefreshResult {
@@ -28,6 +28,7 @@ export async function refreshLinkedHarnesses(
     fleets?: readonly HerdrFleet[];
     shell?: (fleet: HerdrFleet) => FleetShellRun;
     authorizeSetup?: (machine: string, fleet?: HerdrFleet) => Promise<void>;
+    consent?: Parameters<typeof installHarnessBridges>[0]["consent"];
     execute?: NonNullable<Parameters<typeof installHarnessBridges>[0]["execute"]>;
     prepareSkills?: NonNullable<Parameters<typeof installHarnessBridges>[0]["prepareSkills"]>;
   },
@@ -39,8 +40,15 @@ export async function refreshLinkedHarnesses(
     repoRoot: options.repoRoot,
     env,
     linkedOnly: true,
-    consent: async () => {
+    consent: async (harness, detail, context) => {
       await options.authorizeSetup?.("local");
+      if (options.consent) return options.consent(harness, detail, context);
+      if (options.authorizeSetup && harness === "codex")
+        return automaticCodexConsent(
+          detail,
+          context,
+          join(options.repoRoot, "integrations", "claude-plugin"),
+        );
       return true;
     },
     codexHomes: settings.codexAccounts.map((entry) => entry.home),

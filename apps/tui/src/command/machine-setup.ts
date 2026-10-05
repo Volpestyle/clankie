@@ -1,7 +1,23 @@
 import { realpath } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import { FleetSettingsContextSchema } from "@clankie/protocol";
 import { commandHost } from "./io.ts";
+
+/** A CLI flag is a request to ask the terminal owner, never proof of human consent. */
+export async function confirmMachineSetupApproval(detail: string): Promise<void> {
+  if (process.stdin.isTTY !== true || process.stdout.isTTY !== true)
+    throw new Error(
+      "Owner approval requires an interactive TTY confirmation; headless --approve is refused. No changes made.",
+    );
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    if (!/^y(?:es)?$/iu.test((await terminal.question(`${detail}\nProceed? [y/N] `)).trim()))
+      throw new Error("Machine setup was not approved. No changes made.");
+  } finally {
+    terminal.close();
+  }
+}
 
 /** Read current server policy and existing link; this creates no workspace, account or machine grant. */
 export async function machineSetupContext(

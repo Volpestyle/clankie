@@ -39,6 +39,7 @@ import type { DiscordRoomObservations } from "../discord-room-observations.ts";
 import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
+import type { HerdrFleet } from "../herdr-fleet.ts";
 import type { HostedBodyClient } from "../hosted-body.ts";
 import type { HostedDeviceSecurity } from "../hosted-device-security.ts";
 import type { HostedPairing } from "../hosted-pairing.ts";
@@ -176,7 +177,7 @@ export interface ClankieAppDependencies {
   fleetProjectMembership?: Pick<import("../fleet-project-membership.ts").FleetProjectMembership, "read">;
   projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
   /** `clankie herdr prepare NAME`: prepare native workers through that fleet's registered transport. */
-  prepareFleet?: (id: string, options: { codexSourceSetup?: string }) => Promise<unknown>;
+  prepareFleet?: (id: string, options: { codexSourceSetup?: string }, fleet: HerdrFleet) => Promise<unknown>;
   inspectFleetHarnesses?: (id: string) => Promise<unknown>;
   /** Host-only project eligibility on a configured fleet; never verifies an MCP connection. */
   inspectFleetMembership?: (

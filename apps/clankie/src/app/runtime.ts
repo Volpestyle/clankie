@@ -935,6 +935,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       input.data.codexSourceSetup === undefined ? {} : { codexSourceSetup: input.data.codexSourceSetup };
     try {
       const current = await settingsSource.load();
+      const configured = current.execution.connections.find((entry) => entry.id === context.req.param("id"));
+      if (!configured?.enabled || !configured.ssh) throw new Error("Configured ssh fleet unavailable");
+      const fleet = structuredClone({ id: configured.id, session: configured.session, ssh: configured.ssh });
       const policy = await resolveFleetSettingsContext(
         current,
         {
@@ -944,7 +947,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         },
         { runtimes: dependencies.runtimes, herdrBinding: dependencies.herdrBinding },
       );
-      if (!input.data.ownerApproved && policy.effective.machineSetup === "owner")
+      if (
+        input.data.expectedMachineRevision !== undefined &&
+        input.data.expectedMachineRevision !== policy.machine.targetRevision
+      )
+        return context.json({ error: "machine_setup_target_changed" }, 409);
+      if (
+        !input.data.ownerApproved &&
+        (policy.effective.machineSetup === "owner" || input.data.codexSourceSetup !== undefined)
+      )
         return context.json({ error: "machine_setup_owner_approval_required" }, 403);
       if (!input.data.ownerApproved && !policy.machine.linked)
         return context.json({ error: "machine_setup_link_required" }, 403);
@@ -957,9 +968,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         currentOperator.operatorId !== operator.operatorId
       )
         return context.json({ error: "operator_authentication_required" }, 401);
+      if (JSON.stringify(await settingsSource.load()) !== JSON.stringify(current))
+        throw new Error("Machine setup settings changed");
       return context.json({
         ok: true,
-        prepared: await dependencies.prepareFleet(context.req.param("id"), options),
+        prepared: await dependencies.prepareFleet(context.req.param("id"), options, fleet),
+        ownerApproval: input.data.ownerApproved ? "claimed" : "not_claimed",
       });
     } catch (error) {
       return context.json(

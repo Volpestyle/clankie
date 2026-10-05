@@ -1,4 +1,11 @@
 export type HarnessInstallTarget = "claude" | "codex";
+/** Captured native setup inputs; consent does not confer a machine or workspace grant. */
+export interface HarnessInstallConsentContext {
+  profile: string;
+  source: string;
+  managed: boolean;
+  sourceSetup?: { command: string; args: readonly string[] };
+}
 export interface HarnessInstallResult {
   harness: HarnessInstallTarget;
   profile?: string;
@@ -19,7 +26,11 @@ export function installHarnessBridges(options: {
   /** Refresh only existing links; never opt a new profile in or enable a disabled Claude plugin. */
   linkedOnly?: boolean;
   codexHomes?: readonly string[];
-  consent(harness: HarnessInstallTarget, detail: string): Promise<boolean>;
+  consent(
+    harness: HarnessInstallTarget,
+    detail: string,
+    context?: HarnessInstallConsentContext,
+  ): Promise<boolean>;
   execute?(command: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<unknown>;
   prepareSkills?(workerRoot: string): Promise<void>;
   codexSourceSetup?: { command: string; args: readonly string[] };
