@@ -12,6 +12,8 @@ import {
 import { z } from "zod";
 
 const MAX_TIMER_MS = 2_147_483_647;
+const WAKE_RETRY_START_MS = 5_000;
+const WAKE_RETRY_MAX_MS = 5 * 60_000;
 export const DEFAULT_GOAL_TOKEN_BUDGET = 1_000_000;
 
 const PersistedAutonomySchema = z
@@ -54,6 +56,7 @@ export class AutonomyStore {
   private run: InternalRun | undefined;
   private readonly goalRuns = new Set<string>();
   private firingWakes = false;
+  private readonly wakeRetries = new Map<string, { wake: OperatorWake; failures: number; retryAt: number }>();
   private stateUnreadable = false;
 
   public constructor(path: string) {
@@ -290,6 +293,7 @@ export class AutonomyStore {
     OperatorWakeSchema.parse(wake);
     // ponytail: one pending wake per conversation; use a list only when overlapping wakeups are useful.
     this.record(conversationId).wake = wake;
+    this.wakeRetries.delete(conversationId);
     this.save();
     this.arm();
     return wake;
@@ -300,6 +304,7 @@ export class AutonomyStore {
   }
 
   public clearConversation(conversationId: string): void {
+    this.wakeRetries.delete(conversationId);
     if (delete this.state.conversations[conversationId]) this.save();
     this.arm();
   }
@@ -357,6 +362,7 @@ export class AutonomyStore {
   }
 
   private clearWake(conversationId: string): void {
+    this.wakeRetries.delete(conversationId);
     const record = this.state.conversations[conversationId];
     if (record?.wake === undefined) return;
     delete record.wake;
@@ -403,8 +409,8 @@ export class AutonomyStore {
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
     if (!this.state.enabled || this.run === undefined || this.firingWakes) return;
-    const next = Object.values(this.state.conversations)
-      .flatMap((record) => (record.wake === undefined ? [] : [Date.parse(record.wake.at)]))
+    const next = Object.entries(this.state.conversations)
+      .flatMap(([id, record]) => (record.wake === undefined ? [] : [this.wakeDueAt(id, record.wake)]))
       .sort((a, b) => a - b)[0];
     if (next === undefined) return;
     this.timer = setTimeout(
@@ -414,6 +420,11 @@ export class AutonomyStore {
     this.timer.unref?.();
   }
 
+  private wakeDueAt(conversationId: string, wake: OperatorWake): number {
+    const retry = this.wakeRetries.get(conversationId);
+    return Math.max(Date.parse(wake.at), retry?.wake === wake ? retry.retryAt : 0);
+  }
+
   private async fireDueWakes(): Promise<void> {
     this.timer = undefined;
     if (!this.state.enabled || this.run === undefined || this.firingWakes) return;
@@ -421,30 +432,31 @@ export class AutonomyStore {
     const now = Date.now();
     const due = Object.entries(this.state.conversations).filter(
       (entry): entry is [string, { goal?: OperatorGoal; wake: OperatorWake }] =>
-        entry[1].wake !== undefined && Date.parse(entry[1].wake.at) <= now,
+        entry[1].wake !== undefined && this.wakeDueAt(entry[0], entry[1].wake) <= now,
     );
-    let admissionFailed = false;
     for (const [conversationId, record] of due) {
       if (!this.state.enabled) break;
       const wake = record.wake;
       try {
         await this.run(conversationId, wakePrompt(wake), "wake");
         if (this.state.conversations[conversationId]?.wake === wake) {
+          this.wakeRetries.delete(conversationId);
           delete this.state.conversations[conversationId]!.wake;
           this.pruneRecord(conversationId);
           this.save();
         }
       } catch {
-        // Keep the wake durable so a later arm or restart can retry admission.
-        admissionFailed = true;
+        // Retain the exact wake, but do not repeatedly admit a failed receiver
+        // or model turn every five seconds. Other conversations stay schedulable.
+        if (this.state.conversations[conversationId]?.wake === wake) {
+          const previous = this.wakeRetries.get(conversationId);
+          const failures = previous?.wake === wake ? previous.failures + 1 : 1;
+          const delay = Math.min(WAKE_RETRY_MAX_MS, WAKE_RETRY_START_MS * 2 ** Math.min(failures - 1, 16));
+          this.wakeRetries.set(conversationId, { wake, failures, retryAt: Date.now() + delay });
+        }
       }
     }
     this.firingWakes = false;
-    if (admissionFailed && this.state.enabled && this.run !== undefined) {
-      this.timer = setTimeout(() => void this.fireDueWakes(), 5_000);
-      this.timer.unref?.();
-      return;
-    }
     this.arm();
   }
 

@@ -75,6 +75,12 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   receipts can hide the same failure; do not infer an empty successful run
   from that code alone.
 
+- **An operator-turn failure can be native delivery rather than a model call.**
+  Join its exact run ID to the conversation journal and turn metrics before
+  attributing it to model usage. Retained worker-report transport failures can
+  interleave with separate Pi compaction stalls. `contextTokensStart` describes
+  retained context, not billed usage; `usage: null` leaves consumption unknown.
+
 - **An `accepted` receipt establishes admission, not execution or liveness.**
   The input may be queued, preparing, executing or awaiting native delivery.
   With no active Pi tools, service preparation and execution fail after five

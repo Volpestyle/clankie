@@ -215,6 +215,14 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           )
             return;
         }
+        // Native ownership survives gaps in polling. Internal deliveries must
+        // wait for that receiver, rather than starting another lead in Pi.
+        if (context.internal && ctx.conversations.hasNativeSeat(conversationId)) {
+          context.deliveryReceipt?.("unavailable");
+          throw new Error(
+            "Native conversation receiver is unavailable; internal service fallback is refused",
+          );
+        }
         const cwd = context.workspace ?? ctx.workingDirectory;
         const lane = await ctx.durableSession(
           `operator:${conversationId}`,
