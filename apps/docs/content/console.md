@@ -32,8 +32,13 @@ machine and distinct current step wrap below the list. Enter opens its existing
 conversation; Escape closes the modal and preserves your draft.
 An opened conversation shows its newest 20 turns, then follows live; older turns
 stay readable with `clankie conversations show ID`.
+A fixed bar above the transcript names the conversation on screen. In an
+agent's conversation it shows `◀ esc Clankie › name` with the agent's harness,
+state and machine, and the bar and the input border take the harness color
+(yellow for Claude, blue for others), so you can see who you are typing to.
 Messages use the same native delivery as `/agents`. Escape returns to the
-conversation you left without cancelling the worker. Composer drafts stay with
+conversation you left without cancelling the worker, however the agent was
+opened: the dock, `Ctrl+G` or `/agents`. Composer drafts stay with
 their conversations. The strip disappears when no agents are live.
 
 When a harness sits in the selected conversation's seat (for example
