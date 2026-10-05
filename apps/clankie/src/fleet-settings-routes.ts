@@ -14,7 +14,7 @@ import {
   type FleetSettingsContextDependencies,
 } from "./fleet-settings-context.ts";
 
-export function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot {
+function fleetSettingsSnapshot(settings: ClankieSettings): FleetSettingsSnapshot {
   const fleet = { size: settings.fleet.size, models: settings.fleet.models, ...settings.autonomy.fleet };
   return {
     schemaVersion: 1,

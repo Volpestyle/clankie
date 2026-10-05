@@ -46,7 +46,13 @@ async function fixture() {
     embodiment: { submitIntent: unused, getSession: unused, getLiveSession: unused },
     activity: { current: unused },
     presence: { listSessions: unused, listVoiceHistory: unused, listRecentVoiceSpeech: unused },
-    memory: { appendEpisode: unused, recallEpisodeCard: unused, searchEpisodeCard: unused },
+    memory: {
+      writeMemory: unused,
+      recallMemoryCard: unused,
+      searchMemory: unused,
+      editMemory: unused,
+      forgetMemory: unused,
+    },
   };
   const captain = createCaptain(deps, {
     repoRoot: root,
