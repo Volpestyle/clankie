@@ -56,7 +56,7 @@ import { compactLinearWrite } from "./linear-write-receipt.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
 import { TRACKER_TOOLS, type TrackerToolBackend } from "@clankie/work-items";
-import { callPrioritySortedLinearIssues } from "./tracker-tool-router.ts";
+import { createPrioritySortedLinearIssueReader } from "./tracker-tool-router.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -135,6 +135,8 @@ export interface McpHost {
     backend?: "local";
   }>;
   trackerStatus?(): Promise<TrackerBackendStatus>;
+  /** A verified provider change retires cached lists, including self-echo webhooks. */
+  invalidateTrackerReads?(): void;
   /**
    * Connects every active server up front, so no conversational turn pays for
    * it. Failures are logged, never thrown: a server that is down costs him that
@@ -212,6 +214,8 @@ export interface McpHostOptions {
   /** Registered GraphQL OAuth, with a separate broker audience from MCP. */
   readonly linearApiTracker?: TrackerToolBackend;
   readonly trackerIdentity?: string;
+  /** Internal clock for list freshness; never a caller/model argument. */
+  readonly trackerReadClock?: () => number;
   /** Read-only lookup in already registered stores; never enrolls a repository. */
   readonly trackerRepoForCall?: (name: string, args: Record<string, unknown>) => Promise<string | undefined>;
   /** Repository conventions are backends of the same public tracker vocabulary. */
@@ -304,6 +308,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   const retired = new Set<ServerState>();
   const missingCredentials = new Set<string>();
   const opening = new Set<Promise<McpConnection>>();
+  const trackerReads = createPrioritySortedLinearIssueReader(
+    options.trackerReadClock === undefined ? {} : { clock: options.trackerReadClock },
+  );
   let closed = false;
   const isLocalTracker = (server: McpServerSettings) =>
     server.id === "linear" && server.command === LOCAL_TRACKER_COMMAND;
@@ -413,6 +420,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   async function retire(id: string, state: ServerState): Promise<void> {
     if (states.get(id) === state) states.delete(id);
     if (!state.retired) {
+      if (id === "linear") trackerReads.invalidate();
       state.retired = true;
       retired.add(state);
     }
@@ -478,6 +486,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     const existing = states.get(server.id);
     if (existing?.configuration === configuration && existing.credential === credential) return existing;
     const created: ServerState = { configuration, credential, activeCalls: 0 };
+    if (server.id === "linear") trackerReads.invalidate();
     // Publish the new generation before closing the old one; concurrent callers
     // must not replace each other's pending connection during that await.
     states.set(server.id, created);
@@ -679,6 +688,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   }
 
   return {
+    invalidateTrackerReads: () => trackerReads.invalidate(),
     async account(id, lane) {
       const server = (await activeServers()).find((entry) => entry.id === id);
       if (server === undefined || !laneAllows(server, lane))
@@ -907,6 +917,8 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               // Synchronous receipt persistence may consume the remaining budget.
               assertDispatch();
               dispatched = true;
+              if (server.id === "linear" && !/^(?:get|list|search|check|fetch|read)_/u.test(input.tool))
+                trackerReads.invalidate();
             }
           };
           const publication = {
@@ -949,6 +961,12 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               ? (aliases[input.tool] ?? input.tool)
               : input.tool;
           const selected = state;
+          const priorityRead =
+            !repositoryCall &&
+            server.id === "linear" &&
+            upstreamTool === "list_issues" &&
+            (isApiTracker(server) || (!isLocalTracker(server) && options.localTracker !== undefined));
+          let providerPages = 0;
           selected.activeCalls += 1;
           let result: Awaited<ReturnType<McpConnection["callTool"]>>;
           try {
@@ -970,11 +988,12 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                 }
               : isApiTracker(server) && !workerPost
                 ? upstreamTool === "list_issues"
-                  ? await callPrioritySortedLinearIssues(
+                  ? await trackerReads.call(
                       input.arguments,
                       async (args) => {
                         await assertCurrent(server, state!);
                         current?.();
+                        providerPages += 1;
                         return {
                           content: JSON.stringify(
                             await options.linearApiTracker!.call("list_issues", args, publication),
@@ -982,7 +1001,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                           isError: false,
                         };
                       },
-                      connectedAccount?.binding ?? state!.credential,
+                      JSON.stringify([connectedAccount?.binding, state!.configuration, state!.credential]),
                     )
                   : {
                       content: JSON.stringify(
@@ -1018,6 +1037,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                           await assertCurrent(server, state!);
                           assertDispatch();
                           if (!client!.dispatchesAtWire) notifyDispatch();
+                          if (priorityRead) providerPages += 1;
                           // Observe the admitted original response under the existing
                           // provider cap, even after the caller's shorter deadline.
                           return client!.callTool(upstreamTool, args, REQUEST_TIMEOUT_MS);
@@ -1025,14 +1045,31 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                         return options.localTracker &&
                           server.id === "linear" &&
                           upstreamTool === "list_issues"
-                          ? callPrioritySortedLinearIssues(
+                          ? trackerReads.call(
                               input.arguments,
                               callUpstream,
-                              connectedAccount?.binding ?? state!.credential,
+                              JSON.stringify([
+                                connectedAccount?.binding,
+                                state!.configuration,
+                                state!.credential,
+                              ]),
                             )
                           : callUpstream(input.arguments);
                       });
+            if (priorityRead) {
+              // A shared/cached read never borrows the first caller's grant. Every
+              // waiter rechecks its own revocation and account/config generation.
+              commitCurrent = await input.fence?.();
+              await assertCurrent(server, selected);
+              assertDispatch();
+            }
           } finally {
+            if (
+              dispatched &&
+              server.id === "linear" &&
+              !/^(?:get|list|search|check|fetch|read)_/u.test(input.tool)
+            )
+              trackerReads.invalidate();
             selected.activeCalls -= 1;
             // Provider settlement releases the connection; receipt observers
             // can still await without retaining an obsolete transport.
@@ -1048,7 +1085,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           };
           const readOnly =
             !dispatched &&
-            (repositoryCall || isLocalTracker(server) || isApiTracker(server)) &&
+            (repositoryCall || isLocalTracker(server) || isApiTracker(server) || priorityRead) &&
             /^(?:get|list|search)_/u.test(input.tool) &&
             TRACKER_TOOLS.some((tool) => tool.name === input.tool);
           // These owned backend reads need no mutation admission. Provider
@@ -1059,6 +1096,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               event: "mcp.host.call",
               server: server.id,
               tool: input.tool,
+              ...(priorityRead ? { trackerRead: { providerPages } } : {}),
               ...(input.delegation === undefined
                 ? {}
                 : {
@@ -1162,6 +1200,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
 
     async close() {
       closed = true;
+      trackerReads.close();
       await Promise.all([...states].map(([id, state]) => retire(id, state)));
       await Promise.all([...retired].map((state) => closeRetired(state)));
       await Promise.allSettled(opening);

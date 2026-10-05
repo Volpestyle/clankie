@@ -999,6 +999,13 @@ projected onto each backend's own states. Priority is `0` (none), `1` (Urgent),
 `2` (High), `3` (Medium), `4` (Low); open work sorts Urgent through Low, with
 unprioritized work last, before limits. When Linear is disconnected the common
 surface uses local storage; a connected failure never replays a write locally.
+Connected Linear issue lists share a sorted snapshot for up to 60 seconds,
+including their cursor pages and concurrent readers. Writes and verified
+webhooks invalidate it; an expired or invalidated cursor requires restarting the
+listing. Failed list reads wait at least 30 seconds before another provider scan.
+Direct issue reads remain fresh for read-before-write checks. The service's
+`mcp.host.call` log includes `trackerRead.providerPages`, so a cache hit records
+zero provider requests rather than looking like another Linear scan.
 Local records persist across restart and do not automatically migrate on
 connection. Other unavailable repo providers answer `backend_unavailable`. The HTTP
 form is `POST /v1/work` with the operator bearer and `{ "action": ... }`.

@@ -68,6 +68,80 @@ async function setup() {
 }
 
 describe("registered Linear OAuth through real broker and hosted tracker", () => {
+  it("coalesces registered API list reads without caching fresh issue reads or writes", async () => {
+    const { host, provider } = await setup();
+    const list = () =>
+      host.call({
+        server: "linear",
+        tool: "list_issues",
+        lane: "operator",
+        arguments: { project: PROJECT_ID, limit: 1 },
+      });
+    const issueQueries = () =>
+      provider.seen.filter((entry) => /\bissues\s*\(/u.test(entry.query ?? "")).length;
+    const results = await Promise.all(Array.from({ length: 12 }, list));
+    for (const result of results) expect(result).toMatchObject({ outcome: "ok", isError: false });
+    expect(issueQueries()).toBe(1);
+    await list();
+    expect(issueQueries()).toBe(1);
+    const write = await host.call({
+      server: "linear",
+      tool: "save_issue",
+      lane: "operator",
+      arguments: { id: ISSUE_ID, title: "Fresh saved title" },
+    });
+    expect(write).toMatchObject({ outcome: "ok", isError: false });
+    const updated = await list();
+    expect(updated.outcome).toBe("ok");
+    if (updated.outcome !== "ok") throw new Error(updated.detail);
+    expect(JSON.parse(updated.content).issues[0].title).toBe("Fresh saved title");
+    expect(issueQueries()).toBe(2);
+    provider.issue.title = "Changed outside Clankie";
+    const direct = await host.call({
+      server: "linear",
+      tool: "get_issue",
+      lane: "operator",
+      arguments: { id: ISSUE_ID },
+    });
+    expect(direct.outcome).toBe("ok");
+    if (direct.outcome !== "ok") throw new Error(direct.detail);
+    expect(JSON.parse(direct.content).title).toBe("Changed outside Clankie");
+    expect(provider.validationErrors).toEqual([]);
+  });
+
+  it("rechecks each coalesced reader's grant without borrowing another reader's admission", async () => {
+    const { host, provider } = await setup();
+    const held = provider.blockNextGraphql();
+    const input = { server: "linear", tool: "list_issues", lane: "operator" as const, arguments: {} };
+    const owner = host.call(input);
+    await held.started;
+    let allowed = true;
+    let admitted!: () => void;
+    const admission = new Promise<void>((resolve) => {
+      admitted = resolve;
+    });
+    const other = host.call({
+      ...input,
+      fence: async () => {
+        if (!allowed) throw new Error("Reader grant revoked");
+        admitted();
+        return () => {
+          if (!allowed) throw new Error("Reader grant revoked");
+        };
+      },
+    });
+    try {
+      await admission;
+      allowed = false;
+    } finally {
+      held.release();
+    }
+    expect(await owner).toMatchObject({ outcome: "ok", isError: false });
+    expect(await other).toMatchObject({ outcome: "refused", possiblyDispatched: false });
+    expect(await host.call(input)).toMatchObject({ outcome: "ok", isError: false });
+    expect(provider.seen.filter((entry) => /\bissues\s*\(/u.test(entry.query ?? ""))).toHaveLength(1);
+  });
+
   it("implements the canonical read/write surface against provider-owned GraphQL types", async () => {
     const { tracker, provider } = await setup();
     const cases: Array<[string, Record<string, unknown>]> = [

@@ -40,6 +40,17 @@ backend. Open-work lists sort urgent through low, then unprioritized, before
 pagination or limits. Markdown stores priority as front matter; GitHub uses
 reserved priority labels; Linear retains its native field.
 
+Connected issue lists collect provider pages once into an account/configuration-
+bound sorted snapshot. Identical concurrent reads and public cursor pages share
+that scan for 60 seconds; failures have a 30-second retry floor. The host retains
+at most 32 listings. Cursors name the snapshot and require a restarted listing
+after expiry or invalidation, preventing mixed pages. Each caller still passes
+its own lane, grant, account and revocation checks, including after a shared read.
+Writes invalidate at dispatch and settlement (also after uncertain failures),
+and verified webhooks invalidate before self-echo suppression. A connection
+change or shutdown retires snapshots. No mutation is cached or retried. Host
+call logs include the actual provider-page count, including zero for cache hits.
+
 Local records have immutable UUIDs and stable human identifiers. Writes lock
 the durable store and replace it atomically. Patch anchors must match current
 content; a failing operation aborts the entire mutation. Labels replace only
