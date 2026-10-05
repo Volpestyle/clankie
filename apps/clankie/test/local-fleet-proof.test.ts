@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { Socket } from "node:net";
 import { ancestors, clientPid, localFleetProof } from "../src/local-fleet-proof.ts";
+import { socketProcessFixture } from "./helpers/local-fleet-process.ts";
 
 const socket = () =>
   ({
@@ -25,9 +26,9 @@ function fixture() {
     herdrBinary: "/trusted/herdr",
     binding: async () => (live ? binding : undefined),
     privateSeat: async (chain, pane) => privateSeat && chain.includes(44) && pane === "w1:p1",
+    observeSocket: async (socket) => socketProcessFixture(socket, lsof, tree),
     run: async (command, args, env) => {
-      if (command === "/usr/sbin/lsof") return lsof;
-      if (command === "/bin/ps") return tree;
+      expect(command).toBe("/trusted/herdr");
       expect(env?.HERDR_SOCKET_PATH).toBe("/trusted/default.sock");
       expect(args.slice(0, 2)).toEqual(["pane", "process-info"]);
       return JSON.stringify({
@@ -102,10 +103,14 @@ it.each(["owner", "binding", "socket"])("rejects a changed %s during native proo
     herdrBinary: "/trusted/herdr",
     binding: async () =>
       ++bindings > 1 && changed === "binding" ? { ...binding, session: "another" } : binding,
+    observeSocket: async (socket) =>
+      socketProcessFixture(
+        socket,
+        ++owners > 1 && changed === "owner" ? owner.replace("p55", "p56") : owner,
+        "55 44\n44 33\n33 1\n",
+      ),
     run: async (command) => {
-      if (command === "/usr/sbin/lsof")
-        return ++owners > 1 && changed === "owner" ? owner.replace("p55", "p56") : owner;
-      if (command === "/bin/ps") return "55 44\n44 33\n33 1\n";
+      expect(command).toBe("/trusted/herdr");
       if (changed === "socket") Object.assign(connected, { destroyed: true });
       return JSON.stringify({ result: { process_info: { pane_id: "w1:p1", shell_pid: 33 } } });
     },
@@ -124,6 +129,7 @@ it("project proof requires the socket to descend from the current native agent, 
     canonical: async (path) => path,
     herdrBinary: "herdr",
     binding: async () => binding,
+    observeSocket: async (socket) => socketProcessFixture(socket, owner, chain),
     run: async (command, args) => {
       if (command === "herdr" && args[0] === "agent")
         return JSON.stringify({
@@ -136,10 +142,14 @@ it("project proof requires the socket to descend from the current native agent, 
             },
           },
         });
-      if (command === "/usr/sbin/lsof") return args.includes("txt") ? "p44\nftxt\nn/trusted/codex\n" : owner;
-      if (command === "/bin/ps" && args[0] === "-axo") return chain;
-      if (command === "/bin/ps")
+      if (command === "/usr/sbin/lsof") {
+        expect(args).toContain("txt");
+        return "p44\nftxt\nn/trusted/codex\n";
+      }
+      if (command === "/bin/ps") {
+        expect(args[0]).not.toBe("-axo");
         return `${nativeStart} ${Number(args[1]) === 33 ? "/bin/zsh" : "/usr/local/bin/codex"}\n`;
+      }
       return JSON.stringify({
         result: {
           process_info: { pane_id: args.at(-1), shell_pid: 33, foreground_process_group_id: foreground },
@@ -175,6 +185,8 @@ it("admits only a live registered private server matching the foreground native 
     binding: async () => binding,
     launcher: async () => ({ executable: "/trusted/codex" }),
     canonical: async (path: string) => path,
+    observeSocket: async (socket: Socket) =>
+      socketProcessFixture(socket, owner, "55 99\n99 1\n44 33\n33 1\n"),
     privateSeat: async (chain: readonly number[], pane: string) => registry.allows(chain, pane, binding),
     privateProjectSeat: async (
       chain: readonly number[],
@@ -183,10 +195,14 @@ it("admits only a live registered private server matching the foreground native 
       proof: { nativeOccupantId: string },
     ) => registry.allows(chain, pane, binding, proof.nativeOccupantId),
     run: async (command: string, args: string[]) => {
-      if (command === "/usr/sbin/lsof") return args.includes("txt") ? "p44\nftxt\nn/trusted/codex\n" : owner;
-      if (command === "/bin/ps" && args[0] === "-axo") return "55 99\n99 1\n44 33\n33 1\n";
-      if (command === "/bin/ps")
+      if (command === "/usr/sbin/lsof") {
+        expect(args).toContain("txt");
+        return "p44\nftxt\nn/trusted/codex\n";
+      }
+      if (command === "/bin/ps") {
+        expect(args[0]).not.toBe("-axo");
         return `Sat Oct  3 10:00:00 2026 ${Number(args[1]) === 33 ? "/bin/zsh" : "/trusted/codex"}\n`;
+      }
       if (args[0] === "agent")
         return JSON.stringify({
           result: {
@@ -231,10 +247,16 @@ it("allows a sessionless owner process only through its own socket ancestry, nev
     canonical: async (path) => path,
     privateSeat: async () => true,
     privateProjectSeat: async () => true,
+    observeSocket: async (socket) => socketProcessFixture(socket, owner, tree),
     run: async (command, args) => {
-      if (command === "/usr/sbin/lsof") return args.includes("txt") ? "p44\nftxt\nn/trusted/codex\n" : owner;
-      if (command === "/bin/ps" && args[0] === "-axo") return tree;
-      if (command === "/bin/ps") return "Sat Oct  3 10:00:00 2026 /trusted/codex\n";
+      if (command === "/usr/sbin/lsof") {
+        expect(args).toContain("txt");
+        return "p44\nftxt\nn/trusted/codex\n";
+      }
+      if (command === "/bin/ps") {
+        expect(args[0]).not.toBe("-axo");
+        return "Sat Oct  3 10:00:00 2026 /trusted/codex\n";
+      }
       if (args[0] === "agent")
         return JSON.stringify({
           result: { agent: { pane_id: "w1:p1", terminal_id: "terminal", agent: "codex" } },
@@ -272,21 +294,31 @@ it.each([
     binding: async () => (final && changed === "binding" ? undefined : binding),
     launcher: async () => ({ executable: "/trusted/codex" }),
     canonical: async (path) => path,
+    observeSocket: async (socket) => {
+      if (++owners === 2) final = true;
+      if (final && changed === "closed") Object.assign(connected, { destroyed: true });
+      const observedOwner =
+        final && changed === "owner"
+          ? owner.replace("p55", "p56")
+          : final && changed === "duplicate"
+            ? `${owner}p56\nn127.0.0.1:51000->127.0.0.1:42000\n`
+            : owner;
+      return socketProcessFixture(
+        socket,
+        observedOwner,
+        final && changed === "ancestry" ? "55 99\n99 33\n33 1\n44 33\n" : "55 44\n44 33\n33 1\n",
+      );
+    },
     run: async (command, args) => {
       if (command === "/usr/sbin/lsof") {
         if (args.includes("txt")) {
           if (final && changed === "unavailable") throw new Error("Process observation timed out");
           return `p44\nftxt\nn${final && changed === "executable" ? "/untrusted/codex" : "/trusted/codex"}\n`;
         }
-        if (++owners === 2) final = true;
-        if (final && changed === "closed") Object.assign(connected, { destroyed: true });
-        if (final && changed === "owner") return owner.replace("p55", "p56");
-        if (final && changed === "duplicate") return `${owner}p56\nn127.0.0.1:51000->127.0.0.1:42000\n`;
-        return owner;
+        throw new Error("Legacy socket census is forbidden");
       }
       if (command === "/bin/ps") {
-        if (args[0] === "-axo")
-          return final && changed === "ancestry" ? "55 99\n99 33\n33 1\n44 33\n" : "55 44\n44 33\n33 1\n";
+        expect(args[0]).not.toBe("-axo");
         return `Sat Oct  3 10:00:0${final && changed === "lifetime" ? "1" : "0"} 2026 ${Number(args[1]) === 33 ? "/bin/zsh" : "/trusted/codex"}\n`;
       }
       if (args[0] === "agent")

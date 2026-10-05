@@ -13,6 +13,7 @@ import * as fleetRunner from "../src/captain/herdr-fleet-runner.ts";
 import * as codexAdapter from "../src/captain/codex-seat-adapter.ts";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 import { localFleetProof } from "../src/local-fleet-proof.ts";
+import { socketProcessFixture } from "./helpers/local-fleet-process.ts";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { createInboundSender } from "../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
@@ -67,10 +68,10 @@ it("keeps a private Codex worker's authenticated binding and reports across serv
       herdrBinary: "herdr",
       binding: async () => binding,
       privateSeat: (chain, requested, observed) => seats.allows(chain, requested, observed),
+      observeSocket: async (socket) =>
+        socketProcessFixture(socket, "p55\nn127.0.0.1:51000->127.0.0.1:42000\n", "55 99\n99 1\n33 1\n"),
       run: async (command) => {
-        if (command === "/usr/sbin/lsof") return "p55\nn127.0.0.1:51000->127.0.0.1:42000\n";
-        // The app-server is detached from the pane shell, exactly like a real hire.
-        if (command === "/bin/ps") return "55 99\n99 1\n33 1\n";
+        expect(command).toBe("herdr");
         return JSON.stringify({ result: { process_info: { pane_id: pane, shell_pid: 33 } } });
       },
     });

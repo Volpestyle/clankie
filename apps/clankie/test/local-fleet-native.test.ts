@@ -31,7 +31,7 @@ it.skipIf(!process.env.CLANKIE_PROOF_PANE || process.platform !== "darwin")(
       registered = false;
       const revoked = await check(pane);
       console.log(
-        JSON.stringify({ native: "macOS lsof/ps + live Herdr process-info", admitted, forged, revoked }),
+        JSON.stringify({ native: "macOS libproc + live Herdr process-info", admitted, forged, revoked }),
       );
       if (admitted !== 200 || forged !== 403 || revoked !== 403) process.exitCode = 1;
     } finally {

@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { localFleetProof, localProjectProof } from "../src/local-fleet-proof.ts";
 import { createProjectMembershipResolver } from "../src/project-membership.ts";
+import { socketProcessFixture } from "./helpers/local-fleet-process.ts";
 
 function fixture() {
   const counts = { socket: 0, executable: 0 };
@@ -22,6 +23,10 @@ function fixture() {
     binding: async () => ({ runtime: "external" as const, socketPath: "/host/socket", session: "default" }),
     launcher: async () => ({ executable: "/trusted/codex" }),
     canonical: async (path: string) => path,
+    observeSocket: async (socket: Socket) => {
+      counts.socket++;
+      return socketProcessFixture(socket, "p55\nn127.0.0.1:51000->127.0.0.1:42000\n", "55 44\n44 33\n33 1\n");
+    },
     run: async (command: string, args: string[]) => {
       if (command === "/usr/sbin/lsof") {
         if (args.includes("txt")) {
@@ -29,13 +34,12 @@ function fixture() {
           if (state.unavailable) throw new Error("Process observation unavailable");
           return "p44\nftxt\nn/trusted/codex\n";
         }
-        counts.socket++;
-        return "p55\nn127.0.0.1:51000->127.0.0.1:42000\np80\nn127.0.0.1:42000->127.0.0.1:51000\n";
+        throw new Error("Legacy socket census is forbidden");
       }
-      if (command === "/bin/ps")
-        return args[0] === "-axo"
-          ? "55 44\n44 33\n33 1\n"
-          : `${state.start} ${Number(args[1]) === 33 ? "/bin/zsh" : "/trusted/codex"}\n`;
+      if (command === "/bin/ps") {
+        expect(args[0]).not.toBe("-axo");
+        return `${state.start} ${Number(args[1]) === 33 ? "/bin/zsh" : "/trusted/codex"}\n`;
+      }
       if (args[0] === "agent")
         return JSON.stringify({
           result: {
@@ -87,8 +91,7 @@ it("bounds expensive OS scans per resolution while proving both checkpoints and 
   const f = fixture();
   const first = await f.resolve();
   expect(first).toMatchObject({ projectId: "project" });
-  // Measured costs: about80ms/socket scan and50ms/executable scan. Recursive
-  // proof passes consumed the startup window; retain two complete checkpoints.
+  // Retain two complete checkpoints without recursive socket proof passes.
   expect(f.counts.socket).toBeLessThanOrEqual(8);
   expect(f.counts.executable).toBeLessThanOrEqual(8);
   expect(f.identity.projectProof).toHaveBeenCalledTimes(2);
