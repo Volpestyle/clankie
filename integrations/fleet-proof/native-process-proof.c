@@ -18,6 +18,7 @@
 #include <sys/proc_info.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -56,12 +57,14 @@ static int diagnostics;
 static int current_attempt;
 static int budget_reported;
 static int budget_expired;
+static FILE *proof_output;
+static FILE *proof_error;
 
 /* Fixed vocabulary only: this observation is never an admission input. */
 static void diagnostic(const char *stage, const char *reason, int error, int retry) {
   if (!diagnostics) return;
   int saved_error = errno;
-  fprintf(stderr, "Native process proof diagnostic: {\"schemaVersion\":1,"
+  fprintf(proof_error, "Native process proof diagnostic: {\"schemaVersion\":1,"
           "\"stage\":\"%s\",\"reason\":\"%s\",\"errno\":%d,"
           "\"attempt\":%d,\"retry\":%s}\n", stage, reason, error < 0 ? 0 : error,
           current_attempt, retry ? "true" : "false");
@@ -73,7 +76,7 @@ static int refuse(void) {
 }
 
 static int final_refusal(void) {
-  fputs("Native process proof unavailable\n", stderr);
+  fputs("Native process proof unavailable\n", proof_error);
   return 1;
 }
 
@@ -232,10 +235,10 @@ static int same_socket(const struct owner *owner, const struct socket_fdinfo *s)
 }
 
 static void print_identity(const struct identity *p, int include_uid) {
-  printf("{\"pid\":%d", p->pid);
-  if (include_uid) printf(",\"uid\":%u", (unsigned)p->uid);
-  else printf(",\"ppid\":%d", p->ppid);
-  printf(",\"birth\":[\"%" PRIu64 "\",\"%" PRIu64 "\"]", p->sec, p->usec);
+  fprintf(proof_output, "{\"pid\":%d", p->pid);
+  if (include_uid) fprintf(proof_output, ",\"uid\":%u", (unsigned)p->uid);
+  else fprintf(proof_output, ",\"ppid\":%d", p->ppid);
+  fprintf(proof_output, ",\"birth\":[\"%" PRIu64 "\",\"%" PRIu64 "\"]", p->sec, p->usec);
 }
 
 /* JSON only accepts Unicode scalar values, not arbitrary filesystem bytes. */
@@ -262,19 +265,23 @@ static int valid_utf8(const char *text, size_t length) {
   return 1;
 }
 
-static void print_string(const char *text) {
-  putchar('"');
+static void print_string(FILE *stream, const char *text) {
+  fputc('"', stream);
   for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
-    if (*p == '"' || *p == '\\') { putchar('\\'); putchar(*p); }
-    else if (*p < 0x20) printf("\\u%04x", (unsigned)*p);
-    else putchar(*p);
+    if (*p == '"' || *p == '\\') { fputc('\\', stream); fputc(*p, stream); }
+    else if (*p < 0x20) fprintf(stream, "\\u%04x", (unsigned)*p);
+    else fputc(*p, stream);
   }
-  putchar('"');
+  fputc('"', stream);
+}
+
+static void erase_buffer(void *buffer, size_t size) {
+  for (size_t i = 0; i < size; ++i) ((volatile unsigned char *)buffer)[i] = 0;
 }
 
 /* These are both observed owners, not ancestry candidates. Never substitute
  * KERN_PROC_PID for an unavailable full same-user BSD observation. */
-static int target_identity(pid_t pid, struct identity *out) {
+static int target_identity(pid_t pid, struct identity *out, int argv_layout) {
   if (!within_budget()) return refuse();
   struct proc_bsdinfo b;
   errno = 0;
@@ -287,7 +294,7 @@ static int target_identity(pid_t pid, struct identity *out) {
   if (b.pbi_uid != getuid()) return refuse_at("socket_owner", "owner_mismatch", 0);
   /* KERN_PROCARGS2 does not expose pointer width. Its alignment below is
    * supported only when the full BSD snapshot confirms a 64-bit process. */
-  if (!(b.pbi_flags & PROC_FLAG_LP64)) return refuse_at("argv", "argv_invalid", 0);
+  if (argv_layout && !(b.pbi_flags & PROC_FLAG_LP64)) return refuse_at("argv", "argv_invalid", 0);
   *out = (struct identity){pid, (pid_t)b.pbi_ppid, b.pbi_uid, b.pbi_ruid,
                            b.pbi_start_tvsec, b.pbi_start_tvusec};
   return 0;
@@ -304,7 +311,7 @@ static int executable_path(pid_t pid, char *path, size_t capacity) {
   return 0;
 }
 
-static int argument_head(pid_t pid, struct process_record *out) {
+static int arguments(pid_t pid, struct process_record *out, const char *endpoint) {
   if (!within_budget()) return refuse();
   int maximum;
   size_t maximum_size = sizeof(maximum);
@@ -361,33 +368,50 @@ static int argument_head(pid_t pid, struct process_record *out) {
   if (offset > bytes) { result = refuse_at("argv", "argv_invalid", 0); goto finish; }
   for (size_t i = sizeof(int) + path_length + 1; i < offset; ++i)
     if (blob[i] != '\0') { result = refuse_at("argv", "argv_invalid", 0); goto finish; }
-  out->argc = argc > 2 ? 2 : argc;
-  for (int i = 0; i < out->argc; ++i) {
+  if (endpoint != NULL && argc < 3) {
+    result = refuse_at("argv", "argv_invalid", 0); goto finish;
+  }
+  int retained = argc > 2 ? 2 : argc;
+  if (out != NULL) out->argc = retained;
+  int observed = endpoint == NULL ? retained : argc;
+  for (int i = 0; i < observed; ++i) {
+    if (!within_budget()) { result = refuse(); goto finish; }
     size_t length = strnlen(blob + offset, bytes - offset);
-    if (length == bytes - offset || length > MAX_HEAD_ARG ||
-        !valid_utf8(blob + offset, length)) {
+    if (length == bytes - offset) {
       result = refuse_at("argv", "argv_invalid", 0); goto finish;
     }
-    memcpy(out->argv[i], blob + offset, length + 1);
+    if (endpoint == NULL) {
+      if (length > MAX_HEAD_ARG || !valid_utf8(blob + offset, length)) {
+        result = refuse_at("argv", "argv_invalid", 0); goto finish;
+      }
+      memcpy(out->argv[i], blob + offset, length + 1);
+    } else if (i >= argc - 3) {
+      const char *expected = i == argc - 3 ? "app-server" :
+                             i == argc - 2 ? "--listen" : endpoint;
+      if (length != strlen(expected) || memcmp(blob + offset, expected, length) != 0) {
+        result = refuse_at("argv", "argv_invalid", 0); goto finish;
+      }
+    }
     offset += length + 1;
   }
 finish:
-  /* The syscall may return additional arguments/environment. They are never
-   * parsed, emitted or logged, and the entire temporary buffer is erased. */
-  for (size_t i = 0; i < capacity; ++i) ((volatile unsigned char *)blob)[i] = 0;
+  /* Only first-two observations or the exact server tail enter checks. The
+   * environment is never parsed; no additional argument is emitted/logged.
+   * Erase the entire temporary kernel buffer on every path. */
+  erase_buffer(blob, capacity);
   free(blob);
   return result;
 }
 
 static int capture_process(pid_t pid, struct process_record *out) {
-  int result = target_identity(pid, &out->process);
+  int result = target_identity(pid, &out->process, 1);
   if (result != 0) return result;
   result = executable_path(pid, out->executable, sizeof(out->executable));
   if (result != 0) return result;
-  result = argument_head(pid, out);
+  result = arguments(pid, out, NULL);
   if (result != 0) return result;
   struct identity after;
-  result = target_identity(pid, &after);
+  result = target_identity(pid, &after, 1);
   if (result != 0) return result;
   if (!same_process(&out->process, &after)) return refuse_at("process", "process_changed", 0);
   return 0;
@@ -418,25 +442,187 @@ static int prove_processes(int argc, char **argv) {
   }
   for (int i = 0; i < 2; ++i) {
     struct identity after;
-    int result = target_identity((pid_t)pids[i], &after);
+    int result = target_identity((pid_t)pids[i], &after, 1);
     if (result != 0) return result;
     if (!same_process(&first[i].process, &after)) return refuse_at("process", "process_changed", 0);
   }
   if (!within_budget()) return refuse();
-  printf("{\"schemaVersion\":1,\"processes\":[");
+  fprintf(proof_output, "{\"schemaVersion\":1,\"processes\":[");
   for (int i = 0; i < 2; ++i) {
-    if (i) putchar(',');
+    if (i) fputc(',', proof_output);
     print_identity(&first[i].process, 1);
-    printf(",\"ppid\":%d,\"executable\":", first[i].process.ppid);
-    print_string(first[i].executable);
-    printf(",\"argv\":[");
+    fprintf(proof_output, ",\"ppid\":%d,\"executable\":", first[i].process.ppid);
+    print_string(proof_output, first[i].executable);
+    fprintf(proof_output, ",\"argv\":[");
     for (int j = 0; j < first[i].argc; ++j) {
-      if (j) putchar(',');
-      print_string(first[i].argv[j]);
+      if (j) fputc(',', proof_output);
+      print_string(proof_output, first[i].argv[j]);
     }
-    printf("]}");
+    fprintf(proof_output, "]}");
   }
-  puts("]}");
+  fputs("]}\n", proof_output);
+  return 0;
+}
+
+/* A registry's existing lifetime can be fenced without reading argv/executable.
+ * This mode observes facts only; a caller-provided PID never grants membership. */
+static int prove_birth(int argc, char **argv) {
+  uint64_t pid;
+  if (argc != 3 || !decimal(argv[2], INT_MAX, &pid) || pid <= 1)
+    return refuse_at("arguments", "invalid_arguments", 0);
+  struct identity first, second;
+  int result = target_identity((pid_t)pid, &first, 0);
+  if (result != 0) return result;
+  result = target_identity((pid_t)pid, &second, 0);
+  if (result != 0) return result;
+  if (!same_process(&first, &second)) return refuse_at("process", "process_changed", 0);
+  if (!within_budget()) return refuse();
+  fprintf(proof_output, "{\"schemaVersion\":1,\"process\":");
+  print_identity(&first, 1);
+  fputs("}}\n", proof_output);
+  return 0;
+}
+
+/* The hex framing carries no authority; decoded values are compared only to
+ * current kernel observations. Neither value is emitted or logged. */
+static int hex_path(const char *hex, char *out, size_t capacity) {
+  size_t length = strnlen(hex, capacity * 2);
+  if (length == 0 || length >= capacity * 2 || length % 2 != 0) return 0;
+  size_t decoded = length / 2;
+  for (size_t i = 0; i < decoded; ++i) {
+    unsigned value = 0;
+    for (size_t j = 0; j < 2; ++j) {
+      char c = hex[i * 2 + j];
+      unsigned digit;
+      if (c >= '0' && c <= '9') digit = (unsigned)(c - '0');
+      else if (c >= 'a' && c <= 'f') digit = (unsigned)(c - 'a' + 10);
+      else if (c >= 'A' && c <= 'F') digit = (unsigned)(c - 'A' + 10);
+      else return 0;
+      value = value * 16 + digit;
+    }
+    if (value < 0x20 || value == 0x7f) return 0;
+    out[i] = (char)value;
+  }
+  out[decoded] = '\0';
+  return valid_utf8(out, decoded);
+}
+
+struct codex_server_record {
+  struct identity process;
+  char executable[PROC_PIDPATHINFO_MAXSIZE];
+  int fd;
+  uint64_t socket;
+  uint64_t pcb;
+};
+
+static int unix_listener(const struct socket_fdinfo *s, const char *path) {
+  if (s->psi.soi_family != AF_UNIX || s->psi.soi_type != SOCK_STREAM ||
+      s->psi.soi_kind != SOCKINFO_UN || !(s->psi.soi_options & SO_ACCEPTCONN)) return 0;
+  const struct sockaddr_un *address = &s->psi.soi_proto.pri_un.unsi_addr.ua_sun;
+  size_t length = strnlen(address->sun_path, sizeof(address->sun_path));
+  return address->sun_family == AF_UNIX && length < sizeof(address->sun_path) &&
+         address->sun_len <= sizeof(*address) &&
+         address->sun_len >= offsetof(struct sockaddr_un, sun_path) + length &&
+         length == strlen(path) && memcmp(address->sun_path, path, length) == 0;
+}
+
+static int same_unix_listener(const struct codex_server_record *record,
+                              const struct socket_fdinfo *s, const char *path) {
+  return unix_listener(s, path) && record->socket == s->psi.soi_so &&
+         record->pcb == s->psi.soi_pcb;
+}
+
+static int capture_codex_server(pid_t pid, const char *endpoint, const char *path,
+                                 struct codex_server_record *out) {
+  int result = target_identity(pid, &out->process, 1);
+  if (result != 0) return result;
+  result = executable_path(pid, out->executable, sizeof(out->executable));
+  if (result != 0) return result;
+  const char *base = strrchr(out->executable, '/');
+  if (base == NULL || strcmp(base + 1, "codex") != 0)
+    return refuse_at("executable", "executable_unavailable", 0);
+  result = arguments(pid, NULL, endpoint);
+  if (result != 0) return result;
+  struct proc_fdinfo *fds = calloc(MAX_FDS, sizeof(*fds));
+  if (fds == NULL) return refuse_at("fd_list", "allocation_failed", errno);
+  if (!within_budget()) { free(fds); return refuse(); }
+  errno = 0;
+  int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds, MAX_FDS * (int)sizeof(*fds));
+  if (bytes < 0 || (bytes == 0 && errno != 0)) {
+    int error = errno;
+    free(fds);
+    return refuse_at("fd_list", "fd_list_unavailable", error);
+  }
+  if (bytes >= MAX_FDS * (int)sizeof(*fds) || bytes % sizeof(*fds)) {
+    free(fds);
+    return refuse_at("fd_list", "fd_list_bounds", 0);
+  }
+  int count = bytes / (int)sizeof(*fds), found = 0;
+  for (int i = 0; i < count; ++i) {
+    if (fds[i].proc_fd < 0) { result = refuse_at("fd_list", "fd_record_invalid", 0); break; }
+    if (fds[i].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
+    struct socket_fdinfo socket;
+    if (!socket_info(pid, fds[i].proc_fd, &socket)) {
+      result = refuse_at("fd_socket", "socket_unavailable", errno); break;
+    }
+    if (!unix_listener(&socket, path)) continue;
+    if (socket.psi.soi_so == 0 || socket.psi.soi_pcb == 0) {
+      result = refuse_at("socket_owner", "socket_identity_invalid", 0); break;
+    }
+    if (found && !same_unix_listener(out, &socket, path)) {
+      result = refuse_at("socket_owner", "multiple_owners", 0); break;
+    }
+    if (!found) {
+      out->fd = fds[i].proc_fd;
+      out->socket = socket.psi.soi_so;
+      out->pcb = socket.psi.soi_pcb;
+      found = 1;
+    }
+  }
+  free(fds);
+  if (result != 0) return result;
+  if (!found) return refuse_at("socket_owner", "owner_not_found", 0);
+  struct socket_fdinfo final_socket;
+  if (!socket_info(pid, out->fd, &final_socket) || !same_unix_listener(out, &final_socket, path))
+    return refuse_at("final_socket", "socket_mismatch", errno);
+  struct identity after;
+  result = target_identity(pid, &after, 1);
+  if (result != 0) return result;
+  if (!same_process(&out->process, &after)) return refuse_at("process", "process_changed", 0);
+  return 0;
+}
+
+/* This PID-local observation retains the old named-listener guard. It does not
+ * assert global Unix ownership, path-vnode identity or an atomic exec snapshot. */
+static int prove_codex_server(int argc, char **argv) {
+  uint64_t pid;
+  char path[sizeof(((struct sockaddr_un *)0)->sun_path)] = {0};
+  char endpoint[sizeof(path) + 7] = {0};
+  if (argc != 5 || !decimal(argv[2], INT_MAX, &pid) || pid <= 1 ||
+      !hex_path(argv[3], endpoint, sizeof(endpoint)) || strncmp(endpoint, "unix:///", 8) != 0 ||
+      !hex_path(argv[4], path, sizeof(path)) || path[0] != '/')
+    return refuse_at("arguments", "invalid_arguments", 0);
+  struct codex_server_record first = {0}, second = {0};
+  int result = capture_codex_server((pid_t)pid, endpoint, path, &first);
+  if (result != 0) return result;
+  result = capture_codex_server((pid_t)pid, endpoint, path, &second);
+  if (result != 0) return result;
+  if (!same_process(&first.process, &second.process)) return refuse_at("process", "process_changed", 0);
+  if (strcmp(first.executable, second.executable) != 0)
+    return refuse_at("executable", "executable_changed", 0);
+  if (first.fd != second.fd || first.socket != second.socket || first.pcb != second.pcb)
+    return refuse_at("final_socket", "socket_mismatch", 0);
+  struct identity after;
+  struct socket_fdinfo socket;
+  if (!socket_info((pid_t)pid, first.fd, &socket) || !same_unix_listener(&first, &socket, path))
+    return refuse_at("final_socket", "socket_mismatch", errno);
+  result = target_identity((pid_t)pid, &after, 1);
+  if (result != 0) return result;
+  if (!same_process(&first.process, &after)) return refuse_at("process", "process_changed", 0);
+  if (!within_budget()) return refuse();
+  fprintf(proof_output, "{\"schemaVersion\":1,\"process\":");
+  print_identity(&first.process, 1);
+  fputs("}}\n", proof_output);
   return 0;
 }
 
@@ -599,19 +785,25 @@ static int prove(int argc, char **argv) {
       !same_process(&owner.process, &final_owner) || !within_budget())
     return refuse_at("final_socket", "socket_mismatch", errno);
 
-  printf("{\"schemaVersion\":1,\"owner\":");
+  fprintf(proof_output, "{\"schemaVersion\":1,\"owner\":");
   print_identity(&owner.process, 1);
-  printf(",\"socket\":\"%s\"},\"ancestors\":[", socket_id);
+  fprintf(proof_output, ",\"socket\":\"%s\"},\"ancestors\":[", socket_id);
   for (int i = 0; i < chain_count; ++i) {
-    if (i) putchar(',');
+    if (i) fputc(',', proof_output);
     print_identity(&chain[i], 0);
-    putchar('}');
+    fputc('}', proof_output);
   }
-  puts("]}");
+  fputs("]}\n", proof_output);
   return 0;
 }
 
-int main(int argc, char **argv) {
+static int execute_proof(int argc, char **argv) {
+  diagnostics = 0;
+  current_attempt = 0;
+  budget_reported = 0;
+  budget_expired = 0;
+  memset(&began, 0, sizeof(began));
+  memset(&overall_began, 0, sizeof(overall_began));
   if (argc > 1 && strcmp(argv[argc - 1], "--diagnostics") == 0) {
     diagnostics = 1;
     --argc;
@@ -628,11 +820,131 @@ int main(int argc, char **argv) {
       diagnostic("startup", "clock_unavailable", errno, 0);
       return final_refusal();
     }
-    int result = argc > 1 && strcmp(argv[1], "--processes") == 0 ?
-                   prove_processes(argc, argv) : prove(argc, argv);
+    int result;
+    if (argc > 1 && strcmp(argv[1], "--processes") == 0) result = prove_processes(argc, argv);
+    else if (argc > 1 && strcmp(argv[1], "--birth") == 0) result = prove_birth(argc, argv);
+    else if (argc > 1 && strcmp(argv[1], "--codex-server") == 0) result = prove_codex_server(argc, argv);
+    else result = prove(argc, argv);
     if (result == 0) return 0;
     if (result != 2) return final_refusal();
   }
   diagnostic("completion", within_overall_budget() ? "attempts_exhausted" : "budget_exhausted", 0, 0);
   return final_refusal();
+}
+
+enum { MAX_REQUEST_LINE = 4096, MAX_REQUEST_TOKENS = 10, MAX_JOB_OUTPUT = 1024 * 1024 };
+#define MAX_REQUEST_ID UINT64_C(9007199254740991)
+
+/* A bounded private pipe, not a listener. Invalid framing closes the channel;
+ * no prefix of a truncated/ambiguous request can start a proof. */
+static int request_line(char *line) {
+  size_t length = 0;
+  int c;
+  while ((c = fgetc(stdin)) != EOF) {
+    if (c == '\n') { line[length] = '\0'; return 1; }
+    if (length >= MAX_REQUEST_LINE - 1 || c < 0x20 || c > 0x7e) {
+      erase_buffer(line, MAX_REQUEST_LINE);
+      return -1;
+    }
+    line[length++] = (char)c;
+  }
+  erase_buffer(line, MAX_REQUEST_LINE);
+  return ferror(stdin) || length != 0 ? -1 : 0;
+}
+
+static int serve_job(uint64_t id, int argc, char **argv) {
+  char *output = NULL, *error = NULL;
+  size_t output_size = 0, error_size = 0;
+  FILE *out = open_memstream(&output, &output_size);
+  FILE *err = open_memstream(&error, &error_size);
+  if (out == NULL || err == NULL) {
+    if (out != NULL) fclose(out);
+    if (err != NULL) fclose(err);
+    if (output != NULL) { erase_buffer(output, output_size); free(output); }
+    if (error != NULL) { erase_buffer(error, error_size); free(error); }
+    return final_refusal();
+  }
+  proof_output = out;
+  proof_error = err;
+  int result = execute_proof(argc, argv);
+  int output_failed = ferror(out), error_failed = ferror(err);
+  int output_close = fclose(out), error_close = fclose(err);
+  proof_output = stdout;
+  proof_error = stderr;
+  int valid = !output_failed && !error_failed && output_close == 0 && error_close == 0 &&
+              output != NULL && error != NULL && output_size <= MAX_JOB_OUTPUT &&
+              error_size <= MAX_JOB_OUTPUT - output_size;
+  if (result == 0) {
+    /* Proof functions emit exactly one complete JSON object with a final LF.
+     * Removing that LF keeps the envelope on one physical transport line. */
+    valid = valid && output_size >= 3 && output[0] == '{' &&
+            output[output_size - 2] == '}' && output[output_size - 1] == '\n';
+  } else {
+    valid = valid && output_size == 0;
+  }
+  /* Bound the complete encoded envelope, including escaped diagnostic text. */
+  size_t encoded_error = 2;
+  for (size_t i = 0; valid && i < error_size; ++i) {
+    unsigned char c = (unsigned char)error[i];
+    size_t extra = c < 0x20 ? 6 : c == '"' || c == '\\' ? 2 : 1;
+    if (encoded_error > MAX_JOB_OUTPUT - extra) valid = 0;
+    else encoded_error += extra;
+  }
+  size_t result_size = result == 0 && output_size > 0 ? output_size - 1 : 4;
+  if (valid && (encoded_error > MAX_JOB_OUTPUT - 256 ||
+                result_size > MAX_JOB_OUTPUT - 256 - encoded_error)) valid = 0;
+  if (valid) {
+    fprintf(stdout, "{\"id\":%" PRIu64 ",\"ok\":%s,\"result\":", id, result == 0 ? "true" : "false");
+    if (result == 0) fwrite(output, 1, output_size - 1, stdout);
+    else fputs("null", stdout);
+    fputs(",\"stderr\":", stdout);
+    print_string(stdout, error);
+    fputs("}\n", stdout);
+    if (ferror(stdout) || fflush(stdout) != 0) valid = 0;
+  }
+  if (output != NULL) { erase_buffer(output, output_size); free(output); }
+  if (error != NULL) { erase_buffer(error, error_size); free(error); }
+  return valid ? 0 : final_refusal();
+}
+
+static int serve(void) {
+  uint64_t last_id = 0;
+  char line[MAX_REQUEST_LINE];
+  for (;;) {
+    int status = request_line(line);
+    if (status == 0) return 0;
+    if (status < 0) return final_refusal();
+    char *tokens[MAX_REQUEST_TOKENS + 1];
+    int count = 0;
+    char *p = line;
+    int valid = *p != '\0' && *p != ' ';
+    while (valid && *p != '\0') {
+      if (count >= MAX_REQUEST_TOKENS) { valid = 0; break; }
+      tokens[count++] = p;
+      while (*p != '\0' && *p != ' ') ++p;
+      if (*p == ' ') {
+        *p++ = '\0';
+        if (*p == '\0' || *p == ' ') valid = 0;
+      }
+    }
+    uint64_t id = 0;
+    valid = valid && count >= 2 && decimal(tokens[0], MAX_REQUEST_ID, &id) && id > last_id;
+    int result;
+    if (valid) {
+      tokens[0] = "native-process-proof";
+      tokens[count] = NULL;
+      last_id = id;
+      result = serve_job(id, count, tokens);
+    } else result = final_refusal();
+    erase_buffer(line, sizeof(line));
+    erase_buffer(tokens, sizeof(tokens));
+    if (result != 0) return result;
+  }
+}
+
+int main(int argc, char **argv) {
+  proof_output = stdout;
+  proof_error = stderr;
+  if (argc == 2 && strcmp(argv[1], "--serve") == 0) return serve();
+  return execute_proof(argc, argv);
 }

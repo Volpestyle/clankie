@@ -129,6 +129,8 @@ import {
   createRemoteWorktreeRootObserver,
 } from "./remote-project-proof.ts";
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
+import { localProofDiagnostics } from "./local-fleet-proof-log.ts";
+import { closeNativeProcessObservers } from "./native-process-transport.ts";
 import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { refreshLinkedHarnesses } from "../../tui/src/harness-refresh.ts";
@@ -1131,6 +1133,7 @@ const localFleet = new LocalFleetLink({
   directory: join(stateRoot, "links"),
   binding: localFleetBinding,
   projectProof: localProjectProof({
+    diagnostics: localProofDiagnostics(logger, "project"),
     binding: localFleetBinding,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding) =>
@@ -1140,6 +1143,7 @@ const localFleet = new LocalFleetLink({
       grokNative.allows(chain, pane, binding, proof.nativeOccupantId),
   }),
   prove: localFleetProof({
+    diagnostics: localProofDiagnostics(logger, "fleet"),
     binding: localFleetBinding,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding) =>
@@ -1612,6 +1616,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
       logger.warn({ error }, "Body lease operations remain unresolved at shutdown");
     }
     await mcpHost.close().catch(() => undefined);
+    await closeNativeProcessObservers();
     clankie.close();
     if (result.status === "deadline_expired") {
       logger.error(

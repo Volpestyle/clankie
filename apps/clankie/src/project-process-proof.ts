@@ -9,6 +9,7 @@ import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession, recoverLocalCodexSession } from "./captain/herdr-census.ts";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
 import { fleetProcessHelper, nativeProcessStart, observeNativeProcesses } from "./local-fleet-process.ts";
+import { nativeRequest } from "./herdr-native-request.ts";
 
 type Run = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
 const exec = promisify(execFile);
@@ -77,6 +78,7 @@ export function createProjectProcessObserver(options: {
   launcher?(harness: string): Promise<NativeLauncher | undefined>;
   canonical?(path: string): Promise<string>;
   processHelper?: string;
+  signal?: AbortSignal;
 }) {
   const execute = options.run ?? run;
   const canonical = options.canonical ?? realpath;
@@ -90,39 +92,51 @@ export function createProjectProcessObserver(options: {
     try {
       const binding = await options.binding();
       if (!binding) return undefined;
+      const read = async (method: string, params: unknown, args: string[]) =>
+        options.run
+          ? JSON.parse(
+              await execute(
+                options.herdrBinary,
+                args,
+                pinHerdrEnvironment({ ...process.env }, binding.socketPath),
+              ),
+            )
+          : await nativeRequest(binding, method, params, {
+              timeoutMs: 5_000,
+              ...(options.signal ? { signal: options.signal } : {}),
+            });
       const info = async () => {
-        const response = JSON.parse(
-          await execute(
-            options.herdrBinary,
-            ["pane", "process-info", "--pane", pane],
-            pinHerdrEnvironment({ ...process.env }, binding.socketPath),
-          ),
-        );
+        const response = (await read("pane.process_info", { pane_id: pane }, [
+          "pane",
+          "process-info",
+          "--pane",
+          pane,
+        ])) as {
+          result?: {
+            process_info?: { pane_id?: string; shell_pid?: number; foreground_process_group_id?: number };
+          };
+        };
         const value = response?.result?.process_info;
         if (value?.pane_id !== pane) throw new Error("Pane changed");
         return value;
       };
       const native = async () => {
         const agent = parseHerdrAgentResult(
-          await execute(
-            options.herdrBinary,
-            ["agent", "get", pane],
-            pinHerdrEnvironment({ ...process.env }, binding.socketPath),
-          ),
+          JSON.stringify(await read("agent.get", { target: pane }, ["agent", "get", pane])),
         );
         if (agent.paneId !== pane || !OPERATOR_SEAT_HARNESSES.some((harness) => harness === agent.agent))
           throw new Error("Native harness unavailable");
         const session =
           agent.session ??
           (await recoverLocalCodexSession(agent, {
+            ...(options.run === undefined ? { nativeProof: true as const } : {}),
             bridgeSocket: binding.socketPath,
             herdrSession: binding.session,
             runCommand: async (command, args) => ({
-              stdout: await execute(
-                command === "herdr" ? options.herdrBinary : command,
-                [...args],
-                command === "herdr" ? pinHerdrEnvironment({ ...process.env }, binding.socketPath) : undefined,
-              ),
+              stdout:
+                command === "herdr" && args[0] === "pane" && args[1] === "process-info"
+                  ? JSON.stringify(await read("pane.process_info", { pane_id: pane }, [...args]))
+                  : await execute(command, [...args]),
               stderr: "",
             }),
           }));
@@ -136,8 +150,9 @@ export function createProjectProcessObserver(options: {
       const launcher = await (options.launcher ?? installedLauncher)(nativeInitial.harness);
       if (!launcher) return undefined;
       const initial = await info();
-      const shellPid: number = initial.shell_pid;
-      const agentPid: number = initial.foreground_process_group_id;
+      const shellPid = initial.shell_pid;
+      const agentPid = initial.foreground_process_group_id;
+      if (shellPid === undefined || agentPid === undefined) return undefined;
       if (![shellPid, agentPid].every((pid) => Number.isSafeInteger(pid) && pid > 1) || shellPid === agentPid)
         return undefined;
       const snapshot = () =>
@@ -146,6 +161,7 @@ export function createProjectProcessObserver(options: {
           agentPid,
           options.processHelper ?? fleetProcessHelper(),
           options.run,
+          options.signal,
         );
       const initialProcesses = await snapshot();
       if (!initialProcesses) return undefined;

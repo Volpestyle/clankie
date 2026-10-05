@@ -8,21 +8,28 @@ import { type HerdrBinding } from "@clankie/protocol";
 import { LocalCodexStateSchema as StateSchema, isLocalCodexEndpoint } from "./local-codex-records.ts";
 import type { z } from "zod";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
+import { observeNativeBirth, nativeProcessReceipt } from "./local-fleet-process.ts";
 
 const exec = promisify(execFile);
-const processStart = async (pid: number): Promise<string | undefined> => {
-  try {
-    const { stdout } = await exec("/bin/ps", ["-p", String(pid), "-o", "lstart="], {
-      timeout: 5_000,
-      encoding: "utf8",
-    });
-    const start = stdout.trim();
-    return /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4}$/u.test(start)
-      ? start
-      : undefined;
-  } catch {
-    return undefined;
+const processStart = async (pid: number, previous?: string): Promise<string | undefined> => {
+  if (process.platform !== "darwin") {
+    // Preserve existing private-launch support elsewhere. This never supplies
+    // macOS socket admission or substitutes after a failed native observation.
+    try {
+      const { stdout } = await exec("/bin/ps", ["-p", String(pid), "-o", "lstart="], {
+        timeout: 5_000,
+        encoding: "utf8",
+      });
+      const start = stdout.trim();
+      return /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4}$/u.test(start)
+        ? start
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
+  const birth = await observeNativeBirth(pid);
+  return birth ? nativeProcessReceipt(birth, previous) : undefined;
 };
 
 export type LocalCodexRegistration = (() => void) & {
@@ -51,7 +58,7 @@ interface DurableSeats {
 export class LocalCodexSeats {
   private readonly seats = new Map<number, Entry>();
   private readonly binding: () => HerdrBinding | undefined;
-  private readonly observeStart: (pid: number) => Promise<string | undefined>;
+  private readonly observeStart: (pid: number, previous?: string) => Promise<string | undefined>;
   private readonly durable: DurableSeats | undefined;
   constructor(binding: () => HerdrBinding | undefined, observeStart = processStart, durable?: DurableSeats) {
     this.binding = binding;
@@ -215,7 +222,7 @@ export class LocalCodexSeats {
         continue;
       if (nativeOccupantId !== undefined && seat.nativeOccupantId !== nativeOccupantId) continue;
       const start = await seat.start;
-      if (!start || (await this.observeStart(pid).catch(() => undefined)) !== start) continue;
+      if (!start || (await this.observeStart(pid, start).catch(() => undefined)) !== start) continue;
       if (
         seat.restored &&
         (!seat.nativeOccupantId ||

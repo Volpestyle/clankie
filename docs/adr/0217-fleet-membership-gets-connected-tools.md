@@ -36,6 +36,16 @@ may still refuse under sustained churn; an explicit current-request admission
 403 precedes dispatch, while earlier uncertain receipts remain subject to
 reconciliation.
 
+The body keeps one native helper alive on private stdin/stdout pipes. A bounded
+serialized request carries a monotonic ID; each job resets all proof state and
+performs the same complete fresh observations. There is no admission cache or
+helper listener. Malformed replies, timeout, cancellation and child exit refuse
+pending observations; a later request may start a fresh helper. Herdr reads use
+its existing JSONL socket API directly, avoiding a CLI process per read. Shutdown
+closes only the body's own helper. This removes hot-path process launches while
+preserving shared-descriptor, occupant, registry and binding revocation checks.
+Refusals log fixed reason/stage/errno vocabulary without PIDs, paths or argv.
+
 Foreground project identity uses the same native helper for same-user executable,
 exact first launcher arguments and microsecond process births. It reads the shell
 and native process together at both checkpoints, then binds their lifetimes to
@@ -50,6 +60,14 @@ checks retain their independent revocation fences. Existing generic hire receipt
 with second-resolution display timestamps do not match the new kernel lifetime
 format: they fail closed until a fresh hire records the full birth. No legacy
 timestamp conversion grants an old receipt authority.
+
+Private Codex launch registrations also compare fresh native births. New launch
+records retain microseconds. Existing server-owned private records keep their
+previous second-resolution comparison by formatting the observed kernel birth
+identically; this does not promote them to a precise birth or create a new
+registration. Actual socket ownership still uses the full birth and socket pin,
+and restored records still require the matching live native occupant on every
+check. These private launch records are distinct from generic hire receipts.
 
 Fleet discovery lists exactly `clankie_tools` and `clankie_call`.
 `clankie_tools` searches up to 20 qualified names/descriptions or retrieves up to

@@ -14,6 +14,8 @@ import {
 import { readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import { readLocalCodexRecords, isLocalCodexEndpoint } from "../local-codex-records.ts";
 import { CodexAppServerClient, openCodexSocket } from "./codex-app-server.ts";
+import { observeNativeProcesses, observeCodexServer, nativeProcessReceipt } from "../local-fleet-process.ts";
+import { nativeRequest } from "../herdr-native-request.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -185,6 +187,8 @@ export interface LocalCodexRecoveryOptions {
   readonly localCodexRecordsPath?: string;
   readonly bridgeSocket?: string;
   readonly herdrSession?: string;
+  /** Trusted observer selects native guards when it supplies its own Herdr transport. */
+  readonly nativeProof?: true;
 }
 
 /**
@@ -208,10 +212,26 @@ export async function recoverLocalCodexSession(
   );
   if (records.length === 0) return undefined;
   const run = options.runCommand ?? defaultRunner;
+  const nativeProof =
+    options.nativeProof ||
+    (process.platform === "darwin" &&
+      (options.runCommand === undefined ||
+        options.runCommand === defaultRunner ||
+        records.some((record) => /^\d+\.\d{6}$/u.test(record.start))));
   try {
     const observePane = async () => {
-      const value = JSON.parse((await run("herdr", ["pane", "process-info", "--pane", entry.paneId])).stdout)
-        ?.result?.process_info;
+      const response =
+        options.runCommand === undefined && nativeProof
+          ? JSON.stringify(
+              await nativeRequest(
+                { runtime: "external", socketPath: socket, session },
+                "pane.process_info",
+                { pane_id: entry.paneId },
+                { timeoutMs: 2_000 },
+              ),
+            )
+          : (await run("herdr", ["pane", "process-info", "--pane", entry.paneId])).stdout;
+      const value = JSON.parse(response)?.result?.process_info;
       if (value?.pane_id !== entry.paneId || value.foreground_process_group_id === value.shell_pid)
         throw new Error("No native foreground occupant");
       const processes: unknown[] = Array.isArray(value.foreground_processes)
@@ -255,6 +275,12 @@ export async function recoverLocalCodexSession(
     if (matching.length !== 1) return undefined;
     const launch = matching[0]!;
     const lifetime = async (pid: number) => {
+      if (nativeProof) {
+        const observed = (await observeNativeProcesses(process.pid, pid))?.processes[1];
+        if (!observed || basename(observed.executable) !== "codex")
+          throw new Error("Native process lifetime unavailable");
+        return nativeProcessReceipt(observed.birth, pid === launch.pid ? launch.start : undefined);
+      }
       const output = (await run("/bin/ps", ["-p", String(pid), "-o", "lstart=,comm="])).stdout;
       const match =
         /^\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/u.exec(
@@ -264,6 +290,13 @@ export async function recoverLocalCodexSession(
       return match[1]!;
     };
     const serverProof = async () => {
+      if (nativeProof) {
+        const canonicalSocketPath = await realpath(native.endpoint.slice("unix://".length));
+        const birth = await observeCodexServer(launch.pid, native.endpoint, canonicalSocketPath);
+        if (!birth || nativeProcessReceipt(birth, launch.start) !== launch.start)
+          throw new Error("Private server identity unavailable");
+        return;
+      }
       if ((await lifetime(launch.pid)) !== launch.start) throw new Error("Private server lifetime changed");
       const command = (await run("/bin/ps", ["-p", String(launch.pid), "-o", "command="])).stdout.trim();
       if (!command.endsWith(` app-server --listen ${native.endpoint}`))
@@ -280,9 +313,9 @@ export async function recoverLocalCodexSession(
     // argv identifies the requested resume. The live server must still have
     // exactly that native thread loaded; a later /new or /resume cannot reuse
     // the old process command as authority for its previous occupant.
-    const socket = await openCodexSocket(`ws+unix://${native.endpoint.slice("unix://".length)}:/`);
-    if (!socket) return undefined;
-    const client = new CodexAppServerClient(socket, () => {}, 2_000);
+    const codexSocket = await openCodexSocket(`ws+unix://${native.endpoint.slice("unix://".length)}:/`);
+    if (!codexSocket) return undefined;
+    const client = new CodexAppServerClient(codexSocket, () => {}, 2_000);
     try {
       await client.initialize();
       const loaded = (await client.request("thread/loaded/list", {})) as {

@@ -20,6 +20,7 @@ import {
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 import { countProofSpawns, type SpawnRecord } from "./helpers/project-native-proof/spawns.ts";
 import { baselineProof } from "./helpers/project-native-proof/baseline.ts";
+import { closeNativeProcessObservers } from "../src/native-process-transport.ts";
 
 const checkout = fileURLToPath(new URL("../../../", import.meta.url));
 const fixtures = fileURLToPath(new URL("./helpers/project-native-proof/", import.meta.url));
@@ -70,15 +71,19 @@ nativeIt(
         launcher: async () => ({ executable: node, script: trustedScript }),
         expectedOwner: () => expected,
         diagnostics: (event) => trace.push({ phase, diagnostic: event }),
-        run: async (command: string, args: string[], env?: NodeJS.ProcessEnv) => {
-          const result = await promisify(execFile)(command, args, {
-            env,
-            timeout: 5_000,
-            maxBuffer: 2_000_000,
-          });
-          trace.push({ phase, command, args, stdout: result.stdout });
-          return result.stdout;
-        },
+        ...(baseline
+          ? {
+              run: async (command: string, args: string[], env?: NodeJS.ProcessEnv) => {
+                const result = await promisify(execFile)(command, args, {
+                  env,
+                  timeout: 5_000,
+                  maxBuffer: 2_000_000,
+                });
+                trace.push({ phase, command, args, stdout: result.stdout });
+                return result.stdout;
+              },
+            }
+          : {}),
       };
       const proof = proofModule.localProjectProof(options);
       const unavailable = localProjectProof({
@@ -154,11 +159,28 @@ nativeIt(
       };
       const ask = async (name: string, status: number, pane = herdr.pane) => {
         const before = effects;
-        const result = await herdr.request(name, pane);
-        trace.push({ phase, ...result });
-        expect(result.status, `${phase}: see ${logDirectory}`).toBe(status);
-        expect(effects).toBe(before + (status === 200 ? 1 : 0));
-        return result;
+        // This fixture's action is a harmless counter. Only a classified fresh-census
+        // refusal BEFORE forwarding can sample again; wrong identity/protocol never retries.
+        for (let sample = 1; sample <= 8; sample++) {
+          const checkpoint = trace.length;
+          const result = await herdr.request(name, pane);
+          trace.push({ phase, sample, ...result });
+          if (result.status === status) {
+            expect(effects).toBe(before + (status === 200 ? 1 : 0));
+            return result;
+          }
+          const nativeFailure = trace.slice(checkpoint).some((entry) => {
+            const diagnostic = (entry as { diagnostic?: { source?: string; event?: { reason?: string } } })
+              .diagnostic;
+            return diagnostic?.source === "native" && diagnostic.event?.reason === "attempts_exhausted";
+          });
+          expect(result.status, `${phase}: see ${logDirectory}`).toBe(403);
+          expect(effects).toBe(before);
+          if (status !== 200 || !nativeFailure || sample === 8)
+            throw new Error(`${phase}: see ${logDirectory}; unavailable without a completed proof`);
+          await new Promise((resolve) => setTimeout(resolve, 75));
+        }
+        throw new Error("No real response");
       };
       if (!baseline) {
         await herdr.cli(
@@ -196,6 +218,12 @@ nativeIt(
       const cold = measurements[0]!;
       expect(cold.records.length).toBeGreaterThan(0);
       expect(cold.records.every((record) => record.started)).toBe(true);
+      expect(cold.records.map((record) => record.kind)).toEqual(["native:serve"]);
+      expect(
+        measurements
+          .filter((measurement) => measurement.phase === "warm")
+          .flatMap((measurement) => measurement.records),
+      ).toEqual([]);
       expect(
         measurements.flatMap((item) => item.records).some((record) => /^(ps|lsof)$/u.test(record.command)),
       ).toBe(false);
@@ -213,6 +241,17 @@ nativeIt(
       ).toBe(true);
       const original = snapshots.get(accepted.port)!;
       expect(original.pid).toBe(first.pid);
+      phase = "helper-exit-fresh-proof";
+      const helperPid = cold.records[0]!.pid!;
+      process.kill(helperPid, "SIGKILL");
+      await herdr.waitForExit(helperPid);
+      await ask("first", 200);
+      expect(
+        measurements
+          .filter((measurement) => measurement.phase === phase)
+          .flatMap((measurement) => measurement.records)
+          .filter((record) => record.started),
+      ).toHaveLength(1);
       const native = await observeNativeProcesses(herdr.shellPid, first.agentPid, helper);
       expect(native?.processes[1]?.argv).toEqual([node, harness]);
       expect(JSON.stringify(native)).not.toContain("TAIL_ARG_SENTINEL_DO_NOT_EMIT");
@@ -312,6 +351,7 @@ nativeIt(
         );
       } finally {
         counter.close();
+        await closeNativeProcessObservers();
         await cleanupLink?.close();
         for (const socket of sockets.values()) socket.destroy();
         if (cleanupServer) await new Promise<void>((resolve) => cleanupServer!.close(() => resolve()));

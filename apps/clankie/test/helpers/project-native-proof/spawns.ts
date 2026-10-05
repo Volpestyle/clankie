@@ -5,6 +5,7 @@ export interface SpawnRecord {
   command: string;
   kind: string;
   started: boolean;
+  pid?: number;
   overlappingKinds: string[];
 }
 /** Observe actual ChildProcess dispatches, including promisified execFile. */
@@ -20,12 +21,14 @@ export function countProofSpawns() {
       const kind =
         command === "herdr"
           ? `herdr:${options.args?.[1]}`
-          : options.args?.includes("--processes")
-            ? "native:processes"
-            : command.includes("fleet-proof") || command === "native-process-proof"
-              ? "native:socket"
-              : command;
-      const record = {
+          : options.args?.includes("--serve")
+            ? "native:serve"
+            : options.args?.includes("--processes")
+              ? "native:processes"
+              : command.includes("fleet-proof") || command === "native-process-proof"
+                ? "native:socket"
+                : command;
+      const record: SpawnRecord = {
         command,
         kind,
         started: false,
@@ -36,13 +39,15 @@ export function countProofSpawns() {
       this.once("close", () => running.delete(record));
       this.once("spawn", () => {
         record.started = true;
+        if (this.pid !== undefined) record.pid = this.pid;
       });
     }
     return Reflect.apply(original, this, args);
   };
   return {
     async measure<T>(action: () => Promise<T>) {
-      if (active || running.size !== 0) throw new Error("Overlapping proof measurement");
+      if (active || [...running].some((record) => record.kind !== "native:serve"))
+        throw new Error("Overlapping proof measurement");
       const records: SpawnRecord[] = [];
       active = records;
       const began = performance.now();
