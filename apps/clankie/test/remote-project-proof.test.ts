@@ -9,6 +9,7 @@ import {
   createRemoteGitWorktreeObserver,
   createRemoteWorktreeRootObserver,
   createRemoteCodexControlObserver,
+  createRemoteCodexQueueObserver,
 } from "../src/remote-project-proof.ts";
 import { windowsProcessCommand } from "../src/windows-process-probe.ts";
 
@@ -95,9 +96,9 @@ describe("remote project process proof", () => {
       });
     },
   );
-  it("excludes a classified app-server from the native pane occupant candidates", async () => {
+  it("excludes a recognized app-server even when its endpoint projection is uncertain", async () => {
     const observation = fixture();
-    const native = { ...observation.nativeProcesses[0]!, role: "server" };
+    const native = { ...observation.nativeProcesses[0]!, role: "server", endpoint: null, standalone: false };
     observation.nativeProcesses = [native];
     expect(await setup(observation).observe("pc", "w3:p8", stream)).toBeUndefined();
   });
@@ -281,6 +282,76 @@ describe("remote project process proof", () => {
     expect(await canonical("other", "C:\\repos")).toBeUndefined();
     shell.mockRejectedValue(new Error("SSH gone"));
     expect(await canonical("pc", "C:\\repos")).toBeUndefined();
+  });
+});
+
+describe("standalone remote Codex queue proof", () => {
+  function standaloneFixture() {
+    const observation = fixture();
+    const executable = "C:\\installed\\codex.exe";
+    const markers = {
+      pane: "w3:p8",
+      socketPath: observation.binding.socketPath,
+      homeHash: "a".repeat(64),
+    };
+    observation.agent.agent = "codex";
+    observation.agent.agent_session = {
+      agent: "codex",
+      kind: "id",
+      source: "herdr:codex",
+      value: "standalone-thread",
+    };
+    observation.installed = [executable];
+    observation.processes[2]!.executable = executable;
+    return {
+      ...observation,
+      foregroundMarkers: markers,
+      defaultHomeHash: markers.homeHash,
+      nativeProcesses: [
+        {
+          ...observation.nativeProcesses[0]!,
+          executable,
+          role: "tui",
+          endpoint: null,
+          standalone: true,
+          markers,
+        },
+      ],
+    };
+  }
+
+  function observers(first = standaloneFixture(), last = structuredClone(first)) {
+    const options = {
+      fleet: async () => fleet,
+      shell: () => async () => JSON.stringify({ first, last }),
+    };
+    return { queue: createRemoteCodexQueueObserver(options), project: createRemoteProjectObserver(options) };
+  }
+
+  it("requires positive standalone native evidence while retaining the default-home CLI proof", async () => {
+    expect(await observers().queue("pc", "w3:p8", "standalone-thread")).toMatchObject({
+      proof: { processes: [{ pid: 30 }], workspace: { canonicalPath: "C:\\repos\\rivals-agent" } },
+      homeHash: "a".repeat(64),
+    });
+  });
+
+  it.each(["explicit remote configuration", "legacy unknown projection"])(
+    "denies a null endpoint with %s without withdrawing independent project proof",
+    async (kind) => {
+      const observation = standaloneFixture();
+      if (kind === "explicit remote configuration") observation.nativeProcesses[0]!.standalone = false;
+      else delete (observation.nativeProcesses[0] as { standalone?: boolean }).standalone;
+      const observed = observers(observation);
+      expect(await observed.queue("pc", "w3:p8", "standalone-thread")).toBeUndefined();
+      expect(await observed.project("pc", "w3:p8", stream)).toMatchObject({ processes: [{ pid: 30 }] });
+    },
+  );
+
+  it("refuses a standalone projection that disappears before the final native observation", async () => {
+    const first = standaloneFixture();
+    const last = structuredClone(first);
+    last.nativeProcesses[0]!.standalone = false;
+    expect(await observers(first, last).queue("pc", "w3:p8", "standalone-thread")).toBeUndefined();
   });
 });
 
@@ -672,6 +743,9 @@ describe("Windows dedicated Codex observation boundary", () => {
     expect(script).toContain("parameters+0x70");
     expect(script).toContain("HERDR_PANE_ID");
     expect(script).toContain("homeHash");
+    expect(script).toContain("$native.standalone = if ($role) { $role.standalone } else { $false }");
+    expect(script).toContain("standalone=remotes==0 && listens==0");
+    expect(script).toContain('role=command=="app-server"?"server":"other"');
     expect(script).toContain("[ClankieProcess]::Owners(45000, 54000)");
     expect(script).not.toContain("Win32_Process");
     expect(script).not.toContain("ConvertTo-Json $args");

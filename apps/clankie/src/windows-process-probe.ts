@@ -58,7 +58,7 @@ public static class ClankieProcess {
   [DllImport("kernel32.dll", SetLastError=true)] static extern UIntPtr VirtualQueryEx(IntPtr handle, IntPtr address, out Region region, UIntPtr length);
   public class Row { public int pid, parent; public string name; }
   public class Process { public int pid, parent; public string startTime, executable; }
-  public class CodexRole { public string role, endpoint; }
+  public class CodexRole { public string role, endpoint; public bool standalone; }
   public class SeatMarkers { public string pane, socketPath, homeHash; }
   public class Listener { public int pid, port; public string address; }
   public class TcpRow { public int pid, state, localPort, remotePort; public string localAddress, remoteAddress; }
@@ -162,6 +162,10 @@ public static class ClankieProcess {
   }
   /** Windows parses argv internally. Only the role and safe loopback endpoint leave this method. */
   public static CodexRole Codex(int pid) { return ProjectCodex(Arguments(pid)); }
+  // Endpoint uncertainty cannot turn a positively recognized backend into a pane TUI.
+  static CodexRole UncertainCodexRole(string command) {
+    return new CodexRole {role=command=="app-server"?"server":"other"};
+  }
   // Codex 0.160: [OPTIONS] [PROMPT] or [OPTIONS] <COMMAND> [ARGS].
   // Unknown positional text is the initial TUI prompt, never a subcommand.
   static CodexRole ProjectCodex(string[] args) {
@@ -172,11 +176,11 @@ public static class ClankieProcess {
     var flags=new System.Collections.Generic.HashSet<string>(new string[]{"--no-daemon","--no-alt-screen","--search","--full-auto","--dangerously-bypass-approvals-and-sandbox","--oss","--strict-config","--analytics-default-enabled","--stdio","--last","--all"});
     for(int n=1;n<args.Length;n++) {
       string arg=args[n];
-      if(arg=="--help" || arg=="-h" || arg=="--version" || arg=="-V") return new CodexRole {role="other"};
+      if(arg=="--help" || arg=="-h" || arg=="--version" || arg=="-V") return UncertainCodexRole(command);
       if(arg=="--") {
         // An option-looking prompt after the separator is text, not authority.
         int remaining=args.Length-n-1;
-        if(command=="app-server" || remaining>1 || (command==null && positionals+remaining>1)) return new CodexRole {role="other"};
+        if(command=="app-server" || remaining>1 || (command==null && positionals+remaining>1)) return UncertainCodexRole(command);
         positionals+=remaining;
         break;
       }
@@ -185,19 +189,19 @@ public static class ClankieProcess {
         if(values.Contains(name)) {
           if(equals>=0) value=arg.Substring(equals+1);
           else if(++n<args.Length) value=args[n];
-          else return new CodexRole {role="other"};
+          else return UncertainCodexRole(command);
           if(name=="--remote") {remote=value;remotes++;}
           if(name=="--listen") {listen=value;listens++;}
         } else if(equals<0 && flags.Contains(name)) {if(name=="--no-daemon") noDaemon=true;}
-        else return new CodexRole {role="other"};
+        else return UncertainCodexRole(command);
       } else if(command==null && positionals==0) {
         if(arg=="app-server" || arg=="resume" || arg=="fork") command=arg;
-        else if(maintenance.Contains(arg)) return new CodexRole {role="other"};
+        else if(maintenance.Contains(arg)) return UncertainCodexRole(command);
         else positionals=1;
-      } else if(command=="app-server" || (command==null && ++positionals>1)) return new CodexRole {role="other"};
+      } else if(command=="app-server" || (command==null && ++positionals>1)) return UncertainCodexRole(command);
     }
     if(command=="app-server") return new CodexRole {role="server",endpoint=remotes==0 && listens==1 && !noDaemon?Loopback(listen,true):null};
-    return new CodexRole {role="tui",endpoint=remotes==1 && listens==0 && !noDaemon?Loopback(remote,false):null};
+    return new CodexRole {role="tui",endpoint=remotes==1 && listens==0 && !noDaemon?Loopback(remote,false):null,standalone=remotes==0 && listens==0};
   }
   /** Read only fixed consistency markers; unrelated entries are neither retained nor exported. */
   public static SeatMarkers Markers(int pid) {
@@ -378,6 +382,7 @@ $nativeProcesses = @(foreach ($row in $all) {
         try { $role = [ClankieProcess]::Codex($row.pid) } catch { }
         $native.role = if ($role) { $role.role } else { 'unavailable' }
         $native.endpoint = if ($role) { $role.endpoint } else { $null }
+        $native.standalone = if ($role) { $role.standalone } else { $false }
         $native.markers = $null
         try { $native.markers = [ClankieProcess]::Markers($row.pid) } catch { }
         if ($role -and $role.role -eq 'server') {

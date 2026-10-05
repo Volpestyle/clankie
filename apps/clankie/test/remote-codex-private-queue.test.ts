@@ -36,7 +36,9 @@ function defaultHomePane() {
       { pid: 20, parent: 10, startTime: "2026-10-03T10:00:01.000Z", executable: "C:\\Windows\\cmd.exe" },
       { pid: 30, parent: 20, startTime: "2026-10-03T10:00:02.000Z", executable },
     ],
-    nativeProcesses: [{ pid: 30, executable, cwd: "C:\\repo", role: "tui", endpoint: null, markers }],
+    nativeProcesses: [
+      { pid: 30, executable, cwd: "C:\\repo", role: "tui", standalone: true, endpoint: null, markers },
+    ],
     owners: [],
     installed: [executable],
     foregroundMarkers: { ...markers },
@@ -138,6 +140,116 @@ it("refuses queue when a proven private steer becomes idle and its native proof 
   expect(cliCalls).toBe(0);
 });
 
+it.each(["queue", "steer"] as const)(
+  "refuses private %s when peer authority is revoked during the final SSH observation",
+  async (mode) => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await once(server, "listening");
+    const address = server.address();
+    if (typeof address === "string" || address === null) throw new Error("Test socket unavailable");
+    cleanups.push(async () => {
+      for (const socket of server.clients) socket.terminate();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+    type Snapshot = {
+      owners: number[];
+      nativeProcesses: Array<{ pid: number; role: string; endpoint: string; listeners?: { port: number }[] }>;
+    };
+    const snapshots = JSON.parse(raw) as { first: Snapshot; last: Snapshot };
+    for (const snapshot of [snapshots.first, snapshots.last]) {
+      const backend = snapshot.nativeProcesses.find((native) => native.role === "server")!;
+      backend.listeners![0]!.port = address.port;
+      snapshot.nativeProcesses.find((native) => native.role === "tui")!.endpoint =
+        `ws://127.0.0.1:${address.port}`;
+      snapshot.owners = [backend.pid];
+    }
+    const requests: string[] = [];
+    let clientPort: number | undefined;
+    let effects = 0;
+    server.on("connection", (socket, request) => {
+      clientPort = request.socket.remotePort;
+      socket.on("message", (bytes) => {
+        const request = JSON.parse(bytes.toString()) as {
+          id?: number;
+          method: string;
+          params?: { clientUserMessageId?: string };
+        };
+        requests.push(request.method);
+        if (request.method === "initialized") return;
+        let result: unknown = {};
+        if (request.method === "thread/read")
+          result = { thread: { id: sessionId, status: { type: "active" } } };
+        if (request.method === "thread/turns/list")
+          result = { data: [{ id: "held-turn", status: "inProgress" }] };
+        if (request.method === "thread/queue/add") {
+          effects++;
+          result = {
+            queuedSubmission: { id: "queued-once", clientUserMessageId: request.params?.clientUserMessageId },
+          };
+        }
+        if (request.method === "turn/steer") {
+          effects++;
+          result = { turnId: "held-turn" };
+        }
+        socket.send(JSON.stringify({ id: request.id, result }));
+      });
+    });
+    const connect = async () => {
+      const socket = new WebSocket(`ws://127.0.0.1:${address.port}`);
+      await once(socket, "open");
+      if (clientPort === undefined) throw new Error("Test TCP client unavailable");
+      return {
+        socket,
+        connection: { clientPort, serverPort: address.port },
+        alive: () => socket.readyState === WebSocket.OPEN,
+        close: () => socket.terminate(),
+      };
+    };
+    let announceProbe!: () => void;
+    const probeStarted = new Promise<void>((resolve) => {
+      announceProbe = resolve;
+    });
+    let releaseProbe!: () => void;
+    const probeReleased = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    let authorized = true;
+    let probes = 0;
+    const shell = async (command: string) => {
+      expect(scriptFromCommand(command)).toContain("Observe-ClankieProcess");
+      if (++probes === 2) {
+        announceProbe();
+        await probeReleased;
+      }
+      return JSON.stringify(snapshots);
+    };
+    const beforeDispatch = vi.fn(async () => authorized);
+    const pending = remoteCodexControl(fleet, shell, async () => "", qualified, { connect, mode })(
+      sessionId,
+      "revoked private dispatch",
+      undefined,
+      undefined,
+      beforeDispatch,
+    );
+    try {
+      await probeStarted;
+      expect(beforeDispatch).toHaveBeenCalledOnce();
+      authorized = false;
+    } finally {
+      releaseProbe();
+    }
+    expect(await pending).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+    expect(beforeDispatch).toHaveBeenCalledTimes(2);
+    expect(effects).toBe(0);
+    expect(requests).toEqual([
+      "initialize",
+      "initialized",
+      "thread/read",
+      ...(mode === "steer" ? ["thread/turns/list"] : []),
+    ]);
+  },
+);
+
 it.each(["missing control", "unavailable proof"])(
   "refuses %s for a targeted Windows queue before account CLI discovery",
   async (kind) => {
@@ -177,7 +289,62 @@ it("queues a hired --no-daemon pane through SSH CLI only after fresh default-hom
     "utf8",
   );
   expect(commandLine).toBe(`C:\\npm\\codex.js queue --thread ${sessionId} --message "queue once"`);
-  expect(beforeDispatch).toHaveBeenCalledOnce();
+  expect(beforeDispatch).toHaveBeenCalledTimes(2);
+  expect(privateQueue).not.toHaveBeenCalled();
+});
+
+it("refuses CLI queue when peer authority is revoked during the final default-home SSH observation", async () => {
+  const observation = defaultHomePane();
+  let announceProbe!: () => void;
+  const probeStarted = new Promise<void>((resolve) => {
+    announceProbe = resolve;
+  });
+  let releaseProbe!: () => void;
+  const probeReleased = new Promise<void>((resolve) => {
+    releaseProbe = resolve;
+  });
+  let authorized = true;
+  let probes = 0;
+  let effects = 0;
+  const calls: string[] = [];
+  const shell = async (command: string) => {
+    const script = scriptFromCommand(command);
+    calls.push(script);
+    if (script.includes("Observe-ClankieProcess")) {
+      if (++probes === 2) {
+        announceProbe();
+        await probeReleased;
+      }
+      return JSON.stringify({ first: observation, last: observation });
+    }
+    if (script.includes("npm root -g")) return "C:\\npm\\codex.js";
+    effects++;
+    return "queued";
+  };
+  const privateQueue = vi.fn();
+  const beforeDispatch = vi.fn(async () => authorized);
+  const pending = remoteCodexQueue(fleet, shell, privateQueue)(
+    sessionId,
+    "revoked queue",
+    beforeDispatch,
+    qualified,
+  );
+  try {
+    await probeStarted;
+    expect(beforeDispatch).toHaveBeenCalledOnce();
+    authorized = false;
+  } finally {
+    releaseProbe();
+  }
+  expect(await pending).toMatchObject({
+    outcome: "undelivered",
+    deliveryStage: "unavailable",
+    detail: expect.stringContaining("authority changed"),
+  });
+  expect(beforeDispatch).toHaveBeenCalledTimes(2);
+  expect(effects).toBe(0);
+  expect(calls).toHaveLength(3);
+  expect(calls.at(-1)).toContain("Observe-ClankieProcess");
   expect(privateQueue).not.toHaveBeenCalled();
 });
 

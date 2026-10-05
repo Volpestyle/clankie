@@ -2489,8 +2489,10 @@ still needs native verification. Existing embedded `--no-daemon` sessions and ex
 retain that launch mode. Steering refuses when no private endpoint can be proven.
 An embedded TUI may queue through the existing SSH CLI only when fresh kernel
 observations prove that its home is the SSH account's canonical default `~/.codex`
-and the CLI inherits that same home. The pane/session and home proof are repeated
-after preparation and caller authority checks, before sending. Private, changed
+and the CLI inherits that same home. The native projection must positively prove
+a standalone TUI; an absent or rejected remote endpoint is insufficient.
+The pane/session and home proof are repeated after preparation. Caller authority
+is checked again after the final observation, immediately before sending. Private, changed
 or unproved homes refuse the fallback; a private native receipt cannot authorize
 a second send through CLI.
 Clankie checks the current pane/session, native process lifetimes and ancestry,

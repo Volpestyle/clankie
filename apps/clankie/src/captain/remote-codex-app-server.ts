@@ -465,6 +465,18 @@ export function remoteCodexQueue(
         deliveryStage: "unavailable",
         detail: "The Windows pane's default Codex home or native identity changed; nothing was sent.",
       };
+    // The final SSH observation yields; peer authority may change while it runs.
+    if (original && beforeDispatch) {
+      try {
+        if (!(await beforeDispatch())) throw new Error("Peer authority changed; nothing was sent.");
+      } catch (error) {
+        return {
+          outcome: "undelivered",
+          deliveryStage: "unavailable",
+          detail: `Codex authority changed before queue dispatch; nothing was sent: ${String(error)}`,
+        };
+      }
+    }
     const stdout = await shell(
       fleet.ssh.shell === "powershell"
         ? remoteProgramCommand("powershell", "node", queueArgs)
@@ -517,10 +529,12 @@ export function remoteCodexControl(
       try {
         const result = await control(sessionId, text, undefined, undefined, async () => {
           if (!connection?.alive()) return false;
-          // Caller preparation may yield; native ownership is the final observation before writing.
+          // Both caller preparation and the final native observation may yield.
           if (beforeDispatch !== undefined && !(await beforeDispatch())) return false;
           const current = await observe(fleet.id, qualified.id, sessionId, connection.connection);
-          return connection.alive() && isDeepStrictEqual(original, current);
+          if (!connection.alive() || !isDeepStrictEqual(original, current)) return false;
+          if (beforeDispatch !== undefined && !(await beforeDispatch())) return false;
+          return connection.alive();
         });
         // A proven private home must never fall through to the account-default queue.
         return result === undefined && options.mode === "queue"

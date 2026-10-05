@@ -32,6 +32,8 @@ interface NativeProcess {
   /** Bounded kernel argv projection, absent only on legacy observations. */
   role?: "tui" | "server" | "other" | "unavailable";
   endpoint?: string | null;
+  /** Positive native argv evidence; a null/unknown endpoint alone proves nothing. */
+  standalone?: boolean;
   markers?: SeatMarkers | null;
   listeners?: { pid: number; address: string; port: number }[];
   listenerOwners?: number[];
@@ -378,6 +380,7 @@ function selectCodexQueue(observation: Observation, fleet: HerdrFleet, pane: str
     observation.nativeProcesses.length !== 1 ||
     native?.pid !== view.proof.processes[0]?.pid ||
     native?.role !== "tui" ||
+    native.standalone !== true ||
     native.endpoint !== null ||
     !markers ||
     markers.pane !== pane ||
