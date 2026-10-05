@@ -17,7 +17,7 @@ async function fixture() {
   roots.push(cwd);
   const executable = await realpath(process.execPath);
   const binding = { runtime: "external" as const, socketPath: "/tmp/owned-herdr.sock", session: "owned" };
-  const facts = { pid: 123, uid: process.getuid!(), birth: ["1700000000", "123456"], executable };
+  const facts = { pid: 123, uid: process.getuid!(), birth: ["1700000000", "123456"], executable, cwd };
   const info = { pane_id: "w1:p1", shell_pid: 123, foreground_process_group_id: 123 };
   const agent: {
     pane_id: string;
@@ -35,9 +35,8 @@ async function fixture() {
     localPort: 40002,
   };
   let owner = 123;
-  const run = vi.fn(async (file: string, args: readonly string[]) => {
+  const run = vi.fn(async (file: string, _args: readonly string[]) => {
     if (file === "/usr/bin/python3") return JSON.stringify(facts);
-    if (args.includes("cwd")) return `p123\nn${cwd}\n`;
     return `p${owner}\nn127.0.0.1:40001->127.0.0.1:40002\n`;
   });
   const request = vi.fn(async (_binding: unknown, method: string, params: unknown) => {
@@ -177,10 +176,7 @@ test.each([
   const root = await f.capture();
   await root.report("ses_exact1234", "idle");
   if (change === "birth") f.facts.birth[1] = "123457"; // Same PID, same second, different lifetime.
-  if (change === "cwd")
-    f.run.mockImplementation(async (file) =>
-      file === "/usr/bin/python3" ? JSON.stringify(f.facts) : "p123\nn/tmp\n",
-    );
+  if (change === "cwd") f.facts.cwd = "/tmp";
   if (change === "executable") f.facts.executable = "/bin/sh";
   if (change === "shell") f.info.shell_pid = 456;
   if (change === "foreground") f.info.foreground_process_group_id = 456;

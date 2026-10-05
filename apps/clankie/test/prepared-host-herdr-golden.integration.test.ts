@@ -1,12 +1,17 @@
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { createServer } from "node:net";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
-import { createPreparedNativeHost, type PreparedNativeSession } from "../src/captain/prepared-native-host.ts";
+import {
+  createPreparedNativeHost,
+  type PreparedNativeRoot,
+  type PreparedNativeSession,
+} from "../src/captain/prepared-native-host.ts";
 
-// Real Unix transport and libproc/lsof process boundary; Herdr response is a
+// Real Unix transport and libproc process boundary; Herdr response is a
 // golden from the real 0.9.3 socket, not evidence of invoking OpenCode/Pi here.
 test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as const)(
   "reported Herdr 0.9.3 %s pane without top-level agent binds; contradictions revoke",
@@ -14,10 +19,22 @@ test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as co
     const directory = await realpath(await mkdtemp("/tmp/herdr-golden-"));
     const socketPath = join(directory, "herdr.sock");
     const executable = await realpath(process.execPath);
-    const processFixture = spawn(executable, ["-e", "setInterval(() => {}, 1000)"], {
-      cwd: directory,
-      stdio: "ignore",
-    });
+    const processFixture = spawn(
+      executable,
+      [
+        "-e",
+        "process.on('message', (cwd) => { process.chdir(cwd); process.send({cwd}); }); process.send('ready');",
+      ],
+      { cwd: directory, stdio: ["ignore", "ignore", "ignore", "ipc"] },
+    );
+    const ready = once(processFixture, "message");
+    const changeDirectory = async (cwd: string) => {
+      const changed = once(processFixture, "message");
+      processFixture.send(cwd);
+      expect((await changed)[0]).toEqual({ cwd });
+    };
+    let lastRoot: PreparedNativeRoot | undefined;
+    let lastSession: PreparedNativeSession | undefined;
     const golden = JSON.parse(
       await readFile(new URL("./fixtures/herdr-0.9.3-reported-pane.json", import.meta.url), "utf8"),
     );
@@ -49,6 +66,9 @@ test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as co
       });
     });
     try {
+      expect((await ready)[0]).toBe("ready");
+      const changedDirectory = join(directory, "changed");
+      await mkdir(changedDirectory);
       await new Promise<void>((resolve, reject) => {
         server.listen(socketPath, resolve);
         server.once("error", reject);
@@ -72,6 +92,12 @@ test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as co
             : { source: "herdr:opencode", kind: "id", value: "ses_golden1234" };
       await root.report(session, "idle");
       expect(await root.proof(session)).toMatchObject({ pane: pane.pane_id, shell: { pid } });
+      // A real cwd change revokes the same process; restoring it permits
+      // another fresh proof. No cached or caller-provided cwd is admitted.
+      await changeDirectory(changedDirectory);
+      await expect(root.proof(session)).rejects.toThrow("cwd changed");
+      await changeDirectory(directory);
+      await expect(root.proof(session)).resolves.toBeDefined();
       pane.agent = harness;
       await expect(root.proof(session)).resolves.toBeDefined();
       pane.agent_session.agent = "contradictory";
@@ -98,8 +124,18 @@ test.skipIf(process.platform !== "darwin").each(["grok", "opencode", "pi"] as co
       pid += 1;
       await expect(root.proof(session)).rejects.toThrow("allocation changed");
       pid -= 1;
-    } finally {
+      lastRoot = root;
+      lastSession = session;
+      const exited = once(processFixture, "exit");
       processFixture.kill();
+      await exited;
+      await expect(lastRoot!.proof(lastSession!)).rejects.toThrow();
+    } finally {
+      if (processFixture.exitCode === null && processFixture.signalCode === null) {
+        const exited = once(processFixture, "exit");
+        processFixture.kill();
+        await exited;
+      }
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await rm(directory, { recursive: true, force: true });
     }

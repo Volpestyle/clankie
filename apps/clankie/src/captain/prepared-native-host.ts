@@ -16,6 +16,7 @@ const Birth = z.object({
   uid: z.number().int().nonnegative(),
   birth: z.tuple([z.string().regex(/^[1-9]\d*$/u), z.string().regex(/^\d{1,6}$/u)]),
   executable: z.string().startsWith("/"),
+  cwd: z.string().startsWith("/"),
 });
 const NativeSession = z.discriminatedUnion("source", [
   z.object({ source: z.literal("herdr:grok"), kind: z.literal("id"), value: z.string().uuid() }),
@@ -176,15 +177,10 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
         const before = Birth.parse(
           JSON.parse(await run("/usr/bin/python3", ["-I", input.processHelper, String(pid)])),
         );
-        const directory = (await run("/usr/sbin/lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]))
-          .split("\n")
-          .filter((line) => line.startsWith("n"))
-          .map((line) => line.slice(1));
         if (
           before.pid !== pid ||
           before.uid !== ownerUid ||
-          directory.length !== 1 ||
-          (await canonical(directory[0]!)) !== canonicalCwd ||
+          (await canonical(before.cwd)) !== canonicalCwd ||
           (await canonical(before.executable)) !== canonicalExecutable
         )
           throw new Error("Native root executable or cwd changed");

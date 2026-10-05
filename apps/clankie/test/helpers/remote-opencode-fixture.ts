@@ -104,6 +104,7 @@ export async function remoteOpenCodeFixture(options: {
             uid,
             birth: ["1700000000", birth],
             executable: options.executable,
+            cwd: root,
           });
         }
         if (file === "/usr/sbin/lsof" && args.includes("cwd")) return "p" + process.pid + "\nn" + root + "\n";
