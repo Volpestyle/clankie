@@ -1,7 +1,16 @@
 /** Fixed detached helper copied with its builtin-only modules before acceptance. */
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { openSync, closeSync, lstatSync, readFileSync, realpathSync, constants, fstatSync } from "node:fs";
+import {
+  openSync,
+  closeSync,
+  lstatSync,
+  readFileSync,
+  writeFileSync,
+  realpathSync,
+  constants,
+  fstatSync,
+} from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 const directory = realpathSync(import.meta.dirname);
@@ -91,13 +100,26 @@ const cli = async (runtime, args) => {
   const { stdout } = await exec(process.execPath, [join(runtime, "apps/tui/bin/clankie.ts"), ...args], {
     cwd: runtime,
     env: process.env,
-    timeout: 300_000,
+    timeout: args[0] === "harness" ? 20 * 60_000 : 300_000,
     maxBuffer: 2 * 1024 * 1024,
   });
   return JSON.parse(stdout);
 };
 const result = await executeRuntimeUpdate(plan, {
   run: installCommand,
+  refreshHarnesses: async (runtime) => {
+    let result;
+    try {
+      result = await cli(runtime, ["harness", "install", "--refresh-linked"]);
+    } catch (error) {
+      if (typeof error?.stdout !== "string") throw error;
+      result = JSON.parse(error.stdout);
+    }
+    // Keep complete per-profile/fleet evidence outside the bounded transaction record.
+    const receipt = join(directory, "harness-refresh.json");
+    writeFileSync(receipt, JSON.stringify(result) + "\n", { mode: 0o600, flag: "wx" });
+    return { ok: result.ok === true, receipt };
+  },
   services: async (runtime, action) => {
     let outcome;
     try {
@@ -114,4 +136,4 @@ const result = await executeRuntimeUpdate(plan, {
   },
 });
 process.stdout.write(JSON.stringify(result) + "\n");
-process.exitCode = result.phase === "healthy" ? 0 : 1;
+process.exitCode = result.phase === "healthy" && result.harnessRefresh?.ok !== false ? 0 : 1;

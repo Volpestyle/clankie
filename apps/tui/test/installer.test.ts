@@ -47,6 +47,7 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
         CLANKIE_INSTALL_ROOT: installation,
         CLANKIE_BIN_DIR: bin,
         INSTALL_TEST_DOWNLOADS: downloads,
+        INSTALL_TEST_REFRESHES: join(root, "refreshes.jsonl"),
       };
       const userFiles = [
         [env.CLANKIE_SETTINGS_FILE, '{"schemaVersion":1,"persona":{"displayName":"Clankie"}}\n'],
@@ -62,8 +63,14 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
         await mkdir(join(source, "clankie", "bin"), { recursive: true });
         await mkdir(destination, { recursive: true });
         await writeFile(join(source, "clankie", "VERSION"), `${version}\n`);
-        for (const command of ["clankie", "clankie-herdr"])
-          await writeFile(join(source, "clankie", "bin", command), version);
+        for (const command of ["clankie", "clankie-herdr"]) {
+          const path = join(source, "clankie", "bin", command);
+          await writeFile(
+            path,
+            `#!${process.execPath}\nconst fs = require('node:fs');\nfs.appendFileSync(process.env.INSTALL_TEST_REFRESHES, JSON.stringify({version: '${version}', args: process.argv.slice(2)}) + '\\n');\nconsole.log('{"ok":true}');\n`,
+          );
+          await chmod(path, 0o755);
+        }
         const archive = join(destination, archiveName);
         const packed = spawnSync("tar", ["-czf", archive, "-C", source, "clankie"]);
         expect(packed.status).toBe(0);
@@ -76,10 +83,21 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
         const installed = spawnSync("sh", [installer, "--version", version], { env, encoding: "utf8" });
         expect(installed.status, installed.stderr).toBe(0);
         expect(await readlink(join(installation, "current"))).toBe(`releases/${version}`);
-        expect(await readFile(join(bin, "clankie"), "utf8")).toBe(version);
-        expect(await readFile(join(bin, "clankie-herdr"), "utf8")).toBe(version);
+        expect(await readFile(join(bin, "clankie"), "utf8")).toContain(version);
+        expect(await readFile(join(bin, "clankie-herdr"), "utf8")).toContain(version);
         for (const [path, contents] of userFiles) expect(await readFile(path, "utf8")).toBe(contents);
       }
+      expect(
+        (await readFile(env.INSTALL_TEST_REFRESHES, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line)),
+      ).toEqual(
+        ["v0.1.0", "v0.2.0", "v0.1.0"].map((version) => ({
+          version,
+          args: ["harness", "install", "--refresh-linked"],
+        })),
+      );
       const retained = join(installation, "releases", "v0.1.0", "retained");
       await writeFile(retained, "immutable directory");
       expect(spawnSync("sh", [installer, "--version", "v0.1.0"], { env }).status).toBe(0);

@@ -96,7 +96,9 @@ case ":${PATH:-}:" in
   *) echo "Add $bin_dir to PATH, then run: clankie" ;;
 esac
 
-# Review each optional harness installation only in an interactive owner terminal.
+# Existing links follow the release, even when installed without a terminal.
+"$bin_link" harness install --refresh-linked
+# Review new optional harness installations only in an interactive owner terminal.
 if [ -t 0 ] && [ -t 1 ]; then
   "$bin_link" harness install
 else

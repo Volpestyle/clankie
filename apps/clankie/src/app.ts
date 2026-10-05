@@ -451,6 +451,8 @@ const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface ClankieAppDependencies {
   runtimeUpdater?: import("../../tui/bin/runtime-updater.ts").RuntimeUpdater;
+  refreshHarnesses?: () => Promise<unknown>;
+  pluginVersionInstalled?: (version: string) => void;
   discordIngress?: DiscordIngress;
   /** Durable exact Discord turn receipts; production supplies its state directory. */
   discordTurnReceiptPath?: string;
@@ -1164,6 +1166,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     "/",
     createRuntimeUpdateRoutes({
       updater: dependencies.runtimeUpdater,
+      refreshHarnesses: dependencies.refreshHarnesses,
+      pluginVersionInstalled: dependencies.pluginVersionInstalled,
       authorize: async (request) => {
         const identity = await authenticateOperator(request, dependencies);
         if (!identity || identity === "unavailable") return undefined;

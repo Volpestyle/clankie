@@ -321,8 +321,9 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "harness") {
-      outputJson(stdout, await runHarnessCommand(rest, options));
-      return 0;
+      const result = await runHarnessCommand(rest, options);
+      outputJson(stdout, result);
+      return !Array.isArray(result) && result.ok === false ? 1 : 0;
     }
     if (command === "project") {
       outputJson(

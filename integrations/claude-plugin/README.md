@@ -310,6 +310,15 @@ profiles, including `CLAUDE_CONFIG_DIR` and named `~/.claude-*` directories.
 The worker MCP server is `clankie`. Bump both worker manifests on every shipment
 so native caches cannot retain an older protocol at the same version.
 
+Updates and checkout/release installers run `clankie harness install --refresh-linked`
+for existing local profiles and enabled SSH fleet machines, without enrolling new
+profiles or changing channel policy. Native plugin managers refresh caches and
+retarget a recognized local marketplace when an immutable release path changes.
+Previously approved managed Codex source setup is reused for its exact config
+source. Missing source setup stays an incomplete receipt. Running native clients
+report the version captured at plugin process start; an older version gets a
+once-only Herdr restart/resume flag, without controlling the pane.
+
 `clankie doctor [--machine NAME]` compares deployed versions with the service and
 reports bridge, hook and `clankie` skill presence separately. Native Codex worker
 packaging lives beside the Claude packaging in `.agents/plugins/marketplace.json`

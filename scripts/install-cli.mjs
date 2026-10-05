@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { installHarnessBridges } from "../apps/tui/src/harness-install.ts";
+import { refreshLinkedHarnesses } from "../apps/tui/src/harness-refresh.ts";
 import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -58,7 +59,10 @@ if (!onPath) {
   console.log(`Note: ${binDirectory} is not on your PATH; add it in your shell profile.`);
 }
 
-// Consent is per harness. Noninteractive installation leaves harness registrations untouched.
+const refreshed = await refreshLinkedHarnesses({ repoRoot: root });
+console.log(JSON.stringify(refreshed));
+if (!refreshed.ok) process.exitCode = 1;
+// Consent is per new harness. Existing links were refreshed above.
 if (process.stdin.isTTY && process.stdout.isTTY) {
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   try {

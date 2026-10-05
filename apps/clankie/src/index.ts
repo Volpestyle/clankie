@@ -122,6 +122,8 @@ import {
 import { localFleetProof, localProjectProof } from "./local-fleet-proof.ts";
 import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
+import { refreshLinkedHarnesses } from "../../tui/src/harness-refresh.ts";
+import { WorkerPluginNotices } from "./worker-plugin-notices.ts";
 import { LinearWriteReceipts, linearWriteIssue } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { LinearNotifications } from "./linear-notifications.ts";
@@ -1088,11 +1090,26 @@ const localFleet = new LocalFleetLink({
       (await localCodexSeats.allows(chain, pane, binding)) || grokNative.allows(chain, pane, binding),
   }),
 });
+const workerPluginNotices = new WorkerPluginNotices({
+  directory: join(stateRoot, "worker-plugin-notices"),
+  expectedVersion: JSON.parse(
+    readFileSync(join(workerPluginDir(repoRoot), ".claude-plugin", "plugin.json"), "utf8"),
+  ).version,
+  report: async (fleetId, pane, args) => {
+    const metadata = ["pane", "report-metadata", pane, "--source", "clankie-plugin-update", ...args];
+    if (fleetId === "default") return runtimes.runNamed("default", metadata);
+    const fleet = (await runtimes.fleets()).find((entry) => entry.id === fleetId);
+    if (!fleet) throw new Error("Fleet disconnected");
+    return runtimes.fleetRun(fleet)(metadata);
+  },
+});
 const workerMcp = new WorkerMcp({
   directory: join(stateRoot, "worker-grants"),
   credentials: operatorCredentialStore,
   host: mcpHost,
   minecraft,
+  pluginVersionObserved: (identity, version) => workerPluginNotices.observe(identity, version),
+  pluginExpectedVersion: () => workerPluginNotices.expected(),
   projects: async () => (await settingsStore.load()).projects,
   fleetTools: async () => (await settingsStore.load()).fleet.tools,
   fleetToolsSnapshot: async () => {
@@ -1123,6 +1140,14 @@ const clankie = await createClankieApp({
   fleetProjectMembership,
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
+  refreshHarnesses: async () =>
+    refreshLinkedHarnesses({
+      repoRoot,
+      settings: settingsStore,
+      fleets: await runtimes.fleets(),
+      shell: (fleet) => runtimes.fleetShell(fleet),
+    }),
+  pluginVersionInstalled: (version) => workerPluginNotices.expect(version),
   roomObservations,
   roomVoice: new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore),
   discordTurnReceipts,
