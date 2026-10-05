@@ -30,6 +30,20 @@ function decoded(command: string): string {
   return Buffer.from(encoded, "base64").toString("utf16le");
 }
 
+/** Unquote the shell script and verify its bootstrap before checking exact argv. */
+function decodedPosixExec(command: string | undefined): string {
+  const prefix = "exec sh -c '";
+  if (!command?.startsWith(prefix) || !command.endsWith("'"))
+    throw new Error(`not a quoted POSIX script: ${command}`);
+  const script = command.slice(prefix.length, -1).replaceAll("'\\''", "'");
+  const bootstrap =
+    /^command -v codex >\/dev\/null 2>&1 \|\| \{ printf '%s\\n' 'clankie-launch-[a-f0-9]{16}: codex not found in PATH' >&2; exit 127; \}; /u.exec(
+      script,
+    );
+  if (!bootstrap) throw new Error(`not a Codex launch bootstrap: ${script}`);
+  return script.slice(bootstrap[0].length);
+}
+
 function fakeForward() {
   const child = new EventEmitter() as ChildProcess & EventEmitter;
   const stderr = new PassThrough();
@@ -201,7 +215,9 @@ describe("replying to a Codex session Clankie did not start on another machine (
   it("calls codex directly on a POSIX machine and reports a session that is gone", async () => {
     const shell = vi.fn(async (_command: string) => "Error: no active session thread-9\n");
     expect(await remoteCodexQueue(posix, shell)("thread-9", "hi")).toBe(false);
-    expect(shell.mock.calls[0]![0]).toBe("exec codex 'queue' '--thread' 'thread-9' '--message' 'hi'");
+    expect(decodedPosixExec(shell.mock.calls[0]![0])).toBe(
+      "exec codex 'queue' '--thread' 'thread-9' '--message' 'hi'",
+    );
   });
   it.each(["off", "throws"])(
     "refuses a %s authority guard after deferred Windows script discovery without queueing",
@@ -274,7 +290,7 @@ describe("external Codex SSH proxy", () => {
       );
       expect(await sending).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
       expect(delivery).toHaveBeenCalledWith("thread", "peer context", undefined, undefined, beforeDispatch);
-      expect(proxy.mock.calls[0]?.[1]?.at(-1)).toBe(
+      expect(decodedPosixExec(proxy.mock.calls[0]?.[1]?.at(-1))).toBe(
         "exec codex 'app-server' 'proxy' '--sock' '/owned/rpc.sock'",
       );
     } finally {
@@ -314,7 +330,7 @@ describe("external Codex SSH proxy", () => {
       expect(command).toBe("ssh");
       expect(args?.at(-2)).toBe(fleet.ssh.host);
       if (fleet.ssh.shell === "posix") {
-        expect(args?.at(-1)).toBe("exec codex 'app-server' 'proxy'");
+        expect(decodedPosixExec(args?.at(-1))).toBe("exec codex 'app-server' 'proxy'");
         expect(shell).not.toHaveBeenCalled();
       } else {
         const script = decoded(args!.at(-1)!);
@@ -367,7 +383,7 @@ it("passes the exact remote Unix endpoint into the selected fleet's proxy", asyn
         },
       });
     await remoteCodexControl(posix, vi.fn(), herdr, "box/w1:p1")("thread", "hello");
-    expect(proxy.mock.calls[0]?.[1]?.at(-1)).toBe(
+    expect(decodedPosixExec(proxy.mock.calls[0]?.[1]?.at(-1))).toBe(
       "exec codex 'app-server' 'proxy' '--sock' '/owned/rpc.sock'",
     );
   } finally {
