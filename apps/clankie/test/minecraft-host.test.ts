@@ -220,10 +220,7 @@ describe("Minecraft host core receipts and authority", () => {
         (item) => item.name === "minecraft_host_status",
       )!;
       const result = await tool.execute("test", {}, undefined, undefined, {} as never);
-      const visible = [
-        result.details,
-        await f.service.admin({ operation: "say", text: "hello" }, f.owner),
-      ];
+      const visible = [result.details, await f.service.admin({ operation: "say", text: "hello" }, f.owner)];
       expect(JSON.stringify(visible)).not.toContain("DO_NOT_RETURN");
       expect(visible[0]).toEqual(failedStatus);
       expect(result.content).toEqual([{ type: "text", text: JSON.stringify(failedStatus) }]);
