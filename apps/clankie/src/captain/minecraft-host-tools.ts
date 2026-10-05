@@ -125,7 +125,7 @@ export function minecraftHostTools(client: MinecraftHostToolPort, turn: TurnCont
       name: "minecraft_host_claim",
       label: "Claim Minecraft tunnel",
       description:
-        "Begin a non-interactive playit account claim for an authenticated owner or individual machine operator. Returns immediately with preparing while the agent installs in the background. Poll minecraft_host_claim_status until pending with an official approval URL to share privately with the owner, then poll minecraft_host_claim_complete after approval. Repeated starts reuse the same job. Credentials remain in the broker.",
+        "Begin a non-interactive playit account claim for an authenticated owner or individual machine operator. Returns immediately with preparing while the agent installs in the background. Poll minecraft_host_claim_status until pending with an official approval URL to share privately with the owner, then read status after approval; the integration polls playit and exchanges approval into broker storage automatically even after the caller exits. Repeated starts reuse the same job. Credentials remain in the broker.",
       parameters: Type.Object({}),
       execute: async () => call((identity) => client.claim(identity)),
     }),
@@ -141,7 +141,7 @@ export function minecraftHostTools(client: MinecraftHostToolPort, turn: TurnCont
       name: "minecraft_host_claim_complete",
       label: "Complete Minecraft tunnel claim",
       description:
-        "Poll the owner's playit approval once for an authenticated owner or individual machine operator. Returns preparing during installation or pending until approved, then exchanges the secret directly into the broker. No terminal or credentials in chat are needed.",
+        "Read the integration-owned playit claim job for an authenticated owner or individual machine operator. Returns preparing during installation or pending until approved; the integration automatically exchanges approval into broker storage. No terminal or credentials in chat are needed.",
       parameters: Type.Object({}),
       execute: async () => call((identity) => client.completeClaim(identity)),
     }),

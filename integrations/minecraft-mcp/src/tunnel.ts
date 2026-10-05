@@ -44,12 +44,14 @@ type TunnelOptions = {
   install?: (dataDir: string) => Promise<string>;
   launch?: (binary: string, args: string[], cwd: string) => ChildProcess;
   now?: () => number;
+  apiBase?: string;
+  onClaimed?: () => Promise<void>;
 };
 
 /** Never include remote response bodies, credentials or child output in errors. */
-async function api(path: string, request: unknown, secret?: string): Promise<unknown> {
+async function api(path: string, request: unknown, secret?: string, base = API_BASE): Promise<unknown> {
   try {
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await fetch(`${base}${path}`, {
       method: "POST",
       redirect: "error",
       signal: AbortSignal.timeout(15_000),
@@ -74,11 +76,11 @@ async function api(path: string, request: unknown, secret?: string): Promise<unk
     } finally {
       await reader.cancel().catch(() => {});
     }
-    const result = z
-      .object({ status: z.literal("success"), data: z.unknown() })
-      .parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-    return result.data;
-  } catch {
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (body.status === "fail" && body.data === "CodeExpired") throw new Error("playit-claim-expired");
+    return z.object({ status: z.literal("success"), data: z.unknown() }).parse(body).data;
+  } catch (error) {
+    if (error instanceof Error && error.message === "playit-claim-expired") throw error;
     throw new Error("playit-api-unavailable");
   }
 }
@@ -165,7 +167,9 @@ export class MinecraftTunnel {
   private readonly request: NonNullable<TunnelOptions["api"]>;
   private state: TunnelStatus = { phase: "stopped" };
   private child: ChildProcess | undefined;
-  private claim: { code: string; expiresAt: number } | undefined;
+  private claim: { code: string; expiresAt: number; secret?: string } | undefined;
+  private claimTimer: ReturnType<typeof setTimeout> | undefined;
+  private closed = false;
   private claimPreparation: Promise<void> | undefined;
   private claimError: MinecraftTunnelClaimStatus["error"];
   private claimPhase: MinecraftTunnelClaimStatus["phase"] = "idle";
@@ -184,7 +188,7 @@ export class MinecraftTunnel {
       throw new Error("playit-origin-port-invalid");
     }
     this.options = options;
-    this.request = options.api ?? api;
+    this.request = options.api ?? ((path, request, secret) => api(path, request, secret, options.apiBase));
     this.secretPath = join(options.dataDir, "playit-runtime", "agent.secret");
   }
   status(): TunnelStatus {
@@ -192,6 +196,7 @@ export class MinecraftTunnel {
   }
   claimStatus(): MinecraftTunnelClaimStatus {
     if (this.claim && this.now() >= this.claim.expiresAt) {
+      this.clearClaimTimer();
       this.claim = undefined;
       this.claimPhase = "expired";
     }
@@ -209,6 +214,7 @@ export class MinecraftTunnel {
   }
   async prepareClaim(): Promise<MinecraftTunnelClaimStatus> {
     const current = this.claimStatus();
+    if (this.closed) return current;
     if (this.claimPreparation || current.phase === "pending" || current.phase === "claimed") return current;
     this.claimPhase = "preparing";
     this.claimError = undefined;
@@ -224,54 +230,94 @@ export class MinecraftTunnel {
     try {
       await (this.options.install ?? installPlayit)(this.options.dataDir);
     } catch {
+      if (this.closed) return;
       this.claimPhase = "failed";
       this.claimError = "playit-install-failed";
       return;
     }
-    const code = randomBytes(5).toString("hex");
-    const expiresAt = this.now() + 10 * 60_000;
-    try {
-      await this.request("/claim/setup", {
-        code,
-        agent_type: "self-managed",
-        version: `playit ${PLAYIT_PIN.version}`,
-      });
-    } catch {
-      this.claimPhase = "failed";
-      this.claimError = "playit-claim-unavailable";
-      return;
-    }
-    this.claim = { code, expiresAt };
+    if (this.closed) return;
+    this.claim = { code: randomBytes(5).toString("hex"), expiresAt: this.now() + 10 * 60_000 };
     this.claimPhase = "pending";
+    await this.pollClaim();
   }
-  /** One nonblocking poll. Only the transient claim URL may leave this class. */
+  /** Compatibility endpoint: clients observe the integration-owned claim job. */
   async completeClaim(): Promise<MinecraftTunnelClaimStatus> {
-    const current = this.claimStatus();
-    if (!this.claim) return current;
+    return this.claimStatus();
+  }
+  private clearClaimTimer(): void {
+    if (this.claimTimer) clearTimeout(this.claimTimer);
+    this.claimTimer = undefined;
+  }
+  /** Retire an obsolete controller without leaving its account claim alive. */
+  async close(): Promise<TunnelStatus> {
+    this.closed = true;
+    this.clearClaimTimer();
+    this.claim = undefined;
+    this.claimPhase = "idle";
+    this.claimError = undefined;
+    return this.stop();
+  }
+  private async pollClaim(): Promise<void> {
+    this.claimStatus();
+    const claim = this.claim;
+    if (!claim || this.closed) return;
     try {
-      const status = await this.request("/claim/setup", {
-        code: this.claim.code,
-        agent_type: "self-managed",
-        version: `playit ${PLAYIT_PIN.version}`,
-      });
+      const status = claim.secret
+        ? "UserAccepted"
+        : z.enum(["WaitingForUserVisit", "WaitingForUser", "UserAccepted", "UserRejected"]).parse(
+            await this.request("/claim/setup", {
+              code: claim.code,
+              agent_type: "self-managed",
+              version: `playit-cli ${PLAYIT_PIN.version}`,
+            }),
+          );
+      this.claimStatus();
+      if (this.claim !== claim || this.closed) return;
+      this.claimError = undefined;
       if (status === "UserRejected") {
         this.claim = undefined;
         this.claimPhase = "rejected";
-        return this.claimStatus();
+        return;
       }
-      if (status !== "UserAccepted") return this.claimStatus();
-      const result = z
-        .object({ secret_key: z.string().regex(/^[a-fA-F0-9]{32,512}$/) })
-        .parse(await this.request("/claim/exchange", { code: this.claim.code }));
-      await this.options.credentials.set(result.secret_key);
-      this.claim = undefined;
-      this.claimPhase = "claimed";
-      // Claiming credentials must not conceal an already running tunnel.
-      if (this.state.phase === "blocked-on-claim") this.state = { phase: "stopped" };
-      return this.claimStatus();
-    } catch {
-      throw new Error("playit-claim-unavailable");
+      if (status === "UserAccepted") {
+        if (!claim.secret) {
+          const result = z
+            .object({ secret_key: z.string().regex(/^[a-fA-F0-9]{32,512}$/) })
+            .parse(await this.request("/claim/exchange", { code: claim.code }));
+          this.claimStatus();
+          if (this.claim !== claim || this.closed) return;
+          // Retain only in memory until broker persistence succeeds; never exchange twice.
+          claim.secret = result.secret_key;
+        }
+        await this.options.credentials.set(claim.secret);
+        if (this.claim !== claim || this.closed) return;
+        this.claim = undefined;
+        this.claimPhase = "claimed";
+        if (this.state.phase === "blocked-on-claim") this.state = { phase: "stopped" };
+        // Credential completion is independent of a waiting CLI or MCP caller.
+        await this.options.onClaimed?.();
+        return;
+      }
+    } catch (error) {
+      if (this.claim !== claim || this.closed) return;
+      if (error instanceof Error && error.message === "playit-claim-expired") {
+        this.claim = undefined;
+        this.claimPhase = "expired";
+        return;
+      }
+      // A temporary API outage must not require the owner to keep a client open.
+      this.claimError = "playit-claim-unavailable";
     }
+    this.claimStatus();
+    if (this.claim !== claim || this.closed) return;
+    this.claimTimer = setTimeout(
+      () => {
+        this.claimTimer = undefined;
+        void this.pollClaim();
+      },
+      Math.min(3000, Math.max(0, claim.expiresAt - this.now())),
+    );
+    this.claimTimer.unref();
   }
   start(): Promise<TunnelStatus> {
     if (this.stopping) return this.stopping.then(() => this.start());

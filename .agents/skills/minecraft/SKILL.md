@@ -35,8 +35,9 @@ tunnels, provision AWS resources or raise limits. Tool checks enforce this.
   background. Poll `minecraft_host_claim_status` for `pending` and the account
   claim URL. Give that URL to the
   owner in the requesting conversation; they approve it in their browser. Read
-  `minecraft_host_claim_status` and use `minecraft_host_claim_complete` to poll
-  once and store the agent secret in the broker. Pending is not completion;
+  `minecraft_host_claim_status` for completion. The integration polls playit every
+  three seconds and stores the approved agent secret in the broker automatically,
+  even after the caller exits; `minecraft_host_claim_complete` also reads status. Pending is not completion;
   resolve expired/rejected claims before starting. No router changes are needed.
 - **AWS:** use an already provisioned instance and scoped broker credential.
   While stopped, select `settings: {backend: {kind: "aws-ec2", accountId,

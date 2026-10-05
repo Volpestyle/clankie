@@ -36,13 +36,14 @@ async function fixture(
       ],
     },
   };
+  let setups = 0;
   const api = vi.fn(async (path: string) => {
     if (path === "/v1/agents/rundata") return { agent_id: agentId, tunnels: created ? [tunnelData] : [] };
     if (path === "/v1/tunnels/create") {
       created = true;
       return { id: tunnelId };
     }
-    if (path === "/claim/setup") return "UserAccepted";
+    if (path === "/claim/setup") return ++setups === 1 ? "WaitingForUserVisit" : "UserAccepted";
     if (path === "/claim/exchange") return { secret_key: secret };
     throw new Error("remote secret body must not escape");
   });
@@ -85,9 +86,10 @@ describe("Minecraft playit tunnel", () => {
     const claim = f.host.claimStatus();
     expect(f.api).toHaveBeenCalledWith(
       "/claim/setup",
-      expect.objectContaining({ version: `playit ${PLAYIT_PIN.version}` }),
+      expect.objectContaining({ version: `playit-cli ${PLAYIT_PIN.version}` }),
     );
     expect(claim.claimUrl).toMatch(/^https:\/\/playit.gg\/claim\/[a-f0-9]{10}$/);
+    await vi.waitFor(() => expect(f.host.claimStatus().phase).toBe("claimed"), { timeout: 4000 });
     expect(await f.host.completeClaim()).toEqual({ phase: "claimed", claimed: true });
     expect(f.credentials.set).toHaveBeenCalledWith(secret);
     expect(JSON.stringify([claim, f.host.status()])).not.toContain(secret);
@@ -276,11 +278,14 @@ describe("Minecraft playit tunnel", () => {
     await f.host.prepareClaim();
     await vi.waitFor(() =>
       expect(f.host.claimStatus()).toEqual({
-        phase: "failed",
+        phase: "pending",
         claimed: false,
+        claimUrl: expect.any(String),
+        expiresAt: expect.any(String),
         error: "playit-claim-unavailable",
       }),
     );
     expect(await f.host.start()).toEqual({ phase: "failed", error: "playit-start-failed" });
+    await f.host.close();
   });
 });
