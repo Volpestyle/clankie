@@ -1064,8 +1064,9 @@ export class ConversationStore {
     conversationId: string,
     poll: () => Promise<T>,
     signal?: AbortSignal,
+    prepare?: () => Promise<void>,
   ): Promise<T> {
-    return pollConversationDriver(this, conversationId, poll, signal);
+    return pollConversationDriver(this, conversationId, poll, signal, prepare);
   }
 
   /**

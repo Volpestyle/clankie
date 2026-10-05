@@ -374,12 +374,17 @@ it("carries model keys only in the encrypted envelope and still checks machine a
 
 it("carries account-connection codes only in the encrypted envelope and never returns a token", async () => {
   const code = "MARKER_linear_code_encrypted_only_5120";
-  const completeLinear = vi.fn(async () => ({
-    ok: true as const,
-    connection: { provider: "linear" as const, status: "connected" as const, scopes: ["read", "write"] },
-  }));
+  const completeLinear = vi.fn<AccountsPort["completeLinear"]>(async (_state, _code, guard) => {
+    await guard?.();
+    return {
+      ok: true as const,
+      connection: { provider: "linear" as const, status: "connected" as const, scopes: ["read", "write"] },
+    };
+  });
   const clientSecret = "MARKER_linear_app_secret_encrypted_only";
-  const connectLinearApp = vi.fn(completeLinear.getMockImplementation()!);
+  const connectLinearApp = vi.fn<AccountsPort["connectLinearApp"]>(async (_input, guard) =>
+    completeLinear.getMockImplementation()!("", "", guard),
+  );
   const accounts: AccountsPort = {
     list: async () => ({
       connections: [{ provider: "github", status: "connected", account: "octo-owner", scopes: ["repo"] }],
@@ -430,6 +435,9 @@ it("carries account-connection codes only in the encrypted envelope and never re
       ).status,
     ).toBe(426);
   }
-  expect(completeLinear).toHaveBeenCalledExactlyOnceWith(state, code);
-  expect(connectLinearApp).toHaveBeenCalledExactlyOnceWith({ clientId: "application-id", clientSecret });
+  expect(completeLinear).toHaveBeenCalledExactlyOnceWith(state, code, expect.any(Function));
+  expect(connectLinearApp).toHaveBeenCalledExactlyOnceWith(
+    { clientId: "application-id", clientSecret },
+    expect.any(Function),
+  );
 });

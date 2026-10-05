@@ -251,6 +251,7 @@ export async function pollConversationDriver<T>(
   conversationId: string,
   poll: () => Promise<T>,
   signal?: AbortSignal,
+  prepare?: () => Promise<void>,
 ): Promise<T> {
   if (!ctx["metas"].has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);
   let ready!: () => void;
@@ -267,6 +268,10 @@ export async function pollConversationDriver<T>(
     const ready = Promise.all(service);
     if (signal === undefined) await ready;
     else await waitForConversationRun(ready, signal);
+    if (prepare !== undefined) {
+      if (signal === undefined) await prepare();
+      else await waitForConversationRun(prepare(), signal);
+    }
     signal?.throwIfAborted();
     if (!ctx["metas"].has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);
     // The callback establishes mailbox binding synchronously, before the

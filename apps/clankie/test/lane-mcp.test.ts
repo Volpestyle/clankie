@@ -505,14 +505,21 @@ it("serves every real Captain schema with MCP's object root without losing union
     );
     // The SDK itself rejects a missing root type before returning tools/list.
     const listed = (await client.listTools()).tools;
-    const bank = await captain.laneToolBank("operator");
+    // The HTTP route resolves its default conversation explicitly; include that same
+    // conversation-bound room handoff bank when comparing native schemas.
+    const conversationId = captain.seatContext()?.conversationId;
+    expect(conversationId).toBeDefined();
+    const bank = await captain.laneToolBank("operator", conversationId);
     const originals = new Map(bank.tools.map((tool) => [tool.name, tool.inputSchema]));
     for (const tool of listed) {
       expect(tool.inputSchema.type, tool.name).toBe("object");
       const original = originals.get(tool.name);
       if (original) expect(tool.inputSchema, tool.name).toEqual({ ...original, type: "object" });
     }
-    expect(listed).toHaveLength(bank.tools.length + 1); // read-only receipt reconciliation
+    expect(listed.map((tool) => tool.name)).toEqual([
+      ...bank.tools.map((tool) => tool.name),
+      "reconcile_seat_call", // read-only receipt reconciliation
+    ]);
     const union = listed.find((tool) => Array.isArray(originals.get(tool.name)?.anyOf))!;
     expect(union).toBeDefined();
     expect(union.inputSchema.anyOf).toEqual(originals.get(union.name)!.anyOf);
