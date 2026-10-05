@@ -14,7 +14,19 @@ import {
   UpdateProjectSettingsSchema,
   type ProjectsSnapshot,
 } from "@clankie/protocol/projects";
-import { effectiveFleetAutonomy, type FleetAutonomy, type FleetAutonomyMode } from "@clankie/protocol";
+import {
+  effectiveFleetAutonomy,
+  FLEET_WORKING_PREFERENCE_FIELDS,
+  FleetAutonomyPatchSchema,
+  FleetReleasePolicySchema,
+  FleetVerificationSchema,
+  FleetReportingStyleSchema,
+  FleetWorkingPreferencesSchema,
+  type FleetAutonomy,
+  type FleetAutonomyPatch,
+  type FleetAutonomyWire,
+  type FleetAutonomyMode,
+} from "@clankie/protocol";
 import { commandHost } from "./io.ts";
 
 /** Revision-bearing API client shared by the CLI and the console's /project entry. */
@@ -43,7 +55,7 @@ export async function runProjectSettingsCommand(
     )
   )
     throw new Error(
-      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
+      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
     );
   let command: unknown;
   if (!list && !membership) {
@@ -146,7 +158,12 @@ interface ProjectFleetSettingsResult extends ProjectsSnapshot {
   fleet: {
     closure: FleetAutonomyMode | "inherit";
     machineSetup: FleetAutonomyMode | "inherit";
-    effective: FleetAutonomy;
+    commit?: FleetAutonomy["commit"] | "inherit";
+    push?: FleetAutonomy["push"] | "inherit";
+    release?: FleetAutonomy["release"] | "inherit";
+    verification?: FleetAutonomy["verification"] | "inherit";
+    reportingStyle?: string;
+    effective: FleetAutonomyWire;
   };
 }
 
@@ -157,21 +174,42 @@ async function runProjectFleetSettings(
 ): Promise<ProjectFleetSettingsResult> {
   if (!args[1] || args.length % 2 !== 0)
     throw new Error(
-      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit]",
+      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--verification review_and_seal|change_run_read|inherit] [--report-style TEXT|inherit]",
     );
-  const changes: Partial<Record<keyof FleetAutonomy, FleetAutonomyMode | null>> = {};
+  const changes: FleetAutonomyPatch = {};
+  let releaseMode: string | undefined;
+  let releaseRule: string | undefined;
   for (let index = 2; index < args.length; index += 2) {
     const field =
       args[index] === "--closure"
         ? "closure"
         : args[index] === "--machine-setup"
           ? "machineSetup"
-          : undefined;
+          : args[index] === "--commit"
+            ? "commit"
+            : args[index] === "--push"
+              ? "push"
+              : undefined;
     const value = args[index + 1];
-    if (!field || field in changes || !["lead", "owner", "inherit"].includes(value ?? ""))
-      throw new Error("Project fleet settings require each field once with lead, owner or inherit.");
-    changes[field] = value === "inherit" ? null : (value as FleetAutonomyMode);
+    if (field && !(field in changes) && ["lead", "owner", "inherit"].includes(value ?? ""))
+      changes[field] = value === "inherit" ? null : (value as FleetAutonomyMode);
+    else if (args[index] === "--release" && releaseMode === undefined) releaseMode = value;
+    else if (args[index] === "--release-rule" && releaseRule === undefined) releaseRule = value;
+    else if (args[index] === "--verification" && changes.verification === undefined)
+      changes.verification = value === "inherit" ? null : FleetVerificationSchema.parse(value);
+    else if (args[index] === "--report-style" && changes.reportingStyle === undefined)
+      changes.reportingStyle = value === "inherit" ? null : FleetReportingStyleSchema.parse(value);
+    else throw new Error("Project fleet settings require each field once with a supported value or inherit.");
   }
+  if (releaseMode !== undefined || releaseRule !== undefined) {
+    if (releaseMode === "inherit" && releaseRule === undefined) changes.release = null;
+    else
+      changes.release = FleetReleasePolicySchema.parse({
+        mode: releaseMode,
+        ...(releaseRule === undefined ? {} : { rule: releaseRule }),
+      });
+  }
+  if (Object.keys(changes).length) FleetAutonomyPatchSchema.parse(changes);
   const client = { ...options, includeAutonomy: true };
   let snapshot = await runProjectSettingsCommand(["list"], client);
   if (!snapshot || !("settings" in snapshot) || snapshot.autonomyDefaults === undefined)
@@ -180,6 +218,11 @@ async function runProjectFleetSettings(
     );
   if (!snapshot.settings.projects.some((project) => project.id === args[1]))
     throw new Error("Unknown project");
+  if (
+    FLEET_WORKING_PREFERENCE_FIELDS.some((field) => field in changes) &&
+    snapshot.workingPreferences !== true
+  )
+    throw new Error("This service does not support working preferences; update it before editing them.");
   if (Object.keys(changes).length) {
     snapshot = await runProjectSettingsCommand(
       [
@@ -199,13 +242,32 @@ async function runProjectFleetSettings(
   }
   const project = snapshot.settings.projects.find((entry) => entry.id === args[1]);
   if (!project) throw new Error("Project disappeared; inspect its saved settings.");
+  const supported = snapshot.workingPreferences === true;
+  if (supported)
+    FleetWorkingPreferencesSchema.parse({
+      commit: snapshot.autonomyDefaults.fleet.commit,
+      push: snapshot.autonomyDefaults.fleet.push,
+      release: snapshot.autonomyDefaults.fleet.release,
+      verification: snapshot.autonomyDefaults.fleet.verification,
+      reportingStyle: snapshot.autonomyDefaults.fleet.reportingStyle,
+    });
+  const effective = effectiveFleetAutonomy(snapshot.autonomyDefaults, project.autonomy);
   return {
     ...snapshot,
     projectId: project.id,
     fleet: {
       closure: project.autonomy?.fleet?.closure ?? "inherit",
       machineSetup: project.autonomy?.fleet?.machineSetup ?? "inherit",
-      effective: effectiveFleetAutonomy(snapshot.autonomyDefaults, project.autonomy),
+      ...(supported
+        ? {
+            commit: project.autonomy?.fleet?.commit ?? "inherit",
+            push: project.autonomy?.fleet?.push ?? "inherit",
+            release: project.autonomy?.fleet?.release ?? "inherit",
+            verification: project.autonomy?.fleet?.verification ?? "inherit",
+            reportingStyle: project.autonomy?.fleet?.reportingStyle ?? "inherit",
+          }
+        : {}),
+      effective: supported ? effective : { closure: effective.closure, machineSetup: effective.machineSetup },
     },
   };
 }

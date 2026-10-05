@@ -1378,8 +1378,8 @@ paths:
     get:
       tags: [Operator]
       operationId: getFleetSettings
-      summary: Read fleet size, model mode, and owner responsibility settings
-      description: Both closure and machineSetup default to lead. Existing owner or Take Control device authority is required; settings confer no credentials or new machine access.
+      summary: Read fleet size, model mode and owner working preferences
+      description: Closure, machineSetup, commit and push default to lead; official releases default to owner, verification to change_run_read, reporting to Short and plain. workingPreferences=true advertises the five new controls; old responses may omit them. Existing owner or Take Control device authority is required; preferences confer no credentials or new access.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":
@@ -1392,6 +1392,7 @@ paths:
                 required: [schemaVersion, revision, fleet]
                 properties:
                   schemaVersion: { type: integer, enum: [1] }
+                  workingPreferences: { type: boolean, enum: [true] }
                   revision: { type: string, pattern: "^[a-f0-9]{64}$" }
                   fleet:
                     type: object
@@ -1402,12 +1403,18 @@ paths:
                       models: { type: string, enum: [optimal, efficient] }
                       closure: { type: string, enum: [lead, owner] }
                       machineSetup: { type: string, enum: [lead, owner] }
+                      commit: { type: string, enum: [lead, owner] }
+                      push: { type: string, enum: [lead, owner] }
+                      release: { $ref: "#/components/schemas/FleetReleasePolicy" }
+                      verification: { type: string, enum: [review_and_seal, change_run_read] }
+                      reportingStyle: { type: string, minLength: 1, maxLength: 2000 }
         "401": { description: Owner authentication required }
         "403": { description: Caller lacks owner authority }
     post:
       tags: [Operator]
       operationId: updateFleetSettings
-      summary: Update fleet budget and responsibility with revision fencing
+      summary: Update fleet budget and working preferences with revision fencing
+      description: Omitted leaves retain their value. A null autonomy leaf restores its global default. Release mode and rule are replaced together.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
@@ -1427,8 +1434,14 @@ paths:
                   properties:
                     size: { type: string, enum: [max, large, small, solo] }
                     models: { type: string, enum: [optimal, efficient] }
-                    closure: { type: string, enum: [lead, owner] }
-                    machineSetup: { type: string, enum: [lead, owner] }
+                    closure: { type: string, enum: [lead, owner, null], nullable: true }
+                    machineSetup: { type: string, enum: [lead, owner, null], nullable: true }
+                    commit: { type: string, enum: [lead, owner, null], nullable: true }
+                    push: { type: string, enum: [lead, owner, null], nullable: true }
+                    release: { $ref: "#/components/schemas/FleetReleasePolicyPatch" }
+                    verification:
+                      { type: string, enum: [review_and_seal, change_run_read, null], nullable: true }
+                    reportingStyle: { type: string, minLength: 1, maxLength: 2000, nullable: true }
       responses:
         "200": { description: Updated fleet snapshot and revision }
         "400": { description: Malformed request }
@@ -1473,12 +1486,18 @@ paths:
                 required: [schemaVersion, effective, machine]
                 properties:
                   schemaVersion: { type: integer, enum: [1] }
+                  workingPreferences: { type: boolean, enum: [true] }
                   effective:
                     type: object
                     required: [closure, machineSetup]
                     properties:
                       closure: { type: string, enum: [lead, owner] }
                       machineSetup: { type: string, enum: [lead, owner] }
+                      commit: { type: string, enum: [lead, owner] }
+                      push: { type: string, enum: [lead, owner] }
+                      release: { $ref: "#/components/schemas/FleetReleasePolicy" }
+                      verification: { type: string, enum: [review_and_seal, change_run_read] }
+                      reportingStyle: { type: string, minLength: 1, maxLength: 2000 }
                   projectId: { type: string }
                   machine:
                     type: object
@@ -1496,7 +1515,7 @@ paths:
       tags: [Operator]
       operationId: updateProjectSettings
       summary: Update project policy while preserving independent inheritance
-      description: An autonomy.fleet closure or machineSetup change accepts lead or owner; null clears only that override. Omitted leaves retain their current value. Responses omit autonomy fields unless includeAutonomy=true. The expectedRevision fences the full underlying project settings even for legacy projections.
+      description: Each autonomy.fleet leaf overrides its global default independently; null clears only that override and omission retains it. Release mode and rule are one atomic leaf. Responses omit autonomy fields unless includeAutonomy=true; workingPreferences=true then advertises support for the new controls. The expectedRevision fences full project settings even for legacy projections.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -1532,6 +1551,12 @@ paths:
                           properties:
                             closure: { type: string, enum: [lead, owner, null], nullable: true }
                             machineSetup: { type: string, enum: [lead, owner, null], nullable: true }
+                            commit: { type: string, enum: [lead, owner, null], nullable: true }
+                            push: { type: string, enum: [lead, owner, null], nullable: true }
+                            release: { $ref: "#/components/schemas/FleetReleasePolicyPatch" }
+                            verification:
+                              { type: string, enum: [review_and_seal, change_run_read, null], nullable: true }
+                            reportingStyle: { type: string, minLength: 1, maxLength: 2000, nullable: true }
       responses:
         "200": { description: Updated project snapshot and revision }
         "400": { description: Malformed request }
@@ -1543,7 +1568,7 @@ paths:
       tags: [Operator]
       operationId: getOperatorProjects
       summary: Read owner project settings and their current revision
-      description: Legacy responses omit autonomy fields. includeAutonomy=true adds optional project autonomy.fleet overrides and global autonomyDefaults without changing the full settings revision.
+      description: Legacy responses omit autonomy fields. includeAutonomy=true adds optional project autonomy.fleet overrides, global autonomyDefaults and workingPreferences=true without changing the full settings revision. New working-preference leaves stay absent on an older service.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -4069,6 +4094,30 @@ paths:
 
 components:
   schemas:
+    FleetReleasePolicy:
+      description: Owner guidance for official tags, packages and store submissions; confers no account or tool authority. A time rule is checked by the agent, not evaluated by a scheduler.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [mode]
+          properties:
+            mode: { type: string, enum: [lead] }
+        - type: object
+          additionalProperties: false
+          required: [mode]
+          properties:
+            mode: { type: string, enum: [owner] }
+        - type: object
+          additionalProperties: false
+          required: [mode, rule]
+          properties:
+            mode: { type: string, enum: [time_rule] }
+            rule: { type: string, minLength: 1, maxLength: 2000 }
+    FleetReleasePolicyPatch:
+      description: Replace the entire release preference; null restores global default or project inheritance.
+      oneOf:
+        - { $ref: "#/components/schemas/FleetReleasePolicy" }
+        - { type: object, nullable: true, enum: [null] }
     DeployHoldOverride:
       type: object
       additionalProperties: false

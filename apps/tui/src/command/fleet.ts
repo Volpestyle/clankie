@@ -1,4 +1,12 @@
-import { effectiveHireProfile, FleetAutonomySchema, type FleetAutonomy } from "@clankie/protocol";
+import {
+  effectiveHireProfile,
+  FleetAutonomySchema,
+  FleetReleasePolicySchema,
+  FleetVerificationSchema,
+  FleetReportingStyleSchema,
+  formatFleetAutonomyGuidance,
+  type FleetAutonomy,
+} from "@clankie/protocol";
 import { projectRolePolicy } from "@clankie/protocol/projects";
 import { readFile } from "node:fs/promises";
 import { HireProfileSchema } from "@clankie/protocol";
@@ -6,8 +14,6 @@ import {
   FLEET_MODEL_GUIDANCE,
   FLEET_MODEL_MODES,
   FLEET_SIZE_GUIDANCE,
-  FLEET_CLOSURE_GUIDANCE,
-  FLEET_MACHINE_SETUP_GUIDANCE,
   FLEET_SIZES,
   FleetSettingsSchema,
   SettingsStore,
@@ -16,21 +22,23 @@ import {
   type FleetSettings,
   type FleetSize,
 } from "@clankie/settings";
+import { readWorkingPreferences, type WorkingPreferencesReport } from "./working-preferences.ts";
+import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
-  "Usage: clankie fleet [status]",
-  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]`,
+  "Usage: clankie fleet [status [--working-directory PATH]]",
+  `       clankie fleet set [--notes TEXT] [--size ${FLEET_SIZES.join("|")}] [--models ${FLEET_MODEL_MODES.join("|")}] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--verification review_and_seal|change_run_read] [--report-style TEXT] [--tools connected|off] [--peer-messages on|off] [--hire-profile FILE.json]`,
   "       clankie fleet clear",
 ].join("\n");
 
-export interface FleetCommandOptions {
-  readonly env?: NodeJS.ProcessEnv;
+export interface FleetCommandOptions extends NonNullable<Parameters<typeof machineSetupContext>[1]> {
   readonly settings?: SettingsStore;
 }
 
 export interface FleetCommandResult {
   readonly ok: true;
   readonly fleet: FleetSettings & FleetAutonomy;
+  readonly workingPreferences: WorkingPreferencesReport;
   readonly roleProfiles: Array<{
     projectId: string;
     role: string;
@@ -52,8 +60,7 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
   return [
     `fleet size: ${fleet.size} — ${FLEET_SIZE_GUIDANCE[fleet.size]}`,
     `models: ${fleet.models} — ${FLEET_MODEL_GUIDANCE[fleet.models]}`,
-    `closure: ${fleet.closure ?? "lead"} — ${FLEET_CLOSURE_GUIDANCE[fleet.closure ?? "lead"]}`,
-    `machine setup: ${fleet.machineSetup ?? "lead"} — ${FLEET_MACHINE_SETUP_GUIDANCE[fleet.machineSetup ?? "lead"]}`,
+    ...formatFleetAutonomyGuidance(FleetAutonomySchema.parse(fleetAutonomyFields(fleet))),
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
     `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
     `hire defaults: ${JSON.stringify(fleet.hire ?? {})}`,
@@ -64,11 +71,25 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
   ];
 }
 
-async function result(settings: SettingsStore, fleet: FleetSettings): Promise<FleetCommandResult> {
+function fleetAutonomyFields(value: Partial<FleetAutonomy>): Partial<FleetAutonomy> {
+  const { closure, machineSetup, commit, push, release, verification, reportingStyle } = value;
+  return Object.fromEntries(
+    Object.entries({ closure, machineSetup, commit, push, release, verification, reportingStyle }).filter(
+      ([, value]) => value !== undefined,
+    ),
+  );
+}
+
+async function result(
+  settings: SettingsStore,
+  fleet: FleetSettings,
+  options: FleetCommandOptions,
+): Promise<FleetCommandResult> {
   const config = await settings.load();
   return {
     ok: true,
     fleet: { ...fleet, ...config.autonomy.fleet },
+    workingPreferences: await readWorkingPreferences(options),
     roleProfiles: config.projects.projects.flatMap((p) =>
       (p.roles.length
         ? p.roles
@@ -86,7 +107,7 @@ async function result(settings: SettingsStore, fleet: FleetSettings): Promise<Fl
 
 export async function fleetStatus(options: FleetCommandOptions = {}): Promise<FleetCommandResult> {
   const settings = store(options);
-  return await result(settings, (await settings.load()).fleet);
+  return await result(settings, (await settings.load()).fleet, options);
 }
 
 /** Merge the given fields into the stored fleet settings; a string alone updates the notes. */
@@ -96,7 +117,8 @@ export async function fleetUpdate(
 ): Promise<FleetCommandResult> {
   const change: FleetUpdate = typeof update === "string" ? { notes: update } : update;
   const settings = store(options);
-  const { closure, machineSetup, ...fleetChange } = change;
+  const { closure, machineSetup, commit, push, release, verification, reportingStyle, ...fleetChange } =
+    change;
   const updated = await settings.update((current) => ({
     ...current,
     fleet: FleetSettingsSchema.parse({ ...current.fleet, ...fleetChange }),
@@ -106,10 +128,15 @@ export async function fleetUpdate(
         ...current.autonomy.fleet,
         ...(closure === undefined ? {} : { closure }),
         ...(machineSetup === undefined ? {} : { machineSetup }),
+        ...(commit === undefined ? {} : { commit }),
+        ...(push === undefined ? {} : { push }),
+        ...(release === undefined ? {} : { release }),
+        ...(verification === undefined ? {} : { verification }),
+        ...(reportingStyle === undefined ? {} : { reportingStyle }),
       }),
     },
   }));
-  return await result(settings, updated.fleet);
+  return await result(settings, updated.fleet, options);
 }
 
 function isSize(value: string): value is FleetSize {
@@ -124,6 +151,8 @@ function isModelMode(value: string): value is FleetModelMode {
 async function parseSet(flags: readonly string[]): Promise<FleetUpdate> {
   if (flags.length === 0 || flags.length % 2 !== 0) throw new Error(FLEET_USAGE);
   const change: FleetUpdate = {};
+  let releaseMode: string | undefined;
+  let releaseRule: string | undefined;
   for (let index = 0; index < flags.length; index += 2) {
     const flag = flags[index];
     const value = flags[index + 1] ?? "";
@@ -146,6 +175,20 @@ async function parseSet(flags: readonly string[]): Promise<FleetUpdate> {
     } else if (flag === "--machine-setup" && change.machineSetup === undefined) {
       if (value !== "lead" && value !== "owner") throw new Error("--machine-setup must be lead or owner.");
       change.machineSetup = value;
+    } else if (
+      (flag === "--commit" || flag === "--push") &&
+      change[flag === "--commit" ? "commit" : "push"] === undefined
+    ) {
+      if (value !== "lead" && value !== "owner") throw new Error(`${flag} must be lead or owner.`);
+      change[flag === "--commit" ? "commit" : "push"] = value;
+    } else if (flag === "--release" && releaseMode === undefined) {
+      releaseMode = value;
+    } else if (flag === "--release-rule" && releaseRule === undefined) {
+      releaseRule = value;
+    } else if (flag === "--verification" && change.verification === undefined) {
+      change.verification = FleetVerificationSchema.parse(value);
+    } else if (flag === "--report-style" && change.reportingStyle === undefined) {
+      change.reportingStyle = FleetReportingStyleSchema.parse(value);
     } else if (flag === "--tools" && change.tools === undefined) {
       if (value !== "connected" && value !== "off") throw new Error("--tools must be connected or off.");
       change.tools = value;
@@ -156,6 +199,11 @@ async function parseSet(flags: readonly string[]): Promise<FleetUpdate> {
       throw new Error(FLEET_USAGE);
     }
   }
+  if (releaseMode !== undefined || releaseRule !== undefined)
+    change.release = FleetReleasePolicySchema.parse({
+      mode: releaseMode,
+      ...(releaseRule === undefined ? {} : { rule: releaseRule }),
+    });
   return change;
 }
 
@@ -164,13 +212,15 @@ export async function runFleetCommand(
   options: FleetCommandOptions = {},
 ): Promise<FleetCommandResult> {
   const verb = args[0];
-  if (verb === undefined || verb === "status") return await fleetStatus(options);
+  if (verb === undefined || verb === "status") {
+    if (args.length <= 1) return await fleetStatus(options);
+    if (args.length === 3 && args[1] === "--working-directory" && args[2])
+      return await fleetStatus({ ...options, cwd: args[2] });
+    throw new Error(FLEET_USAGE);
+  }
   // `clear` returns every field to its default: no notes, no plan limit.
   if (verb === "clear" && args.length === 1)
-    return await fleetUpdate(
-      { ...FleetSettingsSchema.parse({}), closure: "lead", machineSetup: "lead" },
-      options,
-    );
+    return await fleetUpdate({ ...FleetSettingsSchema.parse({}), ...FleetAutonomySchema.parse({}) }, options);
   if (verb === "set") return await fleetUpdate(await parseSet(args.slice(1)), options);
   throw new Error(FLEET_USAGE);
 }

@@ -176,6 +176,36 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
 function buildNetworkRows() {
   const routeDetails = new Map([
     [
+      "GET /v1/operator/fleet-settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read global fleet defaults and owner working preferences with their current revision.",
+      },
+    ],
+    [
+      "POST /v1/operator/fleet-settings",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Update global fleet defaults and working preferences with revision and current-authority fencing.",
+      },
+    ],
+    [
+      "GET /v1/operator/projects",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read approved projects and opt into independently inherited working preferences.",
+      },
+    ],
+    [
+      "POST /v1/operator/projects/update",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Edit existing project settings and clear individual overrides through revision-fenced owner access.",
+      },
+    ],
+    [
       "GET /v1/model-keys",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

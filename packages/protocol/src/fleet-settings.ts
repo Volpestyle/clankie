@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { FleetAutonomyModeSchema } from "./autonomy.ts";
+import {
+  FleetAutonomyWireSchema,
+  FleetAutonomyPatchSchema,
+  FleetWorkingPreferencesSchema,
+} from "./autonomy.ts";
 import { ProjectIdSchema } from "./projects.ts";
 
 export const FLEET_SETTINGS_PATH = "/v1/operator/fleet-settings";
@@ -8,8 +12,7 @@ const FleetPolicySchema = z
   .object({
     size: z.enum(["max", "large", "small", "solo"]),
     models: z.enum(["optimal", "efficient"]),
-    closure: FleetAutonomyModeSchema,
-    machineSetup: FleetAutonomyModeSchema,
+    ...FleetAutonomyWireSchema.shape,
   })
   .strict();
 export const FleetSettingsSnapshotSchema = z
@@ -17,17 +20,33 @@ export const FleetSettingsSnapshotSchema = z
     schemaVersion: z.literal(1),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
     fleet: FleetPolicySchema,
+    /** Advertises support explicitly; absence identifies an older service. */
+    workingPreferences: z.literal(true).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.workingPreferences !== true ||
+      FleetWorkingPreferencesSchema.safeParse({
+        commit: value.fleet.commit,
+        push: value.fleet.push,
+        release: value.fleet.release,
+        verification: value.fleet.verification,
+        reportingStyle: value.fleet.reportingStyle,
+      }).success,
+    "A working-preferences snapshot must include every global preference",
+  );
 export type FleetSettingsSnapshot = z.infer<typeof FleetSettingsSnapshotSchema>;
 export const UpdateFleetSettingsSchema = z
   .object({
     schemaVersion: z.literal(1),
     expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
-    changes: FleetPolicySchema.partial().refine(
-      (value) => Object.values(value).some((field) => field !== undefined),
-      "No fleet settings changes supplied",
-    ),
+    changes: FleetPolicySchema.partial()
+      .extend(FleetAutonomyPatchSchema.shape)
+      .refine(
+        (value) => Object.values(value).some((field) => field !== undefined),
+        "No fleet settings changes supplied",
+      ),
   })
   .strict();
 export type UpdateFleetSettings = z.infer<typeof UpdateFleetSettingsSchema>;
@@ -54,7 +73,8 @@ export type FleetSettingsContextRequest = z.infer<typeof FleetSettingsContextReq
 export const FleetSettingsContextSchema = z
   .object({
     schemaVersion: z.literal(1),
-    effective: z.object({ closure: FleetAutonomyModeSchema, machineSetup: FleetAutonomyModeSchema }).strict(),
+    effective: FleetAutonomyWireSchema,
+    workingPreferences: z.literal(true).optional(),
     projectId: ProjectIdSchema.optional(),
     machine: z
       .object({
@@ -65,7 +85,19 @@ export const FleetSettingsContextSchema = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.workingPreferences !== true ||
+      FleetWorkingPreferencesSchema.safeParse({
+        commit: value.effective.commit,
+        push: value.effective.push,
+        release: value.effective.release,
+        verification: value.effective.verification,
+        reportingStyle: value.effective.reportingStyle,
+      }).success,
+    "A working-preferences context must include every effective preference",
+  );
 export type FleetSettingsContext = z.infer<typeof FleetSettingsContextSchema>;
 
 /** The operator's source workspace determines policy; this does not select another project. */

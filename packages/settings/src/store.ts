@@ -7,6 +7,7 @@ import {
   ClankieSettingsSchema,
   assertNoSecretShapedValue,
   dropRetiredSettings,
+  migrateLegacyFleetWorkingPreferences,
   emptySettings,
   type ClankieSettings,
 } from "./schema.ts";
@@ -107,7 +108,7 @@ export class SettingsStore {
     // defaults, which would quietly widen an allowlist the operator narrowed.
     // Sections this version retired are the one exception: they are dropped, so
     // an older file still opens. The next write persists it without them.
-    return machineSettings(dropRetiredSettings(parsed));
+    return machineSettings(migrateLegacyFleetWorkingPreferences(dropRetiredSettings(parsed)));
   }
 
   /** Apply a transform atomically under a serialized queue. */

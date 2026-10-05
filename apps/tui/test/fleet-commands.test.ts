@@ -1,3 +1,4 @@
+import { FleetAutonomySchema } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import { emptySettings, type ClankieSettings, type SettingsStore } from "@clankie/settings";
 import { fleetStatus, formatFleetLines, runFleetCommand } from "../src/command/fleet.ts";
@@ -71,7 +72,18 @@ describe("clankie fleet", () => {
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
     const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
-    const picks = ["small", "efficient", "off", "off", "owner", "owner"];
+    const picks = [
+      "small",
+      "efficient",
+      "off",
+      "off",
+      "owner",
+      "owner",
+      "owner",
+      "lead",
+      "owner",
+      "review_and_seal",
+    ];
     const flow = {
       begin: () => undefined,
       end: () => undefined,
@@ -81,7 +93,9 @@ describe("clankie fleet", () => {
       },
       readText: async (options: Parameters<SetupFlow["readText"]>[0]) => {
         prompts.push(options);
-        return "  claude when it needs skills.  ";
+        return options.message.includes("reporting style")
+          ? "Plain evidence."
+          : "  claude when it needs skills.  ";
       },
       renderLine: () => undefined,
     } as unknown as SetupFlow;
@@ -95,8 +109,15 @@ describe("clankie fleet", () => {
       { currentValue: "on" },
       { currentValue: "lead" },
       { currentValue: "lead" },
+      { currentValue: "lead" },
+      { currentValue: "lead" },
+      { currentValue: "owner" },
+      { currentValue: "change_run_read" },
     ]);
-    expect(prompts).toMatchObject([{ defaultValue: "codex is the workhorse.", multiline: true }]);
+    expect(prompts).toMatchObject([
+      { defaultValue: "Short and plain.", multiline: true },
+      { defaultValue: "codex is the workhorse.", multiline: true },
+    ]);
     expect(read().fleet).toEqual({
       notes: "claude when it needs skills.",
       size: "small",
@@ -104,7 +125,16 @@ describe("clankie fleet", () => {
       tools: "off",
       peerMessages: "off",
     });
-    expect(read().autonomy.fleet).toEqual({ closure: "owner", machineSetup: "owner" });
+    expect(read().autonomy.fleet).toEqual(
+      FleetAutonomySchema.parse({
+        closure: "owner",
+        machineSetup: "owner",
+        commit: "owner",
+        push: "lead",
+        verification: "review_and_seal",
+        reportingStyle: "Plain evidence.",
+      }),
+    );
   });
 });
 
@@ -124,8 +154,7 @@ describe("clankie fleet budget", () => {
       models: "optimal",
       tools: "off",
       peerMessages: "on",
-      closure: "lead",
-      machineSetup: "lead",
+      ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain("fleet tool access disabled");
     await expect(runFleetCommand(["set", "--tools", "all"], { settings })).rejects.toThrow(
@@ -162,8 +191,7 @@ describe("clankie fleet budget", () => {
       models: "efficient",
       tools: "connected",
       peerMessages: "on",
-      closure: "lead",
-      machineSetup: "lead",
+      ...FleetAutonomySchema.parse({}),
     });
     await runFleetCommand(["set", "--models", "optimal"], { settings });
     expect(read().fleet).toEqual({
@@ -179,8 +207,7 @@ describe("clankie fleet budget", () => {
       models: "optimal",
       tools: "connected",
       peerMessages: "on",
-      closure: "lead",
-      machineSetup: "lead",
+      ...FleetAutonomySchema.parse({}),
     });
   });
 
@@ -218,8 +245,7 @@ describe("clankie fleet peer messages", () => {
       models: "optimal",
       tools: "off",
       peerMessages: "off",
-      closure: "lead",
-      machineSetup: "lead",
+      ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain(
       "peer messages: off — new messages between fleet workers disabled",

@@ -2,6 +2,7 @@ import type { FleetSeatToolCatalog } from "@clankie/protocol/tool-catalog";
 import { ToolCatalogHealthStore, type ToolCatalogIdentity } from "./tool-catalog-health.ts";
 import { PaneTidy } from "./pane-tidy.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
+import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { readIssueMetrics } from "./issue-metrics.ts";
 import { FleetMembershipReadError, type FleetProjectMembership } from "../fleet-project-membership.ts";
@@ -22,7 +23,7 @@ import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
 import { hireDisplayName } from "./hire-name.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
-import { localWorkspaceProject, selectHireProject, nativeHireProject } from "./project-hire-context.ts";
+import { selectHireProject, nativeHireProject } from "./project-hire-context.ts";
 import type { ProjectHireProcessProof } from "./project-hires.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { captureDiscordBodyIdentity, planConversationWakeSession } from "./body-identity.ts";
@@ -78,8 +79,6 @@ import {
   codexAccounts,
   FLEET_MODEL_GUIDANCE,
   FLEET_SIZE_GUIDANCE,
-  FLEET_CLOSURE_GUIDANCE,
-  FLEET_MACHINE_SETUP_GUIDANCE,
   effectiveFleetAutonomy,
   personaInstructions,
   resolveDiscordSettings,
@@ -161,6 +160,7 @@ import {
   type HerdrAgentSnapshot,
   type NativeLaunchPolicy,
   type HerdrWatchRunner,
+  type ProjectHirePolicy,
 } from "./herdr-watch.ts";
 import {
   SeatHookLog,
@@ -224,7 +224,7 @@ import {
  * hire tracks work in the repo's own convention the same way he does.
  */
 const WORKER_RESULT_BRIEF =
-  "End each finished turn with a short report the lead can act on without your transcript: the outcome, links to its evidence, unresolved gaps, and any decision still open.";
+  "End each finished turn with a report in the resolved reporting style that the lead can act on without your transcript: the outcome, links to its evidence, unresolved gaps, and any decision still open.";
 const REGISTER_FOR_LANE: Readonly<Record<CaptainSessionLaneV2, PersonaRegister>> = {
   operator: "operator",
   discord_voice: "social",
@@ -400,10 +400,9 @@ function fleetInstructions(systemTools: boolean, currentSettings: ClankieSetting
     `Fleet size: ${size}. ${FLEET_SIZE_GUIDANCE[size]}`,
     `Models: ${models}. ${FLEET_MODEL_GUIDANCE[models]}`,
     "Size and models are budget targets, not caps: go past them when the work warrants and say so.",
-    `Work closure: ${policy.closure}. ${FLEET_CLOSURE_GUIDANCE[policy.closure]}`,
-    `Machine setup: ${policy.machineSetup}. ${FLEET_MACHINE_SETUP_GUIDANCE[policy.machineSetup]}`,
-    "Under lead closure, workers report to the lead without parking for owner acceptance. Genuine owner-only steps (App Store, payments, evals or owner-account sign-ups) become linked follow-ups without holding delivered work open; missing implementation or verification is never a pass.",
-    "These settings delegate fleet work within existing authority. Sign-ins, codes, CAPTCHAs, payments, account changes, credentials and destructive actions outside fleet workspaces remain owner-only.",
+    ...formatFleetAutonomyGuidance(policy),
+    "Under lead closure, workers report to the lead without parking for owner acceptance. Release publication, including App Store or TestFlight, follows the resolved release preference. Owner-only payments, evals and account sign-ups become linked follow-ups without holding delivered work open; missing implementation or verification is never a pass.",
+    "These preferences are standing work guidance within existing authority. They grant no tools, accounts, credentials or machine authority. Sign-ins, codes, CAPTCHAs, payments, account changes, credentials and destructive actions outside fleet workspaces remain owner-only. Evals require explicit owner authorization; a release preference never authorizes them.",
     ...(notes.trim()
       ? ["", "Routing notes are preferences; you still choose a harness for each job.", notes.trim()]
       : []),
@@ -1112,6 +1111,43 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...claudeWorkerDeps,
   });
   const hireRegistry = createModelRegistry();
+  const resolveHireProject = async (
+    input: Pick<Parameters<ProjectHirePolicy["project"]>[0], "workingDirectory" | "fleet" | "projectId">,
+    projects: Parameters<ProjectHirePolicy["project"]>[1],
+    authority?: Parameters<ProjectHirePolicy["project"]>[2],
+  ) => {
+    const localProject = async (directory: string) =>
+      (
+        await resolveFleetSettingsContext(
+          { ...(await settings()), projects },
+          { workingDirectory: directory, machine: "local" },
+          {},
+        )
+      ).projectId;
+    let source: string | undefined;
+    const origin = authority?.owner.conversationId;
+    const native = origin === undefined ? undefined : conversations.nativeSource(origin);
+    if (!native && projects.projects.length === 0) return undefined;
+    if (native) {
+      const fleet = splitFleetQualified(native.terminalId)?.fleet ?? "default";
+      const proof = await options.projectHireIdentity?.(fleet, native.paneId);
+      source = await nativeHireProject(
+        projects,
+        native.session === undefined ? undefined : occupantIdForHerdrSession(native.session),
+        proof,
+        (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),
+        options.projectHireWorkspace,
+      );
+    } else if (origin !== undefined) {
+      const context = seatContext(origin);
+      if (context !== undefined) source = await localProject(context.cwd);
+    }
+    // Remote paths cannot be canonicalized by this host. A proven source project remains pinned.
+    const destination = input.fleet === undefined ? await localProject(input.workingDirectory) : undefined;
+    if (input.fleet !== undefined && source === undefined && projects.projects.length > 0)
+      throw new Error("The remote agent's project could not be verified. Hire from a project conversation.");
+    return selectHireProject(source, destination, input.projectId);
+  };
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     validateOwner: validateConversationOwner,
     hireDefaults: async () => (await settings()).fleet.hire ?? {},
@@ -1125,36 +1161,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       settings: async () => (await settings()).projects,
       ...(options.projectHireTools === undefined ? {} : { tools: options.projectHireTools }),
       ...(options.projectHireIdentity === undefined ? {} : { proof: options.projectHireIdentity }),
-      project: async (input, projects, authority) => {
-        let source: string | undefined;
-        const origin = authority?.owner.conversationId;
-        const native = origin === undefined ? undefined : conversations.nativeSource(origin);
-        if (!native && projects.projects.length === 0) return undefined;
-        if (native) {
-          const fleet = splitFleetQualified(native.terminalId)?.fleet ?? "default";
-          const proof = await options.projectHireIdentity?.(fleet, native.paneId);
-          source = await nativeHireProject(
-            projects,
-            native.session === undefined ? undefined : occupantIdForHerdrSession(native.session),
-            proof,
-            (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),
-            options.projectHireWorkspace,
-          );
-        } else if (origin !== undefined) {
-          const context = seatContext(origin);
-          if (context !== undefined) source = await localWorkspaceProject(projects, context.cwd);
-        }
-        // Remote paths cannot be canonicalized by this host. A proven source project remains pinned.
-        const destination =
-          input.fleet === undefined
-            ? await localWorkspaceProject(projects, input.workingDirectory)
-            : undefined;
-        if (input.fleet !== undefined && source === undefined && projects.projects.length > 0)
-          throw new Error(
-            "The remote agent's project could not be verified. Hire from a project conversation.",
-          );
-        return selectHireProject(source, destination, input.projectId);
-      },
+      project: resolveHireProject,
     },
     ...(options.nativeSummariesPath === undefined ? {} : { summariesPath: options.nativeSummariesPath }),
     ...(options.nativeLaunchPolicy === undefined ? {} : { nativeLaunchPolicy: options.nativeLaunchPolicy }),
@@ -1495,7 +1502,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
       autonomy: {
         ...current.autonomy,
-        fleet: context.effective,
+        fleet: FleetAutonomySchema.parse(context.effective),
       },
     };
   }
@@ -2488,9 +2495,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           });
     await assertConversationAuthority(authority);
     await refreshFleets();
-    if (brief?.trim()) {
-      brief += `\n\n${WORKER_RESULT_BRIEF}`;
-    }
     if (
       brief !== undefined &&
       (!brief.trim() || brief.includes("\0") || Buffer.byteLength(brief) > 32 * 1024)
@@ -2532,6 +2536,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           detail: "Claude worker channel requires an exact workspace binding",
         },
       };
+    try {
+      const current = await settings();
+      const projectId = await resolveHireProject(request, current.projects, authority);
+      const project = current.projects.projects.find((entry) => entry.id === projectId);
+      const policy = effectiveFleetAutonomy(current.autonomy, project?.autonomy);
+      brief = [
+        ...(brief === undefined ? [] : [brief]),
+        "Working preferences for this assignment:",
+        ...formatFleetAutonomyGuidance(policy),
+        "These are standing work preferences, not tool, account or machine authority. Existing authentication, payment, credential and explicitly authorized eval boundaries still apply. Do not run evals as part of release checks without explicit owner authorization.",
+        WORKER_RESULT_BRIEF,
+      ].join("\n\n");
+      if (brief.includes("\0") || Buffer.byteLength(brief) > 32 * 1024)
+        throw new Error("brief including working preferences must be 1 to 32768 UTF-8 bytes with no NUL");
+    } catch (error) {
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
     request = { ...request, title: hireDisplayName(request.title) };
     await personas.ready(settingsStore);
     await personas.prepareRoleAdoption(request.role);
@@ -4562,7 +4587,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           current: () => conversations.runsCaptainTurns(conversationId),
           authorize: async () => conversations.runsCaptainTurns(conversationId),
         });
-        const result = { ...hired, deliveryStage: hireDeliveryStage(hired, request.brief !== undefined) };
+        const result = {
+          ...hired,
+          deliveryStage:
+            hired.deliveryStage ??
+            hireDeliveryStage(hired, hired.outcome === "spawned" || request.brief !== undefined),
+        };
         return { op: "spawn_seat", schemaVersion: 1, result };
       }
       if (request.op === "move_seat") {

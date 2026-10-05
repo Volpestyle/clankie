@@ -7,12 +7,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, test } from "vitest";
 import { SettingsStore } from "@clankie/settings";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { createOpenCodeNativeHost } from "../src/captain/opencode-native-host.ts";
 import { createOpenCodeSeatAdapter } from "../src/captain/opencode-seat-adapter.ts";
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
-import { readFleet } from "../src/captain/herdr-census.ts";
+import { occupantIdForHerdrSession, readFleet } from "../src/captain/herdr-census.ts";
 import { withSeatSubagents } from "../src/captain/seat-subagents.ts";
 import { createAgentSessions } from "../src/agent-sessions.ts";
 import { OpenCodeProfiles } from "../src/opencode-profiles.ts";
@@ -28,7 +29,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture() {
+async function fixture(preferencesOnly = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "opencode-fleet-integration-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const state = join(root, "captain");
@@ -60,6 +61,7 @@ async function fixture() {
   let database = "";
   let exitCommands = 0;
   let physicalCloses = 0;
+  const receivedBriefs: string[] = [];
   const execute = promisify(execFile);
   const socketSamples = new Map<string, Promise<string>>();
   const executable = await realpath(process.execPath);
@@ -118,7 +120,10 @@ async function fixture() {
         get: async () => ({ data: { id: sessionId, directory: root } }),
         status: async () => ({ data: {} }),
         messages: async () => ({ data: [] }),
-        promptAsync: async () => ({ response: { status: 204 } }),
+        promptAsync: async (input: { parts: { type: string; text: string }[] }) => {
+          receivedBriefs.push(input.parts[0]!.text);
+          return { response: { status: 204 } };
+        },
       },
       permission: { list: async () => ({ data: [] }) },
       question: { list: async () => ({ data: [] }) },
@@ -238,6 +243,28 @@ async function fixture() {
     timeoutMs: 3000,
   });
   const settings = new SettingsStore(join(root, "settings.json"));
+  if (preferencesOnly)
+    await settings.update((current) => ({
+      ...current,
+      autonomy: { fleet: { ...current.autonomy.fleet, commit: "owner", push: "owner" } },
+      projects: ProjectsSettingsSchema.parse({
+        projects: [
+          {
+            id: "native",
+            name: "Native",
+            workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: root }],
+            autonomy: {
+              fleet: {
+                push: "lead",
+                release: { mode: "time_rule", rule: "After one week with changes." },
+                verification: "review_and_seal",
+                reportingStyle: "Evidence links first.",
+              },
+            },
+          },
+        ],
+      }),
+    }));
   const sessions = createAgentSessions(settings, undefined, new OpenCodeProfiles(state));
   const census = async (_command: string, args: readonly string[]) => ({
     stdout: await herdr(args),
@@ -265,6 +292,18 @@ async function fixture() {
     seatAdapters: [adapter],
     nativeHerdrRunner: runner,
     nativeCensusRunner: census,
+    projectHireTools: async () => [],
+    projectHireIdentity: async (fleet, selectedPane) =>
+      pane.agent_session === undefined
+        ? undefined
+        : {
+            fleet,
+            pane: selectedPane,
+            nativeOccupantId: occupantIdForHerdrSession({ ...pane.agent_session, kind: "id" }),
+            binding: { socketPath: join(root, "herdr.sock"), session: "fixture" },
+            shell: { pid: process.pid, startTime: "fixture-shell-birth" },
+            processes: [{ pid: process.pid, startTime: "fixture-native-birth" }],
+          },
   });
   cleanups.push(() => captain.close());
   const created = await captain.serveOperatorConversation({
@@ -285,7 +324,7 @@ async function fixture() {
       role: "tester",
       workingDirectory: root,
     },
-    brief: "Fixture native brief",
+    ...(preferencesOnly ? {} : { brief: "Fixture native brief" }),
   });
   if (hired.op !== "spawn_seat" || hired.result.outcome !== "spawned") throw new Error(JSON.stringify(hired));
   await initialization;
@@ -360,6 +399,7 @@ async function fixture() {
     sessions,
     database,
     root,
+    receivedBriefs,
     completeTask,
     counts: () => ({ exitCommands, physicalCloses }),
     switchRoute: () => {
@@ -367,6 +407,28 @@ async function fixture() {
     },
   };
 }
+
+test("a hire without an explicit brief delivers resolved working preferences through the real native channel once", async () => {
+  const f = await fixture(true);
+  expect(f.hired.deliveryStage).toBe("consumed");
+  expect(f.receivedBriefs).toHaveLength(1);
+  const brief = f.receivedBriefs[0]!;
+  expect(brief).toContain("Working preferences for this assignment:");
+  expect(brief).toContain("Commit: owner.");
+  expect(brief).toContain("Push: lead.");
+  expect(brief).toContain("Release: time_rule.");
+  expect(brief).toContain("After one week with changes.");
+  expect(brief).toContain("Verification: review_and_seal.");
+  expect(brief).toContain("Reporting style: Evidence links first.");
+  expect(brief).toContain("not tool, account or machine authority");
+  expect(brief).toContain("Do not run evals");
+  expect(
+    brief.match(/report in the resolved reporting style that the lead can act on without your transcript/gu),
+  ).toHaveLength(1);
+  const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+  expect(roster.op).toBe("roster");
+  expect(f.receivedBriefs).toHaveLength(1);
+});
 
 test("native prepared hire survives real census/roster reconciliation and exits only its original TUI", async () => {
   const f = await fixture();

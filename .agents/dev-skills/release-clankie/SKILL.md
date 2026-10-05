@@ -1,6 +1,6 @@
 ---
 name: release-clankie
-description: Use when maintaining Clankie's downloadable installer or release bundle, updating bundled runtimes or assets, building a distributable artifact, or publishing a tagged GitHub Release - including when the last release is over a week old and main has changes worth shipping.
+description: Use when maintaining Clankie's downloadable installer or release bundle, updating bundled runtimes or assets, building a distributable artifact, or publishing a tagged GitHub Release under the resolved owner/project working preferences.
 ---
 
 # Release Clankie
@@ -108,11 +108,17 @@ present, the checksum passes, and no symlink escapes the release tree.
 
 ## Publish
 
-Any agent that notices the last release is over a week old
-(`gh release list --limit 1`) and `main` has user-visible changes worth
-shipping publishes one without asking (James, 2026-09-25): bump the root
-`package.json` version in a release commit, then tag. Churn with nothing an
-operator would notice waits. Otherwise, publish only when asked. Replacing an
+Read the resolved workspace working preferences with `clankie fleet status`
+before publishing. Follow the resolved commit, push and verification preferences
+for that work too. Global `autonomy.fleet.release` asks before official releases;
+the registered `clankie` project may override it with an owner-authored time rule.
+For the migrated weekly rule, verify that the last `v*` tag is more than one week
+old and `main` has user-visible changes worth shipping. Churn with nothing an
+operator would notice waits. Check current tag history rather than substituting
+the date of a GitHub release record. When the effective rule permits release,
+bump the root `package.json` version in a release commit, then tag. When it says
+ask first, obtain owner authorization. Explicit task and integrator gates take
+precedence, and unavailable context does not establish release consent. Replacing an
 installed version or an existing release always needs explicit authorization.
 
 Before the release commit, run the drift audit in

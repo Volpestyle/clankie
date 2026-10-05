@@ -58,6 +58,11 @@ native interactive terminals; harness channels and session APIs carry automated
 messages without typing into your draft. Work stays in your repo's tracker or
 files. Remote hires use the fleet link and native channels. See
 [agent control](packages/agent-hosts/README.md#seat-adapters).
+Tell him how you want agents to work: commit, push and release approval,
+verification and reporting style. Owner defaults apply everywhere; each project
+can override them. The app's project settings and `clankie fleet status` expose
+the same [working preferences](docs/cli.md#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear),
+which reach every hire's brief.
 
 **A familiar face on your phone.** Messages is home. Commons shows the team as
 a small world of agent figures, each leading back to a real conversation.
