@@ -176,6 +176,13 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
 function buildNetworkRows() {
   const routeDetails = new Map([
     [
+      "POST /v1/activity/viewer",
+      {
+        access: "Fleet-signed Activity media permit with current audience authorization",
+        purpose: "Read the scoped hosted Activity stream while its live audience remains authorized.",
+      },
+    ],
+    [
       "GET /v1/operator/fleet-settings",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
@@ -637,6 +644,7 @@ function buildNetworkRows() {
         "/v1/hooks/linear",
         "/v1/hosted/pair-offer",
         "/v1/discord/ingress",
+        "/v1/activity/viewer",
       ].includes(route.path)
         ? `/h/{hostId}${route.path}`
         : `${route.path} (inside encrypted exchange)`,

@@ -9,8 +9,8 @@ import type { ActivityShareSink } from "@clankie/rendered-surface-client";
 import type { ActivitySharingOptions } from "./activity-sharing.ts";
 import type { DeliveredFileStore } from "./delivered-files.ts";
 
-export const ACTIVITY_ARTIFACT_MAX_BYTES = 32 * 1024 * 1024;
-export const ACTIVITY_ARTIFACT_MAX_SECONDS = 120;
+const ACTIVITY_ARTIFACT_MAX_BYTES = 32 * 1024 * 1024;
+const ACTIVITY_ARTIFACT_MAX_SECONDS = 120;
 const FRAME_RATE = 5;
 const SAMPLE_RATE = 32_000;
 const AUDIO_FRAMES = SAMPLE_RATE / 50;

@@ -21,7 +21,7 @@ import type { DeliveredFileStore } from "./delivered-files.ts";
 import { ActivitySharingRequestSchema } from "@clankie/protocol/activity-sharing";
 export { ActivitySharingRequestSchema } from "@clankie/protocol/activity-sharing";
 
-export const ActivitySharingReceiptSchema = z
+const ActivitySharingReceiptSchema = z
   .object({
     outcome: z.enum(["confirmed", "refused", "uncertain"]),
     receiptId: z.string().uuid(),
