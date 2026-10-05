@@ -107,9 +107,10 @@ async function fixture() {
     // exact pane. This uses real TCP kernel ownership, not caller PID claims;
     // ordinary native Herdr ancestry is exercised by the manual ABI journey.
     prove: async (socket, pane) => {
+      // Count every fresh proof, including a refusal after provider discovery.
+      observedPorts.push(socket.remotePort ?? 0);
       if (!state.admitted || pane !== "w1:p1" || socket.destroyed || !socket.remotePort || !socket.localPort)
         return false;
-      observedPorts.push(socket.remotePort);
       const { stdout } = await exec(
         "/usr/sbin/lsof",
         ["-nP", "-a", `-iTCP:${socket.localPort}`, "-sTCP:ESTABLISHED", "-Fpn"],
@@ -156,7 +157,8 @@ async function fixture() {
         ...(options.close ? { connection: "close" } : {}),
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }),
-      signal: AbortSignal.timeout(10000),
+      // Successful calls cross all fresh OS proofs; stay below the worker's 30s budget.
+      signal: AbortSignal.timeout(20000),
     });
     const text = await response.text();
     return { response, body: text ? JSON.parse(text) : undefined };
@@ -205,6 +207,9 @@ localIt(
       }
       f.state.admitted = true;
       expect((await f.rpc("initialize", {}, { pane: "w0:p0" })).response.status).toBe(403);
+      const proofsBeforeInitialize = f.observedPorts.length;
+      expect((await f.initialize()).response.status).toBe(200);
+      expect(f.observedPorts.length - proofsBeforeInitialize).toBe(1);
       expect(f.state.dispatched).toBe(0);
     } finally {
       await f.close();
@@ -217,15 +222,19 @@ localIt("reauthenticates the current HTTP socket after the initialize socket clo
   try {
     const init = await f.initialize(true);
     expect(init.response.status).toBe(200);
+    expect.soft(f.observedPorts).toHaveLength(1);
     const initialPort = f.observedPorts[0];
     const session = init.response.headers.get("mcp-session-id")!;
+    const proofsBeforeList = f.observedPorts.length;
     const listed = await f.rpc("tools/list", {}, { session });
     expect(listed.response.status).toBe(200);
+    // The HTTP boundary and SDK handler each authenticate the current request.
+    expect.soft(f.observedPorts.length - proofsBeforeList).toBe(2);
     expect(listed.body.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
       "clankie_tools",
       "clankie_call",
     ]);
-    expect(f.observedPorts.slice(1).every((port) => port !== initialPort)).toBe(true);
+    expect(f.observedPorts.slice(proofsBeforeList).every((port) => port !== initialPort)).toBe(true);
     f.state.admitted = false;
     const revoked = await f.rpc("tools/list", {}, { session });
     expect(revoked.response.status).toBe(403);
@@ -240,8 +249,10 @@ localIt("rechecks admission after real provider discovery before dispatching a c
   try {
     const init = await f.initialize();
     expect(init.response.status).toBe(200);
+    expect.soft(f.observedPorts).toHaveLength(1);
     const session = init.response.headers.get("mcp-session-id")!;
     f.state.revokeDuringDiscovery = true;
+    const proofsBeforeCall = f.observedPorts.length;
     const called = await f.rpc(
       "tools/call",
       { name: "clankie_call", arguments: { name: "fixture_read", arguments: {} } },
@@ -249,7 +260,33 @@ localIt("rechecks admission after real provider discovery before dispatching a c
     );
     expect(called.body.result.isError).toBe(true);
     expect(JSON.stringify(called.body)).toContain("Fleet admission unavailable");
+    // Both authentication checks, then the refusal after provider discovery.
+    expect.soft(f.observedPorts.length - proofsBeforeCall).toBe(3);
     expect(f.state.dispatched).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+localIt("dispatches an admitted connected call through the real provider boundary", async () => {
+  const f = await fixture();
+  try {
+    const init = await f.initialize();
+    expect(init.response.status).toBe(200);
+    expect.soft(f.observedPorts).toHaveLength(1);
+    const session = init.response.headers.get("mcp-session-id")!;
+    const proofsBeforeCall = f.observedPorts.length;
+    const called = await f.rpc(
+      "tools/call",
+      { name: "clankie_call", arguments: { name: "fixture_read", arguments: {} } },
+      { session },
+    );
+    expect(called.response.status).toBe(200);
+    expect(called.body.result.isError).toBe(false);
+    expect(JSON.stringify(called.body)).toContain("fixture result");
+    expect(f.state.dispatched).toBe(1);
+    // HTTP/SDK authentication, post-discovery admission, and the final host fence.
+    expect.soft(f.observedPorts.length - proofsBeforeCall).toBe(4);
   } finally {
     await f.close();
   }
