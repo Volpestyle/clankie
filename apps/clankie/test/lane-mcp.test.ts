@@ -1,4 +1,8 @@
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
+import { serve } from "@hono/node-server";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -482,6 +486,69 @@ it("initializes an operator MCP session with native and connected tools", async 
     await captain.close();
     warning.mockRestore();
     // The session store can still be flushing after close; retry ENOTEMPTY.
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+it("serves every real Captain schema with MCP's object root without losing union validation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-mcp-schema-"));
+  const captain = createCaptain(
+    { ...bankDeps(), herdrAvailable: () => false },
+    {
+      repoRoot: root,
+      stateDir: root,
+      workingDirectory: root,
+      settings: new SettingsStore(join(root, "settings.json")),
+    },
+  );
+  const app = await createClankieApp({
+    captain,
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer fixture"
+        ? { operatorId: "schema-fixture" }
+        : undefined,
+  });
+  const server = serve({ fetch: app.app.fetch, hostname: "127.0.0.1", port: 0 });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("No loopback address");
+  const client = new Client({ name: "official-sdk-schema-regression", version: "1" });
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/v1/mcp`), {
+        requestInit: { headers: { authorization: "Bearer fixture" } },
+      }) as unknown as Transport,
+    );
+    // The SDK itself rejects a missing root type before returning tools/list.
+    const listed = (await client.listTools()).tools;
+    const bank = await captain.laneToolBank("operator");
+    const originals = new Map(bank.tools.map((tool) => [tool.name, tool.inputSchema]));
+    for (const tool of listed) {
+      expect(tool.inputSchema.type, tool.name).toBe("object");
+      const original = originals.get(tool.name);
+      if (original) expect(tool.inputSchema, tool.name).toEqual({ ...original, type: "object" });
+    }
+    expect(listed).toHaveLength(bank.tools.length + 1); // read-only receipt reconciliation
+    const union = listed.find((tool) => Array.isArray(originals.get(tool.name)?.anyOf))!;
+    expect(union).toBeDefined();
+    expect(union.inputSchema.anyOf).toEqual(originals.get(union.name)!.anyOf);
+    expect((union.inputSchema.anyOf as unknown[]).length).toBeGreaterThan(1);
+    const valid = await client.callTool({ name: "recall_episodes", arguments: { query: "fixture" } });
+    expect(valid.isError).not.toBe(true);
+    expect(valid.content).toMatchObject([{ type: "text" }]);
+    expect(JSON.parse((valid.content as Array<{ text: string }>)[0]!.text)).toEqual({ found: 0, card: "" });
+    const invalid = await client.callTool({ name: "recall_episodes", arguments: { query: 42 } });
+    expect(invalid.isError).toBe(true);
+    expect(JSON.stringify(invalid.content)).toContain("Invalid arguments");
+    const invalidUnion = await client.callTool({ name: union.name, arguments: {} });
+    expect(invalidUnion.isError).toBe(true);
+    expect(JSON.stringify(invalidUnion.content)).toContain("Invalid arguments");
+  } finally {
+    await client.close();
+    app.close();
+    if ("closeAllConnections" in server) server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await captain.close();
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
