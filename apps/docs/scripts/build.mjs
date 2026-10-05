@@ -528,7 +528,7 @@ function networkRow({ method, route, access, purpose }) {
 async function slashCommands() {
   const tuiSrc = resolve(repoRoot, "apps/tui/src");
   const literal =
-    /name: "([^"]+)",\s*aliases: \[([^\]]*)\],\s*description: "([^"]*)",(?:\s*argumentHint: "([^"]*)",)?\s*takesArgument: (?:true|false)/g;
+    /name: "([^"]+)",\s*aliases: \[([^\]]*)\],\s*description: "([^"]*)",(?:\s*argumentHint:\s*"([^"]*)",)?\s*takesArgument: (?:true|false)/g;
   const commands = [];
   let registered = 0;
   for await (const file of glob("**/*.ts", { cwd: tuiSrc })) {
