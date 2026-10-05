@@ -61,8 +61,12 @@ export async function publishLinearWorker(input: {
   credential: ProviderCredential | undefined;
   author: (personaId: string) => Promise<{ name: string; avatarUrl: string } | undefined>;
   beforeWrite: () => Promise<void>;
+  /** The host's total caller deadline; it must fence setup and the actual write. */
+  signal?: AbortSignal;
+  beforeDispatch?: () => void;
   fetch?: typeof fetch;
 }): Promise<{ content: string; isError: boolean }> {
+  const signal = input.signal ?? AbortSignal.timeout(30_000);
   const credential = input.credential;
   if (
     credential?.type !== "oauth" ||
@@ -80,7 +84,8 @@ export async function publishLinearWorker(input: {
   const parsed = (kind === "comment" ? Comment : Issue).safeParse(input.args);
   if (!parsed.success) throw new Error("Invalid worker publishing arguments");
   const { personaId, ...fields } = parsed.data;
-  const author = await input.author(personaId);
+  signal.throwIfAborted();
+  const author = await beforeDeadline(input.author(personaId), signal);
   if (!author || !author.name.trim()) throw new Error("Unknown worker persona");
   const avatar = new URL(author.avatarUrl);
   if (avatar.protocol !== "https:" || avatar.username || avatar.password)
@@ -89,19 +94,28 @@ export async function publishLinearWorker(input: {
   const selection =
     kind === "comment" ? "id body updatedAt url" : "id identifier title description updatedAt url";
   // Resolve the author first, then recheck the exact account binding at the wire boundary.
-  await input.beforeWrite();
+  await beforeDeadline(input.beforeWrite(), signal);
+  signal.throwIfAborted();
+  input.beforeDispatch?.();
+  signal.throwIfAborted();
+  // The caller can return earlier while this original write is observed for a
+  // receipt. Keep its existing network cap, including response-body consumption.
+  const completion = AbortSignal.timeout(30_000);
   let response: Response;
   try {
-    response = await (input.fetch ?? fetch)("https://api.linear.app/graphql", {
-      method: "POST",
-      redirect: "error",
-      headers: { authorization: `Bearer ${credential.access}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        query: `mutation WorkerPost($input: ${variableType}!) { ${kind}Create(input: $input) { success ${kind} { ${selection} } } }`,
-        variables: { input: { ...fields, createAsUser: author.name, displayIconUrl: author.avatarUrl } },
+    response = await beforeDeadline(
+      (input.fetch ?? fetch)("https://api.linear.app/graphql", {
+        method: "POST",
+        redirect: "error",
+        headers: { authorization: `Bearer ${credential.access}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          query: `mutation WorkerPost($input: ${variableType}!) { ${kind}Create(input: $input) { success ${kind} { ${selection} } } }`,
+          variables: { input: { ...fields, createAsUser: author.name, displayIconUrl: author.avatarUrl } },
+        }),
+        signal: completion,
       }),
-      signal: AbortSignal.timeout(30_000),
-    });
+      completion,
+    );
   } catch {
     throw new Error("Linear worker post unavailable; inspect the issue before retrying");
   }
@@ -109,7 +123,12 @@ export async function publishLinearWorker(input: {
     throw new Error(`Linear worker post failed: HTTP ${response.status}; inspect the issue before retrying`);
   const result = z
     .object({ data: z.record(z.string(), z.unknown()).nullish(), errors: z.array(z.unknown()).optional() })
-    .safeParse(await response.json().catch(() => undefined));
+    .safeParse(
+      await beforeDeadline(
+        response.json().catch(() => undefined),
+        completion,
+      ),
+    );
   if (!result.success || result.data.errors?.length)
     throw new Error("Linear worker post was not confirmed; inspect the issue before retrying");
   const payload = z
@@ -129,4 +148,27 @@ export async function publishLinearWorker(input: {
       JSON.stringify({ ...receipt.data, personaId }),
     );
   return { content, isError: false };
+}
+
+function beforeDeadline<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => reject(signal.reason);
+    if (signal.aborted) {
+      // The passed operation may already be running; observe its rejection too.
+      void operation.catch(() => undefined);
+      aborted();
+      return;
+    }
+    signal.addEventListener("abort", aborted, { once: true });
+    void operation.then(
+      (result) => {
+        signal.removeEventListener("abort", aborted);
+        resolve(result);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", aborted);
+        reject(error);
+      },
+    );
+  });
 }

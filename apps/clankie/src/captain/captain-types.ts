@@ -30,6 +30,11 @@ export interface CaptainOptions {
     pane: string,
   ) => Promise<ProjectHireProcessProof | undefined>;
   readonly projectHireTools?: (projectId: string) => Promise<readonly string[]>;
+  readonly fleetHireTools?: () => Promise<readonly string[]>;
+  readonly workerBridgeStatus?: (
+    fleet: string,
+    pane: string,
+  ) => import("@clankie/protocol").WorkerBridgeStatus;
   /** The same native membership producer exposed by the HTTP app, created after the captain. */
   readonly fleetProjectMembership?: () => Pick<FleetProjectMembership, "read"> | undefined;
   readonly projectHireWorkspace?: (proof: ProjectHireProcessProof) => Promise<string | undefined>;

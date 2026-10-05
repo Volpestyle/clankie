@@ -9,5 +9,5 @@ interface InboundReceipt {
 export function createInboundSender(options: {
   directory: string;
   scope: string;
-  request: (suffix: string, init?: { method: string; body: string }) => Promise<Response>;
+  request: (suffix: string, init?: { method: string; body: string; redirect?: "error" }) => Promise<Response>;
 }): (text: string) => Promise<InboundReceipt>;

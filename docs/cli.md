@@ -2055,7 +2055,17 @@ What crosses the link, and what cannot:
 - Every call runs `herdr --session SESSION <verb> …` on the remote host with an
   exact argv (a Windows command line is built for `CommandLineToArgvW` and
   handed to `ProcessStartInfo`, so PowerShell never parses it). One multiplexed
-  ssh connection per fleet carries them (`~/.clankie/ssh/%C`, `ControlPersist=600`).
+  ssh connection per fleet carries them through service-owned control sockets
+  under `~/.clankie/ssh/` (`ControlPersist=600`). New service lifetimes and
+  connections older than ten minutes use a fresh socket. A failure before the
+  remote program starts retries once with a fresh login environment; failures
+  from an already running program are reported without replaying the command.
+  Resident fleet relays also refresh every ten minutes: the replacement becomes
+  ready before the old relay drains accepted requests and proof commands, so
+  routine renewal keeps link status ready. Retired masters retain
+  existing clients and expire when idle, leaving other SSH sessions intact.
+  PowerShell progress is suppressed and serialized errors are decoded before
+  appearing in link status and logs.
 - Only read and pane verbs pass: `agent list|get|read|wait|prompt|send-keys|start`,
   `pane list|get|read|send-text|send-keys|close|process-info|layout`,
   `tab|workspace create|list`, `api snapshot`, `session list`. Nothing that
@@ -2864,6 +2874,24 @@ fleet tools are denied; `nativeTools: not-verified` still requires an actual nat
 catalog/call check. MCP sessions bind to fleet/pane (fleet only for bearer links)
 and expire after 15 minutes idle. See [worker access](worker-access.md).
 
+New Claude/Codex hires require the connected-tool wrapper pair and, when
+`fleet.peerMessages` is on, `list_fleet_seats` and `message_peer` before starting
+their brief, including native-first hires without a project allocation. The
+wrapper catalog depends on fleet settings and admission; provider account and
+native peer proofs are checked when invoking a tool. A temporary provider or
+discovery failure keeps previously verified schemas in the native catalog.
+Explicit settings changes remove disabled tools.
+
+Each worker connected-tool request has a thirty-second total budget covering
+initialization, catalog/account reads, remote invocation and the response body.
+Timeouts report a reason and never replay an uncertain mutation. Concurrent
+requests share one completed MCP handshake. Replacing a service provider
+connection lets already dispatched calls settle on their original connection.
+HTTP refusals retain the service's reason, including fleet admission errors;
+cached schemas do not authorize a refused call. A `No durable native binding`
+message receipt means the bridge could not prove its delivery binding and sent
+no new message; inspect the pane's native binding before retrying delivery.
+
 ### `project list`, `project settings` and `project update`
 
 `clankie project list` reads the current project settings and their revision.
@@ -3656,14 +3684,24 @@ An absent Codex executable remains an absent harness. After updating the owning
 source setup and completing preparation, verify `clankie doctor --machine NAME`.
 Do not restart unrelated panes; installation alone cannot prove a live receiver.
 `clankie doctor` reports local profiles and
-connected remote fleets; `clankie doctor --machine NAME` inspects one registered
-fleet through `GET /v1/runtime-connections/NAME/harnesses` and
-`GET /v1/runtime-connections/NAME/membership`. The membership card reads native
+connected remote fleets, including their `linkState` and decoded failure reason.
+The human `/doctor` checklist also shows each observed fleet link's state and
+reason. `clankie doctor --machine NAME` inspects one registered fleet through
+`GET /v1/runtime-connections/NAME/harnesses`,
+`GET /v1/runtime-connections/NAME/membership`, and the connection inventory at
+`GET /v1/runtime-connections`. Its `linkState` remains visible even when the
+native harness diagnostics answer successfully. The membership card reads native
 process and actual cwd observations for at most 64 panes, with two concurrent
 inspections. It distinguishes missing proof, unsupported harnesses, pending
 native sessions, stale hires, and project eligibility. Changed observations are
 discarded. `nativeTools: "not-verified"` means the card has not tested that pane's
 bridge socket, catalog or reply delivery; use a native tool call to verify those.
+Doctor and roster additionally show `workerTools` for an authenticated served or
+bridge-reported catalog: `pending`, `ready`, `missing`, `stalled`, or
+`not-observed`, with the reason and observation time. An idle worker remains
+ready; an unobserved catalog is unknown. Catalog reads do not erase a tool-call
+timeout; a successful connected-tool call clears it. These diagnostics grant
+no account, project or native peer authority.
 Unregistered or disconnected machines never supply an arbitrary SSH target.
 
 On Windows, Codex detection resolves a unique installed native executable from

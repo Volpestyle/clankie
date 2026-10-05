@@ -55,7 +55,7 @@ import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./
 import { compactLinearWrite } from "./linear-write-receipt.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
-import type { TrackerToolBackend } from "@clankie/work-items";
+import { TRACKER_TOOLS, type TrackerToolBackend } from "@clankie/work-items";
 import { callPrioritySortedLinearIssues } from "./tracker-tool-router.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
@@ -150,7 +150,7 @@ export interface McpHost {
     readonly arguments: Record<string, unknown>;
     /** Internal data consumers only; model-facing calls retain the default 50k character cap. */
     readonly resultMode?: "model" | "data";
-    /** Host-selected bound for setup operations; never a model tool argument. */
+    /** Total caller budget, including setup; never a model tool argument. */
     readonly timeoutMs?: number;
     /** Only MinecraftMcpPort holds Clankie's motor; raw and delegated routes are denied. */
     readonly bodyAccess?: typeof MINECRAFT_BODY_ACCESS;
@@ -163,7 +163,11 @@ export interface McpHost {
     readonly nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>;
     /** Internal receipt hooks; never caller/model arguments. */
     readonly onDispatch?: () => void;
-    readonly onSettled?: () => void;
+    /** Confirmed response in the caller's result mode; may follow a caller timeout. */
+    readonly onSettled?: (
+      result: { content: string; isError: boolean },
+      observation?: { readonly readOnly: true },
+    ) => void;
   }): Promise<McpCallResult>;
   close(): Promise<void>;
 }
@@ -260,6 +264,8 @@ export interface McpHostOptions {
 
 /** The part of an MCP client this host uses, so tests can supply a fake. */
 export interface McpConnection {
+  /** The transport rechecks admission at its actual HTTP/stdin send boundary. */
+  readonly dispatchesAtWire?: boolean;
   listTools(): Promise<readonly { name: string; description?: string | undefined; inputSchema?: unknown }[]>;
   callTool(
     name: string,
@@ -272,6 +278,9 @@ export interface McpConnection {
 interface ServerState {
   readonly configuration: string;
   readonly credential: string;
+  activeCalls: number;
+  retired?: boolean;
+  closing?: Promise<void>;
   connection?: McpConnection;
   connecting?: Promise<McpConnection>;
   tools?: readonly McpToolDescriptor[];
@@ -292,6 +301,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   const connectImpl = options.connect ?? connectServer;
   const curated = options.curated ?? CURATED_MCP_SERVERS;
   const states = new Map<string, ServerState>();
+  const retired = new Set<ServerState>();
   const missingCredentials = new Set<string>();
   const opening = new Set<Promise<McpConnection>>();
   let closed = false;
@@ -402,9 +412,21 @@ export function createMcpHost(options: McpHostOptions): McpHost {
 
   async function retire(id: string, state: ServerState): Promise<void> {
     if (states.get(id) === state) states.delete(id);
+    if (!state.retired) {
+      state.retired = true;
+      retired.add(state);
+    }
     // A pending connection checks its generation when it settles and closes
     // itself. Retiring it must not wait for a stalled initialize to finish.
-    await state.connection?.close().catch(() => undefined);
+    await closeRetired(state);
+  }
+
+  function closeRetired(state: ServerState): Promise<void> {
+    if (!state.retired || (state.activeCalls > 0 && !closed)) return Promise.resolve();
+    return (state.closing ??= (async () => {
+      await state.connection?.close().catch(() => undefined);
+      retired.delete(state);
+    })());
   }
 
   async function credentialFingerprint(server: McpServerSettings, refresh = false): Promise<string> {
@@ -455,7 +477,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     const configuration = JSON.stringify(server);
     const existing = states.get(server.id);
     if (existing?.configuration === configuration && existing.credential === credential) return existing;
-    const created: ServerState = { configuration, credential };
+    const created: ServerState = { configuration, credential, activeCalls: 0 };
     // Publish the new generation before closing the old one; concurrent callers
     // must not replace each other's pending connection during that await.
     states.set(server.id, created);
@@ -735,344 +757,413 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           detail: "Clankie's Minecraft body is reachable only through the Minecraft service tools.",
         };
       input = { ...input, arguments: structuredClone(input.arguments) };
-      const providedSource = input.conversationAuthority
-        ? captureConversationAuthority(input.conversationAuthority)
-        : undefined;
-      const workerProof =
-        input.delegation && options.writeAuthorityForWorker
-          ? await options
-              .writeAuthorityForWorker(input.delegation.principalId, input.nativeWriteProof)
-              .catch(() => undefined)
+      const timeoutMs =
+        input.timeoutMs === undefined
+          ? REQUEST_TIMEOUT_MS
+          : z.number().int().positive().max(1_200_000).parse(input.timeoutMs);
+      const signal = AbortSignal.timeout(timeoutMs);
+      const deadline = Date.now() + timeoutMs;
+      let dispatched = false;
+      const perform = async (): Promise<McpCallResult> => {
+        const providedSource = input.conversationAuthority
+          ? captureConversationAuthority(input.conversationAuthority)
           : undefined;
-      const workerSource =
-        workerProof?.conversationAuthority ??
-        (!providedSource && input.delegation && !options.writeAuthorityForWorker
-          ? await options.conversationForWorker?.(input.delegation.principalId).catch(() => undefined)
-          : undefined);
-      const admittedSource =
-        providedSource ?? (workerSource ? captureConversationAuthority(workerSource) : undefined);
-      const admittedNativeSource = workerProof?.nativeRecipientAuthority
-        ? captureNativeSeatAuthority(workerProof.nativeRecipientAuthority)
-        : undefined;
-      const now = Date.now();
-      const server = (await activeServers()).find((entry) => entry.id === input.server);
-      if (server === undefined) {
-        return {
-          outcome: "refused",
-          reason: "unknown_server",
-          detail: `no MCP server ${input.server} is connected`,
-        };
-      }
-      // Re-checked rather than trusted from registration time: a session built
-      // in one lane must not become a way to reach a console-only server.
-      if (!laneAllows(server, input.lane)) {
-        return {
-          outcome: "refused",
-          reason: "lane_denied",
-          detail: `${server.id} stays at the console. Ask from the operator TUI, not from this room.`,
-        };
-      }
-      let trackerRepo = input.arguments.repo;
-      let inferredRepo = false;
-      if (
-        isLocalTracker(server) &&
-        trackerNames.has(input.tool) &&
-        trackerRepo === undefined &&
-        input.lane === "operator" &&
-        options.trackerRepoForCall
-      ) {
-        try {
-          trackerRepo = await options.trackerRepoForCall(input.tool, input.arguments);
-          inferredRepo = trackerRepo !== undefined;
-        } catch (error) {
+        const workerProof =
+          input.delegation && options.writeAuthorityForWorker
+            ? await options
+                .writeAuthorityForWorker(input.delegation.principalId, input.nativeWriteProof)
+                .catch(() => undefined)
+            : undefined;
+        const workerSource =
+          workerProof?.conversationAuthority ??
+          (!providedSource && input.delegation && !options.writeAuthorityForWorker
+            ? await options.conversationForWorker?.(input.delegation.principalId).catch(() => undefined)
+            : undefined);
+        const admittedSource =
+          providedSource ?? (workerSource ? captureConversationAuthority(workerSource) : undefined);
+        const admittedNativeSource = workerProof?.nativeRecipientAuthority
+          ? captureNativeSeatAuthority(workerProof.nativeRecipientAuthority)
+          : undefined;
+        const now = Date.now();
+        const server = (await activeServers()).find((entry) => entry.id === input.server);
+        if (server === undefined) {
           return {
             outcome: "refused",
-            reason: "server_unavailable",
-            possiblyDispatched: false,
-            detail: error instanceof Error ? error.message.slice(0, 500) : "Tracker scope lookup failed",
+            reason: "unknown_server",
+            detail: `no MCP server ${input.server} is connected`,
           };
         }
-      }
-      const repositoryCall =
-        server.id === "linear" && trackerNames.has(input.tool) && trackerRepo !== undefined;
-      if (
-        repositoryCall &&
-        (input.lane !== "operator" || typeof trackerRepo !== "string" || !options.trackerForRepo)
-      ) {
-        return {
-          outcome: "refused",
-          reason: "lane_denied",
-          detail: "Repository tracker access requires operator tools and a registered repository.",
-        };
-      }
-      let state: ServerState | undefined;
-      let dispatched = false;
-      const deferredDispatch = repositoryCall || isLocalTracker(server) || isApiTracker(server);
-      try {
-        state = await stateFor(server);
-        const client = repositoryCall ? undefined : await connection(server, state, now);
-        const connectedAccount =
-          input.delegation !== undefined || options.observeCall !== undefined
-            ? await account(server, state.credential).catch((error: unknown) => {
-                if (input.delegation !== undefined) throw error;
-                return undefined;
-              })
-            : undefined;
-        if (input.delegation !== undefined && connectedAccount?.binding !== input.delegation.binding)
-          throw new Error("Delegated account binding changed; a new grant is required");
-        await assertCurrent(server, state);
-        const workerPost =
-          server.id === "linear" && server.credential !== undefined && isLinearWorkerTool(input.tool);
-        const credential = workerPost ? await options.credentials.get(server.credential!) : undefined;
-        const source = admittedSource;
-        // Attribution is optional: losing an owning conversation does not revoke
-        // independently admitted connected-account tools.
-        let authority: ConversationAuthority | undefined;
-        let recipient: LinearRecipient | undefined;
-        const refreshAttribution = async () => {
-          authority = undefined;
-          recipient = undefined;
-          try {
-            if (source && source.current() && (await source.authorize()) && source.current())
-              authority = captureConversationAuthority(source);
-          } catch {
-            /* Unavailable attribution does not revoke an independent provider grant. */
-          }
-          try {
-            if (
-              admittedNativeSource &&
-              admittedNativeSource.current() &&
-              (await admittedNativeSource.authorize()) &&
-              admittedNativeSource.current()
-            )
-              recipient = captureNativeSeatAuthority(admittedNativeSource).recipient;
-          } catch {
-            /* Never manufacture a native recipient when proof is unavailable. */
-          }
-          recipient ??= authority ? { kind: "conversation", owner: authority.owner } : undefined;
-        };
-        await refreshAttribution();
-        // Admission may await; retain the account/config fence after it, then
-        // check revocation without yielding again before provider dispatch.
-        const current = input.fence ? await input.fence() : undefined;
-        await assertCurrent(server, state);
-        let commitCurrent = current;
-        let confirmed = false;
-        const assertDispatch = () => {
-          try {
-            if (closed || states.get(server.id) !== state) throw new Error(`${server.id} connection changed`);
-            current?.();
-            if (!deferredDispatch) input.onDispatch?.();
-          } catch (error) {
-            throw new DispatchRefused(error instanceof Error ? error.message : "MCP dispatch refused");
-          }
-        };
-        assertDispatch();
-        dispatched = !deferredDispatch;
-        const publication = {
-          beforeWrite: async () => {
-            try {
-              await refreshAttribution();
-              commitCurrent = await input.fence?.();
-              await assertCurrent(server, state!);
-              commitCurrent?.();
-            } catch (error) {
-              throw new DispatchRefused(
-                error instanceof Error ? error.message : "Tracker publication refused",
-              );
-            }
-          },
-          onDispatch: () => {
-            try {
-              if (closed || states.get(server.id) !== state) throw new Error(`${server.id} backend changed`);
-              commitCurrent?.();
-              input.onDispatch?.();
-              dispatched = true;
-            } catch (error) {
-              throw new DispatchRefused(
-                error instanceof Error ? error.message : "Tracker publication refused",
-              );
-            }
-          },
-          effectConfirmed: () => {
-            confirmed = true;
-            input.onSettled?.();
-          },
-        };
-        const aliases: Record<string, string> = {
-          search_issues: "list_issues",
-          create_comment: "save_comment",
-          create_issue_label: "save_issue_label",
-        };
-        const upstreamTool =
-          !isLocalTracker(server) &&
-          server.id === "linear" &&
-          (input.tool === "search_issues" || state.nativeToolNames?.has(input.tool) === false)
-            ? (aliases[input.tool] ?? input.tool)
-            : input.tool;
-        const result = repositoryCall
-          ? {
-              content: JSON.stringify(
-                await options.trackerForRepo!({
-                  name: input.tool,
-                  repo: trackerRepo as string,
-                  args: Object.fromEntries(Object.entries(input.arguments).filter(([key]) => key !== "repo")),
-                  lane: input.lane,
-                  local: input.lane === "operator" && input.delegation === undefined && !inferredRepo,
-                  ...publication,
-                }),
-              ),
-              isError: false,
-            }
-          : isApiTracker(server) && !workerPost
-            ? upstreamTool === "list_issues"
-              ? await callPrioritySortedLinearIssues(
-                  input.arguments,
-                  async (args) => {
-                    await assertCurrent(server, state!);
-                    current?.();
-                    return {
-                      content: JSON.stringify(
-                        await options.linearApiTracker!.call("list_issues", args, publication),
-                      ),
-                      isError: false,
-                    };
-                  },
-                  connectedAccount?.binding ?? state!.credential,
-                )
-              : {
-                  content: JSON.stringify(
-                    await options.linearApiTracker!.call(input.tool, input.arguments, publication),
-                  ),
-                  isError: false,
-                }
-            : isLocalTracker(server)
-              ? {
-                  content: JSON.stringify(
-                    await options.localTracker!.call(input.tool, input.arguments, publication),
-                  ),
-                  isError: false,
-                }
-              : workerPost
-                ? await publishLinearWorker({
-                    tool: input.tool,
-                    args: input.arguments,
-                    credential,
-                    author: options.linearAuthor ?? (async () => undefined),
-                    beforeWrite: async () => {
-                      await publication.beforeWrite();
-                      publication.onDispatch();
-                    },
-                    ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
-                  })
-                : await dispatchFence.run(assertDispatch, () =>
-                    !isLocalTracker(server) &&
-                    options.localTracker &&
-                    server.id === "linear" &&
-                    upstreamTool === "list_issues"
-                      ? callPrioritySortedLinearIssues(
-                          input.arguments,
-                          async (args) => {
-                            await assertCurrent(server, state!);
-                            current?.();
-                            return client!.callTool(upstreamTool, args, input.timeoutMs);
-                          },
-                          connectedAccount?.binding ?? state!.credential,
-                        )
-                      : input.timeoutMs === undefined
-                        ? client!.callTool(upstreamTool, input.arguments)
-                        : client!.callTool(upstreamTool, input.arguments, input.timeoutMs),
-                  );
-        if (!result.isError && !confirmed) input.onSettled?.();
-        options.logger.info(
-          {
-            event: "mcp.host.call",
-            server: server.id,
-            tool: input.tool,
-            ...(input.delegation === undefined
-              ? {}
-              : {
-                  worker: {
-                    grantId: input.delegation.grantId,
-                    principalId: input.delegation.principalId,
-                    workId: input.delegation.workId,
-                  },
-                }),
-          },
-          "mcp tool called",
-        );
-        try {
-          await options.observeCall?.({
-            server: server.id,
-            tool: input.tool,
-            content: result.content,
-            arguments: input.arguments,
-            ...(authority ? { owner: authority.owner } : {}),
-            ...(recipient ? { recipient } : {}),
-            isError: result.isError,
-            ...(connectedAccount === undefined || !("account" in connectedAccount)
-              ? {}
-              : { account: connectedAccount.account }),
-            ...(input.delegation === undefined
-              ? {}
-              : {
-                  worker: {
-                    grantId: input.delegation.grantId,
-                    principalId: input.delegation.principalId,
-                    workId: input.delegation.workId,
-                  },
-                }),
-          });
-        } catch {
-          // The provider already settled. A receipt failure must not invite a duplicate write.
-          options.logger.warn(
-            { event: "mcp.host.observer_failed", server: server.id, tool: input.tool },
-            "MCP call settled but its receipt could not be recorded",
-          );
+        // Re-checked rather than trusted from registration time: a session built
+        // in one lane must not become a way to reach a console-only server.
+        if (!laneAllows(server, input.lane)) {
+          return {
+            outcome: "refused",
+            reason: "lane_denied",
+            detail: `${server.id} stays at the console. Ask from the operator TUI, not from this room.`,
+          };
         }
+        let trackerRepo = input.arguments.repo;
+        let inferredRepo = false;
         if (
-          input.resultMode === "data" &&
-          Buffer.byteLength(result.content, "utf8") > MAX_DATA_RESULT_BYTES
+          isLocalTracker(server) &&
+          trackerNames.has(input.tool) &&
+          trackerRepo === undefined &&
+          input.lane === "operator" &&
+          options.trackerRepoForCall
+        ) {
+          try {
+            trackerRepo = await options.trackerRepoForCall(input.tool, input.arguments);
+            inferredRepo = trackerRepo !== undefined;
+          } catch (error) {
+            return {
+              outcome: "refused",
+              reason: "server_unavailable",
+              possiblyDispatched: false,
+              detail: error instanceof Error ? error.message.slice(0, 500) : "Tracker scope lookup failed",
+            };
+          }
+        }
+        const repositoryCall =
+          server.id === "linear" && trackerNames.has(input.tool) && trackerRepo !== undefined;
+        if (
+          repositoryCall &&
+          (input.lane !== "operator" || typeof trackerRepo !== "string" || !options.trackerForRepo)
         ) {
           return {
             outcome: "refused",
-            reason: "result_too_large",
-            possiblyDispatched: true,
-            detail: `MCP ${server.id}/${input.tool} result exceeds ${MAX_DATA_RESULT_BYTES} bytes; request a smaller page or fewer fields`,
+            reason: "lane_denied",
+            detail: "Repository tracker access requires operator tools and a registered repository.",
           };
         }
-        // Callers asking for data get the full record; model-facing results get a receipt.
-        const content =
-          input.resultMode !== "data" && server.id === "linear" && !result.isError
-            ? compactLinearWrite(input.tool, result.content)
-            : result.content;
-        return {
-          outcome: "ok",
-          content: input.resultMode === "data" ? content : content.slice(0, MAX_RESULT_CHARACTERS),
-          isError: result.isError,
-        };
-      } catch (error) {
-        // A call that fails may have killed the process; drop the connection so
-        // the next attempt reconnects instead of writing to a closed pipe.
-        if (
-          dispatched &&
-          !(error instanceof DispatchRefused) &&
-          state !== undefined &&
-          state.failure === undefined
-        )
-          await retire(server.id, state);
-        return {
-          outcome: "refused",
-          reason: "server_unavailable",
-          possiblyDispatched: dispatched && (deferredDispatch || !(error instanceof DispatchRefused)),
-          detail: error instanceof Error ? error.message.slice(0, 500) : "mcp_call_failed",
-        };
-      }
+        let state: ServerState | undefined;
+        let confirmed = false;
+
+        try {
+          state = await stateFor(server);
+          const client = repositoryCall ? undefined : await connection(server, state, now);
+          const connectedAccount =
+            input.delegation !== undefined || options.observeCall !== undefined
+              ? await account(server, state.credential).catch((error: unknown) => {
+                  if (input.delegation !== undefined) throw error;
+                  return undefined;
+                })
+              : undefined;
+          if (input.delegation !== undefined && connectedAccount?.binding !== input.delegation.binding)
+            throw new Error("Delegated account binding changed; a new grant is required");
+          await assertCurrent(server, state);
+          const workerPost =
+            server.id === "linear" && server.credential !== undefined && isLinearWorkerTool(input.tool);
+          const credential = workerPost ? await options.credentials.get(server.credential!) : undefined;
+          const source = admittedSource;
+          // Attribution is optional: losing an owning conversation does not revoke
+          // independently admitted connected-account tools.
+          let authority: ConversationAuthority | undefined;
+          let recipient: LinearRecipient | undefined;
+          const refreshAttribution = async () => {
+            authority = undefined;
+            recipient = undefined;
+            try {
+              if (source && source.current() && (await source.authorize()) && source.current())
+                authority = captureConversationAuthority(source);
+            } catch {
+              /* Unavailable attribution does not revoke an independent provider grant. */
+            }
+            try {
+              if (
+                admittedNativeSource &&
+                admittedNativeSource.current() &&
+                (await admittedNativeSource.authorize()) &&
+                admittedNativeSource.current()
+              )
+                recipient = captureNativeSeatAuthority(admittedNativeSource).recipient;
+            } catch {
+              /* Never manufacture a native recipient when proof is unavailable. */
+            }
+            recipient ??= authority ? { kind: "conversation", owner: authority.owner } : undefined;
+          };
+          await refreshAttribution();
+          // Admission may await; retain the account/config fence after it, then
+          // check revocation without yielding again before provider dispatch.
+          const current = input.fence ? await input.fence() : undefined;
+          await assertCurrent(server, state);
+          let commitCurrent = current;
+          const assertDispatch = () => {
+            try {
+              signal.throwIfAborted();
+              if (Date.now() >= deadline)
+                throw new Error(`MCP ${input.server}/${input.tool} timed out after ${timeoutMs}ms`);
+              if (closed || states.get(server.id) !== state)
+                throw new Error(`${server.id} connection changed`);
+              commitCurrent?.();
+            } catch (error) {
+              throw new DispatchRefused(error instanceof Error ? error.message : "MCP dispatch refused");
+            }
+          };
+          assertDispatch();
+          const notifyDispatch = () => {
+            assertDispatch();
+            if (!dispatched) {
+              input.onDispatch?.();
+              // Synchronous receipt persistence may consume the remaining budget.
+              assertDispatch();
+              dispatched = true;
+            }
+          };
+          const publication = {
+            beforeWrite: async () => {
+              try {
+                await refreshAttribution();
+                commitCurrent = await input.fence?.();
+                await assertCurrent(server, state!);
+                assertDispatch();
+              } catch (error) {
+                throw new DispatchRefused(
+                  error instanceof Error ? error.message : "Tracker publication refused",
+                );
+              }
+            },
+            onDispatch: () => {
+              try {
+                notifyDispatch();
+              } catch (error) {
+                throw new DispatchRefused(
+                  error instanceof Error ? error.message : "Tracker publication refused",
+                );
+              }
+            },
+            effectConfirmed: () => {
+              // The backend knows the effect committed, but its result is not
+              // available yet. Notify the projected receipt once it returns.
+              confirmed = true;
+            },
+          };
+          const aliases: Record<string, string> = {
+            search_issues: "list_issues",
+            create_comment: "save_comment",
+            create_issue_label: "save_issue_label",
+          };
+          const upstreamTool =
+            !isLocalTracker(server) &&
+            server.id === "linear" &&
+            (input.tool === "search_issues" || state.nativeToolNames?.has(input.tool) === false)
+              ? (aliases[input.tool] ?? input.tool)
+              : input.tool;
+          const selected = state;
+          selected.activeCalls += 1;
+          let result: Awaited<ReturnType<McpConnection["callTool"]>>;
+          try {
+            result = repositoryCall
+              ? {
+                  content: JSON.stringify(
+                    await options.trackerForRepo!({
+                      name: input.tool,
+                      repo: trackerRepo as string,
+                      args: Object.fromEntries(
+                        Object.entries(input.arguments).filter(([key]) => key !== "repo"),
+                      ),
+                      lane: input.lane,
+                      local: input.lane === "operator" && input.delegation === undefined && !inferredRepo,
+                      ...publication,
+                    }),
+                  ),
+                  isError: false,
+                }
+              : isApiTracker(server) && !workerPost
+                ? upstreamTool === "list_issues"
+                  ? await callPrioritySortedLinearIssues(
+                      input.arguments,
+                      async (args) => {
+                        await assertCurrent(server, state!);
+                        current?.();
+                        return {
+                          content: JSON.stringify(
+                            await options.linearApiTracker!.call("list_issues", args, publication),
+                          ),
+                          isError: false,
+                        };
+                      },
+                      connectedAccount?.binding ?? state!.credential,
+                    )
+                  : {
+                      content: JSON.stringify(
+                        await options.linearApiTracker!.call(input.tool, input.arguments, publication),
+                      ),
+                      isError: false,
+                    }
+                : isLocalTracker(server)
+                  ? {
+                      content: JSON.stringify(
+                        await options.localTracker!.call(input.tool, input.arguments, publication),
+                      ),
+                      isError: false,
+                    }
+                  : workerPost
+                    ? await publishLinearWorker({
+                        tool: input.tool,
+                        args: input.arguments,
+                        credential,
+                        author: options.linearAuthor ?? (async () => undefined),
+                        signal,
+                        beforeDispatch: notifyDispatch,
+                        beforeWrite: async () => {
+                          await refreshAttribution();
+                          commitCurrent = await input.fence?.();
+                          await assertCurrent(server, state!);
+                          assertDispatch();
+                        },
+                        ...(options.linearFetch ? { fetch: options.linearFetch } : {}),
+                      })
+                    : await dispatchFence.run(notifyDispatch, () => {
+                        const callUpstream = async (args: Record<string, unknown>) => {
+                          await assertCurrent(server, state!);
+                          assertDispatch();
+                          if (!client!.dispatchesAtWire) notifyDispatch();
+                          // Observe the admitted original response under the existing
+                          // provider cap, even after the caller's shorter deadline.
+                          return client!.callTool(upstreamTool, args, REQUEST_TIMEOUT_MS);
+                        };
+                        return options.localTracker &&
+                          server.id === "linear" &&
+                          upstreamTool === "list_issues"
+                          ? callPrioritySortedLinearIssues(
+                              input.arguments,
+                              callUpstream,
+                              connectedAccount?.binding ?? state!.credential,
+                            )
+                          : callUpstream(input.arguments);
+                      });
+          } finally {
+            selected.activeCalls -= 1;
+            // Provider settlement releases the connection; receipt observers
+            // can still await without retaining an obsolete transport.
+            if (selected.retired) void closeRetired(selected);
+          }
+          const content =
+            input.resultMode !== "data" && server.id === "linear" && !result.isError
+              ? compactLinearWrite(input.tool, result.content)
+              : result.content;
+          const settled = {
+            content: input.resultMode === "data" ? content : content.slice(0, MAX_RESULT_CHARACTERS),
+            isError: result.isError,
+          };
+          const readOnly =
+            !dispatched &&
+            (repositoryCall || isLocalTracker(server) || isApiTracker(server)) &&
+            /^(?:get|list|search)_/u.test(input.tool) &&
+            TRACKER_TOOLS.some((tool) => tool.name === input.tool);
+          // These owned backend reads need no mutation admission. Provider
+          // responses and unpublished writes must never manufacture that proof.
+          input.onSettled?.(settled, readOnly ? { readOnly: true } : undefined);
+          options.logger.info(
+            {
+              event: "mcp.host.call",
+              server: server.id,
+              tool: input.tool,
+              ...(input.delegation === undefined
+                ? {}
+                : {
+                    worker: {
+                      grantId: input.delegation.grantId,
+                      principalId: input.delegation.principalId,
+                      workId: input.delegation.workId,
+                    },
+                  }),
+            },
+            "mcp tool called",
+          );
+          try {
+            await options.observeCall?.({
+              server: server.id,
+              tool: input.tool,
+              content: result.content,
+              arguments: input.arguments,
+              ...(authority ? { owner: authority.owner } : {}),
+              ...(recipient ? { recipient } : {}),
+              isError: result.isError,
+              ...(connectedAccount === undefined || !("account" in connectedAccount)
+                ? {}
+                : { account: connectedAccount.account }),
+              ...(input.delegation === undefined
+                ? {}
+                : {
+                    worker: {
+                      grantId: input.delegation.grantId,
+                      principalId: input.delegation.principalId,
+                      workId: input.delegation.workId,
+                    },
+                  }),
+            });
+          } catch {
+            // The provider already settled. A receipt failure must not invite a duplicate write.
+            options.logger.warn(
+              { event: "mcp.host.observer_failed", server: server.id, tool: input.tool },
+              "MCP call settled but its receipt could not be recorded",
+            );
+          }
+          if (
+            input.resultMode === "data" &&
+            Buffer.byteLength(result.content, "utf8") > MAX_DATA_RESULT_BYTES
+          ) {
+            return {
+              outcome: "refused",
+              reason: "result_too_large",
+              possiblyDispatched: true,
+              detail: `MCP ${server.id}/${input.tool} result exceeds ${MAX_DATA_RESULT_BYTES} bytes; request a smaller page or fewer fields`,
+            };
+          }
+          // Callers asking for data get the full record; model-facing results get a receipt.
+          return { outcome: "ok", ...settled };
+        } catch (error) {
+          // A call that fails may have killed the process; drop the connection so
+          // the next attempt reconnects instead of writing to a closed pipe.
+          if (
+            dispatched &&
+            !confirmed &&
+            !(error instanceof DispatchRefused) &&
+            state !== undefined &&
+            state.failure === undefined
+          )
+            await retire(server.id, state);
+          return {
+            outcome: "refused",
+            reason: "server_unavailable",
+            possiblyDispatched: dispatched,
+            detail: error instanceof Error ? error.message.slice(0, 500) : "mcp_call_failed",
+          };
+        }
+      };
+      // The original provider operation retains its hold and settlement hook.
+      return new Promise<McpCallResult>((resolve) => {
+        const timedOut = () =>
+          resolve({
+            outcome: "refused",
+            reason: "server_unavailable",
+            possiblyDispatched: dispatched,
+            detail: `MCP ${input.server}/${input.tool} timed out after ${timeoutMs}ms`,
+          });
+        signal.addEventListener("abort", timedOut, { once: true });
+        void perform().then(
+          (result) => {
+            signal.removeEventListener("abort", timedOut);
+            resolve(result);
+          },
+          (error: unknown) => {
+            signal.removeEventListener("abort", timedOut);
+            resolve({
+              outcome: "refused",
+              reason: "server_unavailable",
+              possiblyDispatched: dispatched,
+              detail: error instanceof Error ? error.message : "MCP call failed",
+            });
+          },
+        );
+      });
     },
 
     async close() {
       closed = true;
       await Promise.all([...states].map(([id, state]) => retire(id, state)));
+      await Promise.all([...retired].map((state) => closeRetired(state)));
       await Promise.allSettled(opening);
     },
   };
@@ -1141,6 +1232,7 @@ async function connectServer(
     throw error;
   }
   return {
+    dispatchesAtWire: true,
     async listTools() {
       const collected: { name: string; description?: string | undefined; inputSchema?: unknown }[] = [];
       const seenCursors = new Set<string>();

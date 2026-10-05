@@ -291,9 +291,9 @@ export function createCodexSeatAdapter(
           // Only this dedicated remote launch must bootstrap before Clankie's
           // project assignment exists. Other servers retain their required flags.
           const expectedToolNames = [...new Set(view.expectedToolNames ?? [])].sort();
-          if (options.serverForView)
+          if (options.serverForView) trackerOverrides.push("mcp_servers.clankie.required=false");
+          if (options.serverForView || options.localProcess)
             trackerOverrides.push(
-              "mcp_servers.clankie.required=false",
               `mcp_servers.clankie.env.CLANKIE_EXPECTED_TOOL_NAMES=${JSON.stringify(JSON.stringify(expectedToolNames))}`,
             );
           // A private local app-server needs the same worker bridge even when its

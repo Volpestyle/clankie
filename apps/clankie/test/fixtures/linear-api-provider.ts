@@ -144,6 +144,7 @@ export async function createLinearApiProvider() {
   let refresh = API_REFRESH;
   let rotations = 0;
   let reject = false;
+  let blockedMutationResponse: { started: () => void; wait: Promise<void> } | undefined;
   let blockedRead: { started: () => void; wait: Promise<void> } | undefined;
   let blocked: { started: () => void; wait: Promise<void> } | undefined;
   const server = createServer(async (request, response) => {
@@ -252,6 +253,12 @@ export async function createLinearApiProvider() {
         } else if (field.endsWith("Delete")) data[key] = { success: true };
         else throw new Error(`Unimplemented fixture field ${field}`);
       }
+      if (operation.operation === "mutation" && blockedMutationResponse) {
+        const gate = blockedMutationResponse;
+        blockedMutationResponse = undefined;
+        gate.started();
+        await gate.wait;
+      }
       return json(200, { data });
     } catch (error) {
       validationErrors.push(error instanceof Error ? error.message : String(error));
@@ -290,6 +297,18 @@ export async function createLinearApiProvider() {
     },
     reject: (value: boolean) => {
       reject = value;
+    },
+    blockNextMutationResponse: () => {
+      let started!: () => void;
+      let release!: () => void;
+      const startedPromise = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const wait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      blockedMutationResponse = { started, wait };
+      return { started: startedPromise, release };
     },
     blockNextExchange: () => {
       let started!: () => void;

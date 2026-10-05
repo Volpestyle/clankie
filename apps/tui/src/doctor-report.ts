@@ -1,7 +1,12 @@
+import { stripVTControlCharacters } from "node:util";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
 
 const mark = (ok: boolean) => (ok ? "✓" : "✗");
+const clean = (text: string) =>
+  stripVTControlCharacters(text)
+    .replace(/[\r\n\t]/gu, " ")
+    .trim();
 
 /** `/doctor` as a checklist; `/doctor json` keeps the full canonical report. */
 export function formatDoctorReport(report: InstallDoctorReport): string {
@@ -11,6 +16,29 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
   const endpoint = report.selectedModel?.endpoint;
   const commands = Object.entries(report.commands);
   const missing = commands.filter(([, presence]) => !presence.present).map(([name]) => name);
+  const fleetLinks = (report.remoteHarnesses ?? []).flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const fleet = entry as { machine?: unknown; linkState?: { state?: unknown; error?: unknown } };
+    if (typeof fleet.machine !== "string" || typeof fleet.linkState?.state !== "string") return [];
+    return [
+      `  ${mark(fleet.linkState.state === "ready")} Fleet ${clean(fleet.machine)} · ${clean(fleet.linkState.state)}${
+        typeof fleet.linkState.error === "string" ? ` · ${clean(fleet.linkState.error)}` : ""
+      }`,
+    ];
+  });
+  const workerTools = (report.workerTools?.workers ?? []).map((worker) => {
+    const marker =
+      worker.status === "ready" ? "✓" : ["missing", "stalled"].includes(worker.status) ? "✗" : "○";
+    const status =
+      worker.status === "ready"
+        ? "catalog served"
+        : worker.status === "not-observed"
+          ? "unknown"
+          : worker.status;
+    return `  ${marker} Worker ${clean(worker.seatId)} tools · ${status} · ${clean(worker.reason)}`;
+  });
+  if (report.workerTools?.error)
+    workerTools.push(`  ○ Worker tools · unknown · ${clean(report.workerTools.error)}`);
   const lines = [
     `Clankie ${report.version} · ${report.kind} · ${report.persona.displayName}`,
     "",
@@ -28,6 +56,8 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     `  ${mark(missing.length === 0)} Tools · ${
       missing.length ? `missing ${missing.join(", ")}` : `${commands.length} present`
     }`,
+    ...fleetLinks,
+    ...workerTools,
     `  Credentials · ${report.credentials.length ? report.credentials.map((c) => c.id).join(", ") : "none"}`,
     ...(report.tracker
       ? [

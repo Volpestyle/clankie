@@ -7,6 +7,19 @@ import { join } from "node:path";
 const hash = (text) => createHash("sha256").update(text.replace(/\r\n?/gu, "\n").trim()).digest("hex");
 const hex = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 const uuid = (value) => typeof value === "string" && /^[a-f0-9-]{36}$/u.test(value);
+/** Only refused connection attempts prove that the POST never reached a service. */
+function refusedConnection(error, ancestors = new Set()) {
+  if (!error || typeof error !== "object" || ancestors.has(error)) return false;
+  const path = new Set(ancestors).add(error);
+  const children = [
+    ...(error.cause === undefined ? [] : [error.cause]),
+    ...(Array.isArray(error.errors) ? error.errors : []),
+  ];
+  return children.length
+    ? (error.code === undefined || error.code === "ECONNREFUSED") &&
+        children.every((child) => refusedConnection(child, path))
+    : error.code === "ECONNREFUSED";
+}
 const valid = (value) =>
   value?.schemaVersion === 1 &&
   uuid(value.deliveryId) &&
@@ -61,6 +74,20 @@ export function createInboundSender({ directory, scope, request }) {
     const query = new URLSearchParams({ binding: record.binding, fingerprint: record.fingerprint });
     const response = await request(`/${record.deliveryId}?${query}`);
     const value = response.ok ? await response.json() : undefined;
+    if (
+      value?.schemaVersion === 1 &&
+      value.received === false &&
+      value.deliveryStage === "unavailable" &&
+      value.definitive === "not_sent" &&
+      value.deliveryId === record.deliveryId &&
+      value.binding === record.binding &&
+      value.fingerprint === record.fingerprint
+    ) {
+      // Only an authenticated exact terminal negative releases an unknown
+      // original. This invocation still cannot send a replacement payload.
+      settle(record);
+      return { ...value, detail: "The original was not sent. No replacement was sent." };
+    }
     if (!stored(value, record)) return uncertain(record);
     // Only unlink this exact claim. Another process may have reconciled it;
     // never remove a newer original that took its place.
@@ -98,11 +125,30 @@ export function createInboundSender({ directory, scope, request }) {
         const original = inspect();
         return original ? await reconcile(original, text) : uncertain();
       }
-      const response = await request("", {
-        method: "POST",
-        body: JSON.stringify({ schemaVersion: 1, text, delivery: { id: record.deliveryId, binding } }),
-      });
-      const value = await response.json().catch(() => undefined);
+      let response;
+      try {
+        response = await request("", {
+          method: "POST",
+          // A redirect could follow an accepted original with another failed
+          // connection. Never let fetch silently dispatch a second POST.
+          redirect: "error",
+          body: JSON.stringify({ schemaVersion: 1, text, delivery: { id: record.deliveryId, binding } }),
+        });
+      } catch (error) {
+        if (!refusedConnection(error)) throw error;
+        settle(record);
+        return {
+          schemaVersion: 1,
+          received: false,
+          deliveryStage: "unavailable",
+          deliveryId: record.deliveryId,
+          binding: record.binding,
+          fingerprint: record.fingerprint,
+          detail: "The connection was refused before dispatch; nothing was sent.",
+        };
+      }
+      // An unauthenticated error response is never an exact receipt proof.
+      const value = response.ok ? await response.json().catch(() => undefined) : undefined;
       const exactRefusal =
         value?.schemaVersion === 1 &&
         value.received === false &&
@@ -114,8 +160,8 @@ export function createInboundSender({ directory, scope, request }) {
       settle(record);
       return value;
     } catch {
-      // Even connection errors after a claim are retained. A later invocation
-      // only reads the exact original receipt, including after process restart.
+      // A timeout, reset, lost reply, or failed receipt read retains the claim.
+      // A later invocation only reads the exact original receipt.
       return uncertain(record);
     }
   };

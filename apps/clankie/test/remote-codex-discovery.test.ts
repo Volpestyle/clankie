@@ -75,7 +75,12 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
               capabilities: { tools: {} },
               serverInfo: { name: "fixture", version: "1" },
             }
-          : { tools: [{ name: "linear_get_issue", inputSchema: { type: "object" } }] };
+          : {
+              tools: [
+                { name: "clankie_tools", inputSchema: { type: "object" } },
+                { name: "clankie_call", inputSchema: { type: "object" } },
+              ],
+            };
       response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result }));
     });
   });
@@ -109,7 +114,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
         HOME: home,
         HERDR_PANE_ID: "w1:p1",
         HERDR_SOCKET_PATH: "fixture",
-        CLANKIE_EXPECTED_TOOL_NAMES: JSON.stringify(["linear_get_issue"]),
+        CLANKIE_EXPECTED_TOOL_NAMES: JSON.stringify(["clankie_tools", "clankie_call"]),
       },
       stdio: ["pipe", "pipe", "pipe"],
     },
@@ -141,7 +146,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
                 {
                   name: "clankie",
                   runtimeStatus: catalogReceived ? "connected" : "starting",
-                  tools: catalogReceived ? { message_clankie: {}, linear_get_issue: {} } : {},
+                  tools: catalogReceived ? { message_clankie: {}, clankie_tools: {}, clankie_call: {} } : {},
                 },
               ],
               nextCursor: null,
@@ -209,7 +214,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
       }),
     });
     expect(catalogReceived).toBe(false);
-    seat.expectTools?.(["linear_get_issue"]);
+    seat.expectTools?.(["clankie_tools", "clankie_call"]);
     const firstTurn = seat.send("first brief");
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(statusReads).toBeGreaterThan(0);
@@ -219,7 +224,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
     expect(await firstTurn).toMatchObject({ turnId: "first-turn" });
     expect(turns).toBe(1);
     expect(reply).toMatchObject({
-      result: { tools: [{ name: "message_clankie" }, { name: "linear_get_issue" }] },
+      result: { tools: [{ name: "message_clankie" }, { name: "clankie_tools" }, { name: "clankie_call" }] },
     });
     expect(sessionStarts).toBe(1);
     expect(nativeThreadReads).toEqual([
