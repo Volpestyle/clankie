@@ -52,6 +52,16 @@ servers keep their existing proof and startup trust handling (VUH-1551).
 
 ## Windows owner decision
 
+VUH-1563 native Windows verification belongs to **James, on the PC only**.
+The fast worker checks execute the shared TypeScript argv classifier and
+loopback control fixtures. They do not execute the C# kernel producer or prove
+its runtime parity. James's PC run must verify the native argv projection,
+including a recognized app-server with an unknown trailing flag, alongside
+the private backend/TUI and default-home queue paths. The opt-in installed
+Codex suite is separate evidence; its skipped cases do not establish native
+Windows acceptance. Workers must not enable this lane or make live PC calls
+as part of the focused gate.
+
 Proposal for James: retain the elevated-shell `--no-daemon` workaround for now.
 Removing it globally would exchange reliable private pane identity and local
 fleet proof for a reachable shared server, while daemon identity and elevated

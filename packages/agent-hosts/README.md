@@ -191,7 +191,19 @@ verification and the remaining live acceptance checks.
 ### External Codex active-turn delivery
 
 For an owner-started Codex session with a known Herdr thread identity, the service
-tries `codex app-server proxy` on that machine before the native queue. The proxy
+tries the existing app-server connection on that machine before the native queue.
+Windows control supports an existing dedicated backend with the native TUI
+attached by `--remote`; both must retain the pane's private environment, cwd and
+configuration. This adapter does not establish automatic supervision of new
+Windows launches; native launcher verification remains open.
+Control uses the fleet's SSH link only after proving current native ancestry,
+lifetimes, pane/session and the actual connected TCP owner's backend. It does not
+enable or select the account's shared daemon. Embedded `--no-daemon` sessions and
+explicit named profiles retain their launch mode, but pane-targeted delivery
+refuses when no private endpoint can be proven. Private-backend queue delivery
+uses the same proven connection and native `thread/queue/add`, preserving the
+private home and waiting until an active turn settles.
+On other supported machines, `codex app-server proxy`
 carries a WebSocket upgrade and frames over stdio (also through SSH); it never
 starts a daemon. The exact thread must report active and its current turn is
 fenced with `expectedTurnId`. No thread is resumed, no approval answered, and no

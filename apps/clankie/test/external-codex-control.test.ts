@@ -300,7 +300,7 @@ it("uses the remote pane's reported parent without inspecting local rollouts", a
   ).toMatchObject({ outcome: "delivered", state: "queued" });
   expect(select).toHaveBeenCalledWith("pc", "pc/w3Z:p2");
   expect(native).toHaveBeenCalledWith(parent, "hello");
-  expect(queue).toHaveBeenCalledWith("pc", parent, "hello");
+  expect(queue).toHaveBeenCalledWith("pc", parent, "hello", undefined, "pc/w3Z:p2");
   expect(inspect).not.toHaveBeenCalled();
   expect(local).not.toHaveBeenCalled();
 });

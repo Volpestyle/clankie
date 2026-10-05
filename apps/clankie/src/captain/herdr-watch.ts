@@ -832,6 +832,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         sessionId: string,
         text: string,
         beforeDispatch?: () => Promise<boolean>,
+        paneId?: string,
       ) => Promise<boolean | FleetSeatDelivery>;
       /** Include every configured Herdr server on the same exact SSH destination. */
       readonly resumeInventory?: (fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>;

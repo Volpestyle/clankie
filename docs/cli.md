@@ -2682,7 +2682,27 @@ An uncertain start or brief delivery retains its pane for inspection and reports
 uncertainty. The turn may already have started; reconcile its native session before
 retrying. `message_seat` distinguishes confirmed delivery, unconfirmed delivery,
 and unavailable control. External Codex messages first try the selected machine's
-existing app-server proxy. `state: steered` confirms the exact active turn;
+existing app-server connection. On Windows, control supports an existing
+dedicated loopback backend and a TUI attached with `--remote`, preserving their
+private environment, cwd, configuration and MCP bridge. This adapter does not
+establish automatic supervision of new Windows launches; that launcher path
+still needs native verification. Existing embedded `--no-daemon` sessions and explicit named profiles
+retain that launch mode. Steering refuses when no private endpoint can be proven.
+An embedded TUI may queue through the existing SSH CLI only when fresh kernel
+observations prove that its home is the SSH account's canonical default `~/.codex`
+and the CLI inherits that same home. The native projection must positively prove
+a standalone TUI; an absent or rejected remote endpoint is insufficient.
+The pane/session and home proof are repeated after preparation. Caller authority
+is checked again after the final observation, with a 250 ms deadline immediately
+before sending. A timeout reports undelivered and never sends on late approval. Private, changed
+or unproved homes refuse the fallback; a private native receipt cannot authorize
+a second send through CLI.
+Clankie checks the current pane/session, native process lifetimes and ancestry,
+private-home consistency, listener and actual connected TCP owner before steering
+through the fleet's native SSH forwarding. Private queues reach the same proven
+backend and remain pending until its active turn settles, preserving custom
+`CODEX_HOME` sessions. These observations do not widen tool grants.
+`state: steered` confirms the exact active turn;
 `state: queued` and `status: queued_until_turn_end` mean native queue acceptance,
 not that the agent saw the message. A goal may hold it until the whole goal ends.
 No new setting or daemon is enabled. An unavailable connection does not promise an automatic

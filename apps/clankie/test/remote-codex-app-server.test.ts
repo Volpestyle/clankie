@@ -297,7 +297,7 @@ describe("external Codex SSH proxy", () => {
       proxy.mockRestore();
     }
   });
-  it.each([posix, windows])("keeps the proxy on fleet $id and preserves bytes", async (fleet) => {
+  it.each([posix])("keeps the proxy on fleet $id and preserves bytes", async (fleet) => {
     const delivery = vi.fn(async () => ({ outcome: "unconfirmed" as const, detail: "lost" }));
     const proxy = vi.spyOn(externalCodex, "codexProxyControl").mockReturnValue(delivery);
     try {
@@ -357,10 +357,24 @@ it("never tries another server for a remote private or unknown pane", async () =
           result: { process_info: { foreground_processes: [{ pid: 123, name: "codex.exe", argv }] } },
         }),
       );
-      expect(await remoteCodexControl(windows, shell, herdr, "pc/w1:p1")("thread", "hello")).toBeUndefined();
+      expect(await remoteCodexControl(posix, shell, herdr, "box/w1:p1")("thread", "hello")).toBeUndefined();
       expect(herdr).toHaveBeenCalledWith(["pane", "process-info", "--pane", "w1:p1"]);
     }
     expect(shell).not.toHaveBeenCalled();
+    expect(proxy).not.toHaveBeenCalled();
+  } finally {
+    proxy.mockRestore();
+  }
+});
+
+it("never substitutes the Windows account daemon when a fresh kernel observation cannot prove the pane's private endpoint", async () => {
+  const proxy = vi.spyOn(externalCodex, "codexProxyControl");
+  const shell = vi.fn(async () => "{}");
+  const herdr = vi.fn();
+  try {
+    expect(await remoteCodexControl(windows, shell, herdr, "pc/w1:p1")("thread", "hello")).toBeUndefined();
+    expect(shell).toHaveBeenCalledOnce();
+    expect(herdr).not.toHaveBeenCalled();
     expect(proxy).not.toHaveBeenCalled();
   } finally {
     proxy.mockRestore();

@@ -151,7 +151,22 @@ do not reconstruct membership from a claimed PID or switch to an operator bearer
 After a restart, Clankie loses that adapter's in-memory
 turn state; inspect the pane and transcript before relying on a new delivery.
 Codex messages can steer an active turn; a `steered` receipt is not an after-turn
-queue. Other routes need a supported native channel or session API. Automated
+queue. Windows control supports an existing private loopback backend with its
+native TUI (`--remote`), preserving the pane's environment and MCP. Automatic
+supervision of new Windows launches is not established by this adapter.
+Fleet SSH control requires fresh native process,
+pane/session, private-home and exact connected TCP ownership proof. Existing
+embedded `--no-daemon` sessions and explicit named profiles retain their launch
+mode. Steering requires a proven private endpoint. Queueing may use the existing
+SSH CLI only after fresh kernel observations prove the pane and CLI share the
+SSH account's canonical default `~/.codex` and positively identify a standalone
+TUI. A missing or rejected remote endpoint alone cannot prove that mode.
+The same pane/session and home proof are repeated after preparation, then caller
+authority is rechecked with a 250 ms deadline immediately before sending. Timeout
+means undelivered; late approval cannot send. Private or unproved
+homes refuse the CLI fallback, and private native receipts never authorize a
+second send. An unavailable endpoint grants no tools or authority to another
+session. Other routes need a supported native channel or session API. Automated
 briefs and messages never fall back to terminal typing. An uncertain start or
 delivery retains its pane for inspection; reconcile it before retrying. A saved
 Codex session reference alone cannot recover its in-memory control after a

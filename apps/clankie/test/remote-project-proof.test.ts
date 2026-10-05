@@ -1,4 +1,6 @@
 import { RemoteCodexSeats } from "../src/remote-codex-seats.ts";
+import { gunzipSync } from "node:zlib";
+import { readFileSync } from "node:fs";
 
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -6,10 +8,18 @@ import {
   createRemoteWorkspaceCanonical,
   createRemoteGitWorktreeObserver,
   createRemoteWorktreeRootObserver,
+  createRemoteCodexControlObserver,
+  createRemoteCodexQueueObserver,
 } from "../src/remote-project-proof.ts";
 import { windowsProcessCommand } from "../src/windows-process-probe.ts";
+import { classifyWindowsCodexArgv } from "../src/windows-codex-argv.ts";
 
 const fleet = { id: "pc", session: "kh2-desktop", ssh: { host: "pc", shell: "powershell" as const } };
+function scriptFromCommand(command: string): string {
+  const script = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
+  const compressed = /\$bytes=\[Convert\]::FromBase64String\('([A-Za-z0-9+/=]+)'\)/u.exec(script)?.[1];
+  return compressed ? gunzipSync(Buffer.from(compressed, "base64")).toString("utf8") : script;
+}
 function fixture() {
   const executable = "C:\\installed\\claude.exe";
   return {
@@ -66,6 +76,49 @@ describe("remote project process proof", () => {
 
   it("allows host doctor observation without pretending it authenticates a socket", async () => {
     expect(await setup().observe("pc", "w3:p8")).toBeDefined();
+  });
+  it.each(["unavailable", "other", "tui"])(
+    "preserves a Codex project's native process proof when argv is classified %s",
+    async (role) => {
+      const observation = fixture();
+      observation.agent.agent = "codex";
+      observation.agent.agent_session.agent = "codex";
+      observation.agent.agent_session.source = "herdr:codex";
+      const executable = "C:\\installed\\codex.exe";
+      observation.installed = [executable];
+      observation.processes[2]!.executable = executable;
+      const argv = role === "unavailable" ? [] : [executable, role === "other" ? "--yolo" : "--no-daemon"];
+      const projection = classifyWindowsCodexArgv(argv);
+      expect(projection.role).toBe(role);
+      const native = { ...observation.nativeProcesses[0]!, executable, ...projection };
+      observation.nativeProcesses = [native];
+      // Failed argv reads and unknown flags (for example --yolo) are not
+      // prerequisites for the installed native process/cwd/socket ancestry proof.
+      expect(await setup(observation).observe("pc", "w3:p8", stream)).toMatchObject({
+        processes: [{ pid: native.pid }],
+        workspace: { canonicalPath: native.cwd },
+      });
+    },
+  );
+  it("keeps app-server excluded after an unknown trailing flag", async () => {
+    const observation = fixture();
+    observation.agent.agent = "codex";
+    observation.agent.agent_session.agent = "codex";
+    observation.agent.agent_session.source = "herdr:codex";
+    const executable = "C:\\installed\\codex.exe";
+    observation.installed = [executable];
+    observation.processes[2]!.executable = executable;
+    const projection = classifyWindowsCodexArgv([
+      executable,
+      "app-server",
+      "--listen",
+      "ws://127.0.0.1:45000",
+      "--future-native-flag",
+    ]);
+    const native = { ...observation.nativeProcesses[0]!, executable, ...projection };
+    observation.nativeProcesses = [native];
+    expect(await setup(observation).observe("pc", "w3:p8", stream)).toBeUndefined();
+    expect(projection).toEqual({ role: "server", endpoint: null, standalone: false });
   });
   it.each([
     [
@@ -200,7 +253,7 @@ describe("remote project process proof", () => {
       clientPort: 1234,
       serverPort: 2345,
     });
-    const script = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
+    const script = scriptFromCommand(command);
     expect(script).toContain("ReadProcessMemory");
     expect(script).toContain("DuplicateHandle(handle, directoryHandle");
     expect(script).toContain("parameters + 0x48");
@@ -226,7 +279,7 @@ describe("remote project process proof", () => {
     const observe = createRemoteGitWorktreeObserver(options);
     expect(await observe({ machineId: "pc", repoPath: "C:\\repo" }, "C:\\work\\topic")).toEqual(facts);
     expect(await observe({ machineId: "other", repoPath: "C:\\repo" }, "C:\\work\\topic")).toBeUndefined();
-    const script = Buffer.from(shell.mock.calls[0]![0].split(" ").at(-1)!, "base64").toString("utf16le");
+    const script = scriptFromCommand(shell.mock.calls[0]![0]);
     expect(script).toContain("'worktree','list','--porcelain','-z'");
     expect(script).toContain("Join-Path $gitDir 'gitdir'");
     shell.mockRejectedValue(new Error("SSH failed"));
@@ -247,6 +300,88 @@ describe("remote project process proof", () => {
     expect(await canonical("other", "C:\\repos")).toBeUndefined();
     shell.mockRejectedValue(new Error("SSH gone"));
     expect(await canonical("pc", "C:\\repos")).toBeUndefined();
+  });
+});
+
+describe("standalone remote Codex queue proof", () => {
+  function standaloneFixture() {
+    const observation = fixture();
+    const executable = "C:\\installed\\codex.exe";
+    const markers = {
+      pane: "w3:p8",
+      socketPath: observation.binding.socketPath,
+      homeHash: "a".repeat(64),
+    };
+    observation.agent.agent = "codex";
+    observation.agent.agent_session = {
+      agent: "codex",
+      kind: "id",
+      source: "herdr:codex",
+      value: "standalone-thread",
+    };
+    observation.installed = [executable];
+    observation.processes[2]!.executable = executable;
+    return {
+      ...observation,
+      foregroundMarkers: markers,
+      defaultHomeHash: markers.homeHash,
+      nativeProcesses: [
+        {
+          ...observation.nativeProcesses[0]!,
+          executable,
+          ...classifyWindowsCodexArgv([executable, "--no-daemon"]),
+          markers,
+        },
+      ],
+    };
+  }
+
+  function observers(first = standaloneFixture(), last = structuredClone(first)) {
+    const options = {
+      fleet: async () => fleet,
+      shell: () => async () => JSON.stringify({ first, last }),
+    };
+    return { queue: createRemoteCodexQueueObserver(options), project: createRemoteProjectObserver(options) };
+  }
+
+  it("requires positive standalone native evidence while retaining the default-home CLI proof", async () => {
+    expect(await observers().queue("pc", "w3:p8", "standalone-thread")).toMatchObject({
+      proof: { processes: [{ pid: 30 }], workspace: { canonicalPath: "C:\\repos\\rivals-agent" } },
+      homeHash: "a".repeat(64),
+    });
+  });
+
+  it.each([
+    ["non-loopback remote", ["--remote", "wss://other.example:45000"]],
+    ["remote endpoint with a trailing newline", ["--remote", "ws://127.0.0.1:45000\n"]],
+  ] as const)(
+    "denies standalone queue authority for %s while retaining independent project proof",
+    async (_kind, args) => {
+      const observation = standaloneFixture();
+      const native = observation.nativeProcesses[0]!;
+      const projection = classifyWindowsCodexArgv([native.executable, ...args]);
+      expect(projection.endpoint).toBeNull();
+      expect(projection.standalone).toBe(false);
+      Object.assign(native, projection);
+      const observed = observers(observation);
+      expect(await observed.queue("pc", "w3:p8", "standalone-thread")).toBeUndefined();
+      expect(await observed.project("pc", "w3:p8", stream)).toMatchObject({ processes: [{ pid: 30 }] });
+    },
+  );
+
+  it("denies a legacy unknown standalone projection without withdrawing independent project proof", async () => {
+    const observation = standaloneFixture();
+    delete (observation.nativeProcesses[0] as { standalone?: boolean }).standalone;
+    const observed = observers(observation);
+    expect(await observed.queue("pc", "w3:p8", "standalone-thread")).toBeUndefined();
+    expect(await observed.project("pc", "w3:p8", stream)).toMatchObject({ processes: [{ pid: 30 }] });
+  });
+
+  it("refuses a standalone projection that disappears before the final native observation", async () => {
+    const first = standaloneFixture();
+    const last = structuredClone(first);
+    last.nativeProcesses[0]!.standalone = false;
+    expect(await observers(first, last).queue("pc", "w3:p8", "standalone-thread")).toBeUndefined();
   });
 });
 
@@ -321,5 +456,328 @@ describe("registered private remote Codex proof", () => {
     const { observer, registration } = await privateSetup(first, last);
     if (kind === "unbound") registration.release();
     expect(await observer("pc", "w3:p8", stream)).toBeUndefined();
+  });
+});
+
+describe("Windows dedicated Codex observation boundary", () => {
+  it("accepts the actual Windows private backend and native TUI launched with an initial positional prompt", async () => {
+    // Captured by the actual Windows C# producer on the owned w8:pB lane,
+    // 2026-10-04, Codex 0.160.0; argv/environment remain projected and bounded.
+    const raw = readFileSync(
+      new URL("./fixtures/windows-codex-private-control.json", import.meta.url),
+      "utf8",
+    );
+    const registered = { id: "pc", session: "default", ssh: { host: "pc", shell: "powershell" as const } };
+    const observer = createRemoteCodexControlObserver({
+      fleet: async (id) => (id === registered.id ? registered : undefined),
+      shell: () => async () => raw,
+    });
+    expect(await observer("pc", "w8:pB", "01a10928-d878-7db2-82d0-643dce239a3f")).toMatchObject({
+      endpoint: "ws://127.0.0.1:52645",
+      listenEndpoint: "ws://127.0.0.1:0",
+      shell: { pid: 789840, startTime: "2026-10-04T22:59:51.8840955Z" },
+      foreground: { pid: 686856, startTime: "2026-10-04T23:03:52.5814358Z" },
+      tui: { pid: 792564, startTime: "2026-10-04T23:03:53.9980954Z" },
+      server: { pid: 785568, startTime: "2026-10-04T23:03:53.4473657Z" },
+      binding: { session: "default" },
+    });
+  });
+  // The legacy PC example is codex.exe --no-daemon resume <thread> (pc-probe.log).
+  // This contract replay models the approved foreground supervisor's sibling
+  // --remote TUI and --listen backend; live Windows producer acceptance is separate.
+  function dedicated() {
+    const x = fixture();
+    const executable = "C:\\installed\\codex.exe";
+    const markers = { pane: "w3:p8", socketPath: x.binding.socketPath, homeHash: "a".repeat(64) };
+    const endpoint = "ws://127.0.0.1:45000";
+    return {
+      ...x,
+      agent: {
+        ...x.agent,
+        agent: "codex",
+        agent_session: { agent: "codex", kind: "id", source: "herdr:codex", value: "private-thread" },
+      },
+      installed: [executable],
+      foregroundMarkers: { ...markers },
+      processes: [
+        ...x.processes.map((p) => {
+          if (p.pid === 30) return { ...p, executable };
+          if (p.pid === 40) return { ...p, parent: 60 };
+          return p;
+        }),
+        { pid: 60, parent: 20, startTime: "2026-10-03T10:00:01.0000001Z", executable },
+      ],
+      nativeProcesses: [
+        {
+          pid: 30,
+          executable,
+          cwd: x.nativeProcesses[0]!.cwd,
+          role: "tui" as "tui" | "server" | "other" | "unavailable",
+          endpoint: endpoint as string | null,
+          markers: { ...markers },
+          listeners: [] as { pid: number; address: string; port: number }[],
+          listenerOwners: [] as number[],
+        },
+        {
+          pid: 60,
+          executable,
+          cwd: x.nativeProcesses[0]!.cwd,
+          role: "server" as "tui" | "server" | "other" | "unavailable",
+          endpoint: "ws://127.0.0.1:0" as string | null,
+          markers: { ...markers },
+          listeners: [{ pid: 60, address: "127.0.0.1", port: 45000 }],
+          listenerOwners: [60],
+        },
+      ],
+    };
+  }
+  function replay(first = dedicated(), last = structuredClone(first)) {
+    const options = {
+      fleet: async (id: string) => (id === fleet.id ? fleet : undefined),
+      shell: () => async (command: string) => {
+        expect(command.length).toBeLessThan(32_767);
+        return JSON.stringify({ first, last });
+      },
+    };
+    return {
+      control: createRemoteCodexControlObserver(options),
+      project: createRemoteProjectObserver(options),
+    };
+  }
+  it("binds native steering and the backend MCP child to the same visible TUI without private registry privilege", async () => {
+    const observer = replay();
+    const proof = await observer.control("pc", "w3:p8", "private-thread");
+    expect(proof).toMatchObject({
+      fleet: "pc",
+      pane: "w3:p8",
+      terminalId: "term_1",
+      sessionId: "private-thread",
+      endpoint: "ws://127.0.0.1:45000",
+      listenEndpoint: "ws://127.0.0.1:0",
+      server: { pid: 60, startTime: "2026-10-03T10:00:01.0000001Z", executable: "C:\\installed\\codex.exe" },
+      tui: { pid: 30 },
+      foreground: { pid: 20 },
+      shell: { pid: 10 },
+      binding: { session: fleet.session, socketPath: "C:\\herdr\\kh2.sock" },
+      homeHash: "a".repeat(64),
+    });
+    const project = await observer.project("pc", "w3:p8", stream);
+    expect(project).toMatchObject({
+      nativeOccupantId: proof!.nativeOccupantId,
+      processes: [{ pid: proof!.tui.pid }],
+      workspace: { canonicalPath: "C:\\repos\\rivals-agent" },
+    });
+    expect(project!.privateSeat).toBeUndefined();
+    expect(JSON.stringify(proof)).not.toContain("CODEX_HOME");
+    expect(JSON.stringify(proof)).not.toContain("arguments");
+  });
+  it("accepts a fixed positive --listen port and returns identical static proof after exact connected server-half validation", async () => {
+    const observation = dedicated();
+    observation.nativeProcesses[1]!.endpoint = "ws://127.0.0.1:45000";
+    observation.owners = [60];
+    const observer = replay(observation).control;
+    const initial = await observer("pc", "w3:p8", "private-thread");
+    expect(initial).toBeDefined();
+    expect(await observer("pc", "w3:p8", "private-thread", { clientPort: 54000, serverPort: 45000 })).toEqual(
+      initial,
+    );
+    expect(
+      await observer("pc", "w3:p8", "private-thread", { clientPort: 54000, serverPort: 45001 }),
+    ).toBeUndefined();
+    observation.owners = [40];
+    expect(
+      await replay(observation).control("pc", "w3:p8", "private-thread", {
+        clientPort: 54000,
+        serverPort: 45000,
+      }),
+    ).toBeUndefined();
+  });
+  it.each([
+    [
+      "embedded --no-daemon TUI",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[0]!.endpoint = null;
+      },
+    ],
+    [
+      "shared daemon",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.role = "other";
+      },
+    ],
+    [
+      "foreign foreground",
+      (x: ReturnType<typeof dedicated>) => {
+        x.processes.at(-1)!.parent = 10;
+      },
+    ],
+    [
+      "missing wrapper",
+      (x: ReturnType<typeof dedicated>) => {
+        x.processes = x.processes.filter((p) => p.pid !== 20);
+      },
+    ],
+    [
+      "PID reuse before child",
+      (x: ReturnType<typeof dedicated>) => {
+        x.processes[1]!.startTime = "2026-10-03T10:00:01.0000002Z";
+      },
+    ],
+    [
+      "replacement backend newer than TUI",
+      (x: ReturnType<typeof dedicated>) => {
+        x.processes.at(-1)!.startTime = "2026-10-03T10:00:02.0000001Z";
+      },
+    ],
+    [
+      "foreign listener",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.listenerOwners = [99];
+      },
+    ],
+    [
+      "ambiguous listener",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.listenerOwners = [60, 99];
+      },
+    ],
+    [
+      "second server listener",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.listeners.push({ pid: 60, address: "127.0.0.1", port: 45001 });
+      },
+    ],
+    [
+      "wildcard address",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.listeners[0]!.address = "0.0.0.0";
+      },
+    ],
+    [
+      "different native executable",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.executable = "C:\\desktop\\codex.exe";
+      },
+    ],
+    [
+      "unavailable argv",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.role = "unavailable";
+      },
+    ],
+    [
+      "different listen argv port",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.endpoint = "ws://127.0.0.1:45001";
+      },
+    ],
+    [
+      "pane marker",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.markers.pane = "w3:p9";
+      },
+    ],
+    [
+      "session/socket marker",
+      (x: ReturnType<typeof dedicated>) => {
+        x.foregroundMarkers.socketPath = "C:\\herdr\\other.sock";
+      },
+    ],
+    [
+      "CODEX_HOME hash",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.markers.homeHash = "b".repeat(64);
+      },
+    ],
+    [
+      "backend cwd",
+      (x: ReturnType<typeof dedicated>) => {
+        x.nativeProcesses[1]!.cwd = "C:\\other";
+      },
+    ],
+  ])("refuses %s for steering and sibling-owned MCP", async (_name, mutate) => {
+    const observation = dedicated();
+    mutate(observation);
+    const observer = replay(observation);
+    expect(await observer.control("pc", "w3:p8", "private-thread")).toBeUndefined();
+    expect(await observer.project("pc", "w3:p8", stream)).toBeUndefined();
+  });
+  it("refuses embedded-server steering while preserving the existing directly proven TUI-child MCP identity", async () => {
+    const observation = dedicated();
+    observation.processes.at(-1)!.parent = 30;
+    observation.processes.at(-1)!.startTime = "2026-10-03T10:00:02.0000001Z";
+    const observer = replay(observation);
+    expect(await observer.control("pc", "w3:p8", "private-thread")).toBeUndefined();
+    expect(await observer.project("pc", "w3:p8", stream)).toMatchObject({
+      processes: [{ pid: 30 }],
+      nativeOccupantId: (await replay().control("pc", "w3:p8", "private-thread"))!.nativeOccupantId,
+    });
+  });
+  it.each([
+    "ws://localhost:45000",
+    "wss://127.0.0.1:45000",
+    "ws://0.0.0.0:45000",
+    "ws://127.0.0.1:45000/path",
+    "ws://127.0.0.1:45000?token=secret",
+    "ws://user@127.0.0.1:45000",
+    "ws://127.0.0.1:0",
+    "ws://127.0.0.1:65536",
+  ])("refuses noncanonical frontend endpoint %s", async (endpoint) => {
+    const observation = dedicated();
+    observation.nativeProcesses[0]!.endpoint = endpoint;
+    expect(await replay(observation).control("pc", "w3:p8", "private-thread")).toBeUndefined();
+  });
+  it("refuses a second TUI, a different reported session/pane/fleet, and startup without a session", async () => {
+    const observation = dedicated();
+    observation.nativeProcesses.push({ ...structuredClone(observation.nativeProcesses[0]!), pid: 31 });
+    observation.processes.push({ ...observation.processes[2]!, pid: 31 });
+    expect(await replay(observation).control("pc", "w3:p8", "private-thread")).toBeUndefined();
+    const observer = replay().control;
+    expect(await observer("pc", "w3:p8", "foreign-thread")).toBeUndefined();
+    expect(await observer("pc", "w3:p9", "private-thread")).toBeUndefined();
+    expect(await observer("other", "w3:p8", "private-thread")).toBeUndefined();
+    delete (observation.agent as { agent_session?: unknown }).agent_session;
+    expect(await replay(observation).control("pc", "w3:p8", "private-thread")).toBeUndefined();
+  });
+  it.each(["tui", "server", "shell", "wrapper", "home", "listener", "cwd"] as const)(
+    "refuses changed %s proof between initial and final kernel observations",
+    async (kind) => {
+      const first = dedicated(),
+        last = dedicated();
+      const pid = { tui: 30, server: 60, shell: 10, wrapper: 20 }[
+        kind as "tui" | "server" | "shell" | "wrapper"
+      ];
+      if (pid) last.processes.find((p) => p.pid === pid)!.startTime = "2026-10-03T10:00:02.0000002Z";
+      if (kind === "home") {
+        last.foregroundMarkers.homeHash = "b".repeat(64);
+        for (const native of last.nativeProcesses) native.markers.homeHash = last.foregroundMarkers.homeHash;
+      }
+      if (kind === "listener") last.nativeProcesses[1]!.listenerOwners = [];
+      if (kind === "cwd") for (const native of last.nativeProcesses) native.cwd = "C:\\other";
+      const observer = replay(first, last);
+      expect(await observer.control("pc", "w3:p8", "private-thread")).toBeUndefined();
+      expect(await observer.project("pc", "w3:p8", stream)).toBeUndefined();
+    },
+  );
+  it("keeps the native reader bounded and fixed-marker-only across its encoded command boundary", () => {
+    const command = windowsProcessCommand({
+      session: fleet.session,
+      pane: "w3:p8",
+      codexControl: true,
+      clientPort: 45000,
+      serverPort: 54000,
+    });
+    expect(command.length).toBeLessThan(32_767);
+    const script = scriptFromCommand(command);
+    expect(script).toContain("CommandLineToArgvW");
+    expect(script).toContain("parameters+0x70");
+    expect(script).toContain("HERDR_PANE_ID");
+    expect(script).toContain("homeHash");
+    expect(script).toContain("$native.standalone = if ($role) { $role.standalone } else { $false }");
+    expect(script).toContain("standalone=remotes==0 && listens==0");
+    expect(script).toContain('role=command=="app-server"?"server":"other"');
+    expect(script).toContain("[ClankieProcess]::Owners(45000, 54000)");
+    expect(script).not.toContain("Win32_Process");
+    expect(script).not.toContain("ConvertTo-Json $args");
   });
 });

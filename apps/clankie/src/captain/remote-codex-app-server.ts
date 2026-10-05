@@ -7,13 +7,21 @@ import {
   type WindowsCodexBridgeBinding,
 } from "../windows-codex-launch.ts";
 import { codexControlEndpoint, codexProcess, parseHerdrForegroundProcesses } from "./codex-seat.ts";
-import { codexProxyControl, type ExternalCodexControl } from "./external-codex-control.ts";
+import {
+  codexProxyControl,
+  codexSocketControl,
+  type ExternalCodexControl,
+} from "./external-codex-control.ts";
+import { openRemoteCodexConnection, type RemoteCodexConnection } from "./remote-codex-connection.ts";
+import { createRemoteCodexControlObserver, createRemoteCodexQueueObserver } from "../remote-project-proof.ts";
+import { isDeepStrictEqual } from "node:util";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
-import { createServer } from "node:net";
 import {
   SSH_BASE_OPTIONS,
+  freeLoopbackPort,
+  forwardSshArgs,
   posixQuote,
   posixScriptCommand,
   powershellLiteral,
@@ -43,6 +51,7 @@ import { codexTrackerOverridesFromList } from "./tracker-isolation.ts";
 const REMOTE_PORTS = { min: 41_000, max: 60_999 } as const;
 const START_TIMEOUT_MS = 30_000;
 const TAIL_INTERVAL_MS = 5_000;
+const FINAL_CODEX_AUTHORITY_TIMEOUT_MS = 250;
 /** A remote server starts over ssh and, on Windows, through PowerShell. */
 const REMOTE_CODEX_LISTEN_TIMEOUT_MS = 45_000;
 
@@ -147,37 +156,7 @@ function parseStarted(stdout: string): Started {
   return { ...parsed, pid: parsed.pid, log: parsed.log };
 }
 
-function freeLocalPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.once("error", reject);
-    server.listen({ host: "127.0.0.1", port: 0 }, () => {
-      const address = server.address();
-      server.close(() =>
-        typeof address === "object" && address !== null
-          ? resolve(address.port)
-          : reject(new Error("No local port was assigned")),
-      );
-    });
-  });
-}
-
-/** The forward's own ssh connection: it must end exactly when this seat's link does. */
-export function forwardSshArgs(fleet: HerdrFleet, localPort: number, remotePort: number): string[] {
-  return [
-    ...SSH_BASE_OPTIONS,
-    "-o",
-    "ControlMaster=no",
-    "-o",
-    "ExitOnForwardFailure=yes",
-    "-N",
-    "-L",
-    `127.0.0.1:${String(localPort)}:127.0.0.1:${String(remotePort)}`,
-    "--",
-    fleet.ssh.host,
-  ];
-}
+export { forwardSshArgs } from "../herdr-fleet.ts";
 
 export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServerLauncher {
   const { fleet, shell } = options;
@@ -248,7 +227,7 @@ export function remoteCodexServer(options: RemoteCodexServerOptions): CodexServe
     let forward: ChildProcess;
     let forwardErrors = "";
     try {
-      localPort = await (options.freeLocalPort ?? freeLocalPort)();
+      localPort = await (options.freeLocalPort ?? freeLoopbackPort)();
       forward = (options.spawn ?? spawn)("ssh", forwardSshArgs(fleet, localPort, remotePort), {
         stdio: ["ignore", "ignore", "pipe"],
       });
@@ -406,6 +385,26 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
   };
 }
 
+/** A final authority read must finish promptly; late approval cannot authorize a write. */
+async function finalCodexAuthority(beforeDispatch: () => Promise<boolean>): Promise<boolean> {
+  const deadline = performance.now() + FINAL_CODEX_AUTHORITY_TIMEOUT_MS;
+  const timeout = () => new Error("Final Codex authority check timed out; nothing was sent.");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const allowed = await Promise.race([
+      Promise.resolve().then(beforeDispatch),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(timeout()), FINAL_CODEX_AUTHORITY_TIMEOUT_MS);
+      }),
+    ]);
+    // A synchronous guard can delay timer delivery past the authority deadline.
+    if (performance.now() >= deadline) throw timeout();
+    return allowed;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
  * `codex queue` on a remote fleet's machine (VUH-1527): a Codex session
  * Clankie did not start there receives his message as its next prompt. On
@@ -413,7 +412,11 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
  * in the message, so the real `codex.js` runs under node.exe with exactly
  * escaped arguments; it is found once per fleet through `npm root -g`.
  */
-export function remoteCodexQueue(fleet: HerdrFleet, shell: FleetShellRun) {
+export function remoteCodexQueue(
+  fleet: HerdrFleet,
+  shell: FleetShellRun,
+  privateQueue?: (paneId: string) => ExternalCodexControl | undefined,
+) {
   let script: Promise<string> | undefined;
   const codexScript = () =>
     (script ??= shell(
@@ -430,16 +433,64 @@ export function remoteCodexQueue(fleet: HerdrFleet, shell: FleetShellRun) {
         script = undefined;
         throw error;
       }));
+  const observeDefaultHome = createRemoteCodexQueueObserver({
+    fleet: async (id) => (id === fleet.id ? fleet : undefined),
+    shell: () => shell,
+  });
   return async (
     sessionId: string,
     text: string,
     beforeDispatch?: () => Promise<boolean>,
+    paneId?: string,
   ): Promise<boolean | FleetSeatDelivery> => {
+    const qualified = paneId === undefined ? undefined : splitFleetQualified(paneId);
+    const pane = qualified?.fleet === fleet.id ? qualified.id : undefined;
+    const original =
+      fleet.ssh.shell === "powershell" && pane !== undefined
+        ? await observeDefaultHome(fleet.id, pane, sessionId)
+        : undefined;
+    if (fleet.ssh.shell === "powershell" && paneId !== undefined) {
+      // Choose the default-home fallback before any native mutation. An uncertain
+      // or unavailable private result cannot authorize a second send through CLI.
+      if (!original) {
+        const native = await privateQueue?.(paneId)?.(sessionId, text, undefined, undefined, beforeDispatch);
+        return (
+          native ?? {
+            outcome: "undelivered",
+            deliveryStage: "unavailable",
+            detail: "The Windows pane's Codex queue backend cannot be proven; nothing was sent.",
+          }
+        );
+      }
+    }
     const argv = ["queue", "--thread", sessionId, "--message", text];
     const queueArgs = fleet.ssh.shell === "powershell" ? [await codexScript(), ...argv] : argv;
     if (beforeDispatch) {
       try {
         if (!(await beforeDispatch())) throw new Error("Peer authority changed; nothing was sent.");
+      } catch (error) {
+        return {
+          outcome: "undelivered",
+          deliveryStage: "unavailable",
+          detail: `Codex authority changed before queue dispatch; nothing was sent: ${String(error)}`,
+        };
+      }
+    }
+    if (
+      original &&
+      pane !== undefined &&
+      !isDeepStrictEqual(original, await observeDefaultHome(fleet.id, pane, sessionId))
+    )
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: "The Windows pane's default Codex home or native identity changed; nothing was sent.",
+      };
+    // The final SSH observation yields; peer authority may change while it runs.
+    if (original && beforeDispatch) {
+      try {
+        if (!(await finalCodexAuthority(beforeDispatch)))
+          throw new Error("Peer authority changed; nothing was sent.");
       } catch (error) {
         return {
           outcome: "undelivered",
@@ -463,10 +514,62 @@ export function remoteCodexControl(
   shell: FleetShellRun,
   herdr: HerdrFleetRun,
   paneId: string,
+  options: {
+    observe?: ReturnType<typeof createRemoteCodexControlObserver>;
+    connect?: typeof openRemoteCodexConnection;
+    mode?: "steer" | "queue";
+  } = {},
 ): ExternalCodexControl {
   return async (sessionId, text, _codexHome, _endpoint, beforeDispatch) => {
     const qualified = splitFleetQualified(paneId);
     if (qualified?.fleet !== fleet.id) return undefined;
+    if (fleet.ssh.shell === "powershell") {
+      const observe =
+        options.observe ??
+        createRemoteCodexControlObserver({
+          fleet: async (id) => (id === fleet.id ? fleet : undefined),
+          shell: () => shell,
+        });
+      const original = await observe(fleet.id, qualified.id, sessionId);
+      if (original === undefined)
+        return options.mode === "queue"
+          ? {
+              outcome: "undelivered",
+              deliveryStage: "unavailable",
+              detail: "The Windows pane's Codex queue backend cannot be proven; nothing was sent.",
+            }
+          : undefined;
+      let connection: RemoteCodexConnection | undefined;
+      const control = codexSocketControl(
+        async () => {
+          connection = await (options.connect ?? openRemoteCodexConnection)(fleet, original.endpoint);
+          return connection?.socket;
+        },
+        5000,
+        options.mode,
+      );
+      try {
+        const result = await control(sessionId, text, undefined, undefined, async () => {
+          if (!connection?.alive()) return false;
+          // Both caller preparation and the final native observation may yield.
+          if (beforeDispatch !== undefined && !(await beforeDispatch())) return false;
+          const current = await observe(fleet.id, qualified.id, sessionId, connection.connection);
+          if (!connection.alive() || !isDeepStrictEqual(original, current)) return false;
+          if (beforeDispatch !== undefined && !(await finalCodexAuthority(beforeDispatch))) return false;
+          return connection.alive();
+        });
+        // A proven private home must never fall through to the account-default queue.
+        return result === undefined && options.mode === "queue"
+          ? {
+              outcome: "undelivered",
+              deliveryStage: "unavailable",
+              detail: "The pane's private Codex queue is unavailable; nothing was sent.",
+            }
+          : result;
+      } finally {
+        connection?.close();
+      }
+    }
     let endpoint: string | undefined | null;
     try {
       endpoint = codexControlEndpoint(
@@ -478,35 +581,11 @@ export function remoteCodexControl(
       return undefined;
     }
     if (endpoint === null) return undefined;
-    let program = "codex";
-    let prefix: string[] = [];
-    if (fleet.ssh.shell === "powershell") {
-      // ProcessStartInfo cannot execute npm's .cmd shim. Resolve its real JS
-      // entrypoint, just as the existing native queue does; transport stays raw.
-      const result = JSON.parse(
-        (
-          await shell(
-            powershellScriptCommand(
-              [
-                "$ErrorActionPreference = 'Stop'",
-                "$path = (Get-Command codex -CommandType Application | Select-Object -First 1).Source",
-                "if ($path -match '\\.cmd$') { $root = (& npm root -g 2>$null | Select-Object -First 1); $js = Join-Path $root '@openai\\codex\\bin\\codex.js'; if (-not (Test-Path -LiteralPath $js)) { throw 'Codex npm entrypoint is missing' }; @{ script = $js } | ConvertTo-Json -Compress } else { @{ script = $null } | ConvertTo-Json -Compress }",
-              ].join("; "),
-            ),
-          )
-        ).trim(),
-      ) as { script?: string | null };
-      if (typeof result.script === "string") {
-        program = "node";
-        prefix = [result.script];
-      }
-    }
     const control = codexProxyControl("ssh", [
       ...SSH_BASE_OPTIONS,
       "--",
       fleet.ssh.host,
-      remoteProgramCommand(fleet.ssh.shell, program, [
-        ...prefix,
+      remoteProgramCommand(fleet.ssh.shell, "codex", [
         "app-server",
         "proxy",
         ...(endpoint === undefined ? [] : ["--sock", endpoint.slice("unix://".length)]),

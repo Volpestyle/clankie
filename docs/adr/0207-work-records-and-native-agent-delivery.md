@@ -104,3 +104,56 @@ an expired result, while uncertain originals remain retained. ID, scope and
 fingerprint tombstones survive result-body expiry and service restart. Reconciliation
 reports what the original receipt proves, preserving the distinction between
 native delivery, uncertainty and completed work.
+
+## Private Windows Codex control (VUH-1563)
+
+Windows control must preserve a pane's private environment. Joining the account's
+shared daemon can disconnect the worker MCP bridge from its pane. Existing
+elevated-shell `--no-daemon` sessions use an embedded server with no external
+control endpoint. Steering requires a proven native endpoint. Queueing may use
+the existing SSH CLI only when a fresh kernel probe proves that the pane's home
+matches the SSH account's canonical default `~/.codex`, and the SSH CLI inherits
+that same default home. Private or unproved homes refuse this fallback.
+
+The adapter supports an existing dedicated app-server and the original
+interactive TUI in the same pane's foreground process tree. The server must
+inherit the launch's environment, `CODEX_HOME`, cwd and configuration, bind only
+to loopback, and expose its OS-assigned endpoint to the TUI's `--remote` argument.
+Codex rejects `--no-daemon` together with `--remote`; neither this adapter nor its
+protocol tests implement or prove the native launch supervisor that would select
+that launch shape. New Windows launch supervision and live Windows acceptance
+remain open verification gaps.
+
+The native app-server cannot select a CLI named profile (`-p`/`--profile`),
+whose separate configuration file may carry different MCP and model settings.
+Those launches retain the native embedded `--no-daemon` path. Pane-targeted
+steering refuses until an endpoint and the same private home can be proven;
+queueing retains the default-home CLI path described above. The pane identity
+and home proof are repeated after preparation and caller authority checks, just
+before CLI dispatch. A private native receipt never falls through to CLI queueing.
+A future launcher must forward only configuration flags accepted by both native commands and
+preserve the TUI's prompt, model, approval, sandbox and resume arguments.
+
+Before opening the fleet's SSH transport, Clankie independently proves the
+current Herdr pane/session, installed native TUI and backend executables, full
+process creation order, common foreground ancestry, private-home consistency
+and the backend's actual loopback listener. A banner, title, saved session or
+endpoint file confers no authority. A dedicated native SSH loopback forward carries
+protocol bytes; a metadata-only host probe identifies its nearest live SSHD
+ancestor and sole established TCP tuple. After connecting, the kernel TCP table must
+prove the exact established connection terminates in that same backend lifetime.
+The complete pane proof and current caller authority are checked again before
+the native write. MCP children may join the same pane through the proven backend
+ancestry; existing project grants and per-call admission still apply.
+
+Reuse the existing read-only `thread/read` and latest-turn inspection, followed
+by `turn/steer` with the exact `expectedTurnId`. Never resume an unrelated thread
+or answer a native approval. A confirmed receipt reports `steered`; native queue
+acceptance reports `queued`. Private-backend queues reuse native `thread/queue/add`
+with its required experimental protocol negotiation on the same proven connection,
+so a private home never falls through to the account-default queue. Busy turns
+hold the submission until they settle; idle turns start it through that backend.
+Explicit Queue bypasses steering, and an impossible
+explicit Steer is a reasoned pre-send rejection under the existing delivery-mode
+contract. Once a mutation may have been written, a lost response remains
+unconfirmed and cannot authorize a queue, fallback model turn or second send.
