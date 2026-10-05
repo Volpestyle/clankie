@@ -108,6 +108,7 @@ async function fixture(admission: Admission = "bearer") {
     authenticateOperator: async () => undefined,
   });
   const localFetch = local.fetch(app.app.fetch);
+  const socket = { destroyed: false };
   async function rpc(method: string, params: unknown = {}, session?: string) {
     const request = new Request("http://localhost/v1/fleet/mcp", {
       method: "POST",
@@ -120,7 +121,7 @@ async function fixture(admission: Admission = "bearer") {
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     });
-    if (admission === "local") return localFetch(request, { incoming: { socket: {} } } as HttpBindings);
+    if (admission === "local") return localFetch(request, { incoming: { socket } } as HttpBindings);
     if (admission === "stream") identities.set(request, identity);
     try {
       return await app.app.fetch(request);
@@ -140,6 +141,7 @@ async function fixture(admission: Admission = "bearer") {
   return {
     credentials,
     account,
+    socket,
     state,
     calls,
     host,
@@ -161,7 +163,8 @@ it("searches bounded names and schemas across verified servers, excluding worker
   const f = await fixture();
   try {
     const listed = (await (await f.rpc("tools/list")).json()).result.tools;
-    expect(listed[0].description).toMatch(/Connected now: .*linear/u);
+    expect(listed.map((tool: { name: string }) => tool.name)).toEqual(["clankie_tools", "clankie_call"]);
+    expect(listed[0].description).not.toContain("Connected now");
     const search = await f.call("clankie_tools", {});
     const lines = search.content[0].text.split("\n");
     expect(lines).toHaveLength(20);
@@ -228,84 +231,132 @@ it("keeps the two-tool catalog when no account verifies, with no callable upstre
   }
 });
 
-// WorkerMcp observes resource bindings, which retain verified account identity
-// for connected providers and also admit the account-free local tracker.
+// Pause an actual discovery/account await or the host's pre-dispatch fence.
+// Wrapper discovery no longer scans accounts, so binding call counts do not identify these seams.
+type AwaitPhase = "catalog" | "authorization-binding" | "dispatch-admission" | "dispatch-fence";
+function pauseAt(host: Awaited<ReturnType<typeof fixture>>["host"], phase: AwaitPhase) {
+  let entered!: () => void;
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let paused = false;
+  const pause = async () => {
+    if (paused) return;
+    paused = true;
+    entered();
+    await barrier;
+  };
+  const catalog = host.catalog.bind(host);
+  const binding = host.binding!.bind(host);
+  const call = host.call.bind(host);
+  const spy =
+    phase === "catalog"
+      ? vi.spyOn(host, "catalog").mockImplementation(async (...args) => {
+          const result = await catalog(...args);
+          await pause();
+          return result;
+        })
+      : phase === "authorization-binding"
+        ? vi.spyOn(host, "binding").mockImplementation(async (...args) => {
+            const result = await binding(...args);
+            if (args[0] === "linear") await pause();
+            return result;
+          })
+        : vi.spyOn(host, "call").mockImplementation((input) => {
+            if (!input.fence) throw new Error("Missing fleet pre-dispatch fence");
+            const fence = input.fence;
+            return call({
+              ...input,
+              fence: async () => {
+                // Process proof is asynchronous; its validation must complete after revocation.
+                if (phase === "dispatch-admission") await pause();
+                const current = await fence();
+                if (phase === "dispatch-fence") await pause();
+                return current;
+              },
+            });
+          });
+  return { waiting, release, restore: () => spy.mockRestore() };
+}
+
 const admissionRaces = (["local", "stream", "bearer"] as const).flatMap((admission) =>
-  (["catalog", "authorization-binding", "dispatch-binding"] as const).map((phase) => ({ admission, phase })),
+  (["catalog", "authorization-binding", "dispatch-admission"] as const).map((phase) => ({
+    admission,
+    phase,
+  })),
 );
 it.each(admissionRaces)(
   "refuses $admission admission invalidated during the $phase await",
   async ({ admission, phase }) => {
     const f = await fixture(admission);
+    let held: ReturnType<typeof pauseAt> | undefined;
     try {
       // Control establishes that the same admitted pane and arguments can dispatch.
       expect(
         (await f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } })).isError,
       ).toBe(false);
-      let entered!: () => void;
-      let release!: () => void;
-      const waiting = new Promise<void>((resolve) => {
-        entered = resolve;
-      });
-      const barrier = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const catalog = f.host.catalog.bind(f.host);
-      const binding = f.host.binding!.bind(f.host);
-      let reads = 0;
-      const catalogSpy = vi.spyOn(f.host, "catalog").mockImplementation(async (...args) => {
-        const result = await catalog(...args);
-        if (phase === "catalog" && ++reads === 1) {
-          entered();
-          await barrier;
-        }
-        return result;
-      });
-      const bindingSpy = vi.spyOn(f.host, "binding").mockImplementation(async (...args) => {
-        const result = await binding(...args);
-        if (
-          args[0] === "linear" &&
-          phase !== "catalog" &&
-          ++reads === (phase === "authorization-binding" ? 2 : 3)
-        ) {
-          entered();
-          await barrier;
-        }
-        return result;
-      });
+      held = pauseAt(f.host, phase);
       const pending = f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } });
-      await waiting;
+      await held.waiting;
       f.state.live = false;
-      release();
+      held.release();
       expect((await pending).isError).toBe(true);
       expect(f.calls).toHaveBeenCalledOnce();
-      catalogSpy.mockRestore();
-      bindingSpy.mockRestore();
     } finally {
+      held?.release();
+      held?.restore();
       await f.close();
     }
   },
 );
 
+it("refuses a revoked local socket after asynchronous dispatch admission completed", async () => {
+  const f = await fixture("local");
+  let held: ReturnType<typeof pauseAt> | undefined;
+  try {
+    expect((await f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } })).isError).toBe(
+      false,
+    );
+    f.calls.mockClear();
+    held = pauseAt(f.host, "dispatch-fence");
+    const pending = f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } });
+    await held.waiting;
+    f.socket.destroyed = true;
+    held.release();
+    expect((await pending).isError).toBe(true);
+    expect(f.calls).not.toHaveBeenCalled();
+  } finally {
+    held?.release();
+    held?.restore();
+    await f.close();
+  }
+});
+
 it.each(["local", "stream", "bearer"] as const)(
-  "rechecks tools off at %s dispatch after a binding await",
+  "rechecks tools off at %s dispatch after the fence await",
   async (admission) => {
     const f = await fixture(admission);
+    let held: ReturnType<typeof pauseAt> | undefined;
     try {
-      const binding = f.host.binding!.bind(f.host);
-      let reads = 0;
-      const spy = vi.spyOn(f.host, "binding").mockImplementation(async (...args) => {
-        const result = await binding(...args);
-        if (args[0] === "linear" && ++reads === 3) f.state.tools = "off";
-        return result;
-      });
       expect(
         (await f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } })).isError,
-      ).toBe(true);
+      ).toBe(false);
+      f.calls.mockClear();
+      held = pauseAt(f.host, "dispatch-fence");
+      const pending = f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } });
+      await held.waiting;
+      f.state.tools = "off";
+      held.release();
+      expect((await pending).isError).toBe(true);
       expect(f.calls).not.toHaveBeenCalled();
-      spy.mockRestore();
       expect((await (await f.rpc("tools/list")).json()).result.tools).toEqual([]);
     } finally {
+      held?.release();
+      held?.restore();
       await f.close();
     }
   },
@@ -313,25 +364,26 @@ it.each(["local", "stream", "bearer"] as const)(
 
 it("retains the host account-binding fence after the standing account snapshot", async () => {
   const f = await fixture();
+  let held: ReturnType<typeof pauseAt> | undefined;
   try {
-    const binding = f.host.binding!.bind(f.host);
-    let reads = 0;
-    const spy = vi.spyOn(f.host, "binding").mockImplementation(async (...args) => {
-      const result = await binding(...args);
-      if (args[0] === "linear" && ++reads === 3)
-        await f.credentials.set("linear", {
-          type: "api",
-          key: "replacement",
-          account: { ...f.account, connectionId: randomUUID() },
-        });
-      return result;
-    });
     expect((await f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } })).isError).toBe(
-      true,
+      false,
     );
+    f.calls.mockClear();
+    held = pauseAt(f.host, "dispatch-fence");
+    const pending = f.call("clankie_call", { name: "linear_read_0", arguments: { id: "A-1" } });
+    await held.waiting;
+    await f.credentials.set("linear", {
+      type: "api",
+      key: "replacement",
+      account: { ...f.account, connectionId: randomUUID() },
+    });
+    held.release();
+    expect((await pending).isError).toBe(true);
     expect(f.calls).not.toHaveBeenCalled();
-    spy.mockRestore();
   } finally {
+    held?.release();
+    held?.restore();
     await f.close();
   }
 });
