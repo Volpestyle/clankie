@@ -131,6 +131,10 @@ it does not prove the recipient model read it or accepted its authority.
 A refused connection before an inbound POST reaches the service releases only
 that exact claim. An authenticated definitive unknown-delivery lookup also
 releases it after the service seals the original ID against delayed delivery.
+After a restart or the host request deadline, that lookup can settle an exact
+abandoned pane claim whose message was never accepted. Live requests, accepted
+history and mismatched or unreadable evidence remain protected. Keep the claim
+and use its lookup; do not delete it or replay the original to recover.
 Neither sends a replacement in the same invocation. Timeouts, connection resets,
 unverified lookups and mismatched evidence retain the uncertain original.
 
