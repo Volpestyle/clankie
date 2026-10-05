@@ -30,3 +30,9 @@ Codex 0.160.0's rmcp 3.2.0 wire contract and recursive schema normalization are
 pinned by source links in `apps/clankie/src/mcp-tool-schema.ts`. These are
 contract/integration checks, not a launched-client end-to-end test. A later
 client upgrade needs review of those pinned contracts.
+
+Follow-up coverage refinement: the same four lane wire checks now enable every
+optional authored family (desktop, Minecraft, body leases, rivals, native agent
+sessions, work items, runtime updates, file delivery, Discord bodies and stream
+watch). This exercises their real definitions without executing the ports.
+The final unchanged 32-test contract check passed in 6.84 seconds.

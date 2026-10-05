@@ -701,9 +701,32 @@ it("keeps Clankie's raw Minecraft motor out of direct and deferred lane MCP call
 // Catalog boundary check: real authored registries, real HTTP MCP endpoint,
 // raw JSON result so a client parser cannot hide the offending tool name.
 it.each(CaptainSessionLaneV2Schema.options)("strict client contract: %s lane tools/list", async (lane) => {
+  // Catalog-only ports enable every optional authored family. Their real
+  // definitions are checked, and this test never executes any tool.
+  const catalogOnly = {};
+  const deps = {
+    ...bankDeps(),
+    desktop: catalogOnly,
+    bodyLeases: catalogOnly,
+    rivals: catalogOnly,
+    minecraft: catalogOnly,
+    minecraftHost: catalogOnly,
+    agentSessions: catalogOnly,
+    workItems: catalogOnly,
+    streamWatch: catalogOnly,
+    discordMusic: catalogOnly,
+    discordVoicePresence: catalogOnly,
+    discordActions: catalogOnly,
+    runtimeUpdater: catalogOnly,
+  } as unknown as CaptainDeps;
   const bank = await buildLaneToolBank(
-    bankDeps(),
-    {},
+    deps,
+    {
+      shell: true,
+      publishFile: async () => {
+        throw new Error("catalog check must never publish");
+      },
+    },
     {} as LaneLog,
     lane,
     { pokeagentMmoEnabled: true },
