@@ -206,13 +206,19 @@ it.each(["posix", "powershell"] as const)(
       },
     );
     expect(calls).toHaveLength(2);
-    expect(calls.every((call) => call.command === "ssh" && call.args.includes("pc-owner"))).toBe(true);
+    expect(calls.every((call) => call.command === "ssh" && call.args.at(-2) === "pc-owner")).toBe(true);
     expect(calls[0]?.interactive).toBe(false);
     expect(calls[1]?.args).toContain("-tt");
     expect(calls[1]?.interactive).toBe(true);
     if (shell === "posix") {
-      expect(calls[0]?.args.at(-1)).toContain("'owned' 'agent' 'focus' 'w1:p2'");
-      expect(calls[1]?.args.at(-1)).toContain("'owned' 'client'");
+      const scripts = calls.map((call) => {
+        const command = call.args.at(-1)!;
+        expect(command).toMatch(/^exec sh -c '.+'$/u);
+        // Decode the single outer argument; preserve the exact inner argv.
+        return command.slice("exec sh -c '".length, -1).replaceAll("'\\''", "'");
+      });
+      expect(scripts[0]?.split("; ").at(-1)).toBe("exec herdr '--session' 'owned' 'agent' 'focus' 'w1:p2'");
+      expect(scripts[1]?.split("; ").at(-1)).toBe("exec herdr '--session' 'owned' 'client'");
     } else {
       const script = Buffer.from(calls[1]!.args.at(-1)!.split(" ").at(-1)!, "base64").toString("utf16le");
       expect(script).toContain("& herdr '--session' 'owned' 'client'");
