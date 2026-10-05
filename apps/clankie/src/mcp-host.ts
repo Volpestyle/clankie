@@ -54,7 +54,7 @@ import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./
 import { compactLinearWrite } from "./linear-write-receipt.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
-import type { TrackerToolBackend } from "@clankie/work-items";
+import { TRACKER_TOOLS, type TrackerToolBackend } from "@clankie/work-items";
 import { callPrioritySortedLinearIssues } from "./tracker-tool-router.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
@@ -162,7 +162,10 @@ export interface McpHost {
     /** Internal receipt hooks; never caller/model arguments. */
     readonly onDispatch?: () => void;
     /** Confirmed response in the caller's result mode; may follow a caller timeout. */
-    readonly onSettled?: (result: { content: string; isError: boolean }) => void;
+    readonly onSettled?: (
+      result: { content: string; isError: boolean },
+      observation?: { readonly readOnly: true },
+    ) => void;
   }): Promise<McpCallResult>;
   close(): Promise<void>;
 }
@@ -981,7 +984,14 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             content: input.resultMode === "data" ? content : content.slice(0, MAX_RESULT_CHARACTERS),
             isError: result.isError,
           };
-          input.onSettled?.(settled);
+          const readOnly =
+            !dispatched &&
+            (repositoryCall || isLocalTracker(server)) &&
+            /^(?:get|list|search)_/u.test(input.tool) &&
+            TRACKER_TOOLS.some((tool) => tool.name === input.tool);
+          // These owned backend reads need no mutation admission. Provider
+          // responses and unpublished writes must never manufacture that proof.
+          input.onSettled?.(settled, readOnly ? { readOnly: true } : undefined);
           options.logger.info(
             {
               event: "mcp.host.call",

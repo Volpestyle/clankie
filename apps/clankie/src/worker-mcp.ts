@@ -986,6 +986,7 @@ export class WorkerMcp {
       let receiptId: string | undefined;
       let admitted = false;
       let repeatedReceipt: WorkerCallReceipt | undefined;
+      let unadmittedSettlement = false;
       try {
         return await this.operation(
           authority,
@@ -1145,8 +1146,26 @@ export class WorkerMcp {
                   admitted = true;
                 }
               },
-              onSettled: (settled) => {
-                this.settleCallReceipt(id, { outcome: "ok", ...settled });
+              onSettled: (settled, observation) => {
+                if (!admitted) {
+                  const previous = this.beginCallReceipt(id, authorityNow, current, rule.name, fingerprint);
+                  if (previous) {
+                    repeatedReceipt = previous;
+                    return;
+                  }
+                  admitted = true;
+                  if (observation?.readOnly !== true) {
+                    // An unexpected unadmitted effect must remain uncertain,
+                    // with a tombstone preventing this ID from executing again.
+                    unadmittedSettlement = true;
+                    return;
+                  }
+                }
+                this.settleCallReceipt(id, {
+                  outcome: "ok",
+                  content: settled.content,
+                  isError: settled.isError,
+                });
                 const health = this.bridge(authorityNow);
                 if (!settled.isError && health?.last?.status === "stalled")
                   health.last = {
@@ -1192,6 +1211,13 @@ export class WorkerMcp {
                   }),
             });
             if (repeatedReceipt) return workerCallResponse(this.callReceiptResult(repeatedReceipt));
+            if (unadmittedSettlement)
+              return workerCallResponse(
+                this.uncertainCallReceipt(
+                  id,
+                  "The host settled this call without durable dispatch admission; reconcile its receipt",
+                ),
+              );
             if (result.outcome === "ok" && admitted) this.settleCallReceipt(id, result);
             if (result.outcome !== "ok" && admitted && !this.callReceipts.load().get(id)?.result) {
               const health = this.bridge(authorityNow);

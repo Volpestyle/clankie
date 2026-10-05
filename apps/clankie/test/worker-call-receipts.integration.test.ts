@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { FileCredentialStore, type ProviderAccount } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
+import { createLocalTracker } from "@clankie/work-items";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -48,7 +49,7 @@ async function listen(fetch: (request: Request) => Promise<Response>) {
 }
 
 /** Real worker/host/SDK HTTP path; the isolated tracker owns one controlled issue. */
-async function fixture() {
+async function fixture(options: { local?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-call-receipts-"));
   const admitted = gate();
   const release = gate();
@@ -120,18 +121,20 @@ async function fixture() {
     fleet: { ...current.fleet, tools: "connected" },
     mcp: {
       ...current.mcp,
-      servers: [
-        {
-          id: "linear",
-          transport: "http",
-          url: provider.url,
-          args: [],
-          lane: "operator",
-          credential: "linear",
-          initialTools: [],
-          enabled: true,
-        },
-      ],
+      servers: options.local
+        ? []
+        : [
+            {
+              id: "linear",
+              transport: "http",
+              url: provider.url,
+              args: [],
+              lane: "operator",
+              credential: "linear",
+              initialTools: [],
+              enabled: true,
+            },
+          ],
     },
   }));
   const account: ProviderAccount = {
@@ -145,18 +148,23 @@ async function fixture() {
     verifiedAt: new Date().toISOString(),
   };
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
-  await credentials.set("linear", { type: "api", key: "fixture-provider-secret", account });
+  if (!options.local)
+    await credentials.set("linear", { type: "api", key: "fixture-provider-secret", account });
+  const localTracker = options.local
+    ? createLocalTracker({ directory: join(root, "local-tracker") })
+    : undefined;
   const host = createMcpHost({
     credentials,
     settings,
     curated: [],
+    ...(localTracker ? { localTracker, trackerIdentity: join(root, "local-tracker") } : {}),
     logger: { info() {}, warn() {} },
     observeCall: () => observed.release(),
   });
   let valid = true;
   let authenticationFailure: Error | undefined;
   let heldFence: { entered: ReturnType<typeof gate>; release: ReturnType<typeof gate> } | undefined;
-  const options = {
+  const workerOptions = {
     directory: join(root, "grants"),
     credentials,
     host,
@@ -173,7 +181,7 @@ async function fixture() {
       return { tools, assertCurrent() {} };
     },
   };
-  let worker = new WorkerMcp(options);
+  let worker = new WorkerMcp(workerOptions);
   const identity = (pane = "w1:p1"): LocalFleetIdentity => ({
     fleet: "default",
     pane,
@@ -263,6 +271,7 @@ async function fixture() {
     credentials,
     account,
     settings,
+    localTracker,
     holdFence() {
       const held = { entered: gate(), release: gate() };
       heldFence = held;
@@ -273,7 +282,7 @@ async function fixture() {
     },
     async restartWorker() {
       await worker.close();
-      worker = new WorkerMcp(options);
+      worker = new WorkerMcp(workerOptions);
     },
     revoke() {
       valid = false;
@@ -282,6 +291,45 @@ async function fixture() {
 }
 
 const invocation = { name: "linear_save_issue", arguments: { id: "VUH-FIXTURE", state: "Done" } };
+
+it("local tracker reads and writes retain scoped receipts while the fleet kill switch blocks new effects", async () => {
+  const f = await fixture({ local: true });
+  const session = await f.initialize();
+  const readId = randomUUID();
+  const read = await f.call(
+    { name: "linear_get_user", arguments: { query: "me" } },
+    session,
+    undefined,
+    readId,
+  );
+  expect(read).toMatchObject({ outcome: "ok", receiptId: readId, isError: false, toolError: false });
+  expect(JSON.stringify(JSON.parse(read.content)).toLowerCase()).toContain("local");
+  expect(await f.call({ receiptId: readId }, session)).toEqual(read);
+  const writeId = randomUUID();
+  const write = { name: "linear_save_issue", arguments: { team: "LOCAL", title: "One local effect" } };
+  const saved = await f.call(write, session, undefined, writeId);
+  expect(saved).toMatchObject({ outcome: "ok", receiptId: writeId, isError: false, toolError: false });
+  expect(await f.call(write, session, undefined, writeId)).toEqual(saved);
+  expect(await f.call({ receiptId: writeId }, session)).toEqual(saved);
+  expect(await f.localTracker!.call("list_issues", {})).toMatchObject({
+    issues: [expect.objectContaining({ title: "One local effect" })],
+  });
+  await f.settings.update((current) => ({ ...current, fleet: { ...current.fleet, tools: "off" } }));
+  expect(
+    await f.call(
+      { ...write, arguments: { team: "LOCAL", title: "Blocked local effect" } },
+      session,
+      undefined,
+      randomUUID(),
+    ),
+  ).toMatchObject({
+    outcome: "refused",
+    toolError: true,
+  });
+  expect(await f.localTracker!.call("list_issues", {})).toMatchObject({
+    issues: [expect.objectContaining({ title: "One local effect" })],
+  });
+});
 
 it("a timed-out admitted Linear write has a durable receipt and reconciles without redispatch", async () => {
   const f = await fixture();
@@ -304,7 +352,13 @@ it("a timed-out admitted Linear write has a durable receipt and reconciles witho
     reason: expect.stringMatching(/timed out|timeout/iu),
   });
   expect(f.status()).toMatchObject({ status: "stalled" });
-  expect(await f.call({ receiptId: uncertain.receiptId }, session)).toEqual(uncertain);
+  expect(await f.call({ receiptId: uncertain.receiptId }, session)).toMatchObject({
+    outcome: "uncertain",
+    receiptId: uncertain.receiptId,
+    detail: uncertain.detail,
+    reason: expect.stringMatching(/timed out|timeout/iu),
+    toolError: false,
+  });
   f.release.release();
   await f.observed.promise;
   expect(f.status()).toMatchObject({ status: "ready" });
