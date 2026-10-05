@@ -19,14 +19,26 @@ control reference, including its output formats and exceptions.
 
 ## Live agents
 
-While agents are seated, a two-line dock below the editor shows status counts
-and a selected-agent preview in the shell's colors. `Ctrl+G` opens a scrolling
-modal listing every agent. Use Up/Down to select; its full name, harness, state,
+While agents are seated, a dock below the editor shows status counts and up to
+three agents that want attention: blocked or with a broken bridge first, then
+working, then done. Idle agents are only counted. Another machine is named; this
+Mac is not. Press Down on an empty prompt to expand the dock in place into the
+whole fleet in the same order: Up/Down selects, Enter opens its conversation,
+and Escape or Up past the first row returns to the prompt. Typing anything else
+collapses the list and goes to the prompt.
+
+`Ctrl+G` opens the same list as a centered modal; its full name, harness, state,
 machine and distinct current step wrap below the list. Enter opens its existing
 conversation; Escape closes the modal and preserves your draft.
+An opened conversation shows its newest 20 turns, then follows live; older turns
+stay readable with `clankie conversations show ID`.
 Messages use the same native delivery as `/agents`. Escape returns to the
 conversation you left without cancelling the worker. Composer drafts stay with
 their conversations. The strip disappears when no agents are live.
+
+When a harness sits in the selected conversation's seat (for example
+`clankie claude`), the footer names it, such as `claude seat`, in place of the
+configured model, because that harness takes the turns.
 
 From an expanded agent, `Ctrl+Y` focuses its exact pane in the full Herdr
 workspace. In an ordinary terminal it attaches a viewer to the existing
@@ -48,6 +60,7 @@ Type `/` for the typeahead, `Ctrl+/` for the workbench, or `$` at a token bounda
 | Key                           | What it does                                                                                                                                                                               |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `Ctrl+/`                      | Open the command workbench                                                                                                                                                                 |
+| `Down` on an empty prompt     | Expand the agent dock into the whole fleet; Up/Down selects, Enter opens its conversation, Escape returns                                                                                  |
 | `Ctrl+G`                      | Open the full live-agent modal; Up/Down selects, Enter opens its conversation, Escape closes                                                                                               |
 | `Ctrl+Y` in an expanded agent | Open that exact pane in its full Herdr workspace                                                                                                                                           |
 | `Esc` in an expanded agent    | Return to the previous conversation; leave the worker running                                                                                                                              |

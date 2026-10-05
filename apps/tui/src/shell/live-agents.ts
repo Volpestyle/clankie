@@ -1,4 +1,6 @@
 import {
+  Key,
+  matchesKey,
   SelectList,
   stripTerminalSequences,
   truncateToWidth,
@@ -68,26 +70,73 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme): string {
   return [
     paintHarness(harness),
     statusText(seat.status, clean(seat.status), theme),
-    theme.ansi.dim(clean(seat.machine ?? seat.fleet ?? "local")),
+    // This Mac is the default; only a seat on another machine names where it is.
+    seat.fleet === undefined ? undefined : theme.ansi.dim(clean(seat.machine ?? seat.fleet)),
     bridgeWarning(agent, theme),
   ]
     .filter((part): part is string => part !== undefined)
     .join(theme.ansi.dim(" · "));
 }
 
-/** The compact preview and the modal share a qualified seat identity, never a row index. */
+/** Blocked or broken first, then running, then finished; idle seats only count. */
+function attentionRank(agent: LiveAgent, theme: AgentTheme): number {
+  if (agent.seat.status === "blocked" || bridgeWarning(agent, theme) !== undefined) return 0;
+  switch (agent.seat.status) {
+    case "working":
+      return 1;
+    case "done":
+      return 2;
+    case "idle":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function attentionOrder(agents: readonly LiveAgent[], theme: AgentTheme): LiveAgent[] {
+  return agents
+    .map((agent, index) => ({
+      agent,
+      index,
+      rank: attentionRank(agent, theme),
+    }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ agent }) => agent);
+}
+
+/** Collapsed, the dock shows at most this many seats that want attention. */
+const COLLAPSED_ROWS = 3;
+
+export type LiveAgentStripInput = "open" | "leave" | "consumed" | "pass";
+
+/**
+ * The dock under the prompt. Collapsed it lists the seats that want attention;
+ * ↓ from an empty prompt focuses it and it expands in place to the whole
+ * fleet. The modal shares its selection, a qualified seat identity, never a row index.
+ */
 export class LiveAgentStrip implements Component {
   private selectedId: string | undefined;
+  private expanded = false;
   private readonly agents: () => readonly LiveAgent[];
   private readonly theme: AgentTheme;
+  private readonly maxRows: () => number;
 
-  constructor(agents: () => readonly LiveAgent[], theme: AgentTheme) {
+  constructor(
+    agents: () => readonly LiveAgent[],
+    theme: AgentTheme,
+    options: { readonly maxRows?: () => number } = {},
+  ) {
     this.agents = agents;
     this.theme = theme;
+    this.maxRows = options.maxRows ?? (() => 12);
+  }
+
+  private ordered(): LiveAgent[] {
+    return attentionOrder(this.agents(), this.theme);
   }
 
   selected(): LiveAgent | undefined {
-    const agents = this.agents();
+    const agents = this.ordered();
     const selected = agents.find((agent) => agent.seat.seatId === this.selectedId) ?? agents[0];
     this.selectedId = selected?.seat.seatId;
     return selected;
@@ -97,22 +146,92 @@ export class LiveAgentStrip implements Component {
     this.selectedId = seatId;
   }
 
+  get focused(): boolean {
+    return this.expanded;
+  }
+
+  /** Expand onto the most urgent seat; false when there is nothing to browse. */
+  focus(): boolean {
+    const first = this.ordered()[0];
+    if (first === undefined) return false;
+    this.selectedId = first.seat.seatId;
+    this.expanded = true;
+    return true;
+  }
+
+  blur(): void {
+    this.expanded = false;
+  }
+
+  /** Keys while expanded. Anything that is not navigation collapses and goes back to the prompt. */
+  handleInput(data: string): LiveAgentStripInput {
+    const agents = this.ordered();
+    const index = agents.findIndex((agent) => agent.seat.seatId === this.selected()?.seat.seatId);
+    if (matchesKey(data, Key.up)) {
+      if (index <= 0) {
+        this.blur();
+        return "leave";
+      }
+      this.selectedId = agents[index - 1]!.seat.seatId;
+      return "consumed";
+    }
+    if (matchesKey(data, Key.down)) {
+      if (index >= 0 && index < agents.length - 1) this.selectedId = agents[index + 1]!.seat.seatId;
+      return "consumed";
+    }
+    if (matchesKey(data, Key.enter) || data === "\r") {
+      this.blur();
+      return agents.length > 0 ? "open" : "leave";
+    }
+    this.blur();
+    return matchesKey(data, Key.escape) ? "leave" : "pass";
+  }
+
   invalidate(): void {}
 
+  private row(agent: LiveAgent, prefix: string): string {
+    const step = currentStep(agent);
+    return `${prefix}${statusText(agent.seat.status, "●", this.theme)} ${clean(agent.name)} · ${agentMetadata(agent, this.theme)}${step ? ` · ${step}` : ""}`;
+  }
+
   render(width: number): string[] {
-    const agents = this.agents();
-    const selected = this.selected();
-    if (!selected) return [];
+    const agents = this.ordered();
+    if (agents.length === 0) {
+      this.expanded = false;
+      return [];
+    }
     const counts = new Map<LiveAgent["seat"]["status"], number>();
     for (const { seat } of agents) counts.set(seat.status, (counts.get(seat.status) ?? 0) + 1);
     const summary = [...counts].map(([status, count]) =>
       statusText(status, `${count} ${status}`, this.theme),
     );
-    const step = currentStep(selected);
+    const { ansi } = this.theme;
+    const fit = (line: string) => truncateToWidth(line, Math.max(1, width), "…");
+    if (!this.expanded) {
+      const attention = agents.filter((agent) => attentionRank(agent, this.theme) < 3);
+      return [
+        `${ansi.bold(`Agents · ${agents.length}`)}${ansi.dim(" · ↓ list · ctrl+g")}${ansi.dim(" · ")}${summary.join(ansi.dim(" · "))}`,
+        ...attention.slice(0, COLLAPSED_ROWS).map((agent) => this.row(agent, "")),
+      ].map(fit);
+    }
+    const selected = this.selected();
+    const index = Math.max(
+      0,
+      agents.findIndex((agent) => agent.seat.seatId === selected?.seat.seatId),
+    );
+    const visible = Math.max(1, Math.min(agents.length, this.maxRows() - 1));
+    const first = Math.min(Math.max(0, index - Math.floor(visible / 2)), agents.length - visible);
+    const position = visible < agents.length ? ansi.dim(` · ${index + 1}/${agents.length}`) : "";
     return [
-      `${this.theme.ansi.bold(`Agents · ${agents.length}`)}${this.theme.ansi.dim(" · ctrl+g")}${this.theme.ansi.dim(" · ")}${summary.join(this.theme.ansi.dim(" · "))}`,
-      `${statusText(selected.seat.status, "●", this.theme)} ${clean(selected.name)} · ${agentMetadata(selected, this.theme)}${step ? ` · ${step}` : ""}`,
-    ].map((line) => truncateToWidth(line, Math.max(1, width), "…"));
+      `${ansi.bold(`Agents · ${agents.length}`)}${position}${ansi.dim(" · ↑↓ select · enter open · esc back")}`,
+      ...agents
+        .slice(first, first + visible)
+        .map((agent, offset) =>
+          first + offset === index
+            ? this.row(agent, ansi.accent("› "))
+            : ansi.dim("  ") + this.row(agent, ""),
+        ),
+    ].map(fit);
   }
 }
 
@@ -149,7 +268,7 @@ export class LiveAgentPicker implements Component {
   invalidate(): void {}
 
   private syncList(maxVisible = 8): SelectList {
-    const agents = this.agents();
+    const agents = attentionOrder(this.agents(), this.theme);
     const list = new SelectList(
       agents.map((agent) => ({
         value: agent.seat.seatId,

@@ -31,25 +31,56 @@ const agent = (id: string, remote = false): LiveAgent => ({
   },
 });
 
-it("bounds the strip to two rows and preserves qualified selection across updates", () => {
-  let agents = [agent("same"), agent("same", true), agent("third"), agent("fourth")];
-  const strip = new LiveAgentStrip(() => agents, theme);
-  strip.select("pc/same");
-  expect(plain(strip.render(120))).toContain("Office PC");
-  expect(plain(strip.render(120))).not.toContain("Checking native delivery");
-  expect(strip.selected()?.seat.seatId).toBe("pc/same");
-  agents = [agent("new"), ...agents];
-  expect(strip.selected()?.seat.seatId).toBe("pc/same");
-  for (const width of [1, 24, 32, 80, 120]) {
-    expect(strip.render(width)).toHaveLength(2);
+it("lists up to three seats that want attention and expands to the whole fleet in place", () => {
+  const status = (id: string, value: string, remote = false): LiveAgent => ({
+    ...agent(id, remote),
+    seat: {
+      ...agent(id, remote).seat,
+      status: value as LiveAgent["seat"]["status"],
+    },
+  });
+  let agents = [
+    status("idle-1", "idle"),
+    status("done", "done"),
+    status("working", "working", true),
+    status("blocked", "blocked"),
+    status("idle-2", "idle"),
+  ];
+  const strip = new LiveAgentStrip(() => agents, theme, { maxRows: () => 3 });
+  const collapsed = plain(strip.render(120)).split("\n");
+  // Blocked first, then working, then done; idle seats only count.
+  expect(collapsed.slice(1).map((row) => row.split(" · ")[0])).toEqual([
+    "● Worker blocked",
+    "● Worker working",
+    "● Worker done",
+  ]);
+  expect(collapsed[2]).toContain("Office PC");
+  expect(plain(strip.render(120))).not.toContain("Worker idle");
+  for (const width of [1, 24, 32, 80, 120])
     expect(strip.render(width).every((row) => visibleWidth(row) <= width)).toBe(true);
-  }
-  expect(plain(strip.render(32))).toContain("ctrl+g");
-  agents = [agent("third")];
-  expect(strip.selected()?.seat.seatId).toBe("third");
+
+  expect(strip.focus()).toBe(true);
+  expect(strip.selected()?.seat.seatId).toBe("blocked");
+  for (let i = 0; i < 4; i++) expect(strip.handleInput("\x1b[B")).toBe("consumed");
+  expect(strip.selected()?.seat.seatId).toBe("idle-2");
+  const expanded = plain(strip.render(120));
+  expect(expanded).toContain("5/5");
+  expect(expanded).toContain("› ● Worker idle-2");
+  expect(strip.render(120)).toHaveLength(3);
+  // A reorder keeps the same seat selected.
+  agents = [status("new", "working"), ...agents];
+  expect(strip.selected()?.seat.seatId).toBe("idle-2");
+  expect(strip.handleInput("\r")).toBe("open");
+  expect(strip.focused).toBe(false);
+
+  strip.focus();
+  expect(strip.handleInput("\x1b[A")).toBe("leave");
+  strip.focus();
+  expect(strip.handleInput("x")).toBe("pass");
+  expect(strip.focused).toBe(false);
   agents = [];
   expect(strip.render(80)).toEqual([]);
-  expect(strip.selected()).toBeUndefined();
+  expect(strip.focus()).toBe(false);
 });
 
 it("uses theme colors for each status, harness and machine and suppresses repeated steps", () => {
@@ -152,6 +183,31 @@ it.each([32, 120])("places the dock below the prompt at width %i", (width) => {
   expect(text.indexOf("A draft above the agents")).toBeGreaterThanOrEqual(0);
   expect(text.indexOf("Agents · 1")).toBeGreaterThan(text.indexOf("A draft above the agents"));
   expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+});
+
+it("enters the inline agent list only from an empty prompt and opens the chosen seat", async () => {
+  const open = vi.fn(async (_agent: LiveAgent) => {});
+  const shell = new ClankieFaceShell({
+    commands: [],
+    cwd: process.cwd(),
+    env: { CLANKIE_HEADER: "off" },
+    bannerFields: { title: "Clankie" },
+    liveAgents: () => [agent("first"), agent("second")],
+    onOpenLiveAgent: open,
+  });
+  vi.spyOn(shell.tui, "start").mockImplementation(() => {});
+  shell.start();
+  const ui = shell as unknown as { routeInput(data: string): unknown };
+  shell.setDraft("still typing");
+  expect(ui.routeInput("\x1b[B")).toBeUndefined();
+  shell.setDraft("");
+  expect(ui.routeInput("\x1b[B")).toEqual({ consume: true });
+  expect(plain(shell.tui.render(120))).toContain("esc back");
+  ui.routeInput("\x1b[B");
+  ui.routeInput("\r");
+  await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
+  expect(open.mock.calls[0]?.[0].seat.seatId).toBe("second");
+  expect(plain(shell.tui.render(120))).not.toContain("esc back");
 });
 
 it("opens a real overlay, restores editor focus and navigates without interrupting the agent", async () => {
