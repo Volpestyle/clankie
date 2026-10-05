@@ -1,4 +1,6 @@
 import { DISCORD_INGRESS_PATH } from "@clankie/protocol/discord-ingress";
+import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/hosted-operator";
+import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_IN_FLIGHT_MAX,
@@ -489,10 +491,21 @@ export class PublicGatewayConnector {
     }
     const body = frame.bodyBase64 === undefined ? undefined : Buffer.from(frame.bodyBase64, "base64");
     try {
+      let discordWebEnvelope = false;
+      if (frame.path === HOSTED_OPERATOR_PATH) {
+        try {
+          discordWebEnvelope = HostedDiscordEnvelopeSchema.safeParse(
+            JSON.parse(body?.toString("utf8") ?? "null"),
+          ).success;
+        } catch {
+          /* Other envelopes remain on the ordinary encrypted transport. */
+        }
+      }
       const response =
         frame.path === "/v1/hooks/linear" ||
         frame.path === "/v1/hosted/pair-offer" ||
-        frame.path === DISCORD_INGRESS_PATH
+        frame.path === DISCORD_INGRESS_PATH ||
+        discordWebEnvelope
           ? await this.fetcher(new URL(frame.path, baseUrl), {
               method: frame.method,
               headers,

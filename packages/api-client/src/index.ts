@@ -16,6 +16,7 @@ import {
   type SupportGrantListResponse,
 } from "@clankie/protocol/support-access";
 export * from "./discord-setup.ts";
+import { createDiscordSetupApi } from "./discord-api.ts";
 import {
   INTEGRATE_PATH,
   IntegrationRequestSchema,
@@ -29,9 +30,6 @@ import {
   IssueMetricsReportSchema,
   type IssueMetricsQuery,
   type IssueMetricsReport,
-  DISCORD_DIRECTORY_PATH,
-  DiscordDirectoryRequestSchema,
-  DiscordDirectorySnapshotSchema,
   DISCORD_SETUP_TEST_POST_PATH,
   DiscordSetupTestPostRequestSchema,
   DiscordSetupTestPostResultSchema,
@@ -46,13 +44,10 @@ import {
   DISCORD_ROOM_EVIDENCE_PATH,
   DISCORD_ROOMS_PATH,
   DISCORD_ROOM_GUIDANCE_PATH,
-  DISCORD_SETTINGS_PATH,
   DiscordRoomEvidenceSchema,
   DiscordRoomsSnapshotSchema,
   DiscordRoomGuidanceRequestSchema,
   DiscordRoomGuidanceSchema,
-  DiscordSettingsSnapshotSchema,
-  DiscordSettingsUpdateSchema,
   type DiscordRoomEvidence,
 } from "@clankie/protocol";
 import {
@@ -622,10 +617,7 @@ export class ClankieApiClient {
     );
   }
   public async discordSettings() {
-    return parseProtocolResponse(
-      DiscordSettingsSnapshotSchema,
-      await this.request(DISCORD_SETTINGS_PATH, { headers: this.operatorHeaders() }),
-    );
+    return this.discordApi().discordSettings();
   }
   public async discordSetupTestPost(input: unknown) {
     return parseProtocolResponse(
@@ -638,24 +630,21 @@ export class ClankieApiClient {
     );
   }
   public async discordDirectory(input: unknown = {}) {
-    const query = DiscordDirectoryRequestSchema.parse(input);
-    const params = new URLSearchParams({ kind: query.kind, limit: String(query.limit) });
-    if (query.guildId) params.set("guildId", query.guildId);
-    if (query.after) params.set("after", query.after);
-    return parseProtocolResponse(
-      DiscordDirectorySnapshotSchema,
-      await this.request(`${DISCORD_DIRECTORY_PATH}?${params}`, { headers: this.operatorHeaders() }),
-    );
+    return this.discordApi().discordDirectory(input);
   }
   public async updateDiscordSettings(input: unknown) {
-    return parseProtocolResponse(
-      DiscordSettingsSnapshotSchema,
-      await this.request(DISCORD_SETTINGS_PATH, {
-        method: "POST",
-        headers: this.operatorHeaders(),
-        body: JSON.stringify(DiscordSettingsUpdateSchema.parse(input)),
-      }),
-    );
+    return this.discordApi().updateDiscordSettings(input);
+  }
+
+  private discordApi() {
+    return createDiscordSetupApi({
+      request: (method, path, body) =>
+        this.request(path, {
+          method,
+          headers: this.operatorHeaders(),
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        }),
+    });
   }
 
   public async recordDiscordPresencePhase(

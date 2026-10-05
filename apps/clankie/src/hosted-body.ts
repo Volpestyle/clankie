@@ -17,6 +17,19 @@ import {
 } from "@clankie/protocol/support-access";
 import type { CredentialStore } from "@clankie/credential-broker";
 import {
+  ManagedDiscordDirectoryResponseSchema,
+  ManagedDiscordPermissionsResponseSchema,
+  ManagedDiscordPolicyStateResponseSchema,
+  ManagedDiscordPolicyRequestSchema,
+  ManagedDiscordPolicyResponseSchema,
+  ManagedDiscordPolicyConflictSchema,
+  type ManagedDiscordPolicyRequest,
+  type ManagedDiscordPolicyState,
+} from "@clankie/protocol/managed-discord";
+import { HostedDiscordAuthorizationClaimsSchema } from "@clankie/protocol/hosted-discord";
+import { verifyHostedDiscordPermit } from "@clankie/protocol/hosted-discord-crypto";
+import type { DiscordDirectoryRequest, DiscordPermissionsRequest } from "@clankie/protocol";
+import {
   loadConfig,
   parseModelRef,
   subscriptionRefFor,
@@ -246,7 +259,12 @@ function hostedVerifyKeys(json: string): ReadonlyMap<string, KeyObject> {
 
 function signedClaims(
   token: string,
-  typ: "clankie-host" | "clankie-pair" | "clankie-security" | "clankie-support",
+  typ:
+    | "clankie-host"
+    | "clankie-pair"
+    | "clankie-security"
+    | "clankie-support"
+    | "clankie-discord-authorization",
   keys: ReadonlyMap<string, KeyObject>,
 ): unknown {
   const parts = token.split(".");
@@ -334,11 +352,25 @@ export type HostedSecurityState = Pick<
 
 /** Resource/key refusal is not revocation of this body's entitlement. */
 export class HostedBodyResourceError extends Error {
-  readonly code: "key_retired" | "stale_auth_key" | "device_revoked" | "too_many_revocations";
+  readonly code:
+    | "key_retired"
+    | "stale_auth_key"
+    | "device_revoked"
+    | "too_many_revocations"
+    | "discord_grant_revoked"
+    | "discord_scope_refused"
+    | "wrong_guild";
   constructor(code: HostedBodyResourceError["code"]) {
     super(`Fleet request refused (${code})`);
     this.name = "HostedBodyResourceError";
     this.code = code;
+  }
+}
+export class ManagedDiscordPolicyConflictError extends Error {
+  readonly current: ManagedDiscordPolicyState;
+  constructor(current: ManagedDiscordPolicyState) {
+    super("discord_policy_conflict");
+    this.current = current;
   }
 }
 
@@ -552,6 +584,17 @@ export class HostedBodyClient {
       }
       if (response.status === 403 || response.status === 409) {
         const code = await errorCode(response);
+        if (path === "discord-policy" && response.status === 409 && code === "discord_policy_conflict") {
+          const conflict = ManagedDiscordPolicyConflictSchema.parse(await response.json());
+          throw new ManagedDiscordPolicyConflictError(conflict.current);
+        }
+        if (
+          path.startsWith("discord-") &&
+          (code === "discord_grant_revoked" || code === "discord_scope_refused" || code === "wrong_guild")
+        ) {
+          await response.body?.cancel();
+          throw new HostedBodyResourceError(code);
+        }
         if (
           (path === "pairing-key" && code === "key_retired") ||
           (path === "wake-keys" && code === "device_revoked") ||
@@ -654,6 +697,68 @@ export class HostedBodyClient {
   ): Promise<Response> {
     const credential = await this.resolveHostToken();
     return this.request(path, { ...body, installationId: this.bootstrap.installationId }, credential.token);
+  }
+  private async discordRequest(path: string, body: Readonly<Record<string, unknown>>) {
+    const credential = await this.resolveHostToken();
+    return this.request(path, { ...body, installationId: this.bootstrap.installationId }, credential.token);
+  }
+  async readDiscordDirectory(query: DiscordDirectoryRequest) {
+    return ManagedDiscordDirectoryResponseSchema.parse(
+      await (await this.discordRequest("discord-directory", { query })).json(),
+    );
+  }
+  async readDiscordPermissions(query: DiscordPermissionsRequest) {
+    return ManagedDiscordPermissionsResponseSchema.parse(
+      await (await this.discordRequest("discord-permissions", { query })).json(),
+    );
+  }
+  async readDiscordPolicyState() {
+    return ManagedDiscordPolicyStateResponseSchema.parse(
+      await (await this.discordRequest("discord-policy-state", {})).json(),
+    );
+  }
+  async syncDiscordPolicy(policy: Omit<ManagedDiscordPolicyRequest, "installationId">) {
+    const input = ManagedDiscordPolicyRequestSchema.parse({
+      ...policy,
+      installationId: this.bootstrap.installationId,
+    });
+    return ManagedDiscordPolicyResponseSchema.parse(
+      await (await this.discordRequest("discord-policy", input)).json(),
+    );
+  }
+  async authorizeDiscordWeb(permit: string): Promise<number> {
+    const expected = verifyHostedDiscordPermit(permit, {
+      tenantId: this.bootstrap.tenantId,
+      installationId: this.bootstrap.installationId,
+      verifyKeys: this.keys,
+      nowMs: this.clock(),
+    });
+    if (expected.sub !== this.bootstrap.accountId) throw new Error("discord_owner_required");
+    const nonce = randomBytes(16).toString("base64url");
+    const response = await this.discordRequest("discord-authorize", { permit, nonce });
+    const wire = z
+      .object({ authorization: z.string().min(1).max(4096) })
+      .strict()
+      .parse(await response.json());
+    const claims = HostedDiscordAuthorizationClaimsSchema.parse(
+      signedClaims(wire.authorization, "clankie-discord-authorization", this.keys),
+    );
+    const now = this.clock();
+    if (
+      claims.tid !== expected.tid ||
+      claims.inst !== expected.inst ||
+      claims.sub !== expected.sub ||
+      claims.gen !== expected.gen ||
+      claims.dig !== expected.dig ||
+      claims.prm !== expected.jti ||
+      claims.non !== nonce ||
+      claims.exp * 1000 <= now ||
+      claims.iat * 1000 > now + 1000 ||
+      claims.exp <= claims.iat ||
+      claims.exp - claims.iat > 5
+    )
+      throw new Error("Invalid Discord authorization proof");
+    return claims.exp * 1000;
   }
   async readSecurityState(): Promise<HostedSecurityState> {
     let state: HostedSecurityState | undefined;

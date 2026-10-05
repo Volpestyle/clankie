@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DiscordSettingsSchema } from "./discord-settings.ts";
 import { DiscordSetupSnapshotSchema } from "./discord-setup.ts";
+import { ManagedDiscordPolicyStatusSchema } from "./managed-discord.ts";
 
 export const DISCORD_ROOMS_PATH = "/v1/discord/rooms";
 export const DISCORD_ROOM_GUIDANCE_PATH = "/v1/discord/room-guidance";
@@ -84,6 +85,7 @@ export const DiscordSettingsSnapshotSchema = z
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
     /** Optional display metadata; older hosts and clients may omit it. */
     setup: DiscordSetupSnapshotSchema.optional(),
+    managedPolicy: ManagedDiscordPolicyStatusSchema.optional(),
   })
   .strict();
 export type DiscordSettingsSnapshot = z.infer<typeof DiscordSettingsSnapshotSchema>;

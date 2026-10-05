@@ -15,6 +15,7 @@ import {
 import { openDiscordIngress } from "@clankie/protocol/discord-ingress-crypto";
 import type { CaptainPort } from "./captain/port.ts";
 import type { HostedBodyClient } from "./hosted-body.ts";
+import { HostedDiscordOperator } from "./hosted-discord.ts";
 
 const SavedSchema = z
   .array(
@@ -134,7 +135,7 @@ export async function createHostedDiscordIngress(options: {
   statePath: string;
   captain: CaptainPort;
   onWork?: () => void;
-}): Promise<{ ingress: DiscordIngress; close(): void }> {
+}): Promise<{ ingress: DiscordIngress; operator: HostedDiscordOperator; close(): void }> {
   const provider = `clankie-discord-ingress-${options.client.hostId}`;
   const existing = await options.store.get(provider),
     key = createECDH("prime256v1");
@@ -162,6 +163,15 @@ export async function createHostedDiscordIngress(options: {
   };
   void register();
   return {
+    operator: new HostedDiscordOperator({
+      tenantId: options.client.bootstrap.tenantId,
+      installationId: options.client.bootstrap.installationId,
+      accountId: options.client.bootstrap.accountId,
+      key,
+      verifyKeys: options.client.keys,
+      statePath: `${options.statePath}.web-admissions`,
+      authorize: (permit) => options.client.authorizeDiscordWeb(permit),
+    }),
     ingress: new DiscordIngress({
       tenantId: options.client.bootstrap.tenantId,
       installationId: options.client.bootstrap.installationId,
