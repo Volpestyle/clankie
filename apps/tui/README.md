@@ -297,6 +297,13 @@ expands the original Pi tool components. Failed output stays visible when
 collapsed. Messages, other tools, and turn boundaries separate groups; shell
 commands are never classified by guessing what their text does.
 
+Hired-seat results unwrap native Codex text parts and MCP envelopes. Exec results
+show the command, exit code (or running session), elapsed seconds, and output on
+real lines. Message receipts show their delivery stage in one line, such as
+`report stored`; that means retained, not read or completed. Long results keep
+the ten-line preview and existing click / `Ctrl+O` expansion. Unknown JSON stays
+inspectable, and malformed or truncated payloads retain their original text.
+
 The footer keeps workspace, conversation title, model/effort, and context
 remaining on one row when they fit, or two on narrow terminals. Routine fleet
 and Discord details live in `/status`; side-conversation, shell, and exceptional

@@ -22,7 +22,8 @@
     "./hosted-operator": "./src/hosted-operator.ts",
     "./discord-settings": "./src/discord-settings.ts",
     "./projects": "./src/projects.ts",
-    "./presence": "./src/presence.ts"
+    "./presence": "./src/presence.ts",
+    "./tool-output": "./src/tool-output.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
