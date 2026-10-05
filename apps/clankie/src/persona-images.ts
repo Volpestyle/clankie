@@ -49,7 +49,7 @@ export function createPersonaImageSource(
 }
 export function personaImagesExtension(
   source: PersonaImageSource,
-  turnContext?: () => Promise<string>,
+  turnContext?: (prompt: string) => Promise<string>,
 ): InlineExtension {
   return {
     name: "persona-images",
@@ -58,7 +58,17 @@ export function personaImagesExtension(
       pi.on("context", async (event, ctx) => {
         const prefix = personaImageMessage(await source(), ctx.model?.input.includes("image") === true);
         if (!prefix) return undefined;
-        const current = await turnContext?.();
+        const latestUser = event.messages.findLast((message) => message.role === "user");
+        const prompt =
+          latestUser?.role !== "user"
+            ? ""
+            : typeof latestUser.content === "string"
+              ? latestUser.content
+              : latestUser.content
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("\n");
+        const current = await turnContext?.(prompt);
         return {
           messages: [
             prefix,

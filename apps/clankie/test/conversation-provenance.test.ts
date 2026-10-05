@@ -137,8 +137,8 @@ it("refuses unbound API provenance and stamps only the authenticated exact sourc
 it("captures memory ownership before asynchronous admission and refuses a replaced turn", async () => {
   let release!: (value: boolean) => void;
   let current = true;
-  const appendEpisode = vi.fn(async () => ({ corrected: false, retained: false }));
-  const deps = { embodiment: {}, memory: { appendEpisode } } as unknown as CaptainDeps;
+  const writeMemory = vi.fn(async () => ({ id: "note", text: "note" }));
+  const deps = { embodiment: {}, memory: { writeMemory } } as unknown as CaptainDeps;
   const turn: TurnContext = {
     targetId: "guild:a",
     conversationAuthority: {
@@ -151,21 +151,27 @@ it("captures memory ownership before asynchronous admission and refuses a replac
     },
   };
   const tool = captainTools(deps, turn, {} as LaneLog, "discord_presence").find(
-    (entry) => entry.name === "remember_episode",
+    (entry) => entry.name === "memory",
   )!;
-  const pending = tool.execute("remember", { summary: "note" }, undefined, undefined, {} as never);
+  const pending = tool.execute(
+    "remember",
+    { action: "write", text: "note" },
+    undefined,
+    undefined,
+    {} as never,
+  );
   turn.targetId = "guild:b";
   turn.conversationAuthority!.owner.conversationId = "room-b";
   release(true);
   await pending;
-  expect(appendEpisode).toHaveBeenCalledWith(
+  expect(writeMemory).toHaveBeenCalledWith(
     expect.objectContaining({ sourceConversationId: "room-a", targetId: "guild:a" }),
   );
-  const stale = tool.execute("stale", { summary: "note" }, undefined, undefined, {} as never);
+  const stale = tool.execute("stale", { action: "write", text: "note" }, undefined, undefined, {} as never);
   current = false;
   release(true);
   await expect(stale).rejects.toThrow("authority");
-  expect(appendEpisode).toHaveBeenCalledOnce();
+  expect(writeMemory).toHaveBeenCalledOnce();
 });
 
 it("persists hire intent before discovery and exact pane/seat ownership before completion, including restart", async () => {

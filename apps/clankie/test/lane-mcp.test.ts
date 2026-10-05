@@ -271,9 +271,11 @@ function bankDeps(): CaptainDeps {
       getLiveSession: () => Promise.reject(new Error("unused")),
     },
     memory: {
-      appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
-      recallEpisodeCard: () => Promise.resolve(""),
-      searchEpisodeCard: () => Promise.resolve(""),
+      writeMemory: () => Promise.resolve({ id: "fixture", text: "fixture" }),
+      editMemory: () => Promise.resolve(undefined),
+      forgetMemory: () => Promise.resolve(false),
+      recallMemoryCard: () => Promise.resolve(""),
+      searchMemory: () => Promise.resolve(""),
     },
   } as unknown as CaptainDeps;
 }
@@ -300,7 +302,7 @@ describe("a lane's tool bank", () => {
       expect(social.has(name), `a social lane should not hold ${name}`).toBe(false);
     }
     // The rest of the bank is the same bank in both lanes.
-    expect(social.has("remember_episode")).toBe(true);
+    expect(social.has("memory")).toBe(true);
   });
 
   it("says what a call attached, and refuses arguments the schema rejects", async () => {
@@ -533,11 +535,18 @@ it("serves every real Captain schema with MCP's object root without losing union
     expect(union).toBeDefined();
     expect(union.inputSchema.anyOf).toEqual(originals.get(union.name)!.anyOf);
     expect((union.inputSchema.anyOf as unknown[]).length).toBeGreaterThan(1);
-    const valid = await client.callTool({ name: "recall_episodes", arguments: { query: "fixture" } });
+    const valid = await client.callTool({
+      name: "memory",
+      arguments: { action: "search", query: "fixture" },
+    });
     expect(valid.isError).not.toBe(true);
     expect(valid.content).toMatchObject([{ type: "text" }]);
-    expect(JSON.parse((valid.content as Array<{ text: string }>)[0]!.text)).toEqual({ found: 0, card: "" });
-    const invalid = await client.callTool({ name: "recall_episodes", arguments: { query: 42 } });
+    expect(JSON.parse((valid.content as Array<{ text: string }>)[0]!.text)).toEqual({
+      action: "search",
+      found: 0,
+      card: "",
+    });
+    const invalid = await client.callTool({ name: "memory", arguments: { action: "search", query: 42 } });
     expect(invalid.isError).toBe(true);
     expect(JSON.stringify(invalid.content)).toContain("Invalid arguments");
     const invalidUnion = await client.callTool({ name: union.name, arguments: {} });

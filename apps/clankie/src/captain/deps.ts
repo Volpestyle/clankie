@@ -13,7 +13,6 @@ import type {
 } from "@clankie/interactive-environment";
 import type { VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
 import type {
-  CaptainEpisodeVisibility,
   CaptainSessionLaneV2,
   CaptainTurnSettledMetrics,
   DiscordPersonIdentity,
@@ -169,25 +168,28 @@ export interface CaptainDeps {
     listRecentVoiceSpeech(limit?: number): Promise<VoiceSpeechSnapshot>;
   };
   readonly memory: {
-    appendEpisode(input: {
+    writeMemory(input: {
       readonly sourceConversationId: string;
       readonly lane: CaptainSessionLaneV2;
       readonly targetId: string;
-      readonly summary: string;
-      readonly visibility?: CaptainEpisodeVisibility;
-      /** Keep this one past the recent window, where newer notes cannot evict it. */
-      readonly retained?: boolean;
-      /** Supersede this episode's note in place instead of appending a new one. */
-      readonly corrects?: string;
-    }): Promise<{
-      readonly corrected: boolean;
-      readonly retained: boolean;
-      /** Set when the durable shelf was full: the note was still written, just not kept. */
-      readonly retentionRefused?: string;
-    }>;
-    recallEpisodeCard(lane: CaptainSessionLaneV2): Promise<string>;
+      readonly text: string;
+    }): Promise<{ readonly id: string; readonly text: string }>;
+    recallMemoryCard(lane: CaptainSessionLaneV2, query?: string): Promise<string>;
     /** On-demand recall past the automatic card, scoped to what this lane may see. */
-    searchEpisodeCard(lane: CaptainSessionLaneV2, query: string): Promise<string>;
+    searchMemory(lane: CaptainSessionLaneV2, query: string): Promise<string>;
+    /** Reading a memory grants no right to edit it: the exact source conversation owns it. */
+    editMemory(input: {
+      readonly sourceConversationId: string;
+      readonly lane: CaptainSessionLaneV2;
+      readonly id: string;
+      readonly text: string;
+    }): Promise<{ readonly id: string; readonly text: string } | undefined>;
+    /** The same authorship fence as edit; an inaccessible id is indistinguishable from a missing one. */
+    forgetMemory(input: {
+      readonly sourceConversationId: string;
+      readonly lane: CaptainSessionLaneV2;
+      readonly id: string;
+    }): Promise<boolean>;
     recallDiscordPerson?(
       identity: DiscordPersonIdentity,
       options: { readonly channelId: string; readonly query: string },

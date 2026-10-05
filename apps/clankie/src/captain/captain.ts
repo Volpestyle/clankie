@@ -325,14 +325,14 @@ export function createDraftPacer(
  * writes one. A recall *failure* stays silent: a broken store degrades the
  * prompt, it does not lie about what he remembers.
  */
-const EMPTY_EPISODE_CARD = [
-  "## What you remember doing recently",
-  "Nothing yet — you have not written an episode. `remember_episode` is how one gets here.",
+const EMPTY_MEMORY_CARD = [
+  "## Your memory",
+  "Nothing yet — you have not written a memory. `memory` with action `write` is how one gets here.",
 ].join("\n");
 
-/** The card as it reaches the prompt: an empty ring says so rather than vanishing. */
-function renderEpisodeCard(card: string): string {
-  return card.length === 0 ? EMPTY_EPISODE_CARD : card;
+/** The card as it reaches the prompt: an empty store says so rather than vanishing. */
+function renderMemoryCard(card: string): string {
+  return card.length === 0 ? EMPTY_MEMORY_CARD : card;
 }
 
 /** Refresh bounded episodic recall as trusted context for every Pi run. */
@@ -342,9 +342,9 @@ export function captainMemoryExtension(memory: CaptainDeps["memory"], lane: Capt
     hidden: true,
     factory(pi) {
       pi.on("before_agent_start", async (event) => {
-        const card = await memory.recallEpisodeCard(lane).catch(() => undefined);
+        const card = await memory.recallMemoryCard(lane, event.prompt).catch(() => undefined);
         if (card === undefined) return undefined;
-        return { systemPrompt: `${event.systemPrompt}\n\n${renderEpisodeCard(card)}` };
+        return { systemPrompt: `${event.systemPrompt}\n\n${renderMemoryCard(card)}` };
       });
     },
   } satisfies InlineExtension;
@@ -1591,13 +1591,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         extensionFactories: [
           ...(hasPersonaImages
             ? [
-                personaImagesExtension(personaImages, async () => {
-                  const card = await deps.memory.recallEpisodeCard(lane).catch(() => undefined);
+                personaImagesExtension(personaImages, async (prompt) => {
+                  const card = await deps.memory.recallMemoryCard(lane, prompt).catch(() => undefined);
                   const selection = await resolveRoute(purpose)
                     .then((route) => route.selection)
                     .catch(() => undefined);
                   return [
-                    card === undefined ? "" : renderEpisodeCard(card),
+                    card === undefined ? "" : renderMemoryCard(card),
                     selection === undefined ? "" : modelCard(selection),
                   ]
                     .filter(Boolean)
@@ -4684,12 +4684,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     wakeConversation,
 
     async laneMemoryCard(lane) {
-      return renderEpisodeCard(await deps.memory.recallEpisodeCard(lane));
+      return renderMemoryCard(await deps.memory.recallMemoryCard(lane));
     },
 
     async laneToolBank(lane, conversationId) {
       // One turn context per bank, so a seat's attachments and room stay its
-      // own. The selected operator conversation is the room `remember_episode`,
+      // own. The selected operator conversation is the room `memory`,
       // `schedule_wake`, and `herdr_watch` attribute to. A social lane gets none:
       // its attribution comes from a Discord
       // delivery, which a bare bearer does not carry, and the tools that need

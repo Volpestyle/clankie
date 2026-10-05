@@ -169,6 +169,22 @@ Finish active turns and close side conversations first. An externally bound
 root must end its seat first; resetting service storage cannot reset that
 harness's context. Full contract: `{repoRoot}/docs/cli.md`.
 
+## Memory
+
+Use `memory` for selected notes: `action: write` takes `text`, `search` takes `query`,
+`edit` takes `id` and `text`, and `forget` takes `id`. Notes stay until forgotten;
+no retention flag is needed. Search when the bounded automatic card does not
+show what you need. An edit or forget requires the note's own source
+conversation; reading a shared note does not give another conversation control
+over it. Console notes remain private to the operator lane; Discord notes are
+shareable. The host supplies source and visibility.
+
+`/memory` and `clankie memory` are explicit operator management across
+conversations. They remain the way to manage older notes without a source
+conversation. Person facts still come from your person's `/person-memory`,
+not this tool. See `{repoRoot}/docs/memory.md` for the storage and authority
+contract.
+
 ## Read next, only for the question at hand
 
 - [Launcher details](reference/launcher.md): Linear inbox, devices, memory,

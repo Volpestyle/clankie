@@ -47,9 +47,11 @@ describe("Discord context visuals", () => {
 
       const normalized = await normalizeDiscordTurn(request, {
         memory: {
-          appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
-          recallEpisodeCard: () => Promise.resolve(""),
-          searchEpisodeCard: () => Promise.resolve(""),
+          writeMemory: () => Promise.reject(new Error("unused")),
+          recallMemoryCard: () => Promise.resolve(""),
+          searchMemory: () => Promise.resolve(""),
+          editMemory: () => Promise.reject(new Error("unused")),
+          forgetMemory: () => Promise.reject(new Error("unused")),
         },
         resolveDiscordAttachments: (attachments): Promise<readonly ResolvedAttachment[]> => {
           const resolved: ResolvedAttachment[] = [];
@@ -136,9 +138,11 @@ describe("Discord context visuals", () => {
     };
     const deps = {
       memory: {
-        appendEpisode: () => Promise.resolve({ corrected: false, retained: false }),
-        recallEpisodeCard: () => Promise.resolve(""),
-        searchEpisodeCard: () => Promise.resolve(""),
+        writeMemory: () => Promise.reject(new Error("unused")),
+        recallMemoryCard: () => Promise.resolve(""),
+        searchMemory: () => Promise.resolve(""),
+        editMemory: () => Promise.reject(new Error("unused")),
+        forgetMemory: () => Promise.reject(new Error("unused")),
       },
       resolveDiscordAttachments: (attachments: readonly { id: string; mediaType: string }[]) =>
         Promise.resolve(

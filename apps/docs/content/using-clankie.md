@@ -22,14 +22,13 @@ it are different instructions; tell him which outcome you want.
 
 Tell him what matters, and ask him to keep it: “Remember that I prefer quiet
 places and short walks.” You can ask what he remembers and correct a stale
-note. In the local console, `/memory` lets you inspect, edit, retain, and forget
+note. In the local console, `/memory` lets you inspect, edit, and forget
 memories directly.
 
-His memories are selected notes, separate from conversation history. Recent
-notes can age out; retained notes stay until released or forgotten, within the
-store's capacity. He can search what he has kept, but memory is not a promise
+His memories are selected notes, separate from conversation history. Notes
+stay until forgotten. He can search them, but memory is not a promise
 to reproduce every past message. The [memory reference](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)
-explains retention and privacy between conversations and Discord rooms.
+explains storage and privacy between conversations and Discord rooms.
 
 Clankie has a character of his own. On a DIY installation, `/persona` lets you
 shape his name and character; it does not require rebuilding the software.

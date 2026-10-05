@@ -70,17 +70,17 @@ pane needing a bridge. This grants no tools or room permissions.
 
 These serve different purposes:
 
-| Store                | What it gives you                                                                                                       |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Conversation history | The thread you return to, with messages, visible tool work, and delivered files.                                        |
-| Memory               | Selected experiences and facts that can inform later conversations. Recent and retained notes have different lifetimes. |
-| Goal                 | An explicit objective that can continue across turns when autonomy is enabled.                                          |
+| Store                | What it gives you                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| Conversation history | The thread you return to, with messages, visible tool work, and delivered files.                |
+| Memory               | Selected experiences and facts that can inform later conversations. Notes stay until forgotten. |
+| Goal                 | An explicit objective that can continue across turns when autonomy is enabled.                  |
 
-Closing a client does not erase those records. Memory is bounded and filtered
+Closing a client does not erase those records. Memory recall is bounded and filtered
 by the receiving conversation's authority; operator-private notes do not enter
 social Discord recall. Goals and scheduled wakes use the existing conversation
 and tool permissions. They do not create extra access. The [memory reference](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)
-and [CLI](/cli/) own retention and continuation controls.
+and [CLI](/cli/) own memory and continuation controls.
 
 ## Models, skills, and tools
 
