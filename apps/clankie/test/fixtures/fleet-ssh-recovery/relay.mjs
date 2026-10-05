@@ -25,6 +25,7 @@ export async function startRelay(returnPort) {
   const control = createConnection({ host: "127.0.0.1", port: returnPort });
   const clients = new Map();
   const timers = new Set();
+  const heldProofs = new Set();
   let next = 0;
   let closed = false;
   let watcher;
@@ -95,13 +96,20 @@ export async function startRelay(returnPort) {
         send(6, 0);
       } else if (kind === 4) {
         record("execute-start", { id, script: bytes.toString("utf8") });
-        const delay = JSON.parse(readFileSync(join(root, "login.json"), "utf8")).proofDelayMs ?? 0;
-        const timer = setTimeout(() => {
-          timers.delete(timer);
+        const login = JSON.parse(readFileSync(join(root, "login.json"), "utf8"));
+        const complete = () => {
           if (closed) return;
           send(4, id, Buffer.from("proof-complete", "utf8"));
           record("execute-result", { id });
-        }, delay);
+        };
+        if (login.holdProof) {
+          heldProofs.add(complete);
+          continue;
+        }
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          complete();
+        }, login.proofDelayMs ?? 0);
         timers.add(timer);
       } else if (kind === 2) clients.get(id)?.write(bytes);
       else if (kind === 3) {
@@ -125,6 +133,10 @@ export async function startRelay(returnPort) {
   record("relay-ready", { port });
   watcher = setInterval(() => {
     if (existsSync(join(root, `stop-relay-${process.pid}`))) close();
+    if (existsSync(join(root, `release-proof-${process.pid}`))) {
+      for (const complete of heldProofs) complete();
+      heldProofs.clear();
+    }
   }, 20);
   watcher.unref();
 }

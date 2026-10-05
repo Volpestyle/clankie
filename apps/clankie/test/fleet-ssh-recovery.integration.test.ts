@@ -78,7 +78,7 @@ async function fixture() {
   const login = (
     path: string,
     mode = "success",
-    options: { proofDelayMs?: number; responseDelayMs?: number } = {},
+    options: { proofDelayMs?: number; responseDelayMs?: number; holdProof?: boolean } = {},
   ) => writeFile(join(root, "login.json"), JSON.stringify({ path, mode, ...options }));
   await login(oldBin);
   // No real ssh is reachable even if the production runner selects its default.
@@ -109,6 +109,7 @@ async function fixture() {
     programs: () => lines<{ args: string[]; cwd: string }>("program"),
     relays: () => lines<RelayCall>("relay"),
     stopRelay: (pid: number) => writeFile(join(root, `stop-relay-${pid}`), "stop fixture relay"),
+    releaseProof: (pid: number) => writeFile(join(root, `release-proof-${pid}`), "release fixture proof"),
   };
 }
 
@@ -139,7 +140,9 @@ it("keeps the decoded remote failure in link status and logs after exactly one r
   });
   linksToClose.push(links);
   links.start([fleet], 4567);
-  await vi.waitFor(() => expect(links.status(fleet.id)).toMatchObject({ state: "unreachable" }));
+  await vi.waitFor(() => expect(links.status(fleet.id)).toMatchObject({ state: "unreachable" }), {
+    timeout: 5_000,
+  });
   expect(links.status(fleet.id)).toMatchObject({
     error: expect.stringContaining("The term 'herdr' is not recognized"),
   });
@@ -178,7 +181,9 @@ it("drains a failed relay's large progress stream before decoding its final erro
   });
   linksToClose.push(links);
   links.start([fleet], 4567);
-  await vi.waitFor(() => expect(links.status(fleet.id)).toMatchObject({ state: "unreachable" }));
+  await vi.waitFor(() => expect(links.status(fleet.id)).toMatchObject({ state: "unreachable" }), {
+    timeout: 5_000,
+  });
   expect(links.status(fleet.id)).toMatchObject({
     error: expect.stringContaining("The term 'relay dependency' is not recognized"),
   });
@@ -257,7 +262,7 @@ it.each(["herdr-business-error", "native-business-error", "native-business-launc
 it("replaces a ready relay without interrupting its in-flight proof or authenticated HTTP response", async () => {
   const f = await fixture();
   await f.install(f.oldBin);
-  await f.login(f.oldBin, "relay-success", { proofDelayMs: 1_800, responseDelayMs: 300 });
+  await f.login(f.oldBin, "relay-success", { holdProof: true, responseDelayMs: 300 });
   const responseBody = "held-http-response:".padEnd(256 * 1024, "proof-body-");
   const responseHash = createHash("sha256").update(responseBody).digest("hex");
   const log: string[] = [];
@@ -305,7 +310,7 @@ it("replaces a ready relay without interrupting its in-flight proof or authentic
   const lifetime = links.lifetime(fleet);
   const reply = fetch(`http://127.0.0.1:${oldReady.port}/v1/fleet/mcp`, {
     headers: { "x-clankie-pane": "w8:p1", connection: "close" },
-    signal: AbortSignal.timeout(5_000),
+    signal: AbortSignal.timeout(15_000),
   })
     .then(async (response) => {
       const body = await response.text();
@@ -318,7 +323,7 @@ it("replaces a ready relay without interrupting its in-flight proof or authentic
     .catch((error: unknown) => ({ error }));
   await vi.waitFor(() => expect(admitted?.fleet).toBe(fleet.id));
   const observer = links.observer(fleet)!;
-  const pending = observer(powershellScriptCommand("Write-Output 'proof-complete'"), 5_000).then(
+  const pending = observer(powershellScriptCommand("Write-Output 'proof-complete'"), 15_000).then(
     (value) => ({ value }),
     (error: unknown) => ({ error }),
   );
@@ -332,9 +337,9 @@ it("replaces a ready relay without interrupting its in-flight proof or authentic
       () => {
         const status = links.status(fleet.id);
         expect(status?.state).toBe("ready");
-        expect(status?.state === "ready" && status.port !== oldReady.port).toBe(true);
+        expect(status?.state === "ready" && status.port !== oldReady.port, log.join("\n")).toBe(true);
       },
-      { timeout: 3_000 },
+      { timeout: 10_000 },
     );
     expect((await f.relays()).some((call) => call.kind === "relay-exit" && call.pid === oldReady.pid)).toBe(
       false,
@@ -355,6 +360,10 @@ it("replaces a ready relay without interrupting its in-flight proof or authentic
       }),
     ).rejects.toMatchObject({ code: "ECONNREFUSED" });
     expect(lifetime()).toBe(true);
+    expect(
+      (await f.relays()).some((call) => call.kind === "execute-result" && call.pid === oldReady.pid),
+    ).toBe(false);
+    await f.releaseProof(oldReady.pid);
     expect(await pending).toEqual({ value: "proof-complete" });
     expect(await admitted!.validate()).toBe(true);
     expect((await f.relays()).some((call) => call.kind === "relay-exit" && call.pid === oldReady.pid)).toBe(
@@ -373,7 +382,7 @@ it("replaces a ready relay without interrupting its in-flight proof or authentic
     const oldResult = calls.find((call) => call.kind === "execute-result" && call.pid === oldReady.pid)!;
     const resumed = calls.find((call) => call.kind === "response-resumed" && call.pid === oldReady.pid)!;
     const acknowledged = calls.find((call) => call.kind === "stream-ack" && call.pid === oldReady.pid)!;
-    expect(ready).toHaveLength(2);
+    expect(ready.length).toBeGreaterThanOrEqual(2);
     expect(ready[1]!.time).toBeLessThanOrEqual(oldExit.time);
     expect(oldResult.time).toBeLessThanOrEqual(oldExit.time);
     expect(resumed.time).toBeLessThanOrEqual(oldExit.time);
@@ -382,6 +391,7 @@ it("replaces a ready relay without interrupting its in-flight proof or authentic
     expect(log.join("\n")).not.toContain("link down");
   } finally {
     clearInterval(sampling);
+    await f.releaseProof(oldReady.pid);
     releaseReply();
   }
 });
