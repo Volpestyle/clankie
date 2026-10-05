@@ -1,0 +1,28 @@
+{
+  "source": "Herdr 0.9.3 live VUH-1583 checkpoint 2026-10-04T23:04Z; pane.report_agent succeeded, pane.get omits top-level agent",
+  "pane": {
+    "pane_id": "w1:p2",
+    "terminal_id": "term_65d0bc853b0b12",
+    "workspace_id": "w1",
+    "tab_id": "w1:t2",
+    "focused": false,
+    "cwd": "<workspace>",
+    "foreground_cwd": "<workspace>",
+    "label": "Nova \u00b7 developer",
+    "terminal_title": "grok",
+    "terminal_title_stripped": "grok",
+    "agent_status": "unknown",
+    "agent_session": {
+      "source": "herdr:grok",
+      "agent": "grok",
+      "kind": "id",
+      "value": "d14cd66b-6dd3-4267-b6f9-d23dfff8bb01"
+    },
+    "scroll": {
+      "offset_from_bottom": 0,
+      "max_offset_from_bottom": 0,
+      "viewport_rows": 40
+    },
+    "revision": 1
+  }
+}

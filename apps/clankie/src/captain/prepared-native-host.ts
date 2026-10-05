@@ -17,6 +17,7 @@ const Birth = z.object({
   executable: z.string().startsWith("/"),
 });
 const NativeSession = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("herdr:grok"), kind: z.literal("id"), value: z.string().uuid() }),
   z.object({
     source: z.literal("herdr:opencode"),
     kind: z.literal("id"),
@@ -47,12 +48,15 @@ export interface PreparedCommandTab {
  * A path producer verifies canonical native header/path agreement; a fresh native
  * session need not have flushed its file. Saved-history validation is separate. */
 export type PreparedNativeSession =
+  | { readonly source: "herdr:grok"; readonly kind: "id"; readonly value: string }
   | { readonly source: "herdr:opencode"; readonly kind: "id"; readonly value: string }
   | { readonly source: "herdr:pi"; readonly kind: "path"; readonly value: string };
 
 export interface PreparedNativeRoot {
   readonly paneId: string;
   readonly terminalId: string;
+  readonly process: { readonly pid: number; readonly startTime: string };
+  verifyAllocation(): Promise<void>;
   check(socket: Socket): Promise<boolean>;
   proof(session: PreparedNativeSession): Promise<SeatProcessIdentity>;
   report(
@@ -64,7 +68,7 @@ export interface PreparedNativeRoot {
 
 /** Narrow local control transport. No generic method or caller-selected socket is exposed. */
 export interface PreparedNativeHostOptions {
-  readonly harness: "opencode" | "pi";
+  readonly harness: "opencode" | "pi" | "grok";
   readonly binding: () => Promise<HerdrBinding | undefined>;
   readonly processHelper: string;
   readonly platform?: string;
@@ -144,7 +148,12 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
                 terminal_id: z.string().min(1),
                 agent: z.string().nullish(),
                 agent_session: z
-                  .object({ source: z.string(), kind: z.string(), value: z.string() })
+                  .object({
+                    source: z.string(),
+                    agent: z.string().optional(),
+                    kind: z.string(),
+                    value: z.string(),
+                  })
                   .nullish(),
               }),
             }),
@@ -186,7 +195,12 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
           JSON.stringify(await info()) !== JSON.stringify(initial) ||
           latestAllocation.terminal_id !== originalAllocation.terminal_id ||
           (reportedSession !== undefined &&
-            (latestAllocation.agent !== harness ||
+            ((latestAllocation.agent === undefined
+              ? latestAllocation.agent_session?.agent
+              : latestAllocation.agent) !== harness ||
+              (latestAllocation.agent !== undefined &&
+                latestAllocation.agent_session?.agent !== undefined &&
+                latestAllocation.agent !== latestAllocation.agent_session.agent) ||
               latestAllocation.agent_session?.kind !== reportedSession.kind ||
               latestAllocation.agent_session.source !== reportedSession.source ||
               latestAllocation.agent_session.value !== reportedSession.value)) ||
@@ -198,6 +212,8 @@ export function createPreparedNativeHost(input: PreparedNativeHostOptions) {
       return {
         paneId,
         terminalId: originalAllocation.terminal_id,
+        process: { pid, startTime: `${birth.birth[0]}.${birth.birth[1].padStart(6, "0")}` },
+        verifyAllocation: current,
         async check(socket) {
           const clientPort = socket.remotePort;
           const serverPort = socket.localPort;

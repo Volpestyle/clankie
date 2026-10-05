@@ -17,7 +17,7 @@ import type { DeliveryStage } from "@clankie/protocol";
  * blocked or uncertain delivery without typing into the owner's terminal.
  */
 
-export type SeatHarness = "claude" | "codex" | "opencode";
+export type SeatHarness = "claude" | "codex" | "opencode" | "grok";
 
 /** Internal controller observation. Never accepted from a request or plugin payload. */
 export interface SeatProcessIdentity {
