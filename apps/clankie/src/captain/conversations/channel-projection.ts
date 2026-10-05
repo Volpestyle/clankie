@@ -368,6 +368,7 @@ export async function projectChannelMessage(
       personaId === "operator" || personaId === CHANNEL_NOTICE_AUTHOR
         ? { username: personaId }
         : ((await ctx["personaPresentation"]?.(personaId)) ?? { username: personaId });
+    if (meta.channelDiscordAutoProvision === "disabled") return;
     if (
       await ctx["projection"].participantPost?.({
         username: presentation.username,
