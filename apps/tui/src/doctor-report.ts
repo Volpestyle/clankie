@@ -10,6 +10,16 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
   const endpoint = report.selectedModel?.endpoint;
   const commands = Object.entries(report.commands);
   const missing = commands.filter(([, presence]) => !presence.present).map(([name]) => name);
+  const fleetLinks = (report.remoteHarnesses ?? []).flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const fleet = entry as { machine?: unknown; linkState?: { state?: unknown; error?: unknown } };
+    if (typeof fleet.machine !== "string" || typeof fleet.linkState?.state !== "string") return [];
+    return [
+      `  ${mark(fleet.linkState.state === "ready")} Fleet ${fleet.machine} · ${fleet.linkState.state}${
+        typeof fleet.linkState.error === "string" ? ` · ${fleet.linkState.error}` : ""
+      }`,
+    ];
+  });
   const lines = [
     `Clankie ${report.version} · ${report.kind} · ${report.persona.displayName}`,
     "",
@@ -27,6 +37,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     `  ${mark(missing.length === 0)} Tools · ${
       missing.length ? `missing ${missing.join(", ")}` : `${commands.length} present`
     }`,
+    ...fleetLinks,
     `  Credentials · ${report.credentials.length ? report.credentials.map((c) => c.id).join(", ") : "none"}`,
     `  Discord · ${report.discord.activeBody ?? "no body"}${report.discord.voiceEnabled ? " · voice" : ""}`,
     ...(report.mcpServers.length ? [`  MCP · ${report.mcpServers.join(", ")}`] : []),

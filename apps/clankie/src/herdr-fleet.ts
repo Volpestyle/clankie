@@ -1,7 +1,9 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess, type ExecFileException } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
 import type { HerdrSshTransport } from "@clankie/settings";
+import { decodeRemoteShellError } from "./remote-shell-error.ts";
 
 /**
  * A Herdr fleet on another machine (ADR 0184): its CLI runs there, over the
@@ -112,11 +114,25 @@ export function remoteProgramCommand(
   if (!/^[a-z][a-z0-9-]*$/u.test(program)) throw new Error("Remote program must be a bare command name");
   if (argv.some((arg) => arg.includes("\0")) || cwd?.includes("\0") === true)
     throw new Error("Remote arguments cannot contain NUL");
+  // Only the bootstrap knows whether the child started. A command-specific
+  // marker prevents an application's own dependency error from replaying it.
+  const launchFailure = `clankie-launch-${randomBytes(8).toString("hex")}: `;
   if (shell === "posix")
-    return `${cwd === undefined ? "" : `cd ${posixQuote(cwd)} && `}exec ${program} ${argv.map(posixQuote).join(" ")}`;
+    return posixScriptCommand(
+      [
+        ...(cwd === undefined
+          ? []
+          : [
+              `cd ${posixQuote(cwd)} || { printf '%s\\n' ${posixQuote(`${launchFailure}Cannot enter working directory ${cwd}`)} >&2; exit 127; }`,
+            ]),
+        `command -v ${program} >/dev/null 2>&1 || { printf '%s\\n' ${posixQuote(`${launchFailure}${program} not found in PATH`)} >&2; exit 127; }`,
+        `exec ${program} ${argv.map(posixQuote).join(" ")}`,
+      ].join("; "),
+    );
   const commandLine = Buffer.from(argv.map(windowsArgument).join(" "), "utf8").toString("base64");
   const script = [
     "$ErrorActionPreference = 'Stop'",
+    "try {",
     `$program = (Get-Command ${program} -CommandType Application | Select-Object -First 1).Source`,
     "$start = New-Object System.Diagnostics.ProcessStartInfo",
     "$start.FileName = $program",
@@ -126,6 +142,7 @@ export function remoteProgramCommand(
     "$start.RedirectStandardOutput = $true",
     "$start.RedirectStandardError = $true",
     "$child = [System.Diagnostics.Process]::Start($start)",
+    `} catch { [Console]::Error.WriteLine(${powershellLiteral(launchFailure)} + $_.Exception.Message); exit 127 }`,
     "$errors = $child.StandardError.BaseStream.CopyToAsync([Console]::OpenStandardError())",
     "$out = [Console]::OpenStandardOutput()",
     "$child.StandardOutput.BaseStream.CopyTo($out)",
@@ -134,7 +151,7 @@ export function remoteProgramCommand(
     "$child.WaitForExit()",
     "exit $child.ExitCode",
   ].join("; ");
-  return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
+  return powershellScriptCommand(script);
 }
 
 /** A PowerShell single-quoted literal: nothing inside it is interpolated. */
@@ -165,16 +182,48 @@ export { posixQuote };
 
 /**
  * One multiplexed ssh connection per fleet carries every call (ADR 0184). The
- * control socket lives under his state directory, keyed by ssh's own `%C`
- * hash so it stays inside the 104-byte socket limit.
+ * control socket lives under his state directory. Each service lifetime has
+ * its own short generation, so it never inherits an old login environment.
+ * Retired masters keep existing clients and expire when idle; nothing closes
+ * the owner's other SSH sessions.
  */
-export function sshArgs(fleet: HerdrFleet, controlDirectory: string, remoteCommand: string): string[] {
+export const SSH_CONTROL_MAX_AGE_MS = 10 * 60 * 1_000;
+
+const controlConnections = new Map<string, { path: string; since: number }>();
+
+function controlConnectionKey(fleet: HerdrFleet, controlDirectory: string): string {
+  return JSON.stringify([controlDirectory, fleet.id, fleet.ssh.host]);
+}
+
+function controlPath(fleet: HerdrFleet, directory: string, maxAgeMs: number): string {
+  const key = controlConnectionKey(fleet, directory);
+  const current = controlConnections.get(key);
+  if (current && Date.now() - current.since < maxAgeMs) return current.path;
+  const fleetKey = createHash("sha256").update(key).digest("hex").slice(0, 8);
+  const path = join(directory, `${fleetKey}-${randomBytes(3).toString("hex")}-%C`);
+  controlConnections.set(key, { path, since: Date.now() });
+  return path;
+}
+
+function retireControlConnection(fleet: HerdrFleet, directory: string, usedArgs: readonly string[]): void {
+  const key = controlConnectionKey(fleet, directory);
+  const current = controlConnections.get(key);
+  // Concurrent failures retire the same generation only once.
+  if (current && usedArgs.includes(`ControlPath=${current.path}`)) controlConnections.delete(key);
+}
+
+export function sshArgs(
+  fleet: HerdrFleet,
+  controlDirectory: string,
+  remoteCommand: string,
+  maxControlAgeMs = SSH_CONTROL_MAX_AGE_MS,
+): string[] {
   return [
     ...SSH_BASE_OPTIONS,
     "-o",
     "ControlMaster=auto",
     "-o",
-    `ControlPath=${join(controlDirectory, "%C")}`,
+    `ControlPath=${controlPath(fleet, controlDirectory, maxControlAgeMs)}`,
     "-o",
     "ControlPersist=600",
     "--",
@@ -231,37 +280,73 @@ function herdrError(stdout: string): HerdrFleetError | undefined {
  */
 export type FleetShellRun = (remoteCommand: string, timeoutMs?: number) => Promise<string>;
 
-export function createFleetShellRun(
+interface FleetCommandOptions {
+  readonly controlDirectory: string;
+  readonly execFile?: typeof execFile;
+  readonly maxControlAgeMs?: number;
+}
+
+function launchFailureMarker(command: string): string | undefined {
+  const encoded = /-EncodedCommand (\S+)$/u.exec(command)?.[1];
+  const script = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : command;
+  return /clankie-launch-[a-f0-9]{16}: /u.exec(script)?.[0];
+}
+
+/** Retry only launcher/environment failures that occurred before the program ran. */
+async function runFleetCommand(
   fleet: HerdrFleet,
-  options: {
-    readonly controlDirectory: string;
-    readonly execFile?: typeof execFile;
-  },
-): FleetShellRun {
-  const run = options.execFile ?? execFile;
-  return (remoteCommand, timeoutMs = REMOTE_HERDR_TIMEOUT_MS) => {
-    try {
-      mkdirSync(options.controlDirectory, { recursive: true, mode: 0o700 });
-    } catch (error) {
-      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
-    }
-    return new Promise((resolve, reject) => {
-      run(
+  options: FleetCommandOptions,
+  command: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+) {
+  mkdirSync(options.controlDirectory, { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + timeoutMs;
+  const launchMarker = launchFailureMarker(command);
+  for (let attempt = 0; ; attempt += 1) {
+    const args = sshArgs(fleet, options.controlDirectory, command, options.maxControlAgeMs);
+    const result = await new Promise<{
+      error: ExecFileException | null;
+      stdout: string;
+      stderr: string;
+    }>((resolve) => {
+      (options.execFile ?? execFile)(
         "ssh",
-        sshArgs(fleet, options.controlDirectory, remoteCommand),
-        { maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs },
-        (error, stdout, stderr) => {
-          if (error === null) return resolve(String(stdout));
-          const detail = String(stderr).trim().slice(-2_000);
-          reject(
-            new HerdrFleetError(
-              error.killed ? "timeout" : "fleet_command_failed",
-              `fleet ${fleet.id}: ${detail || error.message}`,
-            ),
-          );
+        args,
+        {
+          maxBuffer: 8 * 1024 * 1024,
+          timeout: Math.max(1, deadline - Date.now()),
+          ...(signal === undefined ? {} : { signal }),
         },
+        (error, stdout, stderr) => resolve({ error, stdout: String(stdout), stderr: String(stderr) }),
       );
     });
+    if (
+      attempt === 0 &&
+      result.error !== null &&
+      !result.error.killed &&
+      !signal?.aborted &&
+      herdrError(result.stdout) === undefined &&
+      result.error.code === 127 &&
+      launchMarker !== undefined &&
+      result.stderr.includes(launchMarker) &&
+      Date.now() < deadline
+    ) {
+      retireControlConnection(fleet, options.controlDirectory, args);
+      continue;
+    }
+    return { ...result, stderr: decodeRemoteShellError(result.stderr) };
+  }
+}
+
+export function createFleetShellRun(fleet: HerdrFleet, options: FleetCommandOptions): FleetShellRun {
+  return async (remoteCommand, timeoutMs = REMOTE_HERDR_TIMEOUT_MS) => {
+    const { error, stdout, stderr } = await runFleetCommand(fleet, options, remoteCommand, timeoutMs);
+    if (error === null) return stdout;
+    throw new HerdrFleetError(
+      error.killed ? "timeout" : "fleet_command_failed",
+      `fleet ${fleet.id}: ${stderr.slice(0, 2_000) || error.message}`,
+    );
   };
 }
 
@@ -273,63 +358,42 @@ export type HerdrFleetRun = (
 
 const REMOTE_HERDR_TIMEOUT_MS = 20_000;
 
-export function createHerdrFleetRun(
-  fleet: HerdrFleet,
-  options: {
-    readonly controlDirectory: string;
-    readonly execFile?: typeof execFile;
-  },
-): HerdrFleetRun {
-  const run = options.execFile ?? execFile;
-  return (args, signal, timeoutMs = REMOTE_HERDR_TIMEOUT_MS) => {
-    let command: string;
-    try {
-      command = remoteHerdrCommand(fleet, args);
-      mkdirSync(options.controlDirectory, { recursive: true, mode: 0o700 });
-    } catch (error) {
-      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
-    }
-    return new Promise((resolve, reject) => {
-      run(
-        "ssh",
-        sshArgs(fleet, options.controlDirectory, command),
-        {
-          maxBuffer: 8 * 1024 * 1024,
-          timeout: timeoutMs,
-          ...(signal === undefined ? {} : { signal }),
-        },
-        (error, stdout, stderr) => {
-          const out = String(stdout);
-          const reported = herdrError(out);
-          if (reported !== undefined) return reject(reported);
-          if (error !== null) {
-            if (signal?.aborted === true) return reject(error);
-            const detail = String(stderr).trim();
-            return reject(
-              new HerdrFleetError(
-                error.killed ? "timeout" : "fleet_unreachable",
-                error.killed
-                  ? `fleet ${fleet.id}: herdr ${args.slice(0, 2).join(" ")} timed out after ${String(timeoutMs)} ms`
-                  : `fleet ${fleet.id}: ${detail || error.message}`,
-              ),
-            );
-          }
-          resolve(out);
-        },
+export function createHerdrFleetRun(fleet: HerdrFleet, options: FleetCommandOptions): HerdrFleetRun {
+  return async (args, signal, timeoutMs = REMOTE_HERDR_TIMEOUT_MS) => {
+    const command = remoteHerdrCommand(fleet, args);
+    const { error, stdout, stderr } = await runFleetCommand(fleet, options, command, timeoutMs, signal);
+    const reported = herdrError(stdout);
+    if (reported !== undefined) throw reported;
+    if (error !== null) {
+      if (signal?.aborted === true) throw error;
+      throw new HerdrFleetError(
+        error.killed ? "timeout" : "fleet_unreachable",
+        error.killed
+          ? `fleet ${fleet.id}: herdr ${args.slice(0, 2).join(" ")} timed out after ${String(timeoutMs)} ms`
+          : `fleet ${fleet.id}: ${stderr || error.message}`,
       );
-    });
+    }
+    return stdout;
   };
 }
 
 /** A service-authored streaming command over the same fleet SSH multiplexer. */
 export function createFleetShellStream(
   fleet: HerdrFleet,
-  options: { readonly controlDirectory: string; readonly spawn?: typeof spawn },
+  options: {
+    readonly controlDirectory: string;
+    readonly spawn?: typeof spawn;
+    readonly maxControlAgeMs?: number;
+  },
 ): (remoteCommand: string) => ChildProcess {
   return (remoteCommand) => {
     mkdirSync(options.controlDirectory, { recursive: true, mode: 0o700 });
-    return (options.spawn ?? spawn)("ssh", sshArgs(fleet, options.controlDirectory, remoteCommand), {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    return (options.spawn ?? spawn)(
+      "ssh",
+      sshArgs(fleet, options.controlDirectory, remoteCommand, options.maxControlAgeMs),
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
   };
 }
