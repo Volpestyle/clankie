@@ -1,3 +1,4 @@
+import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import { readIssueMetrics } from "./issue-metrics.ts";
 import { FleetMembershipReadError, type FleetProjectMembership } from "../fleet-project-membership.ts";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
@@ -27,6 +28,7 @@ import {
   captureConversationAuthority,
   assertConversationAuthority,
   type ConversationOwner,
+  type ConversationAuthority,
   NativeSeatRecipientSchema,
   captureNativeSeatAuthority,
   type NativeSeatRecipient,
@@ -1010,6 +1012,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         deps.herdrAvailable,
         undefined,
         (options.openCodeNative ?? options.grokNative)?.createCommandTab,
+        {
+          localCodexBinding: () => deps.runtimes?.configuredBinding("default") ?? Promise.resolve(undefined),
+        },
       ),
     async () =>
       new Map([
@@ -1029,12 +1034,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           const revision = fleetRevisions.get(entry.id) ?? 0;
           return [
             entry.id,
-            createHerdrWatchRunner(undefined, async (args, signal, timeout) => {
-              await refreshFleets();
-              if ((fleetRevisions.get(entry.id) ?? 0) !== revision)
-                throw new Error(`Machine connection ${entry.id} changed or disconnected`);
-              return deps.runtimes!.runNamed!(entry.id, args, signal, timeout, entry);
-            }),
+            createHerdrWatchRunner(
+              undefined,
+              async (args, signal, timeout) => {
+                await refreshFleets();
+                if ((fleetRevisions.get(entry.id) ?? 0) !== revision)
+                  throw new Error(`Machine connection ${entry.id} changed or disconnected`);
+                return deps.runtimes!.runNamed!(entry.id, args, signal, timeout, entry);
+              },
+              undefined,
+              { localCodexRecovery: false },
+            ),
           ] as const;
         }),
       ]),
@@ -1652,6 +1662,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       herdrWatches,
       hireSeat,
       messageSeat,
+      workerReportActions,
     );
     const evalTools = options.evalSessionBoundary?.tools({ cwd, systemTools, authored });
     let preparingSession: AgentSession | undefined;
@@ -2715,15 +2726,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const withRemoteGoals = createRemoteCodexGoals({ shell: (fleet) => deps.fleets?.shell?.(fleet) });
   let seatWork = "";
   let captainGoals = "";
+  const parentEdges = new HerdrParentEdges(join(options.stateDir, "herdr-parent-edges.json"));
+
   /** Admission reads this fresh census; cached roster/bridge cards confer no authority. */
   async function observeFleet() {
     const binding = await deps.runtimes?.configuredBinding("default");
-    return readFleet({
-      ...(options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner, summaries: {} } : {}),
-      fleets: await censusFleets(),
-      localAvailable: deps.herdrAvailable?.() !== false,
-      ...(binding ? { herdrSession: binding.session, bridgeSocket: binding.socketPath } : {}),
-    });
+    return parentEdges.observe(
+      await readFleet({
+        ...(options.nativeCensusRunner ? { runCommand: options.nativeCensusRunner, summaries: {} } : {}),
+        fleets: await censusFleets(),
+        localAvailable: deps.herdrAvailable?.() !== false,
+        ...(binding ? { herdrSession: binding.session, bridgeSocket: binding.socketPath } : {}),
+      }),
+    );
   }
 
   async function refreshFleet(): Promise<readonly OperatorFleetSeat[]> {
@@ -2830,6 +2845,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ...(lastOutcome === undefined ? {} : { lastOutcome }),
           ...(parentSeatId === undefined ? {} : { parentSeatId }),
           ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
+          ...(observed === undefined
+            ? {}
+            : { workerReports: reportSummaries(undefined, observedAgent(observed)).slice(-100) }),
         };
       }),
     );
@@ -2872,6 +2890,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           goals,
           assignments,
           seats: [...seats],
+          workerReports: reportSummaries(),
           personas: fleetPersonas,
           channels: [...channelsResult.channels],
           // Bounded by the roster it is read against, so the day's counts can
@@ -3572,6 +3591,129 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
   }
 
+  const workerReportActions = {
+    async read(authority: ConversationAuthority, limit?: number) {
+      await assertConversationAuthority(authority);
+      return conversations.readInboundReports(
+        authority.owner.conversationId,
+        limit === undefined ? {} : { limit },
+      );
+    },
+    async acknowledge(authority: ConversationAuthority, ids: readonly string[]) {
+      await assertConversationAuthority(authority);
+      return conversations.acknowledgeInboundReports(authority.owner.conversationId, ids);
+    },
+  };
+  conversations.onInboundReportChange = () => fleetChanges.touch();
+  function reportSummaries(conversationId?: string, native?: HerdrAgentSnapshot) {
+    return conversations
+      .inboundReports(conversationId)
+      .filter(
+        (report) =>
+          native === undefined ||
+          (report.paneId === native.paneId && report.binding === inboundBinding(native)),
+      )
+      .slice(-1000)
+      .map((report) => ({
+        deliveryId: report.deliveryId,
+        conversationId: report.conversationId,
+        paneId: report.paneId,
+        acceptedAt: report.acceptedAt,
+        state: report.reportDelivery.state,
+        ...(report.reportDelivery.stage === undefined ? {} : { stage: report.reportDelivery.stage }),
+      }));
+  }
+  function conversationReportRunner(owner: ConversationOwner, deliveryId: string): ConversationRunner {
+    return async (conversationId, prompt, _publish, context) => {
+      if (context.signal.aborted || !(await validateConversationOwner(owner)))
+        throw new Error("Worker report owner is unavailable");
+      const outbox = seatOutboxes.get(conversationId);
+      const content = `Worker report ${deliveryId}\n${prompt}`;
+      const receipt = outbox?.receipt(content);
+      if (receipt?.outcome === "delivered") {
+        context.deliveryReceipt?.("delivered");
+        return;
+      }
+      if (!outbox?.bound() && !outbox?.uncertain()) {
+        context.deliveryReceipt?.("unavailable");
+        throw new Error("Worker report is retained until its conversation receiver returns");
+      }
+      const result = await outbox!.deliver({
+        kind: "message",
+        conversationId,
+        source: "worker-report",
+        content,
+        wantsReply: false,
+        signal: context.signal,
+      });
+      context.deliveryReceipt?.(result.deliveryStage ?? "uncertain");
+      if (result.outcome !== "delivered" && result.outcome !== "replied")
+        throw new Error("Worker report native delivery remains unavailable");
+    };
+  }
+  const reportRecovery = new Set<string>();
+  async function recoverWorkerReports(conversationId: string) {
+    if (shutdown.signal.aborted || reportRecovery.has(conversationId)) return;
+    reportRecovery.add(conversationId);
+    try {
+      for (const report of conversations.inboundReports(conversationId)) {
+        if (report.reportDelivery.state !== "pending" || report.recipient === undefined) continue;
+        const recipient = report.recipient;
+        if (report.workerReportRouting?.source === "refused") {
+          const sender = await herdrRunner.get(report.paneId).catch(() => undefined);
+          if (inboundBinding(sender) !== report.binding) continue;
+          try {
+            if (
+              !sender ||
+              recipient.kind !== "conversation" ||
+              JSON.stringify(herdrWatches.nativeOwner(sender)) !== JSON.stringify(recipient.owner)
+            )
+              continue;
+          } catch {
+            continue;
+          }
+        }
+        let runner: ConversationRunner;
+        if (recipient.kind === "conversation") {
+          if (
+            recipient.owner.conversationId !== conversationId ||
+            recipient.owner.discord !== undefined ||
+            !(await validateConversationOwner(recipient.owner)) ||
+            !seatOutboxes.get(conversationId)?.bound()
+          )
+            continue;
+          runner = conversationReportRunner(recipient.owner, report.deliveryId);
+        } else {
+          if (!(await nativeRecipientCurrent(recipient))) continue;
+          runner = async (_id, prompt, _publish, context) => {
+            const guard = async () => {
+              if (context.signal.aborted || !(await nativeRecipientCurrent(recipient)))
+                throw new Error("Original worker-report recipient changed");
+            };
+            const result = await deliverToSeat(
+              recipient.seatId,
+              `Worker report ${report.deliveryId}\n${prompt}`,
+              {
+                conversationId,
+                source: "worker-report",
+              },
+              {
+                guard,
+                recipientBinding: recipient.binding,
+                stableReceiptKey: `worker-report:${deliveryFingerprint(JSON.stringify([report.deliveryId, recipient]))}`,
+              },
+            );
+            context.deliveryReceipt?.(result.deliveryStage ?? "uncertain");
+            if (result.outcome !== "delivered") throw new Error("Worker report remains undelivered");
+          };
+        }
+        conversations.retryInboundReport(report.deliveryId, runner);
+      }
+    } finally {
+      reportRecovery.delete(conversationId);
+    }
+  }
+
   const inboundReceipts = new InboundSeatReceipts(
     join(options.stateDir, "delivery-receipts", "inbound.json"),
     conversations,
@@ -4025,11 +4167,54 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               : await seatComposerCatalog(seat),
         };
       }
+      if (
+        request.op === "readopt_seat" ||
+        request.op === "worker_reports" ||
+        request.op === "acknowledge_worker_reports"
+      ) {
+        if (authority) await authorizeQuestion(authority);
+        const owner: ConversationOwner = { conversationId: request.conversationId };
+        const admitted = captureConversationAuthority({
+          owner,
+          current: () =>
+            (authority?.current() ?? true) &&
+            conversations.conversation(request.conversationId) !== undefined,
+          authorize: async () => {
+            if (authority) await authorizeQuestion(authority);
+            return validateConversationOwner(owner);
+          },
+        });
+        await assertConversationAuthority(admitted);
+        if (request.op === "readopt_seat") {
+          await herdrWatches.readoptSeat(request.seatId, admitted);
+          fleetChanges.touch();
+          return { op: request.op, schemaVersion: 1, seatId: request.seatId, adopted: true };
+        }
+        if (request.op === "worker_reports") {
+          return {
+            op: request.op,
+            schemaVersion: 1,
+            page: conversations.readInboundReports(
+              request.conversationId,
+              request.limit === undefined ? {} : { limit: request.limit },
+            ),
+          };
+        }
+        if (!conversations.acknowledgeInboundReports(request.conversationId, request.deliveryIds))
+          throw new ConversationRefusedError("Only fully offered worker reports may be acknowledged");
+        return {
+          op: request.op,
+          schemaVersion: 1,
+          conversationId: request.conversationId,
+          acknowledged: new Set(request.deliveryIds).size,
+        };
+      }
       if (request.op === "roster") {
         const seats = await refreshFleet();
         return {
           op: "roster",
           schemaVersion: 1,
+          workerReports: reportSummaries(),
           seats:
             request.includeWork === true
               ? [...seats]
@@ -4736,6 +4921,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         herdrWatches,
         hireSeat,
         messageSeat,
+        workerReportActions,
       );
     },
 
@@ -4743,11 +4929,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
       conversations.cancelPendingQuestion(binding.conversationId, "native_seat_takeover");
+      void recoverWorkerReports(binding.conversationId).catch(() => undefined);
       const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);
       return conversations
         .pollConversationDriver(
           binding.conversationId,
-          () => seatOutbox(binding.conversationId).poll(waitMs, pollSignal),
+          () => {
+            const pending = seatOutbox(binding.conversationId).poll(waitMs, pollSignal);
+            void recoverWorkerReports(binding.conversationId).catch(() => undefined);
+            return pending;
+          },
           pollSignal,
         )
         .catch((error: unknown) => {
@@ -4842,6 +5033,39 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ].join("\n");
       const previous = inboundReceipts.reconcile(agent.paneId, delivery, deliveryFingerprint(text));
       if (previous.received) return previous;
+      try {
+        herdrWatches.nativeOwner(agent);
+      } catch {
+        // Exact same-thread provenance permits retaining output, never controlling the changed occupant.
+        const retainedOwner = herdrWatches.retainedReportOwner(agent);
+        if (!retainedOwner || !(await validateConversationOwner(retainedOwner)))
+          return inboundReceipts.refuse(agent.paneId, delivery, text);
+        const current = await herdrRunner.get(paneId).catch(() => undefined);
+        if (
+          inboundBinding(current) !== delivery.binding ||
+          JSON.stringify(current && herdrWatches.retainedReportOwner(current)) !==
+            JSON.stringify(retainedOwner)
+        )
+          return inboundReceipts.refuse(agent.paneId, delivery, text);
+        return inboundReceipts.accept(
+          agent.paneId,
+          delivery,
+          text,
+          message,
+          retainedOwner.conversationId,
+          async (_id, _prompt, _publish, context) => {
+            context.deliveryReceipt?.("unavailable");
+            throw new Error("Worker output retained; the owner must re-adopt the native occupant");
+          },
+          {
+            source: "refused",
+            reason: "authority_unavailable",
+            conversationId: retainedOwner.conversationId,
+          },
+          { kind: "conversation", owner: retainedOwner },
+        );
+      }
+
       let owner: ConversationOwner | undefined;
       let route: Awaited<ReturnType<typeof workerReportRoute>>;
       let originalCensus: Awaited<ReturnType<typeof observeFleet>>;
@@ -4931,6 +5155,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             throw new Error(result.detail ?? "Worker report native delivery is unavailable");
         };
       } else {
+        if (
+          target.discord === undefined &&
+          (headSeat !== undefined || seatOutboxes.has(target.conversationId))
+        )
+          runner = conversationReportRunner(target, delivery.id);
         if (!(await validateConversationOwner(target)))
           return inboundReceipts.refuse(agent.paneId, delivery, text);
         if (target.discord !== undefined)
@@ -5009,6 +5238,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ...route.diagnostic,
           conversationId: target.conversationId,
         },
+        route.native ?? { kind: "conversation", owner: target },
       );
     },
 

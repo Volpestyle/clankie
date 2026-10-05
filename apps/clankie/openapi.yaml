@@ -1622,7 +1622,14 @@ paths:
       description: |
         One route, discriminated `op`: `list`, `roster`, `get`, `create`,
         `fork`, `close`, `send`, `cancel`, `replay`, `subagent_replay`, `tail`, `autonomy`,
-        `terminal_tail`. The TUI and relay both speak this. Seat scopes
+        `terminal_tail`, `readopt_seat`, `worker_reports`, and
+        `acknowledge_worker_reports`. Worker ownership/report operations require
+        current operator authority and an exact conversationId. Re-adoption
+        proves the original owner and same native thread. Worker reads return
+        complete bounded unread payloads and ackDeliveryIds without acknowledging;
+        only fully offered IDs may be marked read. Roster/fleet report summaries
+        survive disappeared panes, and delivery receipts never establish reading.
+        The TUI and relay both speak this. Seat scopes
         identify Herdr direct-send/projection threads. `cancel` interrupts one
         accepted run: the captain aborts the live model turn and the durable
         log settles that run as `cancelled`. `fork` clones the current Pi leaf

@@ -1,3 +1,4 @@
+import { workerReportTools, type WorkerReportActions } from "./worker-report-tools.ts";
 import { questionTools } from "./question-tools.ts";
 /**
  * A lane's tool bank, assembled once for every harness that runs it (VUH-1085).
@@ -41,8 +42,10 @@ export function laneAuthoredTools(
   herdrWatches?: HerdrWatchPort,
   hireSeat?: HireSeat,
   messageSeat?: MessageSeat,
+  reports?: WorkerReportActions,
 ): ToolDefinition[] {
   return [
+    ...((lane === "operator" || turn.shell === true) && reports ? workerReportTools(reports, turn) : []),
     ...runtimeUpdateTools(deps.runtimeUpdater, turn),
     ...(lane === "operator" ? questionTools(turn) : []),
     ...captainTools(deps, turn, laneLog, lane, gameplay, autonomy, herdrWatches, hireSeat, messageSeat),
@@ -67,6 +70,7 @@ export async function buildLaneToolBank(
   herdrWatches?: HerdrWatchPort,
   hireSeat?: HireSeat,
   messageSeat?: MessageSeat,
+  reports?: WorkerReportActions,
 ): Promise<LaneToolBank> {
   const tools: LaneTool[] = laneAuthoredTools(
     deps,
@@ -78,6 +82,7 @@ export async function buildLaneToolBank(
     herdrWatches,
     hireSeat,
     messageSeat,
+    reports,
   ).map((tool) => authoredLaneTool(tool, turn));
   const browser = await deps.browser.catalog();
   for (const tool of browser.available ? browser.tools : []) {

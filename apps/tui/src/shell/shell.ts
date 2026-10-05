@@ -1,3 +1,4 @@
+import type { WorkerReportSummary } from "@clankie/protocol";
 /**
  * The Clankie face shell: pi's interactive chat surface wearing Clankie's
  * chrome. The renderer is pi's fullscreen mode — a TuiAltScreen whose
@@ -107,6 +108,7 @@ export interface FaceShellCommand {
 
 export interface FaceShellOptions {
   readonly liveAgents?: () => readonly LiveAgent[];
+  readonly workerReports?: () => readonly WorkerReportSummary[];
   readonly onOpenLiveAgent?: (agent: LiveAgent) => Promise<void>;
   readonly onLeaveLiveAgent?: () => Promise<void>;
   readonly onOpenAgentWorkspace?: () => Promise<void>;
@@ -380,6 +382,7 @@ export class ClankieFaceShell {
     );
     this.liveAgents = new LiveAgentStrip(() => this.options.liveAgents?.() ?? [], this.theme, {
       maxRows: () => Math.max(3, Math.floor(this.tui.terminal.rows * 0.5)),
+      reports: () => this.options.workerReports?.() ?? [],
     });
     this.conversationHeader = new ConversationHeader(this.theme, () => {
       const name = this.options.expandedAgent?.();

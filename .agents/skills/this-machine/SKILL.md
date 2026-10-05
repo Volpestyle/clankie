@@ -238,6 +238,14 @@ symlinks; use `CLAUDE_CONFIG_DIR` for an alias profile. Verify the fresh native
 catalog lists `message_clankie`, `clankie_tools`, and `clankie_call`, then make a
 bounded connected-tool read.
 
+Doctor's `linkedSession.nativeBindings` distinguishes observed, recovered and
+missing session proof. Local Codex `--remote … resume THREAD` reattachments are
+recovered only from the exact retained seat server/socket/thread lifetime.
+After an owner-authorized same-thread reattach, `clankie agents readopt SEAT
+--conversation ID` repairs the existing owning conversation's occupant binding.
+Unread worker output is available through `clankie agents reports --conversation ID`;
+reading leaves it unread until the lead acknowledges the fully offered IDs.
+
 The roster's `harnessBridge` flags the same process facts; `Ctrl+G` in the
 console reveals the selected pane's full fix. `live-process` verifies process
 ancestry/dedicated socket and matching pane/socket environment only, not tools

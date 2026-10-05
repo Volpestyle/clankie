@@ -28,6 +28,14 @@ and watches. Worker reports follow the hiring/adopting conversation, not always
 Use `this-machine` for current routing and the retained delivery receipt for its
 stage; transcript presence alone does not prove an effect or model awareness.
 
+Read retained worker results with `clankie agents reports --conversation ID`.
+The exact accepted payloads and delivery/read state live in that conversation's
+`meta.json` under `inboundAcceptances`, independently of event trimming and pane
+lifetime. Join their `runId` to the accepted/completed/failed `events.jsonl` turns.
+`stored` proves retention; a transport completion still does not prove reading.
+A service-interrupted attempt stays uncertain. Read first and acknowledge only
+fully reviewed offered IDs with `clankie agents reports ack ID... --conversation ID`.
+
 ## Where to look
 
 - Operator console chat (the TUI dialogue): `~/.clankie/captain/conversations/<conversationId>/`

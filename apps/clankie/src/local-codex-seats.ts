@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { promisify } from "node:util";
-import { z } from "zod";
-import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
-import { HerdrBindingSchema, type HerdrBinding } from "@clankie/protocol";
+import { occupantIdForHerdrSession, parseHerdrAgentList } from "./captain/herdr-census.ts";
+import { type HerdrBinding } from "@clankie/protocol";
+import { LocalCodexStateSchema as StateSchema, isLocalCodexEndpoint } from "./local-codex-records.ts";
+import type { z } from "zod";
+import { pinHerdrEnvironment } from "./herdr-session.ts";
 
 const exec = promisify(execFile);
 const processStart = async (pid: number): Promise<string | undefined> => {
@@ -23,30 +25,18 @@ const processStart = async (pid: number): Promise<string | undefined> => {
   }
 };
 
-export type LocalCodexRegistration = (() => void) & { bindSession?(threadId: string): void | Promise<void> };
-
-const StateSchema = z
-  .object({
-    version: z.literal(1),
-    seats: z.array(
-      z
-        .object({
-          pid: z.number().int().min(2),
-          pane: z.string().regex(/^w[\w]+:p[\w]+$/u),
-          binding: HerdrBindingSchema,
-          start: z.string().min(1),
-          nativeOccupantId: z.string().min(1),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
+export type LocalCodexRegistration = (() => void) & {
+  bindSession?(threadId: string, endpoint?: string): void | Promise<void>;
+};
 interface Entry {
   pane: string;
   binding: HerdrBinding;
   start: Promise<string | undefined>;
   capturedStart?: string;
   nativeOccupantId?: string;
+  threadId?: string | undefined;
+  endpoint?: string | undefined;
+  parent?: { paneId: string; occupantId: string } | undefined;
   restored?: true;
 }
 interface DurableSeats {
@@ -100,6 +90,9 @@ export class LocalCodexSeats {
               binding: seat.binding,
               start: seat.capturedStart,
               nativeOccupantId: seat.nativeOccupantId,
+              ...(seat.threadId === undefined ? {} : { threadId: seat.threadId }),
+              ...(seat.endpoint === undefined ? {} : { endpoint: seat.endpoint }),
+              ...(seat.parent === undefined ? {} : { parent: seat.parent }),
             },
           ]
         : [],
@@ -136,19 +129,73 @@ export class LocalCodexSeats {
       this.save();
     };
     return Object.assign(release, {
-      bindSession: async (threadId: string) => {
+      bindSession: async (threadId: string, endpoint?: string) => {
         if (this.seats.get(pid) !== entry || !threadId) return;
         const identity = occupantIdForHerdrSession({ source: "herdr:codex", kind: "id", value: threadId });
         if (entry.nativeOccupantId !== undefined && entry.nativeOccupantId !== identity) return release();
         entry.nativeOccupantId = identity;
+        entry.threadId = threadId;
+        if (endpoint !== undefined) {
+          if (!isLocalCodexEndpoint(endpoint)) throw new Error("Private Codex endpoint is invalid");
+          if (entry.endpoint !== undefined && entry.endpoint !== endpoint) return release();
+          entry.endpoint = endpoint;
+        }
         if (!this.durable) return;
         const start = await entry.start;
         if (this.seats.get(pid) !== entry) return;
         if (!start) throw new Error("Private Codex process lifetime is unavailable");
         entry.capturedStart = start;
+        if (endpoint !== undefined && entry.parent === undefined) {
+          const parent = await this.captureParent(entry);
+          if (this.seats.get(pid) !== entry) return;
+          if (parent !== undefined) entry.parent = parent;
+        }
         this.save();
       },
     });
+  }
+
+  /** Preserve a real launcher edge before a Herdr reset can discard it. */
+  private async captureParent(entry: Entry): Promise<Entry["parent"]> {
+    try {
+      const read = async (pane: string) => {
+        const { stdout } = await exec("herdr", ["agent", "get", pane], {
+          env: pinHerdrEnvironment({ ...process.env }, entry.binding.socketPath),
+          timeout: 2_000,
+          maxBuffer: 1_048_576,
+          encoding: "utf8",
+        });
+        const raw = JSON.parse(stdout)?.result?.agent;
+        return parseHerdrAgentList(JSON.stringify({ result: { agents: [raw] } }))[0];
+      };
+      const child = await read(entry.pane);
+      const parentPaneId = child?.parentPaneId;
+      if (
+        child?.paneId !== entry.pane ||
+        !parentPaneId ||
+        parentPaneId === entry.pane ||
+        !/^w[\w]+:p[\w]+$/u.test(parentPaneId) ||
+        (child.session && occupantIdForHerdrSession(child.session) !== entry.nativeOccupantId)
+      )
+        return undefined;
+      const parent = await read(parentPaneId);
+      if (parent?.paneId !== parentPaneId || parent.session === undefined) return undefined;
+      const occupantId = occupantIdForHerdrSession(parent.session);
+      const [latestChild, latestParent] = await Promise.all([read(entry.pane), read(parentPaneId)]);
+      if (
+        latestChild?.parentPaneId !== parentPaneId ||
+        latestParent?.session === undefined ||
+        occupantIdForHerdrSession(latestParent.session) !== occupantId ||
+        (latestChild.session && occupantIdForHerdrSession(latestChild.session) !== entry.nativeOccupantId)
+      )
+        return undefined;
+      const current = this.binding();
+      return current?.socketPath === entry.binding.socketPath && current.session === entry.binding.session
+        ? { paneId: parentPaneId, occupantId }
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async allows(

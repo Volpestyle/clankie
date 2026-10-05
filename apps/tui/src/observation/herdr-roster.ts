@@ -2,6 +2,7 @@ import type {
   OperatorConversationServiceClient,
   OperatorFleetSeat,
   OperatorAgentPersona,
+  WorkerReportSummary,
 } from "@clankie/protocol";
 
 export interface HerdrRosterAgent {
@@ -18,6 +19,7 @@ export interface LiveAgent {
 
 export interface HerdrRosterSnapshot {
   readonly liveAgents?: readonly LiveAgent[];
+  readonly workerReports?: readonly WorkerReportSummary[];
   readonly agents: readonly HerdrRosterAgent[];
   readonly error?: string;
 }
@@ -30,6 +32,7 @@ export class HerdrRoster {
   private agents: readonly HerdrRosterAgent[] = [];
   private error: string | undefined;
   private liveAgents: readonly LiveAgent[] = [];
+  private workerReports: readonly WorkerReportSummary[] = [];
   private personas: readonly OperatorAgentPersona[] = [];
   private following: AbortController | undefined;
   private polling = false;
@@ -43,6 +46,7 @@ export class HerdrRoster {
     return {
       agents: this.agents,
       liveAgents: this.liveAgents,
+      workerReports: this.workerReports,
       ...(this.error === undefined ? {} : { error: this.error }),
     };
   }
@@ -68,7 +72,11 @@ export class HerdrRoster {
           const fleet = await this.client.fleet(cursor, signal);
           if (signal.aborted) return;
           cursor = fleet.cursor;
-          if (await this.apply(() => Promise.resolve(fleet.seats), fleet.personas)) onChange();
+          const changedReports =
+            JSON.stringify(this.workerReports) !== JSON.stringify(fleet.workerReports ?? []);
+          this.workerReports = fleet.workerReports ?? [];
+          if ((await this.apply(() => Promise.resolve(fleet.seats), fleet.personas)) || changedReports)
+            onChange();
           continue;
         } catch {
           if (signal.aborted) return;

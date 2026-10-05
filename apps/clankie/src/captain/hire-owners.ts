@@ -24,6 +24,7 @@ const RecordSchema = z
   })
   .strict();
 const StateSchema = z.object({ schemaVersion: z.literal(1), hires: z.array(RecordSchema) }).strict();
+type HireOwnerRecord = z.infer<typeof RecordSchema>;
 
 /** Ownership survives watch consumption and service replacement; it is never inferred from persona. */
 export class HireOwners {
@@ -57,8 +58,64 @@ export class HireOwners {
     return held === undefined ? undefined : ConversationOwnerSchema.parse(held.owner);
   }
   public sessionOwner(sessionKey: string): ConversationOwner | undefined {
-    const entry = this.state.hires.find((item) => item.sessionKey === sessionKey);
+    const entries = this.state.hires.filter((item) => item.sessionKey === sessionKey);
+    const entry = entries[0];
+    if (entries.some((item) => item.owner.conversationId !== entry?.owner.conversationId))
+      throw new Error("Saved session has conflicting persisted conversation owners");
     return entry === undefined ? undefined : ConversationOwnerSchema.parse(entry.owner);
+  }
+  /** A matching thread may retain its report, without adopting or granting native control. */
+  public retainedReportOwner(
+    paneId: string,
+    seatId: string,
+    sessionKey: string,
+  ): ConversationOwner | undefined {
+    const held = this.sessionOwner(sessionKey);
+    if (held === undefined || this.hasThreadConflict(paneId, seatId, sessionKey, held)) return undefined;
+    return held;
+  }
+  private hasThreadConflict(
+    paneId: string,
+    seatId: string,
+    sessionKey: string,
+    held: ConversationOwner,
+  ): boolean {
+    return this.state.hires.some(
+      (entry) =>
+        (entry.paneId === paneId || entry.seatId === seatId) &&
+        (entry.owner.conversationId !== held.conversationId ||
+          (entry.sessionKey !== sessionKey &&
+            (entry.sessionKey !== undefined ||
+              entry.seatId !== undefined ||
+              entry.occupantId !== undefined))),
+    );
+  }
+  /** Only the persisted owning conversation may repair the exact same native thread. */
+  public readopt(
+    paneId: string,
+    seatId: string,
+    occupantId: string,
+    owner: ConversationOwner,
+    sessionKey: string,
+    intentId?: string,
+  ): { owner: ConversationOwner; replaced: readonly HireOwnerRecord[] } {
+    const held = this.sessionOwner(sessionKey);
+    if (held === undefined || held.conversationId !== owner.conversationId)
+      throw new Error("Saved session has no matching persisted hiring conversation");
+    if (this.hasThreadConflict(paneId, seatId, sessionKey, held))
+      throw new Error("This pane belongs to a different persisted native thread");
+    const replaced = this.state.hires.filter(
+      (entry) => entry.sessionKey === sessionKey || entry.paneId === paneId || entry.seatId === seatId,
+    );
+    const prior = replaced.find((entry) => entry.sessionKey === sessionKey)!;
+    this.save({
+      schemaVersion: 1,
+      hires: [
+        ...this.state.hires.filter((entry) => entry.id !== intentId && !replaced.includes(entry)),
+        { id: intentId ?? prior.id, paneId, seatId, occupantId, owner: held, sessionKey },
+      ],
+    });
+    return { owner: held, replaced: replaced.map((entry) => RecordSchema.parse(entry)) };
   }
   /** An admitted message adopts the exact native worker, before it can report back. */
   public adopt(
@@ -113,9 +170,17 @@ export class HireOwners {
     );
     const sessionOwner = sessionKey === undefined ? undefined : this.sessionOwner(sessionKey);
     const held = sessionOwner ?? prior?.owner;
+    const sessionClaim =
+      sessionKey === undefined
+        ? undefined
+        : this.state.hires.find((entry) => entry.sessionKey === sessionKey);
     if (
       (held !== undefined && held.conversationId !== owner.conversationId) ||
-      (prior?.occupantId !== undefined && (prior.occupantId !== occupantId || prior.seatId !== seatId))
+      (prior?.occupantId !== undefined && (prior.occupantId !== occupantId || prior.seatId !== seatId)) ||
+      (sessionClaim !== undefined &&
+        (sessionClaim.paneId !== paneId ||
+          sessionClaim.seatId !== seatId ||
+          sessionClaim.occupantId !== occupantId))
     )
       throw new Error("This worker has a different persisted conversation or native occupant");
     const next = StateSchema.parse({
@@ -125,7 +190,8 @@ export class HireOwners {
           (entry) =>
             entry.id !== intentId &&
             entry.paneId !== paneId &&
-            (seatId === undefined || entry.seatId !== seatId),
+            (seatId === undefined || entry.seatId !== seatId) &&
+            (sessionKey === undefined || entry.sessionKey !== sessionKey),
         ),
         {
           id: intentId ?? randomUUID(),

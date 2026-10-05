@@ -215,7 +215,10 @@ export function captainTools(
       : []),
     ...((lane === "operator" || (lane === "discord_presence" && turn.shell === true)) &&
     herdrWatches !== undefined
-      ? herdrWatchTools(herdrWatches, turn, deps.herdrAvailable)
+      ? [
+          ...herdrWatchTools(herdrWatches, turn, deps.herdrAvailable),
+          ...(herdrWatches.readoptSeat === undefined ? [] : [readoptSeatTool(herdrWatches, turn)]),
+        ]
       : []),
     // Hiring starts a process on the operator's machine, so it rides the same
     // authority as starting one by shell: the operator lane, or a Discord room
@@ -831,6 +834,23 @@ function hireAgentTool(
           status: result.seat.status,
         },
       });
+    },
+  });
+}
+
+function readoptSeatTool(watches: HerdrWatchPort, turn: TurnContext): ToolDefinition {
+  return defineTool({
+    name: "readopt_seat",
+    label: "Re-adopt a reattached worker",
+    description:
+      "Rebind this conversation's existing persisted ownership after a legitimate native same-thread reattach. Requires fresh host proof of the exact native thread and the original owning conversation; refuses a different thread or owner. Call only for an owner-authorized reattach, then message_seat and herdr_watch can steer it again. Never grants ownership to a worker or sends a message itself.",
+    parameters: Type.Object({ seatId: Type.String({ minLength: 1, maxLength: 256 }) }),
+    executionMode: "sequential",
+    execute: async (_id, input) => {
+      const authority = captureConversationAuthority(turn.conversationAuthority);
+      await assertConversationAuthority(authority);
+      await watches.readoptSeat!(input.seatId, authority);
+      return json({ adopted: true, seatId: input.seatId });
     },
   });
 }

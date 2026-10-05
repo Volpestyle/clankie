@@ -1,3 +1,4 @@
+import { parseHerdrAgentList, recoverLocalCodexSession } from "../../clankie/src/captain/herdr-census.ts";
 import { inspectLiveHarnessBridges } from "../../../integrations/claude-plugin/worker/bin/harness-live.mjs";
 import { inspectHarnessProfiles } from "../../../integrations/claude-plugin/worker/bin/harness-status.mjs";
 import { readFile, realpath, access } from "node:fs/promises";
@@ -118,6 +119,11 @@ export async function inspectHarnessBridges(
     }
   let linkedSession: Awaited<ReturnType<typeof inspectLiveHarnessBridges>> & {
     parentLeads?: readonly ParentLeadObservation[];
+    nativeBindings?: readonly {
+      paneId: string;
+      status: "observed" | "recovered" | "missing";
+      detail: string;
+    }[];
   } = {
     state: "no-link",
     panes: [],
@@ -209,7 +215,37 @@ export async function inspectHarnessBridges(
           run,
           ...(runtimePid === undefined ? {} : { runtimePid }),
         });
-        linkedSession = { ...live, parentLeads: parentLeadObservations(census, live) };
+        const nativeBindings = await Promise.all(
+          parseHerdrAgentList(JSON.stringify(list))
+            .filter((agent) => ["claude", "codex"].includes(agent.agent))
+            .map(async (agent) => {
+              const recovered =
+                agent.session ??
+                (agent.agent === "codex"
+                  ? await recoverLocalCodexSession(agent, {
+                      bridgeSocket: link.socket,
+                      herdrSession: link.session ?? "default",
+                      localCodexRecordsPath: join(stateRoot, "local-codex-seats.json"),
+                      runCommand: async (command, args) => ({
+                        stdout: await run(command, [...args]),
+                        stderr: "",
+                      }),
+                    })
+                  : undefined);
+              return {
+                paneId: agent.paneId,
+                status: agent.session
+                  ? ("observed" as const)
+                  : recovered
+                    ? ("recovered" as const)
+                    : ("missing" as const),
+                detail: recovered
+                  ? "Exact native session binding observed; delivery remains unverified."
+                  : "Native session binding missing; reports and steering require exact native proof. Inspect the seat socket/thread and use owner-authorized re-adoption for the same thread.",
+              };
+            }),
+        );
+        linkedSession = { ...live, parentLeads: parentLeadObservations(census, live), nativeBindings };
       } catch {
         linkedSession = { state: "unavailable", panes: [], unownedBridges: [], parentLeads: [] };
       }
@@ -265,6 +301,9 @@ export async function inspectHarnessBridges(
     localFleet: local,
     linkedSession,
     remediation: [
+      ...(linkedSession.nativeBindings ?? [])
+        .filter((binding) => binding.status === "missing")
+        .map((binding) => `${binding.paneId}: ${binding.detail}`),
       ...(linkedSession.parentLeads ?? []).flatMap((lead) =>
         lead.remediation === undefined ? [] : [lead.remediation],
       ),

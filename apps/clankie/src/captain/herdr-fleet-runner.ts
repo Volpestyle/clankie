@@ -49,7 +49,7 @@ export function createRemoteHerdrRunner(
   run: HerdrFleetRun,
   options: { readonly pollMs?: number; readonly transcriptHost?: AgentTranscriptHost } = {},
 ): HerdrWatchRunner {
-  const base = createHerdrWatchRunner(undefined, run);
+  const base = createHerdrWatchRunner(undefined, run, undefined, { localCodexRecovery: false });
   const pollMs = options.pollMs ?? REMOTE_POLL_MS;
   let cached: { readonly at: number; readonly panes: Promise<readonly HerdrAgentSnapshot[]> } | undefined;
 

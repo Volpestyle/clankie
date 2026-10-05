@@ -6,7 +6,7 @@ import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import { OPERATOR_SEAT_HARNESSES, type HerdrBinding } from "@clankie/protocol";
 import { parseHerdrAgentResult } from "./captain/herdr-watch.ts";
-import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
+import { occupantIdForHerdrSession, recoverLocalCodexSession } from "./captain/herdr-census.ts";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
 
 type Run = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string>;
@@ -110,8 +110,22 @@ export function createProjectProcessObserver(options: {
         );
         if (agent.paneId !== pane || !OPERATOR_SEAT_HARNESSES.some((harness) => harness === agent.agent))
           throw new Error("Native harness unavailable");
+        const session =
+          agent.session ??
+          (await recoverLocalCodexSession(agent, {
+            bridgeSocket: binding.socketPath,
+            herdrSession: binding.session,
+            runCommand: async (command, args) => ({
+              stdout: await execute(
+                command === "herdr" ? options.herdrBinary : command,
+                [...args],
+                command === "herdr" ? pinHerdrEnvironment({ ...process.env }, binding.socketPath) : undefined,
+              ),
+              stderr: "",
+            }),
+          }));
         return {
-          nativeOccupantId: agent.session ? occupantIdForHerdrSession(agent.session) : undefined,
+          nativeOccupantId: session ? occupantIdForHerdrSession(session) : undefined,
           terminalId: agent.terminalId,
           harness: agent.agent,
         };
