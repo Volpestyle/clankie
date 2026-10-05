@@ -1454,20 +1454,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         conversations.bindPersona(seat.personaId, seat.seatId, seat.title);
         liveSeats = [...liveSeats.filter((current) => current.personaId !== seat.personaId), seat];
         seatByPersona.set(seat.personaId, seat.seatId);
-        herdrWatches.trackSeat(seat.seatId);
         seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
-        fleetChanges.touch();
         adopted = seat;
       },
+      () => personas.flushProjectRoles(),
     );
     if (result.outcome !== "spawned") return result;
-    try {
-      await personas.flushProjectRoles();
-    } catch {
-      // The native seat already exists. Retain the exact pending role operation,
-      // never turn an association failure into a retryable native hire failure.
-    }
     if (adopted === undefined) throw new Error("Hired seat was not finalized under its admitted authority");
+    // A watch probes project settings immediately. Finish our own role write
+    // before publishing the hire, so it cannot revoke the admitted controller.
+    herdrWatches.trackSeat(adopted.seatId);
+    fleetChanges.touch();
     const roleAssignment =
       adoptedRoleWrite?.outcome === "pending"
         ? personas.roleWritePending(adoptedRoleWrite.operationId)
