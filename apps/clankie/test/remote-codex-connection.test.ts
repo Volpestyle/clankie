@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import type { HerdrFleet } from "../src/herdr-fleet.ts";
 import type { RemoteCodexControlProof } from "../src/remote-project-proof.ts";
+import { windowsProcessCommand } from "../src/windows-process-probe.ts";
 import { codexSocketControl } from "../src/captain/external-codex-control.ts";
 import { openRemoteCodexConnection } from "../src/captain/remote-codex-connection.ts";
 import { remoteCodexControl, remoteCodexQueue } from "../src/captain/remote-codex-app-server.ts";
@@ -170,7 +171,7 @@ it("checks the exact connected TCP tuple and complete fresh proof immediately be
       { clientPort: expect.any(Number), serverPort: Number(f.endpoint.split(":").at(-1)) },
     ],
   ]);
-  expect(guard).toHaveBeenCalledOnce();
+  expect(guard).toHaveBeenCalledTimes(2);
 });
 
 it.each(["server", "tui", "binding", "homeHash", "endpoint", "cwd"] as const)(
@@ -290,8 +291,18 @@ it("queues to the proven pane backend, preserving private home and the final aut
     outcome: "delivered",
     state: "queued",
   });
-  expect(guard).toHaveBeenCalledOnce();
-  expect(shell).not.toHaveBeenCalled();
+  expect(guard).toHaveBeenCalledTimes(2);
+  expect(shell.mock.calls).toEqual([
+    [
+      windowsProcessCommand({
+        session: fleet.session,
+        pane: "w1:p1",
+        codexControl: true,
+        codexDefaultHome: true,
+      }),
+      10_000,
+    ],
+  ]);
   expect(f.requests.find((r) => r.method === "initialize")).toMatchObject({
     params: { capabilities: { experimentalApi: true } },
   });
@@ -316,7 +327,17 @@ it("refuses an unavailable proven private queue instead of falling through to th
     outcome: "undelivered",
     deliveryStage: "unavailable",
   });
-  expect(shell).not.toHaveBeenCalled();
+  expect(shell.mock.calls).toEqual([
+    [
+      windowsProcessCommand({
+        session: fleet.session,
+        pane: "w1:p1",
+        codexControl: true,
+        codexDefaultHome: true,
+      }),
+      10_000,
+    ],
+  ]);
 });
 
 it("retains uncertainty for a lost private native queue receipt without the account queue", async () => {
@@ -333,5 +354,15 @@ it("retains uncertainty for a lost private native queue receipt without the acco
     outcome: "unconfirmed",
   });
   expect(f.requests.filter((r) => r.method === "thread/queue/add")).toHaveLength(1);
-  expect(shell).not.toHaveBeenCalled();
+  expect(shell.mock.calls).toEqual([
+    [
+      windowsProcessCommand({
+        session: fleet.session,
+        pane: "w1:p1",
+        codexControl: true,
+        codexDefaultHome: true,
+      }),
+      10_000,
+    ],
+  ]);
 });
