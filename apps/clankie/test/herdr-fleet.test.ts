@@ -140,10 +140,17 @@ describe("remote Herdr transport", () => {
     expect(args).toEqual(
       expect.arrayContaining(["BatchMode=yes", "ControlMaster=auto", "ControlPersist=600"]),
     );
-    expect(
-      args.some((arg) => /^ControlPath=\/Users\/me\/\.clankie\/ssh\/[a-f0-9]{8}-[a-f0-9]{6}-%C$/u.test(arg)),
-    ).toBe(true);
+    expect(args.some((arg) => /^ControlPath=\/Users\/me\/\.clankie\/ssh\/[a-f0-9]{6}-%C$/u.test(arg))).toBe(
+      true,
+    );
     expect(args.slice(-3)).toEqual(["--", "volpe@supedupsilly", "cmd"]);
+    // OpenSSH expands %C to 40 hex bytes and appends a 17-byte temporary
+    // suffix. macOS sockaddr_un leaves 104 bytes including its terminating NUL.
+    const longerHome = sshArgs(pc, "/Users/james-alexander/.clankie/ssh", "cmd")
+      .find((arg) => arg.startsWith("ControlPath="))!
+      .slice("ControlPath=".length)
+      .replace("%C", "a".repeat(40));
+    expect(Buffer.byteLength(longerHome) + 17 + 1).toBeLessThanOrEqual(104);
   });
 
   it("reports Herdr's own JSON error and a dead link as distinct failures", async () => {

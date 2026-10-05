@@ -18,3 +18,14 @@ exit 127. The persistent `missing-clixml` mode retains noisy progress framing to
 prove error decoding even with upstream records. The native dependency-failure
 mode emits the same diagnostic after recording a mutation, without the marker;
 the transport must surface the error without replaying that program.
+
+The successful relay mode uses actual loopback TCP forwarding and nonce-bound
+framed messages through child stdio. A delayed proof response crosses a scheduled
+link refresh; event records establish that the replacement becomes ready before
+the old relay closes and the pending proof finishes before its process exits.
+The HTTP response is 256 KiB with delayed frame consumption; retirement waits
+for the remote close acknowledgment so buffered bytes cannot be truncated.
+The drain frame stops new accepts while existing clients and proofs finish.
+Failed-renewal coverage retains the old ready link until retry promotes its
+replacement, then an isolated control file stops only that fixture relay to
+verify a real outage revokes the old lifetime and the promoted link can recover.

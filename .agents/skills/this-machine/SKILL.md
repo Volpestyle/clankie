@@ -268,7 +268,8 @@ For missing native fleet tools, inspect `clankie doctor` or `clankie doctor
 skill are independent facts. Static installation is not live native membership.
 Remote reports also include `linkState`: an `unreachable` link's `error` is the
 decoded remote reason, independently of harness installation health. Fleet
-control connections and resident links refresh at ten minutes; a failure before
+control connections and resident relays refresh at ten minutes; renewal keeps
+the link ready and drains accepted requests before closing the old relay. A failure before
 the remote program starts retries once with a fresh login environment. Read the
 reported reason if it remains down rather than closing unrelated SSH masters.
 The selected remote machine also reports host-observed eligibility per pane,

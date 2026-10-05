@@ -14,6 +14,7 @@ interface Stream extends RemoteStream {
 export class RemoteFleetRelay {
   private buffer = Buffer.alloc(0);
   private streams = new Map<number, Stream>();
+  private readonly closing = new Set<number>();
   private open = true;
   private lastId = 0;
   private remotePort: number | undefined;
@@ -21,6 +22,9 @@ export class RemoteFleetRelay {
   private nonce: Buffer | undefined;
   private response: Socket | undefined;
   private readonly candidates = new Map<Socket, Buffer>();
+  private drained: (() => void) | undefined;
+  private draining = false;
+  private drainAcknowledged = false;
   private commandId = 0;
   private readonly commands = new Map<
     number,
@@ -95,6 +99,28 @@ export class RemoteFleetRelay {
   /** A bounded fresh observation executed inside the service-owned relay PowerShell process. */
   alive(): boolean {
     return this.open && this.readyNotified;
+  }
+
+  /** Retain accepted HTTP streams and observations until their replies finish. */
+  drain(complete: () => void): void {
+    this.drained = complete;
+    this.draining = true;
+    this.send(6, 0);
+    this.finishDrain();
+  }
+
+  private finishDrain(): void {
+    if (
+      !this.drained ||
+      (this.open && !this.drainAcknowledged) ||
+      this.streams.size > 0 ||
+      this.closing.size > 0 ||
+      this.commands.size > 0
+    )
+      return;
+    const complete = this.drained;
+    this.drained = undefined;
+    complete();
   }
 
   execute(command: string, timeoutMs = 10_000): Promise<string> {
@@ -178,6 +204,11 @@ export class RemoteFleetRelay {
   }
 
   private frame(kind: number, id: number, bytes: Buffer): void {
+    if (kind === 6 && id === 0 && bytes.length === 0 && this.draining && !this.drainAcknowledged) {
+      this.drainAcknowledged = true;
+      this.finishDrain();
+      return;
+    }
     if (
       kind === 5 &&
       id === 0 &&
@@ -195,6 +226,7 @@ export class RemoteFleetRelay {
       this.commands.delete(id);
       clearTimeout(command.timer);
       command.resolve(bytes.toString("utf8"));
+      this.finishDrain();
       return;
     }
     if (kind === 0 && id === 0 && bytes.length === 4 && this.remotePort === undefined) {
@@ -206,9 +238,14 @@ export class RemoteFleetRelay {
     }
     if (this.remotePort === undefined || id === 0) throw new Error("Relay not ready");
     if (kind === 1) {
-      if (bytes.length !== 8 || id <= this.lastId || this.streams.size >= 64)
+      if (bytes.length !== 8 || id <= this.lastId || this.streams.size + this.closing.size >= 64)
         throw new Error("Invalid relay stream");
       this.lastId = id;
+      if (this.draining) {
+        this.closing.add(id);
+        this.send(3, id);
+        return;
+      }
       const clientPort = bytes.readUInt32LE(),
         serverPort = bytes.readUInt32LE(4);
       if (serverPort !== this.remotePort || clientPort < 1 || clientPort > 65535)
@@ -235,16 +272,23 @@ export class RemoteFleetRelay {
       });
       socket.on("error", () => socket.destroy());
       socket.once("close", () => {
+        if (this.streams.get(id) !== stream) return;
         this.streams.delete(id);
+        // Remote kind 3 acknowledges the preceding response frames. A local
+        // close alone does not mean those bytes have reached the remote client.
+        this.closing.add(id);
         this.send(3, id);
+        this.finishDrain();
       });
       return;
     }
     const stream = this.streams.get(id);
     // Closing races are normal; stale data never creates/rebinds a stream.
     if (kind === 3 && bytes.length === 0) {
+      this.closing.delete(id);
       stream?.socket.destroy();
       this.streams.delete(id);
+      this.finishDrain();
       return;
     }
     if (kind !== 2) throw new Error("Invalid relay frame kind");
@@ -259,6 +303,7 @@ export class RemoteFleetRelay {
     this.open = false;
     for (const stream of this.streams.values()) stream.socket.destroy();
     this.streams.clear();
+    this.closing.clear();
     this.buffer = Buffer.alloc(0);
     this.response?.destroy();
     for (const socket of this.candidates.keys()) socket.destroy();
@@ -270,6 +315,7 @@ export class RemoteFleetRelay {
       command.reject(new Error("Remote observer disconnected"));
     }
     this.commands.clear();
+    this.finishDrain();
     this.options.child.stdin?.destroy();
     this.options.child.kill();
   }

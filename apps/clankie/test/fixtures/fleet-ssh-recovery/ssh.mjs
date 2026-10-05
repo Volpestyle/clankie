@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,11 +17,29 @@ const record = (value) => appendFileSync(join(root, "ssh.jsonl"), `${JSON.string
 if (args.includes("-O")) throw new Error("Recovery must preserve existing SSH masters");
 
 if (args.includes("-N")) {
-  record({ kind: "forward", args });
-  process.stderr.write("Allocated port 55000 for remote forward to 127.0.0.1:4567\n");
-  const hold = setInterval(() => {}, 1_000);
+  const destination = Number(args[args.indexOf("-R") + 1].split(":").at(-1));
+  const sockets = new Set();
+  const forward = createServer((incoming) => {
+    const outgoing = createConnection({ host: "127.0.0.1", port: destination });
+    for (const socket of [incoming, outgoing]) {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+      socket.once("error", () => {
+        incoming.destroy();
+        outgoing.destroy();
+      });
+    }
+    incoming.pipe(outgoing).pipe(incoming);
+  });
+  forward.listen(0, "127.0.0.1", () => {
+    const port = forward.address().port;
+    record({ kind: "forward", args, pid: process.pid, port, time: Date.now() });
+    process.stderr.write(`Allocated port ${port} for remote forward to 127.0.0.1:${destination}\n`);
+  });
   process.once("SIGTERM", () => {
-    clearInterval(hold);
+    record({ kind: "forward-exit", pid: process.pid, time: Date.now() });
+    for (const socket of sockets) socket.destroy();
+    forward.close();
     process.exit(0);
   });
 } else {

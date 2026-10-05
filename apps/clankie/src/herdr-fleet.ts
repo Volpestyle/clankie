@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess, type ExecFileException } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { HerdrSshTransport } from "@clankie/settings";
 import { decodeRemoteShellError } from "./remote-shell-error.ts";
 
@@ -199,8 +199,7 @@ function controlPath(fleet: HerdrFleet, directory: string, maxAgeMs: number): st
   const key = controlConnectionKey(fleet, directory);
   const current = controlConnections.get(key);
   if (current && Date.now() - current.since < maxAgeMs) return current.path;
-  const fleetKey = createHash("sha256").update(key).digest("hex").slice(0, 8);
-  const path = join(directory, `${fleetKey}-${randomBytes(3).toString("hex")}-%C`);
+  const path = join(directory, `${randomBytes(3).toString("hex")}-%C`);
   controlConnections.set(key, { path, since: Date.now() });
   return path;
 }

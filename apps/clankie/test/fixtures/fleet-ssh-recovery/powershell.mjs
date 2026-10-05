@@ -13,7 +13,11 @@ const quiet = /\$ProgressPreference\s*=\s*'SilentlyContinue'/u.test(script);
 appendFileSync(join(root, "powershell.jsonl"), `${JSON.stringify({ script, program, quiet })}\n`);
 
 if (!program) {
-  if (script.includes("ClankieRelay")) {
+  const returnPort = /\[ClankieRelay\]::Start\((\d+)\)/u.exec(script)?.[1];
+  if (returnPort && JSON.parse(readFileSync(join(root, "login.json"), "utf8")).mode === "relay-success") {
+    const { startRelay } = await import("./relay.mjs");
+    await startRelay(Number(returnPort));
+  } else if (script.includes("ClankieRelay")) {
     const diagnostic = readFileSync(new URL("missing-command.clixml", import.meta.url), "utf8")
       .replace("Preparing modules for first use.", "Preparing modules for first use." + "x".repeat(70_000))
       .replaceAll("{{PROGRAM}}", "relay dependency");
