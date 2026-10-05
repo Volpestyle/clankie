@@ -192,7 +192,7 @@ const DiagnosticSchema = z
       "argv_changed",
     ]),
     errno: z.number().int().min(0),
-    attempt: z.number().int().min(0).max(3),
+    attempt: z.number().int().min(0).max(32),
     retry: z.boolean(),
   })
   .strict();

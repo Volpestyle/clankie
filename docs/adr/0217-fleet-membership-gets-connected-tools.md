@@ -31,16 +31,25 @@ boundary. The release includes the helper; source startup builds it before
 serving requests. Project and private-seat checks retain their separate authority.
 The owner requires full same-user kernel observation; non-owner ancestors use
 cross-user `sysctl` PID, parent and birth records, including a terminal's root
-`login` process. Descriptor churn restarts a complete census. Bounded retries
-may still refuse under sustained churn; an explicit current-request admission
+`login` process. Descriptor churn restarts a complete census, with up to 32
+attempts and 1–8 ms jitter inside the unchanged 200 ms per-attempt and 600 ms
+total budgets. Unknown owners and owner/ancestor changes still fail closed;
+no partial census or earlier admission is reused. Bounded retries may still
+refuse under sustained churn; an explicit current-request admission
 403 precedes dispatch, while earlier uncertain receipts remain subject to
 reconciliation.
 
 The body keeps one native helper alive on private stdin/stdout pipes. A bounded
 serialized request carries a monotonic ID; each job resets all proof state and
 performs the same complete fresh observations. There is no admission cache or
-helper listener. Malformed replies, timeout, cancellation and child exit refuse
-pending observations; a later request may start a fresh helper. Herdr reads use
+helper listener. Each active proof has a 1 s transport timeout; queue wait does
+not consume it. Cancelling a queued job removes only that job. Cancelling an
+active job drains its reply and discards it before releasing that observation,
+so one caller cannot kill other callers' proofs. Queue depth remains capped at
+128; queued callers can abort, but waiting under a burst can exceed 1 s.
+A malformed reply, active
+timeout or child exit refuses pending observations; a later request may start
+a fresh helper. Herdr reads use
 its existing JSONL socket API directly, avoiding a CLI process per read. Shutdown
 closes only the body's own helper. This removes hot-path process launches while
 preserving shared-descriptor, occupant, registry and binding revocation checks.

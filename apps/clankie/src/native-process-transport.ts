@@ -25,7 +25,8 @@ interface Job {
   args: readonly string[];
   resolve(value: NativeReply | undefined): void;
   report?(reason: NativeTransportReason): void;
-  timer: ReturnType<typeof setTimeout>;
+  timer?: ReturnType<typeof setTimeout>;
+  cancelled?: true;
   signal?: AbortSignal;
   abort(): void;
 }
@@ -72,10 +73,12 @@ class NativeProcessTransport {
         resolve,
         ...(report ? { report } : {}),
         ...(signal ? { signal } : {}),
-        timer: setTimeout(() => this.stop("timeout"), 1_000),
         abort: () => {
-          if (this.active === job) this.stop("cancelled");
-          else {
+          if (this.active === job) {
+            // Keep the serial frame and proof permit until completion. A caller's
+            // cancellation cannot kill another caller's independently queued proof.
+            job.cancelled = true;
+          } else {
             this.queue = this.queue.filter((entry) => entry !== job);
             this.finish(job, undefined, "cancelled");
           }
@@ -90,8 +93,13 @@ class NativeProcessTransport {
   private finish(job: Job, reply?: NativeReply, reason?: NativeTransportReason) {
     clearTimeout(job.timer);
     job.signal?.removeEventListener("abort", job.abort);
-    if (reason) transportDiagnostic(job.report, reason);
-    job.resolve(reply);
+    if (job.cancelled) {
+      transportDiagnostic(job.report, "cancelled");
+      job.resolve(undefined);
+    } else {
+      if (reason) transportDiagnostic(job.report, reason);
+      job.resolve(reply);
+    }
   }
 
   private start() {
@@ -123,6 +131,8 @@ class NativeProcessTransport {
     }
     this.active = this.queue.shift();
     if (!this.active) return;
+    // Queue time is not kernel-proof time; a burst must not kill unrelated jobs.
+    this.active.timer = setTimeout(() => this.stop("timeout"), 1_000);
     this.child.stdin.write(`${this.active.id} ${this.active.args.join(" ")}\n`);
   }
 

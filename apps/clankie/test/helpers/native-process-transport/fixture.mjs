@@ -50,6 +50,10 @@ for await (const line of createInterface({ input: process.stdin })) {
     case "timeout":
       await new Promise(() => {});
       break;
+    case "slow":
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      send(reply(id, mode));
+      break;
     case "hold": {
       await new Promise((resolve) => {
         const timer = setInterval(() => {

@@ -177,26 +177,72 @@ pipeIt("bounds a silent real child by the production deadline and waits for its 
 });
 
 pipeIt(
-  "cancels active work by killing its child and never dispatches or replays the queued request",
+  "drains a cancelled active proof before releasing it and serves other callers through the same child",
   async () => {
     const f = await fixture();
     const signal = new AbortController();
     const reasons: NativeTransportReason[] = [];
-    const active = nativeProcessRequest(f.helper, ["hold"], signal.signal, (reason) => reasons.push(reason));
+    let settled = false;
+    const active = nativeProcessRequest(f.helper, ["hold"], signal.signal, (reason) =>
+      reasons.push(reason),
+    ).then((value) => {
+      settled = true;
+      return value;
+    });
     const pid = (await f.received())[0]!.pid;
-    const queued = nativeProcessRequest(f.helper, ["must-not-dispatch"], undefined, (reason) =>
+    const queued = nativeProcessRequest(f.helper, ["independent-proof"], undefined, (reason) =>
       reasons.push(reason),
     );
     signal.abort();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(settled).toBe(false);
+    expect(alive(pid)).toBe(true);
+    expect((await f.journal()).filter((row) => row.kind === "request")).toHaveLength(1);
+    await f.release();
     expect(await active).toBeUndefined();
-    expect(alive(pid)).toBe(false);
-    expect(await queued).toBeUndefined();
-    expect(reasons).toEqual(["cancelled", "cancelled"]);
+    expect(JSON.parse((await queued)!.stdout)).toMatchObject({ pid, mode: "independent-proof", sequence: 2 });
+    expect(alive(pid)).toBe(true);
+    expect(reasons).toEqual(["cancelled"]);
     expect((await f.journal()).filter((row) => row.kind === "request").map((row) => row.mode)).toEqual([
       "hold",
+      "independent-proof",
     ]);
   },
 );
+
+pipeIt("starts each timeout at dispatch, even after waiting longer than a proof deadline", async () => {
+  const f = await fixture();
+  const reasons: NativeTransportReason[] = [];
+  const began = performance.now();
+  const replies = await Promise.all(
+    [1, 2, 3].map(() =>
+      nativeProcessRequest(f.helper, ["slow"], undefined, (reason) => reasons.push(reason)),
+    ),
+  );
+  expect(performance.now() - began).toBeGreaterThan(1_500);
+  const values = replies.map((reply) => JSON.parse(reply!.stdout));
+  expect(values.map((value) => value.sequence)).toEqual([1, 2, 3]);
+  expect(new Set(values.map((value) => value.pid)).size).toBe(1);
+  expect(reasons).toEqual([]);
+  expect((await f.journal()).filter((row) => row.kind === "start")).toHaveLength(1);
+});
+
+pipeIt("still kills a stalled helper at its active deadline after caller cancellation", async () => {
+  const f = await fixture();
+  const signal = new AbortController();
+  const reasons: NativeTransportReason[] = [];
+  const active = nativeProcessRequest(f.helper, ["timeout"], signal.signal, (reason) => reasons.push(reason));
+  const pid = (await f.received())[0]!.pid;
+  const queued = nativeProcessRequest(f.helper, ["must-not-dispatch"], undefined, (reason) =>
+    reasons.push(reason),
+  );
+  signal.abort();
+  expect(await active).toBeUndefined();
+  expect(await queued).toBeUndefined();
+  expect(alive(pid)).toBe(false);
+  expect(reasons).toEqual(["cancelled", "timeout"]);
+  expect((await f.journal()).filter((row) => row.kind === "request")).toHaveLength(1);
+});
 
 pipeIt(
   "cancels only a queued job while the active child remains alive and serves the next explicit job",

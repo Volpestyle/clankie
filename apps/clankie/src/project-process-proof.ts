@@ -136,7 +136,11 @@ export function createProjectProcessObserver(options: {
               stdout:
                 command === "herdr" && args[0] === "pane" && args[1] === "process-info"
                   ? JSON.stringify(await read("pane.process_info", { pane_id: pane }, [...args]))
-                  : await execute(command, [...args]),
+                  : await execute(
+                      command,
+                      [...args],
+                      pinHerdrEnvironment({ ...process.env }, binding.socketPath),
+                    ),
               stderr: "",
             }),
           }));

@@ -23,7 +23,7 @@
 #include <unistd.h>
 
 enum { MAX_PIDS = 16384, MAX_FDS = 16384, MAX_CHAIN = 64, MAX_SCAN_MS = 200,
-       MAX_ATTEMPTS = 3, MAX_TOTAL_MS = MAX_SCAN_MS * MAX_ATTEMPTS };
+       MAX_ATTEMPTS = 32, MAX_TOTAL_MS = 600 };
 _Static_assert(sizeof(pid_t) == 4 && sizeof(uid_t) == 4, "Unsupported process ABI");
 _Static_assert(sizeof(struct proc_bsdinfo) == 136, "Unsupported proc_bsdinfo ABI");
 _Static_assert(offsetof(struct proc_bsdinfo, pbi_start_tvsec) == 120, "Unsupported birth ABI");
@@ -114,6 +114,33 @@ static int within_overall_budget(void) {
   int64_t ns = (int64_t)(now.tv_sec - overall_began.tv_sec) * INT64_C(1000000000) +
                now.tv_nsec - overall_began.tv_nsec;
   return ns >= 0 && ns < (int64_t)MAX_TOTAL_MS * 1000000;
+}
+
+/* Churn retries spend the existing job budget rather than exhausting three
+ * back-to-back reads in a few milliseconds. No partial census survives this
+ * pause. Clip every wait, including EINTR continuations, to the outer cap. */
+static int retry_pause(void) {
+  int64_t delay = ((int64_t)arc4random_uniform(8) + 1) * 1000000;
+  for (;;) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+      diagnostic("startup", "clock_unavailable", errno, 0);
+      return 0;
+    }
+    int64_t elapsed = (int64_t)(now.tv_sec - overall_began.tv_sec) * INT64_C(1000000000) +
+                      now.tv_nsec - overall_began.tv_nsec;
+    int64_t remaining = (int64_t)MAX_TOTAL_MS * 1000000 - elapsed;
+    if (elapsed < 0 || remaining <= 0) return 0;
+    if (delay > remaining) delay = remaining;
+    struct timespec wait = {0, (long)delay}, rest;
+    if (nanosleep(&wait, &rest) == 0) return 1;
+    if (errno != EINTR || rest.tv_sec != 0 || rest.tv_nsec < 0 || rest.tv_nsec > delay) {
+      diagnostic("startup", "clock_unavailable", errno, 0);
+      return 0;
+    }
+    delay = rest.tv_nsec;
+    if (delay == 0) return 1;
+  }
 }
 
 static int decimal(const char *text, uint64_t max, uint64_t *out) {
@@ -827,6 +854,7 @@ static int execute_proof(int argc, char **argv) {
     else result = prove(argc, argv);
     if (result == 0) return 0;
     if (result != 2) return final_refusal();
+    if (attempt + 1 < MAX_ATTEMPTS && !retry_pause()) break;
   }
   diagnostic("completion", within_overall_budget() ? "attempts_exhausted" : "budget_exhausted", 0, 0);
   return final_refusal();

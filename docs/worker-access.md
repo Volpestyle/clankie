@@ -92,12 +92,20 @@ The body owns one persistent native helper over private pipes. Every job still
 checks fresh kernel facts; an earlier admission never substitutes for the
 current check. Herdr foreground and session reads use its socket API directly.
 No helper, Herdr CLI or `ps` process is launched for ordinary mailbox/catalog
-polls or restored-private-seat birth checks. The bounded queue refuses on
-timeout, malformed replies or helper exit, and the body closes its own helper
+polls or restored-private-seat birth checks. The bounded queue starts each 1 s
+timeout when the job becomes active. Cancelling one caller removes its queued
+job or drains and discards its active reply; other callers keep their proofs.
+Queue depth stays at 128; waiting under a burst can exceed 1 s, and queued
+callers can abort.
+An active timeout, malformed reply or helper exit refuses pending observations,
+and the body closes its own helper
 at shutdown. Refusals emit `fleet.local_proof.refused` with a fixed reason;
 `fleet.local_proof.diagnostic` records fixed kernel or transport details.
-Neither event contains PIDs, paths, argv or caller headers. Census churn can
-still refuse a legitimate request within the unchanged bounds.
+Neither event contains PIDs, paths, argv or caller headers. Transient census
+churn restarts the complete proof up to 32 times with 1–8 ms jitter, within
+the unchanged 200 ms per-attempt and 600 ms total limits. Unknown ownership,
+owner/ancestor changes and shared descriptors remain refused; sustained churn
+can still exhaust those limits.
 
 When project identity is required, the same helper reads the foreground agent's
 executable, exact first launcher arguments, and the shell and agent's microsecond
