@@ -4,7 +4,9 @@ import { operatorHarness } from "./harness-command.ts";
 const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["harness"],
-    lines: ["  harness install [--codex-source-setup SCRIPT]  Review native harness plugin installation"],
+    lines: [
+      "  harness install [--refresh-linked | --codex-source-setup SCRIPT]  Install or refresh linked native plugins",
+    ],
   },
   {
     nouns: ["project"],

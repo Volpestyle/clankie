@@ -1166,6 +1166,50 @@ paths:
         "401": { description: Owner authentication required }
         "403": { description: Caller is not the owner }
         "409": { description: Removal conflicts with current settings or authority }
+  /v1/harness-refresh:
+    post:
+      tags: [Operator]
+      operationId: refreshLinkedHarnessPlugins
+      summary: Refresh existing native worker plugin links locally and on enabled fleet machines
+      description: Uses the native harness installer without enrolling new profiles, changing channel policy or restarting panes. Returns per-profile and per-fleet outcomes; ok is false for incomplete installation, missing source setup or unreachable machines.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Plugin refresh receipts, including incomplete outcomes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, local, fleets, notices]
+                properties:
+                  ok: { type: boolean }
+                  local: { type: array, items: { type: object } }
+                  fleets: { type: array, items: { type: object } }
+                  notices: { type: object }
+        "403": { description: Operator required or revoked }
+        "503": { description: Harness refresh unavailable }
+  /v1/harness-plugin-version:
+    post:
+      tags: [Operator]
+      operationId: announceInstalledWorkerPluginVersion
+      summary: Tell a running service which worker version the installer shipped
+      description: Updates display-only restart flags at the next admitted native client request. Client version reports confer no tool authority, and nothing is restarted.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version]
+              properties:
+                version: { type: string, pattern: '^[0-9]+\.[0-9]+\.[0-9]+$' }
+      responses:
+        "200": { description: Announcement accepted for the next native client request }
+        "400": { description: Invalid plugin version }
+        "403": { description: Operator required or revoked }
+        "503": { description: Plugin notices unavailable }
   /v1/runtime-connections/{id}/harnesses:
     get:
       tags: [Operator]

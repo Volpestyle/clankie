@@ -16,6 +16,9 @@ export function installHarnessBridges(options: {
   repoRoot?: string;
   marketplaceRoot?: string;
   env?: NodeJS.ProcessEnv;
+  /** Refresh only existing links; never opt a new profile in or enable a disabled Claude plugin. */
+  linkedOnly?: boolean;
+  codexHomes?: readonly string[];
   consent(harness: HarnessInstallTarget, detail: string): Promise<boolean>;
   execute?(command: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<unknown>;
   prepareSkills?(workerRoot: string): Promise<void>;

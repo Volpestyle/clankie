@@ -150,7 +150,7 @@ function stageCommand(fleet: HerdrFleet): string {
 }
 
 /** Native installers receive the explicit owner approval from `herdr prepare`; no config append. */
-function installCommand(fleet: HerdrFleet, sourceSetup?: string): string {
+function installCommand(fleet: HerdrFleet, sourceSetup?: string, linkedOnly = false): string {
   const setupArgs =
     sourceSetup === undefined
       ? ""
@@ -163,7 +163,7 @@ function installCommand(fleet: HerdrFleet, sourceSetup?: string): string {
           `$target = Join-Path $env:USERPROFILE ${powershellLiteral(MARKETPLACE_DIR.replaceAll("/", "\\"))}`,
           "if (Test-Path -LiteralPath $target) { Remove-Item -Recurse -Force -LiteralPath $target }",
           "Move-Item -LiteralPath $stage -Destination $target",
-          `& node (Join-Path $target 'worker\\bin\\harness-setup.mjs') --approved $target${setupArgs}`,
+          `& node (Join-Path $target 'worker\\bin\\harness-setup.mjs') --approved $target${linkedOnly ? " --refresh-linked" : ""}${setupArgs}`,
           "if ($LASTEXITCODE -ne 0) { throw 'Native harness setup failed' }",
         ].join("; "),
       )
@@ -174,7 +174,7 @@ function installCommand(fleet: HerdrFleet, sourceSetup?: string): string {
           `target="$HOME/${MARKETPLACE_DIR}"`,
           'rm -rf "$target"',
           'mv "$stage" "$target"',
-          `node "$target/worker/bin/harness-setup.mjs" --approved "$target"${setupArgs}`,
+          `node "$target/worker/bin/harness-setup.mjs" --approved "$target"${linkedOnly ? " --refresh-linked" : ""}${setupArgs}`,
         ].join("\n"),
       );
 }
@@ -205,6 +205,7 @@ export async function prepareFleet(
     readonly workerPluginDir: string;
     /** An owner-selected source manager on the remote machine. */
     readonly codexSourceSetup?: string;
+    readonly linkedOnly?: boolean;
     /** Copies a directory to a path relative to the remote home; scp by default. */
     readonly copy?: (source: string, destination: string) => Promise<void>;
   },
@@ -242,7 +243,7 @@ export async function prepareFleet(
   await copy(options.workerPluginDir, `${STAGING_DIR}/worker`);
   await copy(join(options.workerPluginDir, "..", ".agents"), `${STAGING_DIR}/.agents`);
   const installations = JSON.parse(
-    await options.shell(installCommand(fleet, options.codexSourceSetup), 180_000),
+    await options.shell(installCommand(fleet, options.codexSourceSetup, options.linkedOnly), 180_000),
   );
   const harnesses = (await inspectFleetHarnesses(fleet, options)) as {
     claude: Array<{ executable: boolean; enabled: boolean; versionMatches: boolean }>;
@@ -257,6 +258,22 @@ export async function prepareFleet(
       identityForwarding: boolean;
     };
   };
+  if (options.linkedOnly) {
+    if (!Array.isArray(installations)) throw new Error("Native refresh returned no profile results");
+    return {
+      fleet: fleet.id,
+      plugin: CLAUDE_WORKER_PLUGIN_ID,
+      marketplace: MARKETPLACE_DIR,
+      installations,
+      harnesses,
+      // Existing policy is preserved; an update cannot approve a new channel.
+      policy: { path: "unchanged", changed: false },
+      codex: {
+        registered: Boolean(harnesses.codex.pluginInstalled && harnesses.codex.bridge),
+        changed: false,
+      },
+    };
+  }
   if (harnesses.claude.some((profile) => profile.executable && (!profile.enabled || !profile.versionMatches)))
     throw new Error(
       `A Claude profile on ${fleet.id} has a disabled or stale worker plugin; inspect clankie doctor and native plugin sources. ` +

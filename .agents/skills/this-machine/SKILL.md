@@ -270,6 +270,14 @@ means it has not checked that pane's bridge socket, catalog or reply delivery;
 confirm those through the native harness. Unavailable observations stay unproven.
 The owner's `clankie harness install` asks per local Claude/Codex profile;
 `clankie herdr prepare FLEET_ID` explicitly ships/enables remote profiles.
+Updates and checkout/release installs automatically refresh existing links on
+this machine and enabled SSH fleets with `clankie harness install --refresh-linked`.
+Check its per-profile/fleet receipts: missing managed Codex source setup stays
+`source-manager-required`, and a healthy runtime update may still report
+`harness-refresh-incomplete`. Owner-approved source setup is remembered for the
+same config source. Older native plugin clients get a once-only pane flag asking
+the owner to save and restart/resume that harness; nothing is restarted for them.
+If `notices.state` is `deferred`, restart flags await an updated service connection.
 Generated/symlinked Codex configuration requires its source-owned setup, never
 TOML appends. OpenCode/Pi/Grok setup gaps are reported, not silently called ready.
 

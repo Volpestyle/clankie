@@ -108,6 +108,8 @@ export class WorkerMcp {
     fleetTools?(): Promise<FleetSettings["tools"]>;
     /** Canonical settings generation, checked without yielding at provider dispatch. */
     fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
+    pluginExpectedVersion?(): string;
+    pluginVersionObserved?(identity: LocalFleetIdentity, version: string): Promise<boolean>;
   };
   private readonly sessions = new Map<
     string,
@@ -117,6 +119,8 @@ export class WorkerMcp {
       server: Server;
       transport: WebStandardStreamableHTTPServerTransport;
       expiresAt: number;
+      pluginVersion?: string;
+      pluginNoticeVersion?: string;
     }
   >();
   constructor(options: WorkerMcp["options"]) {
@@ -328,12 +332,21 @@ export class WorkerMcp {
   private readonly localRequests = new Map<string, LocalFleetIdentity>();
 
   async handleLocalFleet(request: Request, identity: LocalFleetIdentity): Promise<Response> {
+    let version = this.sessions.get(request.headers.get("mcp-session-id") ?? "")?.pluginVersion;
+    if (request.method === "POST" && request.headers.get("mcp-session-id") === null) {
+      const input = await request
+        .clone()
+        .json()
+        .catch(() => undefined);
+      if (input?.method === "initialize" && input.params?.clientInfo?.name === "clankie-worker")
+        version = input.params.clientInfo.version;
+    }
     const proof = randomUUID();
     this.localRequests.set(proof, identity);
     const headers = new Headers(request.headers);
     headers.set("authorization", `Bearer ${proof}`);
     try {
-      return await this.handleAuthorized(new Request(request, { headers }), async (token) => {
+      const response = await this.handleAuthorized(new Request(request, { headers }), async (token) => {
         const current = this.localRequests.get(token);
         if (!current || !(await current.validate())) throw new Error("Local fleet membership unavailable");
         const fleet = current.fleet ?? "default";
@@ -351,6 +364,19 @@ export class WorkerMcp {
           },
         );
       });
+      if (response.ok && typeof version === "string") {
+        const session = this.sessions.get(
+          response.headers.get("mcp-session-id") ?? request.headers.get("mcp-session-id") ?? "",
+        );
+        if (session) session.pluginVersion = version;
+        // A display failure must not deny tools or prompt an uncertain tool replay.
+        const expected = this.options.pluginExpectedVersion?.();
+        if (session?.pluginNoticeVersion !== expected || session?.pluginNoticeVersion === undefined) {
+          if (await this.options.pluginVersionObserved?.(identity, version).catch(() => false))
+            if (session && expected !== undefined) session.pluginNoticeVersion = expected;
+        }
+      }
+      return response;
     } finally {
       this.localRequests.delete(proof);
     }

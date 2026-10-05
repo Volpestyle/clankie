@@ -1,5 +1,10 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
+// Capture at process start: a refreshed on-disk plugin does not refresh this running client.
+const PLUGIN_VERSION = JSON.parse(
+  readFileSync(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8"),
+).version;
 import { createInboundSender } from "./inbound-receipt.mjs";
 import { createPeerSender, readPeerCatalog } from "./peer-receipt.mjs";
 import { createCatalogWatcher, signalCodexCatalog } from "./catalog-watch.mjs";
@@ -128,7 +133,7 @@ function fleetTools(current, refresh) {
         params: {
           protocolVersion: "2025-06-18",
           capabilities: {},
-          clientInfo: { name: "clankie-worker", version: "0.6.2" },
+          clientInfo: { name: "clankie-worker", version: PLUGIN_VERSION },
         },
       },
       signal,
@@ -421,7 +426,7 @@ export function runSeatChannel({ paneId, parentArgv }) {
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
           capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
-          serverInfo: { name: "clankie-worker", version: "0.6.2" },
+          serverInfo: { name: "clankie-worker", version: PLUGIN_VERSION },
           instructions: sharedDaemon ? `${INSTRUCTIONS} ${SHARED_DAEMON_NOTE}` : INSTRUCTIONS,
         },
       });

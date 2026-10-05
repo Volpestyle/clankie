@@ -260,6 +260,13 @@ confirmed-stop rollback. Unknown shutdown never authorizes a worktree move.
 Generated pnpm wrappers and known workspace metadata are relocated before cutover;
 committed source, lockfiles and global package-store files are not rewritten.
 
+After confirmed new service health, the helper refreshes existing Claude/Codex
+plugin links locally and on enabled SSH fleet machines through
+`clankie harness install --refresh-linked`. Plugin refresh failures leave the
+healthy service running and report `harness-refresh-incomplete`; they do not
+roll back the service. `harnessRefresh` in update status links the complete
+per-profile receipt in `harness-refresh.json` beside the transaction record.
+
 The CLI and TUI `/update` return an accepted/pending operation, not a success
 claim. `clankie update status` and `/update status` read the durable old/new commit,
 phase, per-service receipts and exact service boot identity. Results live in
@@ -3316,8 +3323,24 @@ The owner API exposes `GET /v1/operator/projects` and revision-guarded
 `clankie harness install` reviews each installed Claude/Codex harness in an
 interactive terminal. Each Claude profile (default, `CLAUDE_CONFIG_DIR`, and
 named `~/.claude-*` directories) has its own consent and native install/enable.
-Declining or running without a terminal changes no registration. Both checkout
-and release installers offer this step interactively.
+Declining the interactive step changes no registration. Both checkout and
+release installers refresh existing links even without a terminal, then offer
+new linking interactively. `clankie harness install --refresh-linked` repeats
+that maintenance step and returns JSON receipts with a failing exit code for
+incomplete installations. It includes remembered custom profiles and registered
+Codex account homes; enabled fleet aliases sharing one SSH destination refresh
+once. Unlinked profiles and existing Claude channel policy stay unchanged.
+An explicitly disabled Codex plugin reports `declined`: its native installer
+would enable it, so refreshing that profile requires a reviewed install.
+
+Native clients reporting an older worker version receive a durable, display-only
+`clankie-plugin` pane flag with a save/restart/resume prompt, once per native
+occupant/process and expected version. No harness or pane is restarted. The flag
+clears when a current native client connects. A release installer announces its
+worker version to an already-running service; unavailable notification is
+reported as `notices.state: deferred` until the updated service connects.
+The operator API exposes `POST /v1/harness-refresh` for the same maintenance and
+`POST /v1/harness-plugin-version` with `{ "version": "0.6.2" }` for that announcement.
 
 Codex uses the native `clankie-worker@clankie-fleet` plugin for project-scoped
 bridge tools and packaged skills. It does not load the operator-seat plugin.
@@ -3325,6 +3348,10 @@ Symlinked or marked generated Codex configuration is not rewritten. Use the
 owning source/setup; `--codex-source-setup /absolute/script` runs an explicitly
 selected source setup after consent and checks that the link is preserved.
 Setup completion still needs doctor verification; no hook trust record is written.
+Successful owner-approved source setup is remembered for that exact config
+source and profile, so subsequent updates reuse it. A changed config source or a
+legacy bridge without a recorded source setup reports `source-manager-required`;
+select the source-owned script through the supported install/prepare command first.
 
 `clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` is the
 explicit owner-approved remote installation.

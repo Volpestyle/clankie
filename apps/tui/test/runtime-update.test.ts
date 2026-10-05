@@ -115,6 +115,43 @@ it("installs completely before old shutdown and persists exact new health", asyn
   });
   expect(readRuntimeUpdate(f.plan.directory)).toEqual(result);
 });
+it("refreshes plugins after healthy cutover and retains incomplete profile receipts without rollback", async () => {
+  const f = fixture();
+  const result = await executeRuntimeUpdate(f.plan, {
+    ...f,
+    refreshHarnesses: async (runtime) => {
+      expect(runtime).toBe(f.plan.runtime);
+      expect(f.calls.at(-1)).toBe("restart:new");
+      f.calls.push("refresh");
+      return { ok: false, local: [{ harness: "codex", status: "source-manager-required" }] };
+    },
+  });
+  expect(result).toMatchObject({
+    phase: "healthy",
+    healthy: true,
+    reason: "harness-refresh-incomplete",
+    harnessRefresh: { ok: false, result: { local: [{ status: "source-manager-required" }] } },
+  });
+  expect(f.calls.at(-1)).toBe("refresh");
+  expect(f.commits.get(f.plan.runtime)).toBe(f.plan.newCommit);
+  expect(readRuntimeUpdate(f.plan.directory)).toEqual(result);
+});
+it("persists a failed refresh independently of service health", async () => {
+  const f = fixture();
+  const result = await executeRuntimeUpdate(f.plan, {
+    ...f,
+    refreshHarnesses: async () => {
+      throw Error("fleet offline");
+    },
+  });
+  expect(result).toMatchObject({
+    phase: "healthy",
+    healthy: true,
+    harnessRefresh: { ok: false, error: "fleet offline" },
+  });
+  expect(readRuntimeUpdate(f.plan.directory)).toEqual(result);
+  expect(f.calls.at(-1)).toBe("restart:new");
+});
 it("failed install leaves old pin and all services untouched", async () => {
   const f = fixture();
   f.onInstall(() => {

@@ -107,12 +107,14 @@ export interface RuntimeUpdateResult {
   readonly rollbackHealthy?: boolean;
   readonly reason?: string;
   readonly serviceReceipts?: readonly RuntimeServiceReceipt[];
+  readonly harnessRefresh?: { readonly ok: boolean; readonly result?: unknown; readonly error?: string };
 }
 export interface RuntimeUpdatePorts {
   readonly run: InstallCommand;
   /** Existing CLI service supervisor; a successful stop means all exact owned services stopped. */
   readonly services: (runtime: string, action: "down" | "restart") => Promise<RuntimeServiceReceipt>;
   readonly now?: () => Date;
+  readonly refreshHarnesses?: (runtime: string) => Promise<{ ok: boolean }>;
 }
 
 export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
@@ -144,6 +146,7 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
         "rollbackHealthy",
         "reason",
         "serviceReceipts",
+        "harnessRefresh",
       ].includes(key)
     )
       throw Error("Unknown update result field");
@@ -167,6 +170,19 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
     ...(value.serviceReceipts === undefined
       ? {}
       : { serviceReceipts: (value.serviceReceipts as unknown[]).map(parseServiceReceipt) }),
+    ...(value.harnessRefresh === undefined
+      ? {}
+      : { harnessRefresh: parseHarnessRefresh(value.harnessRefresh) }),
+  };
+}
+
+function parseHarnessRefresh(input: unknown): NonNullable<RuntimeUpdateResult["harnessRefresh"]> {
+  const value = object(input);
+  if (typeof value.ok !== "boolean") throw Error("Invalid harness refresh receipt");
+  return {
+    ok: value.ok,
+    ...(value.result === undefined ? {} : { result: value.result }),
+    ...(value.error === undefined ? {} : { error: boundedString(value.error, 1024) }),
   };
 }
 
@@ -266,7 +282,25 @@ export async function executeRuntimeUpdate(
     await installPinnedLinks(plan.runtime, plan.home);
     persist("restarting");
     if (!(await service("restart", plan.newCommit))) throw Error("New services failed health checks");
-    return persist("healthy", { healthy: true });
+    // Plugin failures do not undo a healthy service cutover or restart any harness.
+    let harnessRefresh: RuntimeUpdateResult["harnessRefresh"];
+    if (ports.refreshHarnesses) {
+      try {
+        const result = await ports.refreshHarnesses(plan.runtime);
+        harnessRefresh = { ok: result.ok === true, result };
+      } catch (error) {
+        harnessRefresh = {
+          ok: false,
+          error: (error instanceof Error ? error.message : String(error)).slice(0, 1024),
+        };
+      }
+    }
+    return persist("healthy", {
+      healthy: true,
+      ...(harnessRefresh
+        ? { harnessRefresh, ...(harnessRefresh.ok ? {} : { reason: "harness-refresh-incomplete" }) }
+        : {}),
+    });
   } catch {
     if (!oldStopped)
       return persist(stopAttempted ? "stop-unconfirmed" : "failed", {

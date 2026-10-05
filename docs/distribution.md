@@ -18,6 +18,15 @@ each version immutably under `~/.local/share/clankie/releases/`. It updates
 `~/.local/bin/clankie` to the current launcher. Set `CLANKIE_INSTALL_ROOT` or
 `CLANKIE_BIN_DIR` before running the installer to choose different roots.
 
+Both release installation and `clankie update` refresh already-linked Claude and
+Codex worker plugins, including profiles on enabled SSH fleet machines, through
+the existing harness installer. First-time linking still uses interactive
+consent. Managed Codex profiles reuse a previously approved source-owned setup;
+missing setup or an unreachable machine returns an incomplete receipt. Native
+panes with an older plugin get a once-only save/restart/resume flag. Their
+harnesses are never restarted by installation. See [harness linking](cli.md#linking-native-fleet-harnesses)
+for receipts, source setup and manual remediation.
+
 Install a specific release with:
 
 ```bash
