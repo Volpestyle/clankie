@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -92,6 +92,8 @@ async function fixture() {
     exp: now / 1000 + 21600,
   });
   let revision: string | null = null,
+    sequence = 0,
+    legacyFence = false,
     active = true,
     unavailable = false,
     badProof = false;
@@ -180,7 +182,11 @@ async function fixture() {
             }),
           });
         } else if (path.endsWith("/discord-policy-state"))
-          send(200, { generation: active ? generation : null, revision: active ? revision : null });
+          send(200, {
+            generation: active ? generation : null,
+            revision: active ? revision : null,
+            ...(legacyFence ? {} : { sequence: active ? sequence : 0 }),
+          });
         else if (path.endsWith("/discord-policy")) {
           const policy = ManagedDiscordPolicyRequestSchema.parse(input);
           policyRequests.push(policy);
@@ -190,17 +196,27 @@ async function fixture() {
             hold.started.resolve();
             await hold.release.promise;
           }
-          if (!active || policy.generation !== generation || policy.expectedRevision !== revision) {
+          if (
+            !active ||
+            policy.generation !== generation ||
+            policy.expectedRevision !== revision ||
+            policy.expectedSequence !== sequence
+          ) {
             send(409, {
               error: "discord_policy_conflict",
-              current: { generation: active ? generation : null, revision: active ? revision : null },
+              current: {
+                generation: active ? generation : null,
+                revision: active ? revision : null,
+                sequence: active ? sequence : 0,
+              },
             });
             return;
           }
           expect(policy.revision).toBe(discordSettingsRevision(policy.settings));
           revision = policy.revision;
+          sequence++;
           applied.push(policy);
-          send(200, { generation, revision });
+          send(200, { generation, revision, sequence });
         } else if (path.endsWith("/discord-directory")) {
           if (input.query.guildId && input.query.guildId !== guildId) {
             send(403, { error: "wrong_guild" });
@@ -404,6 +420,10 @@ async function fixture() {
     },
     setRemoteRevision: (value: string) => {
       revision = value;
+      sequence++;
+    },
+    legacyFence: (value: boolean) => {
+      legacyFence = value;
     },
   };
 }
@@ -504,6 +524,8 @@ it("retries policy conflicts from current disk and survives outage/restart with 
   await pending;
   expect(f.applied.map((policy) => policy.settings.role)).toEqual(["admin"]);
   expect(f.policyRequests.map((policy) => policy.settings.role)).toEqual(["participant", "admin"]);
+  expect(f.policyRequests.map((policy) => policy.expectedSequence)).toEqual([0, 1]);
+  expect(JSON.parse(readFileSync(join(f.root, "policy.json"), "utf8")).sequence).toBe(2);
   expect((await manager.status()).state).toBe("synced");
   const raw = discordSettingsRevision((await f.settings.load()).discord),
     before = f.applied.at(-1)!.revision;
@@ -520,4 +542,29 @@ it("retries policy conflicts from current disk and survives outage/restart with 
   const count = f.applied.length;
   await f.manager({ DISCORD_ROLE: "participant" }).sync();
   expect(f.applied).toHaveLength(count);
+});
+
+it("discards revision-only disk acknowledgements and refuses revision-only wire fences before a policy write", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => ({
+    ...current,
+    discord: { ...current.discord, serverId: "10001" },
+  }));
+  await f.manager().sync();
+  const path = join(f.root, "policy.json");
+  const { sequence: _sequence, ...legacy } = JSON.parse(readFileSync(path, "utf8"));
+  writeFileSync(path, JSON.stringify(legacy));
+  const restarted = f.manager();
+  expect(await restarted.status()).toMatchObject({ state: "pending" });
+  expect((await restarted.status()).appliedRevision).toBeUndefined();
+  const count = f.policyRequests.length;
+  f.legacyFence(true);
+  await restarted.sync();
+  expect((await restarted.status()).state).toBe("unavailable");
+  expect(f.policyRequests).toHaveLength(count);
+  f.legacyFence(false);
+  await restarted.sync();
+  expect((await restarted.status()).state).toBe("synced");
+  expect(JSON.parse(readFileSync(path, "utf8")).sequence).toBe(1);
+  expect(f.policyRequests).toHaveLength(count);
 });

@@ -69,13 +69,17 @@ filter visible channels and private threads; incomplete caches remain partial,
 and unknown permissions remain unchecked. A server or installation outside that
 scope cannot become visible by changing the directory query.
 
-The body projects its revision-fenced policy to the provider. Participant has
+The body projects its revision- and sequence-fenced policy to the provider. Participant has
 no second channel allowlist; Discord permissions decide admission in its bound
 server. Admin requires a dedicated bound server and verified Administrator.
 The provider rechecks the current connection, installation, policy and channel
 permissions before ingress and outbound effects. A conflicting projection
-causes the body to reread the provider fence and retry its current policy;
-disconnect/reinstall invalidates the old connection generation. Pending or
+causes the body to reread the provider fence and retry its current policy.
+The monotonic write sequence prevents a delayed write from succeeding after
+a revision changes and then reverts. An empty ingress server list denies guild
+ingress; it never selects every visible channel. Non-admitted messages do not
+consume the tenant's admitted-message budget.
+Disconnect/reinstall invalidates the old connection generation. Pending or
 unavailable synchronization is reported separately from a successful save.
 
 The hosted dashboard uses purpose-specific, request-bound, short-lived owner

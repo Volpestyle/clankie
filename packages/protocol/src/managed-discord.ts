@@ -5,6 +5,7 @@ import { DiscordSettingsSchema } from "./discord-settings.ts";
 
 export const DiscordConnectionGenerationSchema = z.string().regex(/^[a-f0-9]{32}$/u);
 export const DiscordPolicyRevisionSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+export const DiscordPolicySequenceSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const Installation = z.string().regex(/^[A-Za-z0-9_-]{22}$/u);
 const ApplicationId = z.string().regex(/^\d{5,32}$/u);
 export const ManagedDiscordDirectoryRequestSchema = z
@@ -32,6 +33,7 @@ export const ManagedDiscordPolicyStateSchema = z
   .object({
     generation: DiscordConnectionGenerationSchema.nullable(),
     revision: DiscordPolicyRevisionSchema.nullable(),
+    sequence: DiscordPolicySequenceSchema,
     applicationId: ApplicationId.optional(),
   })
   .strict();
@@ -42,6 +44,7 @@ export const ManagedDiscordPolicyRequestSchema = z
     generation: DiscordConnectionGenerationSchema,
     revision: DiscordPolicyRevisionSchema,
     expectedRevision: DiscordPolicyRevisionSchema.nullable(),
+    expectedSequence: DiscordPolicySequenceSchema,
     settings: DiscordSettingsSchema,
   })
   .strict();
@@ -49,6 +52,7 @@ export const ManagedDiscordPolicyResponseSchema = z
   .object({
     generation: DiscordConnectionGenerationSchema,
     revision: DiscordPolicyRevisionSchema,
+    sequence: DiscordPolicySequenceSchema,
     applicationId: ApplicationId.optional(),
   })
   .strict();

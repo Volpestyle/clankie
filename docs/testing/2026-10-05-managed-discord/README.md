@@ -64,6 +64,20 @@ fixture-only HTTP endpoint cannot. No private hosted implementation is added
 to the public repository. The companion ops evidence lives at
 `clankie-ops/docs/testing/2026-10-05-managed-discord/README.md`.
 
+## Review follow-up: sequence fence
+
+The policy wire now requires a nonnegative safe-integer `sequence` on state,
+acknowledgement and conflict responses, plus `expectedSequence` on writes.
+The body rereads both revision and sequence after conflict, and persists the
+accepted sequence. A legacy local revision-only acknowledgement is discarded
+until a fresh wire read; revision-only wire requests/responses fail closed.
+The sealed owner bridge, signatures and draft edit revision are unchanged.
+
+Focused follow-up: `managed-discord.test.ts` **4/4 passed**; protocol/core
+typechecks, scoped lint and diff check passed. The private real edge HTTP
+regression verifies that a delayed R1 → R2 write is refused after R1 → R2 → R1.
+Core and ops protocol consumers must land together.
+
 ## Owner gates
 
 James owns the disposable dev Discord installation/permission and addressed

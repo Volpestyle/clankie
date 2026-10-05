@@ -73,7 +73,9 @@ ownership transfer refused at the adapter. Machine grants remain separate.
 four-sentence setup.
 Managed hosts also return optional `managedPolicy` status: `synced`, `pending`,
 `conflict`, `unavailable` or `disconnected`. A saved revision is distinct from
-the revision acknowledged by the edge. Conflicts reread the edge fence and retry
+the revision acknowledged by the edge. Policy writes also compare a monotonic
+sequence so an old write cannot succeed after a revision changes and reverts.
+Conflicts reread the edge fence and retry
 the body's current policy; the persisted settings are reconciled after restart.
 `managedPolicy.revision` fingerprints the effective policy, including environment
 overrides; `revision` on the settings snapshot still fences the stored owner edit.

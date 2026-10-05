@@ -21,6 +21,7 @@ const Saved = ManagedDiscordPolicyStateSchema.extend({
   version: z.literal(1),
   installationId: z.string(),
 }).strict();
+const LegacySaved = Saved.omit({ sequence: true });
 
 /** The body's current settings own policy. Every retry rereads both the edge fence and current disk. */
 export class ManagedDiscord {
@@ -50,10 +51,17 @@ export class ManagedDiscord {
       installationId: options.client.bootstrap.installationId,
       generation: null,
       revision: null,
+      sequence: 0,
     };
     try {
-      const saved = Saved.parse(JSON.parse(readFileSync(options.statePath, "utf8")));
-      if (saved.installationId === this.applied.installationId) this.applied = saved;
+      const raw: unknown = JSON.parse(readFileSync(options.statePath, "utf8"));
+      const saved = Saved.safeParse(raw);
+      if (saved.success) {
+        if (saved.data.installationId === this.applied.installationId) this.applied = saved.data;
+      } else if (!LegacySaved.safeParse(raw).success) {
+        throw new Error("managed_discord_state_invalid");
+      }
+      // A revision-only local acknowledgement is discarded. Only a fresh wire fence restores it.
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT")
         throw new Error("managed_discord_state_invalid");
@@ -150,7 +158,7 @@ export class ManagedDiscord {
         const source = await this.options.settings.loadFenced();
         const { settings, revision } = this.projection(source.settings.discord);
         if (fence.revision === revision) {
-          this.persist({ generation: fence.generation, revision });
+          this.persist({ generation: fence.generation, revision, sequence: fence.sequence });
           this.state = "synced";
           return;
         }
@@ -160,9 +168,14 @@ export class ManagedDiscord {
           generation: fence.generation,
           revision,
           expectedRevision: fence.revision,
+          expectedSequence: fence.sequence,
           settings,
         });
-        if (accepted.generation !== fence.generation || accepted.revision !== revision)
+        if (
+          accepted.generation !== fence.generation ||
+          accepted.revision !== revision ||
+          accepted.sequence !== fence.sequence + 1
+        )
           throw new Error("managed_discord_ack_invalid");
         this.persist(accepted);
         if (this.projection((await this.options.settings.load()).discord).revision === revision) {
@@ -183,7 +196,7 @@ export class ManagedDiscord {
     );
     return { settings: effective, revision: discordSettingsRevision(effective) };
   }
-  private persist(fence: { generation: string; revision: string }): void {
+  private persist(fence: { generation: string; revision: string; sequence: number }): void {
     const saved = Saved.parse({
       ...fence,
       version: 1,
