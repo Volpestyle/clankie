@@ -153,12 +153,16 @@ it("delivers the original wake and report once when the native receiver returns,
       "Finished",
       "Worker output: Finished",
       "global-default",
-      f.reports.conversationReportRunner({ conversationId: "global-default" }, delivery.id),
+      // A native head is persisted, but its mailbox has not returned yet.
+      undefined,
       { source: "adoption", conversationId: "global-default" },
       { kind: "conversation", owner: { conversationId: "global-default" } },
     );
   expect(accept()).toMatchObject({ received: true });
   await vi.advanceTimersByTimeAsync(0);
+  expect(f.conversations.inboundReports()).toMatchObject([
+    { deliveryId: delivery.id, reportDelivery: { state: "pending", stage: "unavailable" } },
+  ]);
   f.autonomy.scheduleWake("global-default", "2026-10-05T17:00:00Z", "Review the pending work");
   await vi.advanceTimersByTimeAsync(16_000);
   const other = await f.conversations.serve({
