@@ -356,7 +356,13 @@ function closedCaptainDeps() {
     browser: { catalog: deny, call: deny },
     media: { generateImage: deny, generateVideo: deny, finishedRenders: deny },
     embodiment: { submitIntent: deny, getSession: deny, getLiveSession: deny },
-    memory: { appendEpisode: deny, recallEpisodeCard: deny, searchEpisodeCard: deny },
+    memory: {
+      writeMemory: deny,
+      recallMemoryCard: deny,
+      searchMemory: deny,
+      editMemory: deny,
+      forgetMemory: deny,
+    },
     presence: { listSessions: deny, listVoiceHistory: deny, listRecentVoiceSpeech: deny },
   };
 }

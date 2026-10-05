@@ -78,13 +78,16 @@ mid-write costs one note instead of the file.
 
 **Recall is automatic and hidden.** A Pi extension named `captain-memory` runs on
 `before_agent_start` for every Clankie turn and appends a bounded card of
-visible notes to the system prompt. Notes with more matching query terms rank
-first, then by newest date; with no query, the card takes the newest eight
+visible notes to the system prompt. Notes with more matching query terms of at
+least three characters rank first, then by newest date; with no query, the card takes the newest eight
 ([`captain/captain.ts`](../apps/clankie/src/captain/captain.ts)). He does not
 call a tool to remember; the card is simply there. It is labelled as ambient
 context rather than instruction or established fact, because his own past notes
 are still model output. Recall failure is swallowed — a broken memory store
 degrades the prompt, it does not fail the turn.
+
+Rendered note text and search headings collapse whitespace to stay on one
+reference line. Stored text is preserved, including line breaks.
 
 An empty store still renders a card, saying so and naming the tool. A missing
 card reads as having no memory at all, and nothing else in the prompt would
