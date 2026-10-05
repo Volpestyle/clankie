@@ -45,6 +45,7 @@ interface Observation {
   owners: number[];
   installed: string[];
   foregroundMarkers?: SeatMarkers | null;
+  defaultHomeHash?: string | null;
   privateServer?: {
     pid: number;
     startTime: string;
@@ -143,7 +144,7 @@ function select(observation: Observation, fleet: HerdrFleet, pane: string, strea
   if (!shell || shell.pid === foreground) return undefined;
   const candidates = observation.nativeProcesses.flatMap((native) => {
     if (
-      (native.role !== undefined && native.role !== "tui") ||
+      native.role === "server" ||
       !observation.installed.includes(native.executable) ||
       typeof native.cwd !== "string" ||
       !win32.isAbsolute(native.cwd) ||
@@ -352,6 +353,63 @@ export function createRemoteCodexControlObserver(options: Pick<Options, "fleet" 
       ) as { first: Observation; last: Observation };
       const first = selectCodexControl(snapshots.first, fleet, pane, sessionId, connection);
       const last = selectCodexControl(snapshots.last, fleet, pane, sessionId, connection);
+      return first && isDeepStrictEqual(first, last) && isDeepStrictEqual(await options.fleet(fleetId), fleet)
+        ? first
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+/** Only a standalone native TUI in the SSH account's default home may use CLI queueing. */
+function selectCodexQueue(observation: Observation, fleet: HerdrFleet, pane: string, sessionId: string) {
+  const view = select(observation, fleet, pane);
+  const agent = parseHerdrAgentResult(JSON.stringify({ result: { agent: observation.agent } }));
+  const native = observation.nativeProcesses[0];
+  const markers = observation.foregroundMarkers;
+  if (
+    !view ||
+    agent.agent !== "codex" ||
+    agent.session?.kind !== "id" ||
+    agent.session.value !== sessionId ||
+    !sessionId ||
+    view.proof.nativeSessionPending ||
+    observation.nativeProcesses.length !== 1 ||
+    native?.pid !== view.proof.processes[0]?.pid ||
+    native?.role !== "tui" ||
+    native.endpoint !== null ||
+    !markers ||
+    markers.pane !== pane ||
+    markers.socketPath !== observation.binding.socketPath ||
+    !/^[a-f0-9]{64}$/u.test(markers.homeHash) ||
+    markers.homeHash !== observation.defaultHomeHash ||
+    !isDeepStrictEqual(markers, native.markers)
+  )
+    return undefined;
+  return { ...view, homeHash: markers.homeHash };
+}
+
+/** Fresh initial/final pane facts, including the default home of the authenticated SSH account. */
+export function createRemoteCodexQueueObserver(options: Pick<Options, "fleet" | "shell">) {
+  return async (fleetId: string, pane: string, sessionId: string) => {
+    if (!/^w[\w]+:p[\w]+$/u.test(pane) || fleetId === "default") return undefined;
+    try {
+      const fleet = await options.fleet(fleetId);
+      if (!fleet || fleet.id !== fleetId || fleet.ssh.shell !== "powershell") return undefined;
+      const snapshots = JSON.parse(
+        await options.shell(fleet)(
+          windowsProcessCommand({
+            session: fleet.session,
+            pane,
+            codexControl: true,
+            codexDefaultHome: true,
+          }),
+          10_000,
+        ),
+      ) as { first: Observation; last: Observation };
+      const first = selectCodexQueue(snapshots.first, fleet, pane, sessionId);
+      const last = selectCodexQueue(snapshots.last, fleet, pane, sessionId);
       return first && isDeepStrictEqual(first, last) && isDeepStrictEqual(await options.fleet(fleetId), fleet)
         ? first
         : undefined;

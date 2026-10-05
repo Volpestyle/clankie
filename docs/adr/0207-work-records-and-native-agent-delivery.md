@@ -110,7 +110,10 @@ native delivery, uncertainty and completed work.
 Windows control must preserve a pane's private environment. Joining the account's
 shared daemon can disconnect the worker MCP bridge from its pane. Existing
 elevated-shell `--no-daemon` sessions use an embedded server with no external
-control endpoint, so pane-targeted delivery must refuse until one is proven.
+control endpoint. Steering requires a proven native endpoint. Queueing may use
+the existing SSH CLI only when a fresh kernel probe proves that the pane's home
+matches the SSH account's canonical default `~/.codex`, and the SSH CLI inherits
+that same default home. Private or unproved homes refuse this fallback.
 
 The adapter supports an existing dedicated app-server and the original
 interactive TUI in the same pane's foreground process tree. The server must
@@ -124,9 +127,11 @@ remain open verification gaps.
 The native app-server cannot select a CLI named profile (`-p`/`--profile`),
 whose separate configuration file may carry different MCP and model settings.
 Those launches retain the native embedded `--no-daemon` path. Pane-targeted
-steer and queue delivery refuse until an endpoint and the same private home can
-be proven; they never fall through to an account-default queue. A future launcher
-must forward only configuration flags accepted by both native commands and
+steering refuses until an endpoint and the same private home can be proven;
+queueing retains the default-home CLI path described above. The pane identity
+and home proof are repeated after preparation and caller authority checks, just
+before CLI dispatch. A private native receipt never falls through to CLI queueing.
+A future launcher must forward only configuration flags accepted by both native commands and
 preserve the TUI's prompt, model, approval, sandbox and resume arguments.
 
 Before opening the fleet's SSH transport, Clankie independently proves the

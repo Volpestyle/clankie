@@ -238,11 +238,13 @@ public static class ClankieProcess {
         home=System.IO.Path.Combine(profile,".codex");
       }
       if(!System.IO.Path.IsPathRooted(home)) throw new Exception("Relative process home");
-      using(var hash=SHA256.Create()) {
-        string homeHash=BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(DirectoryCanonical(home)))).Replace("-","").ToLowerInvariant();
-        return new SeatMarkers {pane=pane,socketPath=socket,homeHash=homeHash};
-      }
+      return new SeatMarkers {pane=pane,socketPath=socket,homeHash=HomeHash(home)};
     } finally {CloseHandle(handle);}
+  }
+  public static string HomeHash(string home) {
+    using(var hash=SHA256.Create()) {
+      return BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(DirectoryCanonical(home)))).Replace("-","").ToLowerInvariant();
+    }
   }
   static byte[] Read(IntPtr handle, long address, int length) {
     if (address <= 0 || length < 0 || length > 65536) throw new Exception("Invalid process memory range");
@@ -318,6 +320,8 @@ export function windowsProcessCommand(input: {
   privateServer?: { pid: number; port: number };
   /** Project bounded native argv and fixed seat markers for dedicated Codex control. */
   codexControl?: boolean;
+  /** Compare the native home to the SSH account's default; no home path is exported. */
+  codexDefaultHome?: boolean;
 }): string {
   return probeCommand(`${native}
 $session = ${powershellLiteral(input.session)}
@@ -409,7 +413,18 @@ foreach ($start in @($nativeProcesses | ForEach-Object { $_.pid }) + @($owners) 
 $relevant = @(foreach ($processId in $needed) { try { $detail=[ClankieProcess]::Details($processId); $detail.executable=[ClankieProcess]::Canonical($detail.executable); $detail } catch { } })
 $foregroundMarkers=$null
 ${input.codexControl ? "try { $foregroundMarkers=[ClankieProcess]::Markers([int]$info.foreground_process_group_id) } catch { }" : ""}
-[ordered]@{binding=[ordered]@{socketPath=$binding[0].socket_path;session=$session};info=[ordered]@{pane_id=$info.pane_id;shell_pid=$info.shell_pid;foreground_process_group_id=$info.foreground_process_group_id};agent=[ordered]@{pane_id=$agent.pane_id;terminal_id=$agent.terminal_id;agent=$agent.agent;agent_session=$agent.agent_session;agent_status=$agent.agent_status};processes=$relevant;nativeProcesses=$nativeProcesses;owners=$owners;installed=$installed;privateServer=$privateServer;foregroundMarkers=$foregroundMarkers}
+$defaultHomeHash=$null
+${
+  input.codexDefaultHome
+    ? `try {
+  $defaultHome=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) '.codex'
+  $defaultHash=[ClankieProcess]::HomeHash($defaultHome)
+  # The CLI will inherit this SSH account's environment; a custom CODEX_HOME cannot select the fallback.
+  if ([ClankieProcess]::Markers([int]$PID).homeHash -ceq $defaultHash) { $defaultHomeHash=$defaultHash }
+} catch { }`
+    : ""
+}
+[ordered]@{binding=[ordered]@{socketPath=$binding[0].socket_path;session=$session};info=[ordered]@{pane_id=$info.pane_id;shell_pid=$info.shell_pid;foreground_process_group_id=$info.foreground_process_group_id};agent=[ordered]@{pane_id=$agent.pane_id;terminal_id=$agent.terminal_id;agent=$agent.agent;agent_session=$agent.agent_session;agent_status=$agent.agent_status};processes=$relevant;nativeProcesses=$nativeProcesses;owners=$owners;installed=$installed;privateServer=$privateServer;foregroundMarkers=$foregroundMarkers;defaultHomeHash=$defaultHomeHash}
 }
 $first = Observe-ClankieProcess
 $last = Observe-ClankieProcess

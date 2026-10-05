@@ -75,6 +75,32 @@ describe("remote project process proof", () => {
   it("allows host doctor observation without pretending it authenticates a socket", async () => {
     expect(await setup().observe("pc", "w3:p8")).toBeDefined();
   });
+  it.each(["unavailable", "other", "tui"])(
+    "preserves a Codex project's native process proof when argv is classified %s",
+    async (role) => {
+      const observation = fixture();
+      observation.agent.agent = "codex";
+      observation.agent.agent_session.agent = "codex";
+      observation.agent.agent_session.source = "herdr:codex";
+      const executable = "C:\\installed\\codex.exe";
+      observation.installed = [executable];
+      observation.processes[2]!.executable = executable;
+      const native = { ...observation.nativeProcesses[0]!, executable, role };
+      observation.nativeProcesses = [native];
+      // Failed argv reads and unknown flags (for example --yolo) are not
+      // prerequisites for the installed native process/cwd/socket ancestry proof.
+      expect(await setup(observation).observe("pc", "w3:p8", stream)).toMatchObject({
+        processes: [{ pid: native.pid }],
+        workspace: { canonicalPath: native.cwd },
+      });
+    },
+  );
+  it("excludes a classified app-server from the native pane occupant candidates", async () => {
+    const observation = fixture();
+    const native = { ...observation.nativeProcesses[0]!, role: "server" };
+    observation.nativeProcesses = [native];
+    expect(await setup(observation).observe("pc", "w3:p8", stream)).toBeUndefined();
+  });
   it.each([
     [
       "unrelated socket owner",

@@ -133,7 +133,12 @@ supervision of new Windows launches is not established by this adapter.
 Fleet SSH control requires fresh native process,
 pane/session, private-home and exact connected TCP ownership proof. Existing
 embedded `--no-daemon` sessions and explicit named profiles retain their launch
-mode; pane-targeted delivery refuses until a private endpoint can be proven. An unavailable endpoint grants no tools or authority to another
+mode. Steering requires a proven private endpoint. Queueing may use the existing
+SSH CLI only after fresh kernel observations prove the pane and CLI share the
+SSH account's canonical default `~/.codex`; the same pane/session and home proof
+are repeated after preparation and caller authority checks. Private or unproved
+homes refuse the CLI fallback, and private native receipts never authorize a
+second send. An unavailable endpoint grants no tools or authority to another
 session. Other routes need a supported native channel or session API. Automated
 briefs and messages never fall back to terminal typing. An uncertain start or
 delivery retains its pane for inspection; reconcile it before retrying. A saved

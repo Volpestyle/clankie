@@ -13,7 +13,7 @@ import {
   type ExternalCodexControl,
 } from "./external-codex-control.ts";
 import { openRemoteCodexConnection, type RemoteCodexConnection } from "./remote-codex-connection.ts";
-import { createRemoteCodexControlObserver } from "../remote-project-proof.ts";
+import { createRemoteCodexControlObserver, createRemoteCodexQueueObserver } from "../remote-project-proof.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -412,23 +412,35 @@ export function remoteCodexQueue(
         script = undefined;
         throw error;
       }));
+  const observeDefaultHome = createRemoteCodexQueueObserver({
+    fleet: async (id) => (id === fleet.id ? fleet : undefined),
+    shell: () => shell,
+  });
   return async (
     sessionId: string,
     text: string,
     beforeDispatch?: () => Promise<boolean>,
     paneId?: string,
   ): Promise<boolean | FleetSeatDelivery> => {
+    const qualified = paneId === undefined ? undefined : splitFleetQualified(paneId);
+    const pane = qualified?.fleet === fleet.id ? qualified.id : undefined;
+    const original =
+      fleet.ssh.shell === "powershell" && pane !== undefined
+        ? await observeDefaultHome(fleet.id, pane, sessionId)
+        : undefined;
     if (fleet.ssh.shell === "powershell" && paneId !== undefined) {
-      const native = await privateQueue?.(paneId)?.(sessionId, text, undefined, undefined, beforeDispatch);
-      // An unavailable proof cannot establish that this pane uses the SSH
-      // account's home. Never replace its private/named-profile backend.
-      return (
-        native ?? {
-          outcome: "undelivered",
-          deliveryStage: "unavailable",
-          detail: "The Windows pane's Codex queue backend cannot be proven; nothing was sent.",
-        }
-      );
+      // Choose the default-home fallback before any native mutation. An uncertain
+      // or unavailable private result cannot authorize a second send through CLI.
+      if (!original) {
+        const native = await privateQueue?.(paneId)?.(sessionId, text, undefined, undefined, beforeDispatch);
+        return (
+          native ?? {
+            outcome: "undelivered",
+            deliveryStage: "unavailable",
+            detail: "The Windows pane's Codex queue backend cannot be proven; nothing was sent.",
+          }
+        );
+      }
     }
     const argv = ["queue", "--thread", sessionId, "--message", text];
     const queueArgs = fleet.ssh.shell === "powershell" ? [await codexScript(), ...argv] : argv;
@@ -443,6 +455,16 @@ export function remoteCodexQueue(
         };
       }
     }
+    if (
+      original &&
+      pane !== undefined &&
+      !isDeepStrictEqual(original, await observeDefaultHome(fleet.id, pane, sessionId))
+    )
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: "The Windows pane's default Codex home or native identity changed; nothing was sent.",
+      };
     const stdout = await shell(
       fleet.ssh.shell === "powershell"
         ? remoteProgramCommand("powershell", "node", queueArgs)

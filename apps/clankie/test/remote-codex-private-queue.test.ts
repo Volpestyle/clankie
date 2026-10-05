@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { once } from "node:events";
-import { afterEach, expect, it } from "vitest";
+import { gunzipSync } from "node:zlib";
+import { afterEach, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 import { createRemoteCodexControlObserver } from "../src/remote-project-proof.ts";
 import { createFleetSeatControl } from "../src/captain/fleet-seat-control.ts";
@@ -13,6 +14,47 @@ const pane = "w8:pB";
 const qualified = `${fleet.id}/${pane}`;
 const sessionId = "01a10928-d878-7db2-82d0-643dce239a3f";
 const cleanups: Array<() => Promise<void>> = [];
+function scriptFromCommand(command: string) {
+  const script = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
+  const compressed = /\$bytes=\[Convert\]::FromBase64String\('([A-Za-z0-9+/=]+)'\)/u.exec(script)?.[1];
+  return compressed ? gunzipSync(Buffer.from(compressed, "base64")).toString("utf8") : script;
+}
+function defaultHomePane() {
+  const executable = "C:\\installed\\codex.exe";
+  const markers = { pane, socketPath: "C:\\herdr.sock", homeHash: "a".repeat(64) };
+  return {
+    binding: { session: fleet.session, socketPath: markers.socketPath },
+    info: { pane_id: pane, shell_pid: 10, foreground_process_group_id: 20 },
+    agent: {
+      pane_id: pane,
+      terminal_id: "term_default",
+      agent: "codex",
+      agent_session: { agent: "codex", kind: "id", source: "herdr:codex", value: sessionId },
+    },
+    processes: [
+      { pid: 10, parent: 999, startTime: "2026-10-03T10:00:00.000Z", executable: "C:\\Windows\\pwsh.exe" },
+      { pid: 20, parent: 10, startTime: "2026-10-03T10:00:01.000Z", executable: "C:\\Windows\\cmd.exe" },
+      { pid: 30, parent: 20, startTime: "2026-10-03T10:00:02.000Z", executable },
+    ],
+    nativeProcesses: [{ pid: 30, executable, cwd: "C:\\repo", role: "tui", endpoint: null, markers }],
+    owners: [],
+    installed: [executable],
+    foregroundMarkers: { ...markers },
+    defaultHomeHash: markers.homeHash as string | null,
+  };
+}
+function queueShell(
+  observations: () => { first: ReturnType<typeof defaultHomePane>; last: ReturnType<typeof defaultHomePane> },
+) {
+  const calls: string[] = [];
+  const shell = vi.fn(async (command: string) => {
+    const script = scriptFromCommand(command);
+    calls.push(script);
+    if (script.includes("Observe-ClankieProcess")) return JSON.stringify(observations());
+    return script.includes("npm root -g") ? "C:\\npm\\codex.js" : "queued";
+  });
+  return { shell, calls };
+}
 afterEach(async () => {
   for (const close of cleanups.splice(0)) await close();
 });
@@ -68,7 +110,8 @@ it("refuses queue when a proven private steer becomes idle and its native proof 
     };
   };
   let cliCalls = 0;
-  const shell = async () => {
+  const shell = async (command: string) => {
+    if (scriptFromCommand(command).includes("Observe-ClankieProcess")) return raw;
     cliCalls++;
     throw new Error("Account-default CLI queue must not be reached");
   };
@@ -101,7 +144,7 @@ it.each(["missing control", "unavailable proof"])(
     let cliCalls = 0;
     const shell = async () => {
       cliCalls++;
-      return "C:\\npm\\codex.js";
+      return "{}";
     };
     const queue = remoteCodexQueue(
       fleet,
@@ -112,6 +155,114 @@ it.each(["missing control", "unavailable proof"])(
       outcome: "undelivered",
       deliveryStage: "unavailable",
     });
-    expect(cliCalls).toBe(0);
+    // A fresh read-only probe is allowed; CLI discovery and dispatch are not.
+    expect(cliCalls).toBe(1);
+  },
+);
+
+it("queues a hired --no-daemon pane through SSH CLI only after fresh default-home proof and final authority", async () => {
+  const observation = defaultHomePane();
+  const { shell, calls } = queueShell(() => ({ first: observation, last: observation }));
+  const privateQueue = vi.fn();
+  const beforeDispatch = vi.fn(async () => true);
+  expect(
+    await remoteCodexQueue(fleet, shell, privateQueue)(sessionId, "queue once", beforeDispatch, qualified),
+  ).toBe(true);
+  expect(calls).toHaveLength(4);
+  expect(calls[0]).toContain("[Environment+SpecialFolder]::UserProfile");
+  expect(calls[0]).toContain("[ClankieProcess]::Markers([int]$PID).homeHash -ceq $defaultHash");
+  expect(calls[1]).toContain("npm root -g");
+  expect(calls[2]).toContain("Observe-ClankieProcess");
+  const commandLine = Buffer.from(/FromBase64String\('([^']+)'\)/u.exec(calls[3]!)![1]!, "base64").toString(
+    "utf8",
+  );
+  expect(commandLine).toBe(`C:\\npm\\codex.js queue --thread ${sessionId} --message "queue once"`);
+  expect(beforeDispatch).toHaveBeenCalledOnce();
+  expect(privateQueue).not.toHaveBeenCalled();
+});
+
+it.each([
+  "private home",
+  "unknown SSH home",
+  "missing markers",
+  "wrong pane",
+  "wrong session",
+  "unclassified TUI",
+  "reused PID",
+])("refuses a targeted CLI queue with %s", async (kind) => {
+  const observation = defaultHomePane();
+  if (kind === "private home") observation.defaultHomeHash = "b".repeat(64);
+  if (kind === "unknown SSH home") observation.defaultHomeHash = null;
+  if (kind === "missing markers") observation.nativeProcesses[0]!.markers.homeHash = "";
+  if (kind === "wrong pane") observation.info.pane_id = "w9:pC";
+  if (kind === "wrong session") observation.agent.agent_session.value = "other-thread";
+  if (kind === "unclassified TUI") observation.nativeProcesses[0]!.role = "unavailable";
+  if (kind === "reused PID") observation.processes[1]!.startTime = "2026-10-03T10:00:03.000Z";
+  const { shell, calls } = queueShell(() => ({ first: observation, last: observation }));
+  expect(await remoteCodexQueue(fleet, shell)(sessionId, "do not queue", undefined, qualified)).toMatchObject(
+    {
+      outcome: "undelivered",
+      deliveryStage: "unavailable",
+    },
+  );
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toContain("Observe-ClankieProcess");
+});
+
+it.each(["home", "session", "PID", "proof disappears"])(
+  "refuses a changed %s after the authority guard yields",
+  async (kind) => {
+    let observation = defaultHomePane();
+    const { shell, calls } = queueShell(() => ({ first: observation, last: observation }));
+    const beforeDispatch = async () => {
+      observation = structuredClone(observation);
+      if (kind === "home") {
+        observation.nativeProcesses[0]!.markers.homeHash = "b".repeat(64);
+        observation.foregroundMarkers.homeHash = "b".repeat(64);
+        observation.defaultHomeHash = "b".repeat(64);
+      }
+      if (kind === "session") observation.agent.agent_session.value = "replacement";
+      if (kind === "PID") observation.processes[2]!.startTime = "2026-10-03T10:00:02.0000001Z";
+      if (kind === "proof disappears") observation.defaultHomeHash = null;
+      return true;
+    };
+    expect(
+      await remoteCodexQueue(fleet, shell)(sessionId, "do not queue", beforeDispatch, qualified),
+    ).toMatchObject({
+      outcome: "undelivered",
+      deliveryStage: "unavailable",
+    });
+    expect(calls).toHaveLength(3);
+    expect(calls.at(-1)).toContain("Observe-ClankieProcess");
+  },
+);
+
+it("refuses a pane whose native lifetime changes within the fresh default-home probe", async () => {
+  const first = defaultHomePane();
+  const last = structuredClone(first);
+  last.processes[2]!.startTime = "2026-10-03T10:00:02.0000001Z";
+  const { shell, calls } = queueShell(() => ({ first, last }));
+  expect(await remoteCodexQueue(fleet, shell)(sessionId, "do not queue", undefined, qualified)).toMatchObject(
+    {
+      outcome: "undelivered",
+      deliveryStage: "unavailable",
+    },
+  );
+  expect(calls).toHaveLength(1);
+});
+
+it.each(["unconfirmed", "undelivered"] as const)(
+  "never replaces a private native %s receipt with CLI queueing",
+  async (outcome) => {
+    const observation = defaultHomePane();
+    observation.defaultHomeHash = "b".repeat(64);
+    const { shell, calls } = queueShell(() => ({ first: observation, last: observation }));
+    const result = { outcome, detail: "Native queue receipt" };
+    const privateQueue = vi.fn(() => async () => result);
+    expect(
+      await remoteCodexQueue(fleet, shell, privateQueue)(sessionId, "deliver once", undefined, qualified),
+    ).toEqual(result);
+    expect(calls).toHaveLength(1);
+    expect(privateQueue).toHaveBeenCalledOnce();
   },
 );
