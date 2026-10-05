@@ -85,6 +85,13 @@ has setup and troubleshooting details.
 
 “Keep the team small and use efficient models. Ask Codex to implement, then
 have another agent review.” Open `/fleet` to save how you like him to work.
+The same editor lets you choose who closes delivered work and who prepares
+Clankie's own setup on already-linked machines. Both default to the lead: he
+closes after landing, passing checks and attaching evidence, and you can reopen.
+Choose Owner to keep closure In Review or to require approval for machine setup.
+Projects may override either setting independently. Sign-ins, payments, accounts
+and credentials retain your decision; setup does not restart existing work.
+
 The [fleet CLI](/cli/#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear)
 lets you set the same preferences:
 

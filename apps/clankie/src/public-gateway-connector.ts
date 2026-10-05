@@ -508,7 +508,7 @@ export class PublicGatewayConnector {
                 async (request) => {
                   const url = new URL(request.url);
                   const origin = url.hostname === "control" ? this.controlPlaneUrl : this.relayUrl;
-                  return this.fetcher(new Request(new URL(url.pathname, origin), request));
+                  return this.fetcher(new Request(new URL(`${url.pathname}${url.search}`, origin), request));
                 },
               );
       await sendFrame(socket, {

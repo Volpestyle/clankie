@@ -61,6 +61,27 @@ export {
   type VoiceSettings,
 } from "./schema.ts";
 export { MinecraftPlaySettingsSchema, type MinecraftPlaySettings } from "@clankie/protocol";
+export {
+  FleetAutonomyModeSchema,
+  FleetAutonomySchema,
+  AutonomySettingsSchema,
+  FleetAutonomyOverridesSchema,
+  ProjectAutonomySchema,
+  FleetAutonomyPatchSchema,
+  ProjectAutonomyPatchSchema,
+  FLEET_AUTONOMY_DEFAULTS,
+  FLEET_CLOSURE_GUIDANCE,
+  FLEET_MACHINE_SETUP_GUIDANCE,
+  FLEET_AUTONOMY_GUIDANCE,
+  effectiveFleetAutonomy,
+  type FleetAutonomyMode,
+  type FleetAutonomy,
+  type AutonomySettings,
+  type FleetAutonomyOverrides,
+  type ProjectAutonomy,
+  type FleetAutonomyPatch,
+  type ProjectAutonomyPatch,
+} from "@clankie/protocol/autonomy";
 export { discordAttachmentRoot } from "./attachments.ts";
 export { characterNames, personaInstructions, type PersonaRegister } from "./persona.ts";
 export { bundledSkills, projectSkillPlugin } from "./bundled-skills.ts";

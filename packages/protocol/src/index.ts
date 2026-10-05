@@ -512,6 +512,8 @@ export const OperatorAgentAppearanceSchema = z
 export type OperatorAgentAppearance = z.infer<typeof OperatorAgentAppearanceSchema>;
 export * from "./agent-roles.ts";
 export * from "./projects.ts";
+export * from "./autonomy.ts";
+export * from "./fleet-settings.ts";
 import {
   OPERATOR_AGENT_ROLES,
   OperatorAgentRoleSchema,

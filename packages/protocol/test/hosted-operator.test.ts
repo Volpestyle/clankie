@@ -46,4 +46,21 @@ it("limits hosted device authority to explicit routes and validated conversation
   expect(hostedOperatorAllows("PUT", "/v1/swarm/config", '{"enabled":false}')).toBe(false);
   expect(hostedOperatorAllows("PUT", "/v1/swarm/connections", "{}")).toBe(false);
   expect(hostedOperatorAllows("PUT", "/v1/swarm/future-route", "{}")).toBe(false);
+  expect(hostedOperatorAllows("GET", "/v1/operator/fleet-settings")).toBe(true);
+  expect(hostedOperatorAllows("POST", "/v1/operator/fleet-settings", "{}")).toBe(true);
+  expect(hostedOperatorAllows("GET", "/v1/operator/projects?includeAutonomy=true")).toBe(true);
+  expect(hostedOperatorAllows("POST", "/v1/operator/projects/update?includeAutonomy=true", "{}")).toBe(true);
+  for (const path of [
+    "/v1/operator/fleet-settings/context",
+    "/v1/operator/projects/create",
+    "/v1/operator/projects/worktree-roots/add",
+    "/v1/operator/projects?includeAutonomy=false",
+    "/v1/operator/projects?includeAutonomy=true&unknown=true",
+    "/v1/operator/projects?includeAutonomy=true&includeAutonomy=true",
+    "/v1/operator/projects?include%41utonomy=true",
+    "/v1/operator/fleet-settings?includeAutonomy=true",
+  ]) {
+    expect(hostedOperatorAllows("GET", path)).toBe(false);
+    expect(hostedOperatorAllows("POST", path, "{}")).toBe(false);
+  }
 });

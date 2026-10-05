@@ -14,6 +14,7 @@ import {
   type ObserveProjectWorktreeRoot,
   type SettingsStore,
   updateProjectSettings,
+  type ClankieSettings,
 } from "@clankie/settings";
 import {
   PROJECTS_PATH,
@@ -28,6 +29,21 @@ import {
   PROJECT_UPDATE_SETTINGS_PATH,
   UpdateProjectSettingsSchema,
 } from "@clankie/protocol/projects";
+
+/** Legacy strict clients keep their existing view; the revision always binds full stored policy. */
+function projectSnapshot(current: ClankieSettings, includeAutonomy: boolean) {
+  return {
+    settings: includeAutonomy
+      ? current.projects
+      : {
+          ...current.projects,
+          projects: current.projects.projects.map(({ autonomy: _autonomy, ...project }) => project),
+        },
+    ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
+    ...(includeAutonomy ? { autonomyDefaults: current.autonomy } : {}),
+    revision: projectsRevision(current.projects),
+  };
+}
 
 /** Owner-only configuration. Registration and removal confer no grant or process authority. */
 export function createProjectRoutes(
@@ -55,12 +71,9 @@ export function createProjectRoutes(
   }
   app.get(PROJECTS_PATH, async (context) => {
     const current = await settings.load();
-    const value = current.projects;
-    return context.json({
-      settings: value,
-      ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
-      revision: projectsRevision(value),
-    });
+    const authority = await authorize(context.req.raw);
+    if (authority !== true) return context.json({ error: authority }, authority === "forbidden" ? 403 : 401);
+    return context.json(projectSnapshot(current, context.req.query("includeAutonomy") === "true"));
   });
   app.post(PROJECT_CREATE_SETTINGS_PATH, async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
@@ -75,7 +88,13 @@ export function createProjectRoutes(
         input.data,
         requireOwner,
       );
-      return context.json(result, 201);
+      // Keep the committed generation's full revision while projecting the caller's view.
+      const current = await settings.load();
+      const projected = projectSnapshot(
+        { ...current, projects: result.settings },
+        context.req.query("includeAutonomy") === "true",
+      );
+      return context.json({ ...projected, revision: result.revision }, 201);
     } catch (error) {
       return context.json(
         {
@@ -115,7 +134,7 @@ export function createProjectRoutes(
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
         },
       );
-      return context.json({ settings: updated.projects, revision: projectsRevision(updated.projects) });
+      return context.json(projectSnapshot(updated, context.req.query("includeAutonomy") === "true"));
     } catch {
       return context.json({ error: "project_update_conflict" }, 409);
     }
@@ -136,7 +155,7 @@ export function createProjectRoutes(
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
         },
       );
-      return context.json({ settings: updated.projects, revision: projectsRevision(updated.projects) });
+      return context.json(projectSnapshot(updated, context.req.query("includeAutonomy") === "true"));
     } catch {
       return context.json({ error: "workspace_removal_conflict" }, 409);
     }
@@ -162,7 +181,7 @@ export function createProjectRoutes(
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
         },
       );
-      return context.json({ settings: updated.projects, revision: projectsRevision(updated.projects) });
+      return context.json(projectSnapshot(updated, context.req.query("includeAutonomy") === "true"));
     } catch {
       return context.json({ error: "worktree_root_conflict" }, 409);
     }
@@ -183,7 +202,7 @@ export function createProjectRoutes(
           if (JSON.stringify(await settings.load()) !== before) throw new Error("Settings changed");
         },
       );
-      return context.json({ settings: updated.projects, revision: projectsRevision(updated.projects) });
+      return context.json(projectSnapshot(updated, context.req.query("includeAutonomy") === "true"));
     } catch {
       return context.json({ error: "worktree_root_removal_conflict" }, 409);
     }

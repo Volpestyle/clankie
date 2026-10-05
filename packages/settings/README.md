@@ -159,3 +159,13 @@ final authority guard. `resolveProjectMembership` only calculates policy from
 host-established inputs; it cannot prove a pane, grant or caller’s identity.
 Session-wide fleet grants remain unchanged here; VUH-1558 owns explicit retirement
 and per-agent enforcement. No live migration runs as part of tests or build.
+
+## Fleet responsibility
+
+Global owner settings store `autonomy.fleet.closure` and
+`autonomy.fleet.machineSetup`, both `lead` by default or `owner`. Project
+`autonomy.fleet` leaves are optional and inherit independently; a null patch
+removes only one override. The logical CLI/API fleet view places them beside
+size/models. Configure through `clankie fleet set` and `clankie project settings`,
+not direct file edits. See [ADR 0230](../../docs/adr/0230-fleet-responsibility-is-owner-settings.md)
+for responsibility, owner-only boundaries and future envelope alignment.

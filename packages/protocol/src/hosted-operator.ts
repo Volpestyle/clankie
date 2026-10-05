@@ -1,8 +1,14 @@
 export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
 import { OperatorConversationServiceRequestSchema } from "./index.ts";
+import { FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
+import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
 export function hostedOperatorAllows(method: string, path: string, body?: string): boolean {
+  // Only this explicit projection query is supported. Unknown, duplicated or
+  // encoded queries never acquire authority through URL normalization.
+  if (path === `${PROJECTS_PATH}?includeAutonomy=true`) return method === "GET";
+  if (path === `${PROJECT_UPDATE_SETTINGS_PATH}?includeAutonomy=true`) return method === "POST";
   if (path === "/operator/v1/dispatch" && method === "POST") {
     let value: unknown;
     try {
@@ -78,6 +84,8 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/runtime-connections",
       "/v1/agent-hosts",
       "/v1/agent-sessions",
+      FLEET_SETTINGS_PATH,
+      PROJECTS_PATH,
     ],
     POST: [
       "/v1/discord/room-guidance",
@@ -99,6 +107,8 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/accounts/disconnect",
       "/v1/runtime-connections",
       "/v1/agent-hosts",
+      FLEET_SETTINGS_PATH,
+      PROJECT_UPDATE_SETTINGS_PATH,
     ],
   };
   return routes[method]?.includes(path) ?? false;

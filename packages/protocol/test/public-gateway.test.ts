@@ -56,6 +56,35 @@ describe("public gateway protocol", () => {
     expect(publicGatewayTargetFor("GET", HOSTED_CREDITS_PATH)).toBe("control");
     expect(publicGatewayTargetFor("POST", HOSTED_CREDITS_PATH)).toBeUndefined();
     expect(publicGatewayTargetFor("GET", "/v1/private")).toBeUndefined();
+    for (const [method, path] of [
+      ["GET", "/v1/operator/fleet-settings"],
+      ["POST", "/v1/operator/fleet-settings"],
+      ["GET", "/v1/operator/projects"],
+      ["POST", "/v1/operator/projects/update"],
+      ["GET", "/v1/operator/projects?includeAutonomy=true"],
+      ["POST", "/v1/operator/projects/update?includeAutonomy=true"],
+    ] as const)
+      expect(publicGatewayTargetFor(method, path)).toBe("relay");
+    for (const path of [
+      "/v1/operator/fleet-settings/context",
+      "/v1/operator/projects/create",
+      "/v1/operator/projects/worktree-roots/add",
+      "/v1/operator/projects?includeAutonomy=false",
+      "/v1/operator/projects?includeAutonomy=true&unknown=true",
+      "/v1/operator/projects?includeAutonomy=true&includeAutonomy=true",
+      "/v1/operator/projects?include%41utonomy=true",
+      "/v1/operator/projects?includeAutonomy=%74rue",
+      "/v1/operator/fleet-settings?includeAutonomy=true",
+      "/v1/devices?includeAutonomy=true",
+      "/v1/operator/%70rojects?includeAutonomy=true",
+    ]) {
+      expect(publicGatewayTargetFor("GET", path)).toBeUndefined();
+      expect(publicGatewayTargetFor("POST", path)).toBeUndefined();
+    }
+    expect(publicGatewayTargetFor("POST", "/v1/operator/projects?includeAutonomy=true")).toBeUndefined();
+    expect(
+      publicGatewayTargetFor("GET", "/v1/operator/projects/update?includeAutonomy=true"),
+    ).toBeUndefined();
   });
 
   it("carries a signed hook's own headers, within the frame's header budget", () => {

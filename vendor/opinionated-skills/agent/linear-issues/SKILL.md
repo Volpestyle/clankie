@@ -107,6 +107,18 @@ updates when that workflow calls for them; leave automation-owned transitions
 to the configured automation. Do not assume a branch name changes Linear state.
 If ownership is unclear, inspect the project's workflow before changing it.
 
+In Clankie's fleet, read effective `fleet.closure` from "Your fleet" before
+closing work; `clankie fleet status` gives global defaults and `clankie project
+settings PROJECT` gives project overrides and effective values. `lead` is the
+default: the lead closes to Done after landing, passing relevant checks and
+attaching evidence; workers report without waiting for owner acceptance.
+`owner` parks completed work In Review for the owner to close. The owner can
+reopen it. Genuine owner-only gates (App Store submission, payments, evals or
+owner-account sign-ups) become linked follow-ups without holding a delivered
+issue open. Record them as unperformed; never hide missing implementation or
+verification. A setting grants no permission for the owner-only action. Older
+installs without it keep the existing workflow.
+
 `save_release` into a completed stage can change every attached issue. Treat it
 as a release action requiring authorization for that bulk effect, not a routine
 single-issue update.

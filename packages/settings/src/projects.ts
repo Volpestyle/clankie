@@ -34,6 +34,19 @@ export function updateProjectSettings(
   else if (input.changes.workerCap !== undefined) project.workerCap = input.changes.workerCap;
   if (input.changes.trackerRef === null) delete project.trackerRef;
   else if (input.changes.trackerRef !== undefined) project.trackerRef = input.changes.trackerRef;
+  if (input.changes.autonomy !== undefined) {
+    const fleet = { ...project.autonomy?.fleet };
+    for (const field of ["closure", "machineSetup"] as const) {
+      const value = input.changes.autonomy.fleet[field];
+      if (value === null) delete fleet[field];
+      else if (value !== undefined) fleet[field] = value;
+    }
+    const autonomy = { ...project.autonomy };
+    if (Object.keys(fleet).length > 0) autonomy.fleet = fleet;
+    else delete autonomy.fleet;
+    if (Object.keys(autonomy).length > 0) project.autonomy = autonomy;
+    else delete project.autonomy;
+  }
   return ProjectsSettingsSchema.parse({
     ...settings,
     projects: settings.projects.map((saved) => (saved.id === project.id ? project : saved)),
