@@ -181,6 +181,12 @@ Discovery uses `GET /v1/fleet/seats/{paneId}/peers`, sending uses
 `POST /v1/fleet/seats/{paneId}/peer-messages`, and reconciliation reads
 `GET /v1/fleet/seats/{paneId}/peer-messages/{id}`. The server derives the sender
 from admitted process/session proof and scopes receipt reads to that sender.
+On the local listener, that proof already checks the unique socket owner,
+process lifetimes, ancestry, native pane/session and private registration. Peer
+routes consume it directly and reobserve it at later authority checks, rather
+than repeat broad fleet admission around every native check. Discovery brackets
+its roster reads with fresh proofs; sending and reconciliation retain their
+separate native sender/recipient fences. No admission is cached between requests.
 Delivery reuses `message_seat` and its native harness channel/session API,
 receipts and refusal states; it never types terminal keys or revives Swarm.
 

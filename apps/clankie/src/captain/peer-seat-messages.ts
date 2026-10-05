@@ -111,9 +111,9 @@ export class PeerSeatMessages {
     }
   }
 
-  private async sender(authority: PeerSeatAuthority) {
+  private async sender(authority: PeerSeatAuthority, validate = true) {
     const proof = authority.proof;
-    if (proof.nativeSessionPending || !(await authority.validate())) return undefined;
+    if (proof.nativeSessionPending || (validate && !(await authority.validate()))) return undefined;
     const agent = await this.options.sender(paneOf(proof));
     return agent?.session &&
       agent.paneId === paneOf(proof) &&
@@ -126,7 +126,10 @@ export class PeerSeatMessages {
 
   async list(authority: PeerSeatAuthority): Promise<FleetPeerSeats | undefined> {
     if (!(await this.options.enabled())) return undefined;
-    const sender = await this.sender(authority);
+    // Discovery only reads observations. The final fresh authority check below
+    // fences the entire result, including replacement/exit during these reads.
+    // Sends and receipt reads keep their separate sender checks.
+    const sender = await this.sender(authority, false);
     if (!sender) return undefined;
     const seats = await this.options.seats();
     if (!(await authority.validate()) || !(await this.options.enabled())) return undefined;

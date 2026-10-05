@@ -21,6 +21,7 @@ import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 import { countProofSpawns, type SpawnRecord } from "./helpers/project-native-proof/spawns.ts";
 import { baselineProof } from "./helpers/project-native-proof/baseline.ts";
 import { closeNativeProcessObservers } from "../src/native-process-transport.ts";
+import { peerSeatAuthority } from "../src/app/peer-seat-authority.ts";
 
 const checkout = fileURLToPath(new URL("../../../", import.meta.url));
 const fixtures = fileURLToPath(new URL("./helpers/project-native-proof/", import.meta.url));
@@ -31,6 +32,8 @@ nativeIt(
   "proves project access at the real socket boundary and counts actual spawn dispatches",
   async () => {
     const baseline = process.env.PROJECT_NATIVE_BASELINE === "1";
+    const peers = process.env.PROJECT_NATIVE_PEERS === "1";
+    if (baseline && peers) throw new Error("Peer boundary proof requires current sources");
     const logDirectory = join(
       checkout,
       ".local/project-proof",
@@ -109,8 +112,22 @@ nativeIt(
       });
       cleanupLink = link;
       const forward = link.fetch(async (request) => {
-        const project = await link.identity(request)?.projectProof?.();
-        if (!project) return Response.json({ refused: true }, { status: 403 });
+        const identity = link.identity(request);
+        if (peers) {
+          trace.push({
+            phase,
+            identityPane: identity?.pane,
+            requestedPane: herdr.pane,
+            current: identity?.current?.(),
+          });
+          const authority = await peerSeatAuthority(identity, herdr.pane);
+          if (phase === "peer-boundary-revoked") linked = false;
+          if (!authority || !(await authority.validate()))
+            return Response.json({ refused: true }, { status: 403 });
+        } else {
+          const project = await identity?.projectProof?.();
+          if (!project) return Response.json({ refused: true }, { status: 403 });
+        }
         effects++;
         return Response.json({ admitted: true });
       });
@@ -133,7 +150,9 @@ nativeIt(
       if (!server.listening) await once(server, "listening");
       const address = server.address();
       if (!address || typeof address === "string") throw new Error("Missing real TCP listener");
-      const endpoint = `http://127.0.0.1:${address.port}/v1/fleet/mcp`;
+      const endpoint = `http://127.0.0.1:${address.port}${
+        peers ? `/v1/fleet/seats/${encodeURIComponent(herdr.pane)}/peer-messages` : "/v1/fleet/mcp"
+      }`;
       const launch = async (name: string, script = harness, shell = false, emptyArgv = false) => {
         const args = [herdr.controlPath, client, name, endpoint, herdr.pane, herdr.socketPath, randomUUID()];
         const command = shell
@@ -145,7 +164,14 @@ nativeIt(
           "pane",
           "run",
           herdr.pane,
-          ["env", "PROJECT_FIXTURE_SENTINEL=ENV_SENTINEL_DO_NOT_EMIT", ...command].map(quote).join(" "),
+          [
+            "env",
+            "PROJECT_FIXTURE_SENTINEL=ENV_SENTINEL_DO_NOT_EMIT",
+            ...(peers ? ["PROJECT_FIXTURE_NATIVE_SESSION=1"] : []),
+            ...command,
+          ]
+            .map(quote)
+            .join(" "),
         );
         const pid = await herdr.waitForClient(name);
         const info = await herdr.cli("pane", "process-info", "--pane", herdr.pane);
@@ -259,6 +285,11 @@ nativeIt(
       expect(JSON.stringify(native)).not.toContain("ENV_SENTINEL_DO_NOT_EMIT");
       phase = "unrelated-pane-job";
       await ask("unrelated-job", 403);
+      if (peers) {
+        phase = "peer-boundary-revoked";
+        await ask("first", 403);
+        linked = true;
+      }
       phase = "foreign-pane";
       await ask("first", 403, herdr.foreignPane);
       phase = "binding-revoked";
@@ -346,8 +377,11 @@ nativeIt(
       try {
         await writeFile(
           join(logDirectory, "evidence.json"),
-          JSON.stringify({ baseline, measurements, trace, socketOwners: [...snapshots.values()] }, null, 2) +
-            "\n",
+          JSON.stringify(
+            { baseline, peers, measurements, trace, socketOwners: [...snapshots.values()] },
+            null,
+            2,
+          ) + "\n",
         );
       } finally {
         counter.close();

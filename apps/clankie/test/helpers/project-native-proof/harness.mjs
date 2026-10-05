@@ -20,6 +20,24 @@ execFileSync(
   ],
   { env, stdio: "ignore" },
 );
+if (process.env.PROJECT_FIXTURE_NATIVE_SESSION === "1")
+  execFileSync(
+    "herdr",
+    [
+      "pane",
+      "report-agent",
+      pane,
+      "--source",
+      "herdr:codex",
+      "--agent",
+      "codex",
+      "--state",
+      "idle",
+      "--agent-session-id",
+      session,
+    ],
+    { env, stdio: "ignore" },
+  );
 const child = spawn(process.execPath, [clientScript, control, name, endpoint, pane], {
   env,
   stdio: "inherit",

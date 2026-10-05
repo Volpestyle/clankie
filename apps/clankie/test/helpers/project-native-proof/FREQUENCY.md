@@ -106,3 +106,33 @@ separate. Use completion times inside the measured interval so cleanup cannot
 turn an unfinished request into a measured refusal. Keep every failed run and
 all normal shipped bridge retries; never retry HTTP proof in the test to conceal
 an admission failure. Report sample counts and uncertainty, not just percentages.
+
+## Older bridge peer-catalog workload
+
+`PROJECT_PROOF_LEGACY_PEERS=1` enables peer messaging and runs ten preserved
+worker bridges from `.local/project-proof/legacy-worker/bin/fleet-mcp.mjs`.
+Preserve the complete shipped `bin/` and `.claude-plugin/` directories from the
+older installation, recording its version, source path and every file's SHA256
+in `manifest.json`. Never copy credentials or runtime state. This mode requires
+`current` service sources, so before/after runs hold the bridge bytes fixed while
+changing the service code.
+
+Older bridges discover the actual peer roster on each tool-catalog refresh.
+This mode exercises the production peer-authority resolver and `PeerSeatMessages`
+against real socket/process proof, restored private registrations and native
+Herdr reads. It requires both peer tools to remain advertised throughout; every
+request and refusal is retained. It sends no peer message or provider request.
+
+```sh
+PROJECT_PROOF_FREQUENCY_TEST=1 PROJECT_PROOF_FREQUENCY_VARIANT=current \
+  PROJECT_PROOF_LEGACY_PEERS=1 PROJECT_PROOF_FREQUENCY_SECONDS=60 \
+  pnpm exec vitest run --config vitest.config.ts \
+  apps/clankie/test/project-proof-frequency.integration.test.ts
+```
+
+`PROJECT_NATIVE_PROOF_TEST=1 PROJECT_NATIVE_PEERS=1` selects the same local
+peer-authority boundary in `project-native-proof.integration.test.ts`. Its real
+TCP/process cases cover binding revocation during a read, unrelated processes,
+foreign panes, owner exit/replacement, stale births, unavailable helper and exact
+native launcher arguments. The foreground launcher is an ordinary trusted fixture,
+not an installed agent or provider session.
