@@ -487,7 +487,17 @@ it("durable retention prunes abandoned pending children while preserving admitte
       state: "pending" as const,
       host: "pi" as const,
     };
+    // Fill the real store before its first handoff. Creating the child must
+    // retain its canonical room even when that room is the oldest record.
+    for (let i = 0; i < OPERATOR_CONVERSATION_RETAINED_MAX - 2; i += 1)
+      await store.serve({
+        schemaVersion: 1,
+        op: "create",
+        scope: { kind: "global" },
+        title: `before-first-handoff-${i}`,
+      });
     const abandoned = store.beginRoomHandoff({ ...draft, deliveryId: "abandoned" }, "abandoned");
+    expect(store.conversation(roomConversationId)?.scope.kind).toBe("room");
     const admitted = store.beginRoomHandoff({ ...draft, deliveryId: "admitted" }, "admitted", true);
     for (let i = 0; i < OPERATOR_CONVERSATION_RETAINED_MAX + 2; i += 1)
       await store.serve({

@@ -1134,8 +1134,8 @@ export class ConversationStore {
       room.scope,
       `${checked.actorName ?? checked.actorId} · ${checked.request}`.slice(0, 200),
       id,
+      checked,
     );
-    meta.roomHandoff = checked;
     meta.roomHandoffFingerprint = fingerprint;
     meta.sessionState = "waiting";
     meta.revision += 1;
@@ -1436,6 +1436,7 @@ export class ConversationStore {
     scope: OperatorConversationScope,
     title: string,
     conversationId: string = `conv-${randomUUID()}`,
+    roomHandoff?: RoomHandoffMetadata,
   ): ConversationMeta {
     if (scope.kind === "persona") {
       const existing = this.conversationIdForPersona(scope.personaId);
@@ -1464,6 +1465,7 @@ export class ConversationStore {
       updatedAt: now,
       revision: 0,
       sessionState: "unbound",
+      ...(roomHandoff === undefined ? {} : { roomHandoff }),
     };
     mkdirSync(join(this.root, meta.conversationId), { recursive: true });
     this.metas.set(meta.conversationId, meta);

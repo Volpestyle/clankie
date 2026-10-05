@@ -14,7 +14,7 @@ import type { LaneTool, LaneToolBank, LaneToolResult } from "./port.ts";
 import type { SeatOutbox } from "./seat-outbox.ts";
 
 /** This exact plugin agent has a structural MCP-only tool allowlist. */
-export const CLAUDE_ROOM_AGENT_TYPE = "clankie:room";
+const CLAUDE_ROOM_AGENT_TYPE = "clankie:room";
 const PROOF_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 
@@ -52,7 +52,7 @@ export interface NativeRoomHandoffInput {
   readonly onTranscript?: (transcript: HerdrSeatTranscript) => void;
 }
 
-export interface NativeRoomHandoffResult {
+interface NativeRoomHandoffResult {
   readonly outcome: "completed" | "waiting_user" | "unavailable" | "uncertain" | "canceled";
   readonly text?: string;
   readonly prompt?: string;
