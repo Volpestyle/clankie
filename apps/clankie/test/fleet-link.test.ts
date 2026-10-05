@@ -313,6 +313,7 @@ describe("a fleet link (VUH-1527)", () => {
       expect(links.identity(request)).toBeUndefined();
       expect(projectProof).not.toHaveBeenCalled();
       remote.emit("exit", 1);
+      remote.emit("close", 1);
       expect(links.status("pc")).toMatchObject({ state: "unreachable" });
       expect(await admitted!.validate()).toBe(false);
       expect(admitted!.current?.()).toBe(false);
