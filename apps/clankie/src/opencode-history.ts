@@ -21,7 +21,10 @@ import {
   OPEN_CODE_HISTORY_MIGRATIONS,
   OPEN_CODE_HISTORY_SCHEMA,
 } from "./opencode-history-schema.ts";
-// @ts-expect-error Native OpenCode plugins are standalone ESM; reuse their v1 projection semantics.
+// Native OpenCode plugins are standalone ESM; reuse their v1 projection semantics. The
+// module is untyped here but resolved by checkouts that allow JS (clankie-ops), so an
+// expect-error would fail there as unused.
+// @ts-ignore
 import { projectMessages } from "../../../integrations/opencode-plugin/runtime.mjs";
 
 const MAX_BYTES = 4 * 1024 * 1024;

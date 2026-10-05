@@ -22,7 +22,16 @@ import {
 } from "./model-keys.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH } from "./index.ts";
+import { DISCORD_VOICE_TRANSCRIPTS_PATH, OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH } from "./index.ts";
+import { BODY_LEASE_STATUS_PATH } from "./body-leases.ts";
+import { DISCORD_DIRECTORY_PATH } from "./discord-directory.ts";
+import { DISCORD_SETUP_TEST_POST_PATH } from "./discord-permissions.ts";
+import {
+  DISCORD_ROOMS_PATH,
+  DISCORD_ROOM_GUIDANCE_PATH,
+  DISCORD_ROOM_VOICE_PATH,
+  DISCORD_SETTINGS_PATH,
+} from "./discord-rooms.ts";
 import {
   DEVICE_PUSH_PATH,
   PublicGatewayPushWakeFrameSchema,
@@ -90,6 +99,16 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
   { method: "POST", path: "/operator/v1/terminal-tail", target: "relay" },
   { method: "POST", path: OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH, target: "relay" },
+  // Device reads and owner guidance the relay authorizes per grant; settings
+  // and voice writes ride the hosted operator bridge instead.
+  { method: "GET", path: BODY_LEASE_STATUS_PATH, target: "relay" },
+  { method: "GET", path: DISCORD_ROOMS_PATH, target: "relay" },
+  { method: "GET", path: DISCORD_SETTINGS_PATH, target: "relay" },
+  { method: "GET", path: DISCORD_DIRECTORY_PATH, target: "relay" },
+  { method: "GET", path: DISCORD_ROOM_VOICE_PATH, target: "relay" },
+  { method: "GET", path: DISCORD_VOICE_TRANSCRIPTS_PATH, target: "relay" },
+  { method: "POST", path: DISCORD_ROOM_GUIDANCE_PATH, target: "relay" },
+  { method: "POST", path: DISCORD_SETUP_TEST_POST_PATH, target: "relay" },
 ] as const;
 
 /**
