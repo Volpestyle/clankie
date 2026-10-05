@@ -86,6 +86,7 @@ separate Linear inbox protocol. Clankie can set the non-secret target and rules.
 - [0227 — Discord connects a server with a role](0227-discord-connects-a-server-with-a-role.md)
 - [0228 — Quick actions are skills, and tidy keeps results](0228-quick-actions-are-skills-and-tidy-keeps-results.md)
 
+- [0229 — Room handoffs are visible parallel threads](0229-room-handoffs-are-visible-parallel-threads.md)
 - [0230 — Fleet responsibility is owner settings](0230-fleet-responsibility-is-owner-settings.md)
 
 ## Archived decisions

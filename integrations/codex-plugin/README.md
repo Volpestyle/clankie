@@ -32,6 +32,15 @@ shared global chat. Live verification must select a new scratch
 conversation and close its own seat afterward. Codex and Claude maintain
 separate resume records; resume cannot rebind a thread to another conversation.
 
+Room handoffs under a live Codex head run in parallel and appear as individual
+threads in the dock and app. Machine-authorized room work starts real native
+Codex children; the service verifies their parent and task marker and returns
+results to the original room. Ambient room work uses separate Pi threads with
+the room's own authority. Codex 0.160.0 retains parent MCP servers and permissions
+in child roles and exposes no public `ToolPolicy` ceiling. The request for that
+upstream capability, and James's fallback decision, are recorded in
+[ADR 0229](../../docs/adr/0229-room-handoffs-are-visible-parallel-threads.md).
+
 `clankie codex2` selects the registered account labelled exactly `codex2`:
 `clankie accounts codex add /absolute/CODEX_HOME --label codex2` registers it.
 The number is part of the label, never an account-list position. Unknown labels

@@ -2150,6 +2150,14 @@ inspection. Voice rooms contain captain handoffs, not unrecorded ambient voice.
 The existing authenticated conversation API provides these same list/get/replay/tail
 operations. See [ADR 0176](adr/0176-every-room-is-an-inspectable-conversation.md).
 
+Room handoffs also appear as separate child records with `roomHandoff` metadata
+and in the fleet snapshot's `roomHandoffs` array. Use their child conversation ID
+with `show` or `tail`; the original `roomConversationId` identifies the asking
+room and its delivery evidence. The TUI dock and app expose the same threads.
+The recorded `host` is the actual executor: ambient work under a Codex head runs
+on Pi with the original room authority, while machine-authorized work uses native
+Codex children. See [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md).
+
 ### `send --conversation ID [--delivery steer|queue] [--attach PATH]... (MESSAGE | --stdin)`
 
 Send to an existing operator conversation through the shared service API.

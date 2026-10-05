@@ -299,6 +299,16 @@ attached native seat can execute admitted room turns and return correlated repli
 through the existing Discord transport. See
 [ADR 0176](adr/0176-every-room-is-an-inspectable-conversation.md).
 
+Every admitted room handoff has a separate durable child conversation, visible
+under Clankie in the TUI dock and app with who asked, current work and result.
+A shared four-slot queue admits separate voice and text requests in parallel.
+The canonical room retains authority and the reply destination. A service head
+runs separate Pi threads; a Claude head starts restricted native children; a
+Codex head starts native children for machine-authorized work and uses Pi under
+the original room lane for ambient work. Actual native ancestry establishes
+child references, and taken or uncertain native requests are never replayed as
+Pi work. See [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md).
+
 Conversations are files under `~/.clankie/captain/`. Each settled operator or
 Discord captain turn also appends one metrics line to
 `~/.clankie/captain/turn-settled.jsonl`: tool-name counts, first mutating tool,

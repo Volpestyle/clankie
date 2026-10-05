@@ -66,6 +66,14 @@ conversation or native channel. If no eligible parent exists, the default
 conversation gets an explicitly tagged report and doctor/roster name the lead
 pane needing a bridge. This grants no tools or room permissions.
 
+Voice and text handoffs appear as individual threads under Clankie in the dock
+and app: who asked, what he is doing, and the result. Separate handoffs can run
+in parallel, with up to four active at once, and answers return to the asking
+room. Claude uses restricted native children. Codex uses native children for
+machine-authorized work; ambient work uses the service's Pi threads with the
+room's own tools until Codex can enforce a narrower child tool set. Approval
+requests still continue on the authenticated operator surface.
+
 ## History, memory, and goals
 
 These serve different purposes:

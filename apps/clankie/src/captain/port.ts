@@ -171,7 +171,11 @@ export interface CaptainPort {
   /** One Discord text/voice message becomes one captain turn. */
   submitDiscordTurn(
     request: DiscordPresenceChannelTurnRequest,
-    authority?: { readonly verifiedOwner: boolean },
+    authority?: {
+      readonly verifiedOwner: boolean;
+      /** Host-only current source proof from authenticated hosted ingress. */
+      readonly sourceCurrent?: () => boolean;
+    },
   ): Promise<CaptainChannelTurnResult>;
   /**
    * One message from a guild channel a Clankie channel is projected onto

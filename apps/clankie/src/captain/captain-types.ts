@@ -1,3 +1,4 @@
+import type { NativeRoomHandoffExecutor } from "./native-room-handoffs.ts";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import { type ModelPurpose } from "@clankie/model-provider";
 import { SettingsStore } from "@clankie/settings";
@@ -18,6 +19,8 @@ import type { ProjectHireProcessProof } from "./project-hires.ts";
 import { type TurnContext } from "./tools.ts";
 
 export interface CaptainOptions {
+  /** Native room child execution, selected before admission under the original room ceiling. */
+  readonly runNativeRoomHandoff?: NativeRoomHandoffExecutor;
   /** Explicit controller-created eval boundary; ordinary sessions remain unchanged. */
   readonly evalSessionBoundary?: EvalSessionBoundary;
   /** Override local harness control adapters (including deterministic test adapters). */

@@ -68,6 +68,7 @@ export async function resolveSeatContext(
             (item) =>
               item.title === input.conversationId ||
               (item.scope.kind === "room" &&
+                item.roomHandoff === undefined &&
                 (item.scope.targetId === input.conversationId ||
                   item.scope.targetId.split(":").at(-1) === input.conversationId)),
           )

@@ -3,6 +3,7 @@ import type {
   OperatorFleetSeat,
   OperatorAgentPersona,
   WorkerReportSummary,
+  OperatorConversation,
 } from "@clankie/protocol";
 
 export interface HerdrRosterAgent {
@@ -20,6 +21,7 @@ export interface LiveAgent {
 export interface HerdrRosterSnapshot {
   readonly liveAgents?: readonly LiveAgent[];
   readonly workerReports?: readonly WorkerReportSummary[];
+  readonly roomHandoffs?: readonly OperatorConversation[];
   readonly agents: readonly HerdrRosterAgent[];
   readonly error?: string;
 }
@@ -33,6 +35,7 @@ export class HerdrRoster {
   private error: string | undefined;
   private liveAgents: readonly LiveAgent[] = [];
   private workerReports: readonly WorkerReportSummary[] = [];
+  private roomHandoffs: readonly OperatorConversation[] = [];
   private personas: readonly OperatorAgentPersona[] = [];
   private following: AbortController | undefined;
   private polling = false;
@@ -47,6 +50,7 @@ export class HerdrRoster {
       agents: this.agents,
       liveAgents: this.liveAgents,
       workerReports: this.workerReports,
+      roomHandoffs: this.roomHandoffs,
       ...(this.error === undefined ? {} : { error: this.error }),
     };
   }
@@ -75,7 +79,14 @@ export class HerdrRoster {
           const changedReports =
             JSON.stringify(this.workerReports) !== JSON.stringify(fleet.workerReports ?? []);
           this.workerReports = fleet.workerReports ?? [];
-          if ((await this.apply(() => Promise.resolve(fleet.seats), fleet.personas)) || changedReports)
+          if (
+            (await this.apply(
+              () => Promise.resolve(fleet.seats),
+              fleet.personas,
+              fleet.roomHandoffs ?? [],
+            )) ||
+            changedReports
+          )
             onChange();
           continue;
         } catch {
@@ -103,10 +114,11 @@ export class HerdrRoster {
   private async apply(
     readSeats: () => Promise<readonly OperatorFleetSeat[]>,
     personas?: readonly OperatorAgentPersona[],
+    roomHandoffs: readonly OperatorConversation[] = [],
   ): Promise<boolean> {
     if (this.polling) return false;
     this.polling = true;
-    const before = JSON.stringify([this.agents, this.liveAgents, this.error]);
+    const before = JSON.stringify([this.agents, this.liveAgents, this.roomHandoffs, this.error]);
     try {
       const [seats, terminals] = await Promise.all([
         readSeats(),
@@ -114,6 +126,7 @@ export class HerdrRoster {
       ]);
       const panes = new Map(terminals.map((terminal) => [terminal.terminalId, terminal.pane.id]));
       if (personas) this.personas = personas;
+      this.roomHandoffs = roomHandoffs.filter((conversation) => conversation.roomHandoff !== undefined);
       this.liveAgents = seats
         .map((seat) => ({
           seat,
@@ -138,10 +151,11 @@ export class HerdrRoster {
     } catch (caught) {
       this.agents = [];
       this.liveAgents = [];
+      this.roomHandoffs = [];
       this.error = caught instanceof Error ? caught.message : String(caught);
     } finally {
       this.polling = false;
     }
-    return JSON.stringify([this.agents, this.liveAgents, this.error]) !== before;
+    return JSON.stringify([this.agents, this.liveAgents, this.roomHandoffs, this.error]) !== before;
   }
 }

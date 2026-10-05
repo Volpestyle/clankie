@@ -239,7 +239,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (!bodyRequestsOpen) return false;
     const origin = owner.discord;
     if (origin !== undefined) {
-      const source = discordTurnReceipts.get(`discord:${origin.messageId}`)?.origin;
+      const source = discordTurnReceipts.get(`discord:${origin.deliveryId ?? origin.messageId}`)?.origin;
       if (
         source === undefined ||
         source.baseSessionKey !== origin.baseSessionKey ||

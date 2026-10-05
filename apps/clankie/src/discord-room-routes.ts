@@ -145,7 +145,7 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
       rooms:
         result.op === "list"
           ? result.conversations
-              .filter((room) => room.scope.kind === "room")
+              .filter((room) => room.scope.kind === "room" && room.roomHandoff === undefined)
               .map((room) => ({
                 ...options.observations.status(room.conversationId),
                 ...(discordRoomDisplayTitle(room.title) === undefined
@@ -170,7 +170,11 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
     });
     await authority.guard();
     if (!authority.current()) return context.json({ error: "room_guidance_required" }, 403);
-    if (room.op !== "get" || room.conversation?.scope.kind !== "room")
+    if (
+      room.op !== "get" ||
+      room.conversation?.scope.kind !== "room" ||
+      room.conversation.roomHandoff !== undefined
+    )
       return context.json({ error: "room_not_found" }, 404);
     return context.json(
       options.observations.setGuidance(

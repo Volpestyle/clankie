@@ -6,6 +6,17 @@ run tools there (ADRs [0124](adr/0124-one-self-has-many-local-threads.md),
 [0176](adr/0176-every-room-is-an-inspectable-conversation.md), and
 [0186](adr/0186-a-discord-room-harvests-its-own-workers.md)).
 
+Each voice `ask_clankie` handoff and admitted text request has its own thread
+under Clankie in the dock and app. The card shows who asked, the request, current
+work and result; selecting it opens that request's transcript. Up to four
+handoffs run concurrently, while spoken answers retain the room's normal floor.
+Replies return to the original asking room. Approval requests still continue on
+the authenticated operator surface. With a Codex head, ambient room work runs
+on Pi with the room's own tools; only machine-authorized room work uses native
+Codex children. Claude uses restricted native children. See
+[ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md) and the
+[verification record](testing/2026-10-05-room-handoffs/README.md).
+
 `clankie discord rooms` and TUI `/discord rooms` add delivery health. The API is
 `GET /v1/discord/rooms`; its strict node-free contract lives in
 `packages/protocol/src/discord-rooms.ts`. Counters describe observed outcomes in

@@ -23,7 +23,7 @@ what lets both bodies be one character
 | `voice-composition`          | Shared voice dependency assembly for bot and user-session bodies                                      |
 | `voice-control`              | Local join/leave control request handling                                                             |
 | `voice-music`                | Shared bounded queue and transport controls                                                           |
-| `voice-ingress`              | Routes one `ask_clankie` handoff to the continuing `discord_voice` captain lane                       |
+| `voice-ingress`              | Submits attributed `ask_clankie` handoffs to Clankie's bounded parallel room threads                  |
 | `voice-consent`              | Ephemeral consent under explicit or owner-selected presence policy; opt-out always wins               |
 | `voice-audio`                | Shared voice-provider PCM helpers and content-free RMS measurement                                    |
 | `receipt-store`              | Append-only, content-free receipts for both planes                                                    |
@@ -112,12 +112,14 @@ response receipts even when Vox logged a successful start and drain.
 
 ### Chaotic group calls
 
-Voice ingress keeps different speakers' asks in separate handoffs, one active
-speaker per room. The active speaker's refinements can steer their live run;
-other speakers wait for their own answer. The realtime conversation and local
-voice tools keep running while that work waits. Tool results carry their
-recipient, and the mouth gives that person the gist, expanding when warranted. Responses serialize through
-provider completion and, for external voices, TTS drain.
+Voice ingress keeps each ask in its own visible handoff. Clankie's service admits
+up to four room handoffs concurrently, so different speakers' work can progress
+in parallel. The realtime conversation and local voice tools keep running while
+work waits. Tool results retain their recipient, and the mouth gives that person
+the gist, expanding when warranted. Speech responses serialize through provider
+completion and, for external voices, TTS drain. The executor follows the live
+head; ambient work under a Codex head uses Pi with the original room authority.
+See [ADR 0229](../../docs/adr/0229-room-handoffs-are-visible-parallel-threads.md).
 
 A realtime server error can abandon the current local response attempt as failed,
 without fabricating provider completion or usage. An unidentified bare error does
@@ -155,9 +157,9 @@ pause before it becomes a response opportunity: while another participant is
 still talking or their final is due, the latest such line waits (bounded at
 8 seconds) and is offered once when the room pauses.
 
-Repeated identical asks from the same person join pending work. For paraphrases,
-`ask_clankie.join_call_id` joins only that authenticated speaker's handoff;
-changed requests remain refinements. Slow work offers one brief acknowledgment
+An exact call-ID retry joins its original pending work. Identical wording in a
+new call remains a separate ask. `ask_clankie.join_call_id` joins only that
+authenticated speaker's handoff in the same realtime conversation. Slow work offers one brief acknowledgment
 after 1.2 seconds, canceled if the room moves on or work finishes. Spoken
 length and register come from the service-composed instructions (one rule:
 usually a short sentence, longer only when asked); handoff results get the

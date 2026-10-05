@@ -11,6 +11,15 @@ Claude Code on your own plan and you are talking to Clankie: his identity, the
 owner persona, his tools over MCP, the newest memory card on every turn, and
 his skills. The service keeps running his body, Discord, voice, and play.
 
+Room handoffs reach a live Clankie head as separate native background agents.
+The shipped `agents/room.md` definition (`clankie:room`) permits only the three
+`room_task_*` proxy tools. Those tools retain the original room's actor, tool
+bank and current grants. The service verifies the actual parent Agent call,
+restricted agent type and child journal before accepting calls or showing the
+native child reference. The dock and app expose each request's work and result.
+An approval-shaped result continues on the authenticated operator surface.
+See [ADR 0229](../../docs/adr/0229-room-handoffs-are-visible-parallel-threads.md).
+
 Running Claude Code as a worker in Clankie's Herdr fleet does not require
 replacing the lead with this seat. Eligible signed Linear webhooks wake one
 configured ordinary global chat, `global-default` by default. Its bound Claude

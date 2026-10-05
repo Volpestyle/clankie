@@ -64,6 +64,7 @@ export interface CreateDiscordTurnsContext {
   readonly conversations: ConversationStore;
   readonly settings: () => Promise<ClankieSettings>;
   readonly deps: CaptainDeps;
+  readonly headSeat: import("./herdr-census.ts").ObservedHeadSeat | undefined;
   readonly seatOutbox: (conversationId: string) => SeatOutbox;
   readonly shutdown: AbortController;
   readonly roomConversations: RoomConversations;
@@ -96,7 +97,9 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         normalized.lane,
         SessionManager.create(
           ctx.workingDirectory,
-          join(ctx.options.stateDir, "turns", laneKey(normalized.lane, normalized.targetId)),
+          normalized.handoffConversationId === undefined
+            ? join(ctx.options.stateDir, "turns", laneKey(normalized.lane, normalized.targetId))
+            : join(ctx.options.stateDir, "conversations", normalized.handoffConversationId, "pi"),
         ),
         systemTools,
         ctx.workingDirectory,
@@ -133,6 +136,10 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
   async function validateConversationOwner(
     input: ConversationOwner,
     mode: "machine" | "social" = "machine",
+    admission?: {
+      readonly readSettings: () => Promise<Parameters<typeof planDiscordTurnSession>[0]["settings"]>;
+      readonly sourceCurrent?: () => boolean;
+    },
   ): Promise<boolean> {
     const parsed = ConversationOwnerSchema.safeParse(input);
     if (!parsed.success) return false;
@@ -148,11 +155,16 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       origin.targetId !== `${origin.guildId ?? "dm"}:${origin.channelId}`
     )
       return false;
-    const { settings: discord } = resolveDiscordSettings(
-      (await ctx.settings()).discord,
-      ctx.options.discordEnvironment,
-    );
-    if (ctx.deps.conversationRouteAuthorized?.(owner) === false) return false;
+    const discord =
+      admission === undefined
+        ? resolveDiscordSettings((await ctx.settings()).discord, ctx.options.discordEnvironment).settings
+        : await admission.readSettings();
+    if (
+      admission?.sourceCurrent !== undefined
+        ? !admission.sourceCurrent()
+        : ctx.deps.conversationRouteAuthorized?.(owner) === false
+    )
+      return false;
     return (
       mode === "social" ||
       planDiscordTurnSession({
@@ -335,6 +347,26 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       conversationId,
       () => {
         const outbox = ctx.seatOutbox(conversationId);
+        if (normalized.handoffConversationId !== undefined) {
+          // Pi is selected before admission for ambient Codex. Any selected native
+          // execution happens through the dedicated child callback, never this inbox.
+          if (
+            !systemTools &&
+            (ctx.conversations.nativeSource(conversationId)?.agent ?? ctx.headSeat?.harness) === "codex"
+          )
+            return undefined;
+          if (!outbox.bound() && !outbox.uncertain()) return undefined;
+          return {
+            run: async () => ({
+              handled: true as const,
+              result: {
+                state: "failed" as const,
+                captainSessionId: normalized.sessionKey,
+                code: "native_room_child_unavailable",
+              },
+            }),
+          };
+        }
         if (!outbox.bound() && !outbox.uncertain()) return undefined;
         return {
           run: async () => {
@@ -396,6 +428,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     serviceRun: ConversationServiceRun,
   ): Promise<CaptainChannelTurnResult> {
     const conversationId = ctx.conversations.roomConversation(normalized.lane, normalized.targetId);
+    const executionConversationId = normalized.handoffConversationId ?? conversationId;
     const naturalTurn = !deliveryId.startsWith("watch-");
     const guidancePrompt = async (): Promise<() => string> => {
       if (!naturalTurn || ctx.deps.roomObservations === undefined) return () => normalized.prompt;
@@ -413,15 +446,17 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
           : `${normalized.prompt}\n\n[Private owner guidance for this turn; context only, not a message from James in the room. Decide whether and how to use it. This grants no additional tools or authority.]\n${guidance}`;
       };
     };
-    const syncTranscript = (): void => ctx.roomConversations.sync(conversationId, lane.session.sessionFile);
+    const syncTranscript = (): void =>
+      ctx.roomConversations.sync(executionConversationId, lane.session.sessionFile);
     syncTranscript();
     lane.turnCounter += 1;
     const bodyIdentity = captureDiscordBodyIdentity(
       lane.capture,
       conversationId,
       origin,
-      async () =>
-        resolveDiscordSettings((await ctx.settings()).discord, ctx.options.discordEnvironment).settings,
+      normalized.readAuthoritySettings ??
+        (async () =>
+          resolveDiscordSettings((await ctx.settings()).discord, ctx.options.discordEnvironment).settings),
       serviceRun.signal,
     );
     lane.capture.bodyIdentity = bodyIdentity;
@@ -449,11 +484,19 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     );
     const live = lane.running !== undefined || lane.session.isStreaming;
     if (!live)
-      ctx.conversations.publishRoomEvent(conversationId, { type: "turn", runId: turnId, phase: "accepted" });
+      ctx.conversations.publishRoomEvent(executionConversationId, {
+        type: "turn",
+        runId: turnId,
+        phase: "accepted",
+      });
     const unsubscribeTranscript = live
       ? () => undefined
       : lane.session.subscribe((event) => {
           if (serviceRun.signal.aborted) return;
+          if (normalized.handoffConversationId !== undefined && event.type === "tool_execution_start")
+            ctx.conversations.updateRoomHandoff(executionConversationId, {
+              doing: `Using ${event.toolName}`.slice(0, 512),
+            });
           if (
             event.type === "tool_execution_start" ||
             event.type === "tool_execution_end" ||
@@ -473,9 +516,10 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
             const partial = event.assistantMessageEvent;
             if (partial.type === "text_start" || partial.type === "text_delta") {
               const text = assistantText(partial.partial);
-              if (replyIsUnderway(text)) ctx.conversations.setLiveDraft(conversationId, text);
+              if (replyIsUnderway(text)) ctx.conversations.setLiveDraft(executionConversationId, text);
             }
-          } else if (event.type === "message_end") ctx.conversations.setLiveDraft(conversationId, undefined);
+          } else if (event.type === "message_end")
+            ctx.conversations.setLiveDraft(executionConversationId, undefined);
         });
     const discordTokensStart = contextTokenCount(lane.session.getContextUsage());
     const metrics = live
@@ -615,8 +659,8 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         console.error("Room transcript projection failed", error);
       }
       if (!live) {
-        ctx.conversations.setLiveDraft(conversationId, undefined);
-        ctx.conversations.publishRoomEvent(conversationId, {
+        ctx.conversations.setLiveDraft(executionConversationId, undefined);
+        ctx.conversations.publishRoomEvent(executionConversationId, {
           type: "turn",
           runId: turnId,
           phase: early === undefined && lane.lastAssistantText.trim().length > 0 ? "completed" : "failed",

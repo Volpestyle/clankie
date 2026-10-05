@@ -137,7 +137,11 @@ export interface FaceShellOptions {
   readonly onLoadOlderHistory?: () => Promise<void>;
   readonly liveAgents?: () => readonly LiveAgent[];
   readonly workerReports?: () => readonly WorkerReportSummary[];
+  readonly roomHandoffs?: () => readonly import("@clankie/protocol").OperatorConversation[];
   readonly onOpenLiveAgent?: (agent: LiveAgent) => Promise<void>;
+  readonly onOpenRoomHandoff?: (
+    conversation: import("@clankie/protocol").OperatorConversation,
+  ) => Promise<void>;
   readonly onLeaveLiveAgent?: () => Promise<void>;
   readonly onOpenAgentWorkspace?: () => Promise<void>;
   readonly expandedAgent?: () => string | undefined;
@@ -411,6 +415,7 @@ export class ClankieFaceShell {
       },
     );
     this.liveAgents = new LiveAgentStrip(() => this.options.liveAgents?.() ?? [], this.theme, {
+      roomHandoffs: () => this.options.roomHandoffs?.() ?? [],
       maxRows: () => Math.max(3, Math.floor(this.tui.terminal.rows * 0.5)),
       reports: () => this.options.workerReports?.() ?? [],
     });
@@ -1234,6 +1239,9 @@ export class ClankieFaceShell {
     this.tui.requestRender();
     if (result === "pass") return undefined;
     const agent = this.liveAgents.selected();
+    const handoff = this.liveAgents.selectedHandoff();
+    if (result === "open" && handoff !== undefined && this.options.onOpenRoomHandoff)
+      this.navigateAgent(() => this.options.onOpenRoomHandoff!(handoff));
     if (result === "open" && agent !== undefined && this.options.onOpenLiveAgent)
       this.navigateAgent(() => this.options.onOpenLiveAgent!(agent));
     return { consume: true };
@@ -1247,6 +1255,11 @@ export class ClankieFaceShell {
       onOpen: (agent) => {
         this.closeLiveAgents();
         if (this.options.onOpenLiveAgent) this.navigateAgent(() => this.options.onOpenLiveAgent!(agent));
+      },
+      onOpenHandoff: (conversation) => {
+        this.closeLiveAgents();
+        if (this.options.onOpenRoomHandoff)
+          this.navigateAgent(() => this.options.onOpenRoomHandoff!(conversation));
       },
     });
     this.liveAgentOverlay = this.showModalOverlay(picker, clankieModalOverlayOptions());
