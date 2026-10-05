@@ -356,7 +356,7 @@ async function runLinearWizard(shell: ClankieFaceShell, services: ConnectCommand
         value: "follow",
         label: "Follow Linear",
         hint: followHint,
-        description: "Opt-in awareness of issue, comment, project and other activity in a separate inbox.",
+        description: "Verified Linear activity in your chosen chat, with configurable wake rules.",
       },
     ],
     allowBack: true,
@@ -372,13 +372,14 @@ async function runLinearWakeFlow(shell: ClankieFaceShell, services: ConnectComma
   const fields = [
     ["actors", "Actors: owner, human, self (Clankie and workers), users"],
     ["ownerUserIds", "Owner's Linear user IDs"],
+    ["ownerUserEmails", "Owner's Linear email addresses"],
     ["userIds", "Named Linear user IDs (for users)"],
     ["notificationTypes", "Notification types (none means all types)"],
     ["excludedNotificationTypes", "Excluded types (always win)"],
   ] as const;
   const patch: Record<string, string[]> = {};
   shell.setupFlow.renderLine(
-    "Comma-separated values; enter none to clear. Unknown authors never wake. Changes apply to new notifications.",
+    "Comma-separated values; enter none to clear. Unknown authors never wake. Changes apply to new signed webhook events.",
     "info",
   );
   for (const [key, message] of fields) {
@@ -399,7 +400,11 @@ async function runLinearWakeFlow(shell: ClankieFaceShell, services: ConnectComma
     ...value,
     linearWebhook: { ...value.linearWebhook, wake: LinearWakeSettingsSchema.parse(patch) },
   }));
-  shell.insertCommandResult("/linear", "Linear wake rules saved. Inbox collection is unchanged.", "success");
+  shell.insertCommandResult(
+    "/linear",
+    "Linear wake rules saved. Activity stays visible in your chosen chat.",
+    "success",
+  );
 }
 
 export async function runLinearFollowMenu(
@@ -425,15 +430,27 @@ async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCom
         value: following ? "off" : "on",
         label: following ? "Stop following" : "Start following",
         hint: following
-          ? "Keep receiving inbox messages without waking him"
-          : "Wake the operator conversation on the connected account’s Linear notifications",
+          ? "Keep activity visible in the chosen chat without waking him"
+          : "Wake the chosen chat for verified events that match the wake rules",
       },
-      { value: "wake", label: "Wake rules", hint: "Who and which notifications wake Clankie" },
+      { value: "wake", label: "Wake rules", hint: "Who and which events wake Clankie" },
+      { value: "target", label: "Wake chat", hint: status.wakeConversationId },
       { value: "setup", label: "Configure webhook", hint: "URL, all activity events, signing secret" },
     ],
     allowBack: true,
   });
   if (action === undefined) return;
+  if (action === "target") {
+    const conversationId = await flow.readText({
+      message: "Existing global chat ID",
+      defaultValue: status.wakeConversationId,
+      validate: (value) => (/^[a-zA-Z0-9_-]{1,256}$/u.test(value) ? undefined : "Enter a chat ID."),
+    });
+    if (conversationId === undefined) return;
+    const result = await runLinearCommand(["target", "set", conversationId], options);
+    shell.insertCommandResult("/linear", `Linear wake chat: ${result.wakeConversationId}`, "success");
+    return;
+  }
   if (action === "wake") {
     await runLinearWakeFlow(shell, services);
     return;
@@ -451,8 +468,8 @@ async function runLinearFollowFlow(shell: ClankieFaceShell, services: ConnectCom
     shell.insertCommandResult(
       "/connect linear",
       result.following
-        ? "Following the connected account’s Linear notifications in the operator conversation."
-        : "Stopped following Linear. New activity stays in the inbox without waking him.",
+        ? "Following verified Linear events in the chosen chat."
+        : "Stopped following Linear. New activity stays visible in the chosen chat without waking him.",
       "success",
     );
     return;

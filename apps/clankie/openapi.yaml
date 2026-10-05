@@ -931,20 +931,30 @@ paths:
         "404": { description: Unknown repo or work item }
         "409": { description: The repo needs its convention decided, or its recorded backend is unavailable }
         "502": { description: The backend refused or failed the request }
-  /v1/linear/work:
+  /v1/linear/target:
     get:
       tags: [Operator]
-      operationId: listLinearWorkOwners
-      summary: Read persisted organization and issue ownership
+      operationId: inspectLinearWakeTarget
+      summary: Inspect the ordinary chat selected for Linear activity
       security: [{ operatorBearer: [] }]
       responses:
-        "200": { description: Owners in an owners array }
+        "200":
+          description: Current live wake target
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, wakeConversationId]
+                properties:
+                  schemaVersion: { const: 1 }
+                  wakeConversationId: { type: string, default: global-default }
         "401": { description: Operator authentication required }
+        "503": { description: Operator authentication unavailable }
     put:
       tags: [Operator]
-      operationId: bindLinearWorkOwner
-      summary: Bind an exact Linear issue to an authorized conversation
-      description: Requires current operator authority over the selected runnable conversation. Selecting an attachable room grants no Discord or machine authority. Ownership routes future qualifying events; it does not replay passive history.
+      operationId: setLinearWakeTarget
+      summary: Select an existing ordinary global chat without restarting
+      description: Sets linearWebhook.wakeConversationId, default global-default. The target must be an existing ordinary global chat; its attached native operator seat may drive it. Changing the target applies to new activity without moving or replaying history. Selecting a target grants no additional authority.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -953,109 +963,29 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [organizationId, issueId, conversationId]
+              required: [conversationId]
               properties:
-                organizationId: { type: string, format: uuid }
-                issueId: { type: string, format: uuid }
-                conversationId: { type: string, pattern: "^[a-zA-Z0-9_-]+$", maxLength: 256 }
+                conversationId: { type: string, pattern: "^[a-zA-Z0-9_-]{1,256}$" }
       responses:
-        "200": { description: The persisted binding in bound }
-        "400": { description: Invalid issue or conversation binding }
+        "200":
+          description: Persisted live wake target
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, wakeConversationId]
+                properties:
+                  schemaVersion: { const: 1 }
+                  wakeConversationId: { type: string }
+        "400": { description: Invalid target }
         "401": { description: Operator authentication required }
-        "409": { description: Source conversation authority is unavailable or was revoked }
-        "503": { description: Operator authentication unavailable }
-    delete:
-      tags: [Operator]
-      operationId: unbindLinearWorkOwner
-      summary: Remove an exact organization and issue binding
-      security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [organizationId, issueId]
-              properties:
-                organizationId: { type: string, format: uuid }
-                issueId: { type: string, format: uuid }
-      responses:
-        "200": { description: Whether a binding was removed in unbound }
-        "400": { description: Invalid organization and issue pair }
-        "401": { description: Operator authentication required }
-        "503": { description: Operator authentication unavailable }
-  /v1/linear/inbox:
-    get:
-      tags: [Operator]
-      operationId: readLinearInbox
-      summary: Read a bounded page without consuming it
-      security: [{ operatorBearer: [] }]
-      parameters:
-        - {
-            name: conversationId,
-            in: query,
-            schema: { type: string },
-            description: Optional owner filter; omitted reads the whole inbox,
-          }
-        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
-        - { name: before, in: query, schema: { type: string, pattern: "^[0-9]{12}$" } }
-        - { name: headlines, in: query, schema: { type: boolean } }
-      responses:
-        "200": { description: Items, unread count, continuation and acknowledgment cursor }
-        "400": { description: Invalid cursor or limit }
-        "401": { description: Operator authentication required }
-        "404": { description: Unknown owner conversation }
-    post:
-      tags: [Operator]
-      operationId: acknowledgeLinearInbox
-      summary: Acknowledge only events already offered under the selected owner
-      security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [ackCursor]
-              properties:
-                ackCursor: { type: string, pattern: "^[0-9]{12}$" }
-                conversationId: { type: string }
-      responses:
-        "200": { description: Acknowledged cursor }
-        "400": { description: Invalid acknowledgment }
-        "401": { description: Operator authentication required }
-        "409": { description: Cursor was not offered for this owner }
-  /v1/linear/inbox/handoff:
-    post:
-      tags: [Operator]
-      operationId: handoffLinearActivity
-      summary: Hand one retained inbox event to its current issue owner
-      description: The service resolves the persisted issue owner from the retained event. The caller cannot choose a destination or change passive wake rules. An accepted or uncertain handoff is never dispatched again.
-      security: [{ operatorBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [cursor]
-              properties:
-                cursor: { type: string, pattern: "^[0-9]{12}$" }
-      responses:
-        "200": { description: Accepted cursor in handedOff }
-        "400": { description: Invalid retained event cursor }
-        "401": { description: Operator authentication required }
-        "409":
-          { description: Event or authorized current owner is unavailable, or handoff was already attempted }
-        "503": { description: Operator authentication unavailable }
+        "409": { description: Target is not an available ordinary global chat }
+        "503": { description: Settings or operator authentication unavailable }
   /v1/linear/wake:
     get:
       tags: [Operator]
       operationId: inspectLinearWakeRules
-      summary: Inspect actor and notification type wake rules
+      summary: Inspect actor and activity type wake rules
       security: [{ operatorBearer: [] }]
       responses:
         "200":
@@ -1074,7 +1004,7 @@ paths:
       tags: [Operator]
       operationId: setLinearWakeRules
       summary: Replace wake rules without restarting
-      description: Missing fields take defaults. Defaults select configured owner user IDs only and exclude issueSubscribed. Unknown or ambiguous authors never wake. Actor selectors are ORed; exclusions always win. Empty notificationTypes allows all types. Rules apply to new notification decisions and never replay collected history or change inbox collection. The follow switch still gates wakes.
+      description: Missing fields take defaults. Defaults select signed comments and mentions by the owner user email volpestyle@gmail.com and exclude issueSubscribed. Owner IDs may also be configured. Unknown or ambiguous authors and own writes never wake. Actor selectors are ORed; exclusions always win. Empty notificationTypes allows all types. Rules apply to new signed webhook activity without replaying history. The follow switch still gates wakes; passive activity remains visible in the selected ordinary chat.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -1099,7 +1029,7 @@ paths:
     get:
       tags: [Operator]
       operationId: inspectLinearFollowing
-      summary: Inspect notification following and required webhook readiness
+      summary: Inspect Linear activity following and required webhook readiness
       security: [{ operatorBearer: [] }]
       responses:
         "200":
@@ -1110,14 +1040,14 @@ paths:
             reason,
             missingWebhook,
             detail,
-            canonical inbox conversation; wakeRouting is work-owner and wakeConversationId is the inbox fallback,
+            configured ordinary chat in wakeConversationId,
           }
         "401": { description: Operator authentication required }
     put:
       tags: [Operator]
       operationId: setLinearFollowing
-      summary: Enable or disable rule-matched turns from the bot notification inbox
-      description: Enabling requires a stored webhook URL and signing secret. It resumes previously accepted pending wakes, never passive backlog. Disabling leaves inbox delivery enabled. Status distinguishes the requested following switch from active readiness, with linear_webhook_required and missingWebhook when setup is removed. There is no periodic poll.
+      summary: Enable or disable rule-matched turns from signed Linear webhooks
+      description: Enabling requires a stored webhook URL and signing secret. It never promotes passive backlog. Disabling suppresses new and queued wakes while leaving ordinary chat history delivery enabled. Status distinguishes the requested following switch from active readiness, with linear_webhook_required and missingWebhook when setup is removed. Bursts coalesce into one wake for the selected ordinary global chat. There is no notification poll.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -1138,7 +1068,7 @@ paths:
             reason,
             missingWebhook,
             detail,
-            canonical inbox conversation; wakeRouting is work-owner and wakeConversationId is the inbox fallback,
+            configured ordinary chat in wakeConversationId,
           }
         "400": { description: Invalid request }
         "401": { description: Operator authentication required }
@@ -3845,13 +3775,19 @@ components:
           type: array
           maxItems: 100
           default: []
-          description: Explicit owner human IDs in Linear; never inferred from app credentials or display names
+          description: Explicit owner human IDs in Linear, alongside ownerUserEmails; never inferred from app credentials or display names
           items: { type: string, minLength: 1, maxLength: 256 }
+        ownerUserEmails:
+          type: array
+          maxItems: 100
+          default: [volpestyle@gmail.com]
+          description: Owner human emails matched only against verified signed user actors
+          items: { type: string, format: email, maxLength: 320 }
         actors:
           type: array
           maxItems: 4
           default: [owner]
-          description: owner is a configured human; human is any signed user except self or workers; self is the connected account and attributed workers; users selects userIds
+          description: owner is a configured human by signed ID or email; human is any signed user except self or workers; self selects the connected account and attributed workers; users selects userIds. Own-write suppression remains in force.
           items: { enum: [owner, human, self, users] }
         userIds:
           type: array
@@ -3861,7 +3797,18 @@ components:
         notificationTypes:
           type: array
           maxItems: 100
-          default: []
+          default:
+            [
+              issueNewComment,
+              issueCommentMention,
+              issueMention,
+              projectUpdateNewComment,
+              projectUpdateMention,
+              initiativeUpdateNewComment,
+              initiativeUpdateMention,
+              documentNewComment,
+              documentMention,
+            ]
           items: { type: string, minLength: 1, maxLength: 128 }
         excludedNotificationTypes:
           type: array

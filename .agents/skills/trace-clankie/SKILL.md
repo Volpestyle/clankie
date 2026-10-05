@@ -57,7 +57,7 @@ fully reviewed offered IDs with `clankie agents reports ack ID... --conversation
 - Live status: `clankie status` / `/trace` in the face
 - What's on the TUI screen right now: `herdr pane read <pane> --source visible`
 
-Shapes, retention and the Discord media and Linear inbox details are in
+Shapes, retention and the Discord media and Linear activity details are in
 [the trail map](reference/trail-map.md).
 
 ## Read next, only for the question at hand

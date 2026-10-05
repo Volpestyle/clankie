@@ -9,6 +9,7 @@ import { SettingsStore } from "@clankie/settings";
 import { expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
+import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { LinearWriteReceipts, type LinearActivityEvent } from "../src/linear-webhook.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
@@ -120,6 +121,10 @@ async function fixture() {
     account,
     revision,
     store,
+    external: () =>
+      new ConversationJournal(join(root, "conversations"))
+        .read("global-default")
+        .filter((event) => event.type === "message" && event.role === "external"),
     admitted,
     recorded,
     providerWrites,
@@ -204,7 +209,7 @@ async function fixture() {
   };
 }
 
-it("correlates a native display-ID issue write after durable reload, while human and worker activity stays in the inbox", async () => {
+it("correlates a native display-ID issue write after durable reload, while human activity stays in the ordinary chat and worker echoes stay quiet", async () => {
   const f = await fixture();
   try {
     const revision = f.revision();
@@ -213,7 +218,7 @@ it("correlates a native display-ID issue write after durable reload, while human
     expect(await post(revision)).toMatchObject({ ingested: false });
     expect(f.admitted).toHaveLength(0);
     expect(f.recorded).toHaveLength(1);
-    expect(f.store.readLinearInbox().items).toHaveLength(0);
+    expect(f.external()).toHaveLength(0);
     expect(await f.receipts()).toEqual([expect.objectContaining({ id: revision.id })]);
     expect(f.providerWrites).toEqual([{ id: "VUH-FIXTURE", state: "Done" }]);
 
@@ -225,17 +230,17 @@ it("correlates a native display-ID issue write after durable reload, while human
     ] as const;
     for (const [data, envelope] of visible)
       expect(await post(data, envelope)).toMatchObject({ ingested: true });
-    expect(f.store.readLinearInbox().items).toHaveLength(visible.length);
+    expect(f.external()).toHaveLength(visible.length);
 
     const workerRevision = f.revision();
     const worker = await f.write({ ...workerRevision, id: "VUH-FIXTURE", uuid: workerRevision.id }, true);
-    expect(await (await f.reloadHook())(workerRevision)).toMatchObject({ ingested: true });
-    expect(f.admitted.at(-1)?.worker).toEqual({
+    expect(await (await f.reloadHook())(workerRevision)).toMatchObject({ ingested: false });
+    expect(f.recorded.at(-1)?.worker).toEqual({
       grantId: worker!.grantId,
       principalId: worker!.principalId,
       workId: worker!.workId,
     });
-    expect(f.store.readLinearInbox().items).toHaveLength(visible.length + 1);
+    expect(f.external()).toHaveLength(visible.length);
   } finally {
     await f.close();
   }
@@ -249,7 +254,7 @@ it("retains UUID-id compatibility without hiding activity from ambiguous native 
     expect(await (await f.reloadHook())(legacy)).toMatchObject({ ingested: false });
     expect(f.admitted).toHaveLength(0);
     expect(f.recorded).toHaveLength(1);
-    expect(f.store.readLinearInbox().items).toHaveLength(0);
+    expect(f.external()).toHaveLength(0);
     expect(await f.receipts()).toEqual([expect.objectContaining({ id: legacy.id })]);
     const missing = f.revision();
     const invalid = f.revision();
@@ -266,7 +271,7 @@ it("retains UUID-id compatibility without hiding activity from ambiguous native 
       for (const activity of activities) expect(await post(activity)).toMatchObject({ ingested: true });
     }
     expect(f.admitted).toHaveLength(4);
-    expect(f.store.readLinearInbox().items).toHaveLength(4);
+    expect(f.external()).toHaveLength(4);
   } finally {
     await f.close();
   }

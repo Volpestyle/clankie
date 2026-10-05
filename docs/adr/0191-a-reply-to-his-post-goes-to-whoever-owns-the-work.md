@@ -10,6 +10,13 @@ replaces per-issue wake routes with the bot's actual notification inbox waking
 `global-default`. Stored issue bindings remain inert; reply provenance and
 untrusted context remain available in passive webhook history.
 
+Amended 2026-10-04 by
+[ADR 0214's VUH-1678 decision](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04):
+signed rule-passing webhooks wake one configured ordinary chat, default
+`global-default`. The inbox protocol, notification polling and per-work wake
+routing described below are historical. Default rules select James's signed
+comments and mentions; own-write suppression remains.
+
 ## Context
 
 On 2026-09-26 James asked two questions in a comment on a Rivals Agent project

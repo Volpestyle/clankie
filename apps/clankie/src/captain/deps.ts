@@ -43,6 +43,11 @@ import type { WorkItemsService } from "../work-items.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
+  /** Non-secret wake settings, shared by the CLI, API and Clankie's own tool. */
+  readonly linearWake?: {
+    readonly settings: Pick<import("@clankie/settings").SettingsStore, "load" | "update">;
+    targetAllowed(conversationId: string): boolean;
+  };
   /** Exact conversation-owned Minecraft stay, sharing the Pokémon play lease. */
   readonly minecraft?: import("../minecraft.ts").MinecraftService;
   readonly minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;

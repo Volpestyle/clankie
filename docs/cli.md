@@ -608,231 +608,165 @@ See [worker posts](linear-worker-posts.md) for examples, grants and limitations.
 
 ### `linear status` / `linear follow on|off`
 
-When a webhook is configured, accepted events appear in the **Linear inbox**
-conversation (`linear-inbox`) as **External activity** messages, including worker
-posts delivered by the webhook. Workspace webhook events are passive history. Clankie also reads the connected
-account’s actual Linear notifications once at startup and when webhooks arrive.
-There is no periodic poll. A newly persisted, signed workspace event (or a verified exact self echo) requests a
-refresh after a 1.5-second debounce; if no new notifications appear, it retries
-once after another 1.5 seconds. Refreshes coalesce bursts and never overlap an
-active read. A failed startup or manual read gets one delayed catch-up attempt;
-a failed retry retains its checkpoint for the next webhook or restart.
-Following requires a configured webhook. Following controls
-whether those notifications wake the conversation that owns the issue, or the inbox for unowned work:
+A verified Linear webhook stores a compact **External activity** message in one
+ordinary Clankie chat. `linearWebhook.wakeConversationId` selects that chat;
+`global-default`, the lead conversation, is the default. Open it with
+`clankie --chat global-default`, or use the configured ID. A chat named for Linear
+has the same conversation controls and history as any other chat.
 
-| Following     | Inbox delivery                          | Automatic model turns                                              |
-| ------------- | --------------------------------------- | ------------------------------------------------------------------ |
-| Off (default) | Events stay visible in the conversation | None from incoming events                                          |
-| On            | Events stay visible in the conversation | Rule-matched notifications wake their work owner or `linear-inbox` |
+Following is off by default. With following on, a new signed event that passes
+`linearWebhook.wake` wakes this chat. The lead decides what to do and delegates
+from there. Events arriving within a 1.5-second burst window coalesce into one
+wake containing issue identifiers and titles,
+what changed, who acted, and links. Events that do not pass the rules remain
+visible as external context without starting a turn. Exact own-write echoes are
+suppressed; Clankie's connected account and attributed workers never wake him.
+Unknown or ambiguous actors stay quiet. Production wakes also require the
+connected Linear account identity to match the signed event's workspace. An
+unavailable identity or workspace mismatch keeps activity passive, logged as
+`identity_unavailable` or `account_workspace_mismatch`; local `active` readiness
+alone does not prove this identity lookup succeeded. No connected-account
+notification poll, separate inbox, read/ack protocol, or issue-owner route
+participates in delivery.
 
-Notifications wake only after attribution from signed webhook history and matching
-`linearWebhook.wake`. Defaults select configured owner humans only and exclude
-`issueSubscribed`. Clankie's own account and workers are quiet unless explicitly
-selected; unknown or ambiguous actors stay quiet. Collection is unchanged
-([ADR 0214](adr/0214-linear-wakes-require-attribution-and-rules.md)).
-Mentions, assignments, subscribed issue activity and replies follow Linear’s
-own inbox semantics. Successful conversation writes and issue-scoped hires establish ownership automatically; explicit claims can adopt it. The first connection starts
-watching from now; existing Linear notifications remain readable with
-`linear_get_notifications`. Notification IDs and a private durable checkpoint
-prevent restart, pagination and read-state changes from creating extra wakes.
-Unavailable connections are retried without waking; no human connector is used.
+A Comment webhook may carry only `issueId`, without an issue title. Missing
+display context is filled from retained signed Issue history or a native
+connected `get_issue` lookup bounded to one second. That read supplies the identifier/title only; signed
+actor, resource and changes remain the authority for wake rules. If title lookup
+is unavailable, the compact event says `Title unavailable` and keeps its signed
+issue UUID and link rather than dropping the event.
 
-Open the conversation with `clankie --chat linear-inbox`. It is created on the
-first accepted event, including while off. Ask Clankie to **check the Linear
-inbox** when you want him to read its retained messages; collecting them does
-not automatically load them into model context. Turning following on does not
-schedule a turn for every old message. Unread events survive retention; normal conversation retention bounds consumed
-history.
+| Following     | Chat history                   | Automatic model turns                  |
+| ------------- | ------------------------------ | -------------------------------------- |
+| Off (default) | Accepted events remain visible | None from incoming events              |
+| On            | Accepted events remain visible | One coalesced wake for eligible events |
 
-`clankie linear inbox read` (or `clankie linear inbox`) returns a JSON page
-in `items`: the oldest unread events, 20 by default (`--limit N`, up to 100),
-under 31 KB serialized. `--headlines` returns one line per event (cursor,
-time, headline) instead of the quoted payload; `--before CURSOR` returns the
-events just before that cursor, read or not, so history can be walked back
-from `oldestCursor` as deep as wanted. Reading leaves events unread. Review
-what was shown, then run `clankie linear inbox ack CURSOR` with the returned
-`ackCursor`; it moves the read boundary forward over events already offered,
-never past one unseen. Never acknowledge truncated output. Unacknowledged
-pages survive restart. `GET /v1/linear/inbox?limit=&before=&headlines=1`
-reads; `POST /v1/linear/inbox` requires `{ "ackCursor": "..." }`.
-Following controls waking, not collection.
+The default rules wake only for comments or mentions by James, identified by the
+signed user email `volpestyle@gmail.com`. Other actors and other changes stay
+quiet. The connected tracker account remains Clankie's and his fleet's publishing
+identity; it does not become the human owner. Display names and notification
+subtitles do not prove authorship. A wake supplies context, never new permission.
+[ADR 0214](adr/0214-linear-wakes-require-attribution-and-rules.md) records the
+attribution and routing decision.
 
-`clankie linear follow off` suppresses new event-triggered turns and skips model
-turns still queued; their inbox messages remain. An already-running turn can
-finish. `clankie linear follow on|off` applies without a restart, and
-`clankie linear status` reports the switch and webhook readiness. All three
-return JSON with `ok`, `following`, `active`, `webhookConfigured`, `reason`,
-`missingWebhook`, `detail`, `conversationId` (`linear-inbox`),
-`wakeConversationId` (`linear-inbox`, the fallback), `wakeRouting` (`work-owner`),
-`wakeWarning`, and `settingsFile`. When following is on with the owner selector
-and no owner IDs, status and doctor report: “following is on, but no owner IDs, so
-owner comments never wake”. Other selected actors can still match. Verify the
-owner through the connected Linear account, then configure
-`clankie linear wake set --owner-user-ids OWNER_UUID`; it applies live.
-Enabling without a
-stored webhook URL or signing secret leaves the switch unchanged and returns
-`ok: false`, `error: "linear_webhook_required"`, and a nonzero exit status.
-`missingWebhook` names `url`, `secret`, or both, with setup guidance in `detail`.
-`PUT /v1/linear/follow` refuses with HTTP 409 and the same reason; its authenticated
-GET reports readiness. Removing a prerequisite while following is on reports
-`following: true`, `active: false`, and `reason: "linear_webhook_required"`, also
-shown plainly in the TUI. Turning following off always remains available.
-
-Notifications wake the operator conversation or its attached native seat. All
-records remain in one canonical inbox. `--conversation global-default` scopes
-reads and acknowledgments to that stream; omitting it reads all retained history.
-Removing the webhook stops ongoing notification refreshes and workspace history
-delivery; disconnecting Linear stops notification reads. Startup and queued wakes
-recheck webhook readiness. Following off keeps webhook ingestion and notification
-collection enabled. Readiness checks local configuration, not delivery health or
-whether someone deleted the webhook in Linear's own settings.
+`clankie linear follow on|off` applies live. Turning it off suppresses new and
+queued event turns; an already-running turn can finish. Turning it on does not
+replay passive history. `clankie linear status` reports `following`, `active`,
+`webhookConfigured`, `reason`, `missingWebhook`, `detail`, `wakeConversationId`,
+`wakeWarning`, and `settingsFile`. Following requires both the registered webhook
+URL and its broker-held signing secret. Enabling without them leaves the switch
+unchanged, returns `ok: false`, `error: "linear_webhook_required"`, and exits
+nonzero. `missingWebhook` names `url`, `secret`, or both. If a prerequisite is
+removed after enabling, status reports `following: true`, `active: false`, and
+the same reason. Turning following off remains available.
 
 Configure the webhook from `/connect linear` → **Follow Linear** → **Configure
-webhook**. The flow prints and stores the registered public URL in
-`linearWebhook.url`, and stores the signing secret in the credential broker
-(`linear-webhook`). In Linear's webhook settings, select **all
-available activity events**, including issues, comments, projects, and updates.
-An existing Comments-only webhook also needs its event selection expanded there.
-Setup does not enable following; **Start following** / **Stop following** is a
-separate choice under **Follow Linear**, enabled only once both are configured.
-Existing setups that stored only a secret must run **Configure webhook** again
-and choose **Keep it**, or record the already-registered URL with
+webhook**. The flow stores the registered public URL in `linearWebhook.url` and
+the signing secret in the credential broker (`linear-webhook`). Select all
+available activity events in Linear's webhook settings. Setup does not enable
+following; **Start following** / **Stop following** is separate. Existing setups
+that stored only a secret can record their registered URL with
 `clankie linear webhook set --url URL`. `clankie linear webhook clear` removes the
-stored URL and leaves any requested following visible as blocked. The secret
-remains broker-owned; it is never a CLI flag.
+stored URL and leaves requested following visibly blocked. The secret remains
+broker-owned and is never a CLI flag. Readiness checks local configuration,
+not delivery health or the webhook's current status in Linear.
 
-The consumer accepts signed `create`, `update`, and `remove` activity from any
-resource type and actor. A verified, matching revision of Clankie's own MCP write
-is dropped at ingress; matching delegated-worker updates retain their provenance
-and enter the inbox. For issue writes, a response with a display-label `id` such
-as `VUH-1641` uses its returned `uuid` for receipt identity. A UUID-valued `id`
-is valid too; any supplied `uuid` must be valid and agree with it. Missing or
-conflicting UUID proof never suppresses activity. Workspace, actor, resource type,
-`updatedAt` and saved-field matching still apply to the exact revision.
-Ambiguous events remain visible under the existing wake rules. A wake carries
-one headline per new event; the stored message carries the resource, action,
-author, URL, data and previous values as bounded untrusted context.
-Shared-account agent posts are not attributed to the human. Clankie decides
-what merits attention; routine updates need no acknowledgment, dispatch or
-reply. A delivery supplies context, not new permission.
-[ADR 0168](adr/0168-linear-awareness-is-opt-in.md) describes the decision.
+The signed public ingress remains `POST /v1/hooks/linear`. It verifies the raw
+body's signature and timestamp before parsing, deduplicates accepted deliveries,
+and retains replay safety across restart. The consumer accepts signed `create`,
+`update`, and `remove` activity. A matching revision of Clankie's own MCP write is
+dropped at ingress; delegated worker events retain their provenance but stay
+quiet. For issue write receipts, display-label `id` values such as `VUH-1641`
+require a valid returned `uuid`; UUID-valued `id` is also accepted. Conflicting
+or missing identity proof never suppresses an event. Workspace, actor, resource,
+revision time, and saved-field matching still apply to exact echoes.
 
-The local operator API exposes `GET /v1/linear/follow` and
-`PUT /v1/linear/follow` with `{ "following": true | false }`. Both require the
-operator bearer and return `{ "schemaVersion": 1, "following": boolean,
-"conversationId": "linear-inbox", "wakeConversationId": "linear-inbox", "wakeRouting": "work-owner" }`. The signed public ingress remains
-`POST /v1/hooks/linear`. Changing the local follow switch does not change which
-events Linear sends; the owner configures that subscription in Linear.
+The old `linear-inbox` conversation and notification checkpoint are retired.
+On upgrade, retained unread inbox activity is dropped once with a service log
+entry; it is not replayed into a fresh wake. Historical records in Linear remain
+available through Clankie's connected `linear_*` tools.
+
+The authenticated local operator API exposes `GET /v1/linear/follow` and
+`PUT /v1/linear/follow` with `{ "following": true | false }`. Both report the
+configured `wakeConversationId`; PUT without webhook prerequisites returns 409.
+Changing the local switch does not change which events Linear sends.
+
+#### `linear target show|set CONVERSATION_ID`
+
+```sh
+clankie linear target show
+clankie linear target set global-default
+```
+
+The target is one non-secret setting, `linearWebhook.wakeConversationId`. Select
+an existing ordinary global chat the owner can open; an attached native operator
+seat can drive it. To use a new chat, create it with `/new` in the TUI, name it
+Linear, and find its stable ID with `clankie conversations list` before setting
+the target. `set` does not create a chat. The change applies live to new activity;
+it does not move history or replay earlier events. The authenticated
+API is `GET /v1/linear/target` and `PUT /v1/linear/target` with
+`{ "conversationId": "global-default" }`.
 
 #### `linear wake [show|set …]`
 
-Bare `/linear` opens **Follow Linear**. Its **Wake rules** editor is also under
-`/connect linear` → **Follow Linear**. Rules are stored beside the follow switch
-in `linearWebhook.wake`; following must still be active for a wake.
+Bare `/linear` opens **Follow Linear**, including **Wake rules**. Rules live in
+`linearWebhook.wake`. Clankie can inspect or change these non-secret settings
+himself through the operator-only `linear_wake` tool or authenticated CLI;
+following must still be active.
 
 ```sh
 clankie linear wake show
-clankie linear wake set --owner-user-ids OWNER_LINEAR_ID
-clankie linear wake set --actors owner,self --types issueMention,issueCommentMention
-clankie linear wake set --actors owner --types none --exclude-types issueSubscribed
+clankie linear wake set --owner-user-emails volpestyle@gmail.com --actors owner
+clankie linear wake set --types issueNewComment,issueCommentMention,issueMention
+clankie linear wake set --exclude-types issueSubscribed
 ```
 
-`set` flags change only the specified fields. Values are comma-separated; `none`
-clears a list. `--json-stdin` instead replaces the whole rule object, with defaults
-for omitted fields. The result is `{ "ok": true, "wake": {…}, "settingsFile": "…" }`.
-Malformed flags or rules fail without writing.
+`set` flags patch only the specified fields. Lists are comma-separated; `none`
+clears one. `--json-stdin` replaces the whole rule object with defaults for
+omitted fields. Malformed rules fail without writing. The result contains `ok`,
+`wake`, and `settingsFile`.
 
-| Flag               | JSON field                  | Meaning / default                                                                     |
-| ------------------ | --------------------------- | ------------------------------------------------------------------------------------- |
-| `--owner-user-ids` | `ownerUserIds`              | Explicit owner Linear IDs; initially empty, so configure before expecting owner wakes |
-| `--actors`         | `actors`                    | Any of `owner`, `human`, `self`, `users`; default `owner`                             |
-| `--user-ids`       | `userIds`                   | Named IDs selected by `users`; initially empty                                        |
-| `--types`          | `notificationTypes`         | Included notification types; empty allows all                                         |
-| `--exclude-types`  | `excludedNotificationTypes` | Exclusions always win; default `issueSubscribed`                                      |
+| Flag                  | JSON field                  | Meaning / default                                         |
+| --------------------- | --------------------------- | --------------------------------------------------------- |
+| `--owner-user-ids`    | `ownerUserIds`              | Additional explicit owner Linear IDs; initially empty     |
+| `--owner-user-emails` | `ownerUserEmails`           | Signed owner user emails; default `volpestyle@gmail.com`  |
+| `--actors`            | `actors`                    | Any of `owner`, `human`, `self`, `users`; default `owner` |
+| `--user-ids`          | `userIds`                   | Exact IDs selected by `users`; initially empty            |
+| `--types`             | `notificationTypes`         | Included activity types; empty allows all                 |
+| `--exclude-types`     | `excludedNotificationTypes` | Exclusions always win; default `issueSubscribed`          |
 
-`human` requires a signed `user` actor type and excludes the connected account
-and attributed workers. `owner` additionally requires an owner ID match. `self`
-selects the connected account/app and attributed workers. `users` selects exact
-IDs, including an app ID if explicitly listed. Selectors are ORed; names, email,
-and notification subtitles never identify a human. Find an owner's ID through
-Clankie's connected `linear_get_user` tool; the app's own account ID is not the
-owner. No personal IDs are built into defaults.
+The default included types are `issueNewComment`, `issueCommentMention`,
+`issueMention`, `projectUpdateNewComment`, `projectUpdateMention`,
+`initiativeUpdateNewComment`, `initiativeUpdateMention`, `documentNewComment`,
+and `documentMention`. The existing VUH-1549 rule engine classifies signed
+webhook activity using these types. A newly added Linear issue/profile/resource
+link in signed `body`, `description`, or `content` counts as a mention.
+
+Legacy owner-only filters migrate to the new comment/mention defaults when
+`ownerUserEmails` is absent and the saved filters match the old defaults:
+`actors: ["owner"]`, `userIds: []`, `notificationTypes: []`, and
+`excludedNotificationTypes: ["issueSubscribed"]`. Configured `ownerUserIds` are
+preserved as identity setup. Edited selectors, included types, or exclusions
+remain unchanged. Once `ownerUserEmails` is persisted, an intentionally empty
+`notificationTypes` list remains all-types; `clankie linear wake set --types none`
+can select that behavior after upgrade.
+
+`owner` requires a signed human actor matching an owner ID or email. `human`
+requires signed user identity and excludes the connected account and workers.
+`users` matches exact IDs. Selectors are ORed, but own-write suppression remains
+in force. Find Linear IDs through the connected `linear_get_user` tool rather
+than inferring them from a name or an app account.
+
+The operator-only `linear_wake({ action: "show" })` returns the rules and target.
+`linear_wake({ action: "set", wake: {…}, conversationId: "global-default" })`
+patches the supplied rule fields and optionally changes the target. No secret
+or owner-console wizard is needed for these settings.
 
 `GET /v1/linear/wake` returns `{ "schemaVersion": 1, "wake": {…} }`.
-`PUT /v1/linear/wake` accepts the rule object directly and replaces it, using
-schema defaults for omitted fields. Both require the operator bearer. Invalid
-rules return 400. API, CLI and TUI changes apply to the next notification decision
-without a restart. Already collected notifications are never replayed or promoted;
-turns accepted before a rule edit retain their decision. Use `follow off` to stop
-queued turns too.
-
-Attribution uses a durable, bounded index of verified webhook history (seven days,
-at most 2,000 events), including exact self echoes even when receipt suppression
-keeps them out of the inbox. It matches workspace, resource URL/issue identifier,
-comment anchor when present, and action time within five seconds before or one
-second after the notification. Relevant comment/state/assignment event checks
-narrow candidates. Conflicting or missing actors produce no attribution.
-Unmatched notifications remain collected without waking, including after journal
-pruning or when notifications arrive before their webhook. No OAuth credential
-is sent to GraphQL. This index does not change inbox retention or acknowledgment.
-
-#### Issue ownership
-
-A successful issue/comment write from an admitted conversation, an issue-scoped
-`hire_agent` (`linearIssue: { organizationId, issueId }`), or an explicit claim
-records the issue's leading conversation. A delegated native worker write uses
-its host-proven hiring/adopting conversation. Organization and issue UUIDs are
-canonical; names and notification subtitles do not establish ownership.
-An identifier-only comment write can establish its issue through the later exact
-signed write receipt. Without a canonical returned issue or sufficient receipt
-proof (resource UUID, revision timestamp and saved fields), automatic ownership
-stays unproven; explicitly claim the canonical issue instead. Signed
-webhook history maps notification URLs to issue UUIDs. Ambiguous identity stays
-unowned. Ownership survives restarts in the existing `linear-work.json`.
-
-A native author without a leading service conversation can own work through its
-original fleet-qualified seat and native occupant. `work list` exposes that
-host-stamped `nativeRecipient`; callers cannot manufacture one with `work bind`.
-Replies to project or initiative status updates use the exact author captured by
-`linear_save_status_update` in the existing write receipt and signed attribution
-index. An eligible reply reaches that author automatically, including a remote
-fleet's native lead, rather than requiring inbox triage. Notification URL aliases
-must agree with retained full parent/comment IDs. Missing or conflicting author
-proof stays in the inbox. Pre-upgrade writes with no retained author proof remain
-unproven; a current pane or project assignment cannot reconstruct them.
-
-```sh
-clankie linear work list
-clankie linear work bind --organization ORGANIZATION_UUID --issue ISSUE_UUID --conversation CONVERSATION_ID
-clankie linear work unbind --organization ORGANIZATION_UUID --issue ISSUE_UUID
-clankie linear inbox handoff CURSOR
-```
-
-`GET /v1/linear/work` lists owners. Authenticated `PUT` accepts
-`{ organizationId, issueId, conversationId }`; `DELETE` accepts
-`{ organizationId, issueId }`. Claims require the selected conversation's existing
-authority. Selecting a room does not grant an operator source or widen its tools;
-room writes/hires retain their admitted actor and route proof.
-
-Eligible notifications wake the issue owner through its existing attached native
-seat or service runner. Unowned work and removed owners fall back to
-`linear-inbox`. A present room with revoked grants remains undelivered. The inbox
-reads shared durable memory, work items, roster and issue ownership, without
-importing other conversations' transcripts. Its explicit handoff uses a retained
-event's current issue owner, keeping the original follow/rules decision. The API
-is authenticated `POST /v1/linear/inbox/handoff` with `{ cursor }`. An already
-handed-off item cannot be sent again. Passive/filtered history stays quiet.
-Native delivery refreshes the original occupant and any original room grants at
-dispatch. A changed or unavailable recipient stays undelivered in the shared
-journal; it does not inherit another seat or `global-default`. The existing native
-delivery fence retains the accepted ID, so a retry reconciles uncertain delivery
-and does not dispatch a second message.
-Unresolved native admissions older than the seven-day receipt window remain
-undelivered for explicit reconciliation; they are never automatically replayed.
-
-Use `clankie linear inbox read --conversation CONVERSATION_ID` and retain the
-same conversation on `inbox ack`. Omit the conversation to inspect all history.
-Never acknowledge truncated output or a cursor offered to another conversation.
+`PUT /v1/linear/wake` replaces the rule object, filling omitted fields with
+schema defaults. Both require the operator bearer; invalid rules return 400.
+API, CLI, tool, and TUI edits apply to the next event without restart. They
+never promote old passive history. Use `follow off` to stop queued turns.
 
 The Claude seat denies the inherited `linear-server` MCP server with Claude
 Code’s server-prefix permission rule. It uses Clankie’s connected `linear_*`

@@ -1,12 +1,13 @@
 import { expect, it } from "vitest";
 import { LinearWebhookSettingsSchema, linearFollowStatus, linearWakeMatches } from "../src/index.ts";
 
-const warning = "following is on, but no owner IDs, so owner comments never wake.";
+const warning = "following is on, but no owner IDs or emails, so owner comments never wake.";
 
 it("reports a ready but ineffective owner rule without changing following or readiness", () => {
   const settings = LinearWebhookSettingsSchema.parse({
     following: true,
     url: "https://example.com/linear",
+    wake: { ownerUserEmails: [] },
   });
   expect(linearFollowStatus(settings, true)).toEqual({
     following: true,
@@ -23,7 +24,7 @@ it("reports a ready but ineffective owner rule without changing following or rea
 });
 
 it("keeps webhook readiness separate from the empty owner warning", () => {
-  const settings = LinearWebhookSettingsSchema.parse({ following: true });
+  const settings = LinearWebhookSettingsSchema.parse({ following: true, wake: { ownerUserEmails: [] } });
   expect(linearFollowStatus(settings, false)).toMatchObject({
     following: true,
     active: false,
@@ -47,7 +48,7 @@ it("names other actor selectors and leaves their wake behavior intact", () => {
   const settings = LinearWebhookSettingsSchema.parse({
     following: true,
     url: "https://example.com/linear",
-    wake: { actors: ["owner", "human"] },
+    wake: { actors: ["owner", "human"], ownerUserEmails: [] },
   });
   expect(linearFollowStatus(settings, true).wakeWarning).toBe(
     `${warning} Other selected actor rules may still wake.`,

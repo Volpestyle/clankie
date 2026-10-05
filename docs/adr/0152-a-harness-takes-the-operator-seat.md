@@ -124,7 +124,8 @@ flowchart LR
   This projection also works with `--plugin-dir` and outside Herdr.
 - **Wakes and escalations follow their conversation.** Self-wakes, completion
   watches, Linear activity and human sends reach a bound seat through that
-  conversation's outbox. Linear activity uses a wake after issue-owner routing;
+  conversation's outbox. Under [ADR 0214's VUH-1678 amendment](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04),
+  Linear activity wakes one configured ordinary chat, `global-default` by default;
   its provider content remains untrusted and carries no new authority.
   A `reply` tool returns escalation responses to the same conversation. A bridge
   polls only when its Claude channel is loaded; otherwise the service runs the

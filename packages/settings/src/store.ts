@@ -8,6 +8,7 @@ import {
   assertNoSecretShapedValue,
   dropRetiredSettings,
   emptySettings,
+  LinearWakeSettingsSchema,
   type ClankieSettings,
 } from "./schema.ts";
 
@@ -105,9 +106,9 @@ export class SettingsStore {
     }
     // A malformed settings file fails loudly rather than silently reverting to
     // defaults, which would quietly widen an allowlist the operator narrowed.
-    // Sections this version retired are the one exception: they are dropped, so
-    // an older file still opens. The next write persists it without them.
-    return machineSettings(dropRetiredSettings(parsed));
+    // Retired sections and unchanged legacy Linear defaults migrate on read;
+    // the next ordinary settings write persists the upgraded format.
+    return machineSettings(migrateLinearWakeDefaults(dropRetiredSettings(parsed)));
   }
 
   /** Apply a transform atomically under a serialized queue. */
@@ -154,6 +155,38 @@ export class SettingsStore {
     }
     await chmod(this.filePath, 0o600);
   }
+}
+
+const LegacyLinearWakeSettingsSchema = LinearWakeSettingsSchema.omit({ ownerUserEmails: true }).required();
+
+/** Owner IDs record setup identity; only unchanged legacy event rules migrate. */
+function migrateLinearWakeDefaults(parsed: unknown): unknown {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return parsed;
+  const settings = parsed as Record<string, unknown>;
+  const webhook = settings.linearWebhook;
+  if (webhook === null || typeof webhook !== "object" || Array.isArray(webhook)) return parsed;
+  const value = webhook as Record<string, unknown>;
+  // The strict old shape lacks ownerUserEmails. Its presence marks the new
+  // format, including a later deliberate choice to allow all event types.
+  const legacy = LegacyLinearWakeSettingsSchema.safeParse(value.wake);
+  if (!legacy.success) return parsed;
+  const wake = legacy.data;
+  if (
+    wake.actors.length !== 1 ||
+    wake.actors[0] !== "owner" ||
+    wake.userIds.length !== 0 ||
+    wake.notificationTypes.length !== 0 ||
+    wake.excludedNotificationTypes.length !== 1 ||
+    wake.excludedNotificationTypes[0] !== "issueSubscribed"
+  )
+    return parsed;
+  return {
+    ...settings,
+    linearWebhook: {
+      ...value,
+      wake: LinearWakeSettingsSchema.parse({ ownerUserIds: wake.ownerUserIds }),
+    },
+  };
 }
 
 /** Materialize compatibility views; only machines own SSH transport on disk. */

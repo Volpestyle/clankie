@@ -128,9 +128,9 @@ import { FleetLinks } from "./fleet-link.ts";
 import { inspectFleetHarnesses, prepareFleet, workerPluginDir } from "./fleet-prepare.ts";
 import { refreshLinkedHarnesses } from "../../tui/src/harness-refresh.ts";
 import { WorkerPluginNotices } from "./worker-plugin-notices.ts";
-import { LinearWriteReceipts, linearWriteIssue } from "./linear-webhook.ts";
+import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
-import { LinearNotifications } from "./linear-notifications.ts";
+import { retireLinearNotifications } from "./linear-notifications.ts";
 import { createMcpHost } from "./mcp-host.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
@@ -571,10 +571,6 @@ const mcpHost = createMcpHost({
   observeCall: (call) => {
     const now = new Date();
     linearWrites.record(call, now);
-    const issue = linearWriteIssue(call);
-    if (issue && call.owner) captain.recordLinearWorkOwner(issue, call.owner, now.getTime());
-    else if (issue && call.recipient?.kind === "native")
-      captain.recordLinearNativeWorkOwner(issue, call.recipient, now.getTime());
   },
   linearAuthor: async (personaId) => {
     const result = await captain.serveOperatorConversation({ op: "personas", schemaVersion: 1 });
@@ -1005,18 +1001,7 @@ async function linearFollowing(): Promise<boolean> {
 }
 
 const linearAttribution = new LinearAttributionJournal(join(stateRoot, "linear-attribution.json"));
-const linearNotifications = new LinearNotifications({
-  path: join(stateRoot, "linear-notifications.json"),
-  host: mcpHost,
-  following: linearFollowing,
-  wakeRules: async () => (await settingsStore.load()).linearWebhook.wake,
-  attribute: (notification, organizationId) => linearAttribution.attribute(notification, organizationId),
-  resolveIssue: (notification, organizationId) => linearAttribution.issue(notification, organizationId),
-  resolveReplyRecipient: (notification, organizationId) =>
-    linearAttribution.replyRecipient(notification, organizationId),
-  receive: (activity, following) => captain.receiveLinearActivity(activity, following),
-  onError: () => logger.warn("Linear notification inbox unavailable; checkpoint retained"),
-});
+retireLinearNotifications(join(stateRoot, "linear-notifications.json"), (message) => logger.info(message));
 // VUH-1527: each ssh fleet reaches the seat routes, and only those, through its link.
 fleetProjectMembership = new FleetProjectMembership({
   settings: async () => (await settingsStore.load()).projects,
@@ -1281,25 +1266,9 @@ const clankie = await createClankieApp({
       return credential?.type === "api" ? credential.key : undefined;
     },
     writes: linearWrites,
-    recordActivity: (activity) => {
-      linearAttribution.record(activity);
-      if (activity.issueId && activity.organizationId && activity.conversationOwner)
-        captain.recordLinearWorkOwner(
-          { issueId: activity.issueId, organizationId: activity.organizationId },
-          activity.conversationOwner,
-          activity.conversationOwnerRecordedAt,
-          true,
-        );
-      else if (activity.issueId && activity.organizationId && activity.writeRecipient?.kind === "native")
-        captain.recordLinearNativeWorkOwner(
-          { issueId: activity.issueId, organizationId: activity.organizationId },
-          activity.writeRecipient,
-          activity.writeRecipientRecordedAt,
-          true,
-        );
-    },
-    requestNotificationPoll: () => linearNotifications.requestPoll(),
-    // Unverified identity leaves webhook history passive.
+    recordActivity: (activity) => linearAttribution.record(activity),
+    issueContext: (activity) => linearAttribution.issueContext(activity, mcpHost),
+    // Verified own-account identity suppresses its activity independently of rules.
     ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
   },
 });
@@ -1371,8 +1340,6 @@ const stopHostedWork =
         available: herdr.available,
       });
 hostedHeartbeat?.start();
-if (await linearFollowing()) captain.resumeLinearActivity();
-linearNotifications.start();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
 // "client" is the embodiment manager itself — the loopback died with the split.
@@ -1483,7 +1450,6 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   hostedDiscord?.close();
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
-    await linearNotifications.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
     await browserHost?.close().catch(() => undefined);

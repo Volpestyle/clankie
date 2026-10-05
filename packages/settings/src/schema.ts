@@ -586,12 +586,27 @@ export type EmailSettings = z.infer<typeof EmailSettingsSchema>;
 export const LinearWakeSettingsSchema = z
   .object({
     ownerUserIds: z.array(z.string().min(1).max(256)).max(100).default([]),
+    /** Matched only against verified webhook actor email, never display names. */
+    ownerUserEmails: z.array(z.email().max(320)).max(100).default(["volpestyle@gmail.com"]),
     actors: z
       .array(z.enum(["owner", "human", "self", "users"]))
       .max(4)
       .default(["owner"]),
     userIds: z.array(z.string().min(1).max(256)).max(100).default([]),
-    notificationTypes: z.array(z.string().min(1).max(128)).max(100).default([]),
+    notificationTypes: z
+      .array(z.string().min(1).max(128))
+      .max(100)
+      .default([
+        "issueNewComment",
+        "issueCommentMention",
+        "issueMention",
+        "projectUpdateNewComment",
+        "projectUpdateMention",
+        "initiativeUpdateNewComment",
+        "initiativeUpdateMention",
+        "documentNewComment",
+        "documentMention",
+      ]),
     excludedNotificationTypes: z.array(z.string().min(1).max(128)).max(100).default(["issueSubscribed"]),
   })
   .strict();
@@ -601,6 +616,11 @@ export type LinearWakeSettings = z.infer<typeof LinearWakeSettingsSchema>;
 export const LinearWebhookSettingsSchema = z
   .object({
     following: z.boolean().default(false),
+    /** One ordinary global chat; Linear never routes directly to an issue's worker. */
+    wakeConversationId: z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]{1,256}$/u)
+      .default("global-default"),
     wake: LinearWakeSettingsSchema.default(() => LinearWakeSettingsSchema.parse({})),
     /** Public URL registered in Linear; the signing secret remains broker-owned. */
     url: z.url({ protocol: /^https?$/ }).optional(),

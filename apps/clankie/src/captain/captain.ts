@@ -32,7 +32,6 @@ import {
   assertConversationAuthority,
   type ConversationOwner,
   type ConversationAuthority,
-  NativeSeatRecipientSchema,
   captureNativeSeatAuthority,
   type NativeSeatRecipient,
   type WorkerWriteAuthority,
@@ -117,12 +116,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { EvalSessionBoundary } from "./eval-session-boundary.ts";
 import { RoomConversations, roomSeatTurnResult } from "./room-conversations.ts";
-import { LinearWorkOwnerSchema } from "../linear-webhook.ts";
 import {
   ConversationRefusedError,
   ConversationResetError,
   ConversationStore,
-  LINEAR_INBOX_CONVERSATION_ID,
   type ConversationTurnContext,
   type ConversationRunner,
   type OwnerAttachmentHost,
@@ -1075,7 +1072,7 @@ export async function runOneShotDiscordTurn(
  * Wakes, watches, worker messages, Linear activity and human sends reach their
  * conversation seat. Goal continuations stay with their Pi loop.
  */
-export function seatEventKindFor(
+function seatEventKindFor(
   context: Pick<ConversationTurnContext, "internal" | "origin">,
   isHeadConversation: boolean,
 ): OperatorSeatEventKind | undefined {
@@ -1513,7 +1510,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const settingsStore = options.settings ?? new SettingsStore();
   const desktop = new DesktopExpressions(async () => (await settingsStore.load()).desktop);
-  const desktopDeps = { ...deps, desktop };
+  const desktopDeps = {
+    ...deps,
+    desktop,
+    linearWake: {
+      settings: settingsStore,
+      targetAllowed: (id: string) => conversations.linearWakeTargetAllowed(id),
+    },
+  };
   const personaImages = options.personaImages ?? createPersonaImageSource(settingsStore, options.repoRoot);
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
@@ -1975,8 +1979,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           (!(await preparation.wait("Linear following settings", settings())).linearWebhook.following ||
             (options.linearFollowing !== undefined &&
               !(await preparation.wait("Linear following authorization", options.linearFollowing()))))
-        )
+        ) {
+          conversations.discardLinearWake(conversationId);
           return;
+        }
         // A hook wake is worded when it starts, from whatever arrived until now.
         preparedMessage =
           context.origin === "hook"
@@ -2072,11 +2078,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           };
         },
         async (run) => {
-          // A Linear wake is a one-shot: a fresh session sees only the new
-          // headlines, so it never resends the conversation it reports into
-          // (VUH-1382). It publishes there like any turn, and its own tree stays
-          // on disk as the record of what it ran.
-          // ponytail: one tree per wake, unbounded; prune by mtime if it grows.
           run.signal.throwIfAborted();
           if (context.origin === "goal") {
             if (refuseNativeGoal(conversationId)) return;
@@ -2087,39 +2088,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             )
               return;
           }
-          const oneShot = context.origin === "hook";
           const cwd = context.workspace ?? workingDirectory;
-          const lane = oneShot
-            ? await buildSession(
-                "operator",
-                SessionManager.create(
-                  cwd,
-                  join(options.stateDir, "conversations", conversationId, "linear-wakes"),
-                ),
-                true,
-                cwd,
-                false,
-                conversationId,
-                run,
-              )
-            : await durableSession(
-                `operator:${conversationId}`,
-                "operator",
-                join(options.stateDir, "conversations", conversationId, "pi"),
-                true,
-                cwd,
-                context.side === true,
-                run,
-              );
+          const lane = await durableSession(
+            `operator:${conversationId}`,
+            "operator",
+            join(options.stateDir, "conversations", conversationId, "pi"),
+            true,
+            cwd,
+            context.side === true,
+            run,
+          );
           if (shutdown.signal.aborted) {
-            if (oneShot) lane.session.dispose();
             shutdown.signal.throwIfAborted();
           }
           // Operator interrupt: stop the live model turn. Aborting mid-stream makes
           // pi settle the message as aborted; partial text still publishes below so
           // the transcript shows what he had said before the interrupt.
           if (run.signal.aborted) {
-            if (oneShot) lane.session.dispose();
             run.signal.throwIfAborted();
           }
           const onInterrupt = (): void => {
@@ -2271,7 +2256,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   publishActivity("waiting");
                 } else if (event.type === "compaction_end") {
                   publishActivity("waiting");
-                  const usage = oneShot ? undefined : lane.session.getContextUsage();
+                  const usage = lane.session.getContextUsage();
                   if (usage !== undefined) {
                     publish({
                       type: "context",
@@ -2287,7 +2272,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   const said = assistantText(event.message).trim();
                   if (said.length > 0)
                     publish({ type: "message", role: "captain", text: said, streaming: false });
-                  const usage = oneShot ? undefined : lane.session.getContextUsage();
+                  const usage = lane.session.getContextUsage();
                   if (usage !== undefined) {
                     publish({
                       type: "context",
@@ -2322,21 +2307,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const paneId = context.seat?.herdrPaneId;
             // Seated or not, an operator turn carries the fleet of the pinned
             // session (ADR 0149); an unseated turn with no live session attaches
-            // nothing rather than herdr noise. The Linear inbox is a reading room,
-            // not a lead room (ADR 0168): no census there.
-            const census =
-              live || oneShot || conversationId === LINEAR_INBOX_CONVERSATION_ID
-                ? undefined
-                : await run.wait(
-                    "fleet census",
-                    readHerdrSessionCensus(paneId, {
-                      ...(options.nativeCensusRunner
-                        ? { runCommand: options.nativeCensusRunner, summaries: {} }
-                        : {}),
-                      fleets: await run.wait("fleet connections", censusFleets()),
-                      localAvailable: deps.herdrAvailable?.() !== false,
-                    }),
-                  );
+            // nothing rather than herdr noise.
+            const census = live
+              ? undefined
+              : await run.wait(
+                  "fleet census",
+                  readHerdrSessionCensus(paneId, {
+                    ...(options.nativeCensusRunner
+                      ? { runCommand: options.nativeCensusRunner, summaries: {} }
+                      : {}),
+                    fleets: await run.wait("fleet connections", censusFleets()),
+                    localAvailable: deps.herdrAvailable?.() !== false,
+                  }),
+                );
             // Owner attachments reach his model as images; the note numbers them
             // and names where each original is stored (ADR 0209).
             const attached =
@@ -2454,7 +2437,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               lane.starting = undefined;
             }
             unsubscribe();
-            if (oneShot) lane.session.dispose();
           }
         },
         signal,
@@ -2542,7 +2524,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   );
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
   conversations.projectOnboarding = projectOnboarding(settingsStore);
-  conversations.linearNativeRunner = deliverLinearNativeRecipient;
   conversations.questionEligible = (id) =>
     !conversations.nativeSource(id) && !seatOutboxes.get(id)?.bound() && !seatOutboxes.get(id)?.uncertain();
 
@@ -2602,27 +2583,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   conversations.linearFollowing = async () =>
     (await settings()).linearWebhook.following &&
     (options.linearFollowing === undefined || (await options.linearFollowing()));
-  conversations.linearRoomRunner = async (owner, prompt, guard, owners) => {
-    const authorized = async () => {
-      await guard();
-      for (const original of owners)
-        if (!(await validateConversationOwner(original)))
-          throw new Error("Linear room ownership authority is unavailable");
-    };
-    await authorized();
-    if (!(await runDiscordWatchTurn(owner, prompt, authorized, "machine", true)))
-      throw new Error("Linear room could not admit its notification");
-  };
-
-  const hireSeat: HireSeat = async (request, brief, source, linearIssue) => {
+  const hireSeat: HireSeat = async (request, brief, source) => {
     const authority = captureConversationAuthority(source);
-    const work =
-      linearIssue === undefined
-        ? undefined
-        : LinearWorkOwnerSchema.parse({
-            ...linearIssue,
-            conversationId: authority.owner.conversationId,
-          });
     await assertConversationAuthority(authority);
     await refreshFleets();
     if (brief?.trim()) {
@@ -2700,8 +2662,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         herdrWatches.trackSeat(seat.seatId);
         seat.conversationId = conversations.conversationIdForPersona(seat.personaId);
         fleetChanges.touch();
-        if (work && !conversations.bindLinearWorkOwner(work, authority.owner))
-          throw new Error("Hiring conversation no longer owns its Linear work");
         adopted = seat;
       },
     );
@@ -4305,44 +4265,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return { nativeRecipientAuthority: native, conversationAuthority };
   }
 
-  async function deliverLinearNativeRecipient(
-    input: NativeSeatRecipient,
-    content: string,
-    eventId: string,
-    guard: () => Promise<void>,
-  ): Promise<FleetSeatDelivery> {
-    const recipient = NativeSeatRecipientSchema.parse(input);
-    const fence = async () => {
-      if (!(await nativeRecipientCurrent(recipient)))
-        throw new Error("Original native author is unavailable");
-      await guard();
-      if (!(await nativeRecipientCurrent(recipient)))
-        throw new Error("Original native author changed before delivery");
-    };
-    try {
-      await fence();
-      return await deliverToSeat(
-        recipient.seatId,
-        `Linear event ${eventId}\n${content}`,
-        {
-          conversationId: recipient.owner?.conversationId ?? recipient.seatId,
-          source: "linear",
-        },
-        {
-          guard: fence,
-          recipientBinding: recipient.binding,
-          stableReceiptKey: `linear:${deliveryFingerprint(JSON.stringify([recipient.seatId, recipient.occupantId, recipient.binding, eventId]))}`,
-        },
-      );
-    } catch (error) {
-      return {
-        outcome: "undelivered",
-        deliveryStage: "unavailable",
-        detail: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
   const peerMessages = new PeerSeatMessages({
     path: join(options.stateDir, "delivery-receipts", "peer-messages.json"),
     enabled: async () => (await settings()).fleet.peerMessages === "on",
@@ -5702,29 +5624,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return conversations.observeDurableMessages(listener);
     },
 
-    readLinearInbox: (options) => conversations.readLinearInbox(options),
-    acknowledgeLinearInbox: (cursor, conversationId) =>
-      conversations.acknowledgeLinearInbox(cursor, conversationId),
-    linearWorkOwners: () => conversations.linearWorkOwners(),
-    async bindLinearWorkOwner(binding, source) {
-      const authority = captureConversationAuthority(source);
-      await assertConversationAuthority(authority);
-      if (!(await validateConversationOwner(authority.owner))) return false;
-      if (!authority.current()) return false;
-      return conversations.bindLinearWorkOwner(binding, authority.owner);
-    },
-    unbindLinearWorkOwner: (organizationId, issueId) =>
-      conversations.unbindLinearWorkOwner(organizationId, issueId),
-    handoffLinearActivity: async (cursor) => conversations.handoffLinearActivity(cursor),
-    recordLinearWorkOwner: (issue, owner, recordedAt, replayed) =>
-      conversations.bindLinearWorkOwner(
-        { ...issue, conversationId: owner.conversationId },
-        owner,
-        recordedAt,
-        replayed,
-      ),
-    recordLinearNativeWorkOwner: (issue, recipient, recordedAt, replayed) =>
-      conversations.bindLinearNativeWorkOwner(issue, recipient, recordedAt, replayed),
     async fleetConversationAuthority(principalId) {
       const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
       if (!match || match[2] === "unverified") return undefined;
@@ -5757,9 +5656,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       };
     },
     fleetWriteAuthority,
-    deliverLinearNativeRecipient,
-    resumeLinearActivity: () => conversations.resumeLinearActivity(),
-    receiveLinearActivity: (activity, following) => conversations.receiveLinearActivity(activity, following),
+    linearWakeTargetAllowed: (id) => conversations.linearWakeTargetAllowed(id),
+    receiveLinearActivity: (activity, following, conversationId) =>
+      conversations.receiveLinearActivity(activity, following, conversationId),
 
     async close(): Promise<void> {
       shutdown.abort(new SeatLinkInterruptedError());

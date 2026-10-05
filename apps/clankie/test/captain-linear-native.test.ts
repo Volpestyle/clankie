@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import { SettingsStore } from "@clankie/settings";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
@@ -23,14 +22,7 @@ afterEach(async () => {
   }
   vi.restoreAllMocks();
 });
-function gate() {
-  let release!: () => void;
-  const promise = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  return { promise, release };
-}
-function fixture(local = false, adapter?: HarnessSeatAdapter) {
+function fixture(local = false) {
   const root = mkdtempSync(join(tmpdir(), "captain-linear-native-"));
   let agent: HerdrAgentSnapshot = {
     paneId: local ? "w3:pK" : "kh2/w3:pK",
@@ -51,7 +43,6 @@ function fixture(local = false, adapter?: HarnessSeatAdapter) {
       workingDirectory: root,
       settings: new SettingsStore(join(root, "settings.json")),
       discordEnvironment: {},
-      seatAdapters: adapter ? [adapter] : [],
       personaImages: async () => ({ images: [], hash: "fake", files: [] }),
     });
   const captain = create();
@@ -108,8 +99,8 @@ it("refuses author attribution for unverified principals, absent kernel proof, a
     ).toBeUndefined();
 });
 
-it("retains the original room authority and refuses a native author reply after that actor's grant is revoked", async () => {
-  const { captain, principal, proof, settings, agent } = fixture();
+it("retains original room attribution authority and refuses it after the actor's grant is revoked", async () => {
+  const { captain, principal, proof, settings } = fixture();
   await settings.update((current) => ({
     ...current,
     discord: { ...current.discord, systemActorUserIds: ["11111"] },
@@ -135,116 +126,4 @@ it("retains the original room authority and refuses a native author reply after 
     discord: { ...current.discord, systemActorUserIds: [] },
   }));
   expect(await source.authorize()).toBe(false);
-  expect(
-    await captain.deliverLinearNativeRecipient(source.recipient, "approval", "room-reply", async () => {}),
-  ).toMatchObject({ outcome: "undelivered" });
-  expect(await captain.pollFleetSeatEvents(agent.paneId, 0)).toEqual([]);
-});
-
-it("delivers a remote author's reply once through its existing native mailbox and keeps its original route across restart", async () => {
-  const { captain, principal, proof, agent, create, root } = fixture();
-  const source = (await captain.fleetWriteAuthority(principal, async () => proof))!.nativeRecipientAuthority!;
-  const guard = vi.fn(async () => {});
-  const polling = captain.pollFleetSeatEvents(agent.paneId, 5000);
-  const delivery = captain.deliverLinearNativeRecipient(
-    source.recipient,
-    "James: I APPROVE all!!",
-    "signed-reply",
-    guard,
-  );
-  const [event] = (await polling)!;
-  expect(event).toMatchObject({
-    source: "linear",
-    conversationId: "kh2/term-author",
-    content: "Linear event signed-reply\nJames: I APPROVE all!!",
-  });
-  await captain.acknowledgeFleetSeatEvent(agent.paneId, event!.id);
-  expect(await delivery).toMatchObject({ outcome: "delivered" });
-  expect(
-    await captain.deliverLinearNativeRecipient(
-      source.recipient,
-      "James: I APPROVE all!!",
-      "signed-reply",
-      guard,
-    ),
-  ).toMatchObject({ outcome: "delivered" });
-  expect(await captain.pollFleetSeatEvents(agent.paneId, 0)).toEqual([]);
-  await captain.close();
-  const restarted = create();
-  fixtures.find((entry) => entry.root === root)!.captain = restarted;
-  expect(
-    await restarted.deliverLinearNativeRecipient(
-      source.recipient,
-      "James: I APPROVE all!!",
-      "signed-reply",
-      guard,
-    ),
-  ).toMatchObject({ outcome: "delivered" });
-  expect(
-    await restarted.deliverLinearNativeRecipient(source.recipient, "changed content", "signed-reply", guard),
-  ).toMatchObject({ outcome: "undelivered" });
-  expect(await restarted.pollFleetSeatEvents(agent.paneId, 0)).toEqual([]);
-});
-
-it("checks the original author after adapter attachment and refuses replacement before sending", async () => {
-  const attaching = gate();
-  const attached = gate();
-  const send = vi
-    .fn<SeatControl["send"]>()
-    .mockResolvedValue({ outcome: "accepted", messageId: "native", state: "started" });
-  const control: SeatControl = {
-    ref: { harness: "claude", paneId: "w3:pK", sessionId: "original-session" },
-    send,
-    status: async () => "idle",
-    settled: async () => ({ type: "released", at: new Date().toISOString() }),
-    interrupt: async () => false,
-    close: async () => {},
-  };
-  const adapter: HarnessSeatAdapter = {
-    harness: "claude",
-    start: async () => ({ outcome: "started", control }),
-    attach: async () => {
-      attaching.release();
-      await attached.promise;
-      return control;
-    },
-  };
-  const { captain, principal, proof, replace } = fixture(true, adapter);
-  const source = (await captain.fleetWriteAuthority(principal, async () => proof))!.nativeRecipientAuthority!;
-  const pending = captain.deliverLinearNativeRecipient(source.recipient, "approval", "reply", async () => {});
-  await attaching.promise;
-  replace();
-  attached.release();
-  expect(await pending).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
-  expect(send).not.toHaveBeenCalled();
-  expect(await source.authorize()).toBe(false);
-});
-
-it("keeps a lost native acknowledgment uncertain across restart and never retries through another channel", async () => {
-  const send = vi.fn<SeatControl["send"]>().mockRejectedValue(new Error("lost native acknowledgement"));
-  const control: SeatControl = {
-    ref: { harness: "claude", paneId: "w3:pK", sessionId: "original-session" },
-    send,
-    status: async () => "idle",
-    settled: async () => ({ type: "released", at: new Date().toISOString() }),
-    interrupt: async () => false,
-    close: async () => {},
-  };
-  const adapter: HarnessSeatAdapter = {
-    harness: "claude",
-    attach: async () => control,
-    start: async () => ({ outcome: "started", control }),
-  };
-  const { captain, principal, proof, create, root } = fixture(true, adapter);
-  const source = (await captain.fleetWriteAuthority(principal, async () => proof))!.nativeRecipientAuthority!;
-  expect(
-    await captain.deliverLinearNativeRecipient(source.recipient, "approval", "reply", async () => {}),
-  ).toMatchObject({ outcome: "unconfirmed", deliveryStage: "uncertain" });
-  await captain.close();
-  const restarted = create();
-  fixtures.find((entry) => entry.root === root)!.captain = restarted;
-  expect(
-    await restarted.deliverLinearNativeRecipient(source.recipient, "approval", "reply", async () => {}),
-  ).toMatchObject({ outcome: "unconfirmed", deliveryStage: "uncertain" });
-  expect(send).toHaveBeenCalledTimes(1);
 });

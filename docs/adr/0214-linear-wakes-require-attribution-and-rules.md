@@ -1,8 +1,80 @@
 # ADR 0214: Linear wakes require attribution and rules
 
 Status: accepted (James / Clankie lead, 2026-10-02, [VUH-1549](https://linear.app/vuhlp/issue/VUH-1549)).
-Destination amended by [ADR 0218](0218-native-seats-drive-their-attached-conversation.md) (2026-10-04): eligible owned events wake their leading conversation; unowned/removed owners wake `linear-inbox`. Attribution and rules below remain unchanged.
-Amends [ADR 0189 (Linear echoes)](0189-his-own-linear-activity-does-not-wake-him.md).
+Amended by James in [VUH-1678](https://linear.app/vuhlp/issue/VUH-1678),
+2026-10-04: signed rule-passing webhooks wake one ordinary configured chat,
+`global-default` by default. This supersedes
+[ADR 0218's Linear work-routing extension](0218-native-seats-drive-their-attached-conversation.md#extension--linear-work-ownership-2026-10-04)
+and the separate inbox protocol. Amends
+[ADR 0189 (Linear echoes)](0189-his-own-linear-activity-does-not-wake-him.md).
+
+## Amendment — one ordinary chat receives signed Linear activity, 2026-10-04
+
+Verified webhook activity is the input to the existing VUH-1549 actor/type rule
+engine. A qualifying event wakes one configured ordinary global conversation;
+`linearWebhook.wakeConversationId` defaults to `global-default`. The lead
+conversation chooses any delegation. An owner who prefers a Linear place can
+select an ordinary owner-openable chat. Issue ownership, parent-update authors,
+and native worker recipients do not select a wake destination. A selected chat's
+existing native operator seat can receive the wake through its normal channel.
+
+The compact event carries the issue ID and title where available, what changed,
+who acted, and the Linear link. A Comment hook can contain only the issue UUID.
+Retained signed Issue context or a native connected `get_issue` lookup bounded
+to one second can supply its display identifier/title. Fetched display context never changes the
+signed actor/resource/change authority. If the title remains unavailable, the
+event says `Title unavailable` and retains its signed UUID/link; it is not dropped.
+Bursts coalesce into one wake. Nonmatching signed
+activity remains visible in the normal chat without starting a turn. The special
+Linear inbox conversation, read/ack/handoff protocol, and notification checkpoint
+are retired. Upgrade drops retained unread inbox items once with a log entry;
+old inbox state never schedules a fresh turn.
+
+Rules and the target are non-secret settings that Clankie can change himself
+through `linear_wake`, the `clankie linear wake` / `linear target` CLI, and their
+authenticated API. The Follow Linear menu exposes both. Defaults select only
+signed comments and mentions from James (`ownerUserEmails: ["volpestyle@gmail.com"]`)
+with actor selector `owner`; additional owner IDs remain configurable. This
+changes the earlier default of an empty owner list and all nonexcluded types.
+Signed user ID/email evidence identifies the human. Display names and notification
+subtitles do not. Own-write suppression takes precedence over the selectors;
+Clankie's connected account and attributed workers remain quiet. Production
+wakes require the connected account identity in the signed event's workspace;
+lookup failure or workspace mismatch retains passive chat history with a
+metadata decision of `identity_unavailable` or `account_workspace_mismatch`.
+Local webhook readiness alone is not proof of account lookup or delivery health.
+
+Raw-body signature verification, signed timestamp tolerance, delivery dedupe and
+restart replay safety remain. The attribution journal and exact write receipts
+retain their provenance and own-write suppression responsibilities; actor-less
+recipient notification polling is no longer the wake path. Rule or target edits
+never promote passive history. Following remains opt-in and requires the stored
+webhook URL and broker-held secret. Incoming events remain untrusted context,
+never new authority.
+
+```mermaid
+flowchart TD
+    Hook[Signed Linear webhook] --> Verify{Signature and timestamp valid?}
+    Verify -->|No| Reject[Reject]
+    Verify -->|Yes| Dedupe{New delivery?}
+    Dedupe -->|No| Quiet[No wake]
+    Dedupe -->|Yes| Own{Exact own-write echo?}
+    Own -->|Yes| Quiet
+    Own -->|No| History[External activity in selected ordinary chat]
+    History --> Identity{Connected account identity matches workspace?}
+    Identity -->|No| Quiet
+    Identity -->|Yes| Rules{Following, known actor and VUH-1549 rules match?}
+    Rules -->|No| Quiet
+    Rules -->|Yes| Coalesce[Coalesce compact events]
+    Coalesce --> Wake[Wake configured chat: global-default by default]
+    Wake --> Lead[Lead decides and delegates]
+```
+
+## Historical decision — 2026-10-02
+
+The following records the original notification-correlation design. The amendment
+above replaces its destination, polling path, inbox protocol and default rules;
+the signed attribution and trust boundaries remain.
 
 ## Context
 

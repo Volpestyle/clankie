@@ -1659,11 +1659,11 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
     streaming: z.boolean(),
     /** Coordinator message identity, retained for duplicate delivery recovery. */
     swarmMessageId: z.string().min(1).max(128).optional(),
-    /** Durable Linear admission and owner selection; never operator authority. */
+    /** Verified Linear context retained in the selected ordinary chat; never operator authority. */
     linear: z
       .object({
         eventId: z.string().regex(/^[a-f0-9]{64}$/u),
-        /** Present only for the connected bot’s notification inbox, never workspace webhooks. */
+        /** Legacy history compatibility; new webhook deliveries do not emit this field. */
         notification: z.boolean().optional(),
         conversationId: OperatorConversationIdSchema,
         following: z.boolean(),

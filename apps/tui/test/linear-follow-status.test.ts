@@ -20,7 +20,12 @@ it("makes an empty owner rule visible in status and stops warning after an expli
   await credentials.set(LINEAR_WEBHOOK_PROVIDER_ID, { type: "api", key: secret });
   await settings.update((current) => ({
     ...current,
-    linearWebhook: { ...current.linearWebhook, following: true, url: "https://example.com/linear" },
+    linearWebhook: {
+      ...current.linearWebhook,
+      following: true,
+      url: "https://example.com/linear",
+      wake: { ...current.linearWebhook.wake, ownerUserEmails: [] },
+    },
   }));
   const before = await settings.load();
   const status = await runLinearCommand(["status"], { settings, credentials });
@@ -28,7 +33,7 @@ it("makes an empty owner rule visible in status and stops warning after an expli
     ok: true,
     following: true,
     active: true,
-    wakeWarning: "following is on, but no owner IDs, so owner comments never wake.",
+    wakeWarning: "following is on, but no owner IDs or emails, so owner comments never wake.",
   });
   expect(await settings.load()).toEqual(before);
   expect(JSON.stringify(status)).not.toContain(secret);

@@ -223,9 +223,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["linear"],
     lines: [
-      "  linear [status] | follow on|off | inbox [read | ack CURSOR | handoff CURSOR]  Linear awareness and unread activity",
-      "  linear wake [show|set --actors owner,human,self,users --owner-user-ids IDS --user-ids IDS --types TYPES --exclude-types TYPES]",
-      "  linear work [list | bind --organization UUID --issue UUID --conversation ID | unbind --organization UUID --issue UUID]",
+      "  linear [status] | follow on|off | target [show|set ID]  Linear webhook wakes",
+      "  linear wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES]",
       "  linear post comment|issue --json-stdin   Publish as an existing worker persona through the connected app",
     ],
   },

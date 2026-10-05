@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
-import { parseInboxRead, runLinearCommand } from "../src/command/linear.ts";
+import { runLinearCommand } from "../src/command/linear.ts";
 import { herdrFleetRuntimeArgs, runHerdrCommand } from "../src/command/herdr.ts";
 import { runRuntimeCommand } from "../src/command/runtime.ts";
 import { runWorkdirCommand } from "../src/command/workdir.ts";
@@ -136,51 +136,13 @@ describe("clankie workdir", () => {
 });
 
 describe("clankie linear", () => {
-  it("reads bindings and scoped inboxes while refusing obsolete positional mutation syntax", async () => {
-    const calls: Array<{ path: string; method: string; body: unknown }> = [];
-    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
-      expect(new Headers(init.headers).get("authorization")).toBe("Bearer fixture");
-      calls.push({
-        path: new URL(url).pathname + new URL(url).search,
-        method: init.method!,
-        body: init.body ? JSON.parse(init.body as string) : undefined,
-      });
-      return Response.json({ ok: true });
-    });
-    const options = { env: { CLANKIE_OPERATOR_TOKEN: "fixture" } };
-    try {
-      await runLinearCommand(["work", "list"], options);
-      await runLinearCommand(["inbox", "read", "--conversation", "project"], options);
-      await runLinearCommand(["inbox", "ack", "000000000042", "--conversation", "project"], options);
-      await expect(
-        runLinearCommand(["work", "bind", "org", "issue", "project", "--from", "previous"], options),
-      ).rejects.toThrow("Usage:");
-      await expect(runLinearCommand(["work", "unbind", "org", "issue", "project"], options)).rejects.toThrow(
-        "Usage:",
-      );
-      expect(calls).toEqual([
-        { path: "/v1/linear/work", method: "GET", body: undefined },
-        { path: "/v1/linear/inbox?conversationId=project", method: "GET", body: undefined },
-        {
-          path: "/v1/linear/inbox",
-          method: "POST",
-          body: { ackCursor: "000000000042", conversationId: "project" },
-        },
-      ]);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
   it("defaults off, persists live follow toggles, and rejects invalid commands", async () => {
     const settings = await tempStore();
     const credentials = { get: async () => ({ type: "api" as const, key: "test-secret" }) };
     const options = { settings, credentials };
     expect(await runLinearCommand([], options)).toMatchObject({
       following: false,
-      conversationId: "linear-inbox",
-      wakeConversationId: "linear-inbox",
-      wakeRouting: "work-owner",
+      wakeConversationId: "global-default",
     });
     expect(await runLinearCommand(["follow", "on"], options)).toMatchObject({
       ok: false,
@@ -217,15 +179,5 @@ describe("clankie linear", () => {
     ).rejects.toThrow();
     await expect(runLinearCommand(["follow", "yes"], options)).rejects.toThrow("Usage:");
     await expect(runLinearCommand(["status", "on"], options)).rejects.toThrow("Usage:");
-  });
-
-  it("turns inbox read flags into the query the service expects", () => {
-    expect(parseInboxRead([])).toBe("");
-    expect(parseInboxRead(["--headlines", "--limit", "50", "--before", "000000000042"])).toBe(
-      "?headlines=1&limit=50&before=000000000042",
-    );
-    expect(parseInboxRead(["--limit"])).toBeUndefined();
-    expect(parseInboxRead(["--before", "42"])).toBeUndefined();
-    expect(parseInboxRead(["--drain"])).toBeUndefined();
   });
 });
