@@ -80,7 +80,7 @@ export async function discoverGrok(env: NodeJS.ProcessEnv = process.env) {
   }
   throw new Error("Grok Build is unavailable; install and sign in to Grok yourself before hiring");
 }
-export function grokSkillContext(repoRoot: string) {
+function grokSkillContext(repoRoot: string) {
   return bundledSkills(repoRoot)
     .filter((skill) => skill.included)
     .map((skill) => `${skill.name}: ${join(skill.path, "SKILL.md")}`)
