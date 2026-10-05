@@ -70,7 +70,7 @@ function fixture(
             threadId: id,
             limit: 1,
             sortDirection: "desc",
-            itemsView: "summary",
+            itemsView: "full",
           });
           result = { data: persisted ? [{ ...turn, items: [] }] : [] };
         }

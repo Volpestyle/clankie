@@ -60,6 +60,17 @@ that its parent or a background producer has finished.
 Stored means retained; delivered means transport delivery; consumed means the
 native receiver accepted it. None alone proves the model read or completed it.
 An active Codex steer differs from a native after-turn queue. Keep that detail.
+Hired Codex sync and async questions reach the exact hiring conversation with
+their native request and question IDs. Answer with `message_seat`'s
+`questionAnswer`, omitting `message`, and preserve the observed IDs and types.
+Async request IDs are the function `call_id`; question IDs are the supplied
+JSON-encoded IDs, not titles or array indexes. The control channel steers an
+active turn without interrupting it, or starts an attributed reply when the
+question's turn has ended. Sync answers require the winning tool output;
+async receipts prove acceptance of the exact user message and do not establish
+atomic first-answer arbitration against a simultaneous owner reply. Pending
+questions appear in the roster summary. Inspect an uncertain answer rather
+than resending it or using terminal keys. Approvals remain owner decisions.
 Uncertain hire or message delivery may already have taken effect: reconcile its
 original receipt and bound session. Do not re-hire, change bridges, resend through
 terminal keys, or derive a session from whichever transcript is newest.

@@ -151,7 +151,7 @@ it.each(["metadata", "legacy-field", "legacy-method"])(
             threadId: "saved-thread",
             limit: 1,
             sortDirection: "desc",
-            itemsView: "summary",
+            itemsView: "full",
           });
           if (compatibility === "legacy-method") {
             socket.send(
@@ -166,7 +166,7 @@ it.each(["metadata", "legacy-field", "legacy-method"])(
             : request.method === "thread/read"
               ? { thread: { id: "saved-thread" } }
               : request.method === "thread/resume"
-                ? { thread: { turns: [] } }
+                ? { thread: { id: "saved-thread", turns: [] } }
                 : request.method === "thread/turns/list"
                   ? { data: [] }
                   : request.method === "turn/start"
@@ -284,7 +284,7 @@ describe("trusted native seat policy", () => {
               : request.method === "thread/read"
                 ? { thread: { id: "root" } }
                 : request.method === "thread/resume"
-                  ? { thread: { turns: [] } }
+                  ? { thread: { id: "root", turns: [] } }
                   : request.method === "turn/start"
                     ? { turn: { id: "turn" } }
                     : request.method === "turn/steer"

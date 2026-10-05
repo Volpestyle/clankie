@@ -1,5 +1,6 @@
 import type { RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { closeSync, openSync, readFileSync } from "node:fs";
 import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,7 +10,16 @@ import type { Duplex } from "node:stream";
 import { isolatedCodexConfig, watchCodexCatalog } from "./codex-catalog-refresh.ts";
 import type { SeatQuestion, SeatQuestionAnswer, SeatQuestionResult } from "@clankie/agent-hosts";
 import { isDeepStrictEqual } from "node:util";
-import { codexQuestion, recordedCodexAnswer, SeatQuestionAnswerSchema } from "./codex-user-input.ts";
+import {
+  codexQuestion,
+  codexAsyncQuestion,
+  codexAsyncQuestionAnswer,
+  codexAnsweredAsyncQuestionIds,
+  recordedCodexAnswer,
+  recordedCodexAsyncAnswer,
+  SeatQuestionAnswerSchema,
+  type CodexAsyncAnswerReceipt,
+} from "./codex-user-input.ts";
 import {
   codexToolCatalogReport,
   type CodexToolCatalogReport,
@@ -79,10 +89,12 @@ export class CodexAppServerClient {
     {
       threadId: string;
       question: SeatQuestion;
+      protocol: "serverRequest" | "asyncMessage";
       answering: boolean;
       resolved?: (error?: Error) => void;
     }
   >();
+  private readonly retiredQuestions = new Set<string>();
 
   constructor(socket: WebSocket, event: (event: CodexSeatEvent) => void, timeoutMs = 30_000) {
     this.socket = socket;
@@ -106,17 +118,20 @@ export class CodexAppServerClient {
             this.questions.set(question.requestId, {
               threadId: String(params.threadId),
               question,
+              protocol: "serverRequest",
               answering: false,
             });
         } else if (message.method === "serverRequest/resolved") {
           const id = params.requestId;
           if (typeof id === "string" || typeof id === "number") {
             const pending = this.questions.get(id);
-            if (pending && pending.threadId === params.threadId) {
+            if (pending && pending.protocol === "serverRequest" && pending.threadId === params.threadId) {
               this.questions.delete(id);
               pending.resolved?.();
             }
           }
+        } else if (message.method === "item/started" || message.method === "item/completed") {
+          this.observeQuestionItem(params);
         }
         this.event({
           method: message.method,
@@ -176,14 +191,128 @@ export class CodexAppServerClient {
   }
 
   hasPendingQuestion(threadId: string): boolean {
-    return [...this.questions.values()].some((question) => question.threadId === threadId);
+    return this.hasPendingBlockingQuestion(threadId);
+  }
+
+  hasPendingBlockingQuestion(threadId: string): boolean {
+    return [...this.questions.values()].some(
+      (pending) => pending.threadId === threadId && pending.question.isBlocking,
+    );
+  }
+
+  isAsyncQuestion(threadId: string, requestId: string | number): boolean {
+    const pending = this.questions.get(requestId);
+    return pending?.threadId === threadId && pending.protocol === "asyncMessage";
+  }
+
+  /** Normal completion preserves async reply identity; interruption and failure revoke it. */
+  retireTurn(threadId: string, turnId: string, status: "completed" | "interrupted" | "failed"): void {
+    for (const [id, pending] of this.questions) {
+      if (
+        pending.threadId !== threadId ||
+        pending.question.turnId !== turnId ||
+        (!pending.question.isBlocking && status === "completed")
+      )
+        continue;
+      if (pending.protocol === "asyncMessage") this.completeAsyncQuestion(threadId, id);
+      else this.questions.delete(id);
+      pending.resolved?.(new Error("native_question_turn_ended: no replacement answer was sent"));
+    }
+  }
+
+  completeAsyncQuestion(threadId: string, requestId: string | number, notify = true): void {
+    if (!this.isAsyncQuestion(threadId, requestId)) return;
+    this.questions.delete(requestId);
+    this.retiredQuestions.add(JSON.stringify([threadId, requestId]));
+    if (this.retiredQuestions.size > 256)
+      this.retiredQuestions.delete(this.retiredQuestions.values().next().value!);
+    if (notify) this.event({ method: "clankie/question/resolved", params: { threadId, requestId } });
+  }
+
+  /** Reconcile persisted native items without replaying their input or answered questions. */
+  hydrateQuestions(threadId: string, value: unknown): void {
+    const thread = record(record(value).thread);
+    if (thread.id !== threadId || !Array.isArray(thread.turns)) return;
+    const before = new Map(
+      [...this.questions]
+        .filter(([, pending]) => pending.threadId === threadId)
+        .map(([id, pending]) => [id, pending.question]),
+    );
+    const latestTurnId = record(thread.turns.at(-1)).id;
+    for (const value of thread.turns) {
+      const turn = record(value);
+      if (typeof turn.id !== "string" || !Array.isArray(turn.items)) continue;
+      // A cold subscription must not reopen old completed-turn prompts. Live
+      // pending questions already in this client survive normal completion.
+      const discoverQuestions = turn.status !== "completed" || turn.id === latestTurnId;
+      for (const item of turn.items)
+        this.observeQuestionItem({ threadId, turnId: turn.id, item }, false, discoverQuestions);
+      if (turn.status === "interrupted" || turn.status === "failed")
+        for (const [id, pending] of this.questions)
+          if (
+            pending.threadId === threadId &&
+            pending.question.turnId === turn.id &&
+            pending.protocol === "asyncMessage"
+          )
+            this.completeAsyncQuestion(threadId, id, false);
+    }
+    for (const [id] of before)
+      if (!this.questions.has(id))
+        this.event({ method: "clankie/question/resolved", params: { threadId, requestId: id } });
+    for (const [id, pending] of this.questions)
+      if (pending.threadId === threadId && !isDeepStrictEqual(before.get(id), pending.question))
+        this.event({
+          method: "clankie/question/updated",
+          requestId: id,
+          params: { threadId, ...pending.question },
+        });
+  }
+
+  private observeQuestionItem(params: RecordValue, notify = true, discoverQuestions = true): void {
+    const question = codexAsyncQuestion(params);
+    if (
+      question &&
+      discoverQuestions &&
+      !this.questions.has(question.requestId) &&
+      !this.retiredQuestions.has(JSON.stringify([params.threadId, question.requestId]))
+    )
+      this.questions.set(question.requestId, {
+        threadId: String(params.threadId),
+        question,
+        protocol: "asyncMessage",
+        answering: false,
+      });
+    const answeredIds = codexAnsweredAsyncQuestionIds(params.item);
+    if (answeredIds.length === 0) return;
+    for (const [id, pending] of this.questions) {
+      if (pending.threadId !== params.threadId || pending.protocol !== "asyncMessage") continue;
+      const remaining = pending.question.questions.filter(
+        (question) => !answeredIds.includes(question.id) && !answeredIds.includes(pending.question.itemId),
+      );
+      if (remaining.length === pending.question.questions.length) continue;
+      if (remaining.length === 0) this.completeAsyncQuestion(pending.threadId, id, notify);
+      else {
+        pending.question = { ...pending.question, questions: remaining };
+        if (notify)
+          this.event({
+            method: "clankie/question/updated",
+            requestId: id,
+            params: { threadId: pending.threadId, ...pending.question },
+          });
+      }
+    }
   }
 
   async answerQuestion(
     threadId: string,
     answer: SeatQuestionAnswer,
     beforeDispatch?: () => Promise<void>,
-  ): Promise<{ outcome: "resolved" } | Exclude<SeatQuestionResult, { outcome: "answered" }>> {
+    asyncDispatch?: (question: SeatQuestion) => Promise<CodexAsyncAnswerReceipt>,
+  ): Promise<
+    | { outcome: "resolved" }
+    | ({ outcome: "dispatched" } & CodexAsyncAnswerReceipt)
+    | Exclude<SeatQuestionResult, { outcome: "answered" }>
+  > {
     const parsed = SeatQuestionAnswerSchema.safeParse(answer);
     if (!parsed.success) return { outcome: "refused", detail: "native_question_answer_invalid" };
     answer = parsed.data;
@@ -211,12 +340,27 @@ export class CodexAppServerClient {
     }
     if (this.failure) return { outcome: "offline", detail: this.failure.message };
     // Owner replies and concurrent lead replies may resolve it during the guard.
-    if (this.questions.get(answer.requestId) !== pending || pending.answering)
+    if (
+      this.questions.get(answer.requestId) !== pending ||
+      pending.answering ||
+      !isDeepStrictEqual(pending.question.questions.map((question) => question.id).sort(), ids)
+    )
       return {
         outcome: "refused",
         detail: "native_question_already_resolved_or_answering: no answer was sent",
       };
+    if (pending.protocol === "asyncMessage" && !asyncDispatch)
+      return { outcome: "refused", detail: "native_async_question_input_transport_unavailable" };
     pending.answering = true;
+    if (pending.protocol === "asyncMessage") {
+      try {
+        return { outcome: "dispatched", ...(await asyncDispatch!(pending.question)) };
+      } catch (error) {
+        // Ordinary native input has no server-request arbitration. An uncertain
+        // dispatch keeps its latch even if the original turn ends meanwhile.
+        return { outcome: "unconfirmed", detail: String(error) };
+      }
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await new Promise<void>((resolve, reject) => {
@@ -558,6 +702,45 @@ export async function startCodexAppServerSeat(options: {
     let activeTurn: string | undefined;
     let turnObservation = 0;
     let threadId: string | undefined;
+    let turnRevision = 0;
+    const turnChanges = new Set<() => void>();
+    const changedTurn = () => {
+      turnRevision += 1;
+      for (const resolve of turnChanges) resolve();
+      turnChanges.clear();
+    };
+    const terminalTurns = new Map<string, CodexSeatEvent>();
+    let idleReconciliation: Promise<void> = Promise.resolve();
+    const reconcileIdle = () => {
+      const expected = activeTurn;
+      const revision = turnRevision;
+      if (!expected) return;
+      idleReconciliation = idleReconciliation
+        .catch(() => undefined)
+        .then(async () => {
+          if (closed || activeTurn !== expected || turnRevision !== revision) return;
+          // An idle notification has no turn ID. A native snapshot must prove the
+          // exact terminal turn before it can release dispatch or blocking input.
+          const response = record(await client!.request("thread/read", { threadId, includeTurns: true }));
+          const thread = record(response.thread);
+          const turns = Array.isArray(thread.turns) ? thread.turns.map(record) : [];
+          const turn = turns.at(-1);
+          if (
+            closed ||
+            thread.id !== threadId ||
+            activeTurn !== expected ||
+            turnRevision !== revision ||
+            turn?.id !== expected ||
+            !["completed", "interrupted", "failed"].includes(String(turn.status)) ||
+            turns.some((candidate) => candidate.status === "inProgress")
+          )
+            return;
+          client!.hydrateQuestions(threadId!, response);
+          observe({ method: "turn/completed", params: { threadId, turn } });
+        });
+      // A missing snapshot supplies no completion proof and never causes replay.
+      void idleReconciliation.catch(() => undefined);
+    };
     const observe = (event: CodexSeatEvent) => {
       if (options.policy && !closed && !policyFailed) {
         auditTail = auditTail
@@ -569,8 +752,25 @@ export async function startCodexAppServerSeat(options: {
       if (event.params.threadId === threadId) {
         const turn = record(event.params.turn);
         if (event.method === "turn/started" || event.method === "turn/completed") turnObservation++;
-        if (event.method === "turn/started" && typeof turn.id === "string") activeTurn = turn.id;
-        if (event.method === "turn/completed" && turn.id === activeTurn) activeTurn = undefined;
+        if (event.method === "turn/started" && typeof turn.id === "string" && !terminalTurns.has(turn.id)) {
+          activeTurn = turn.id;
+          changedTurn();
+        }
+        if (
+          event.method === "turn/completed" &&
+          typeof turn.id === "string" &&
+          ["completed", "interrupted", "failed"].includes(String(turn.status))
+        ) {
+          terminalTurns.set(turn.id, event);
+          if (terminalTurns.size > 64) terminalTurns.delete(terminalTurns.keys().next().value!);
+          if (turn.id === activeTurn) {
+            activeTurn = undefined;
+            changedTurn();
+            client?.retireTurn(threadId!, turn.id, turn.status as "completed" | "interrupted" | "failed");
+          }
+        }
+        if (event.method === "thread/status/changed" && record(event.params.status).type === "idle")
+          reconcileIdle();
       }
       const eventThread =
         typeof event.params.threadId === "string"
@@ -691,6 +891,7 @@ export async function startCodexAppServerSeat(options: {
     const thread = record(result.thread);
     if (typeof thread.id !== "string") throw new Error("Codex app-server returned no thread identity");
     if (thread.id !== threadId) throw new Error("Native thread/read identity changed");
+    client.hydrateQuestions(threadId, result);
     server.remoteRegistration?.bindThread(threadId, async () => {
       if (closed || stopped || server.failure()) return false;
       const loaded = record(await client!.request("thread/loaded/list", {}, 2_000));
@@ -749,18 +950,21 @@ export async function startCodexAppServerSeat(options: {
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
       }
+      const resumedThread = record(resumed.thread);
+      if (resumedThread.id !== threadId) throw new Error("Native thread/resume identity changed");
+      client!.hydrateQuestions(threadId!, resumed);
       subscribed = true;
       let turn: RecordValue;
       if (metadataOnly) {
         try {
-          // Observe one summarized newest turn rather than reconstructing and
-          // transmitting a whole large rollout merely to subscribe to events.
+          // Load only the newest turn, retaining its native question and answer items
+          // without reconstructing or transmitting a whole large rollout.
           const latest = record(
             await client!.request("thread/turns/list", {
               threadId,
               limit: 1,
               sortDirection: "desc",
-              itemsView: "summary",
+              itemsView: "full",
             }),
           );
           turn = Array.isArray(latest.data) ? record(latest.data[0]) : {};
@@ -777,11 +981,13 @@ export async function startCodexAppServerSeat(options: {
         const turns = record(resumed.thread).turns;
         turn = Array.isArray(turns) ? record(turns.at(-1)) : {};
       }
-      if (turnObservation === observedBefore && typeof turn.id === "string")
+      if (turnObservation === observedBefore && typeof turn.id === "string") {
+        client!.hydrateQuestions(threadId!, { thread: { id: threadId, turns: [turn] } });
         observe({
           method: turn.status === "inProgress" ? "turn/started" : "turn/completed",
           params: { threadId, turn },
         });
+      }
     };
     if (options.resumeThreadId) await subscribe();
     let catalogReady = !server.waitForClankieCatalog;
@@ -851,6 +1057,101 @@ export async function startCodexAppServerSeat(options: {
     };
     let firstDispatch = true;
     let sending: Promise<unknown> = Promise.resolve();
+    const sendNative = (
+      message: string,
+      guard?: () => Promise<void>,
+      answer?: { requestId: string | number; clientUserMessageId: string },
+    ) => {
+      const send = async () => {
+        await waitForCatalog();
+        // The owner may have started a native turn before the first delivery.
+        // Subscribe first when its rollout exists so we steer that turn.
+        await subscribe(false);
+        const input = [{ type: "text", text: message, text_elements: [] }];
+        // Serialize dispatch so simultaneous messages cannot start two turns.
+        // A failed steer is not retried: only the server knows if it applied.
+        await checkPolicy();
+        if (options.policy) {
+          try {
+            await options.policy.beforeTurn({ threadId: threadId!, read });
+          } catch (error) {
+            await failPolicy(error);
+            throw policyFailure;
+          }
+          await checkPolicy();
+        }
+        // Recheck the installed contract after every startup/catalog await.
+        if (firstDispatch) await server.validateCatalog?.();
+        // Initial brief authority expires independently of later follow-up turns.
+        if (activeTurn !== undefined) {
+          let release!: () => void;
+          const changed = new Promise<void>((resolve) => {
+            release = resolve;
+            turnChanges.add(resolve);
+          });
+          try {
+            // Matching terminal proof releases a send immediately, even if
+            // an earlier idle snapshot is still waiting on its read reply.
+            await Promise.race([idleReconciliation.catch(() => undefined), changed]);
+          } finally {
+            turnChanges.delete(release);
+          }
+        }
+        await guard?.();
+        if (
+          (answer === undefined && client!.hasPendingQuestion(threadId!)) ||
+          (answer !== undefined &&
+            (!client!.isAsyncQuestion(threadId!, answer.requestId) ||
+              client!.hasPendingBlockingQuestion(threadId!)))
+        )
+          throw new Error(
+            "Codex has a pending native question; answer its request instead of sending a new turn.",
+          );
+        const steering = activeTurn;
+        const dispatchRevision = turnRevision;
+        try {
+          const result: unknown = options.policy?.dispatch?.({
+            threadId: threadId!,
+            method: steering ? "turn/steer" : "turn/start",
+            ...(steering ? { turnId: steering } : {}),
+          });
+          if (result !== undefined) {
+            void Promise.resolve(result).catch(() => {});
+            throw new Error("Native dispatch policy must be synchronous");
+          }
+        } catch (error) {
+          await failPolicy(error);
+          throw policyFailure;
+        }
+        const response = record(
+          await client!.request(steering ? "turn/steer" : "turn/start", {
+            threadId,
+            input,
+            ...(steering ? { expectedTurnId: steering } : {}),
+            ...(answer === undefined ? {} : { clientUserMessageId: answer.clientUserMessageId }),
+          }),
+        );
+        const turnId = steering ? response.turnId : record(response.turn).id;
+        firstDispatch = false;
+        if (typeof turnId !== "string")
+          throw new Error("Codex did not confirm the turn identity; delivery is uncertain");
+        if (!steering && turnRevision === dispatchRevision) {
+          // The RPC itself is authentic turn identity, including when a
+          // subscription did not deliver its started notification.
+          observe({ method: "turn/started", params: { threadId, turn: { id: turnId } } });
+          const terminal = terminalTurns.get(turnId);
+          if (terminal) {
+            activeTurn = turnId;
+            observe(terminal);
+          }
+        }
+        await subscribe();
+        return { turnId, state: steering ? ("steered" as const) : ("started" as const) };
+      };
+      const next = sending.then(send);
+      sending = next.catch(() => undefined);
+      return next;
+    };
     return {
       checkTools,
       async answerQuestion(answer, guard) {
@@ -863,10 +1164,57 @@ export async function startCodexAppServerSeat(options: {
             outcome: "refused",
             detail: "native_question_already_resolved_or_unknown: no answer was sent",
           };
-        const result = await client!.answerQuestion(threadId!, answer, async () => {
-          await checkPolicy();
-          await guard?.();
-        });
+        const result = await client!.answerQuestion(
+          threadId!,
+          answer,
+          async () => {
+            await checkPolicy();
+            await guard?.();
+          },
+          async (question) => {
+            const text = codexAsyncQuestionAnswer(question, answer);
+            const clientUserMessageId = randomUUID();
+            const sent = await sendNative(
+              text,
+              async () => {
+                await guard?.();
+                const current = client!.pendingQuestion(threadId!, answer.requestId);
+                if (
+                  !current ||
+                  !isDeepStrictEqual(
+                    current.questions.map((question) => question.id),
+                    question.questions.map((question) => question.id),
+                  )
+                )
+                  throw new Error("native_async_question_already_answered: no replacement input was sent");
+              },
+              { requestId: answer.requestId, clientUserMessageId },
+            );
+            return { text, clientUserMessageId, turnId: sent.turnId };
+          },
+        );
+        if (result.outcome === "dispatched") {
+          // Async questions return immediately. Confirm our attributed native
+          // input, rather than treating the tool's accepted:true as an answer.
+          const deadline = Date.now() + 2_000;
+          while (!closed && Date.now() < deadline) {
+            const record = await client!
+              .request("thread/read", { threadId, includeTurns: true }, Math.max(1, deadline - Date.now()))
+              .catch(() => undefined);
+            const confirmation = recordedCodexAsyncAnswer(record, threadId!, result);
+            if (confirmation !== "unobserved") {
+              client!.completeAsyncQuestion(threadId!, answer.requestId);
+              if (confirmation === "answered_concurrently_by_owner")
+                return { outcome: "unconfirmed", detail: "answered_concurrently_by_owner" };
+              return { outcome: "answered", deliveryStage: "responded" };
+            }
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          return {
+            outcome: "unconfirmed",
+            detail: "native_async_answer_input_unobserved: do not resend or queue a replacement",
+          };
+        }
         if (result.outcome !== "resolved") return result;
         // Resolution alone does not identify which client won. Check Codex's
         // persisted tool output before calling our requested answer accepted.
@@ -899,64 +1247,7 @@ export async function startCodexAppServerSeat(options: {
       ...(typeof thread.path === "string" ? { transcriptPath: thread.path } : {}),
       viewArgs,
       send(message, guard) {
-        const send = async () => {
-          await waitForCatalog();
-          // The owner may have started a native turn before the first delivery.
-          // Subscribe first when its rollout exists so we steer that turn.
-          await subscribe(false);
-          const input = [{ type: "text", text: message, text_elements: [] }];
-          // Serialize dispatch so simultaneous messages cannot start two turns.
-          // A failed steer is not retried: only the server knows if it applied.
-          await checkPolicy();
-          if (options.policy) {
-            try {
-              await options.policy.beforeTurn({ threadId: threadId!, read });
-            } catch (error) {
-              await failPolicy(error);
-              throw policyFailure;
-            }
-            await checkPolicy();
-          }
-          // Recheck the installed contract after every startup/catalog await.
-          if (firstDispatch) await server.validateCatalog?.();
-          // Initial brief authority expires independently of later follow-up turns.
-          await guard?.();
-          if (client!.hasPendingQuestion(threadId!))
-            throw new Error(
-              "Codex has a pending native question; answer its request instead of sending a new turn.",
-            );
-          const steering = activeTurn;
-          try {
-            const result: unknown = options.policy?.dispatch?.({
-              threadId: threadId!,
-              method: steering ? "turn/steer" : "turn/start",
-              ...(steering ? { turnId: steering } : {}),
-            });
-            if (result !== undefined) {
-              void Promise.resolve(result).catch(() => {});
-              throw new Error("Native dispatch policy must be synchronous");
-            }
-          } catch (error) {
-            await failPolicy(error);
-            throw policyFailure;
-          }
-          const response = record(
-            await client!.request(steering ? "turn/steer" : "turn/start", {
-              threadId,
-              input,
-              ...(steering ? { expectedTurnId: steering } : {}),
-            }),
-          );
-          const turnId = steering ? response.turnId : record(response.turn).id;
-          firstDispatch = false;
-          if (typeof turnId !== "string")
-            throw new Error("Codex did not confirm the turn identity; delivery is uncertain");
-          await subscribe();
-          return { turnId, state: steering ? ("steered" as const) : ("started" as const) };
-        };
-        const next = sending.then(send);
-        sending = next.catch(() => undefined);
-        return next;
+        return sendNative(message, guard);
       },
       async interrupt() {
         if (!activeTurn) return false;
